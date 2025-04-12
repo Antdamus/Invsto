@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Add Item - OG Jewelry</title>
 
-  <!-- Supabase & Barcode + QR dependencies -->
+  <!-- SDKs -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://dymoapis.github.io/dymo-connect-framework/dymo.label.framework.js"></script>
 
-  <!-- Styling -->
+  <!-- Styles -->
   <link rel="stylesheet" href="add-item.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
 </head>
@@ -37,7 +38,6 @@
       <textarea id="distributor-notes" placeholder="Distributor Notes (optional)" class="add-input add-textarea"></textarea>
 
       <input type="url" id="qr-code" placeholder="External QR Code (optional)" class="add-input" />
-      <div class="qr-preview" id="qr-preview"></div>
 
       <div class="add-barcode-section">
         <label class="add-label">1D Code</label>
@@ -46,9 +46,13 @@
           <span>or</span>
           <input type="text" id="scanned-barcode" placeholder="Paste or Scan Barcode" class="add-input" />
         </div>
-        <div class="add-barcode-preview">
-          <canvas id="barcode-preview" class="barcode-canvas" width="300" height="80"></canvas>
+
+        <div id="combined-label" class="combined-label-preview">
+          <canvas id="qr-canvas" width="180" height="180"></canvas>
+          <canvas id="barcode-canvas" width="300" height="80"></canvas>
         </div>
+
+        <button type="button" class="add-button-secondary" onclick="printLabel()">Print Label</button>
       </div>
 
       <input type="file" id="image" accept="image/*" class="add-file" required />
