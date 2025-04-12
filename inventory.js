@@ -55,41 +55,47 @@ function getCanvasBase64(canvas) {
   return canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "");
 }
 
-// Print label via DYMO
 function printLabel() {
   const qrBase64 = getCanvasBase64(qrCanvas);
   const barcodeBase64 = getCanvasBase64(barcodeCanvas);
 
-  const labelXml = `
-  <DieCutLabel Version="8.0" Units="twips">
-    <PaperOrientation>Portrait</PaperOrientation>
-    <Id>Address</Id>
-    <PaperName>30252 Address</PaperName>
-    <DrawCommands/>
-    <ObjectInfo>
-      <ImageObject>
-        <Name>QR</Name>
-        <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
-        <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
-        <Image>base64:${qrBase64}</Image>
-        <ScaleMode>Uniform</ScaleMode>
-        <HorizontalAlignment>Center</HorizontalAlignment>
-        <VerticalAlignment>Top</VerticalAlignment>
-      </ImageObject>
-      <Bounds X="0" Y="0" Width="3000" Height="3000"/>
-    </ObjectInfo>
-    <ObjectInfo>
-      <ImageObject>
-        <Name>Barcode</Name>
-        <Image>base64:${barcodeBase64}</Image>
-        <ScaleMode>Uniform</ScaleMode>
-        <HorizontalAlignment>Center</HorizontalAlignment>
-        <VerticalAlignment>Bottom</VerticalAlignment>
-      </ImageObject>
-      <Bounds X="0" Y="3000" Width="3000" Height="2000"/>
-    </ObjectInfo>
-  </DieCutLabel>
-  `;
+  // This XML is copied directly from the .label file
+  const labelXml = `<?xml version="1.0" encoding="utf-8"?>
+<DieCutLabel Version="8.0" Units="twips" xmlns="http://www.dymo.com">
+  <PaperOrientation>Portrait</PaperOrientation>
+  <Id>Custom</Id>
+  <PaperName>Custom Label</PaperName>
+  <DrawCommands/>
+  <ObjectInfo>
+    <ImageObject>
+      <Name>QR</Name>
+      <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
+      <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
+      <Image>base64:</Image>
+      <ScaleMode>Uniform</ScaleMode>
+      <HorizontalAlignment>Center</HorizontalAlignment>
+      <VerticalAlignment>Top</VerticalAlignment>
+    </ImageObject>
+    <Bounds X="100" Y="100" Width="3000" Height="3000"/>
+  </ObjectInfo>
+  <ObjectInfo>
+    <ImageObject>
+      <Name>Barcode</Name>
+      <ForeColor Alpha="255" Red="0" Green="0" Blue="0"/>
+      <BackColor Alpha="0" Red="255" Green="255" Blue="255"/>
+      <Image>base64:</Image>
+      <ScaleMode>Uniform</ScaleMode>
+      <HorizontalAlignment>Center</HorizontalAlignment>
+      <VerticalAlignment>Bottom</VerticalAlignment>
+    </ImageObject>
+    <Bounds X="100" Y="3200" Width="3000" Height="1500"/>
+  </ObjectInfo>
+</DieCutLabel>`;
+
+  const label = dymo.label.framework.openLabelXml(labelXml);
+  label.setObjectData('QR', qrBase64);
+  label.setObjectData('Barcode', barcodeBase64);
+
 
   const printers = dymo.label.framework.getPrinters();
   if (!printers.length) {
@@ -97,6 +103,5 @@ function printLabel() {
     return;
   }
 
-  const label = dymo.label.framework.openLabelXml(labelXml);
   label.print(printers[0].name);
 }
