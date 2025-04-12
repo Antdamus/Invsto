@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Add Item - OG Jewelry</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <link rel="stylesheet" href="../style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-black text-white p-6">
+  <h1 class="text-3xl mb-4">Add Inventory Item</h1>
+  <form id="add-item-form" class="flex flex-col gap-4">
+    <input type="text" id="title" placeholder="Item Title" class="p-2 rounded">
+    <textarea id="description" placeholder="Item Description" class="p-2 rounded"></textarea>
+    <input type="number" id="price" placeholder="Price ($)" class="p-2 rounded">
+    <input type="file" id="image" accept="image/*" class="text-white">
+    <button type="submit" class="bg-gold p-2 rounded">Add Item</button>
+  </form>
+
+  <script src="../src/js/initSupabase.js"></script>
+  <script src="../src/js/inventory.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <link rel="stylesheet" href="../style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-black text-white p-6">
+  <h1 class="text-3xl mb-4">Inventory Dashboard</h1>
+  <button id="logout" class="mb-4 p-2 bg-red-600 rounded">Logout</button>
+  <div id="inventory-list"></div>
+  <a href="add-item.html" class="mt-6 inline-block p-2 bg-gold rounded">Add New Item</a>
+
+  <script src="../src/js/initSupabase.js"></script>
+  <script src="../src/js/inventory.js"></script>
+</body>
+</html>
