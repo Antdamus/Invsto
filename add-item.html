@@ -4,21 +4,59 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Add Item - OG Jewelry</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <link rel="stylesheet" href="../style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-</head>
-<body class="bg-black text-white p-6">
-  <h1 class="text-3xl mb-4">Add Inventory Item</h1>
-  <form id="add-item-form" class="flex flex-col gap-4">
-    <input type="text" id="title" placeholder="Item Title" class="p-2 rounded">
-    <textarea id="description" placeholder="Item Description" class="p-2 rounded"></textarea>
-    <input type="number" id="price" placeholder="Price ($)" class="p-2 rounded">
-    <input type="file" id="image" accept="image/*" class="text-white">
-    <button type="submit" class="bg-gold p-2 rounded">Add Item</button>
-  </form>
 
-  <script src="../src/js/initSupabase.js"></script>
-  <script src="../src/js/inventory.js"></script>
+  <!-- Supabase & Barcode + QR dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+  <!-- Styling -->
+  <link rel="stylesheet" href="add-item.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+</head>
+<body class="add-body">
+  <main class="add-main">
+    <h1 class="add-heading">Add Item Type</h1>
+    <form id="add-item-form" class="add-form">
+      <input type="text" id="title" placeholder="Item Title" class="add-input" required />
+      <textarea id="description" placeholder="Item Description" class="add-input add-textarea" required></textarea>
+      <input type="number" step="0.01" id="weight" placeholder="Weight (g or ct)" class="add-input" required />
+
+      <select id="category" class="add-input" required>
+        <option value="" disabled selected>Category</option>
+        <option value="diamonds">Diamonds</option>
+        <option value="pendants">Pendants</option>
+        <option value="rings">Rings</option>
+      </select>
+
+      <input type="number" step="0.01" id="cost" placeholder="Cost of Item ($)" class="add-input" required />
+      <input type="text" id="sale-price" placeholder="Sale Price (auto)" class="add-input" readonly />
+
+      <input type="text" id="distributor-name" placeholder="Distributor Name (optional)" class="add-input" />
+      <input type="tel" id="distributor-phone" placeholder="Distributor Phone" class="add-input" />
+      <textarea id="distributor-notes" placeholder="Distributor Notes (optional)" class="add-input add-textarea"></textarea>
+
+      <input type="url" id="qr-code" placeholder="External QR Code (optional)" class="add-input" />
+      <div class="qr-preview" id="qr-preview"></div>
+
+      <div class="add-barcode-section">
+        <label class="add-label">1D Code</label>
+        <div class="add-barcode-options">
+          <button type="button" id="generate-barcode" class="add-button-secondary">Generate Barcode</button>
+          <span>or</span>
+          <input type="text" id="scanned-barcode" placeholder="Paste or Scan Barcode" class="add-input" />
+        </div>
+        <div class="add-barcode-preview">
+          <canvas id="barcode-preview" class="barcode-canvas" width="300" height="80"></canvas>
+        </div>
+      </div>
+
+      <input type="file" id="image" accept="image/*" class="add-file" required />
+      <button type="submit" class="add-button">Add Item</button>
+    </form>
+  </main>
+
+  <script src="initSupabase.js"></script>
+  <script src="inventory.js"></script>
 </body>
 </html>

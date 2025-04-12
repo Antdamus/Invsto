@@ -1,67 +1,64 @@
 /* === Apple-Inspired Login Page Styles === */
 .login-body {
     font-family: 'DM Serif Display', serif;
-    background-color: #000000; /* true black */
-    color: #f5f5f7; /* Apple light grey-white */
+    background-color: #000000;
+    color: #f5f5f7;
     display: flex;
-    align-items: center;
     justify-content: center;
+    align-items: center;
     height: 100vh;
     margin: 0;
+    text-align: center;
+  }
+  
+  .login-main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+  }
+  
+  .login-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
   }
   
   .login-heading {
     font-size: 3rem;
     margin-bottom: 2rem;
     letter-spacing: 0.5px;
-    text-align: center;
     color: #f5f5f7;
+    text-align: center;
   }
   
   .login-form {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 1.2rem;
     width: 100%;
     max-width: 400px;
     padding: 2rem;
-    background-color: #1c1c1e; /* Apple system grey 6 (dark mode) */
+    background-color: #1c1c1e;
     border-radius: 16px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    text-align: center;
   }
   
   .login-input {
+    width: 100%;
     padding: 14px;
     border-radius: 12px;
     border: none;
     font-size: 1rem;
-    background-color: #2c2c2e; /* slightly lighter grey for fields */
+    background-color: #2c2c2e;
     color: #f5f5f7;
+    text-align: center;
   }
   
   .login-input::placeholder {
-    color: #8e8e93; /* Apple system grey 3 */
-  }
-  
-  .login-input:focus {
-    outline: 2px solid #0a84ff; /* Apple blue accent */
-  }
-  
-  .login-button {
-    padding: 14px;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 1rem;
-    background-color: #0a84ff; /* Apple blue */
-    color: #ffffff;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.2s ease;
-  }
-  
-  .login-button:hover {
-    background-color: #409cff; /* hover blue */
-    transform: translateY(-1px);
-  }
-  
+    color
   
