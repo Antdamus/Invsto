@@ -1,68 +1,4 @@
-const qrInput = document.getElementById('qr-code');
-const qrCanvas = document.getElementById('qr-canvas');
-const barcodeCanvas = document.getElementById('barcode-canvas');
-const barcodeInput = document.getElementById('scanned-barcode');
-
-// === Auto-calculate sale price ===
-document.getElementById('cost')?.addEventListener('input', () => {
-  const cost = parseFloat(document.getElementById('cost').value);
-  document.getElementById('sale-price').value = cost > 0 ? (cost * 7.5).toFixed(2) : '';
-});
-
-// === QR Code Rendering
-function renderQR(url) {
-  QRCode.toCanvas(qrCanvas, url, {
-    errorCorrectionLevel: 'H',
-    color: {
-      dark: "#ffffff",
-      light: "#2c2c2e"
-    },
-    width: 180
-  }, err => { if (err) console.error("QR error:", err); });
-}
-
-// === Barcode Rendering
-function renderBarcode(code) {
-  const ctx = barcodeCanvas.getContext('2d');
-  ctx.clearRect(0, 0, barcodeCanvas.width, barcodeCanvas.height);
-  JsBarcode(barcodeCanvas, code, {
-    format: "CODE128",
-    lineColor: "#ffffff",
-    background: "#2c2c2e",
-    displayValue: true,
-    fontOptions: "bold",
-    fontSize: 16,
-    height: 60,
-    margin: 10
-  });
-}
-
-// === Live QR Update
-qrInput?.addEventListener('input', () => {
-  const url = qrInput.value.trim();
-  if (url) renderQR(url);
-});
-
-// === Generate Barcode
-document.getElementById('generate-barcode')?.addEventListener('click', () => {
-  const code = 'OG' + Date.now();
-  barcodeInput.value = code;
-  renderBarcode(code);
-});
-
-// === Helper to get canvas base64
-function getCanvasBase64(canvas) {
-  return canvas.toDataURL("image/png").split(",")[1];
-}
-
-
-// === Hook up export button
-document.getElementById("download-label").addEventListener("click", () => {
-  const barcode = document.getElementById("scanned-barcode").value || "OG" + Date.now();
-  const qr = document.getElementById("qr-code").value || "https://ogjewelry.store/auth?id=" + barcode;
-  const price = document.getElementById("sale-price").value || "0.00";
-
-  const templateXml = `<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <DesktopLabel Version="1">
   <DYMOLabel Version="4">
     <Description>DYMO Label</Description>
@@ -362,12 +298,4 @@ document.getElementById("download-label").addEventListener("click", () => {
     <Columns></Columns>
     <Rows></Rows>
   </DataTable>
-</DesktopLabel>`;
-
-  const blob = new Blob([templateXml], { type: "application/octet-stream" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "OGJewelryLabel.dymo";
-  a.click();
-});
-
+</DesktopLabel>
