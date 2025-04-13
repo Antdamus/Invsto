@@ -123,12 +123,21 @@ select {
   margin: 1.5rem 0;
 }
 
-.label-preview-container img#photo-preview {
+#label-preview-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 1.5rem 0;
+}
+
+#photo-preview {
   max-width: 100%;
   max-height: 240px;
   border-radius: 12px;
   object-fit: contain;
   display: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: opacity 0.3s ease;
 }
 
 .header {

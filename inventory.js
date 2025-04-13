@@ -1,3 +1,6 @@
+// === GLOBAL INIT ===
+let latestDymoXml = ""; // Store the most recent label XML
+
 // === AUTH PROTECTION ===
 (async () => {
   const { data: { user }, error } = await supabase.auth.getUser();
@@ -12,9 +15,10 @@ const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
 const barcodeCanvas = document.getElementById('barcode-canvas');
 const barcodeInput = document.getElementById('scanned-barcode');
-let latestDymoXml = ""; // Will be filled when label is generated
+const qrTypeSelect = document.getElementById("qr-type");
+let typeqr = "";
 
-// === SALE PRICE AUTO-CALCULATION ===
+// === SALE PRICE AUTO-CALCULATION
 document.getElementById('cost')?.addEventListener('input', () => {
   const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
   if (cost > 0) {
@@ -50,22 +54,7 @@ function renderBarcode(code) {
   });
 }
 
-// === QR Live Update
-qrInput?.addEventListener('input', () => {
-  const url = qrInput.value.trim();
-  if (url) renderQR(url);
-});
-
-// === Generate Barcode Button
-document.getElementById('generate-barcode')?.addEventListener('click', () => {
-  const code = 'OG' + Date.now();
-  barcodeInput.value = code;
-  renderBarcode(code);
-});
-
-// === QR TYPE SELECT
-let typeqr = "";
-const qrTypeSelect = document.getElementById("qr-type");
+// === QR Type Selection
 qrTypeSelect?.addEventListener("change", () => {
   typeqr = qrTypeSelect.value;
   if (typeqr === "website") {
@@ -74,9 +63,22 @@ qrTypeSelect?.addEventListener("change", () => {
   }
 });
 
-// === File Preview
-document.getElementById("item-photo").addEventListener("change", (event) => {
-  const file = event.target.files[0];
+// === QR Input Watcher
+qrInput?.addEventListener('input', () => {
+  const url = qrInput.value.trim();
+  if (url) renderQR(url);
+});
+
+// === Barcode Generation
+document.getElementById('generate-barcode')?.addEventListener('click', () => {
+  const code = 'OG' + Date.now();
+  barcodeInput.value = code;
+  renderBarcode(code);
+});
+
+// === Image Preview
+document.getElementById("item-photo")?.addEventListener("change", (e) => {
+  const file = e.target.files[0];
   const preview = document.getElementById("photo-preview");
   if (file) {
     const reader = new FileReader();
@@ -93,15 +95,15 @@ document.getElementById("item-photo").addEventListener("change", (event) => {
   }
 });
 
-// === DOWNLOAD DYMO & SAVE XML
-document.getElementById("download-label").addEventListener("click", () => {
-  const barcode = document.getElementById("scanned-barcode").value || "OG" + Date.now();
-  const qr = document.getElementById("qr-code").value?.trim() || (
+// === Generate DYMO Label
+document.getElementById("generate-dymo-label").addEventListener("click", async () => {
+  const barcode = barcodeInput.value || "OG" + Date.now();
+  const qr = qrInput.value.trim() || (
     typeqr === "website"
       ? "https://ogjeweler.com/"
       : "https://ogjewelry.store/auth?id=" + barcode
   );
-  const price = document.getElementById("sale-price").value || "0.00";
+  const price = document.getElementById("sale-price").value?.replace(/,/g, '') || "0.00";
 
   // Replace this template block with your own XML generator
   const templateXml = `<?xml version="1.0" encoding="utf-8"?>
@@ -682,14 +684,36 @@ document.getElementById("download-label").addEventListener("click", () => {
   </DataTable>
 </DesktopLabel>`;
 
-  latestDymoXml = labelXml;
+  latestDymoXml = templateXml;
 
-  // Offer file to user
-  const blob = new Blob([labelXml], { type: "application/octet-stream" });
+// Download to user
+try {
+  const blob = new Blob([templateXml], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = "OGJewelryLabel.dymo";
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+} catch (e) {
+  console.error("Download failed", e);
+  alert("Label download failed.");
+}
+
+// Upload to Supabase
+const path = `labels/${Date.now()}_OGJewelryLabel.dymo`;
+const { error } = await supabase.storage.from("dymo-labels").upload(path, new Blob([templateXml]), { upsert: true });
+
+const status = document.getElementById("dymo-status");
+if (error) {
+  status.textContent = "❌ Failed to upload DYMO label.";
+  status.style.color = "red";
+} else {
+  status.textContent = "✅ DYMO label downloaded and uploaded successfully.";
+  status.style.color = "green";
+}
 });
 
 // === FORM SUBMIT – Save Item Type to Supabase
