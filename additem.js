@@ -743,15 +743,38 @@ const barcode = barcodeInput.value;
 
 const photoFiles = photoInput.files;
 const photoUrls = [];
+const photoStatus = document.getElementById("photo-status");
+photoStatus.innerHTML = ""; // Clear previous messages
 
 for (const file of photoFiles) {
   const path = `item_photos/${Date.now()}_${file.name}`;
-  const { error } = await supabase.storage.from('photos').upload(path, file, { upsert: true });
-  if (!error) {
-    const { data } = supabase.storage.from('photos').getPublicUrl(path);
-    photoUrls.push(data.publicUrl);
+
+  const { error: uploadError } = await supabase
+    .storage
+    .from('photos')
+    .upload(path, file, { upsert: true });
+
+  if (uploadError) {
+    console.error(`Upload photo failed for ${file.name}:`, uploadError.message);
+    photoStatus.innerHTML += `❌ Failed to upload <strong>${file.name}</strong>: ${uploadError.message}<br>`;
+    continue;
   }
+
+  const { data: signedData, error: urlError } = await supabase
+    .storage
+    .from("photos")
+    .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
+
+  if (urlError) {
+    console.error(`Signed URL error for ${file.name}:`, urlError.message);
+    photoStatus.innerHTML += `❌ Failed to sign URL for <strong>${file.name}</strong>: ${urlError.message}<br>`;
+    continue;
+  }
+
+  photoUrls.push(signedData.signedUrl);
+  photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
 }
+
 
 const { error } = await supabase.from("item_types").insert({
   title,
