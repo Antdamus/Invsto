@@ -122,3 +122,24 @@
     border-radius: 10px;
   }
   
+  .label-preview-container {
+    margin: 1.5rem auto;
+    padding: 1rem;
+    border-radius: 16px;
+    background-color: #1e1e1e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 320px;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.06);
+    transition: all 0.3s ease-in-out;
+  }
+  
+  .label-preview-container img#photo-preview {
+    max-width: 100%;
+    max-height: 240px;
+    border-radius: 12px;
+    object-fit: contain;
+    display: none;
+    transition: opacity 0.3s ease;
+  }
