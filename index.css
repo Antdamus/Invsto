@@ -61,4 +61,20 @@
   
   .login-input::placeholder {
     color
+  }
+
+  .login-button {
+    background: linear-gradient(145deg, #007aff, #0a84ff);
+    border: none;
+    border-radius: 12px;
+    color: white;
+    font-size: 1.1rem;
+    padding: 14px;
+    width: 100%;
+    transition: all 0.3s ease;
+  }
+  .login-button:hover {
+    background-color: #005adf;
+    cursor: pointer;
+  }
   

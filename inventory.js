@@ -1,3 +1,11 @@
+(async () => {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (!user || user.user_metadata.role !== 'admin') {
+    alert('You must be an admin to access this page.');
+    window.location.href = 'index.html';
+  }
+})();
+
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
 const barcodeCanvas = document.getElementById('barcode-canvas');
