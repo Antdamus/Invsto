@@ -725,18 +725,35 @@ document.getElementById('add-item-form')?.addEventListener('submit', async (e) =
     photo_url = publicUrlData.publicUrl;
   }
 
+
   // === Upload DYMO Label
-  if (latestDymoXml) {
-    const filePath = `labels/${Date.now()}_${title.replace(/\s+/g, "_")}.dymo`;
-    const labelBlob = new Blob([latestDymoXml], { type: 'application/octet-stream' });
-    const { error: labelUploadError } = await supabase.storage.from('dymo-labels').upload(filePath, labelBlob);
-    if (labelUploadError) {
-      alert("Failed to upload DYMO file: " + labelUploadError.message);
-      return;
-    }
-    const { data: labelUrlData } = supabase.storage.from('dymo-labels').getPublicUrl(filePath);
-    dymo_label_url = labelUrlData.publicUrl;
+if (latestDymoXml) {
+  const filePath = `labels/${Date.now()}_${title.replace(/\s+/g, "_")}.dymo`;
+  const labelBlob = new Blob([latestDymoXml], { type: 'application/octet-stream' });
+
+  const { error: labelUploadError } = await supabase
+    .storage
+    .from('dymo-labels')
+    .upload(filePath, labelBlob);
+
+  if (labelUploadError) {
+    alert("Failed to upload DYMO file: " + labelUploadError.message);
+    return;
   }
+
+  const { data: signedUrlData, error: signedUrlError } = await supabase
+    .storage
+    .from('dymo-labels')
+    .createSignedUrl(filePath, 60 * 60 * 24 * 30); // valid 30 days
+
+  if (signedUrlError) {
+    alert("Failed to create signed URL: " + signedUrlError.message);
+    return;
+  }
+
+  dymo_label_url = signedUrlData.signedUrl;
+}
+
 
   // === Insert into DB
   const { error } = await supabase.from('item_types').insert({
