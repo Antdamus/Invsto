@@ -697,11 +697,32 @@ document.body.removeChild(a);
 URL.revokeObjectURL(url);
 
 // Upload
-const path = `labels/${Date.now()}_OGJewelryLabel.dymo`;
-await supabase.storage.from("dymo-labels").upload(path, blob, { upsert: true });
+const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`;
 
-document.getElementById("dymo-status").innerText = "✅ DYMO label downloaded and uploaded.";
-});
+const { error: uploadError } = await supabase.storage
+  .from("dymo-labels")
+  .upload(labelPath, blob, { upsert: true });
+
+if (uploadError) {
+  console.error("Upload failed:", uploadError.message);
+  document.getElementById("dymo-status").innerText = "❌ Failed to upload DYMO label.";
+} else {
+  // Create a signed URL that lasts 10 years (in seconds)
+  const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
+
+  const { data: signedData, error: urlError } = await supabase.storage
+    .from("dymo-labels")
+    .createSignedUrl(labelPath, TEN_YEARS);
+
+  if (urlError) {
+    console.error("Signed URL failed:", urlError.message);
+    document.getElementById("dymo-status").innerText = "❌ Failed to generate DYMO URL.";
+  } else {
+    window.latestDymoUrl = signedData.signedUrl;
+    document.getElementById("dymo-status").innerText = "✅ DYMO label uploaded & secured.";
+  }
+}
+
 
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
@@ -745,7 +766,7 @@ const { error } = await supabase.from("item_types").insert({
   qr_code,
   barcode,
   photos: photoUrls, // assuming 'photos' is a JSONB[] column
-  dymo_label_url: "" // or assign signed URL if you store one
+  dymo_label_url: window.latestDymoUrl || ""
 });
 
 if (error) {
