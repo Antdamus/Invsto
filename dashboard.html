@@ -3,18 +3,55 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OG Jewelry - Dashboard</title>
+  <title>OG Jewelry Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <link rel="stylesheet" href="../style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-black text-white p-6">
-  <h1 class="text-3xl mb-4">Inventory Dashboard</h1>
-  <button id="logout" class="mb-4 p-2 bg-red-600 rounded">Logout</button>
-  <div id="inventory-list"></div>
-  <a href="add-item.html" class="mt-6 inline-block p-2 bg-gold rounded">Add New Item</a>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link active" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i>
+            <span class="link-text">Add Item</span>
+          </a>
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
 
-  <script src="../src/js/initSupabase.js"></script>
-  <script src="../src/js/inventory.js"></script>
+    <div class="main">
+      <header class="header">
+        <span id="admin-greeting">Welcome, Admin</span>
+      </header>
+
+      <main class="content">
+        <h2 class="page-title">Inventory Overview</h2>
+
+        <input type="text" id="search-bar" class="search" placeholder="Search items...">
+
+        <div class="metric-cards" id="metric-cards">
+          <!-- Cards will be inserted dynamically -->
+        </div>
+
+        <div id="inventory-table-container" class="inventory-table">
+          <!-- Inventory table will be rendered here -->
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+  <script src="initSupabase.js"></script>
 </body>
 </html>
