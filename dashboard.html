@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OG Jewelry Dashboard</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 </head>
@@ -14,15 +15,15 @@
       <div class="sidebar-inner">
         <div class="logo">OG</div>
         <nav class="nav-links">
-          <a class="nav-link active" href="dashboard.html">
+          <a class="nav-link" href="dashboard.html" title="Dashboard">
             <i class="ti ti-layout-dashboard"></i>
             <span class="link-text">Dashboard</span>
           </a>
-          <a class="nav-link" href="add-item.html">
+          <a class="nav-link" href="add-item.html" title="Add Item">
             <i class="ti ti-plus"></i>
             <span class="link-text">Add Item</span>
           </a>
-          <a class="nav-link" href="#" id="logout">
+          <a class="nav-link" href="#" id="logout" title="Logout">
             <i class="ti ti-logout"></i>
             <span class="link-text">Logout</span>
           </a>
@@ -32,21 +33,15 @@
 
     <div class="main">
       <header class="header">
-        <span id="admin-greeting">Welcome, Admin</span>
+        <span id="admin-greeting"><strong>Welcome, Admin</strong></span>
       </header>
 
       <main class="content">
         <h2 class="page-title">Inventory Overview</h2>
-
         <input type="text" id="search-bar" class="search" placeholder="Search items...">
 
-        <div class="metric-cards" id="metric-cards">
-          <!-- Cards will be inserted dynamically -->
-        </div>
-
-        <div id="inventory-table-container" class="inventory-table">
-          <!-- Inventory table will be rendered here -->
-        </div>
+        <div class="metric-cards" id="metric-cards"></div>
+        <div id="inventory-table-container" class="inventory-table"></div>
       </main>
     </div>
   </div>
