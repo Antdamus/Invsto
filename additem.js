@@ -1,3 +1,4 @@
+console.log("Loaded JS")
 // === GLOBALS ===
 let latestDymoXml = "";
 let typeqr = "";
@@ -715,14 +716,14 @@ if (uploadError) {
     .createSignedUrl(labelPath, TEN_YEARS);
 
   if (urlError) {
-    console.error("Signed URL failed:", urlError.message);
+    console.error("❌ Signed URL failed:", urlError);
     document.getElementById("dymo-status").innerText = "❌ Failed to generate DYMO URL.";
   } else {
     window.latestDymoUrl = signedData.signedUrl;
     document.getElementById("dymo-status").innerText = "✅ DYMO label uploaded & secured.";
   }
 }
-
+});
 
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
