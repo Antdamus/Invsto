@@ -1,0 +1,108 @@
+/* === Elegant iOS-Inspired Login Styles === */
+body {
+  margin: 0;
+  font-family: 'DM Serif Display', serif;
+  background-color: #f6f7f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: #111;
+}
+
+.login-container {
+  background: white;
+  border-radius: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.07);
+  padding: 3rem 2.5rem;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.login-heading {
+  font-size: 2.2rem;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  color: #111;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.3rem;
+}
+
+.login-input {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+  width: 100%;
+  font-family: 'DM Serif Display', serif;
+  text-align: center;
+  background-color: #f9f9f9;
+  color: #111;
+  transition: border 0.3s ease;
+  box-sizing: border-box;
+}
+
+.login-input:focus {
+  border-color: #444;
+  outline: none;
+}
+
+.login-button {
+  background-color: #2f74ff;
+  color: white;
+  font-weight: 600;
+  font-size: 1.05rem;
+  border: none;
+  border-radius: 12px;
+  padding: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.login-button:hover {
+  background-color: #155de0;
+}
+
+#toggle-password {
+  position: absolute;
+  right: 20px;
+  top: 12px;
+  background: none;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+  color: #555;
+}
+
+.password-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.login-footer {
+  margin-top: 1.2rem;
+  font-size: 0.95rem;
+}
+
+.login-footer a {
+  color: #2f74ff;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.login-footer a:hover {
+  text-decoration: underline;
+}
+
+#login-feedback {
+  margin-top: 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  min-height: 20px;
+}

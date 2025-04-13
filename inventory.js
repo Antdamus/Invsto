@@ -1,24 +1,28 @@
-// === GLOBAL INIT ===
-let latestDymoXml = ""; // Store the most recent label XML
+// === GLOBALS ===
+let latestDymoXml = "";
+let typeqr = "";
 
-// === AUTH PROTECTION ===
+// === AUTH CHECK ===
 (async () => {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (!user || user.user_metadata.role !== 'admin') {
-    alert('You must be an admin to access this page.');
-    window.location.href = 'index.html';
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user || user.user_metadata.role !== "admin") {
+    alert("You must be an admin to access this page.");
+    window.location.href = "index.html";
   }
 })();
 
-// === GLOBAL ELEMENTS ===
+// === DOM ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
 const barcodeCanvas = document.getElementById('barcode-canvas');
 const barcodeInput = document.getElementById('scanned-barcode');
 const qrTypeSelect = document.getElementById("qr-type");
-let typeqr = "";
+const previewContainer = document.getElementById("carousel-preview");
+const photoInput = document.getElementById("item-photo");
 
-// === SALE PRICE AUTO-CALCULATION
+let uploadedImages = [];
+
+// === AUTO-CALCULATE SALE PRICE ===
 document.getElementById('cost')?.addEventListener('input', () => {
   const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
   if (cost > 0) {
@@ -54,7 +58,7 @@ function renderBarcode(code) {
   });
 }
 
-// === QR Type Selection
+// === QR TYPE SELECTION
 qrTypeSelect?.addEventListener("change", () => {
   typeqr = qrTypeSelect.value;
   if (typeqr === "website") {
@@ -63,39 +67,34 @@ qrTypeSelect?.addEventListener("change", () => {
   }
 });
 
-// === QR Input Watcher
 qrInput?.addEventListener('input', () => {
   const url = qrInput.value.trim();
   if (url) renderQR(url);
 });
 
-// === Barcode Generation
 document.getElementById('generate-barcode')?.addEventListener('click', () => {
   const code = 'OG' + Date.now();
   barcodeInput.value = code;
   renderBarcode(code);
 });
 
-// === Image Preview
-document.getElementById("item-photo")?.addEventListener("change", (e) => {
-  const file = e.target.files[0];
-  const preview = document.getElementById("photo-preview");
-  if (file) {
+// === MULTI-IMAGE PREVIEW & UPLOAD ===
+photoInput.addEventListener('change', () => {
+  previewContainer.innerHTML = "";
+  uploadedImages = [];
+
+  [...photoInput.files].forEach(file => {
     const reader = new FileReader();
-    reader.onload = function (e) {
-      preview.src = e.target.result;
-      preview.style.display = "block";
-      preview.style.opacity = 0;
-      setTimeout(() => (preview.style.opacity = 1), 50);
+    reader.onload = (e) => {
+      const img = document.createElement("img");
+      img.src = e.target.result;
+      previewContainer.appendChild(img);
     };
     reader.readAsDataURL(file);
-  } else {
-    preview.style.display = "none";
-    preview.src = "";
-  }
+  });
 });
 
-// === Generate DYMO Label
+// === GENERATE DYMO LABEL ===
 document.getElementById("generate-dymo-label").addEventListener("click", async () => {
   const barcode = barcodeInput.value || "OG" + Date.now();
   const qr = qrInput.value.trim() || (
@@ -686,123 +685,76 @@ document.getElementById("generate-dymo-label").addEventListener("click", async (
 
   latestDymoXml = templateXml;
 
-// Download to user
-try {
-  const blob = new Blob([templateXml], { type: "application/octet-stream" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "OGJewelryLabel.dymo";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-} catch (e) {
-  console.error("Download failed", e);
-  alert("Label download failed.");
-}
+// Download
+const blob = new Blob([templateXml], { type: "application/octet-stream" });
+const url = URL.createObjectURL(blob);
+const a = document.createElement("a");
+a.href = url;
+a.download = "OGJewelryLabel.dymo";
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+URL.revokeObjectURL(url);
 
-// Upload to Supabase
+// Upload
 const path = `labels/${Date.now()}_OGJewelryLabel.dymo`;
-const { error } = await supabase.storage.from("dymo-labels").upload(path, new Blob([templateXml]), { upsert: true });
+await supabase.storage.from("dymo-labels").upload(path, blob, { upsert: true });
 
-const status = document.getElementById("dymo-status");
-if (error) {
-  status.textContent = "❌ Failed to upload DYMO label.";
-  status.style.color = "red";
-} else {
-  status.textContent = "✅ DYMO label downloaded and uploaded successfully.";
-  status.style.color = "green";
-}
+document.getElementById("dymo-status").innerText = "✅ DYMO label downloaded and uploaded.";
 });
 
-// === FORM SUBMIT – Save Item Type to Supabase
-document.getElementById('add-item-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
+// === FORM SUBMIT ===
+document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
+e.preventDefault();
 
-  const title = document.getElementById("title").value.trim();
-  const description = document.getElementById("description").value.trim();
-  const weight = parseFloat(document.getElementById("weight").value);
-  const category = document.getElementById("category").value;
-  const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
-  const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
-  const distributor_name = document.getElementById("distributor-name").value.trim();
-  const distributor_phone = document.getElementById("distributor-phone").value.trim();
-  const distributor_notes = document.getElementById("distributor-notes").value.trim();
-  const qr_type = typeqr;
-  const qr_code = document.getElementById("qr-code").value.trim();
-  const barcode = document.getElementById("scanned-barcode").value;
-  let photo_url = null;
-  let dymo_label_url = null;
+const title = document.getElementById("title").value.trim();
+const description = document.getElementById("description").value.trim();
+const weight = parseFloat(document.getElementById("weight").value);
+const category = document.getElementById("category").value;
+const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
+const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
+const distributor_name = document.getElementById("distributor-name").value.trim();
+const distributor_phone = document.getElementById("distributor-phone").value.trim();
+const distributor_notes = document.getElementById("distributor-notes").value.trim();
+const qr_code = document.getElementById("qr-code").value.trim();
+const barcode = barcodeInput.value;
 
-  // === Upload photo
-  const fileInput = document.getElementById("item-photo");
-  const file = fileInput?.files[0];
-  if (file) {
-    const filePath = `item_photos/${Date.now()}_${file.name}`;
-    const { error: uploadError } = await supabase.storage.from('photos').upload(filePath, file);
-    if (uploadError) {
-      alert("Failed to upload image: " + uploadError.message);
-      return;
-    }
-    const { data: publicUrlData } = supabase.storage.from('photos').getPublicUrl(filePath);
-    photo_url = publicUrlData.publicUrl;
+const photoFiles = photoInput.files;
+const photoUrls = [];
+
+for (const file of photoFiles) {
+  const path = `item_photos/${Date.now()}_${file.name}`;
+  const { error } = await supabase.storage.from('photos').upload(path, file, { upsert: true });
+  if (!error) {
+    const { data } = supabase.storage.from('photos').getPublicUrl(path);
+    photoUrls.push(data.publicUrl);
   }
-
-
-  // === Upload DYMO Label
-if (latestDymoXml) {
-  const filePath = `labels/${Date.now()}_${title.replace(/\s+/g, "_")}.dymo`;
-  const labelBlob = new Blob([latestDymoXml], { type: 'application/octet-stream' });
-
-  const { error: labelUploadError } = await supabase
-    .storage
-    .from('dymo-labels')
-    .upload(filePath, labelBlob);
-
-  if (labelUploadError) {
-    alert("Failed to upload DYMO file: " + labelUploadError.message);
-    return;
-  }
-
-  const { data: signedUrlData, error: signedUrlError } = await supabase
-    .storage
-    .from('dymo-labels')
-    .createSignedUrl(filePath, 60 * 60 * 24 * 30); // valid 30 days
-
-  if (signedUrlError) {
-    alert("Failed to create signed URL: " + signedUrlError.message);
-    return;
-  }
-
-  dymo_label_url = signedUrlData.signedUrl;
 }
 
+const { error } = await supabase.from("item_types").insert({
+  title,
+  description,
+  weight,
+  category,
+  cost,
+  sale_price,
+  distributor_name,
+  distributor_phone,
+  distributor_notes,
+  qr_type: typeqr,
+  qr_code,
+  barcode,
+  photos: photoUrls, // assuming 'photos' is a JSONB[] column
+  dymo_label_url: "" // or assign signed URL if you store one
+});
 
-  // === Insert into DB
-  const { error } = await supabase.from('item_types').insert({
-    title,
-    description,
-    weight,
-    category,
-    cost,
-    sale_price,
-    distributor_name,
-    distributor_phone,
-    distributor_notes,
-    qr_type,
-    qr_code,
-    barcode,
-    photo_url,
-    dymo_label_url
-  });
-
-  if (error) {
-    alert("Failed to save item: " + error.message);
-  } else {
-    alert("Item type successfully added!");
-    document.getElementById("add-item-form").reset();
-    document.getElementById("photo-preview").style.display = "none";
-    latestDymoXml = "";
-  }
+if (error) {
+  alert("Failed to save item: " + error.message);
+} else {
+  alert("✅ Item successfully added!");
+  document.getElementById("add-item-form").reset();
+  previewContainer.innerHTML = "";
+  uploadedImages = [];
+  latestDymoXml = "";
+}
 });

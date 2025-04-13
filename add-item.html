@@ -65,13 +65,11 @@
 
           <button id="generate-dymo-label" type="button" class="add-button-secondary">Generate DYMO Label</button>
           <div id="dymo-status" style="text-align:center; margin-top: 10px; font-weight: 500;"></div>
-
         </div>
 
-        <input type="file" id="item-photo" class="add-input" accept="image/*">
-        <div id="label-preview-container">
-          <img id="photo-preview" style="display:none;" />
-        </div>
+        <!-- NEW MULTI-PHOTO SUPPORT -->
+        <input type="file" id="item-photo" class="add-input" accept="image/*" multiple />
+        <div id="carousel-preview" class="carousel-preview"></div>
 
         <button type="submit" class="add-button">Add Item</button>
       </form>

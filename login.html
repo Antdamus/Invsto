@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Login</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <link rel="stylesheet" href="login.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+</head>
+<body class="login-body">
+  <main class="login-main">
+    <div class="login-container">
+      <h1 class="login-heading">OG Jewelry Login</h1>
+      <form id="login-form" class="login-form">
+        <input type="email" id="email" placeholder="Email" class="login-input" required />
+        <div class="password-wrapper">
+          <input type="password" id="password" placeholder="Password" class="login-input" required />
+          <button type="button" id="toggle-password">👁</button>
+        </div>
+        <button type="submit" class="login-button">Login</button>
+        <div id="login-feedback" class="login-feedback"></div>
+        <a href="#" id="reset-link" class="reset-link">Forgot password?</a>
+      </form>
+    </div>
+  </main>
+  <script src="initSupabase.js"></script>
+  <script src="auth.js"></script>
+</body>
+</html>
