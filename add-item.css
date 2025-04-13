@@ -1,145 +1,146 @@
-.add-body {
-    font-family: 'DM Serif Display', serif;
-    background-color: #000;
-    color: #f5f5f7;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
-    text-align: center;
-  }
-  
-  .add-main {
-    width: 100%;
-    max-width: 700px;
-    padding: 2rem;
-  }
-  
-  .add-heading {
-    font-size: 2.75rem;
-    margin-bottom: 2rem;
-    color: #f5f5f7;
-  }
-  
-  .add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    background-color: #1c1c1e;
-    padding: 2rem;
-    border-radius: 20px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
-  }
-  
-  .add-input,
-  .add-textarea,
-  .add-file,
-  select {
-    padding: 14px;
-    border-radius: 12px;
-    border: none;
-    font-size: 1rem;
-    background-color: #2c2c2e;
-    color: #f5f5f7;
-    text-align: center;
-  }
-  
-  .add-input::placeholder,
-  .add-textarea::placeholder {
-    color: #8e8e93;
-  }
-  
-  .add-textarea {
-    resize: none;
-    height: 100px;
-  }
-  
-  .add-button {
-    padding: 14px;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 1rem;
-    background-color: #0a84ff;
-    color: #ffffff;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.2s ease;
-  }
-  
-  .add-button:hover {
-    background-color: #409cff;
-    transform: translateY(-1px);
-  }
-  
-  .add-button-secondary {
-    background-color: #2c2c2e;
-    color: #f5f5f7;
-    padding: 10px 16px;
-    border-radius: 10px;
-    border: 1px solid #444;
-    cursor: pointer;
-  }
-  
-  .add-button-secondary:hover {
-    background-color: #3a3a3c;
-  }
-  
-  .add-label {
-    font-weight: 600;
-    font-size: 1rem;
-    margin-bottom: 0.5rem;
-  }
-  
-  .add-barcode-section {
-    margin-top: 1rem;
-  }
-  
-  .add-barcode-options {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  
-  .combined-label-preview {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    background-color: #1c1c1e;
-    padding: 16px;
-    border-radius: 16px;
-    box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
-    margin-top: 10px;
-  }
-  
-  .combined-label-preview canvas {
-    display: block;
-    background-color: #2c2c2e;
-    border-radius: 10px;
-  }
-  
-  .label-preview-container {
-    margin: 1.5rem auto;
-    padding: 1rem;
-    border-radius: 16px;
-    background-color: #1e1e1e;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    max-width: 320px;
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.06);
-    transition: all 0.3s ease-in-out;
-  }
-  
-  .label-preview-container img#photo-preview {
-    max-width: 100%;
-    max-height: 240px;
-    border-radius: 12px;
-    object-fit: contain;
-    display: none;
-    transition: opacity 0.3s ease;
-  }
+body {
+  font-family: 'DM Serif Display', serif;
+  background-color: #f5f5f7;
+  color: #1c1c1e;
+  margin: 0;
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.add-main {
+  width: 100%;
+  max-width: 800px;
+  background: white;
+  border-radius: 20px;
+  padding: 2rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+}
+
+.add-heading {
+  font-size: 2.25rem;
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #111;
+}
+
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.add-input,
+.add-textarea,
+select {
+  font-size: 1rem;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  color: #111;
+}
+
+.add-textarea {
+  resize: none;
+  height: 100px;
+}
+
+.add-input::placeholder,
+.add-textarea::placeholder {
+  color: #aaa;
+}
+
+.add-button {
+  padding: 14px;
+  background-color: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.add-button:hover {
+  background-color: #339bff;
+}
+
+.add-button-secondary {
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.add-button-secondary:hover {
+  background-color: #e2e2e2;
+}
+
+.add-label {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.add-barcode-options {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+
+.combined-label-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 1rem;
+  background: #f6f6f6;
+  border-radius: 12px;
+  margin-top: 1rem;
+  box-shadow: 0 0 8px rgba(0,0,0,0.03);
+}
+
+.combined-label-preview canvas {
+  background: white;
+  border-radius: 10px;
+}
+
+.label-preview-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 1.5rem 0;
+}
+
+.label-preview-container img#photo-preview {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 12px;
+  object-fit: contain;
+  display: none;
+}
+
+.header {
+  width: 100%;
+  background-color: #ffffff;
+  border-bottom: 1px solid #ddd;
+  padding: 1rem 2rem;
+  margin-bottom: 2rem;
+}
+
+.back-button {
+  text-decoration: none;
+  color: #007aff;
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.back-button:hover {
+  text-decoration: underline;
+}

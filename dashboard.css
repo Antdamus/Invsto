@@ -15,7 +15,7 @@ body {
 
 /* SIDEBAR */
 .sidebar {
-  width: 20px;
+  width: 72px;
   min-width: 72px;
   background-color: #1c1c1e;
   transition: width 0.3s ease;

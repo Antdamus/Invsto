@@ -1,3 +1,4 @@
+// === AUTH PROTECTION ===
 (async () => {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (!user || user.user_metadata.role !== 'admin') {
@@ -6,12 +7,14 @@
   }
 })();
 
+// === GLOBAL ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
 const barcodeCanvas = document.getElementById('barcode-canvas');
 const barcodeInput = document.getElementById('scanned-barcode');
+let latestDymoXml = ""; // Will be filled when label is generated
 
-// === Auto-calculate sale price ===
+// === SALE PRICE AUTO-CALCULATION ===
 document.getElementById('cost')?.addEventListener('input', () => {
   const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
   if (cost > 0) {
@@ -26,10 +29,7 @@ document.getElementById('cost')?.addEventListener('input', () => {
 function renderQR(url) {
   QRCode.toCanvas(qrCanvas, url, {
     errorCorrectionLevel: 'H',
-    color: {
-      dark: "#ffffff",
-      light: "#2c2c2e"
-    },
+    color: { dark: "#ffffff", light: "#2c2c2e" },
     width: 180
   }, err => { if (err) console.error("QR error:", err); });
 }
@@ -50,49 +50,60 @@ function renderBarcode(code) {
   });
 }
 
-// === Live QR Update
+// === QR Live Update
 qrInput?.addEventListener('input', () => {
   const url = qrInput.value.trim();
   if (url) renderQR(url);
 });
 
-// === Generate Barcode
+// === Generate Barcode Button
 document.getElementById('generate-barcode')?.addEventListener('click', () => {
   const code = 'OG' + Date.now();
   barcodeInput.value = code;
   renderBarcode(code);
 });
 
-// === Helper to get canvas base64
-function getCanvasBase64(canvas) {
-  return canvas.toDataURL("image/png").split(",")[1];
-}
-
-let typeqr = ""; // Global tracker for QR type
-
+// === QR TYPE SELECT
+let typeqr = "";
 const qrTypeSelect = document.getElementById("qr-type");
 qrTypeSelect?.addEventListener("change", () => {
   typeqr = qrTypeSelect.value;
-
   if (typeqr === "website") {
     document.getElementById("qr-code").value = "https://ogjeweler.com/";
     renderQR("https://ogjeweler.com/");
   }
-
-  // You can add more conditionals here if needed
 });
 
-// === Hook up export button
+// === File Preview
+document.getElementById("item-photo").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  const preview = document.getElementById("photo-preview");
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      preview.src = e.target.result;
+      preview.style.display = "block";
+      preview.style.opacity = 0;
+      setTimeout(() => (preview.style.opacity = 1), 50);
+    };
+    reader.readAsDataURL(file);
+  } else {
+    preview.style.display = "none";
+    preview.src = "";
+  }
+});
+
+// === DOWNLOAD DYMO & SAVE XML
 document.getElementById("download-label").addEventListener("click", () => {
   const barcode = document.getElementById("scanned-barcode").value || "OG" + Date.now();
-  const qr =
-  document.getElementById("qr-code").value?.trim() ||
-  (typeqr === "website"
-    ? "https://ogjeweler.com/"
-    : "https://ogjewelry.store/auth?id=" + barcode);
-
+  const qr = document.getElementById("qr-code").value?.trim() || (
+    typeqr === "website"
+      ? "https://ogjeweler.com/"
+      : "https://ogjewelry.store/auth?id=" + barcode
+  );
   const price = document.getElementById("sale-price").value || "0.00";
 
+  // Replace this template block with your own XML generator
   const templateXml = `<?xml version="1.0" encoding="utf-8"?>
 <DesktopLabel Version="1">
   <DYMOLabel Version="4">
@@ -671,30 +682,86 @@ document.getElementById("download-label").addEventListener("click", () => {
   </DataTable>
 </DesktopLabel>`;
 
-  const blob = new Blob([templateXml], { type: "application/octet-stream" });
+  latestDymoXml = labelXml;
+
+  // Offer file to user
+  const blob = new Blob([labelXml], { type: "application/octet-stream" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "OGJewelryLabel.dymo";
   a.click();
 });
 
-document.getElementById("item-photo").addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  const preview = document.getElementById("photo-preview");
+// === FORM SUBMIT – Save Item Type to Supabase
+document.getElementById('add-item-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
 
+  const title = document.getElementById("title").value.trim();
+  const description = document.getElementById("description").value.trim();
+  const weight = parseFloat(document.getElementById("weight").value);
+  const category = document.getElementById("category").value;
+  const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
+  const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
+  const distributor_name = document.getElementById("distributor-name").value.trim();
+  const distributor_phone = document.getElementById("distributor-phone").value.trim();
+  const distributor_notes = document.getElementById("distributor-notes").value.trim();
+  const qr_type = typeqr;
+  const qr_code = document.getElementById("qr-code").value.trim();
+  const barcode = document.getElementById("scanned-barcode").value;
+  let photo_url = null;
+  let dymo_label_url = null;
+
+  // === Upload photo
+  const fileInput = document.getElementById("item-photo");
+  const file = fileInput?.files[0];
   if (file) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      preview.src = e.target.result;
-      preview.style.display = "block";
-      preview.style.opacity = 0;
-      setTimeout(() => (preview.style.opacity = 1), 50);
-    };
-    reader.readAsDataURL(file);
+    const filePath = `item_photos/${Date.now()}_${file.name}`;
+    const { error: uploadError } = await supabase.storage.from('photos').upload(filePath, file);
+    if (uploadError) {
+      alert("Failed to upload image: " + uploadError.message);
+      return;
+    }
+    const { data: publicUrlData } = supabase.storage.from('photos').getPublicUrl(filePath);
+    photo_url = publicUrlData.publicUrl;
+  }
+
+  // === Upload DYMO Label
+  if (latestDymoXml) {
+    const filePath = `labels/${Date.now()}_${title.replace(/\s+/g, "_")}.dymo`;
+    const labelBlob = new Blob([latestDymoXml], { type: 'application/octet-stream' });
+    const { error: labelUploadError } = await supabase.storage.from('dymo-labels').upload(filePath, labelBlob);
+    if (labelUploadError) {
+      alert("Failed to upload DYMO file: " + labelUploadError.message);
+      return;
+    }
+    const { data: labelUrlData } = supabase.storage.from('dymo-labels').getPublicUrl(filePath);
+    dymo_label_url = labelUrlData.publicUrl;
+  }
+
+  // === Insert into DB
+  const { error } = await supabase.from('item_types').insert({
+    title,
+    description,
+    weight,
+    category,
+    cost,
+    sale_price,
+    distributor_name,
+    distributor_phone,
+    distributor_notes,
+    qr_type,
+    qr_code,
+    barcode,
+    photo_url,
+    dymo_label_url
+  });
+
+  if (error) {
+    alert("Failed to save item: " + error.message);
   } else {
-    preview.style.display = "none";
-    preview.src = "";
+    alert("Item type successfully added!");
+    document.getElementById("add-item-form").reset();
+    document.getElementById("photo-preview").style.display = "none";
+    latestDymoXml = "";
   }
 });
-
-
