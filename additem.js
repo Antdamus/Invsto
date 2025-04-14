@@ -12,6 +12,8 @@ let typeqr = "";
   }
 })();
 
+
+
 // === DOM ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
@@ -78,6 +80,7 @@ document.getElementById('generate-barcode')?.addEventListener('click', () => {
   barcodeInput.value = code;
   renderBarcode(code);
 });
+
 
 // === MULTI-IMAGE PREVIEW & UPLOAD ===
 photoInput.addEventListener('change', () => {
@@ -699,30 +702,39 @@ URL.revokeObjectURL(url);
 
 // Upload
 const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`;
-
+const { data } = await supabase.auth.getUser();
+console.log("🧾 JWT Payload:", data?.user?.user_metadata);
 const { error: uploadError } = await supabase.storage
   .from("dymo-labels")
   .upload(labelPath, blob, { upsert: true });
 
-if (uploadError) {
-  console.error("Upload failed:", uploadError.message);
-  document.getElementById("dymo-status").innerText = "❌ Failed to upload DYMO label.";
-} else {
-  // Create a signed URL that lasts 10 years (in seconds)
-  const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
-
-  const { data: signedData, error: urlError } = await supabase.storage
-    .from("dymo-labels")
-    .createSignedUrl(labelPath, TEN_YEARS);
-
-  if (urlError) {
-    console.error("❌ Signed URL failed:", urlError);
-    document.getElementById("dymo-status").innerText = "❌ Failed to generate DYMO URL.";
+  if (uploadError) {
+    console.error("❌ Upload failed:");
+    console.error("Message:", uploadError.message);
+    console.error("Status Code:", uploadError.statusCode);
+    console.error("Full Error Object:", uploadError);
+  
+    document.getElementById("dymo-status").innerText =
+      `❌ Failed to upload DYMO label: ${uploadError.message || "Unknown error"}`;
   } else {
-    window.latestDymoUrl = signedData.signedUrl;
-    document.getElementById("dymo-status").innerText = "✅ DYMO label uploaded & secured.";
-  }
-}
+    // Create a signed URL that lasts 10 years (in seconds)
+    const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
+  
+    const { data: signedData, error: urlError } = await supabase.storage
+      .from("dymo-labels")
+      .createSignedUrl(labelPath, TEN_YEARS);
+  
+    if (urlError) {
+      console.error("❌ Signed URL failed:", urlError.message);
+      console.error("Full Signed URL Error Object:", urlError);
+      document.getElementById("dymo-status").innerText =
+        `❌ Failed to generate DYMO URL: ${urlError.message || "Unknown error"}`;
+    } else {
+      window.latestDymoUrl = signedData.signedUrl;
+      document.getElementById("dymo-status").innerText =
+        "✅ DYMO label uploaded & secured.";
+    }
+  }  
 });
 
 // === FORM SUBMIT ===

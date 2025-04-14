@@ -1,0 +1,140 @@
+/* === stock.css === */
+
+body.stock-body {
+    font-family: 'DM Serif Display', serif;
+    background-color: #f5f5f7;
+    color: #1d1d1f;
+    margin: 0;
+    padding: 20px;
+  }
+  
+  .back-button {
+    display: inline-block;
+    margin-bottom: 20px;
+    font-size: 1rem;
+    text-decoration: none;
+    color: #0071e3;
+    padding: 10px 16px;
+    background: #eaeaea;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+  }
+  
+  .back-button:hover {
+    background-color: #d0d0d0;
+  }
+  
+  .stock-heading {
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+  }
+  
+  .stock-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 24px;
+    padding-bottom: 40px;
+  }
+  
+  .stock-card {
+    background-color: #fff;
+    border-radius: 20px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+  }
+  
+  .stock-card:hover {
+    transform: scale(1.01);
+  }
+  
+  .stock-title {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .stock-field {
+    font-size: 0.95rem;
+    margin: 0.2rem 0;
+    line-height: 1.4;
+  }
+  
+  .stock-photos {
+    position: relative;
+    margin-top: 1rem;
+    overflow: hidden;
+  }
+  
+  .stock-photo-preview {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  
+  .photo-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 2rem;
+    color: #333;
+    background-color: rgba(255, 255, 255, 0.7);
+    border: none;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 50%;
+    transition: background 0.2s;
+  }
+  
+  .photo-nav:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+  }
+  
+  .prev-photo {
+    left: 10px;
+  }
+  
+  .next-photo {
+    right: 10px;
+  }
+  
+  /* === Modal === */
+  .modal {
+    display: none;
+    position: fixed;
+    z-index: 99;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.8);
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .modal img {
+    max-width: 90vw;
+    max-height: 90vh;
+    border-radius: 14px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+  }
+  
+  .close-modal {
+    position: absolute;
+    top: 30px;
+    right: 40px;
+    font-size: 2rem;
+    color: white;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  
+  .modal.show {
+    display: flex;
+  }
+  

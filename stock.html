@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry Inventory</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="stock.css" />
+  
+</head>
+<body class="stock-body">
+  <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+  <main class="stock-main">
+    <h1 class="stock-heading">Live Inventory</h1>
+    <div id="stock-container" class="stock-grid"></div>
+  </main>
+
+  <!-- Modal for enlarged image -->
+  <div id="image-modal" class="modal hidden">
+    <span class="close-modal">&times;</span>
+    <img class="modal-content" id="modal-image" />
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="stock.js"></script>
+</body>
+</html>
