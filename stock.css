@@ -441,21 +441,23 @@ body.stock-body {
 }
 
 .favorite-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+  position: static;
+  font-size: 1.4rem;
+  color: #bbb;
   background: none;
   border: none;
-  font-size: 1.6rem;
   cursor: pointer;
-  color: #bbb; 
   transition: color 0.3s ease;
-  z-index: 4; /* ✅ Make sure it's visible above photos */
+  z-index: 2;
 }
 
 .favorite-btn:hover,
 .stock-card.favorited .favorite-btn {
   color: gold;
+}
+
+.favorite-btn:active {
+  transform: scale(1.3);
 }
 
 .favorite-btn:focus {
@@ -537,11 +539,9 @@ body.stock-body {
 }
 
 .select-checkbox {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  transform: scale(1.2);
-  z-index: 3; /* ✅ This ensures it's on top */
+  position: static;
+  transform: scale(1.1);
+  z-index: 2;
 }
 
 .stock-card.selected {
@@ -584,3 +584,22 @@ body.stock-body {
 .card-overlays .favorite-btn {
   pointer-events: auto;
 }
+
+.card-float-controls {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  z-index: 3;
+  pointer-events: auto;
+}
+
+

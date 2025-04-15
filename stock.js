@@ -508,11 +508,13 @@ function renderStockItems(data) {
   
       
     card.innerHTML = `
-        <div class="card-overlays">
-          ${checkboxHTML}
-          ${favoriteBtn}
+        <div class="stock-image-container">
+          ${photoCarousel}
+          <div class="card-float-controls">
+            ${checkboxHTML}
+            ${favoriteBtn}
+          </div>
         </div>
-        <div class="stock-image-container">${photoCarousel}</div>
         <div class="stock-content">
         <h2>${item.title}</h2>
         <p>${item.description}</p>
@@ -632,7 +634,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       .eq("user_id", currentUser.id);
     userFavorites = new Set(favs.map(f => f.item_id));
   }
-  
+
   await fetchStockItems();
   applyFiltersFromURL();
   const filtered = getFilteredItems();
