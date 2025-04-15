@@ -467,6 +467,34 @@ function updateBulkToolbar() {
   toolbar.classList.toggle("hidden", selectedCount === 0);
 }
 
+document.getElementById("bulk-favorite").addEventListener("click", async () => {
+  if (!currentUser || selectedItems.size === 0) return;
+
+  const updates = [];
+
+  for (const id of selectedItems) {
+    const isFav = userFavorites.has(id);
+    if (isFav) {
+      updates.push(
+        supabase.from("favorites").delete().eq("item_id", id).eq("user_id", currentUser.id)
+      );
+      userFavorites.delete(id);
+    } else {
+      updates.push(
+        supabase.from("favorites").insert({ item_id: id, user_id: currentUser.id })
+      );
+      userFavorites.add(id);
+    }
+  }
+
+  await Promise.all(updates);
+
+  // Re-render view
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+});
+
 
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
