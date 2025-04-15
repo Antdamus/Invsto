@@ -9,20 +9,29 @@ async function fetchStockItems() {
   const grid = document.getElementById("stock-container");
   grid.innerHTML = "";
 
-  data.forEach(item => {
+  data.forEach((item, index) => {
     const card = document.createElement("div");
     card.className = "stock-card";
 
     const photos = item.photos || [];
-    const primaryPhoto = photos.length > 0 ? photos[0] : "";
-
     const stock = typeof item.stock === "number" ? item.stock : 0;
     const stockClass = stock === 0 ? "stock-zero" : "";
 
+    // Build carousel HTML
+    const photoCarousel = photos.length
+      ? `
+        <div class="carousel" id="carousel-${index}">
+          <button class="carousel-btn left" onclick="prevSlide(${index})">&#10094;</button>
+          <div class="carousel-track">
+            ${photos.map((photo, i) => `<img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />`).join('')}
+          </div>
+          <button class="carousel-btn right" onclick="nextSlide(${index})">&#10095;</button>
+        </div>
+      `
+      : `<div class="no-photo">No Photos</div>`;
+
     card.innerHTML = `
-      <div class="stock-image-container">
-        ${primaryPhoto ? `<img src="${primaryPhoto}" class="stock-photo-preview" onclick="openModal('${primaryPhoto}')" />` : `<div class="no-photo">No Photo</div>`}
-      </div>
+      <div class="stock-image-container">${photoCarousel}</div>
       <div class="stock-content">
         <h2>${item.title}</h2>
         <p>${item.description}</p>
@@ -43,20 +52,26 @@ async function fetchStockItems() {
   });
 }
 
-function openModal(imageUrl) {
-  const modal = document.getElementById("image-modal");
-  const modalImg = document.getElementById("modal-image");
-  modal.classList.remove("hidden");
-  modalImg.src = imageUrl;
+function nextSlide(index) {
+  const carousel = document.getElementById(`carousel-${index}`);
+  const track = carousel.querySelector(".carousel-track");
+  const images = track.querySelectorAll(".carousel-photo");
+  const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
+
+  images[currentIndex].classList.remove("active");
+  const nextIndex = (currentIndex + 1) % images.length;
+  images[nextIndex].classList.add("active");
 }
 
-function closeModal() {
-  document.getElementById("image-modal").classList.add("hidden");
-}
+function prevSlide(index) {
+  const carousel = document.getElementById(`carousel-${index}`);
+  const track = carousel.querySelector(".carousel-track");
+  const images = track.querySelectorAll(".carousel-photo");
+  const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
 
-document.querySelector(".close-modal").addEventListener("click", closeModal);
-document.getElementById("image-modal").addEventListener("click", (e) => {
-  if (e.target.id === "image-modal") closeModal();
-});
+  images[currentIndex].classList.remove("active");
+  const prevIndex = (currentIndex - 1 + images.length) % images.length;
+  images[prevIndex].classList.add("active");
+}
 
 fetchStockItems();
