@@ -150,6 +150,70 @@ function setupCSVExport() {
   });
 }
 
+function setupPDFExport() {
+  const exportBtn = document.getElementById("export-pdf");
+  exportBtn.addEventListener("click", () => {
+    const headers = [
+      "Title", "Description", "Weight", "Sale Price",
+      "Distributor Name", "Distributor Phone",  "Stock"
+    ];
+
+    const visibleCards = document.querySelectorAll(".stock-card");
+
+    const rows = [];
+
+    visibleCards.forEach(card => {
+      const content = card.querySelector(".stock-content");
+      const getField = (label) => {
+        const p = [...content.querySelectorAll("p")].find(el => el.innerText.startsWith(label));
+        return p ? p.innerText.replace(`${label}:`, '').trim() : '';
+      };
+
+      const title = content.querySelector("h2")?.innerText || "";
+      const description = content.querySelector("p:nth-of-type(1)")?.innerText || "";
+
+      const weight = getField("Weight");
+      //const cost = getField("Cost");
+      const salePrice = getField("Sale Price");
+      //const category = getField("Category");
+      const distName = getField("Distributor").split('\n')[0];
+      const distPhone = getField("Distributor").split('\n')[1] || "";
+      //const notes = getField("Notes");
+      //const barcode = getField("Barcode");
+      const stock = getField("In Stock")?.replace("In Stock: ", "").trim();
+      //const updated = getField("Last Updated");
+
+      rows.push([
+        title, description, weight, salePrice,
+        distName, distPhone, stock,
+      ]);
+    });
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.autoTable({
+      head: [headers],
+      body: rows,
+      styles: {
+        font: "helvetica",
+        fontSize: 9,
+        overflow: "linebreak",
+        cellPadding: 3,
+      },
+      headStyles: {
+        fillColor: [0, 113, 227],
+        textColor: 255,
+      },
+      margin: { top: 20 },
+      theme: "striped"
+    });
+
+    doc.save("filtered_inventory.pdf");
+  });
+}
+
+
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
   grid.innerHTML = "";
@@ -219,4 +283,5 @@ function prevSlide(index) {
   images[prevIndex].classList.add("active");
 }
 
+setupPDFExport();
 fetchStockItems();
