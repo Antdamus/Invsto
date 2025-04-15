@@ -1,7 +1,10 @@
 let currentPage = 1;
 let itemsPerPage = 12;
-
 let allItems = [];
+let userFavorites = new Set();
+let currentUser = null;
+let showOnlyFavorites = false;
+
 
 function updateFilterChips(filters) {
   const chipContainer = document.getElementById("filter-chips");
@@ -172,7 +175,9 @@ function getFilteredItems() {
            (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
            (!filters.createdTo || item.created_at <= filters.createdTo) &&
            (!filters.category || item.category === filters.category) &&
-           (!filters.qr_type || item.qr_type === filters.qr_type);
+           (!filters.qr_type || item.qr_type === filters.qr_type) &&
+           (showOnlyFavorites ? userFavorites.has(item.id) : true);
+
   });
 }
 
@@ -241,6 +246,13 @@ function setupFilters() {
     applySortAndRender(filtered);
     updateFilterChips(filters); // ✅ CORRECT
     updateURLFromForm();
+  });
+
+  document.getElementById("show-favorites-only").addEventListener("change", (e) => {
+    showOnlyFavorites = e.target.checked;
+    const filtered = getFilteredItems();
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
   });
 }
 
@@ -417,6 +429,23 @@ function applySortAndRender(data) {
   paginateAndRender(sorted);
 }
 
+async function toggleFavorite(itemId) {
+  if (!currentUser) return;
+
+  const isFav = userFavorites.has(itemId);
+  const { error } = isFav
+    ? await supabase.from("favorites").delete().eq("user_id", currentUser.id).eq("item_id", itemId)
+    : await supabase.from("favorites").insert([{ user_id: currentUser.id, item_id: itemId }]);
+
+  if (!error) {
+    if (isFav) {
+      userFavorites.delete(itemId);
+    } else {
+      userFavorites.add(itemId);
+    }
+    renderStockItems(getFilteredItems());
+  }
+}
 
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
@@ -458,6 +487,12 @@ function renderStockItems(data) {
         <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
         <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
         <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+
+        ${currentUser ? `
+          <button class="favorite-btn" onclick="toggleFavorite('${item.id}')">
+            ${userFavorites.has(item.id) ? '★' : '☆'}
+          </button>` : ''
+        }
       </div>
     `;
 
@@ -553,6 +588,16 @@ function applyFiltersFromURL() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+const { data: user } = await supabase.auth.getUser();
+currentUser = user?.user || null;
+
+if (currentUser) {
+  const { data: favs } = await supabase.from("favorites")
+    .select("item_id")
+    .eq("user_id", currentUser.id);
+  userFavorites = new Set(favs.map(f => f.item_id));
+}
+
   await fetchStockItems(); // load data, setup, dropdowns, etc.
   applyFiltersFromURL();   // then apply filters from URL
   const filtered = getFilteredItems();
@@ -560,3 +605,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   applySortAndRender(filtered);
   updateFilterChips(filters); // ✅ CORRECT
 });
+
+

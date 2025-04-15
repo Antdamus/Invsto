@@ -43,6 +43,7 @@ body.stock-body {
   display: flex;
   flex-direction: column;
   transition: all 0.3s ease;
+  position: relative;
 }
 
 .stock-card:hover {
@@ -66,6 +67,7 @@ body.stock-body {
   font-size: 0.95rem;
   margin: 0.2rem 0;
   line-height: 1.4;
+  position: relative;
 }
 
 .stock-count.stock-zero {
@@ -436,4 +438,43 @@ body.stock-body {
 
 .filter-chip button:hover {
   color: #000;
+}
+
+.favorite-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  cursor: pointer;
+  color: #bbb;
+  transition: color 0.3s ease;
+}
+
+.favorite-btn:hover {
+  color: gold;
+}
+
+.favorite-btn:focus {
+  outline: none;
+}
+
+#favorite-toggle-container {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 20px 0;
+}
+
+.favorite-toggle {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  color: #ddd;
+  user-select: none;
+}
+
+.favorite-toggle input {
+  margin-right: 8px;
+  transform: scale(1.2);
+  accent-color: gold;
 }
