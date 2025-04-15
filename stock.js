@@ -10,6 +10,10 @@ function getURLParams() {
 function updateURLFromForm() {
   const form = document.getElementById("filter-form");
   const formData = new FormData(form);
+  const parseOrNull = (val) => {
+    const trimmed = typeof val === "string" ? val.trim() : val;
+    return trimmed === "" || trimmed === null ? null : parseFloat(trimmed);
+  };
   const params = new URLSearchParams();
 
   for (const [key, value] of formData.entries()) {
@@ -75,6 +79,10 @@ function setupToggle() {
 function getFilteredItems() {
   const form = document.getElementById("filter-form");
   const formData = new FormData(form);
+  const parseOrNull = (val) => {
+    const trimmed = typeof val === "string" ? val.trim() : val;
+    return trimmed === "" || trimmed === null ? null : parseFloat(trimmed);
+  };
 
   const normalizeDate = (val) => {
     const parsed = new Date(val);
@@ -92,8 +100,8 @@ function getFilteredItems() {
     costMax: parseFloat(formData.get("costMax")),
     priceMin: parseFloat(formData.get("priceMin")),
     priceMax: parseFloat(formData.get("priceMax")),
-    stockMin: parseFloat(formData.get("stockMin")),
-    stockMax: parseFloat(formData.get("stockMax")),
+    stockMin: parseOrNull(formData.get("stockMin")),
+    stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
     category: formData.get("category"),
@@ -111,8 +119,8 @@ function getFilteredItems() {
            (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
            (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
            (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
-           (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
-           (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true) &&
+           (filters.stockMin !== null ? Number(item.stock || 0) >= filters.stockMin : true) &&
+           (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
            (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
            (!filters.createdTo || item.created_at <= filters.createdTo) &&
            (!filters.category || item.category === filters.category) &&
