@@ -453,7 +453,8 @@ function renderStockItems(data) {
 
   data.forEach((item, index) => {
     const card = document.createElement("div");
-    card.className = "stock-card";
+    const isFavorited = currentUser && userFavorites.has(item.id);
+    card.className = `stock-card${isFavorited ? " favorited" : ""}`;
 
     const photos = item.photos || [];
     const stock = typeof item.stock === "number" ? item.stock : 0;

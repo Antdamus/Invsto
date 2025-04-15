@@ -448,8 +448,12 @@ body.stock-body {
   border: none;
   font-size: 1.6rem;
   cursor: pointer;
-  color: #bbb;
+  color: #bbb; 
   transition: color 0.3s ease;
+}
+
+.stock-card.favorited .favorite-btn {
+  color: gold;
 }
 
 .favorite-btn:hover {
@@ -477,4 +481,24 @@ body.stock-body {
   margin-right: 8px;
   transform: scale(1.2);
   accent-color: gold;
+}
+
+.stock-card.favorited {
+  border: 2px solid gold;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  animation: glowFade 1.5s ease-out;
+}
+
+@keyframes glowFade {
+  0% {
+    box-shadow: 0 0 0px rgba(255, 215, 0, 0.0);
+    transform: scale(1.02);
+  }
+  30% {
+    box-shadow: 0 0 14px rgba(255, 215, 0, 0.75);
+  }
+  100% {
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+    transform: scale(1.0);
+  }
 }
