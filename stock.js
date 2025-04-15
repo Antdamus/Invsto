@@ -95,12 +95,14 @@ async function fetchStockItems() {
 
   allItems = data;
   populateDropdowns(data);
+  populateCategoryDropdown(data);
   setupFilters();
   setupToggle();
   setupClearFilters();
   setupCSVExport();
   setupPDFExport();
   applySortAndRender(data); // renders based on default sort
+
 }
 
 function populateDropdowns(data) {
@@ -115,6 +117,18 @@ function populateDropdowns(data) {
   }
   for (const q of qrTypes) {
     qrTypeSelect.innerHTML += `<option value="${q}">${q}</option>`;
+  }
+}
+
+function populateCategoryDropdown(data) {
+  const select = document.getElementById("bulk-category");
+  const categories = [...new Set(data.map(item => item.category).filter(Boolean))];
+
+  for (const cat of categories) {
+    const option = document.createElement("option");
+    option.value = cat;
+    option.textContent = cat;
+    select.appendChild(option);
   }
 }
 
@@ -495,6 +509,29 @@ document.getElementById("bulk-favorite").addEventListener("click", async () => {
   updateFilterChips(getActiveFilters());
 });
 
+document.getElementById("bulk-category").addEventListener("change", async (e) => {
+  const category = e.target.value;
+  if (!category || selectedItems.size === 0) return;
+
+  const updates = [];
+
+  for (const id of selectedItems) {
+    updates.push(
+      supabase.from("item_types").update({ category }).eq("id", id)
+    );
+  }
+
+  await Promise.all(updates);
+
+  const { data, error } = await supabase.from("item_types").select("*");
+  if (error) return console.error("Error refreshing items:", error);
+
+  allItems = data;
+  populateCategoryDropdown(data); // optional refresh
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+});
 
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
@@ -664,6 +701,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   await fetchStockItems();
+  
   applyFiltersFromURL();
   const filtered = getFilteredItems();
   const filters = getActiveFilters();

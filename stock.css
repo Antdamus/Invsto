@@ -602,4 +602,19 @@ body.stock-body {
   pointer-events: auto;
 }
 
+.bulk-select {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: #fff;
+  color: #333;
+  transition: box-shadow 0.2s ease;
+}
+
+.bulk-select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px #0071e3;
+}
+
 
