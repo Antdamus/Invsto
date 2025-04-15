@@ -3,6 +3,54 @@ let itemsPerPage = 12;
 
 let allItems = [];
 
+function updateFilterChips(filters) {
+  const chipContainer = document.getElementById("filter-chips");
+  if (!chipContainer) return;
+  chipContainer.innerHTML = "";
+
+  const createChip = (label, key) => {
+    const chip = document.createElement("div");
+    chip.className = "filter-chip";
+    chip.innerHTML = `${label} <button data-key="${key}">&times;</button>`;
+    chip.querySelector("button").addEventListener("click", () => {
+      const input = document.querySelector(`[name="${key}"]`);
+      if (input) input.value = "";
+      currentPage = 1;
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
+      updateFilterChips(filtered);
+      updateURLFromForm();
+    });
+    chipContainer.appendChild(chip);
+  };
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === null || value === "") continue;
+    let label = "";
+    switch (key) {
+      case "title": label = `Title: "${value}"`; break;
+      case "description": label = `Description: "${value}"`; break;
+      case "barcode": label = `Barcode: ${value}`; break;
+      case "distributor": label = `Distributor: ${value}`; break;
+      case "weightMin": label = `Weight ≥ ${value}`; break;
+      case "weightMax": label = `Weight ≤ ${value}`; break;
+      case "costMin": label = `Cost ≥ ${value}`; break;
+      case "costMax": label = `Cost ≤ ${value}`; break;
+      case "priceMin": label = `Price ≥ ${value}`; break;
+      case "priceMax": label = `Price ≤ ${value}`; break;
+      case "stockMin": label = `Stock ≥ ${value}`; break;
+      case "stockMax": label = `Stock ≤ ${value}`; break;
+      case "createdFrom": label = `Created ≥ ${value}`; break;
+      case "createdTo": label = `Created ≤ ${value}`; break;
+      case "category": label = `Category: ${value}`; break;
+      case "qr_type": label = `QR: ${value}`; break;
+      default: continue;
+    }
+    createChip(label, key);
+  }
+}
+
+
 function getURLParams() {
   return Object.fromEntries(new URLSearchParams(window.location.search));
 }
@@ -128,6 +176,39 @@ function getFilteredItems() {
   });
 }
 
+function getActiveFilters() {
+  const form = document.getElementById("filter-form");
+  const formData = new FormData(form);
+
+  const normalizeDate = (val) => {
+    const parsed = new Date(val);
+    return isNaN(parsed) ? null : parsed.toISOString().split("T")[0];
+  };
+  const parseOrNull = (val) => {
+    const trimmed = typeof val === "string" ? val.trim() : val;
+    return trimmed === "" || trimmed === null ? null : parseFloat(trimmed);
+  };
+
+  return {
+    title: formData.get("title")?.toLowerCase(),
+    description: formData.get("description")?.toLowerCase(),
+    barcode: formData.get("barcode")?.toLowerCase(),
+    distributor: formData.get("distributor")?.toLowerCase(),
+    weightMin: parseOrNull(formData.get("weightMin")),
+    weightMax: parseOrNull(formData.get("weightMax")),
+    costMin: parseOrNull(formData.get("costMin")),
+    costMax: parseOrNull(formData.get("costMax")),
+    priceMin: parseOrNull(formData.get("priceMin")),
+    priceMax: parseOrNull(formData.get("priceMax")),
+    stockMin: parseOrNull(formData.get("stockMin")),
+    stockMax: parseOrNull(formData.get("stockMax")),
+    createdFrom: normalizeDate(formData.get("createdFrom")),
+    createdTo: normalizeDate(formData.get("createdTo")),
+    category: formData.get("category"),
+    qr_type: formData.get("qr_type")
+  };
+}
+
 function setupFilters() {
   const form = document.getElementById("filter-form");
   const inputs = form.querySelectorAll("input, select");
@@ -136,7 +217,9 @@ function setupFilters() {
     input.addEventListener("input", () => {
       currentPage = 1;
       const filtered = getFilteredItems();
+      const filters = getActiveFilters(); // ✅ NEW
       applySortAndRender(filtered);
+      updateFilterChips(filters); // ✅ CORRECT
       updateURLFromForm();
     });
   });
@@ -144,7 +227,9 @@ function setupFilters() {
   document.getElementById("sort-select").addEventListener("change", () => {
     currentPage = 1;
     const filtered = getFilteredItems();
+    const filters = getActiveFilters(); // ✅ NEW
     applySortAndRender(filtered);
+    updateFilterChips(filters); // ✅ CORRECT
     updateURLFromForm();
   });
 
@@ -152,7 +237,9 @@ function setupFilters() {
     itemsPerPage = parseInt(e.target.value);
     currentPage = 1;
     const filtered = getFilteredItems();
+    const filters = getActiveFilters(); // ✅ NEW
     applySortAndRender(filtered);
+    updateFilterChips(filters); // ✅ CORRECT
     updateURLFromForm();
   });
 }
@@ -165,6 +252,7 @@ function setupClearFilters() {
   clearBtn.addEventListener("click", () => {
     form.reset();
     applySortAndRender(allItems);
+    updateFilterChips({});  // 🧼 Clear chips visually
     updateURLFromForm();
   });
 }
@@ -467,6 +555,8 @@ function applyFiltersFromURL() {
 document.addEventListener("DOMContentLoaded", async () => {
   await fetchStockItems(); // load data, setup, dropdowns, etc.
   applyFiltersFromURL();   // then apply filters from URL
-  const filtered = getFilteredItems(); // now get filtered list
-  applySortAndRender(filtered);        // finally render paginated+sorted
+  const filtered = getFilteredItems();
+  const filters = getActiveFilters(); // ✅ NEW
+  applySortAndRender(filtered);
+  updateFilterChips(filters); // ✅ CORRECT
 });
