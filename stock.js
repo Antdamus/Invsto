@@ -3,6 +3,32 @@ let itemsPerPage = 12;
 
 let allItems = [];
 
+function getURLParams() {
+  return Object.fromEntries(new URLSearchParams(window.location.search));
+}
+
+function updateURLFromForm() {
+  const form = document.getElementById("filter-form");
+  const formData = new FormData(form);
+  const params = new URLSearchParams();
+
+  for (const [key, value] of formData.entries()) {
+    if (value) params.set(key, value);
+  }
+
+  if (document.getElementById("sort-select").value)
+    params.set("sort", document.getElementById("sort-select").value);
+
+  if (document.getElementById("cards-per-page").value)
+    params.set("limit", document.getElementById("cards-per-page").value);
+
+  params.set("page", currentPage);
+
+  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState({}, "", newUrl);
+}
+
+
 async function fetchStockItems() {
   const { data, error } = await supabase.from("item_types").select("*");
 
@@ -100,14 +126,18 @@ function setupFilters() {
 
   inputs.forEach(input => {
     input.addEventListener("input", () => {
+      currentPage = 1;
       const filtered = getFilteredItems();
       applySortAndRender(filtered);
+      updateURLFromForm();
     });
   });
 
   document.getElementById("sort-select").addEventListener("change", () => {
+    currentPage = 1;
     const filtered = getFilteredItems();
     applySortAndRender(filtered);
+    updateURLFromForm();
   });
 
   document.getElementById("cards-per-page").addEventListener("change", (e) => {
@@ -115,9 +145,10 @@ function setupFilters() {
     currentPage = 1;
     const filtered = getFilteredItems();
     applySortAndRender(filtered);
+    updateURLFromForm();
   });
-  
 }
+
 
 function setupClearFilters() {
   const form = document.getElementById("filter-form");
@@ -126,6 +157,7 @@ function setupClearFilters() {
   clearBtn.addEventListener("click", () => {
     form.reset();
     applySortAndRender(allItems);
+    updateURLFromForm();
   });
 }
 
@@ -364,6 +396,7 @@ function renderPaginationControls(totalPages) {
       currentPage = page;
       const filtered = getFilteredItems();
       applySortAndRender(filtered);
+      updateURLFromForm(); // ✅ sync new page number to URL
     });
     container.appendChild(btn);
   };
@@ -404,4 +437,28 @@ function prevSlide(index) {
   images[prevIndex].classList.add("active");
 }
 
-fetchStockItems();
+
+function applyFiltersFromURL() {
+  const params = getURLParams();
+  const form = document.getElementById("filter-form");
+
+  for (const [key, value] of Object.entries(params)) {
+    const input = form.querySelector(`[name="${key}"]`);
+    if (input) input.value = value;
+  }
+
+  if (params.limit) {
+    itemsPerPage = parseInt(params.limit);
+    document.getElementById("cards-per-page").value = params.limit;
+  }
+
+  if (params.page) currentPage = parseInt(params.page);
+  if (params.sort) document.getElementById("sort-select").value = params.sort;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  await fetchStockItems(); // load data, setup, dropdowns, etc.
+  applyFiltersFromURL();   // then apply filters from URL
+  const filtered = getFilteredItems(); // now get filtered list
+  applySortAndRender(filtered);        // finally render paginated+sorted
+});
