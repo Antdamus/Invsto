@@ -481,6 +481,12 @@ function updateBulkToolbar() {
   toolbar.classList.toggle("hidden", selectedCount === 0);
 }
 
+function clearSelectionAndRefresh() {
+  selectedItems.clear();
+  updateBulkToolbar();
+  renderStockItems(getFilteredItems());
+}
+
 document.getElementById("bulk-favorite").addEventListener("click", async () => {
   if (!currentUser || selectedItems.size === 0) return;
 
@@ -504,9 +510,9 @@ document.getElementById("bulk-favorite").addEventListener("click", async () => {
   await Promise.all(updates);
 
   // Re-render view
-  const filtered = getFilteredItems();
-  applySortAndRender(filtered);
+  clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
+
 });
 
 document.getElementById("bulk-category").addEventListener("change", async (e) => {
@@ -527,9 +533,8 @@ document.getElementById("bulk-category").addEventListener("change", async (e) =>
   if (error) return console.error("Error refreshing items:", error);
 
   allItems = data;
-  populateCategoryDropdown(data); // optional refresh
-  const filtered = getFilteredItems();
-  applySortAndRender(filtered);
+  populateCategoryDropdown(data);
+  clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
 });
 
@@ -710,9 +715,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ✅ Bulk Toolbar Listeners
   document.getElementById("bulk-clear").addEventListener("click", () => {
-    selectedItems.clear();
-    updateBulkToolbar();
-    renderStockItems(getFilteredItems());
+    clearSelectionAndRefresh();
   });
 
   document.getElementById("bulk-delete").addEventListener("click", async () => {
@@ -723,12 +726,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       .delete()
       .in("id", idsToDelete);
     if (!error) {
-      selectedItems.clear();
-      updateBulkToolbar();
       await fetchStockItems();
-      const filtered = getFilteredItems();
-      applySortAndRender(filtered);
+      clearSelectionAndRefresh();
       updateFilterChips(getActiveFilters());
+
     }
   });
 
