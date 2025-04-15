@@ -3,22 +3,73 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>OG Jewelry Stock</title>
-  <link rel="stylesheet" href="stock.css" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
-</head>
-<body>
-  <header class="stock-header">
-    <h1>📦 Current Inventory</h1>
-    <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
-  </header>
-
-  <main class="stock-main">
-    <div id="stock-container" class="stock-grid"></div>
-  </main>
-
+  <title>Stock Overview - OG Jewelry</title>
+  <link rel="stylesheet" href="stock.css">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+</head>
+<body class="stock-body">
+  <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+  <h1 class="stock-heading">Inventory Stock</h1>
+
+  <button id="toggle-filters">Toggle Filters</button>
+
+  <form id="filter-form" class="filter-container hidden">
+    <h3>Filter Options</h3>
+    <div class="filter-row">
+      <div>
+        <label>Category</label>
+        <select id="filter-category">
+          <option value="">Any</option>
+          <option value="diamonds">Diamonds</option>
+          <option value="pendants">Pendants</option>
+          <option value="rings">Rings</option>
+        </select>
+      </div>
+      <div>
+        <label>QR Type</label>
+        <select id="filter-qr-type">
+          <option value="">Any</option>
+          <option value="website">Website</option>
+          <option value="CGL ID">CGL Certificate</option>
+        </select>
+      </div>
+      <div>
+        <label>Min Price</label>
+        <input type="number" step="0.01" id="filter-price-min">
+      </div>
+      <div>
+        <label>Max Price</label>
+        <input type="number" step="0.01" id="filter-price-max">
+      </div>
+      <div>
+        <label>Min Weight</label>
+        <input type="number" step="0.01" id="filter-weight-min">
+      </div>
+      <div>
+        <label>Max Weight</label>
+        <input type="number" step="0.01" id="filter-weight-max">
+      </div>
+      <div>
+        <label>Distributor</label>
+        <input type="text" id="filter-distributor">
+      </div>
+      <div>
+        <label>Date Start</label>
+        <input type="date" id="filter-date-start">
+      </div>
+      <div>
+        <label>Date End</label>
+        <input type="date" id="filter-date-end">
+      </div>
+    </div>
+    <button type="submit">Apply Filters</button>
+  </form>
+
+  <div id="stock-container" class="stock-grid"></div>
+
   <script src="initSupabase.js"></script>
-  <script src="stock.js"></script>
+  <!-- Your main script that uses Supabase -->
+  <script src="stock.js" type="module"></script>
 </body>
 </html>
