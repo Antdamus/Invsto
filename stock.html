@@ -3,73 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Stock Overview - OG Jewelry</title>
-  <link rel="stylesheet" href="stock.css">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <title>OG Jewelry Stock</title>
+  <link rel="stylesheet" href="stock.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
 </head>
 <body class="stock-body">
-  <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
-  <h1 class="stock-heading">Inventory Stock</h1>
+  <header class="stock-header">
+    <h1 class="stock-heading">📦 Current Inventory</h1>
+    <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+  </header>
 
-  <button id="toggle-filters">Toggle Filters</button>
+  <!-- 🔍 Filter Form -->
+  <section class="stock-filters">
+    <form id="filter-form">
+      <input type="text" name="title" placeholder="Search title..." />
+      <input type="text" name="description" placeholder="Search description..." />
+      <input type="number" name="weightMin" placeholder="Min weight" />
+      <input type="number" name="weightMax" placeholder="Max weight" />
+      <input type="number" name="costMin" placeholder="Min cost" />
+      <input type="number" name="costMax" placeholder="Max cost" />
+      <input type="number" name="priceMin" placeholder="Min sale price" />
+      <input type="number" name="priceMax" placeholder="Max sale price" />
+      <input type="text" name="distributor" placeholder="Distributor name..." />
+      <select name="category">
+        <option value="">All Categories</option>
+      </select>
+      <select name="qr_type">
+        <option value="">All QR Types</option>
+      </select>
+      <input type="number" name="stockMin" placeholder="Min stock" />
+      <input type="number" name="stockMax" placeholder="Max stock" />
+      <button type="submit">Apply Filters</button>
+    </form>
+  </section>
 
-  <form id="filter-form" class="filter-container hidden">
-    <h3>Filter Options</h3>
-    <div class="filter-row">
-      <div>
-        <label>Category</label>
-        <select id="filter-category">
-          <option value="">Any</option>
-          <option value="diamonds">Diamonds</option>
-          <option value="pendants">Pendants</option>
-          <option value="rings">Rings</option>
-        </select>
-      </div>
-      <div>
-        <label>QR Type</label>
-        <select id="filter-qr-type">
-          <option value="">Any</option>
-          <option value="website">Website</option>
-          <option value="CGL ID">CGL Certificate</option>
-        </select>
-      </div>
-      <div>
-        <label>Min Price</label>
-        <input type="number" step="0.01" id="filter-price-min">
-      </div>
-      <div>
-        <label>Max Price</label>
-        <input type="number" step="0.01" id="filter-price-max">
-      </div>
-      <div>
-        <label>Min Weight</label>
-        <input type="number" step="0.01" id="filter-weight-min">
-      </div>
-      <div>
-        <label>Max Weight</label>
-        <input type="number" step="0.01" id="filter-weight-max">
-      </div>
-      <div>
-        <label>Distributor</label>
-        <input type="text" id="filter-distributor">
-      </div>
-      <div>
-        <label>Date Start</label>
-        <input type="date" id="filter-date-start">
-      </div>
-      <div>
-        <label>Date End</label>
-        <input type="date" id="filter-date-end">
-      </div>
-    </div>
-    <button type="submit">Apply Filters</button>
-  </form>
+  <!-- 📦 Inventory Grid -->
+  <main class="stock-main">
+    <div id="stock-container" class="stock-grid"></div>
+  </main>
 
-  <div id="stock-container" class="stock-grid"></div>
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
-  <!-- Your main script that uses Supabase -->
-  <script src="stock.js" type="module"></script>
+  <script src="stock.js"></script>
 </body>
 </html>

@@ -1,164 +1,216 @@
-/* === Stock Page CSS === */
 body.stock-body {
   font-family: 'DM Serif Display', serif;
-  background-color: #f4f4f6;
-  color: #1c1c1e;
-  padding: 2rem;
+  background-color: #f5f5f7;
+  color: #1d1d1f;
   margin: 0;
+  padding: 20px;
 }
 
 .back-button {
   display: inline-block;
-  margin-bottom: 1.5rem;
-  padding: 0.5rem 1rem;
-  background-color: #dcdcdc;
-  color: #000;
-  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 1rem;
   text-decoration: none;
-  font-weight: bold;
+  color: #0071e3;
+  padding: 10px 16px;
+  background: #eaeaea;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.back-button:hover {
+  background-color: #d0d0d0;
 }
 
 .stock-heading {
   font-size: 2.5rem;
+  margin-bottom: 1.5rem;
   text-align: center;
-  margin-bottom: 2rem;
-}
-
-#toggle-filters {
-  background-color: #e6e6ea;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  margin-bottom: 1rem;
-}
-
-.filter-container {
-  background-color: #ffffff;
-  border-radius: 12px;
-  padding: 1rem 2rem;
-  margin-bottom: 2rem;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-}
-
-.filter-container.hidden {
-  display: none;
-}
-
-.filter-container h3 {
-  margin-top: 0;
-  font-size: 1.2rem;
-}
-
-.filter-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.2rem;
-}
-
-.filter-row > div {
-  flex: 1 1 160px;
 }
 
 .stock-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 24px;
+  padding-bottom: 40px;
 }
 
 .stock-card {
-  background: white;
-  border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.05);
+  background-color: #fff;
+  border-radius: 20px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+  padding: 20px;
   display: flex;
   flex-direction: column;
+  transition: all 0.3s ease;
+}
+
+.stock-card:hover {
+  transform: scale(1.01);
+}
+
+.stock-image-container {
   position: relative;
+  margin-bottom: 12px;
 }
 
-.stock-card h3 {
-  margin-top: 0;
-  margin-bottom: 0.8rem;
-}
-
-.stock-carousel {
-  position: relative;
-  overflow: hidden;
-  border-radius: 10px;
-  margin-bottom: 1rem;
-  height: 220px;
-}
-
-.stock-carousel img {
+.stock-photo-preview {
   width: 100%;
   height: 220px;
   object-fit: cover;
-  border-radius: 10px;
-  display: none;
+  border-radius: 14px;
+  cursor: pointer;
 }
 
-.stock-carousel img.active {
+.stock-content p {
+  font-size: 0.95rem;
+  margin: 0.2rem 0;
+  line-height: 1.4;
+}
+
+.stock-count.stock-zero {
+  color: #e63946;
+  font-weight: bold;
+}
+
+/* === Modal === */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 99;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.8);
+  justify-content: center;
+  align-items: center;
+}
+
+.modal img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 14px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+}
+
+.close-modal {
+  position: absolute;
+  top: 30px;
+  right: 40px;
+  font-size: 2rem;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.modal.show {
+  display: flex;
+}
+
+.carousel {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.carousel-track {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  transition: transform 0.3s ease;
+}
+
+.carousel-photo {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: none;
+  border-radius: 14px;
+}
+
+.carousel-photo.active {
   display: block;
 }
 
-.carousel-buttons {
+.carousel-btn {
   position: absolute;
   top: 50%;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: space-between;
   transform: translateY(-50%);
-  padding: 0 1rem;
-}
-
-.carousel-buttons button {
-  background-color: rgba(0,0,0,0.4);
+  font-size: 2rem;
+  color: #333;
+  background-color: rgba(255, 255, 255, 0.8);
   border: none;
-  color: white;
-  font-size: 1.5rem;
-  cursor: pointer;
-  border-radius: 50%;
-  width: 35px;
-  height: 35px;
-}
-
-.stock-detail {
-  font-size: 0.95rem;
-  margin: 0.3rem 0;
-}
-
-.stock-detail strong {
-  font-weight: 600;
-}
-
-.stock-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 1rem;
-}
-
-.stock-count {
-  font-weight: bold;
-  font-size: 1.1rem;
-}
-
-.stock-count.zero {
-  color: red;
-}
-
-.download-button {
-  background-color: #007aff;
-  color: white;
-  padding: 6px 12px;
-  border: none;
+  padding: 4px 10px;
   border-radius: 8px;
-  text-decoration: none;
-  font-size: 0.9rem;
+  cursor: pointer;
+  z-index: 2;
 }
 
-.download-button:hover {
-  background-color: #005fcc;
+.carousel-btn.left {
+  left: 10px;
+}
+
+.carousel-btn.right {
+  right: 10px;
+}
+
+/* === Filter Form Styling === */
+.stock-filters {
+  background-color: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+  padding: 24px;
+  margin: 0 auto 40px auto;
+  max-width: 1200px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.stock-filters input,
+.stock-filters select {
+  font-family: 'DM Serif Display', serif;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background-color: #fafafa;
+  font-size: 1rem;
+  width: 180px;
+  transition: all 0.3s ease;
+}
+
+.stock-filters input:focus,
+.stock-filters select:focus {
+  border-color: #0071e3;
+  background-color: #fff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+}
+
+.stock-filters button {
+  padding: 12px 20px;
+  border: none;
+  background-color: #0071e3;
+  color: white;
+  border-radius: 14px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.stock-filters button:hover {
+  background-color: #005bb5;
+}
+
+@media screen and (max-width: 768px) {
+  .stock-filters input,
+  .stock-filters select {
+    width: 100%;
+  }
 }
