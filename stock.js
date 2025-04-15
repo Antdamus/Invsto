@@ -3,6 +3,7 @@ let itemsPerPage = 12;
 let allItems = [];
 let userFavorites = new Set();
 let currentUser = null;
+let selectedItems = new Set();
 let showOnlyFavorites = false;
 
 
@@ -447,6 +448,26 @@ async function toggleFavorite(itemId) {
   }
 }
 
+function toggleSelectItem(itemId, checked) {
+  if (checked) {
+    selectedItems.add(itemId);
+  } else {
+    selectedItems.delete(itemId);
+  }
+  updateBulkToolbar();
+  renderStockItems(getFilteredItems());
+}
+
+function updateBulkToolbar() {
+  const toolbar = document.getElementById("bulk-toolbar");
+  const count = document.getElementById("selected-count");
+  const selectedCount = selectedItems.size;
+
+  count.textContent = `${selectedCount} selected`;
+  toolbar.classList.toggle("hidden", selectedCount === 0);
+}
+
+
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
   grid.innerHTML = "";
@@ -454,7 +475,12 @@ function renderStockItems(data) {
   data.forEach((item, index) => {
     const card = document.createElement("div");
     const isFavorited = currentUser && userFavorites.has(item.id);
-    card.className = `stock-card${isFavorited ? " favorited" : ""}`;
+    const isSelected = selectedItems.has(item.id);
+    card.className = "stock-card";
+    if (isFavorited) card.classList.add("favorited");
+    if (isSelected) card.classList.add("selected");
+    card.style.position = "relative";
+
 
     const photos = item.photos || [];
     const stock = typeof item.stock === "number" ? item.stock : 0;
@@ -472,9 +498,22 @@ function renderStockItems(data) {
       `
       : `<div class="no-photo">No Photos</div>`;
 
+    const checkboxHTML = `
+      <input type="checkbox" class="select-checkbox" ${isSelected ? "checked" : ""} onchange="toggleSelectItem('${item.id}', this.checked)">
+    `;
+
+    const favoriteBtn = currentUser
+  ? `<button class="favorite-btn" data-id="${item.id}" onclick="toggleFavorite('${item.id}')">${userFavorites.has(item.id) ? '★' : '☆'}</button>`
+  : '';
+  
+      
     card.innerHTML = `
-      <div class="stock-image-container">${photoCarousel}</div>
-      <div class="stock-content">
+        <div class="card-overlays">
+          ${checkboxHTML}
+          ${favoriteBtn}
+        </div>
+        <div class="stock-image-container">${photoCarousel}</div>
+        <div class="stock-content">
         <h2>${item.title}</h2>
         <p>${item.description}</p>
         <p><strong>Weight:</strong> ${item.weight}</p>
@@ -489,11 +528,7 @@ function renderStockItems(data) {
         <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
         <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
 
-        ${currentUser ? `
-          <button class="favorite-btn" onclick="toggleFavorite('${item.id}')">
-            ${userFavorites.has(item.id) ? '★' : '☆'}
-          </button>` : ''
-        }
+       
       </div>
     `;
 
@@ -589,22 +624,56 @@ function applyFiltersFromURL() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-const { data: user } = await supabase.auth.getUser();
-currentUser = user?.user || null;
-
-if (currentUser) {
-  const { data: favs } = await supabase.from("favorites")
-    .select("item_id")
-    .eq("user_id", currentUser.id);
-  userFavorites = new Set(favs.map(f => f.item_id));
-}
-
-  await fetchStockItems(); // load data, setup, dropdowns, etc.
-  applyFiltersFromURL();   // then apply filters from URL
+  currentUser = (await supabase.auth.getUser()).data.user;
+  if (currentUser) {
+    const { data: favs } = await supabase
+      .from("favorites")
+      .select("item_id")
+      .eq("user_id", currentUser.id);
+    userFavorites = new Set(favs.map(f => f.item_id));
+  }
+  
+  await fetchStockItems();
+  applyFiltersFromURL();
   const filtered = getFilteredItems();
-  const filters = getActiveFilters(); // ✅ NEW
+  const filters = getActiveFilters();
   applySortAndRender(filtered);
-  updateFilterChips(filters); // ✅ CORRECT
+  updateFilterChips(filters);
+
+  // ✅ Bulk Toolbar Listeners
+  document.getElementById("bulk-clear").addEventListener("click", () => {
+    selectedItems.clear();
+    updateBulkToolbar();
+    renderStockItems(getFilteredItems());
+  });
+
+  document.getElementById("bulk-delete").addEventListener("click", async () => {
+    if (selectedItems.size === 0) return;
+    const idsToDelete = Array.from(selectedItems);
+    const { error } = await supabase
+      .from("item_types")
+      .delete()
+      .in("id", idsToDelete);
+    if (!error) {
+      selectedItems.clear();
+      updateBulkToolbar();
+      await fetchStockItems();
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
+      updateFilterChips(getActiveFilters());
+    }
+  });
+
+  document.getElementById("bulk-export").addEventListener("click", () => {
+    const exportCards = Array.from(document.querySelectorAll(".stock-card"))
+      .filter(card => {
+        const id = card.querySelector(".select-checkbox")?.getAttribute("onchange")?.match(/'(.*?)'/)?.[1];
+        return selectedItems.has(id);
+      });
+    if (exportCards.length === 0) return;
+    exportCardsToCSV(exportCards);
+  });
 });
+
 
 
