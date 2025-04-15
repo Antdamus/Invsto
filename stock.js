@@ -21,7 +21,7 @@ function updateFilterChips(filters) {
       currentPage = 1;
       const filtered = getFilteredItems();
       applySortAndRender(filtered);
-      updateFilterChips(filtered);
+      updateFilterChips(getActiveFilters());
       updateURLFromForm();
     });
     chipContainer.appendChild(chip);
