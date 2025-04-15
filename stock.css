@@ -194,7 +194,7 @@ body.stock-body {
 
 .stock-filters.show {
   padding: 24px;
-  max-height: 1000px;
+  max-height: 1200px;
   opacity: 1;
   pointer-events: all;
   background-color: #ffffff;
@@ -229,9 +229,48 @@ body.stock-body {
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+.filter-buttons {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.filter-buttons button {
+  font-family: 'DM Serif Display', serif;
+  padding: 10px 18px;
+  border-radius: 14px;
+  font-size: 1rem;
+  cursor: pointer;
+  border: none;
+  transition: all 0.3s ease;
+}
+
+#clear-filters {
+  background-color: #e5e5ea;
+  color: #1d1d1f;
+}
+
+#clear-filters:hover {
+  background-color: #d4d4d8;
+}
+
+#export-csv {
+  background-color: #0071e3;
+  color: white;
+}
+
+#export-csv:hover {
+  background-color: #005bb5;
+}
+
 @media screen and (max-width: 768px) {
   .stock-filters input,
   .stock-filters select {
     width: 100%;
+  }
+  .filter-buttons {
+    flex-direction: column;
   }
 }

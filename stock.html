@@ -18,26 +18,38 @@
     <button id="toggle-filters" class="filter-toggle-btn">🔍 Show Filters</button>
   </div>
 
-  <!-- 🔍 Collapsible Filter Form -->
+  <!-- 🔍 Filter Form Section -->
   <section class="stock-filters collapse" id="filter-section">
     <form id="filter-form">
+      <!-- General -->
       <input type="text" name="title" placeholder="Search title..." />
       <input type="text" name="description" placeholder="Search description..." />
+      <input type="text" name="barcode" placeholder="Search barcode..." />
+      <input type="text" name="distributor" placeholder="Distributor name..." />
+
+      <!-- Numeric -->
       <input type="number" name="weightMin" placeholder="Min weight" />
       <input type="number" name="weightMax" placeholder="Max weight" />
       <input type="number" name="costMin" placeholder="Min cost" />
       <input type="number" name="costMax" placeholder="Max cost" />
       <input type="number" name="priceMin" placeholder="Min sale price" />
       <input type="number" name="priceMax" placeholder="Max sale price" />
-      <input type="text" name="distributor" placeholder="Distributor name..." />
+      <input type="number" name="stockMin" placeholder="Min stock" />
+      <input type="number" name="stockMax" placeholder="Max stock" />
+
+      <!-- Dropdowns -->
       <select name="category">
         <option value="">All Categories</option>
       </select>
       <select name="qr_type">
         <option value="">All QR Types</option>
       </select>
-      <input type="number" name="stockMin" placeholder="Min stock" />
-      <input type="number" name="stockMax" placeholder="Max stock" />
+
+      <!-- Controls -->
+      <div class="filter-buttons">
+        <button type="button" id="clear-filters">🧼 Clear Filters</button>
+        <button type="button" id="export-csv">📤 Export CSV</button>
+      </div>
     </form>
   </section>
 

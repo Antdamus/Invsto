@@ -1,3 +1,5 @@
+let allItems = [];
+
 async function fetchStockItems() {
   const { data, error } = await supabase.from("item_types").select("*");
 
@@ -6,10 +8,13 @@ async function fetchStockItems() {
     return;
   }
 
+  allItems = data;
   populateDropdowns(data);
   renderStockItems(data);
-  setupFilters(data);
+  setupFilters();
   setupToggle();
+  setupClearFilters();
+  setupCSVExport();
 }
 
 function setupToggle() {
@@ -37,7 +42,7 @@ function populateDropdowns(data) {
   }
 }
 
-function setupFilters(originalData) {
+function setupFilters() {
   const form = document.getElementById("filter-form");
   const inputs = form.querySelectorAll("input, select");
 
@@ -48,37 +53,100 @@ function setupFilters(originalData) {
       const filters = {
         title: formData.get("title")?.toLowerCase(),
         description: formData.get("description")?.toLowerCase(),
+        barcode: formData.get("barcode")?.toLowerCase(),
+        distributor: formData.get("distributor")?.toLowerCase(),
         weightMin: parseFloat(formData.get("weightMin")),
         weightMax: parseFloat(formData.get("weightMax")),
         costMin: parseFloat(formData.get("costMin")),
         costMax: parseFloat(formData.get("costMax")),
         priceMin: parseFloat(formData.get("priceMin")),
         priceMax: parseFloat(formData.get("priceMax")),
-        distributor: formData.get("distributor")?.toLowerCase(),
-        category: formData.get("category"),
-        qr_type: formData.get("qr_type"),
         stockMin: parseFloat(formData.get("stockMin")),
         stockMax: parseFloat(formData.get("stockMax")),
+        category: formData.get("category"),
+        qr_type: formData.get("qr_type"),
       };
 
-      const filtered = originalData.filter(item => {
+      const filtered = allItems.filter(item => {
         return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
                (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
+               (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
+               (!filters.distributor || (item.distributor_name?.toLowerCase().includes(filters.distributor))) &&
                (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
                (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
                (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
                (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
                (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
                (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
-               (!filters.distributor || (item.distributor_name?.toLowerCase().includes(filters.distributor))) &&
-               (!filters.category || item.category === filters.category) &&
-               (!filters.qr_type || item.qr_type === filters.qr_type) &&
                (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
-               (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true);
+               (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true) &&
+               (!filters.category || item.category === filters.category) &&
+               (!filters.qr_type || item.qr_type === filters.qr_type);
       });
 
       renderStockItems(filtered);
     });
+  });
+}
+
+function setupClearFilters() {
+  const form = document.getElementById("filter-form");
+  const clearBtn = document.getElementById("clear-filters");
+
+  clearBtn.addEventListener("click", () => {
+    form.reset();
+    renderStockItems(allItems);
+  });
+}
+
+function setupCSVExport() {
+  const exportBtn = document.getElementById("export-csv");
+  exportBtn.addEventListener("click", () => {
+    const headers = [
+      "Title", "Description", "Weight", "Cost", "Sale Price", "Category",
+      "Distributor Name", "Distributor Phone", "Notes", "Barcode", "Stock", "Last Updated"
+    ];
+
+    const rows = [headers];
+
+    const visibleCards = document.querySelectorAll(".stock-card");
+
+    visibleCards.forEach(card => {
+      const content = card.querySelector(".stock-content");
+      const getField = (label) => {
+        const p = [...content.querySelectorAll("p")].find(el => el.innerText.startsWith(label));
+        return p ? p.innerText.replace(`${label}:`, '').trim() : '';
+      };
+
+      const title = content.querySelector("h2")?.innerText || "";
+      const description = content.querySelector("p:nth-of-type(1)")?.innerText || "";
+
+      const weight = getField("Weight");
+      const cost = getField("Cost");
+      const salePrice = getField("Sale Price");
+      const category = getField("Category");
+      const distName = getField("Distributor").split('\n')[0];
+      const distPhone = getField("Distributor").split('\n')[1] || "";
+      const notes = getField("Notes");
+      const barcode = getField("Barcode");
+      const stock = getField("In Stock")?.replace("In Stock: ", "").trim();
+      const updated = getField("Last Updated");
+
+      rows.push([
+        title, description, weight, cost, salePrice, category,
+        distName, distPhone, notes, barcode, stock, updated
+      ]);
+    });
+
+    const csvContent = rows.map(r => r.map(cell => `"${cell}"`).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "filtered_inventory.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   });
 }
 
@@ -117,10 +185,11 @@ function renderStockItems(data) {
         <p><strong>Category:</strong> ${item.category}</p>
         <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
         <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
-        <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
         <p><strong>QR Type:</strong> ${item.qr_type}</p>
-        <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+        <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
         <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
+        <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
+        <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
       </div>
     `;
 
