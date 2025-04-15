@@ -137,4 +137,11 @@ body.stock-body {
   .modal.show {
     display: flex;
   }
+
+  .stock-count.stock-zero {
+    color: #e63946;
+    font-weight: bold;
+  }
+  
+  
   
