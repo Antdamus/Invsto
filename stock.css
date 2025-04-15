@@ -159,14 +159,50 @@ body.stock-body {
   right: 10px;
 }
 
-/* === Filter Form Styling === */
+/* === Filter Toggle === */
+.filter-toggle-container {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.filter-toggle-btn {
+  font-size: 1rem;
+  padding: 10px 20px;
+  background-color: #0071e3;
+  color: white;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.filter-toggle-btn:hover {
+  background-color: #005bb5;
+}
+
+/* === Collapsible Filter Section === */
 .stock-filters {
+  max-width: 1200px;
+  margin: 0 auto 40px auto;
+  padding: 0;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: all 0.5s ease;
+  pointer-events: none;
+}
+
+.stock-filters.show {
+  padding: 24px;
+  max-height: 1000px;
+  opacity: 1;
+  pointer-events: all;
   background-color: #ffffff;
   border-radius: 20px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
-  padding: 24px;
-  margin: 0 auto 40px auto;
-  max-width: 1200px;
+}
+
+.stock-filters form {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -191,21 +227,6 @@ body.stock-body {
   background-color: #fff;
   outline: none;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
-}
-
-.stock-filters button {
-  padding: 12px 20px;
-  border: none;
-  background-color: #0071e3;
-  color: white;
-  border-radius: 14px;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: background 0.3s ease;
-}
-
-.stock-filters button:hover {
-  background-color: #005bb5;
 }
 
 @media screen and (max-width: 768px) {

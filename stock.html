@@ -13,8 +13,13 @@
     <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
   </header>
 
-  <!-- 🔍 Filter Form -->
-  <section class="stock-filters">
+  <!-- ✨ Filter Toggle Button -->
+  <div class="filter-toggle-container">
+    <button id="toggle-filters" class="filter-toggle-btn">🔍 Show Filters</button>
+  </div>
+
+  <!-- 🔍 Collapsible Filter Form -->
+  <section class="stock-filters collapse" id="filter-section">
     <form id="filter-form">
       <input type="text" name="title" placeholder="Search title..." />
       <input type="text" name="description" placeholder="Search description..." />
@@ -33,7 +38,6 @@
       </select>
       <input type="number" name="stockMin" placeholder="Min stock" />
       <input type="number" name="stockMax" placeholder="Max stock" />
-      <button type="submit">Apply Filters</button>
     </form>
   </section>
 

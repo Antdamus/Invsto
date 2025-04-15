@@ -9,6 +9,17 @@ async function fetchStockItems() {
   populateDropdowns(data);
   renderStockItems(data);
   setupFilters(data);
+  setupToggle();
+}
+
+function setupToggle() {
+  const toggleBtn = document.getElementById("toggle-filters");
+  const filterSection = document.getElementById("filter-section");
+
+  toggleBtn.addEventListener("click", () => {
+    filterSection.classList.toggle("show");
+    toggleBtn.textContent = filterSection.classList.contains("show") ? "❌ Hide Filters" : "🔍 Show Filters";
+  });
 }
 
 function populateDropdowns(data) {
@@ -28,44 +39,46 @@ function populateDropdowns(data) {
 
 function setupFilters(originalData) {
   const form = document.getElementById("filter-form");
+  const inputs = form.querySelectorAll("input, select");
 
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const formData = new FormData(form);
+  inputs.forEach(input => {
+    input.addEventListener("input", () => {
+      const formData = new FormData(form);
 
-    const filters = {
-      title: formData.get("title")?.toLowerCase(),
-      description: formData.get("description")?.toLowerCase(),
-      weightMin: parseFloat(formData.get("weightMin")),
-      weightMax: parseFloat(formData.get("weightMax")),
-      costMin: parseFloat(formData.get("costMin")),
-      costMax: parseFloat(formData.get("costMax")),
-      priceMin: parseFloat(formData.get("priceMin")),
-      priceMax: parseFloat(formData.get("priceMax")),
-      distributor: formData.get("distributor")?.toLowerCase(),
-      category: formData.get("category"),
-      qr_type: formData.get("qr_type"),
-      stockMin: parseFloat(formData.get("stockMin")),
-      stockMax: parseFloat(formData.get("stockMax")),
-    };
+      const filters = {
+        title: formData.get("title")?.toLowerCase(),
+        description: formData.get("description")?.toLowerCase(),
+        weightMin: parseFloat(formData.get("weightMin")),
+        weightMax: parseFloat(formData.get("weightMax")),
+        costMin: parseFloat(formData.get("costMin")),
+        costMax: parseFloat(formData.get("costMax")),
+        priceMin: parseFloat(formData.get("priceMin")),
+        priceMax: parseFloat(formData.get("priceMax")),
+        distributor: formData.get("distributor")?.toLowerCase(),
+        category: formData.get("category"),
+        qr_type: formData.get("qr_type"),
+        stockMin: parseFloat(formData.get("stockMin")),
+        stockMax: parseFloat(formData.get("stockMax")),
+      };
 
-    const filtered = originalData.filter(item => {
-      return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
-             (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
-             (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
-             (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
-             (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
-             (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
-             (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
-             (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
-             (!filters.distributor || (item.distributor_name?.toLowerCase().includes(filters.distributor))) &&
-             (!filters.category || item.category === filters.category) &&
-             (!filters.qr_type || item.qr_type === filters.qr_type) &&
-             (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
-             (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true);
+      const filtered = originalData.filter(item => {
+        return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
+               (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
+               (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
+               (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
+               (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
+               (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
+               (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
+               (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
+               (!filters.distributor || (item.distributor_name?.toLowerCase().includes(filters.distributor))) &&
+               (!filters.category || item.category === filters.category) &&
+               (!filters.qr_type || item.qr_type === filters.qr_type) &&
+               (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
+               (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true);
+      });
+
+      renderStockItems(filtered);
     });
-
-    renderStockItems(filtered);
   });
 }
 
