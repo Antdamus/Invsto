@@ -1,3 +1,6 @@
+let currentPage = 1;
+let itemsPerPage = 12;
+
 let allItems = [];
 
 async function fetchStockItems() {
@@ -106,6 +109,14 @@ function setupFilters() {
     const filtered = getFilteredItems();
     applySortAndRender(filtered);
   });
+
+  document.getElementById("cards-per-page").addEventListener("change", (e) => {
+    itemsPerPage = parseInt(e.target.value);
+    currentPage = 1;
+    const filtered = getFilteredItems();
+    applySortAndRender(filtered);
+  });
+  
 }
 
 function setupClearFilters() {
@@ -229,10 +240,7 @@ function setupPDFExport() {
 
 function applySortAndRender(data) {
   const sortValue = document.getElementById("sort-select").value;
-  if (!sortValue) {
-    renderStockItems(data);
-    return;
-  }
+  if (!sortValue) return paginateAndRender(data);
 
   const [field, direction] = sortValue.split("-");
   const isAsc = direction === "asc";
@@ -278,8 +286,9 @@ function applySortAndRender(data) {
     return isAsc ? valA - valB : valB - valA;
   });
 
-  renderStockItems(sorted);
+  paginateAndRender(sorted);
 }
+
 
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
@@ -327,6 +336,51 @@ function renderStockItems(data) {
     grid.appendChild(card);
   });
 }
+
+function paginateAndRender(data) {
+  const totalItems = data.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  if (currentPage > totalPages) currentPage = 1;
+
+  const start = (currentPage - 1) * itemsPerPage;
+  const end = start + itemsPerPage;
+  const paginatedItems = data.slice(start, end);
+
+  renderStockItems(paginatedItems);
+  renderPaginationControls(totalPages);
+}
+
+function renderPaginationControls(totalPages) {
+  const container = document.getElementById("pagination-buttons");
+  container.innerHTML = "";
+
+  if (totalPages <= 1) return;
+
+  const addBtn = (label, page, isActive = false) => {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    if (isActive) btn.classList.add("active");
+    btn.addEventListener("click", () => {
+      currentPage = page;
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
+    });
+    container.appendChild(btn);
+  };
+
+  if (currentPage > 1) {
+    addBtn("« Prev", currentPage - 1);
+  }
+
+  for (let i = 1; i <= totalPages; i++) {
+    addBtn(i, i, i === currentPage);
+  }
+
+  if (currentPage < totalPages) {
+    addBtn("Next »", currentPage + 1);
+  }
+}
+
 
 function nextSlide(index) {
   const carousel = document.getElementById(`carousel-${index}`);

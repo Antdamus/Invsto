@@ -56,7 +56,7 @@
       </div>
     </form>
   </section>
-  
+
   <div class="sort-controls">
     <select id="sort-select">
       <option value="">Sort By...</option>
@@ -75,6 +75,23 @@
     </select>
   </div>
   
+  <!-- 📊 Pagination Controls -->
+  <div class="pagination-controls">
+    <div class="page-size">
+      <label for="cards-per-page">Cards per page:</label>
+      <select id="cards-per-page">
+        <option value="8">8</option>
+        <option value="12" selected>12</option>
+        <option value="24">24</option>
+        <option value="48">48</option>
+      </select>
+    </div>
+
+    <div id="pagination-buttons" class="pagination-buttons">
+      <!-- Page buttons will be inserted here dynamically -->
+    </div>
+  </div>
+
   <!-- 📦 Inventory Grid -->
   <main class="stock-main">
     <div id="stock-container" class="stock-grid"></div>
