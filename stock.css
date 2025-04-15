@@ -292,6 +292,30 @@ body.stock-body {
   background-color: #005bb5;
 }
 
+.sort-controls {
+  max-width: 1200px;
+  margin: -20px auto 20px auto;
+  text-align: right;
+  padding-right: 10px;
+}
+
+.sort-controls select {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background-color: #fafafa;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.sort-controls select:focus {
+  border-color: #0071e3;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.2);
+}
+
 @media screen and (max-width: 768px) {
   .stock-filters input,
   .stock-filters select {

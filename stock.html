@@ -56,7 +56,25 @@
       </div>
     </form>
   </section>
-
+  
+  <div class="sort-controls">
+    <select id="sort-select">
+      <option value="">Sort By...</option>
+      <option value="title-asc">Title (A–Z)</option>
+      <option value="title-desc">Title (Z–A)</option>
+      <option value="weight-asc">Weight (Low → High)</option>
+      <option value="weight-desc">Weight (High → Low)</option>
+      <option value="cost-asc">Cost (Low → High)</option>
+      <option value="cost-desc">Cost (High → Low)</option>
+      <option value="price-asc">Sale Price (Low → High)</option>
+      <option value="price-desc">Sale Price (High → Low)</option>
+      <option value="stock-asc">Stock (Low → High)</option>
+      <option value="stock-desc">Stock (High → Low)</option>
+      <option value="date-desc">Date Created (Newest)</option>
+      <option value="date-asc">Date Created (Oldest)</option>
+    </select>
+  </div>
+  
   <!-- 📦 Inventory Grid -->
   <main class="stock-main">
     <div id="stock-container" class="stock-grid"></div>

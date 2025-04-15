@@ -10,21 +10,12 @@ async function fetchStockItems() {
 
   allItems = data;
   populateDropdowns(data);
-  renderStockItems(data);
   setupFilters();
   setupToggle();
   setupClearFilters();
   setupCSVExport();
-}
-
-function setupToggle() {
-  const toggleBtn = document.getElementById("toggle-filters");
-  const filterSection = document.getElementById("filter-section");
-
-  toggleBtn.addEventListener("click", () => {
-    filterSection.classList.toggle("show");
-    toggleBtn.textContent = filterSection.classList.contains("show") ? "❌ Hide Filters" : "🔍 Show Filters";
-  });
+  setupPDFExport();
+  applySortAndRender(data); // renders based on default sort
 }
 
 function populateDropdowns(data) {
@@ -42,62 +33,78 @@ function populateDropdowns(data) {
   }
 }
 
+function setupToggle() {
+  const toggleBtn = document.getElementById("toggle-filters");
+  const filterSection = document.getElementById("filter-section");
+
+  toggleBtn.addEventListener("click", () => {
+    filterSection.classList.toggle("show");
+    toggleBtn.textContent = filterSection.classList.contains("show") ? "❌ Hide Filters" : "🔍 Show Filters";
+  });
+}
+
+function getFilteredItems() {
+  const form = document.getElementById("filter-form");
+  const formData = new FormData(form);
+
+  const normalizeDate = (val) => {
+    const parsed = new Date(val);
+    return isNaN(parsed) ? null : parsed.toISOString().split("T")[0];
+  };
+
+  const filters = {
+    title: formData.get("title")?.toLowerCase(),
+    description: formData.get("description")?.toLowerCase(),
+    barcode: formData.get("barcode")?.toLowerCase(),
+    distributor: formData.get("distributor")?.toLowerCase(),
+    weightMin: parseFloat(formData.get("weightMin")),
+    weightMax: parseFloat(formData.get("weightMax")),
+    costMin: parseFloat(formData.get("costMin")),
+    costMax: parseFloat(formData.get("costMax")),
+    priceMin: parseFloat(formData.get("priceMin")),
+    priceMax: parseFloat(formData.get("priceMax")),
+    stockMin: parseFloat(formData.get("stockMin")),
+    stockMax: parseFloat(formData.get("stockMax")),
+    createdFrom: normalizeDate(formData.get("createdFrom")),
+    createdTo: normalizeDate(formData.get("createdTo")),
+    category: formData.get("category"),
+    qr_type: formData.get("qr_type"),
+  };
+
+  return allItems.filter(item => {
+    return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
+           (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
+           (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
+           (!filters.distributor || item.distributor_name?.toLowerCase().includes(filters.distributor)) &&
+           (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
+           (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
+           (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
+           (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
+           (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
+           (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
+           (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
+           (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true) &&
+           (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
+           (!filters.createdTo || item.created_at <= filters.createdTo) &&
+           (!filters.category || item.category === filters.category) &&
+           (!filters.qr_type || item.qr_type === filters.qr_type);
+  });
+}
+
 function setupFilters() {
   const form = document.getElementById("filter-form");
   const inputs = form.querySelectorAll("input, select");
 
   inputs.forEach(input => {
     input.addEventListener("input", () => {
-      const formData = new FormData(form);
-
-      const normalizeDate = (val) => {
-        const parsed = new Date(val);
-        if (!isNaN(parsed)) {
-          return parsed.toISOString().split("T")[0]; // YYYY-MM-DD
-        }
-        return null;
-      };
-
-      const filters = {
-        title: formData.get("title")?.toLowerCase(),
-        description: formData.get("description")?.toLowerCase(),
-        barcode: formData.get("barcode")?.toLowerCase(),
-        distributor: formData.get("distributor")?.toLowerCase(),
-        weightMin: parseFloat(formData.get("weightMin")),
-        weightMax: parseFloat(formData.get("weightMax")),
-        costMin: parseFloat(formData.get("costMin")),
-        costMax: parseFloat(formData.get("costMax")),
-        priceMin: parseFloat(formData.get("priceMin")),
-        priceMax: parseFloat(formData.get("priceMax")),
-        stockMin: parseFloat(formData.get("stockMin")),
-        stockMax: parseFloat(formData.get("stockMax")),
-        createdFrom: normalizeDate(formData.get("createdFrom")),
-        createdTo: normalizeDate(formData.get("createdTo")),
-        category: formData.get("category"),
-        qr_type: formData.get("qr_type"),
-      };
-
-      const filtered = allItems.filter(item => {
-        return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
-               (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
-               (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
-               (!filters.distributor || (item.distributor_name?.toLowerCase().includes(filters.distributor))) &&
-               (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
-               (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
-               (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
-               (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
-               (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
-               (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
-               (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
-               (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true) &&
-               (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
-               (!filters.createdTo || item.created_at <= filters.createdTo) &&
-               (!filters.category || item.category === filters.category) &&
-               (!filters.qr_type || item.qr_type === filters.qr_type);
-      });
-
-      renderStockItems(filtered);
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
     });
+  });
+
+  document.getElementById("sort-select").addEventListener("change", () => {
+    const filtered = getFilteredItems();
+    applySortAndRender(filtered);
   });
 }
 
@@ -107,7 +114,7 @@ function setupClearFilters() {
 
   clearBtn.addEventListener("click", () => {
     form.reset();
-    renderStockItems(allItems);
+    applySortAndRender(allItems);
   });
 }
 
@@ -185,15 +192,10 @@ function setupPDFExport() {
       const description = content.querySelector("p:nth-of-type(1)")?.innerText || "";
 
       const weight = getField("Weight");
-      //const cost = getField("Cost");
       const salePrice = getField("Sale Price");
-      //const category = getField("Category");
       const distName = getField("Distributor").split('\n')[0];
       const distPhone = getField("Distributor").split('\n')[1] || "";
-      //const notes = getField("Notes");
-      //const barcode = getField("Barcode");
       const stock = getField("In Stock")?.replace("In Stock: ", "").trim();
-      //const updated = getField("Last Updated");
 
       rows.push([
         title, description, weight, salePrice,
@@ -225,6 +227,59 @@ function setupPDFExport() {
   });
 }
 
+function applySortAndRender(data) {
+  const sortValue = document.getElementById("sort-select").value;
+  if (!sortValue) {
+    renderStockItems(data);
+    return;
+  }
+
+  const [field, direction] = sortValue.split("-");
+  const isAsc = direction === "asc";
+
+  const sorted = [...data].sort((a, b) => {
+    let valA, valB;
+
+    switch (field) {
+      case "title":
+        valA = (a.title || "").toLowerCase();
+        valB = (b.title || "").toLowerCase();
+        return isAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+
+      case "weight":
+        valA = parseFloat(a.weight || 0);
+        valB = parseFloat(b.weight || 0);
+        break;
+
+      case "cost":
+        valA = parseFloat(a.cost || 0);
+        valB = parseFloat(b.cost || 0);
+        break;
+
+      case "price":
+        valA = parseFloat(a.sale_price || 0);
+        valB = parseFloat(b.sale_price || 0);
+        break;
+
+      case "stock":
+        valA = parseFloat(a.stock || 0);
+        valB = parseFloat(b.stock || 0);
+        break;
+
+      case "date":
+        valA = new Date(a.created_at);
+        valB = new Date(b.created_at);
+        break;
+
+      default:
+        return 0;
+    }
+
+    return isAsc ? valA - valB : valB - valA;
+  });
+
+  renderStockItems(sorted);
+}
 
 function renderStockItems(data) {
   const grid = document.getElementById("stock-container");
@@ -295,5 +350,4 @@ function prevSlide(index) {
   images[prevIndex].classList.add("active");
 }
 
-setupPDFExport();
 fetchStockItems();
