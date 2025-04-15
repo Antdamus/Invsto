@@ -229,6 +229,24 @@ body.stock-body {
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+.stock-filters input[type="date"] {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background-color: #fafafa;
+  padding: 12px 16px;
+  transition: all 0.3s ease;
+  width: 180px;
+}
+
+.stock-filters input[type="date"]:focus {
+  border-color: #0071e3;
+  background-color: #fff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+}
+
 .filter-buttons {
   display: flex;
   gap: 12px;
@@ -262,6 +280,15 @@ body.stock-body {
 }
 
 #export-csv:hover {
+  background-color: #005bb5;
+}
+
+#export-pdf {
+  background-color: #0071e3;
+  color: white;
+}
+
+#export-pdf:hover {
   background-color: #005bb5;
 }
 

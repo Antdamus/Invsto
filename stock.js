@@ -50,6 +50,14 @@ function setupFilters() {
     input.addEventListener("input", () => {
       const formData = new FormData(form);
 
+      const normalizeDate = (val) => {
+        const parsed = new Date(val);
+        if (!isNaN(parsed)) {
+          return parsed.toISOString().split("T")[0]; // YYYY-MM-DD
+        }
+        return null;
+      };
+
       const filters = {
         title: formData.get("title")?.toLowerCase(),
         description: formData.get("description")?.toLowerCase(),
@@ -63,6 +71,8 @@ function setupFilters() {
         priceMax: parseFloat(formData.get("priceMax")),
         stockMin: parseFloat(formData.get("stockMin")),
         stockMax: parseFloat(formData.get("stockMax")),
+        createdFrom: normalizeDate(formData.get("createdFrom")),
+        createdTo: normalizeDate(formData.get("createdTo")),
         category: formData.get("category"),
         qr_type: formData.get("qr_type"),
       };
@@ -80,6 +90,8 @@ function setupFilters() {
                (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
                (!isNaN(filters.stockMin) ? item.stock >= filters.stockMin : true) &&
                (!isNaN(filters.stockMax) ? item.stock <= filters.stockMax : true) &&
+               (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
+               (!filters.createdTo || item.created_at <= filters.createdTo) &&
                (!filters.category || item.category === filters.category) &&
                (!filters.qr_type || item.qr_type === filters.qr_type);
       });
