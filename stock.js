@@ -18,6 +18,13 @@ function showToast(message) {
   }, 4000);
 }
 
+function showLoading() {
+  document.getElementById("loading-overlay").classList.add("show");
+}
+
+function hideLoading() {
+  document.getElementById("loading-overlay").classList.remove("show");
+}
 
 
 function updateFilterChips(filters) {
@@ -502,7 +509,7 @@ function clearSelectionAndRefresh() {
 
 document.getElementById("bulk-favorite").addEventListener("click", async () => {
   if (!currentUser || selectedItems.size === 0) return;
-
+  showLoading();
   const updates = [];
 
   for (const id of selectedItems) {
@@ -527,14 +534,13 @@ document.getElementById("bulk-favorite").addEventListener("click", async () => {
   clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
   showToast(`⭐ Updated ${updatedCount} favorites`);
-
-
+  hideLoading();
 });
 
 document.getElementById("bulk-category").addEventListener("change", async (e) => {
   const category = e.target.value;
   if (!category || selectedItems.size === 0) return;
-
+  showLoading();
   const updates = [];
 
   for (const id of selectedItems) {
@@ -556,7 +562,7 @@ document.getElementById("bulk-category").addEventListener("change", async (e) =>
   clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
   showToast(`📂 Moved ${updatedCount} items to “${category}”`);
-
+  hideLoading();
 });
 
 function renderStockItems(data) {
@@ -743,6 +749,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("bulk-delete").addEventListener("click", async () => {
     if (selectedItems.size === 0) return;
+    showLoading();
     const idsToDelete = Array.from(selectedItems);
     const { error } = await supabase
       .from("item_types")
@@ -756,7 +763,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearSelectionAndRefresh();
       updateFilterChips(getActiveFilters());
       showToast(`🗑 Deleted ${updatedCount} items`);
-
+      hideLoading();
     }
   });
 
