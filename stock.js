@@ -68,6 +68,11 @@ function updateFilterChips(filters) {
       case "createdTo": label = `Created ≤ ${value}`; break;
       case "category": label = `Category: ${value}`; break;
       case "qr_type": label = `QR: ${value}`; break;
+      case "categories":
+        value.forEach(cat => {
+          createChip(`Category: ${cat}`, "categories");
+        });
+        continue;
       default: continue;
     }
     createChip(label, key);
@@ -312,17 +317,32 @@ async function fetchStockItems() {
 }
 
 function populateDropdowns(data) {
-  const categorySelect = document.querySelector("select[name='category']");
+  const categorySelect = document.querySelector("select[name='categories']");
   const qrTypeSelect = document.querySelector("select[name='qr_type']");
 
-  const categories = [...new Set(data.map(item => item.category).filter(Boolean))];
-  const qrTypes = [...new Set(data.map(item => item.qr_type).filter(Boolean))];
+  // ✅ Clear current categories
+  categorySelect.innerHTML = "";
 
-  for (const c of categories) {
-    categorySelect.innerHTML += `<option value="${c}">${c}</option>`;
-  }
+  // ✅ Collect all unique categories from item.categories arrays
+  const categories = new Set();
+  data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
+
+  // ✅ Add as <option> elements
+  [...categories].forEach(cat => {
+    const option = document.createElement("option");
+    option.value = cat;
+    option.textContent = cat;
+    categorySelect.appendChild(option);
+  });
+
+  // ✅ QR Types logic stays the same
+  const qrTypes = [...new Set(data.map(item => item.qr_type).filter(Boolean))];
+  qrTypeSelect.innerHTML = `<option value="">All QR Types</option>`;
   for (const q of qrTypes) {
-    qrTypeSelect.innerHTML += `<option value="${q}">${q}</option>`;
+    const option = document.createElement("option");
+    option.value = q;
+    option.textContent = q;
+    qrTypeSelect.appendChild(option);
   }
 }
 
@@ -382,7 +402,7 @@ function getFilteredItems() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    category: formData.get("category"),
+    categories: formData.getAll("categories"),
     qr_type: formData.get("qr_type"),
   };
 
@@ -401,7 +421,7 @@ function getFilteredItems() {
            (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
            (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
            (!filters.createdTo || item.created_at <= filters.createdTo) &&
-           (!filters.category || item.category === filters.category) &&
+           (filters.categories.length === 0 || (item.categories || []).some(cat => filters.categories.includes(cat))) &&
            (!filters.qr_type || item.qr_type === filters.qr_type) &&
            (showOnlyFavorites ? userFavorites.has(item.id) : true);
 
@@ -436,7 +456,7 @@ function getActiveFilters() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    category: formData.get("category"),
+    categories: formData.getAll("categories"),
     qr_type: formData.get("qr_type")
   };
 }
