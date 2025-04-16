@@ -377,6 +377,7 @@ function setupToggle() {
 function getFilteredItems() {
   const form = document.getElementById("filter-form");
   const formData = new FormData(form);
+
   const parseOrNull = (val) => {
     const trimmed = typeof val === "string" ? val.trim() : val;
     return trimmed === "" || trimmed === null ? null : parseFloat(trimmed);
@@ -406,7 +407,14 @@ function getFilteredItems() {
     qr_type: formData.get("qr_type"),
   };
 
+  const matchAll = document.getElementById("match-all-toggle")?.checked;
+
   return allItems.filter(item => {
+    const matchesCategory = filters.categories.length === 0 ? true :
+      matchAll
+        ? filters.categories.every(fCat => (item.categories || []).includes(fCat))
+        : filters.categories.some(fCat => (item.categories || []).includes(fCat));
+
     return (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
            (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
            (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
@@ -421,12 +429,12 @@ function getFilteredItems() {
            (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
            (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
            (!filters.createdTo || item.created_at <= filters.createdTo) &&
-           (filters.categories.length === 0 || (item.categories || []).some(cat => filters.categories.includes(cat))) &&
            (!filters.qr_type || item.qr_type === filters.qr_type) &&
+           matchesCategory &&
            (showOnlyFavorites ? userFavorites.has(item.id) : true);
-
   });
 }
+
 
 function getActiveFilters() {
   const form = document.getElementById("filter-form");
