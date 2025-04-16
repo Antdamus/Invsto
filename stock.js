@@ -74,6 +74,187 @@ function updateFilterChips(filters) {
   }
 }
 
+async function removeCategory(itemId, category) {
+  const { data, error } = await supabase
+    .from("item_types")
+    .select("categories")
+    .eq("id", itemId)
+    .single();
+
+  if (error || !data) return console.error("Error fetching item:", error);
+
+  const newCategories = (data.categories || []).filter(cat => cat !== category);
+
+  await supabase
+    .from("item_types")
+    .update({ categories: newCategories })
+    .eq("id", itemId);
+
+  await fetchStockItems();
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+}
+
+async function addCategory(itemId) {
+  const newCat = prompt("Enter new category:");
+  if (!newCat) return;
+
+  const { data, error } = await supabase
+    .from("item_types")
+    .select("categories")
+    .eq("id", itemId)
+    .single();
+
+  if (error || !data) return console.error("Error fetching item:", error);
+
+  const newCategories = new Set([...(data.categories || []), newCat]);
+
+  await supabase
+    .from("item_types")
+    .update({ categories: Array.from(newCategories) })
+    .eq("id", itemId);
+
+  await fetchStockItems();
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+}
+
+async function applyCategory(itemId, newCategory) {
+  const { data, error } = await supabase
+    .from("item_types")
+    .select("categories")
+    .eq("id", itemId)
+    .single();
+
+  if (error || !data) return;
+
+  const newSet = new Set([...(data.categories || []), newCategory]);
+
+  await supabase
+    .from("item_types")
+    .update({ categories: Array.from(newSet) })
+    .eq("id", itemId);
+
+  await fetchStockItems();
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+}
+
+
+let activeDropdown = null;
+
+async function showCategoryDropdown(itemId, anchorElement) {
+  if (activeDropdown) activeDropdown.remove();
+
+  const { data, error } = await supabase.from("item_types").select("categories").eq("id", itemId).single();
+  const allItems = await supabase.from("item_types").select("categories");
+  const allCategories = Array.from(
+    new Set(allItems.data.flatMap(item => item.categories || []))
+  );
+
+  const selected = new Set();
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "category-dropdown";
+
+  const input = document.createElement("input");
+  input.placeholder = "Search or create...";
+  dropdown.appendChild(input);
+
+  const optionsContainer = document.createElement("div");
+  dropdown.appendChild(optionsContainer);
+
+  const saveBtn = document.createElement("div");
+  saveBtn.className = "category-option";
+  saveBtn.style.fontWeight = "bold";
+  saveBtn.style.textAlign = "center";
+  saveBtn.style.borderTop = "1px solid #eee";
+  saveBtn.style.marginTop = "6px";
+  saveBtn.style.cursor = "pointer";
+  saveBtn.textContent = "✅ Add Selected";
+  dropdown.appendChild(saveBtn);
+
+  function renderOptions(filter = "") {
+    optionsContainer.innerHTML = "";
+    const filtered = allCategories.filter(cat => cat.toLowerCase().includes(filter.toLowerCase()));
+
+    filtered.forEach(cat => {
+      const option = document.createElement("div");
+      option.className = "category-option";
+      option.textContent = cat;
+      if (selected.has(cat)) option.classList.add("selected");
+
+      option.onclick = () => {
+        if (selected.has(cat)) {
+          selected.delete(cat);
+          option.classList.remove("selected");
+        } else {
+          selected.add(cat);
+          option.classList.add("selected");
+        }
+      };
+      optionsContainer.appendChild(option);
+    });
+
+    if (!allCategories.includes(filter) && filter.trim() !== "") {
+      const createOption = document.createElement("div");
+      createOption.className = "category-option";
+      createOption.textContent = `➕ Create "${filter}"`;
+      createOption.onclick = () => {
+        selected.add(filter);
+        renderOptions(""); // rerender all and highlight new
+      };
+      optionsContainer.appendChild(createOption);
+    }
+  }
+
+  input.addEventListener("input", () => renderOptions(input.value));
+  renderOptions();
+
+  saveBtn.onclick = async () => {
+    const { data: current, error } = await supabase
+      .from("item_types")
+      .select("categories")
+      .eq("id", itemId)
+      .single();
+
+    const updated = Array.from(new Set([...(current.categories || []), ...selected]));
+
+    await supabase.from("item_types").update({ categories: updated }).eq("id", itemId);
+    dropdown.remove();
+    activeDropdown = null;
+
+    await fetchStockItems();
+    const filtered = getFilteredItems();
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+  };
+
+  document.body.appendChild(dropdown);
+  const rect = anchorElement.getBoundingClientRect();
+  dropdown.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  dropdown.style.left = `${rect.left + window.scrollX}px`;
+
+  activeDropdown = dropdown;
+
+  // ✅ Click outside to close
+  setTimeout(() => {
+    document.addEventListener("click", closeDropdownOnOutsideClick);
+  }, 0);
+
+  function closeDropdownOnOutsideClick(e) {
+    if (!dropdown.contains(e.target) && e.target !== anchorElement) {
+      dropdown.remove();
+      document.removeEventListener("click", closeDropdownOnOutsideClick);
+      activeDropdown = null;
+    }
+  }
+}
+
+
 
 function getURLParams() {
   return Object.fromEntries(new URLSearchParams(window.location.search));
@@ -150,6 +331,12 @@ function populateCategoryDropdown(data) {
     option.textContent = cat;
     select.appendChild(option);
   }
+
+  const customOption = document.createElement("option");
+  customOption.value = "__new__";
+  customOption.textContent = "➕ New Category...";
+  select.appendChild(customOption);
+
 }
 
 function setupToggle() {
@@ -538,8 +725,27 @@ document.getElementById("bulk-favorite").addEventListener("click", async () => {
 });
 
 document.getElementById("bulk-category").addEventListener("change", async (e) => {
-  const category = e.target.value;
+  let category = e.target.value;
   if (!category || selectedItems.size === 0) return;
+
+  if (category === "__new__") {
+    const userInput = prompt("Enter a new category:");
+    if (!userInput) return;
+  
+    category = userInput;
+  
+    // ✅ Add new category to dropdown
+    const select = document.getElementById("bulk-category");
+    const exists = [...select.options].some(opt => opt.value === category);
+  
+    if (!exists) {
+      const option = document.createElement("option");
+      option.value = category;
+      option.textContent = category;
+      select.insertBefore(option, select.lastElementChild); // insert above “➕ New Category...”
+      select.value = category; // keep it selected
+    }
+  }
   showLoading();
   const updates = [];
 
@@ -562,6 +768,7 @@ document.getElementById("bulk-category").addEventListener("change", async (e) =>
   clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
   showToast(`📂 Moved ${updatedCount} items to “${category}”`);
+  
   hideLoading();
 });
 
@@ -618,7 +825,6 @@ function renderStockItems(data) {
         <p><strong>Weight:</strong> ${item.weight}</p>
         <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
         <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
-        <p><strong>Category:</strong> ${item.category}</p>
         <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
         <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
         <p><strong>QR Type:</strong> ${item.qr_type}</p>
@@ -626,8 +832,15 @@ function renderStockItems(data) {
         <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
         <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
         <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
-
-       
+        <div class="category-chips">
+          ${(item.categories || []).map(cat =>
+            `<div class="category-chip">
+              ${cat}
+              <button onclick="removeCategory('${item.id}', '${cat}')">&times;</button>
+            </div>`
+          ).join("")}
+          <div class="add-category-chip" onclick="showCategoryDropdown('${item.id}', this)">+ Add Category</div>
+        </div>
       </div>
     `;
 
