@@ -1,34 +1,40 @@
+/* Styles the main body of the page */
 body.stock-body {
-  font-family: 'DM Serif Display', serif;
-  background-color: #f5f5f7;
-  color: #1d1d1f;
+  font-family: 'DM Serif Display', serif;  /* Applies serif display font to all text */
+  background-color: #f5f5f7;               /* Light gray background */
+  color: #1d1d1f;                          /* Dark gray text color */
   margin: 0;
-  padding: 20px;
+  padding: 20px;                           /* Adds space around the content */
 }
 
-/* === Unified Top Control Bar === */
+/*---------------------------------------------------------------------------*/
+
+/* ======================= Unified Top Control Bar ============================== */
+/*#region*/ 
+/* #Styles the header bar that stays at the top */
 .stock-header.sticky {
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-  background-color: #ffffffd0;
-  backdrop-filter: blur(12px);
+  position: sticky;                        /* Keeps header fixed while scrolling */
+  top: 0;                                  /* Stick to top of viewport */
+  z-index: 1000;                           /* Renders above other elements */
+  background-color: #ffffffd0;             /* Semi-transparent white background */
+  backdrop-filter: blur(12px);             /* Adds blur effect behind it */
   padding: 12px 20px;
-  border-radius: 20px;
+  border-radius: 20px;                     /* Rounded corners */
   margin: 0 auto 20px auto;
-  max-width: 1200px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  max-width: 1200px;                       /* Centers the header */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06); /* Soft shadow */
   transition: all 0.3s ease;
 }
 
+/* Styles the control group inside the header */
 .top-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: wrap;                         /* Allows controls to wrap on small screens */
   gap: 12px;
   justify-content: center;
   align-items: center;
   padding: 16px 20px;
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.35);   /* Translucent background */
   border-radius: 20px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   backdrop-filter: blur(12px);
@@ -38,7 +44,7 @@ body.stock-body {
   z-index: 800;
 }
 
-
+/* Styles shared across <select>, <button>, and <label> in top-controls */
 .top-controls select,
 .top-controls button,
 .top-controls label {
@@ -55,40 +61,47 @@ body.stock-body {
   backdrop-filter: blur(8px);
 }
 
-
+/* Specific tweaks for <select> inside top-controls */
 .top-controls select {
   border: 1px solid #ccc;
   background-color: #fafafa;
 }
 
+/* Visual highlight when <select> is focused */
 .top-controls select:focus {
   outline: none;
-  border-color: #0071e3;
+  border-color: #0071e3;                   /* Apple blue */
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+/* Style for the blue "Filters" button */
 .top-controls .filter-toggle-btn {
   background-color: #0071e3;
   color: white;
 }
 
+/* Darker blue hover state for filter button */
 .top-controls .filter-toggle-btn:hover {
   background-color: #005bb5;
 }
 
+/* Gray "Clear" button */
 .top-controls .btn-clear {
   background-color: #e5e5ea;
   color: #1d1d1f;
 }
 
+/* Darker gray hover for Clear */
 .top-controls .btn-clear:hover {
   background-color: #d4d4d8;
 }
 
+/* Resets margin on Back button (since it has margin elsewhere) */
 .top-controls .back-button {
   margin: 0;
 }
 
+/* Layout for "Show Only Favorites" toggle */
 .top-controls label.favorite-toggle {
   display: flex;
   align-items: center;
@@ -96,7 +109,7 @@ body.stock-body {
   font-weight: 500;
 }
 
-
+/* Styles the "← Back" link */
 .back-button {
   display: inline-block;
   margin-bottom: 20px;
@@ -109,15 +122,13 @@ body.stock-body {
   transition: all 0.3s ease;
 }
 
+/* Darker hover color for Back link */
 .back-button:hover {
   background-color: #d0d0d0;
 }
 
-.stock-heading {
-  font-size: 2.5rem;
-  margin-bottom: 1.5rem;
-  text-align: center;
-}
+/*#endregion*/
+
 
 .stock-grid {
   display: grid;
@@ -920,6 +931,16 @@ body.stock-body {
   transition: color 0.2s ease;
 }
 
+#category-search {
+  width: 90%;
+  padding: 8px 12px;
+  margin: 6px auto 10px auto;
+  font-size: 0.95rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f5f5f5;
+  display: block;
+}
 
 .custom-dropdown {
   position: relative;
@@ -956,13 +977,14 @@ body.stock-body {
   color: #333;
 }
 
+/* === Dropdown Menu Adjustments === */
 .dropdown-menu {
   position: absolute;
   top: 100%;
   left: 0;
   margin-top: 6px;
   z-index: 9999;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(14px) saturate(200%);
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 20px;
@@ -973,10 +995,39 @@ body.stock-body {
   overflow-y: auto;
   display: none;
   animation: dropdownFadeIn 0.25s ease-out forwards;
+  transition: max-height 0.3s ease;
 }
 
 .dropdown-menu.show {
   display: block;
+}
+
+/* Dropdown Search Input Styling */
+.dropdown-menu input[type="text"] {
+  width: calc(100% - 20px);
+  margin: 8px 10px 12px 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background-color: #f8f8f8;
+  font-family: 'DM Serif Display', serif;
+  font-size: 0.95rem;
+  color: #1d1d1f;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.dropdown-menu input[type="text"]:focus {
+  outline: none;
+  border-color: #0071e3;
+  background-color: white;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.dropdown-options-container {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .dropdown-option {
@@ -987,6 +1038,7 @@ body.stock-body {
   cursor: pointer;
   transition: background 0.2s ease;
   border-radius: 12px;
+  white-space: nowrap;
 }
 
 .dropdown-option:hover {
@@ -998,6 +1050,43 @@ body.stock-body {
   color: white;
   font-weight: bold;
 }
+
+/* Dropdown container alignment fix */
+.custom-dropdown {
+  position: relative;
+  z-index: 900;
+}
+
+.dropdown-toggle {
+  width: 240px;
+  padding: 12px 18px;
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #1d1d1f;
+}
+
+.dropdown-toggle:hover {
+  background: rgba(255, 255, 255, 0.55);
+  transform: scale(1.02);
+}
+
+.dropdown-toggle::after {
+  content: "\25BE";
+  font-size: 0.9rem;
+  margin-left: 8px;
+  color: #333;
+}
+
 
 @keyframes dropdownFadeIn {
   from {

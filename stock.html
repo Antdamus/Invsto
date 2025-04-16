@@ -56,26 +56,35 @@
         <input type="number" name="stockMax" placeholder="Max stock" />
         <input type="date" name="createdFrom" placeholder="Created From..." />
         <input type="date" name="createdTo" placeholder="Created To..." />
+    
         <label class="match-mode-toggle">
           <input type="checkbox" id="match-all-toggle" />
           Match <strong>all</strong> selected categories
         </label>
-        <div class="custom-dropdown" id="category-dropdown-container">
-          <button type="button" class="dropdown-toggle" id="category-dropdown-toggle">Select Categories ⏷</button>
-          <div class="dropdown-menu" id="category-dropdown-menu"></div>
-          <input type="text" placeholder="Search..." id="category-search" />
-
+    
+        <!-- ✅ Category Dropdown Container -->
+        <div id="category-dropdown-container" class="custom-dropdown">
+          <button id="category-dropdown-toggle" class="dropdown-toggle">
+            Select Categories
+          </button>
+          <div id="category-dropdown-menu" class="dropdown-menu"></div>
         </div>
+    
+        <!-- ✅ Hidden input to store selected categories -->
         <input type="hidden" name="categories" id="hidden-categories" />
+    
+        <!-- ✅ QR Type -->
         <select name="qr_type">
           <option value="">All QR Types</option>
         </select>
       </div>
+    
+      <!-- ✅ Export buttons -->
       <div class="filter-actions">
         <button type="button" id="export-csv">📤 Export CSV</button>
         <button type="button" id="export-pdf">📄 Export PDF</button>
       </div>
-    </form>
+    </form>    
   </section>
 
   <!-- 🔻 Active Filter Chips -->

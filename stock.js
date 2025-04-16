@@ -18,6 +18,23 @@ function showToast(message) {
   }, 4000);
 }
 
+let allCategories = [];
+
+async function loadCategories() {
+  const { data, error } = await supabase.from('item-types').select('category');
+
+  if (error) {
+    console.error("Error fetching categories:", error);
+    return;
+  }
+
+  // Remove duplicates and clean nulls
+  const categorySet = new Set(data.map(row => row.category).filter(Boolean));
+  allCategories = [...categorySet];
+  renderDropdownOptions(); // Initial render when dropdown opens
+}
+
+
 function showLoading() {
   document.getElementById("loading-overlay").classList.add("show");
 }
@@ -339,51 +356,51 @@ async function fetchStockItems() {
 function populateDropdowns(data) {
   const qrTypeSelect = document.querySelector("select[name='qr_type']");
   const categories = new Set();
-data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
+  data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
 
-const dropdownMenu = document.getElementById("category-dropdown-menu");
-const dropdownToggle = document.getElementById("category-dropdown-toggle");
+  const dropdownMenu = document.getElementById("category-dropdown-menu");
+  const dropdownToggle = document.getElementById("category-dropdown-toggle");
 
-dropdownMenu.innerHTML = ""; // Clear existing
-dropdownToggle.onclick = () => {
-  dropdownMenu.classList.toggle("show");
-};
+  dropdownMenu.innerHTML = ""; // Clear existing
+  dropdownToggle.onclick = () => {
+    dropdownMenu.classList.toggle("show");
+  };
 
-// Close when clicking outside
-document.addEventListener("click", (e) => {
-  if (!dropdownMenu.contains(e.target) && e.target !== dropdownToggle) {
-    dropdownMenu.classList.remove("show");
-  }
-});
+  // Close when clicking outside
+  document.addEventListener("click", (e) => {
+    if (!dropdownMenu.contains(e.target) && e.target !== dropdownToggle) {
+      dropdownMenu.classList.remove("show");
+    }
+  });
 
-// Build category checkboxes
-[...categories].forEach(cat => {
-  const wrapper = document.createElement("label");
-  wrapper.className = "dropdown-option";
-  wrapper.innerHTML = `<span>${cat}</span>`;
-wrapper.dataset.cat = cat;
-wrapper.addEventListener("click", () => {
-  wrapper.classList.toggle("selected");
-  currentPage = 1;
-  const filtered = getFilteredItems();
-  applySortAndRender(filtered);
-  updateFilterChips(getActiveFilters());
-  updateURLFromForm();
-});
-
-  dropdownMenu.appendChild(wrapper);
-});
-
-// Listen for changes
-dropdownMenu.querySelectorAll(".category-checkbox").forEach(cb => {
-  cb.addEventListener("change", () => {
+  // Build category checkboxes
+  [...categories].forEach(cat => {
+    const wrapper = document.createElement("label");
+    wrapper.className = "dropdown-option";
+    wrapper.innerHTML = `<span>${cat}</span>`;
+  wrapper.dataset.cat = cat;
+  wrapper.addEventListener("click", () => {
+    wrapper.classList.toggle("selected");
     currentPage = 1;
     const filtered = getFilteredItems();
     applySortAndRender(filtered);
     updateFilterChips(getActiveFilters());
     updateURLFromForm();
   });
-});
+
+    dropdownMenu.appendChild(wrapper);
+  });
+
+  // Listen for changes
+  dropdownMenu.querySelectorAll(".category-checkbox").forEach(cb => {
+    cb.addEventListener("change", () => {
+      currentPage = 1;
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
+      updateFilterChips(getActiveFilters());
+      updateURLFromForm();
+    });
+  });
 
   
 }
@@ -1026,6 +1043,14 @@ function applyFiltersFromURL() {
   
 }
 
+document.addEventListener("click", (e) => {
+  const dropdown = document.getElementById("category-dropdown-container");
+  if (!dropdown.contains(e.target)) {
+    document.getElementById("category-dropdown-menu").classList.remove("show");
+  }
+});
+
+
 document.addEventListener("DOMContentLoaded", async () => {
   currentUser = (await supabase.auth.getUser()).data.user;
   if (currentUser) {
@@ -1069,6 +1094,103 @@ document.addEventListener("DOMContentLoaded", async () => {
       showToast(`🗑 Deleted ${updatedCount} items`);
       hideLoading();
     }
+
+    let allCategories = [];
+
+    function renderDropdownOptions(filtered = allCategories) {
+      const menu = document.getElementById("category-dropdown-menu");
+      if (!menu) return;
+
+      menu.innerHTML = `
+        <input type="text" id="category-search" placeholder="Search categories..." style="
+          width: calc(100% - 20px);
+          margin: 10px;
+          padding: 8px 10px;
+          font-size: 1rem;
+          border-radius: 10px;
+          border: none;
+          outline: none;
+          background-color: #f5f5f5;
+        ">
+        <div class="dropdown-options-container">
+          ${filtered.map(cat => `
+            <div class="dropdown-option" data-cat="${cat}">${cat}</div>
+          `).join('')}
+        </div>
+      `;
+
+      menu.querySelectorAll(".dropdown-option").forEach(option => {
+        option.addEventListener("click", () => {
+          option.classList.toggle("selected");
+          currentPage = 1;
+          const filtered = getFilteredItems();
+          applySortAndRender(filtered);
+          updateFilterChips(getActiveFilters());
+          updateURLFromForm();
+        });
+      });
+
+      const input = menu.querySelector("#category-search");
+      if (input) {
+        input.addEventListener("input", (e) => {
+          const search = e.target.value.toLowerCase();
+          const filteredCats = allCategories.filter(cat => cat.toLowerCase().includes(search));
+          renderDropdownOptions(filteredCats);
+        });
+      }
+    }
+
+async function loadCategories() {
+  const { data, error } = await supabase.from('item-types').select('category');
+  if (error) return console.error("Error loading categories:", error);
+  const categorySet = new Set(data.map(row => row.category).filter(Boolean));
+  allCategories = [...categorySet];
+  renderDropdownOptions();
+}
+
+document.getElementById("category-dropdown-toggle")?.addEventListener("click", () => {
+  const menu = document.getElementById("category-dropdown-menu");
+  if (!menu.classList.contains("show")) {
+    loadCategories();
+    menu.classList.add("show");
+  } else {
+    menu.classList.remove("show");
+  }
+});
+
+document.addEventListener("click", (e) => {
+  const container = document.getElementById("category-dropdown-container");
+  if (container && !container.contains(e.target)) {
+    document.getElementById("category-dropdown-menu")?.classList.remove("show");
+  }
+});
+
+    
+
+
+// Open dropdown toggle
+document.getElementById("category-dropdown-toggle")?.addEventListener("click", () => {
+  const menu = document.getElementById("category-dropdown-menu");
+  if (!menu.classList.contains("show")) {
+    loadCategories();
+    menu.classList.add("show");
+  } else {
+    menu.classList.remove("show");
+  }
+});
+
+
+loadCategories();
+// Attach dynamic search functionality
+const dropdownInput = document.querySelector("#category-dropdown-menu input");
+if (dropdownInput) {
+  dropdownInput.addEventListener("input", (e) => {
+    const search = e.target.value.toLowerCase();
+    const filtered = allCategories.filter(cat => cat.toLowerCase().includes(search));
+    renderDropdownOptions(filtered);
+  });
+}
+
   });
 
   document.getElementById("bulk-export").addEventListener("click", () => {
@@ -1082,5 +1204,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
+// 🔍 Live Search in Category Dropdown
+function setupCategorySearch() {
+  const searchInput = document.getElementById("category-search");
+  const options = document.querySelectorAll("#category-dropdown-menu .dropdown-option");
+
+  if (!searchInput) return;
+
+  searchInput.addEventListener("input", () => {
+    const query = searchInput.value.trim().toLowerCase();
+
+    options.forEach(option => {
+      const text = option.textContent.toLowerCase();
+      option.style.display = text.includes(query) ? "block" : "none";
+    });
+  });
+}
 
 
