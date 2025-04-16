@@ -788,4 +788,33 @@ body.stock-body {
   background-color: #e8e8e8;
 }
 
+.category-chip {
+  position: relative;
+  padding-right: 22px;
+  animation: chipFadeIn 0.3s ease;
+  transition: background-color 0.3s ease;
+}
+
+@keyframes chipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.category-chip[data-color="blue"] { background-color: #e6f0ff; color: #1a3e6e; }
+.category-chip[data-color="green"] { background-color: #e4fce9; color: #1c4f2b; }
+.category-chip[data-color="purple"] { background-color: #f3e9ff; color: #4e2d84; }
+.category-chip[data-color="gold"] { background-color: #fff6e0; color: #5c4200; }
+.category-chip[data-color="gray"] { background-color: #eaeaea; color: #2a2a2a; }
+
+.category-chip button {
+  transition: color 0.2s ease;
+}
+
+
 

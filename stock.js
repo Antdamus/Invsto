@@ -254,6 +254,11 @@ async function showCategoryDropdown(itemId, anchorElement) {
   }
 }
 
+function getChipColor(label) {
+  const hash = [...label].reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const options = ["blue", "green", "purple", "gold", "gray"];
+  return options[hash % options.length];
+}
 
 
 function getURLParams() {
@@ -833,12 +838,13 @@ function renderStockItems(data) {
         <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
         <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
         <div class="category-chips">
-          ${(item.categories || []).map(cat =>
-            `<div class="category-chip">
+          ${(item.categories || []).map(cat => {
+            const color = getChipColor(cat);
+            return `<div class="category-chip" data-color="${color}">
               ${cat}
               <button onclick="removeCategory('${item.id}', '${cat}')">&times;</button>
-            </div>`
-          ).join("")}
+            </div>`;
+          }).join("")}        
           <div class="add-category-chip" onclick="showCategoryDropdown('${item.id}', this)">+ Add Category</div>
         </div>
       </div>
