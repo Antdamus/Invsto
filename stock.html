@@ -6,87 +6,82 @@
   <title>OG Jewelry Stock</title>
   <link rel="stylesheet" href="stock.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+
 </head>
 <body class="stock-body">
-  <header class="stock-header">
-    <h1 class="stock-heading">📦 Current Inventory</h1>
-    <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+  <!-- 🔹 Unified Control Bar -->
+  <header class="stock-header sticky">
+    <div class="top-controls">
+      <a href="dashboard.html" class="back-button">← Back</a>
+      <label class="favorite-toggle">
+        <input type="checkbox" id="show-favorites-only">
+        ⭐ Show Only Favorites
+      </label>
+      <select id="sort-select">
+        <option value="">Sort By...</option>
+        <option value="title-asc">Title (A–Z)</option>
+        <option value="title-desc">Title (Z–A)</option>
+        <option value="weight-asc">Weight (Low → High)</option>
+        <option value="weight-desc">Weight (High → Low)</option>
+        <option value="cost-asc">Cost (Low → High)</option>
+        <option value="cost-desc">Cost (High → Low)</option>
+        <option value="price-asc">Sale Price (Low → High)</option>
+        <option value="price-desc">Sale Price (High → Low)</option>
+        <option value="stock-asc">Stock (Low → High)</option>
+        <option value="stock-desc">Stock (High → Low)</option>
+        <option value="date-desc">Date Created (Newest)</option>
+        <option value="date-asc">Date Created (Oldest)</option>
+      </select>
+      <button id="toggle-filters" class="filter-toggle-btn">🔍 Filters</button>
+      <button type="button" id="clear-filters" class="btn-clear">🧼 Clear</button>
+    </div>
   </header>
 
-  <div class="filter-toggle-container">
-    <button id="toggle-filters" class="filter-toggle-btn">🔍 Show Filters</button>
-  </div>
-
-  <section class="stock-filters collapse" id="filter-section">
+  <!-- 🔸 Floating Filter HUD -->
+  <section class="floating-filters" id="filter-section">
     <form id="filter-form">
-      <input type="text" name="title" placeholder="Search title..." />
-      <input type="text" name="description" placeholder="Search description..." />
-      <input type="text" name="barcode" placeholder="Search barcode..." />
-      <input type="text" name="distributor" placeholder="Distributor name..." />
-      <input type="number" name="weightMin" placeholder="Min weight" />
-      <input type="number" name="weightMax" placeholder="Max weight" />
-      <input type="number" name="costMin" placeholder="Min cost" />
-      <input type="number" name="costMax" placeholder="Max cost" />
-      <input type="number" name="priceMin" placeholder="Min sale price" />
-      <input type="number" name="priceMax" placeholder="Max sale price" />
-      <input type="number" name="stockMin" placeholder="Min stock" />
-      <input type="number" name="stockMax" placeholder="Max stock" />
-      <input type="date" name="createdFrom" placeholder="Created From..." />
-      <input type="date" name="createdTo" placeholder="Created To..." />
+      <div class="filter-grid">
+        <input type="text" name="title" placeholder="Search title..." />
+        <input type="text" name="description" placeholder="Search description..." />
+        <input type="text" name="barcode" placeholder="Search barcode..." />
+        <input type="text" name="distributor" placeholder="Distributor name..." />
+        <input type="number" name="weightMin" placeholder="Min weight" />
+        <input type="number" name="weightMax" placeholder="Max weight" />
+        <input type="number" name="costMin" placeholder="Min cost" />
+        <input type="number" name="costMax" placeholder="Max cost" />
+        <input type="number" name="priceMin" placeholder="Min sale price" />
+        <input type="number" name="priceMax" placeholder="Max sale price" />
+        <input type="number" name="stockMin" placeholder="Min stock" />
+        <input type="number" name="stockMax" placeholder="Max stock" />
+        <input type="date" name="createdFrom" placeholder="Created From..." />
+        <input type="date" name="createdTo" placeholder="Created To..." />
+        <label class="match-mode-toggle">
+          <input type="checkbox" id="match-all-toggle" />
+          Match <strong>all</strong> selected categories
+        </label>
+        <div class="custom-dropdown" id="category-dropdown-container">
+          <button type="button" class="dropdown-toggle" id="category-dropdown-toggle">Select Categories ⏷</button>
+          <div class="dropdown-menu" id="category-dropdown-menu"></div>
+          <input type="text" placeholder="Search..." id="category-search" />
 
-      <label class="match-mode-toggle">
-        <input type="checkbox" id="match-all-toggle" />
-        Match <strong>all</strong> selected categories
-      </label>
-
-      <!-- 🔽 Custom Dropdown Menu for Categories -->
-      <div class="custom-dropdown" id="category-dropdown-container">
-        <button type="button" class="dropdown-toggle" id="category-dropdown-toggle">Select Categories ⏷</button>
-        <div class="dropdown-menu" id="category-dropdown-menu">
-          <!-- Checkboxes added by JS -->
         </div>
+        <input type="hidden" name="categories" id="hidden-categories" />
+        <select name="qr_type">
+          <option value="">All QR Types</option>
+        </select>
       </div>
-      <input type="hidden" name="categories" id="hidden-categories" />
-
-      <select name="qr_type">
-        <option value="">All QR Types</option>
-      </select>
-
-      <div class="filter-buttons">
-        <button type="button" id="clear-filters">🧼 Clear Filters</button>
+      <div class="filter-actions">
         <button type="button" id="export-csv">📤 Export CSV</button>
         <button type="button" id="export-pdf">📄 Export PDF</button>
       </div>
     </form>
   </section>
 
-  <div id="favorite-toggle-container">
-    <label class="favorite-toggle">
-      <input type="checkbox" id="show-favorites-only">
-      ⭐ Show Only Favorites
-    </label>
-  </div>
-
-  <div class="sort-controls">
-    <select id="sort-select">
-      <option value="">Sort By...</option>
-      <option value="title-asc">Title (A–Z)</option>
-      <option value="title-desc">Title (Z–A)</option>
-      <option value="weight-asc">Weight (Low → High)</option>
-      <option value="weight-desc">Weight (High → Low)</option>
-      <option value="cost-asc">Cost (Low → High)</option>
-      <option value="cost-desc">Cost (High → Low)</option>
-      <option value="price-asc">Sale Price (Low → High)</option>
-      <option value="price-desc">Sale Price (High → Low)</option>
-      <option value="stock-asc">Stock (Low → High)</option>
-      <option value="stock-desc">Stock (High → Low)</option>
-      <option value="date-desc">Date Created (Newest)</option>
-      <option value="date-asc">Date Created (Oldest)</option>
-    </select>
-  </div>
-
+  <!-- 🔻 Active Filter Chips -->
   <div id="filter-chips" class="filter-chips"></div>
 
+  <!-- 🔻 Pagination + Page Controls -->
   <div class="pagination-controls">
     <div class="page-size">
       <label for="cards-per-page">Cards per page:</label>
@@ -111,6 +106,7 @@
     </select>
   </div>
 
+  <!-- 🔸 Inventory Cards -->
   <main class="stock-main">
     <div id="stock-container" class="stock-grid"></div>
   </main>
@@ -120,6 +116,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <script src="stock.js"></script>
+
+  
 
   <div id="toast-container"></div>
   <div id="loading-overlay"><div class="spinner"></div></div>
