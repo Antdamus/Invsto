@@ -37,8 +37,17 @@ function updateFilterChips(filters) {
     chip.className = "filter-chip";
     chip.innerHTML = `${label} <button data-key="${key}">&times;</button>`;
     chip.querySelector("button").addEventListener("click", () => {
-      const input = document.querySelector(`[name="${key}"]`);
-      if (input) input.value = "";
+      if (key === "categories") {
+        document.querySelectorAll(".dropdown-option.selected").forEach(el => {
+          if (el.dataset.cat === label.split(": ")[1]) {
+            el.classList.remove("selected");
+          }
+        });
+      } else {
+        const input = document.querySelector(`[name="${key}"]`);
+        if (input) input.value = "";
+      }
+      
       currentPage = 1;
       const filtered = getFilteredItems();
       applySortAndRender(filtered);
@@ -273,6 +282,9 @@ function getURLParams() {
 function updateURLFromForm() {
   const form = document.getElementById("filter-form");
   const formData = new FormData(form);
+  const selectedCats = [...document.querySelectorAll(".dropdown-option.selected")].map(el => el.dataset.cat);
+  const matchAll = document.getElementById("match-all-toggle")?.checked;
+
   const parseOrNull = (val) => {
     const trimmed = typeof val === "string" ? val.trim() : val;
     return trimmed === "" || trimmed === null ? null : parseFloat(trimmed);
@@ -282,6 +294,9 @@ function updateURLFromForm() {
   for (const [key, value] of formData.entries()) {
     if (value) params.set(key, value);
   }
+
+  if (selectedCats.length > 0) params.set("categories", selectedCats.join(","));
+  if (matchAll) params.set("matchAll", "true");
 
   if (document.getElementById("sort-select").value)
     params.set("sort", document.getElementById("sort-select").value);
