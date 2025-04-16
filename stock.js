@@ -6,6 +6,19 @@ let currentUser = null;
 let selectedItems = new Set();
 let showOnlyFavorites = false;
 
+function showToast(message) {
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
+}
+
+
 
 function updateFilterChips(filters) {
   const chipContainer = document.getElementById("filter-chips");
@@ -510,8 +523,11 @@ document.getElementById("bulk-favorite").addEventListener("click", async () => {
   await Promise.all(updates);
 
   // Re-render view
+  const updatedCount = selectedItems.size;
   clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
+  showToast(`⭐ Updated ${updatedCount} favorites`);
+
 
 });
 
@@ -534,8 +550,13 @@ document.getElementById("bulk-category").addEventListener("change", async (e) =>
 
   allItems = data;
   populateCategoryDropdown(data);
+
+  const updatedCount = selectedItems.size;
+
   clearSelectionAndRefresh();
   updateFilterChips(getActiveFilters());
+  showToast(`📂 Moved ${updatedCount} items to “${category}”`);
+
 });
 
 function renderStockItems(data) {
@@ -716,6 +737,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ✅ Bulk Toolbar Listeners
   document.getElementById("bulk-clear").addEventListener("click", () => {
     clearSelectionAndRefresh();
+    showToast(`✅ Cleared selection`);
+
   });
 
   document.getElementById("bulk-delete").addEventListener("click", async () => {
@@ -727,8 +750,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       .in("id", idsToDelete);
     if (!error) {
       await fetchStockItems();
+
+      const updatedCount = selectedItems.size;
+      
       clearSelectionAndRefresh();
       updateFilterChips(getActiveFilters());
+      showToast(`🗑 Deleted ${updatedCount} items`);
 
     }
   });
