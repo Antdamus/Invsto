@@ -317,25 +317,25 @@ async function fetchStockItems() {
 }
 
 function populateDropdowns(data) {
-  const categorySelect = document.querySelector("select[name='categories']");
   const qrTypeSelect = document.querySelector("select[name='qr_type']");
+  const categoryContainer = document.getElementById("custom-category-select");
 
-  // ✅ Clear current categories
-  categorySelect.innerHTML = "";
-
-  // ✅ Collect all unique categories from item.categories arrays
   const categories = new Set();
   data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
 
-  // ✅ Add as <option> elements
+  // Clear existing
+  categoryContainer.innerHTML = "";
+
   [...categories].forEach(cat => {
-    const option = document.createElement("option");
-    option.value = cat;
-    option.textContent = cat;
-    categorySelect.appendChild(option);
+    const checkbox = document.createElement("label");
+    checkbox.style.marginRight = "12px";
+    checkbox.innerHTML = `
+      <input type="checkbox" value="${cat}" class="category-checkbox"> ${cat}
+    `;
+    categoryContainer.appendChild(checkbox);
   });
 
-  // ✅ QR Types logic stays the same
+  // Populate QR dropdown
   const qrTypes = [...new Set(data.map(item => item.qr_type).filter(Boolean))];
   qrTypeSelect.innerHTML = `<option value="">All QR Types</option>`;
   for (const q of qrTypes) {
@@ -344,7 +344,19 @@ function populateDropdowns(data) {
     option.textContent = q;
     qrTypeSelect.appendChild(option);
   }
+
+  categoryContainer.querySelectorAll("input[type='checkbox']").forEach(cb => {
+    cb.addEventListener("change", () => {
+      currentPage = 1;
+      const filtered = getFilteredItems();
+      applySortAndRender(filtered);
+      updateFilterChips(getActiveFilters());
+      updateURLFromForm();
+    });
+  });
+  
 }
+
 
 function populateCategoryDropdown(data) {
   const select = document.getElementById("bulk-category");
@@ -403,7 +415,7 @@ function getFilteredItems() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    categories: formData.getAll("categories"),
+    categories: [...document.querySelectorAll(".category-checkbox:checked")].map(cb => cb.value),
     qr_type: formData.get("qr_type"),
   };
 
@@ -464,7 +476,7 @@ function getActiveFilters() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    categories: formData.getAll("categories"),
+    categories: [...document.querySelectorAll(".category-checkbox:checked")].map(cb => cb.value),
     qr_type: formData.get("qr_type")
   };
 }

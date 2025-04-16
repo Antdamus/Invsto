@@ -45,9 +45,11 @@
         <input type="checkbox" id="match-all-toggle" />
         Match <strong>all</strong> selected categories
       </label>
-      <select name="categories" multiple size="4">
-        <!-- categories populated dynamically -->
-      </select>
+      <div id="custom-category-select" class="category-chips">
+        <!-- Dynamically populated checkboxes will go here -->
+      </div>
+      <input type="hidden" name="categories" id="hidden-categories" />
+      
       <select name="qr_type">
         <option value="">All QR Types</option>
       </select>
