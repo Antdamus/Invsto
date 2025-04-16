@@ -1005,6 +1005,20 @@ function applyFiltersFromURL() {
 
   if (params.page) currentPage = parseInt(params.page);
   if (params.sort) document.getElementById("sort-select").value = params.sort;
+
+  if (params.categories) {
+    const catSet = new Set(params.categories.split(","));
+    document.querySelectorAll(".dropdown-option").forEach(el => {
+      if (catSet.has(el.dataset.cat)) {
+        el.classList.add("selected");
+      }
+    });
+  }
+  if (params.matchAll === "true") {
+    const matchToggle = document.getElementById("match-all-toggle");
+    if (matchToggle) matchToggle.checked = true;
+  }
+  
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
