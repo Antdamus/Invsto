@@ -876,4 +876,9 @@ body.stock-body {
 }
 
 
+.filter-chip.removing {
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
 

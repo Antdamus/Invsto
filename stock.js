@@ -37,23 +37,28 @@ function updateFilterChips(filters) {
     chip.className = "filter-chip";
     chip.innerHTML = `${label} <button data-key="${key}">&times;</button>`;
     chip.querySelector("button").addEventListener("click", () => {
-      if (key === "categories") {
-        document.querySelectorAll(".dropdown-option.selected").forEach(el => {
-          if (el.dataset.cat === label.split(": ")[1]) {
-            el.classList.remove("selected");
-          }
-        });
-      } else {
-        const input = document.querySelector(`[name="${key}"]`);
-        if (input) input.value = "";
-      }
-      
-      currentPage = 1;
-      const filtered = getFilteredItems();
-      applySortAndRender(filtered);
-      updateFilterChips(getActiveFilters());
-      updateURLFromForm();
+      chip.classList.add("removing");
+    
+      setTimeout(() => {
+        if (key === "categories") {
+          document.querySelectorAll(".dropdown-option.selected").forEach(el => {
+            if (el.dataset.cat === label.split(": ")[1]) {
+              el.classList.remove("selected");
+            }
+          });
+        } else {
+          const input = document.querySelector(`[name="${key}"]`);
+          if (input) input.value = "";
+        }
+    
+        currentPage = 1;
+        const filtered = getFilteredItems();
+        applySortAndRender(filtered);
+        updateFilterChips(getActiveFilters());
+        updateURLFromForm();
+      }, 200); // match the transition duration
     });
+    
     chipContainer.appendChild(chip);
   };
 
