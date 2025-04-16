@@ -318,42 +318,53 @@ async function fetchStockItems() {
 
 function populateDropdowns(data) {
   const qrTypeSelect = document.querySelector("select[name='qr_type']");
-  const categoryContainer = document.getElementById("custom-category-select");
-
   const categories = new Set();
-  data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
+data.forEach(item => (item.categories || []).forEach(cat => categories.add(cat)));
 
-  // Clear existing
-  categoryContainer.innerHTML = "";
+const dropdownMenu = document.getElementById("category-dropdown-menu");
+const dropdownToggle = document.getElementById("category-dropdown-toggle");
 
-  [...categories].forEach(cat => {
-    const checkbox = document.createElement("label");
-    checkbox.style.marginRight = "12px";
-    checkbox.innerHTML = `
-      <input type="checkbox" value="${cat}" class="category-checkbox"> ${cat}
-    `;
-    categoryContainer.appendChild(checkbox);
-  });
+dropdownMenu.innerHTML = ""; // Clear existing
+dropdownToggle.onclick = () => {
+  dropdownMenu.classList.toggle("show");
+};
 
-  // Populate QR dropdown
-  const qrTypes = [...new Set(data.map(item => item.qr_type).filter(Boolean))];
-  qrTypeSelect.innerHTML = `<option value="">All QR Types</option>`;
-  for (const q of qrTypes) {
-    const option = document.createElement("option");
-    option.value = q;
-    option.textContent = q;
-    qrTypeSelect.appendChild(option);
+// Close when clicking outside
+document.addEventListener("click", (e) => {
+  if (!dropdownMenu.contains(e.target) && e.target !== dropdownToggle) {
+    dropdownMenu.classList.remove("show");
   }
+});
 
-  categoryContainer.querySelectorAll("input[type='checkbox']").forEach(cb => {
-    cb.addEventListener("change", () => {
-      currentPage = 1;
-      const filtered = getFilteredItems();
-      applySortAndRender(filtered);
-      updateFilterChips(getActiveFilters());
-      updateURLFromForm();
-    });
+// Build category checkboxes
+[...categories].forEach(cat => {
+  const wrapper = document.createElement("label");
+  wrapper.className = "dropdown-option";
+  wrapper.innerHTML = `<span>${cat}</span>`;
+wrapper.dataset.cat = cat;
+wrapper.addEventListener("click", () => {
+  wrapper.classList.toggle("selected");
+  currentPage = 1;
+  const filtered = getFilteredItems();
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+  updateURLFromForm();
+});
+
+  dropdownMenu.appendChild(wrapper);
+});
+
+// Listen for changes
+dropdownMenu.querySelectorAll(".category-checkbox").forEach(cb => {
+  cb.addEventListener("change", () => {
+    currentPage = 1;
+    const filtered = getFilteredItems();
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+    updateURLFromForm();
   });
+});
+
   
 }
 
@@ -415,7 +426,7 @@ function getFilteredItems() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    categories: [...document.querySelectorAll(".category-checkbox:checked")].map(cb => cb.value),
+    categories: [...document.querySelectorAll(".dropdown-option.selected")].map(el => el.dataset.cat),
     qr_type: formData.get("qr_type"),
   };
 
@@ -476,7 +487,7 @@ function getActiveFilters() {
     stockMax: parseOrNull(formData.get("stockMax")),
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
-    categories: [...document.querySelectorAll(".category-checkbox:checked")].map(cb => cb.value),
+    categories: [...document.querySelectorAll(".dropdown-option.selected")].map(el => el.dataset.cat),
     qr_type: formData.get("qr_type")
   };
 }

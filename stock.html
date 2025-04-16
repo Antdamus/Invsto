@@ -13,21 +13,16 @@
     <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
   </header>
 
-  <!-- ✨ Filter Toggle Button -->
   <div class="filter-toggle-container">
     <button id="toggle-filters" class="filter-toggle-btn">🔍 Show Filters</button>
   </div>
 
-  <!-- 🔍 Filter Form Section -->
   <section class="stock-filters collapse" id="filter-section">
     <form id="filter-form">
-      <!-- General -->
       <input type="text" name="title" placeholder="Search title..." />
       <input type="text" name="description" placeholder="Search description..." />
       <input type="text" name="barcode" placeholder="Search barcode..." />
       <input type="text" name="distributor" placeholder="Distributor name..." />
-
-      <!-- Numeric -->
       <input type="number" name="weightMin" placeholder="Min weight" />
       <input type="number" name="weightMax" placeholder="Max weight" />
       <input type="number" name="costMin" placeholder="Min cost" />
@@ -39,33 +34,32 @@
       <input type="date" name="createdFrom" placeholder="Created From..." />
       <input type="date" name="createdTo" placeholder="Created To..." />
 
-
-      <!-- Dropdowns -->
       <label class="match-mode-toggle">
         <input type="checkbox" id="match-all-toggle" />
         Match <strong>all</strong> selected categories
       </label>
-      <div id="custom-category-select" class="category-chips">
-        <!-- Dynamically populated checkboxes will go here -->
+
+      <!-- 🔽 Custom Dropdown Menu for Categories -->
+      <div class="custom-dropdown" id="category-dropdown-container">
+        <button type="button" class="dropdown-toggle" id="category-dropdown-toggle">Select Categories ⏷</button>
+        <div class="dropdown-menu" id="category-dropdown-menu">
+          <!-- Checkboxes added by JS -->
+        </div>
       </div>
       <input type="hidden" name="categories" id="hidden-categories" />
-      
+
       <select name="qr_type">
         <option value="">All QR Types</option>
       </select>
 
-      <!-- Controls -->
       <div class="filter-buttons">
         <button type="button" id="clear-filters">🧼 Clear Filters</button>
         <button type="button" id="export-csv">📤 Export CSV</button>
         <button type="button" id="export-pdf">📄 Export PDF</button>
       </div>
     </form>
-
-
   </section>
 
-  <!-- ⭐ Favorite Filter Toggle -->
   <div id="favorite-toggle-container">
     <label class="favorite-toggle">
       <input type="checkbox" id="show-favorites-only">
@@ -91,9 +85,8 @@
     </select>
   </div>
 
-  <!-- 🔍 Filter Chips -->
   <div id="filter-chips" class="filter-chips"></div>
-  <!-- 📊 Pagination Controls -->
+
   <div class="pagination-controls">
     <div class="page-size">
       <label for="cards-per-page">Cards per page:</label>
@@ -104,45 +97,31 @@
         <option value="48">48</option>
       </select>
     </div>
-
-    <div id="pagination-buttons" class="pagination-buttons">
-      <!-- Page buttons will be inserted here dynamically -->
-    </div>
+    <div id="pagination-buttons" class="pagination-buttons"></div>
   </div>
-  
-  <!-- 🧰 Bulk Action Toolbar -->
+
   <div id="bulk-toolbar" class="bulk-toolbar hidden">
     <span id="selected-count">0 selected</span>
     <button id="bulk-delete">🗑 Delete</button>
     <button id="bulk-export">📥 Export CSV</button>
     <button id="bulk-clear">❌ Clear Selection</button>
-    <button id="bulk-favorite" class="bulk-btn">
-      ⭐ Toggle Favorite
-    </button>
+    <button id="bulk-favorite" class="bulk-btn">⭐ Toggle Favorite</button>
     <select id="bulk-category" class="bulk-select">
       <option value="">Move to Category...</option>
     </select>
   </div>
 
-  <!-- 📦 Inventory Grid -->
   <main class="stock-main">
     <div id="stock-container" class="stock-grid"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
-  <!-- jsPDF & AutoTable CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-
   <script src="stock.js"></script>
 
-  <!-- 🔔 Toast Notification Container -->
   <div id="toast-container"></div>
-
-  <div id="loading-overlay">
-    <div class="spinner"></div>
-  </div>
-  
+  <div id="loading-overlay"><div class="spinner"></div></div>
 </body>
 </html>

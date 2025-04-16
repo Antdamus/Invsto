@@ -192,6 +192,7 @@ body.stock-body {
   opacity: 0;
   transition: all 0.5s ease;
   pointer-events: none;
+  overflow: visible !important;
 }
 
 .stock-filters.show {
@@ -814,6 +815,64 @@ body.stock-body {
 
 .category-chip button {
   transition: color 0.2s ease;
+}
+
+
+.custom-dropdown {
+  position: relative;
+}
+
+.dropdown-toggle {
+  width: 180px;
+  padding: 12px 16px;
+  font-family: 'DM Serif Display', serif;
+  background-color: #fafafa;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 9999;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 16px;
+  margin-top: 4px;
+  display: none;
+  max-height: 260px;
+  overflow-y: auto;
+  width: 220px; /* ✅ More room */
+  padding: 8px 0;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+}
+
+
+.dropdown-menu.show {
+  display: block;
+}
+
+.dropdown-option {
+  display: block;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dropdown-option:hover {
+  background-color: #f0f0f0;
+}
+
+.dropdown-option.selected {
+  background-color: #0071e3;
+  color: white;
+  font-weight: bold;
 }
 
 
