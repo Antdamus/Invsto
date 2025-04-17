@@ -1675,9 +1675,7 @@ function setupCategorySearch() {
 }
 
 
-window.extractFilterValues = extractFilterValues;
-window.getFilteredItems = getFilteredItems;
-/*
+/* to be able to upload functions to run them in the console
 window.extractFilterValues = extractFilterValues;
 window.getFilteredItems = getFilteredItems;
 */
