@@ -14,7 +14,7 @@ let activeDropdown = null;
 //#region
 // they are utililitieis be cause they are stateless, meaning they do not modify
 // a global variable, they just get an input, and produce an output as simple as that
-// can be tested independently by pasting them in other codes 
+// can be tested independently by pasting them in other codes     
 
 // 🔹 Toast Message Utility --> pop up message
 function showToast(message) {
@@ -180,7 +180,7 @@ function addBtn(label, page, isActive, container) {
 
   btn.addEventListener("click", () => {
     currentPage = page;
-    const filtered = getFilteredItems();
+    const filtered = getFilteredItems(allItems); // ✅ Fix: pass the full dataset
     applySortAndRender(filtered);
     updateURLFromForm();
   });
@@ -646,7 +646,7 @@ function getFilteredItems(items) {
 
 //-------------------------------------------------------------------//
 
-/* ================= User Interface Rendering Functions =========================== */
+/* ================= User Interface Rendering Functions ============= */
 //#region
 // 🔹 UI Renderer: renderStockItems(data)
 //#region
