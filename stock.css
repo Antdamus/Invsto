@@ -1003,6 +1003,7 @@ body.stock-body {
 
 .dropdown-menu.show {
   display: block;
+  position: absolute;
 }
 
 
@@ -1093,11 +1094,13 @@ body.stock-body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
   max-height: 0;
   opacity: 0;
   transition: all 0.5s ease;
   pointer-events: none;
+  position:sticky;
+  z-index: 10;;
 }
 
 .floating-filters.show {

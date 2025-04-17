@@ -505,7 +505,7 @@ function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
 
     // 🔹 Reset pagination and re-apply filtering + rendering
     currentPage = 1;
-    const filtered = getFilteredItems();
+    const filtered = getFilteredItems(allItems); 
     applySortAndRender(filtered);
     updateFilterChips(getActiveFilters());
     updateURLFromForm();
@@ -1556,6 +1556,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDropdownToggle("category-dropdown-toggle", "category-dropdown-menu");
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "❌ Hide Filters", "🔍 Show Filters");
+  setupClearFilters("clear-filters", "filter-form");
 
   // ✅ Bulk Toolbar Listeners
   document.getElementById("bulk-clear")?.addEventListener("click", () => {
