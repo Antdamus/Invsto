@@ -9,7 +9,7 @@ body.stock-body {
 
 /*---------------------------------------------------------------------------*/
 
-/* ======================= Unified Top Control Bar ============================== */
+/* ================= Unified Top Control Bar ============================== */
 /*#region*/ 
 /* #Styles the header bar that stays at the top */
 .stock-header.sticky {
@@ -129,42 +129,52 @@ body.stock-body {
 
 /*#endregion*/
 
+/*---------------------------------------------------------------------------*/
 
+/* ================= Inventory Grid, carousel style, card style =============== */
+/*#region*/ 
+/* Styles the grid layout inside <main class="stock-main"><div id="stock-container" class="stock-grid"> */
 .stock-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 24px;
-  padding-bottom: 40px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); /* Responsive columns */
+  gap: 24px;                          /* Spacing between cards */
+  padding-bottom: 40px;              /* Bottom spacing below the grid */
 }
 
+/* === Individual Inventory Card === */
+/* Applies to each item card injected inside .stock-grid */
 .stock-card {
-  background-color: #fff;
-  border-radius: 20px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+  background-color: #fff;            /* White card background */
+  border-radius: 20px;               /* Rounded corners */
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);  /* Subtle shadow for elevation */
   padding: 20px;
   display: flex;
   flex-direction: column;
-  transition: all 0.3s ease;
+  transition: all 0.3s ease;         /* Smooth hover effect */
   position: relative;
 }
 
+/* Scale effect on hover */
 .stock-card:hover {
   transform: scale(1.01);
 }
 
+/* Container that holds the image (static or carousel) */
 .stock-image-container {
   position: relative;
   margin-bottom: 12px;
 }
 
+/* Preview image inside the card */
 .stock-photo-preview {
   width: 100%;
   height: 220px;
-  object-fit: cover;
+  object-fit: cover;                /* Keeps aspect ratio, fills space */
   border-radius: 14px;
-  cursor: pointer;
+  cursor: pointer;                 /* Clickable image (modal or preview logic) */
 }
 
+/* Paragraphs inside the card content (e.g., title, weight, price, etc.) */
 .stock-content p {
   font-size: 0.95rem;
   margin: 0.2rem 0;
@@ -172,14 +182,15 @@ body.stock-body {
   position: relative;
 }
 
+/* Special styling for items that are out of stock */
 .stock-count.stock-zero {
-  color: #e63946;
+  color: #e63946;                  /* Red text for zero stock */
   font-weight: bold;
 }
 
-/* === Modal === */
+/* === Modal Viewer for Image === */
 .modal {
-  display: none;
+  display: none;                   /* Hidden by default */
   position: fixed;
   z-index: 99;
   left: 0;
@@ -187,11 +198,12 @@ body.stock-body {
   width: 100vw;
   height: 100vh;
   overflow: auto;
-  background-color: rgba(0,0,0,0.8);
+  background-color: rgba(0,0,0,0.8); /* Dark overlay */
   justify-content: center;
   align-items: center;
 }
 
+/* Enlarged image inside modal */
 .modal img {
   max-width: 90vw;
   max-height: 90vh;
@@ -199,6 +211,7 @@ body.stock-body {
   box-shadow: 0 10px 25px rgba(0,0,0,0.3);
 }
 
+/* Close icon in the modal */
 .close-modal {
   position: absolute;
   top: 30px;
@@ -209,10 +222,13 @@ body.stock-body {
   font-weight: bold;
 }
 
+/* When modal has class "show", it's visible and uses flex centering */
 .modal.show {
   display: flex;
 }
 
+/* === Carousel Styling === */
+/* Wrapper for image carousel in stock-card */
 .carousel {
   position: relative;
   width: 100%;
@@ -221,6 +237,7 @@ body.stock-body {
   border-radius: 14px;
 }
 
+/* Track that holds carousel images */
 .carousel-track {
   width: 100%;
   height: 100%;
@@ -228,19 +245,22 @@ body.stock-body {
   transition: transform 0.3s ease;
 }
 
+/* Each image in the carousel */
 .carousel-photo {
   width: 100%;
   height: 220px;
   object-fit: cover;
   flex-shrink: 0;
-  display: none;
+  display: none;                 /* Hidden unless active */
   border-radius: 14px;
 }
 
+/* Only the "active" carousel photo is shown */
 .carousel-photo.active {
   display: block;
 }
 
+/* Left/right navigation buttons on the carousel */
 .carousel-btn {
   position: absolute;
   top: 50%;
@@ -262,6 +282,10 @@ body.stock-body {
 .carousel-btn.right {
   right: 10px;
 }
+	/*#endregion*/
+
+/*---------------------------------------------------------------------------*/
+
 
 /* === Filter Toggle === */
 .filter-toggle-container {
