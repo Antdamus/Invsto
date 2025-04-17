@@ -210,10 +210,10 @@ function createFilterChip(label, key) {
       }
 
       currentPage = 1;
-      const filtered = getFilteredItems();
+      const filtered = getFilteredItems(allItems); // ✅ Pass the full dataset
       applySortAndRender(filtered);
       updateFilterChips(getActiveFilters());
-      updateURLFromForm();
+      updateURLFromForm(); // ✅ Update URL so the chip stays removed on refresh
     }, 200);
   });
 
