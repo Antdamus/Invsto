@@ -509,6 +509,7 @@ function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
     applySortAndRender(filtered);
     updateFilterChips(getActiveFilters());
     updateURLFromForm();
+    showToast("🧼 Filters cleared!");
   });
 }
 
