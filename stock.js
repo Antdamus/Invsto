@@ -610,24 +610,28 @@ function getFilteredItems(items) {
   const filters = extractFilterValues();
   const matchAll = document.getElementById("match-all-toggle")?.checked;
   console.log("matchstate:", matchAll);
+
   return items.filter(item => {
     const matchesCategory = filters.categories.length === 0 ? true :
       matchAll
         ? filters.categories.every(fCat => (item.categories || []).includes(fCat))
         : filters.categories.some(fCat => (item.categories || []).includes(fCat));
+
     return (
       (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
       (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
       (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
       (!filters.distributor || item.distributor_name?.toLowerCase().includes(filters.distributor)) &&
-      (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
-      (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
-      (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
-      (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
-      (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
-      (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
+
+      (filters.weightMin !== null ? item.weight >= filters.weightMin : true) &&
+      (filters.weightMax !== null ? item.weight <= filters.weightMax : true) &&
+      (filters.costMin !== null ? item.cost >= filters.costMin : true) &&
+      (filters.costMax !== null ? item.cost <= filters.costMax : true) &&
+      (filters.priceMin !== null ? item.sale_price >= filters.priceMin : true) &&
+      (filters.priceMax !== null ? item.sale_price <= filters.priceMax : true) &&
       (filters.stockMin !== null ? Number(item.stock || 0) >= filters.stockMin : true) &&
       (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
+
       (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
       (!filters.createdTo || item.created_at <= filters.createdTo) &&
       (!filters.qr_type || item.qr_type === filters.qr_type) &&
@@ -636,6 +640,7 @@ function getFilteredItems(items) {
     );
   });
 }
+
 
 //#endregion
 
@@ -1544,30 +1549,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   applySortAndRender(filtered);
   updateFilterChips(filters);
 
-  const filters = extractFilterValues();
-const item = allItems[0];
-
-const passes = (
-  (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
-  (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
-  (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
-  (!filters.distributor || item.distributor_name?.toLowerCase().includes(filters.distributor)) &&
-  (!isNaN(filters.weightMin) ? item.weight >= filters.weightMin : true) &&
-  (!isNaN(filters.weightMax) ? item.weight <= filters.weightMax : true) &&
-  (!isNaN(filters.costMin) ? item.cost >= filters.costMin : true) &&
-  (!isNaN(filters.costMax) ? item.cost <= filters.costMax : true) &&
-  (!isNaN(filters.priceMin) ? item.sale_price >= filters.priceMin : true) &&
-  (!isNaN(filters.priceMax) ? item.sale_price <= filters.priceMax : true) &&
-  (filters.stockMin !== null ? Number(item.stock || 0) >= filters.stockMin : true) &&
-  (filters.stockMax !== null ? Number(item.stock || 0) <= filters.stockMax : true) &&
-  (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
-  (!filters.createdTo || item.created_at <= filters.createdTo) &&
-  (!filters.qr_type || item.qr_type === filters.qr_type)
-);
-
-console.log("Does first item pass full filter logic?", passes);
-
-
 
   // 🔹 Step 5: Populate and setup UI dropdowns
   populateDropdowns(allItems);
@@ -1694,3 +1675,9 @@ function setupCategorySearch() {
 }
 
 
+window.extractFilterValues = extractFilterValues;
+window.getFilteredItems = getFilteredItems;
+/*
+window.extractFilterValues = extractFilterValues;
+window.getFilteredItems = getFilteredItems;
+*/
