@@ -972,7 +972,7 @@ function renderDropdownOptionsCustom({
     <input type="text" id="${searchId}" placeholder="${placeholder}">
     <div class="${optionsContainerClass}">
       ${options.map(opt => `
-        <div class="${optionClass}" data-cat="${opt}">${opt}</div>
+        <div class="${optionClass}" data-cat="${opt}" data-value="${opt}">${opt}</div>
       `).join("")}
     </div>
   `;
@@ -1001,25 +1001,39 @@ function renderDropdownOptionsCustom({
 
   // 🔍 Live filtering for search input
   const input = menu.querySelector(`#${searchId}`);
-  if (input) {
+  const optionsContainer = menu.querySelector(`.${optionsContainerClass}`);
+
+  if (input && optionsContainer) {
     input.addEventListener("input", (e) => {
       const search = e.target.value.toLowerCase();
       const filtered = options.filter(opt =>
         opt.toLowerCase().includes(search)
       );
-      // 🔁 Re-render recursively with filtered options
-      renderDropdownOptionsCustom({
-        menuId,
-        options: filtered,
-        items,
-        optionClass,
-        searchId,
-        placeholder,
-        optionsContainerClass,
-        onSelect
+
+      // Clear and inject just the filtered options
+      optionsContainer.innerHTML = filtered.map(opt => `
+        <div class="${optionClass}" data-cat="${opt}" data-value="${opt}">${opt}</div>
+      `).join("");
+
+      // Reattach click listeners
+      optionsContainer.querySelectorAll(`.${optionClass}`).forEach(optionEl => {
+        optionEl.addEventListener("click", () => {
+          const value = optionEl.dataset.value;
+          if (typeof onSelect === "function") {
+            onSelect(value, optionEl);
+          } else {
+            optionEl.classList.toggle("selected");
+            currentPage = 1;
+            const filteredItems = getFilteredItems(items);
+            applySortAndRender(filteredItems);
+            updateFilterChips(getActiveFilters());
+            updateURLFromForm();
+          }
+        });
       });
     });
   }
+
 }
 
 
@@ -1686,18 +1700,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   // 🔹 Step 5: Populate and setup UI dropdowns
-  populateDropdowns({
+  // create the dropdown for the filter
+  populateDropdowns({ 
     data: allItems, //data from where categories will be extracted
     column: "categories", //the name of the column from where the categories will be extracted
-    optionsContainerClass: "dropdown-options-container", //id of the div container where all the stuff will be
+    optionsContainerClass: "dropdown-options-container", //class of the div container where all the stuff will be
     toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
     menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
     optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
     searchId: "category-search", //id of the search bar (injected by html)
     placeholder: "Search categories...", //text that will show up in the search bar
   });
-  populateCategoryDropdown(allItems);
-  setupDropdownToggle("category-dropdown-toggle", "category-dropdown-menu");
+  populateCategoryDropdown(allItems); //this funciton is going to be creating the dropdown for the bulk options
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
   setupClearFilters("clear-filters", "filter-form");

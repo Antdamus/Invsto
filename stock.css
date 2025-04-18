@@ -406,7 +406,14 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   max-height: 220px;
   overflow-y: auto;
   padding-right: 4px;
+  
 }
+
+#category-search {
+  color: #1d1d1f;
+  background-color: white;
+}
+
 
 
 /*the aesthetic of the toggle is being controlled by the 
