@@ -943,62 +943,99 @@ function updateFilterChips(filters) {
   }
 }
 
-// 🔹 Builds the category dropdown menu with search and interactivity
-// ✅ Accepts:
-//   - `categories`: array of category strings to display
-//   - `items`: full inventory dataset to pass to filter logic
-function renderDropdownOptions(categories = [], items = []) {
-  const menu = document.getElementById("category-dropdown-menu");
+/**🔧 Smart Category Dropdown Renderer and searchbar with optional override
+ * @param {Object} config
+ * @param {string} config.menuId - ID of the container element
+ * @param {Array<string>} config.options - Array of strings to render
+ * @param {Array<Object>} config.items - Full dataset to filter
+ * @param {string} config.optionClass - Class for each category block
+ * @param {string} config.searchId - ID for the search input
+ * @param {string} config.placeholder - Placeholder for the search box
+ * @param {string} config.optionsContainerClass - Class around all options
+ * @param {Function} [config.onSelect] - Optional custom handler
+ */
+function renderDropdownOptionsCustom({
+  menuId,
+  options = [],
+  items = [],
+  optionClass = "dropdown-option",
+  searchId = "category-search",
+  placeholder = "Search categories...",
+  optionsContainerClass = "dropdown-options-container",
+  onSelect = null
+}) {
+  const menu = document.getElementById(menuId);
   if (!menu) return;
 
-  // Inject search input and category list into the dropdown container
-   // Build inner HTML: 
-  // - A search bar
-  // - A list of category items (clickable)
-  //note: this method will wipe out everything in the containter menu, and it will
-  //inject whatever we specify must be injected
-  //also any event listeners you had attached to that node before, they will be destroyed
-  //everytime the function is injected
+  // 🔁 Inject the search + options HTML into the container
   menu.innerHTML = `
-    <input type="text" id="category-search" placeholder="Search categories...">
-    <div class="dropdown-options-container">
-      ${categories.map(cat => `
-        <div class="dropdown-option" data-cat="${cat}">${cat}</div>
-      `).join('')}
+    <input type="text" id="${searchId}" placeholder="${placeholder}">
+    <div class="${optionsContainerClass}">
+      ${options.map(opt => `
+        <div class="${optionClass}" data-cat="${opt}">${opt}</div>
+      `).join("")}
     </div>
   `;
 
-  // 🔁 Click handler for category chips (select/deselect)
-  menu.querySelectorAll(".dropdown-option").forEach(option => {
-    option.addEventListener("click", () => {
-      option.classList.toggle("selected");
-      currentPage = 1;
-      const filteredItems = getFilteredItems(items);   // 🔸 Pass data here now
-      applySortAndRender(filteredItems);
-      updateFilterChips(getActiveFilters());
-      updateURLFromForm();
+  // ✅ Default handler (original behavior)
+  const defaultSelectHandler = (value, el) => {
+    el.classList.toggle("selected");
+    currentPage = 1;
+    const filtered = getFilteredItems(items);
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+    updateURLFromForm();
+  };
+
+  // 🔁 Setup click behavior for each option
+  menu.querySelectorAll(`.${optionClass}`).forEach(optionEl => {
+    optionEl.addEventListener("click", () => {
+      const value = optionEl.dataset.value;
+      if (typeof onSelect === "function") {
+        onSelect(value, optionEl); // pass element too if caller wants it
+      } else {
+        defaultSelectHandler(value, optionEl);
+      }
     });
   });
 
-  // 🔍 Live category search within the dropdown
-  const input = menu.querySelector("#category-search");
+  // 🔍 Live filtering for search input
+  const input = menu.querySelector(`#${searchId}`);
   if (input) {
     input.addEventListener("input", (e) => {
       const search = e.target.value.toLowerCase();
-      const filteredCats = categories.filter(cat =>
-        cat.toLowerCase().includes(search)
+      const filtered = options.filter(opt =>
+        opt.toLowerCase().includes(search)
       );
-      // 🔁 Re-render dropdown with filtered list and same items
-      renderDropdownOptions(filteredCats, items);
+      // 🔁 Re-render recursively with filtered options
+      renderDropdownOptionsCustom({
+        menuId,
+        options: filtered,
+        items,
+        optionClass,
+        searchId,
+        placeholder,
+        optionsContainerClass,
+        onSelect
+      });
     });
   }
 }
+
 
 // 🔹 Category Loader: gets unique values and triggers dropdown
 async function loadCategories(items) {
   try {
     const categories = await fetchUniqueValues({ table: "item-types", column: "category" });
-    renderDropdownOptions(categories, items); // explicitly pass both
+    renderDropdownOptionsCustom({
+      menuId: "category-dropdown-menu",
+      options: categories,
+      items: items, // required for default filter refresh
+      optionClass: "dropdown-option", //class of each of the option items
+      searchId: "category-search", //id of the search bar for costumization
+      placeholder: "Search categories...", //what the search bar will say
+      optionsContainerClass: "dropdown-options-container", //name of the container holding the options
+    }); ; // explicitly pass both
   } catch (err) {
     console.error("Failed to load categories:", err.message);
   }
@@ -1063,7 +1100,15 @@ function paginateAndRender(data) {
 // filter interface
 async function loadCategories() {
   const categories = await fetchUniqueValues({ table: "item-types", column: "category" });
-  renderDropdownOptions(categories);
+  renderDropdownOptionsCustom({
+    menuId: "category-dropdown-menu",
+    options: categories,
+    items: data, // required for default filter refresh
+    optionClass: "dropdown-option", //class of each of the option items
+    searchId: "category-search", //id of the search bar for costumization
+    placeholder: "Search categories...", //what the search bar will say
+    optionsContainerClass: "dropdown-options-container", //name of the container holding the options
+  }); ;
 }
 
 // 🔸 Get sort value from DOM, sort the data, and render
@@ -1326,7 +1371,15 @@ function populateDropdowns(data) {
   const uniqueCategories = extractUniqueFromArrayColumn(data, "categories"); // ["Diamond", "Gold", "Pendant"] etc.
 
   // 🔸 Render the dropdown with category selection options
-  renderDropdownOptions(uniqueCategories, data); // Injects live-searchable UI
+  renderDropdownOptionsCustom({
+    menuId: "category-dropdown-menu", //in the html
+    options: uniqueCategories,
+    items: data, // required for default filter refresh
+    optionClass: "dropdown-option", //class of each of the option items
+    searchId: "category-search", //id of the search bar for costumization
+    placeholder: "Search categories...", //what the search bar will say
+    optionsContainerClass: "dropdown-options-container", //name of the container holding the options html
+  }); // Injects live-searchable UI
 
   // 🔸 Setup dropdown toggle behavior
   setupDropdownToggle("category-dropdown-toggle", "category-dropdown-menu");
