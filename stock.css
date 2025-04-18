@@ -127,6 +127,72 @@ body.stock-body {
   background-color: #d0d0d0;
 }
 
+/* ========== clear filter Button Area ========== */
+/* Clear Filters button */
+#clear-filters {
+  background-color: #e5e5ea;
+  color: #1d1d1f;
+}
+
+#clear-filters:hover {
+  background-color: #d4d4d8;
+}
+
+/* ========== 🔽 Filter Toggle Button Area ========== */
+
+/* Container holding the toggle button that shows/hides filters */
+.filter-toggle-container {
+  text-align: center;
+  margin-bottom: 12px; /* space below the toggle */
+}
+
+/* Styles the actual filter toggle button ("Show/Hide Filters") */
+.filter-toggle-btn {
+  font-size: 1rem;
+  padding: 10px 20px;
+  background-color: #0071e3; /* Apple blue */
+  color: white;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+/* Hover state for the filter toggle button */
+.filter-toggle-btn:hover {
+  background-color: #005bb5; /* Darker blue on hover */
+}
+
+/* ========== ⬇️ Sort Control Dropdown (Top-right corner) ========== */
+
+/* Container wrapping the sorting <select> */
+.sort-controls {
+  max-width: 1200px;
+  margin: -20px auto 20px auto; /* Adjust vertical spacing */
+  text-align: right;
+  padding-right: 10px;
+}
+
+/* Styling for <select> used to sort by "Title", "Price", etc. */
+.sort-controls select {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+  background-color: #fafafa;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+/* Focus style for sort dropdown */
+.sort-controls select:focus {
+  border-color: #0071e3;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.2);
+}
+
+
 /*#endregion*/
 
 /*---------------------------------------------------------------------------*/
@@ -287,28 +353,13 @@ body.stock-body {
 /*---------------------------------------------------------------------------*/
 
 
-/* === Filter Toggle === */
-.filter-toggle-container {
-  text-align: center;
-  margin-bottom: 12px;
-}
+/* ================= top controller without filter =============== */
+/*#region*/ 
 
-.filter-toggle-btn {
-  font-size: 1rem;
-  padding: 10px 20px;
-  background-color: #0071e3;
-  color: white;
-  border: none;
-  border-radius: 14px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
 
-.filter-toggle-btn:hover {
-  background-color: #005bb5;
-}
+/* ========== 🧮 Filter Section Container (collapsible panel) ========== */
 
-/* === Collapsible Filter Section === */
+/* Hidden state: filter panel is collapsed */
 .stock-filters {
   max-width: 1200px;
   margin: 0 auto 40px auto;
@@ -317,10 +368,11 @@ body.stock-body {
   max-height: 0;
   opacity: 0;
   transition: all 0.5s ease;
-  pointer-events: none;
-  overflow: visible !important;
+  pointer-events: none; /* disables interaction when hidden */
+  overflow: visible !important; /* Override safety net (you’re using this with dynamic height expansion) */
 }
 
+/* Shown state: filter panel is expanded with visible inputs */
 .stock-filters.show {
   padding: 24px;
   max-height: 1200px;
@@ -328,9 +380,12 @@ body.stock-body {
   pointer-events: all;
   background-color: #ffffff;
   border-radius: 20px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06); /* Soft Apple-like drop shadow */
 }
 
+/* ========== 🧾 Inside Filter Form Layout ========== */
+
+/* Layout for the <form> element inside .stock-filters */
 .stock-filters form {
   display: flex;
   flex-wrap: wrap;
@@ -338,6 +393,7 @@ body.stock-body {
   justify-content: center;
 }
 
+/* Common style for all inputs and selects inside filter form */
 .stock-filters input,
 .stock-filters select {
   font-family: 'DM Serif Display', serif;
@@ -350,14 +406,17 @@ body.stock-body {
   transition: all 0.3s ease;
 }
 
+/* Highlighted/focused state */
 .stock-filters input:focus,
 .stock-filters select:focus {
-  border-color: #0071e3;
+  border-color: #0071e3; /* Apple blue outline */
   background-color: #fff;
   outline: none;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+
+/* Special styles for date inputs only (could probably be merged with the input styles above) */
 .stock-filters input[type="date"] {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
@@ -369,6 +428,7 @@ body.stock-body {
   width: 180px;
 }
 
+/* Focus state for date fields (duplicate of general focus) */
 .stock-filters input[type="date"]:focus {
   border-color: #0071e3;
   background-color: #fff;
@@ -376,6 +436,10 @@ body.stock-body {
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+
+/* ========== 🧼 Filter Action Buttons ( Export CSV/PDF) ========== */
+
+/* Wrapper around the action buttons under filters */
 .filter-buttons {
   display: flex;
   gap: 12px;
@@ -384,6 +448,7 @@ body.stock-body {
   margin-top: 16px;
 }
 
+/* Common style for all buttons inside .filter-buttons */
 .filter-buttons button {
   font-family: 'DM Serif Display', serif;
   padding: 10px 18px;
@@ -394,15 +459,8 @@ body.stock-body {
   transition: all 0.3s ease;
 }
 
-#clear-filters {
-  background-color: #e5e5ea;
-  color: #1d1d1f;
-}
 
-#clear-filters:hover {
-  background-color: #d4d4d8;
-}
-
+/* Export CSV button */
 #export-csv {
   background-color: #0071e3;
   color: white;
@@ -412,6 +470,7 @@ body.stock-body {
   background-color: #005bb5;
 }
 
+/* Export PDF button */
 #export-pdf {
   background-color: #0071e3;
   color: white;
@@ -421,29 +480,6 @@ body.stock-body {
   background-color: #005bb5;
 }
 
-.sort-controls {
-  max-width: 1200px;
-  margin: -20px auto 20px auto;
-  text-align: right;
-  padding-right: 10px;
-}
-
-.sort-controls select {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  padding: 10px 16px;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background-color: #fafafa;
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
-
-.sort-controls select:focus {
-  border-color: #0071e3;
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(0,113,227,0.2);
-}
 
 @media screen and (max-width: 768px) {
   .stock-filters input,
@@ -454,6 +490,8 @@ body.stock-body {
     flex-direction: column;
   }
 }
+
+
 
 /* === Pagination Controls === */
 .pagination-controls {
@@ -566,6 +604,7 @@ body.stock-body {
 .filter-chip button:hover {
   color: #000;
 }
+
 
 .favorite-btn {
   position: static;
