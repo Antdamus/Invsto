@@ -386,6 +386,32 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   background-color: #005bb5;
 }
 
+/* drop down box for where the categories of the items will show up*/
+.custom-dropdown {
+  position: relative;
+}
+
+#category-search { /*injected by renderDropdownOptions functions into the html*/
+  width: 90%;
+  padding: 8px 12px;
+  margin: 6px auto 10px auto;
+  font-size: 0.95rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f5f5f5;
+  display: block;
+}
+
+.dropdown-options-container { /*this is a class be mindful*/
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+
+/*the aesthetic of the toggle is being controlled by the 
+class dropdown-toggle and the menu by the dropdown-menu*/
+
 
 @media screen and (max-width: 768px) {
   
@@ -879,28 +905,6 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   transition: color 0.2s ease;
 }
 
-#category-search {
-  width: 90%;
-  padding: 8px 12px;
-  margin: 6px auto 10px auto;
-  font-size: 0.95rem;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: #f5f5f5;
-  display: block;
-}
-
-.custom-dropdown {
-  position: relative;
-}
-
-
-.dropdown-options-container {
-  max-height: 220px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
 .dropdown-option {
   padding: 10px 18px;
   font-size: 1rem;
@@ -920,12 +924,6 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   background-color: #0071e3;
   color: white;
   font-weight: bold;
-}
-
-/* Dropdown container alignment fix */
-.custom-dropdown {
-  position: relative;
-  z-index: 900;
 }
 
 

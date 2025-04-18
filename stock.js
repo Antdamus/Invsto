@@ -319,15 +319,22 @@ function getURLParams() {
   return Object.fromEntries(new URLSearchParams(window.location.search));
 }
 
-// 🔧 Utility: Extract a deduplicated list of categories from item data
-// ✅ Accepts: full inventory dataset
-// ✅ Returns: array of unique category names strings
-function extractUniqueCategories(data) {
-  const categories = new Set();
+/** 🔧 Extract unique values from an array-type column in a dataset
+ * @param {Array} data - Your dataset (array of objects)
+ * @param {string} key - The field name you want to extract from (e.g., "categories")
+ * @returns {Array} - Array of unique values from that column
+ */
+function extractUniqueFromArrayColumn(data, key) {
+  const unique = new Set();
+
   data.forEach(item => {
-    (item.categories || []).forEach(cat => categories.add(cat));
+    const values = item[key]; // Access the dynamic property
+    if (Array.isArray(values)) {
+      values.forEach(value => unique.add(value));
+    }
   });
-  return [...categories];
+
+  return [...unique]; // Convert Set to Array
 }
 
 // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
@@ -1316,7 +1323,7 @@ async function showCategoryDropdown(itemId, anchorElement) {
 // ✅ Automatically binds dropdown toggle behavior
 function populateDropdowns(data) {
   // 🔸 Extract all unique category names from the dataset
-  const uniqueCategories = extractUniqueCategories(data); // ["Diamond", "Gold", "Pendant"] etc.
+  const uniqueCategories = extractUniqueFromArrayColumn(data, "categories"); // ["Diamond", "Gold", "Pendant"] etc.
 
   // 🔸 Render the dropdown with category selection options
   renderDropdownOptions(uniqueCategories, data); // Injects live-searchable UI
