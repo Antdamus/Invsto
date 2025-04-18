@@ -12,6 +12,7 @@ body.stock-body {
 /* ================= Unified Top Control Bar ============================== */
 /*#region*/ 
 /* ========== 🍎 Unified Control Bar with Glassmorphic Elegance ========== */
+/* ====================== Unified Sticky Header ====================== */
 .stock-header.sticky {
   position: sticky;
   top: 0;
@@ -26,6 +27,7 @@ body.stock-body {
   transition: all 0.3s ease-in-out;
 }
 
+/* ====================== Top Controls Section ====================== */
 .top-controls {
   display: flex;
   flex-wrap: wrap;
@@ -43,8 +45,9 @@ body.stock-body {
   z-index: 800;
 }
 
+/* ====================== Universal Button + Label Styles ====================== */
 .top-controls button,
-.top-controls select,
+.top-controls .dropdown-toggle,
 .top-controls label {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
@@ -57,33 +60,8 @@ body.stock-body {
   color: #1d1d1f;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
   backdrop-filter: blur(10px);
-  transition: all 0.25s ease;
-  cursor: pointer;
-}
-
-.top-controls select {
-  background-color: rgba(250, 250, 250, 0.9);
-  border-color: #ddd;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg fill='black' height='20' viewBox='0 0 24 24' width='20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 16px 16px;
-}
-
-.top-controls select:focus {
-  outline: none;
-  border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
-  background-color: #fff;
-  animation: dropdownExpand 0.3s ease;
-}
-
-/* Animate hover for all control buttons */
-.top-controls button,
-.top-controls .dropdown-toggle,
-.top-controls label.favorite-toggle {
   transition: all 0.3s ease;
+  cursor: pointer;
 }
 
 .top-controls button:hover,
@@ -94,18 +72,7 @@ body.stock-body {
   transform: translateY(-1px);
 }
 
-@keyframes dropdownExpand {
-  0% {
-    transform: scaleY(0.95);
-    opacity: 0.6;
-  }
-  100% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
-
-/* Back button refined */
+/* ====================== Back Button ====================== */
 .back-button {
   display: flex;
   justify-content: center;
@@ -128,6 +95,7 @@ body.stock-body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
+/* ====================== Clear Button ====================== */
 .top-controls .btn-clear {
   background: rgba(240, 240, 245, 0.6);
   color: #1d1d1f;
@@ -137,7 +105,7 @@ body.stock-body {
   background-color: rgba(220, 220, 230, 0.9);
 }
 
-/* Favorites toggle */
+/* ====================== Favorites Toggle ====================== */
 .top-controls label.favorite-toggle {
   display: flex;
   align-items: center;
@@ -151,12 +119,6 @@ body.stock-body {
   transform: scale(1.3);
   accent-color: gold;
   cursor: pointer;
-}
-
-.top-controls label.favorite-toggle input {
-  transform: scale(1.3);
-  accent-color: gold;
-  cursor: pointer;
   transition: all 0.25s ease;
 }
 
@@ -164,15 +126,10 @@ body.stock-body {
   filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5));
 }
 
-/* Sort Dropdown (Custom) */
+/* ====================== Custom Sort Dropdown ====================== */
 .custom-sort-dropdown {
   position: relative;
   font-family: 'DM Serif Display', serif;
-}
-
-/* Fix for custom sort dropdown — remove select-style arrow */
-.custom-sort-dropdown select {
-  background-image: none !important; /* Remove default arrow */
 }
 
 .dropdown-toggle {
@@ -190,6 +147,12 @@ body.stock-body {
   transition: all 0.3s ease;
 }
 
+/* Remove native select arrows if any were inherited */
+.custom-sort-dropdown select {
+  background-image: none !important;
+}
+
+/* Dropdown Menu */
 .dropdown-menu {
   position: absolute;
   top: 110%;
@@ -221,6 +184,7 @@ body.stock-body {
   background: rgba(0, 113, 227, 0.07);
 }
 
+/* ====================== Keyframe Animations ====================== */
 @keyframes dropdownFade {
   from {
     opacity: 0;
@@ -229,6 +193,17 @@ body.stock-body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes dropdownExpand {
+  0% {
+    transform: scaleY(0.95);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
   }
 }
 

@@ -552,7 +552,7 @@ function setupCustomSortDropdown() {
       const selectedLabel = optionEl.textContent;
 
       // ✏️ Update button label
-      toggle.innerHTML = `${selectedLabel} <span class="material-icons">expand_more</span>`;
+      toggle.innerHTML = `${selectedLabel} <span class="material-icons"></span>`;
 
       // 🧪 Sync with hidden native input
       const nativeSelect = document.getElementById("sort-select");
