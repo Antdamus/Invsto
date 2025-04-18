@@ -136,101 +136,8 @@ body.stock-body {
 }
 
 /*all the elements of the sort box in the central panel are being formated
-based on the general class look*/
+based on the general class look dropdown-toggle and dropdown-menu*/
 
-.dropdown-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-  cursor: pointer;
-  transition: all 0.3s ease;
-  animation: dropdownExpand 1s ease;
-}
-
-.dropdown-toggle:hover {
-  background: rgba(255, 255, 255, 0.55);
-  transform: scale(1.02);
-}
-
-.dropdown-toggle::after {
-  content: "\25BE";
-  font-size: 0.9rem;
-  margin-left: 8px;
-  color: #333;
-}
-
-
-/* Dropdown Menu */
-
-.dropdown-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 6px;
-  z-index: 9999;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(14px) saturate(200%);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 20px;
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
-  padding: 10px 0;
-  width: 240px;
-  max-height: 300px;
-  overflow-y: auto;
-  display: none;
-  animation: dropdownFadeIn 0.25s ease-out forwards;
-  transition: max-height 0.3s ease;
-}
-
-
-
-.dropdown-menu li {
-  padding: 10px 20px;
-  cursor: pointer;
-  transition: background 0.2s;
-  font-size: 1rem;
-  white-space: nowrap;
-}
-
-.dropdown-menu li:hover {
-  background: rgba(0, 113, 227, 0.07);
-}
-
-.dropdown-menu.show {
-  display: block;
-  position: absolute;
-}
-
-
-/* ====================== Keyframe Animations ====================== */
-@keyframes dropdownFade {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes dropdownExpand {
-  0% {
-    transform: scaleY(0.95);
-    opacity: 0.6;
-  }
-  100% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
 
 /*#endregion*/
 
@@ -394,6 +301,35 @@ based on the general class look*/
 
 /* ================= filter region =============================*/
 /*#region*/ 
+
+/* === Floating Filter HUD Enhancements === */
+.floating-filters {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0;
+  overflow: visible;
+  max-height: 0;
+  opacity: 0;
+  transition: all 0.5s ease;
+  pointer-events: none;
+  position:sticky;
+  z-index: 10;;
+}
+
+.floating-filters.show {
+  margin-top: 24px;
+  padding: 32px 24px;
+  max-height: 1600px;
+  opacity: 1;
+  pointer-events: all;
+  backdrop-filter: blur(18px) saturate(180%);
+  background-color: rgba(255, 255, 255, 0.45);
+  border-radius: 24px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  animation: fadeSlideDown 0.3s ease;
+}
+
 /* === Filter Grid Layout === */
 .filter-grid {
   display: grid;
@@ -402,93 +338,13 @@ based on the general class look*/
   align-items: center;
 }
 
-/* === Filter Actions Row === */
+/* === Filter Actions Row,like csv and pdf export === */
 .filter-actions {
   display: flex;
   justify-content: center;
   gap: 16px;
   margin-top: 24px;
 }
-
-/* Hidden state: filter panel is collapsed */
-.stock-filters {
-  max-width: 1200px;
-  margin: 0 auto 40px auto;
-  padding: 0;
-  overflow: hidden;
-  max-height: 0;
-  opacity: 0;
-  transition: all 0.5s ease;
-  pointer-events: none; /* disables interaction when hidden */
-  overflow: visible !important; /* Override safety net (you’re using this with dynamic height expansion) */
-}
-
-/* Shown state: filter panel is expanded with visible inputs */
-.stock-filters.show {
-  padding: 24px;
-  max-height: 1200px;
-  opacity: 1;
-  pointer-events: all;
-  background-color: #ffffff;
-  border-radius: 20px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06); /* Soft Apple-like drop shadow */
-}
-
-/* ========== 🧾 Inside Filter Form Layout ========== */
-
-/* Layout for the <form> element inside .stock-filters */
-.stock-filters form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-}
-
-/* Common style for all inputs and selects inside filter form */
-.stock-filters input,
-.stock-filters select {
-  font-family: 'DM Serif Display', serif;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background-color: #fafafa;
-  font-size: 1rem;
-  width: 180px;
-  transition: all 0.3s ease;
-}
-
-/* Highlighted/focused state */
-.stock-filters input:focus,
-.stock-filters select:focus {
-  border-color: #0071e3; /* Apple blue outline */
-  background-color: #fff;
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
-}
-
-
-/* Special styles for date inputs only (could probably be merged with the input styles above) */
-.stock-filters input[type="date"] {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  border-radius: 12px;
-  border: 1px solid #ccc;
-  background-color: #fafafa;
-  padding: 12px 16px;
-  transition: all 0.3s ease;
-  width: 180px;
-}
-
-/* Focus state for date fields (duplicate of general focus) */
-.stock-filters input[type="date"]:focus {
-  border-color: #0071e3;
-  background-color: #fff;
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
-}
-
-
-/* ========== 🧼 Filter Action Buttons ( Export CSV/PDF) ========== */
 
 /* Wrapper around the action buttons under filters */
 .filter-buttons {
@@ -509,7 +365,6 @@ based on the general class look*/
   border: none;
   transition: all 0.3s ease;
 }
-
 
 /* Export CSV button */
 #export-csv {
@@ -533,10 +388,7 @@ based on the general class look*/
 
 
 @media screen and (max-width: 768px) {
-  .stock-filters input,
-  .stock-filters select {
-    width: 100%;
-  }
+  
   .filter-buttons {
     flex-direction: column;
   }
@@ -1077,51 +929,10 @@ based on the general class look*/
 }
 
 
-
-@keyframes dropdownFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-
 .filter-chip.removing {
   opacity: 0;
   transform: scale(0.8);
   transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-/* === Floating Filter HUD Enhancements === */
-.floating-filters {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0;
-  overflow: visible;
-  max-height: 0;
-  opacity: 0;
-  transition: all 0.5s ease;
-  pointer-events: none;
-  position:sticky;
-  z-index: 10;;
-}
-
-.floating-filters.show {
-  margin-top: 24px;
-  padding: 32px 24px;
-  max-height: 1600px;
-  opacity: 1;
-  pointer-events: all;
-  backdrop-filter: blur(18px) saturate(180%);
-  background-color: rgba(255, 255, 255, 0.45);
-  border-radius: 24px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  animation: fadeSlideDown 0.3s ease;
 }
 
 
@@ -1170,5 +981,99 @@ based on the general class look*/
   padding-top: 12px;
 }
 
+/*---------------------------------------------------------------------------*/
+
+/* ============= general class style ====================*/
+/*#region*/ 
+  /* dropdown toggle and menu it shows when you toggle style */
+  /*#region*/ 
+    .dropdown-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.35);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      animation: dropdownExpand 1s ease;
+    }
+
+    .dropdown-toggle:hover {
+      background: rgba(255, 255, 255, 0.55);
+      transform: scale(1.02);
+    }
+
+    .dropdown-toggle::after {
+      content: "\25BE";
+      font-size: 0.9rem;
+      margin-left: 8px;
+      color: #333;
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      margin-top: 6px;
+      z-index: 9999;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(14px) saturate(200%);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 20px;
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
+      padding: 10px 0;
+      width: 240px;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+      animation: dropdownFadeIn 0.25s ease-out forwards;
+      transition: max-height 0.3s ease;
+    }
+
+    .dropdown-menu li {
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-size: 1rem;
+      white-space: nowrap;
+    }
+
+    .dropdown-menu li:hover {
+      background: rgba(0, 113, 227, 0.07);
+    }
+
+    .dropdown-menu.show {
+      display: block;
+      position: absolute;
+    }
+
+    @keyframes dropdownFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes dropdownExpand {
+      0% {
+        transform: scaleY(0.95);
+        opacity: 0.6;
+      }
+      100% {
+        transform: scaleY(1);
+        opacity: 1;
+      }
+    }
+  /*#endregion*/ 
+/*#endregion*/ 
 
 
