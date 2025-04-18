@@ -366,11 +366,24 @@ body.stock-body {
 /*---------------------------------------------------------------------------*/
 
 
-/* ================= top controller without filter =============== */
+/* ================= filter region =============== */
 /*#region*/ 
 
+/* === Filter Grid Layout === */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: center;
+}
 
-/* ========== 🧮 Filter Section Container (collapsible panel) ========== */
+/* === Filter Actions Row === */
+.filter-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+}
 
 /* Hidden state: filter panel is collapsed */
 .stock-filters {
@@ -1193,24 +1206,9 @@ body.stock-body {
 }
 
 
-/* === Filter Grid Layout === */
-.filter-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
-  align-items: center;
-}
 
-/* === Filter Actions Row === */
-.filter-actions {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  margin-top: 24px;
-}
 
 .filter-actions button,
-.top-controls button,
 .bulk-toolbar button {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
@@ -1225,39 +1223,10 @@ body.stock-body {
 }
 
 .filter-actions button:hover,
-.top-controls button:hover,
 .bulk-toolbar button:hover {
   background: rgba(255, 255, 255, 0.55);
   border-color: rgba(0, 0, 0, 0.1);
   transform: scale(1.015);
-}
-
-#export-csv,
-#export-pdf {
-  background-color: #0071e3;
-  color: white;
-}
-
-#export-csv:hover,
-#export-pdf:hover {
-  background-color: #005bb5;
-}
-
-/* === Top Control Bar === */
-.top-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  align-items: center;
-  padding: 16px 20px;
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-  max-width: 1200px;
-  margin: 0 auto 16px;
-  position: relative;
-  z-index: 800;
 }
 
 /* Optional sticky behavior */
