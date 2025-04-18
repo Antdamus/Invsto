@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="stock.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
 </head>
 <body class="stock-body">
@@ -18,20 +19,40 @@
         <input type="checkbox" id="show-favorites-only">
         Show Only Favorites
       </label>
-      <select id="sort-select">
-        <option value="">Sort By...</option>
-        <option value="title-asc">Title (A–Z)</option>
-        <option value="title-desc">Title (Z–A)</option>
-        <option value="weight-asc">Weight (Low → High)</option>
-        <option value="weight-desc">Weight (High → Low)</option>
-        <option value="cost-asc">Cost (Low → High)</option>
-        <option value="cost-desc">Cost (High → Low)</option>
-        <option value="price-asc">Sale Price (Low → High)</option>
-        <option value="price-desc">Sale Price (High → Low)</option>
-        <option value="stock-asc">Stock (Low → High)</option>
-        <option value="stock-desc">Stock (High → Low)</option>
-        <option value="date-desc">Date Created (Newest)</option>
-        <option value="date-asc">Date Created (Oldest)</option>
+      <!-- 🔽 Custom Sort Dropdown -->
+      <div class="custom-sort-dropdown">
+        <button id="sortDropdownToggle" class="dropdown-toggle">
+          Sort By...
+        </button>
+        <ul id="sortDropdownMenu" class="dropdown-menu">
+          <li data-value="title-asc">Title (A–Z)</li>
+          <li data-value="title-desc">Title (Z–A)</li>
+          <li data-value="weight-asc">Weight (Low → High)</li>
+          <li data-value="weight-desc">Weight (High → Low)</li>
+          <li data-value="cost-asc">Cost (Low → High)</li>
+          <li data-value="cost-desc">Cost (High → Low)</li>
+          <li data-value="price-asc">Sale Price (Low → High)</li>
+          <li data-value="price-desc">Sale Price (High → Low)</li>
+          <li data-value="stock-asc">Stock (Low → High)</li>
+          <li data-value="stock-desc">Stock (High → Low)</li>
+          <li data-value="date-desc">Date Created (Newest)</li>
+          <li data-value="date-asc">Date Created (Oldest)</li>
+        </ul>
+      </div>
+      <!-- Hidden select for syncing custom sort value (required by JS) -->
+      <select id="sort-select" style="display: none;">
+        <option value="title-asc"></option>
+        <option value="title-desc"></option>
+        <option value="weight-asc"></option>
+        <option value="weight-desc"></option>
+        <option value="cost-asc"></option>
+        <option value="cost-desc"></option>
+        <option value="price-asc"></option>
+        <option value="price-desc"></option>
+        <option value="stock-asc"></option>
+        <option value="stock-desc"></option>
+        <option value="date-desc"></option>
+        <option value="date-asc"></option>
       </select>
       <button id="toggle-filters" class="filter-toggle-btn">Filters</button>
       <button type="button" id="clear-filters" class="btn-clear">Clear</button>

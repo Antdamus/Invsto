@@ -513,6 +513,69 @@ function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
   });
 }
 
+// 🔧 UI Setup Utility: setupCustomSortDropdown
+// ✅ Attaches custom dropdown behavior to a sort dropdown container
+// ✅ Replaces native <select> with animated, Apple-style interaction
+// ✅ Parameters:
+//    - containerId: the outer <div> ID of the custom dropdown
+//
+// ✅ Behavior:
+//    - Toggles visibility on click
+//    - Animates dropdown unfold using CSS classes
+//    - Closes when clicking outside
+//    - Writes selected option to hidden <input id="sort-select">
+//    - Triggers filtering pipeline
+// 🔧 UI Setup Utility: setupCustomSortDropdown
+// ✅ Attaches custom dropdown behavior to your structure
+// ✅ HTML structure expected:
+// <div class="custom-sort-dropdown">
+//   <button id="sortDropdownToggle" class="dropdown-toggle">...</button>
+//   ul id="sortDropdownMe
+function setupCustomSortDropdown() {
+  const toggle = document.getElementById("sortDropdownToggle");
+  const menu = document.getElementById("sortDropdownMenu");
+  const container = toggle?.closest(".custom-sort-dropdown");
+
+  if (!toggle || !menu || !container) return;
+
+  // 🔁 Toggle menu on button click
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("show");
+    container.classList.toggle("active");
+  });
+
+  // 🔁 Handle option click inside dropdown
+  menu.querySelectorAll("li").forEach((optionEl) => {
+    optionEl.addEventListener("click", () => {
+      const selectedValue = optionEl.getAttribute("data-value");
+      const selectedLabel = optionEl.textContent;
+
+      // ✏️ Update button label
+      toggle.innerHTML = `${selectedLabel} <span class="material-icons">expand_more</span>`;
+
+      // 🧪 Sync with hidden native input
+      const nativeSelect = document.getElementById("sort-select");
+      if (nativeSelect) {
+        nativeSelect.value = selectedValue;
+        nativeSelect.dispatchEvent(new Event("change"));
+      }
+
+      // 🎬 Close dropdown
+      menu.classList.remove("show");
+      container.classList.remove("active");
+    });
+  });
+
+  // ✋ Close dropdown if clicked outside
+  document.addEventListener("click", (e) => {
+    if (!container.contains(e.target)) {
+      menu.classList.remove("show");
+      container.classList.remove("active");
+    }
+  });
+}
+
 // ================= Carousel Navigation Utilities =================
 
 // 🔹 Move to next image in carousel for a given card
@@ -1558,6 +1621,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
   setupClearFilters("clear-filters", "filter-form");
+  setupCustomSortDropdown("custom-sort-dropdown");
 
   // ✅ Bulk Toolbar Listeners
   document.getElementById("bulk-clear")?.addEventListener("click", () => {
