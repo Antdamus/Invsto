@@ -1366,23 +1366,34 @@ async function showCategoryDropdown(itemId, anchorElement) {
 // ✅ Replaces manual DOM creation with modular logic
 // ✅ Splits concerns using helper utilities
 // ✅ Automatically binds dropdown toggle behavior
-function populateDropdowns(data) {
-  // 🔸 Extract all unique category names from the dataset
-  const uniqueCategories = extractUniqueFromArrayColumn(data, "categories"); // ["Diamond", "Gold", "Pendant"] etc.
+function populateDropdowns({
+  data,
+  menuId,
+  toggleId,
+  column,
+  optionClass = "dropdown-option",
+  optionsContainerClass = "dropdown-options-container",
+  searchId = "dropdown-search",
+  placeholder = "Search...",
+  onSelect = null,
+}) {
+  // 🔸 Extract unique values from the specified column
+  const options = extractUniqueFromArrayColumn(data, column);
 
-  // 🔸 Render the dropdown with category selection options
+  // 🔸 Render the dropdown with those options
   renderDropdownOptionsCustom({
-    menuId: "category-dropdown-menu", //in the html
-    options: uniqueCategories,
-    items: data, // required for default filter refresh
-    optionClass: "dropdown-option", //class of each of the option items
-    searchId: "category-search", //id of the search bar for costumization
-    placeholder: "Search categories...", //what the search bar will say
-    optionsContainerClass: "dropdown-options-container", //name of the container holding the options html
-  }); // Injects live-searchable UI
+    menuId,
+    options,
+    items: data,
+    optionClass,
+    optionsContainerClass,
+    searchId,
+    placeholder,
+    onSelect,
+  });
 
-  // 🔸 Setup dropdown toggle behavior
-  setupDropdownToggle("category-dropdown-toggle", "category-dropdown-menu");
+  // 🔸 Setup toggle behavior
+  setupDropdownToggle(toggleId, menuId);
 }
 
 // 🔹 Controller Function: Combines both helpers to populate category dropdown
@@ -1675,7 +1686,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   // 🔹 Step 5: Populate and setup UI dropdowns
-  populateDropdowns(allItems);
+  populateDropdowns({
+    data: allItems, //data from where categories will be extracted
+    column: "categories", //the name of the column from where the categories will be extracted
+    optionsContainerClass: "dropdown-options-container", //id of the div container where all the stuff will be
+    toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
+    menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
+    optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
+    searchId: "category-search", //id of the search bar (injected by html)
+    placeholder: "Search categories...", //text that will show up in the search bar
+  });
   populateCategoryDropdown(allItems);
   setupDropdownToggle("category-dropdown-toggle", "category-dropdown-menu");
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
