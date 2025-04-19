@@ -1933,6 +1933,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (exportCards.length === 0) return;
     exportCardsToCSV(exportCards);
   });
+
+  //listener for the toggle filter
+  document.querySelectorAll(".filter-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const content = btn.nextElementSibling;
+      content.classList.toggle("show");
+    });
+  });
+
+// 🔘 Filter Tab Switching Logic for Horizontal Filter Buttons
+const tabButtons = document.querySelectorAll('.filter-tab-btn');
+const tabContents = document.querySelectorAll('.filter-tab-content');
+
+tabButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    const targetTab = button.getAttribute('data-tab');
+
+    // 🔄 Remove active class from all buttons
+    tabButtons.forEach(btn => btn.classList.remove('active'));
+
+    // 🔄 Hide all tab contents
+    tabContents.forEach(content => content.classList.remove('active'));
+
+    // ✅ Activate the clicked button
+    button.classList.add('active');
+
+    // ✅ Show corresponding content panel
+    const contentToShow = document.getElementById(`tab-${targetTab}`);
+    if (contentToShow) contentToShow.classList.add('active');
+  });
+});
+
+
+  
 });
 
 
