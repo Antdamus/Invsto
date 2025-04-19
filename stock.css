@@ -303,6 +303,7 @@ based on the general class look dropdown-toggle and dropdown-menu*/
 /*#region*/ 
 
 /* ================= Beautiful Floating Filter HUD ================= */
+
 .floating-filters {
   max-width: 1200px;
   margin: 32px auto;
@@ -313,7 +314,7 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   transition: all 0.5s ease;
   pointer-events: none;
   position: sticky;
-  top: 0;
+  top: clamp(130px, 10vh, 160px);
   z-index: 10;
   border-radius: 28px;
   backdrop-filter: blur(22px) saturate(180%);
@@ -417,6 +418,10 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   position: absolute;
   width: 100%;
   max-width: 100%;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 @media screen and (max-width: 768px) {
