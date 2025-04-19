@@ -135,6 +135,11 @@ body.stock-body {
   background-image: none !important;
 }
 
+.custom-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
 /*all the elements of the sort box in the central panel are being formated
 based on the general class look dropdown-toggle and dropdown-menu*/
 
@@ -1233,7 +1238,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
     .dropdown-menu.show {
       display: block;
-      position: absolute;
     }
 
     @keyframes dropdownFadeIn {
