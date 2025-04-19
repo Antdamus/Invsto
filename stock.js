@@ -199,8 +199,15 @@ function createFilterChip(label, key) {
 
     setTimeout(() => {
       if (key === "categories") {
-        document.querySelectorAll(".dropdown-option.selected").forEach(el => {
+        document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
           if (el.dataset.cat === label.split(": ")[1]) {
+            el.classList.remove("selected");
+          }
+        });
+        
+      } else if (key === "qr_type") {
+        document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
+          if (el.dataset.qr === label.split(": ")[1]) {
             el.classList.remove("selected");
           }
         });
@@ -219,6 +226,7 @@ function createFilterChip(label, key) {
 
   return chip;
 }
+
 
 // 🔹 Utility: Extract Filter Values from Form and UI
 // ✅ Used by both `getActiveFilters()` and `getFilteredItems()` to avoid duplication
@@ -245,8 +253,11 @@ function extractFilterValues() {
     createdFrom: normalizeDate(formData.get("createdFrom")),
     createdTo: normalizeDate(formData.get("createdTo")),
 
-    categories: [...document.querySelectorAll(".dropdown-option.selected")].map(el => el.dataset.cat),
-    qr_type: formData.get("qr_type")
+    categories: [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
+      .map(el => el.dataset.cat)
+      .filter(Boolean),
+    qr_type: [...document.querySelectorAll('.dropdown-option.selected[data-qr]')].map(el => el.dataset.qr)
+
   };
 }
 
@@ -324,18 +335,29 @@ function getURLParams() {
  * @param {string} key - The field name you want to extract from (e.g., "categories")
  * @returns {Array} - Array of unique values from that column
  */
-function extractUniqueFromArrayColumn(data, key) {
-  const unique = new Set();
+function extractUniqueFromArrayColumn(data, column) {
+  const uniqueSet = new Set();
 
   data.forEach(item => {
-    const values = item[key]; // Access the dynamic property
-    if (Array.isArray(values)) {
-      values.forEach(value => unique.add(value));
+    let values = item[column];
+
+    if (typeof values === "string") {
+      values = [values]; // Wrap single string in array
+    } else if (!Array.isArray(values)) {
+      values = []; // Ignore invalid types
     }
+
+    values.forEach(val => {
+      if (typeof val === "string" && val.trim() !== "") {
+        uniqueSet.add(val.trim());
+      }
+    });
   });
 
-  return [...unique]; // Convert Set to Array
+  return Array.from(uniqueSet);
 }
+
+
 
 // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
 // ✅ Accepts: toggle button ID and dropdown menu ID
@@ -506,9 +528,13 @@ function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
     form.reset();
 
     // 🔹 Deselect any selected category chips
-    document.querySelectorAll(".dropdown-option.selected").forEach(el =>
+    document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el =>
       el.classList.remove("selected")
     );
+    document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el =>
+      el.classList.remove("selected")
+    );
+    
 
     // 🔹 Reset pagination and re-apply filtering + rendering
     currentPage = 1;
@@ -642,8 +668,18 @@ function applyFiltersFromURL() {
   // 📂 Pre-select categories from URL (comma-separated list)
   if (params.categories) {
     const catSet = new Set(params.categories.split(","));
-    document.querySelectorAll(".dropdown-option").forEach(el => {
+    document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
       if (catSet.has(el.dataset.cat)) {
+        el.classList.add("selected");
+      }
+    });
+  }
+
+  // 📂 Pre-select qr types from URL (comma-separated list)
+  if (params.qr_type) {
+    const qrSet = new Set(params.qr_type.split(","));
+    document.querySelectorAll('.dropdown-option[data-qr]').forEach(el => {
+      if (qrSet.has(el.dataset.qr)) {
         el.classList.add("selected");
       }
     });
@@ -676,7 +712,9 @@ function updateFilterSummary(filteredItems, filters) {
 
   if (filters.title) parts.push(`title contains "${filters.title}"`);
   if (filters.description) parts.push(`description has "${filters.description}"`);
-  if (filters.qr_type) parts.push(`QR type = ${filters.qr_type}`);
+  if (Array.isArray(filters.qr_type) && filters.qr_type.length) {
+    parts.push(`QR type: ${filters.qr_type.join(", ")}`);
+  }
   if (filters.barcode) parts.push(`barcode = ${filters.barcode}`);
   if (filters.distributor) parts.push(`distributor = ${filters.distributor}`);
 
@@ -693,8 +731,11 @@ function updateFilterSummary(filteredItems, filters) {
     parts.push(`date: ${filters.createdFrom ?? '–'} to ${filters.createdTo ?? '–'}`);
   }
 
-  if (filters.categories?.length) {
-    parts.push(`categories: ${filters.categories.join(", ")}`);
+  if (Array.isArray(filters.categories)) {
+    const cleaned = filters.categories.filter(Boolean);
+    if (cleaned.length > 0) {
+      parts.push(`categories: ${cleaned.join(", ")}`);
+    }
   }
 
   const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by ${parts.join(", ")}` : ""}.`;
@@ -743,7 +784,7 @@ function getFilteredItems(items) {
 
       (!filters.createdFrom || item.created_at >= filters.createdFrom) &&
       (!filters.createdTo || item.created_at <= filters.createdTo) &&
-      (!filters.qr_type || item.qr_type === filters.qr_type) &&
+      (filters.qr_type.length === 0 || filters.qr_type.includes(item.qr_type)) &&
       matchesCategory &&
       (showOnlyFavorites ? userFavorites.has(item.id) : true)
     );
@@ -966,12 +1007,21 @@ function updateFilterChips(filters) {
       case "stockMax":     label = `Stock ≤ ${value}`; break;
       case "createdFrom":  label = `Created ≥ ${value}`; break;
       case "createdTo":    label = `Created ≤ ${value}`; break;
-      case "qr_type":      label = `QR: ${value}`; break;
 
       case "categories":
-        value.forEach(cat => {
-          chipContainer.appendChild(createFilterChip(`Category: ${cat}`, "categories"));
-        });
+        if (Array.isArray(value) && value.length && value.some(v => v)) {
+          value.forEach(cat => {
+            chipContainer.appendChild(createFilterChip(`Category: ${cat}`, "categories"));
+          });
+        }
+        continue;
+
+      case "qr_type":
+        if (Array.isArray(value)) {
+          value.forEach(qr => {
+            chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
+          });
+        }
         continue;
 
       default: continue;
@@ -999,6 +1049,7 @@ function renderDropdownOptionsCustom({
   optionClass = "dropdown-option",
   searchId = "category-search",
   placeholder = "Search categories...",
+  dataAttribute = "cat",
   optionsContainerClass = "dropdown-options-container",
   onSelect = null
 }) {
@@ -1010,7 +1061,7 @@ function renderDropdownOptionsCustom({
     <input type="text" id="${searchId}" placeholder="${placeholder}">
     <div class="${optionsContainerClass}">
       ${options.map(opt => `
-        <div class="${optionClass}" data-cat="${opt}" data-value="${opt}">${opt}</div>
+        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
       `).join("")}
     </div>
   `;
@@ -1177,7 +1228,7 @@ function updateURLFromForm() {
   const formData = new FormData(form); // 🔁 Get all input values
 
   // 🔸 Get selected categories from the dropdown UI
-  const selectedCats = [...document.querySelectorAll(".dropdown-option.selected")]
+  const selectedCats = [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
     .map(el => el.dataset.cat);
 
   // 🔸 Match-all checkbox for categories
@@ -1195,6 +1246,14 @@ function updateURLFromForm() {
   if (selectedCats.length > 0) {
     params.set("categories", selectedCats.join(","));
   }
+
+  // 🔁 Add QR type filter (comma-separated string) if selected
+    const selectedQRs = [...document.querySelectorAll(".dropdown-option.selected[data-qr]")]
+    .map(el => el.dataset.qr);
+    if (selectedQRs.length > 0) {
+    params.set("qr_type", selectedQRs.join(","));
+    }
+
 
   // ✅ Add match-all toggle if enabled
   if (matchAll) {
@@ -1429,10 +1488,11 @@ function populateDropdowns({
   searchId = "dropdown-search",
   placeholder = "Search...",
   onSelect = null,
+  dataAttribute,
 }) {
   // 🔸 Extract unique values from the specified column
   const options = extractUniqueFromArrayColumn(data, column);
-
+  console.log("unique items", options);
   // 🔸 Render the dropdown with those options
   renderDropdownOptionsCustom({
     menuId,
@@ -1443,6 +1503,7 @@ function populateDropdowns({
     searchId,
     placeholder,
     onSelect,
+    dataAttribute,
   });
 
   // 🔸 Setup toggle behavior
@@ -1722,6 +1783,29 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 🔹 Step 2: Fetch items from Supabase and store globally
   allItems = await fetchStockItems();
+  populateDropdowns({ 
+    data: allItems, //data from where categories will be extracted
+    column: "categories", //the name of the column from where the categories will be extracted
+    optionsContainerClass: "category-dropdown-container", //id of the div container where all the stuff will be
+    toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
+    menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
+    optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
+    searchId: "category-search", //id of the search bar (injected by html)
+    placeholder: "Search categories...", //text that will show up in the search bar
+  });
+  
+// this is for the dropdown of the qr types
+  populateDropdowns({
+    data: allItems,
+    column: "qr_type", // extract unique QR types
+    optionsContainerClass: "qr-dropdown-container",
+    toggleId: "qr-dropdown-toggle",
+    menuId: "qr-dropdown-menu",
+    optionClass: "dropdown-option",
+    searchId: "qr-search",
+    placeholder: "Search QR types...",
+    dataAttribute: "qr"
+  });
   //console.log("Fetched items:", allItems);
   //console.log("First item:", allItems[0]);
 
@@ -1739,17 +1823,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
   // 🔹 Step 5: Populate and setup UI dropdowns
-  // create the dropdown for the filter
-  populateDropdowns({ 
-    data: allItems, //data from where categories will be extracted
-    column: "categories", //the name of the column from where the categories will be extracted
-    optionsContainerClass: "category-dropdown-container", //class of the div container where all the stuff will be
-    toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
-    menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
-    optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
-    searchId: "category-search", //id of the search bar (injected by html)
-    placeholder: "Search categories...", //text that will show up in the search bar
-  });
+  // this is for the dropdown of the categories
+
   populateCategoryDropdown(allItems); //this funciton is going to be creating the dropdown for the bulk options
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");

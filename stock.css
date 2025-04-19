@@ -433,19 +433,7 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   transform: scale(1.035);
 }
 
-#category-search {
-  display: block;
-  width: 100%;
-  padding: 14px 18px;
-  font-size: 1rem;
-  font-family: 'DM Serif Display', serif;
-  background: #fff;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 16px 16px 0 0;
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
-  outline: none;
-}
+
 
 .dropdown-options-container {
   max-height: 240px;
@@ -464,39 +452,53 @@ based on the general class look dropdown-toggle and dropdown-menu*/
 }
 
 
-.dropdown-toggle {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  padding: 10px 16px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  background: #ffffffc7;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-  line-height: 1.5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
-
-.dropdown-toggle:hover {
-  background-color: #f5f5f5;
-  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.05);
-}
-
-.dropdown-menu {
-  border-radius: 16px;
-  background: white;
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 0;
-  margin-top: 8px;
+#category-search #qr-search {
+  display: block;
   width: 100%;
-  min-width: 240px;
-  box-sizing: border-box;
-  overflow: hidden;
+  padding: 14px 18px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px 16px 0 0;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+  outline: none;
 }
+
+.dropdown-option {
+  padding: 10px 18px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  color: #1d1d1f;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.dropdown-option:hover {
+  background-color: rgba(0, 113, 227, 0.08);
+}
+
+.dropdown-option.selected {
+  background-color: rgba(0, 113, 227, 0.08); /* soft Apple blue tint */
+  color: #1d1d1f;
+  font-weight: bold;
+  padding-left: 18px;
+  transition: all 0.3s ease;
+}
+
+
+
+.dropdown-option:hover {
+  background-color: rgba(0, 113, 227, 0.06);
+  padding-left: 22px;
+  transition: all 0.2s ease;
+}
+
+
+
 
 @media screen and (max-width: 768px) {
   .filter-buttons {
@@ -517,6 +519,16 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   }
 }
 
+@keyframes dropdownReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 
 
 /*the aesthetic of the toggle is being controlled by the 
@@ -1007,27 +1019,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   transition: color 0.2s ease;
 }
 
-.dropdown-option {
-  padding: 10px 18px;
-  font-size: 1rem;
-  font-family: 'DM Serif Display', serif;
-  color: #1d1d1f;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  border-radius: 12px;
-  white-space: nowrap;
-}
-
-.dropdown-option:hover {
-  background-color: rgba(0, 113, 227, 0.08);
-}
-
-.dropdown-option.selected {
-  background-color: #0071e3;
-  color: white;
-  font-weight: bold;
-}
-
 
 .filter-chip.removing {
   opacity: 0;
@@ -1088,31 +1079,36 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   /* dropdown toggle and menu it shows when you toggle style */
   /*#region*/ 
     .dropdown-toggle {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1rem;
+      padding: 10px 16px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+      background: #ffffffc7;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+      line-height: 1.5;
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 12px 20px;
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.35);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-      cursor: pointer;
+      justify-content: space-between;
       transition: all 0.3s ease;
-      animation: dropdownExpand 1s ease;
+      cursor: pointer;
     }
 
     .dropdown-toggle:hover {
-      background: rgba(255, 255, 255, 0.55);
-      transform: scale(1.02);
+      background-color: #f5f5f5;
+      box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.05);
     }
-
+    
     .dropdown-toggle::after {
-      content: "\25BE";
-      font-size: 0.9rem;
-      margin-left: 8px;
-      color: #333;
+      content: '▾';
+      font-size: 0.85rem;
+      color: #555;
+      margin-left: auto;
+      transition: transform 0.3s ease;
+    }
+    
+    .dropdown-toggle.open::after {
+      transform: rotate(180deg);
     }
 
     .dropdown-menu {

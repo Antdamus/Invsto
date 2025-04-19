@@ -126,9 +126,13 @@
         <input type="hidden" name="categories" id="hidden-categories" />
   
         <!-- 🔳 QR Type Selector -->
-        <select name="qr_type">
-          <option value="">All QR Types</option>
-        </select>
+        <div id="qr-dropdown-container" class="custom-dropdown">
+          <button id="qr-dropdown-toggle" type="button" class="dropdown-toggle">
+            Select QR Type
+          </button>
+          <div id="qr-dropdown-menu" class="dropdown-menu"></div>
+        </div>
+        
       </div>
   
       <!-- 📁 Export Buttons Section -->
