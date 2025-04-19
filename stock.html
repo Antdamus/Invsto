@@ -79,13 +79,15 @@
   <div id="filter-summary" class="filter-summary-bar"></div>
   
 <!-- 🔸 Floating Filter Panel with Tabs and Content -->
-<section class="floating-filters show" id="filter-section">
+<section class="floating-filters" id="filter-section">
 
   <!-- 🔘 Filter Tab Buttons Row -->
   <div class="filter-tabs">
-    <button class="filter-tab-btn active" data-tab="basic">🔍 Basic Search</button>
+    <button class="filter-tab-btn" data-tab="basic">🔍 Basic Search</button>
     <button class="filter-tab-btn" data-tab="range">🪜 Range Filters</button>
     <button class="filter-tab-btn" data-tab="labels">🏷️ Labels & Types</button>
+    <button class="filter-tab-btn" data-tab="CSV">Export CSV</button>
+    <button class="filter-tab-btn" data-tab="PDF">Export PDF</button>
   </div>
 
   <!-- 🧩 Filter Form with Tab-Specific Panels -->
@@ -142,12 +144,6 @@
           <div id="qr-dropdown-menu" class="dropdown-menu"></div>
         </div>
       </div>
-    </div>
-
-    <!-- 📁 Export Buttons -->
-    <div class="filter-actions">
-      <button type="button" id="export-csv">Export CSV</button>
-      <button type="button" id="export-pdf">Export PDF</button>
     </div>
   </form>
 </section>
