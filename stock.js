@@ -1704,7 +1704,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   populateDropdowns({ 
     data: allItems, //data from where categories will be extracted
     column: "categories", //the name of the column from where the categories will be extracted
-    optionsContainerClass: "dropdown-options-container", //class of the div container where all the stuff will be
+    optionsContainerClass: "category-dropdown-container", //class of the div container where all the stuff will be
     toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
     menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
     optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
