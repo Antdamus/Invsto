@@ -75,62 +75,70 @@
     </div>
   </header>
 
+  <!-- 🔸 filter summary -->
+  <div id="filter-summary" class="filter-summary-bar"></div>
+  
   <!-- 🔸 Expandable Floating Filter Panel -->
   <section class="floating-filters" id="filter-section">
     <form id="filter-form">
       <div class="filter-grid">
-        <!-- 🔍 Search Filters -->
+        <!-- 🔤 Basic Information Filters -->
         <input type="text" name="title" placeholder="Search title..." />
         <input type="text" name="description" placeholder="Search description..." />
         <input type="text" name="barcode" placeholder="Search barcode..." />
         <input type="text" name="distributor" placeholder="Distributor name..." />
-
-        <!-- 🔢 Range Filters -->
+  
+        <!-- ⚖️ Weight Filters -->
         <input type="number" name="weightMin" placeholder="Min weight" />
         <input type="number" name="weightMax" placeholder="Max weight" />
+  
+        <!-- 💸 Cost Filters -->
         <input type="number" name="costMin" placeholder="Min cost" />
         <input type="number" name="costMax" placeholder="Max cost" />
+  
+        <!-- 💰 Price Filters -->
         <input type="number" name="priceMin" placeholder="Min sale price" />
         <input type="number" name="priceMax" placeholder="Max sale price" />
+  
+        <!-- 📦 Stock Filters -->
         <input type="number" name="stockMin" placeholder="Min stock" />
         <input type="number" name="stockMax" placeholder="Max stock" />
-
-        <!-- 📅 Date Filters -->
+  
+        <!-- 🗓 Date Filters -->
         <input type="date" name="createdFrom" placeholder="Created From..." />
         <input type="date" name="createdTo" placeholder="Created To..." />
-
-        <!-- 📌 Category Match-All Toggle -->
+  
+        <!-- 🧩 Category Match Mode -->
         <label class="match-mode-toggle">
           <input type="checkbox" id="match-all-toggle" />
           Match <strong>all</strong> selected categories
         </label>
-
-        <!-- 🧠 Category Dropdown UI -->
+  
+        <!-- 🧷 Category Dropdown -->
         <div id="category-dropdown-container" class="custom-dropdown">
           <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
             Select Categories
           </button>
-          <!-- JS injects options here -->
-          <div id="category-dropdown-menu" class="dropdown-menu"></div> <!-- being wiped out by html -->
+          <div id="category-dropdown-menu" class="dropdown-menu"></div>
         </div>
-
-        <!-- 👻 Hidden field for storing selected categories -->
+  
+        <!-- Hidden input to track selected categories -->
         <input type="hidden" name="categories" id="hidden-categories" />
-
-        <!-- 🔳 QR Type Dropdown -->
+  
+        <!-- 🔳 QR Type Selector -->
         <select name="qr_type">
           <option value="">All QR Types</option>
         </select>
       </div>
-
-      <!-- 📤 Export Buttons (CSV + PDF) -->
+  
+      <!-- 📁 Export Buttons Section -->
       <div class="filter-actions">
         <button type="button" id="export-csv">Export CSV</button>
         <button type="button" id="export-pdf">Export PDF</button>
       </div>
-    </form>    
+    </form>
   </section>
-
+  
   <!-- 🧠 Active Filter Chips (displayed below filter panel) -->
   <div id="filter-chips" class="filter-chips"></div>
 

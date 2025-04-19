@@ -666,6 +666,44 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// 🔧 Utility: Update Filter Summary Bar
+function updateFilterSummary(filteredItems, filters) {
+  const summaryEl = document.getElementById("filter-summary");
+  if (!summaryEl) return;
+
+  const parts = [];
+  const count = filteredItems.length;
+
+  if (filters.title) parts.push(`title contains "${filters.title}"`);
+  if (filters.description) parts.push(`description has "${filters.description}"`);
+  if (filters.qr_type) parts.push(`QR type = ${filters.qr_type}`);
+  if (filters.barcode) parts.push(`barcode = ${filters.barcode}`);
+  if (filters.distributor) parts.push(`distributor = ${filters.distributor}`);
+
+  if (filters.costMin !== null || filters.costMax !== null) {
+    parts.push(`cost: ${filters.costMin ?? '–'} to ${filters.costMax ?? '–'}`);
+  }
+  if (filters.priceMin !== null || filters.priceMax !== null) {
+    parts.push(`price: ${filters.priceMin ?? '–'} to ${filters.priceMax ?? '–'}`);
+  }
+  if (filters.stockMin !== null || filters.stockMax !== null) {
+    parts.push(`stock: ${filters.stockMin ?? '–'} to ${filters.stockMax ?? '–'}`);
+  }
+  if (filters.createdFrom || filters.createdTo) {
+    parts.push(`date: ${filters.createdFrom ?? '–'} to ${filters.createdTo ?? '–'}`);
+  }
+
+  if (filters.categories?.length) {
+    parts.push(`categories: ${filters.categories.join(", ")}`);
+  }
+
+  const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by ${parts.join(", ")}` : ""}.`;
+
+  summaryEl.textContent = result;
+  summaryEl.classList.add("active");
+}
+
+
 //#endregion
 
 //-------------------------------------------------------------------//
@@ -1130,6 +1168,7 @@ function applySortAndRender(data) {
   const sortValue = document.getElementById("sort-select")?.value;
   const sorted = sortItems(data, sortValue);
   paginateAndRender(sorted);
+  updateFilterSummary(sorted, getActiveFilters());
 }
 
 // 🔸 update the url with the current filters
