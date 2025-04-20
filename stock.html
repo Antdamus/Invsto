@@ -72,8 +72,10 @@
       <!-- 🔘 Filter toggle and clear buttons -->
       <button id="toggle-filters" class="filter-toggle-btn">Show Filters</button>
       <button type="button" id="clear-filters" class="btn-clear">Clear</button>
-      <!-- 🔸 filter summary -->
-      <div id="filter-summary" class="inline-filter-summary"></div>
+      <div id="filter-summary-wrapper">
+        <div id="filter-summary" class="inline-filter-summary"></div>
+        <div id="header-filter-chips" class="header-filter-chips"></div>
+      </div>
     </div>
   </header>
 
@@ -146,10 +148,6 @@
       </div>
     </form>
   </section>
-
-
-  <!-- 🧠 Active Filter Chips (displayed below filter panel) -->
-  <div id="filter-chips" class="filter-chips"></div>
 
   <!-- 🔢 Pagination + Page Controls -->
   <div class="pagination-controls">

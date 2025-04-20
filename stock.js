@@ -171,30 +171,23 @@ function sortItems(data, sortValue) {
 //   - page: page number to assign to currentPage
 //   - isActive: whether this is the current page (for styling)
 //   - container: DOM element to append the button into
-function addBtn(label, page, isActive, container) {
-  const btn = document.createElement("button");
-  btn.type = "button"; // prevent accidental form submissions
-  btn.textContent = label;
-
-  if (isActive) btn.classList.add("active");
-
-  btn.addEventListener("click", () => {
-    currentPage = page;
-    const filtered = getFilteredItems(allItems); // ✅ Fix: pass the full dataset
-    applySortAndRender(filtered);
-    updateURLFromForm();
-  });
-
-  container.appendChild(btn);
-}
-
-// 🔹 Utility: Create a single filter chip element with remove functionality
 function createFilterChip(label, key) {
   const chip = document.createElement("div");
   chip.className = "filter-chip";
-  chip.innerHTML = `${label} <button data-key="${key}">&times;</button>`;
 
-  chip.querySelector("button").addEventListener("click", () => {
+  const span = document.createElement("span");
+  span.className = "chip-label";
+  span.textContent = label;
+
+  const btn = document.createElement("button");
+  btn.className = "chip-close-btn";
+  btn.setAttribute("data-key", key);
+  btn.textContent = "×";
+
+  chip.appendChild(span);
+  chip.appendChild(btn);
+
+  btn.addEventListener("click", () => {
     chip.classList.add("removing");
 
     setTimeout(() => {
@@ -204,7 +197,6 @@ function createFilterChip(label, key) {
             el.classList.remove("selected");
           }
         });
-        
       } else if (key === "qr_type") {
         document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
           if (el.dataset.qr === label.split(": ")[1]) {
@@ -217,15 +209,18 @@ function createFilterChip(label, key) {
       }
 
       currentPage = 1;
-      const filtered = getFilteredItems(allItems); // ✅ Pass the full dataset
+      const filtered = getFilteredItems(allItems);
       applySortAndRender(filtered);
       updateFilterChips(getActiveFilters());
-      updateURLFromForm(); // ✅ Update URL so the chip stays removed on refresh
-    }, 200);
+      updateURLFromForm();
+    }, 150);
   });
 
   return chip;
 }
+
+
+
 
 
 // 🔹 Utility: Extract Filter Values from Form and UI
@@ -738,7 +733,8 @@ function updateFilterSummary(filteredItems, filters) {
     }
   }
 
-  const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by ${parts.join(", ")}` : ""}.`;
+  const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by:` : ""}`;
+  //const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by ${parts.join(", ")}` : ""}.`;
 
   summaryEl.textContent = result;
   summaryEl.classList.add("active");
@@ -984,7 +980,7 @@ function renderPaginationControls(totalPages) {
 // 🔹 UI Renderer: Filter Chips
 // ✅ Displays current active filters as removable chips under the search bar
 function updateFilterChips(filters) {
-  const chipContainer = document.getElementById("filter-chips");
+  const chipContainer = document.getElementById("header-filter-chips");
   if (!chipContainer) return;
   chipContainer.innerHTML = "";
 
