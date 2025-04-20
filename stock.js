@@ -175,19 +175,15 @@ function createFilterChip(label, key) {
   const chip = document.createElement("div");
   chip.className = "filter-chip";
 
-  const span = document.createElement("span");
-  span.className = "chip-label";
-  span.textContent = label;
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = label;
 
-  const btn = document.createElement("button");
-  btn.className = "chip-close-btn";
-  btn.setAttribute("data-key", key);
-  btn.textContent = "×";
+  const closeBtn = document.createElement("button");
+  closeBtn.setAttribute("data-key", key);
+  closeBtn.innerHTML = "&times;";
+  closeBtn.className = "chip-close-btn";
 
-  chip.appendChild(span);
-  chip.appendChild(btn);
-
-  btn.addEventListener("click", () => {
+  closeBtn.addEventListener("click", () => {
     chip.classList.add("removing");
 
     setTimeout(() => {
@@ -213,12 +209,13 @@ function createFilterChip(label, key) {
       applySortAndRender(filtered);
       updateFilterChips(getActiveFilters());
       updateURLFromForm();
-    }, 150);
+    }, 200);
   });
 
+  chip.appendChild(labelSpan);
+  chip.appendChild(closeBtn);
   return chip;
 }
-
 
 
 

@@ -52,7 +52,6 @@ body.stock-body {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
   padding: 12px 20px;
-  min-width: 150px;
   text-align: center;
   border-radius: 16px;
   border: 1px solid rgba(0, 0, 0, 0.05);
@@ -98,6 +97,7 @@ body.stock-body {
 .top-controls .btn-clear {
   background: rgba(240, 240, 245, 0.6);
   color: #1d1d1f;
+  min-width: 150px;
 }
 
 .top-controls .btn-clear:hover {
@@ -167,55 +167,49 @@ body.stock-body {
 .filter-chip {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  font-family: 'DM Serif Display', serif;
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-family: 'DM Serif Display', serif;
-  font-size: 0.82rem;
   color: #1d1d1f;
-  white-space: nowrap;
-  gap: 6px;
-  max-width: fit-content;
+  border-radius: 999px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  white-space: nowrap;
+  max-width: 100%;
+  box-sizing: border-box;
   transition: background 0.3s ease;
 }
 
-.filter-chip button {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font-size: 0.65rem;
+.filter-chip span {
+  display: inline;
   line-height: 1;
+}
+
+.chip-close-btn {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 0.75rem;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
   color: inherit;
-  transform: none;
-  width: auto;
-  height: auto;
-}
-
-
-.filter-chip:hover {
-  background-color: rgba(255, 255, 255, 0.3);
-}
-
-.filter-chip button:hover {
-  color: #000;
-}
-
-.filter-chip.removing {
-  opacity: 0;
-  transform: scale(0.8);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 
 
+.chip-close-btn:hover {
+  background-color: rgba(0, 0, 0, 0.07);
+}
 
 
 
