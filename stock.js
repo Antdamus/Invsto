@@ -758,7 +758,7 @@ function updateFilterSummary(filteredItems, filters) {
 // 🔹 Applies all filters to a given list of items
 function getFilteredItems(items) {
   const filters = extractFilterValues();
-  const matchAll = document.getElementById("match-all-toggle")?.checked;
+  const matchAll = document.getElementById("match-all-toggle")?.classList.contains("active");
   console.log("matchstate:", matchAll);
 
   return items.filter(item => {
@@ -1965,6 +1965,21 @@ tabButtons.forEach(button => {
   });
 });
 
+const matchAllToggleBtn = document.getElementById("match-all-toggle");
+if (matchAllToggleBtn) {
+  matchAllToggleBtn.addEventListener("click", () => {
+    const isActive = matchAllToggleBtn.classList.toggle("active");
+    matchAllToggleBtn.textContent = `Match All Categories: ${isActive ? "On" : "Off"}`;
+    matchAllToggleBtn.dataset.matchAll = isActive;
+
+    // Refresh filter with new match mode
+    currentPage = 1;
+    const filtered = getFilteredItems(allItems);
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+    updateURLFromForm();
+  });
+}
 
   
 });

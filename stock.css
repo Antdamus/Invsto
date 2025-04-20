@@ -340,6 +340,12 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   pointer-events: none;
 }
 
+.floating-filters form {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
 
 .floating-filters.show {
   padding: 36px 28px;
@@ -352,15 +358,18 @@ based on the general class look dropdown-toggle and dropdown-menu*/
 
 .filter-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 20px;
-  padding: 8px 4px 20px 4px;
-  position: relative;
-  scroll-snap-type: y mandatory;
+  justify-items: stretch;
+  align-items: center;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 .filter-grid input,
-.filter-grid select {
+.filter-grid select,
+.filter-grid button  {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
   padding: 10px 16px;
@@ -370,6 +379,9 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
   transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
   line-height: 1.5;
+  width: 100%;
+  min-height: 52px;
+  box-sizing: border-box;
 }
 
 .filter-grid input:hover,
@@ -621,6 +633,27 @@ based on the general class look dropdown-toggle and dropdown-menu*/
     transform: translateY(0);
   }
 }
+
+.match-mode-toggle-btn {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: #e5e5ea;
+  border: 1px solid #ccc;
+  color: #1d1d1f;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.match-mode-toggle-btn.active {
+  background: linear-gradient(145deg, #0071e3, #005bb5);
+  color: white;
+  font-weight: bold;
+}
+
 
 /*the aesthetic of the toggle is being controlled by the 
 class dropdown-toggle and the menu by the dropdown-menu*/
