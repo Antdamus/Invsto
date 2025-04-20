@@ -72,79 +72,80 @@
       <!-- 🔘 Filter toggle and clear buttons -->
       <button id="toggle-filters" class="filter-toggle-btn">Show Filters</button>
       <button type="button" id="clear-filters" class="btn-clear">Clear</button>
+      <!-- 🔸 filter summary -->
+      <div id="filter-summary" class="inline-filter-summary"></div>
     </div>
   </header>
 
-  <!-- 🔸 filter summary -->
-  <div id="filter-summary" class="filter-summary-bar"></div>
+ 
   
-<!-- 🔸 Floating Filter Panel with Tabs and Content -->
-<section class="floating-filters" id="filter-section">
+  <!-- 🔸 Floating Filter Panel with Tabs and Content -->
+  <section class="floating-filters" id="filter-section">
 
-  <!-- 🔘 Filter Tab Buttons Row -->
-  <div class="filter-tabs">
-    <button class="filter-tab-btn" data-tab="basic">🔍 Basic Search</button>
-    <button class="filter-tab-btn" data-tab="range">🪜 Range Filters</button>
-    <button class="filter-tab-btn" data-tab="labels">🏷️ Labels & Types</button>
-    <button class="filter-tab-btn" data-tab="CSV">Export CSV</button>
-    <button class="filter-tab-btn" data-tab="PDF">Export PDF</button>
-  </div>
-
-  <!-- 🧩 Filter Form with Tab-Specific Panels -->
-  <form id="filter-form">
-
-    <!-- 🔍 Basic Search Panel -->
-    <div class="filter-tab-content active" id="tab-basic">
-      <div class="filter-grid">
-        <input type="text" name="title" placeholder="Search title..." />
-        <input type="text" name="description" placeholder="Search description..." />
-        <input type="text" name="barcode" placeholder="Search barcode..." />
-        <input type="text" name="distributor" placeholder="Distributor name..." />
-      </div>
+    <!-- 🔘 Filter Tab Buttons Row -->
+    <div class="filter-tabs">
+      <button class="filter-tab-btn" data-tab="basic">🔍 Basic Search</button>
+      <button class="filter-tab-btn" data-tab="range">🪜 Range Filters</button>
+      <button class="filter-tab-btn" data-tab="labels">🏷️ Labels & Types</button>
+      <button class="filter-tab-btn" data-tab="CSV">Export CSV</button>
+      <button class="filter-tab-btn" data-tab="PDF">Export PDF</button>
     </div>
 
-    <!-- 🪜 Range Filters Panel -->
-    <div class="filter-tab-content" id="tab-range">
-      <div class="filter-grid">
-        <input type="number" name="weightMin" placeholder="Min weight" />
-        <input type="number" name="weightMax" placeholder="Max weight" />
-        <input type="number" name="costMin" placeholder="Min cost" />
-        <input type="number" name="costMax" placeholder="Max cost" />
-        <input type="number" name="priceMin" placeholder="Min sale price" />
-        <input type="number" name="priceMax" placeholder="Max sale price" />
-        <input type="number" name="stockMin" placeholder="Min stock" />
-        <input type="number" name="stockMax" placeholder="Max stock" />
-        <input type="date" name="createdFrom" />
-        <input type="date" name="createdTo" />
-      </div>
-    </div>
+    <!-- 🧩 Filter Form with Tab-Specific Panels -->
+    <form id="filter-form">
 
-    <!-- 🏷️ Labels & Types Panel -->
-    <div class="filter-tab-content" id="tab-labels">
-      <div class="filter-grid">
-        <button type="button" id="match-all-toggle" class="match-mode-toggle-btn">Match All Categories: Off</button>
-
-
-        <!-- 🧷 Category Dropdown -->
-        <div id="category-dropdown-container" class="custom-dropdown">
-          <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
-            Select Categories
-          </button>
-          <div id="category-dropdown-menu" class="dropdown-menu"></div>
-        </div>
-        <input type="hidden" name="categories" id="hidden-categories" />
-
-        <!-- 🔳 QR Type Dropdown -->
-        <div id="qr-dropdown-container" class="custom-dropdown">
-          <button id="qr-dropdown-toggle" type="button" class="dropdown-toggle">
-            Select QR Type
-          </button>
-          <div id="qr-dropdown-menu" class="dropdown-menu"></div>
+      <!-- 🔍 Basic Search Panel -->
+      <div class="filter-tab-content active" id="tab-basic">
+        <div class="filter-grid">
+          <input type="text" name="title" placeholder="Search title..." />
+          <input type="text" name="description" placeholder="Search description..." />
+          <input type="text" name="barcode" placeholder="Search barcode..." />
+          <input type="text" name="distributor" placeholder="Distributor name..." />
         </div>
       </div>
-    </div>
-  </form>
-</section>
+
+      <!-- 🪜 Range Filters Panel -->
+      <div class="filter-tab-content" id="tab-range">
+        <div class="filter-grid">
+          <input type="number" name="weightMin" placeholder="Min weight" />
+          <input type="number" name="weightMax" placeholder="Max weight" />
+          <input type="number" name="costMin" placeholder="Min cost" />
+          <input type="number" name="costMax" placeholder="Max cost" />
+          <input type="number" name="priceMin" placeholder="Min sale price" />
+          <input type="number" name="priceMax" placeholder="Max sale price" />
+          <input type="number" name="stockMin" placeholder="Min stock" />
+          <input type="number" name="stockMax" placeholder="Max stock" />
+          <input type="date" name="createdFrom" />
+          <input type="date" name="createdTo" />
+        </div>
+      </div>
+
+      <!-- 🏷️ Labels & Types Panel -->
+      <div class="filter-tab-content" id="tab-labels">
+        <div class="filter-grid">
+          <button type="button" id="match-all-toggle" class="match-mode-toggle-btn">Match All Categories: Off</button>
+
+
+          <!-- 🧷 Category Dropdown -->
+          <div id="category-dropdown-container" class="custom-dropdown">
+            <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
+              Select Categories
+            </button>
+            <div id="category-dropdown-menu" class="dropdown-menu"></div>
+          </div>
+          <input type="hidden" name="categories" id="hidden-categories" />
+
+          <!-- 🔳 QR Type Dropdown -->
+          <div id="qr-dropdown-container" class="custom-dropdown">
+            <button id="qr-dropdown-toggle" type="button" class="dropdown-toggle">
+              Select QR Type
+            </button>
+            <div id="qr-dropdown-menu" class="dropdown-menu"></div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </section>
 
 
   <!-- 🧠 Active Filter Chips (displayed below filter panel) -->
