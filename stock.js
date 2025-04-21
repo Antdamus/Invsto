@@ -1948,46 +1948,52 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
-// 🔘 Filter Tab Switching Logic for Horizontal Filter Buttons
-const tabButtons = document.querySelectorAll('.filter-tab-btn');
-const tabContents = document.querySelectorAll('.filter-tab-content');
+  // 🔘 Filter Tab Switching Logic for Horizontal Filter Buttons
+  const tabButtons = document.querySelectorAll('.filter-tab-btn');
+  const tabContents = document.querySelectorAll('.filter-tab-content');
 
-tabButtons.forEach(button => {
-  button.addEventListener('click', () => {
-    const targetTab = button.getAttribute('data-tab');
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const targetTab = button.getAttribute('data-tab');
 
-    // 🔄 Remove active class from all buttons
-    tabButtons.forEach(btn => btn.classList.remove('active'));
+      // 🔄 Remove active class from all buttons
+      tabButtons.forEach(btn => btn.classList.remove('active'));
 
-    // 🔄 Hide all tab contents
-    tabContents.forEach(content => content.classList.remove('active'));
+      // 🔄 Hide all tab contents
+      tabContents.forEach(content => content.classList.remove('active'));
 
-    // ✅ Activate the clicked button
-    button.classList.add('active');
+      // ✅ Activate the clicked button
+      button.classList.add('active');
 
-    // ✅ Show corresponding content panel
-    const contentToShow = document.getElementById(`tab-${targetTab}`);
-    if (contentToShow) contentToShow.classList.add('active');
+      // ✅ Show corresponding content panel
+      const contentToShow = document.getElementById(`tab-${targetTab}`);
+      if (contentToShow) contentToShow.classList.add('active');
+    });
   });
-});
 
-const matchAllToggleBtn = document.getElementById("match-all-toggle");
-if (matchAllToggleBtn) {
-  matchAllToggleBtn.addEventListener("click", () => {
-    const isActive = matchAllToggleBtn.classList.toggle("active");
-    matchAllToggleBtn.textContent = `Match All Categories: ${isActive ? "On" : "Off"}`;
-    matchAllToggleBtn.dataset.matchAll = isActive;
+  const matchAllToggleBtn = document.getElementById("match-all-toggle");
+  if (matchAllToggleBtn) {
+    matchAllToggleBtn.addEventListener("click", () => {
+      const isActive = matchAllToggleBtn.classList.toggle("active");
+      matchAllToggleBtn.textContent = `Match All Categories: ${isActive ? "On" : "Off"}`;
+      matchAllToggleBtn.dataset.matchAll = isActive;
 
-    // Refresh filter with new match mode
-    currentPage = 1;
-    const filtered = getFilteredItems(allItems);
-    applySortAndRender(filtered);
-    updateFilterChips(getActiveFilters());
-    updateURLFromForm();
+      // Refresh filter with new match mode
+      currentPage = 1;
+      const filtered = getFilteredItems(allItems);
+      applySortAndRender(filtered);
+      updateFilterChips(getActiveFilters());
+      updateURLFromForm();
+    });
+  }
+
+  document.getElementById("toggle-controller").addEventListener("click", () => {
+    const header = document.querySelector(".container");
+    header.classList.toggle("collapsed");
   });
-}
-
   
+
+    
 });
 
 
