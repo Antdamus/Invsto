@@ -1506,6 +1506,7 @@ function populateDropdowns({
   // 🔸 Extract unique values from the specified column
   const options = extractUniqueFromArrayColumn(data, column);
   console.log("unique items", options);
+  
   // 🔸 Render the dropdown with those options
   renderDropdownOptionsCustom({
     menuId,
@@ -1583,38 +1584,6 @@ function clearSelectionAndRefresh() {
   const filtered = getFilteredItems(allItems);
   applySortAndRender(filtered);
 }
-
-
-// =================== Bulk Favorite Toggle ===================== //
-document.getElementById("bulk-favorite").addEventListener("click", async () => {
-  if (!currentUser || selectedItems.size === 0) return;
-
-  showLoading();
-  const updates = [];
-
-  for (const id of selectedItems) {
-    const isFav = userFavorites.has(id);
-    if (isFav) {
-      updates.push(
-        supabase.from("favorites").delete().eq("item_id", id).eq("user_id", currentUser.id)
-      );
-      userFavorites.delete(id);
-    } else {
-      updates.push(
-        supabase.from("favorites").insert({ item_id: id, user_id: currentUser.id })
-      );
-      userFavorites.add(id);
-    }
-  }
-
-  await Promise.all(updates);
-
-  clearSelectionAndRefresh();
-  updateFilterChips(getActiveFilters());
-  showToast(`⭐ Updated ${selectedItems.size} favorites`);
-  hideLoading();
-});
-
 
 // =================== Bulk Category Assignment ===================== //
 document.getElementById("bulk-category").addEventListener("change", async (e) => {
@@ -1838,7 +1807,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 🔹 Step 5: Populate and setup UI dropdowns
   // this is for the dropdown of the categories
-
   populateCategoryDropdown(allItems); //this funciton is going to be creating the dropdown for the bulk options
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
