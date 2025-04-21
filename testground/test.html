@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <!-- 🪪 Page title -->
   <title>OG Jewelry Stock</title>
+<!-- test comment -->
 
   <!-- 🎨 Main CSS stylesheet -->
   <link rel="stylesheet" href="test.css" />
@@ -20,11 +21,27 @@
 
 <body class="stock-body">
 
-  <!-- 📦 Supabase Client, Data + PDF Libraries, Main Script -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="initSupabase.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-  <script src="test.js"></script>
+    <!-- categories dropdown -->
+    <div id="bulk-category-container" class="custom-dropdown">
+        <button id="bulk-category-toggle" type="button" class="dropdown-toggle">
+            Categories to add
+        </button>
+        <div id="bulk-category-menu" class="dropdown-menu"></div>
+            <!-- here is where the categories will be injected-->
+    </div>
+
+    <!-- 📦 Inventory Item Cards Grid -->
+    <main class="stock-main">
+        <div id="stock-container" class="stock-grid">
+            <!--Here all the cards will be injected-->
+        </div>
+    </main>
+
+    <!-- 📦 Supabase Client, Data + PDF Libraries, Main Script -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script src="initSupabase.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="test.js"></script>
 
 </body>
