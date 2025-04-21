@@ -362,7 +362,14 @@ function extractUniqueFromArrayColumn(data, column) {
   return Array.from(uniqueSet);
 }
 
+/**help to make toolbar visible */
+function setBulkToolbarVisibility(visible) {
+  const toolbar = document.getElementById("bulk-toolbar");
+  if (!toolbar) return;
 
+  toolbar.classList.toggle("show", visible);
+  toolbar.classList.toggle("hide", !visible);
+}
 
 // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
 // ✅ Accepts: toggle button ID and dropdown menu ID
@@ -1563,7 +1570,8 @@ function updateBulkToolbar() {
   const selectedCount = selectedItems.size;
 
   count.textContent = `${selectedCount} selected`;
-  toolbar.classList.toggle("hidden", selectedCount === 0);
+  toolbar.classList.toggle("show", selectedCount > 0);
+  toolbar.classList.toggle("hide", selectedCount === 0);
 }
 
 
@@ -1991,6 +1999,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const header = document.querySelector(".container");
     header.classList.toggle("collapsed");
   });
+
+  updateBulkToolbar();
   
 
     

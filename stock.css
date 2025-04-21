@@ -259,6 +259,140 @@ body.stock-body {
   background-color: rgba(0, 0, 0, 0.07);
 }
 
+/* =================================== */
+/* 🧰 Ultra-Aesthetic Bulk Toolbar     */
+/* =================================== */
+.bulk-toolbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 24px;
+  margin: 12px auto 0;
+  max-width: 1200px;
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+/* 👁️‍🗨️ Visibility toggling */
+.bulk-toolbar.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 🙈 Hidden state */
+.bulk-toolbar.hidden {
+  display: none; /* Add this */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-10px);
+  height: 0;
+  overflow: hidden;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.bulk-toolbar.hide {
+  opacity: 0;
+  transform: translateY(-20px);
+  pointer-events: none;
+  user-select: none;
+  height: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+/* ✨ Toolbar Buttons */
+.bulk-toolbar button {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 10px 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.2);
+  color: #1d1d1f;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 💫 Subtle Ripple Effect */
+.bulk-toolbar button::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.5s ease, height 0.5s ease;
+  z-index: 0;
+}
+
+.bulk-toolbar button:active::after {
+  width: 200px;
+  height: 200px;
+}
+
+/* 🧊 Hover Feedback */
+.bulk-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+/* 🪟 Dropdown Select (Bulk Category) */
+.bulk-select {
+  padding: 10px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 1rem;
+  color: #1d1d1f;
+  font-family: 'DM Serif Display', serif;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s ease;
+}
+
+.bulk-select:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+}
+
+/* 🧃 Smooth Fade + Slide Animations */
+@keyframes bulkToolbarSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /*all the elements of the sort box in the central panel are being formated
 based on the general class look dropdown-toggle and dropdown-menu*/
 
@@ -907,40 +1041,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   }
 }
 
-.bulk-toolbar {
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  align-items: center;
-  padding: 12px 20px;
-  background-color: #f9f9f9;
-  border-top: 2px solid #e5e5ea;
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-.bulk-toolbar.hidden {
-  display: none;
-}
-
-.bulk-toolbar button {
-  font-size: 1rem;
-  padding: 10px 18px;
-  border-radius: 14px;
-  border: none;
-  cursor: pointer;
-  background-color: #0071e3;
-  color: white;
-  transition: background-color 0.3s ease;
-}
-
-.bulk-toolbar button:hover {
-  background-color: #005bb5;
-}
 
 .select-checkbox {
   position: static;
@@ -1006,20 +1106,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   pointer-events: auto;
 }
 
-.bulk-select {
-  padding: 6px 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 0.95rem;
-  background: #fff;
-  color: #333;
-  transition: box-shadow 0.2s ease;
-}
-
-.bulk-select:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px #0071e3;
-}
 
 #toast-container {
   position: fixed;
@@ -1227,26 +1313,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 
 
-.filter-actions button,
-.bulk-toolbar button {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  padding: 10px 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.3);
-  color: #1d1d1f;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  transition: all 0.3s ease;
-  backdrop-filter: blur(8px);
-}
 
-.filter-actions button:hover,
-.bulk-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.55);
-  border-color: rgba(0, 0, 0, 0.1);
-  transform: scale(1.015);
-}
 
 
 /*---------------------------------------------------------------------------*/
