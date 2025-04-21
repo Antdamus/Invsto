@@ -254,6 +254,225 @@ let selectedItems = new Set();
 
 //#endregion
 
+//#region function to generate a full dropwdown menu with search bar for bulk operation
+
+  // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
+  // ✅ Accepts: toggle button ID and dropdown menu ID
+  // ✅ Adds toggle show/hide behavior and outside-click closing
+  function setupDropdownToggle(toggleId, menuId) {
+    const toggle = document.getElementById(toggleId);
+    const menu = document.getElementById(menuId);
+    if (!toggle || !menu) return;
+
+    // ✅ Toggle dropdown on click
+    toggle.onclick = () => {
+      menu.classList.toggle("show");
+    };
+
+    // ✅ Close dropdown if user clicks outside
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target) && e.target !== toggle) {
+        menu.classList.remove("show");
+      }
+    });
+  }
+
+  //refreshed after changes are made 
+  function refreshUIAfterCategoryChange() {
+    renderStockItems(allItems); // Rebuild the grid
+    populateDropdowns({
+      data: allItems,
+      menuId: "category-menu",
+      toggleId: "category-toggle",
+      column: "categories",
+      dataAttribute: "cat"
+    });
+  }
+  
+  //deployed function on select for bulk operations
+  /**
+   * Adds a value (e.g. category/tag/type) to a specific column of all selected items in a table,
+   * only if the value is not already present in that item's array field.
+   * Executes all updates in parallel using Promise.all for efficiency.
+   *
+   * @param {Object} config
+   * @param {string} config.table - Supabase table name (e.g. "item_types")
+   * @param {string} config.column - Column name to update (must be an array-type column)
+   * @param {string} config.value - The value to add (e.g. a category name)
+   * @param {Array<string>} config.selectedIds - Array or Set of item IDs to update
+   * @param {string} [config.matchColumn="id"] - Column used to match items (default is "id")
+   * @param {Array<Object>} config.allItems - Local reference to the full dataset for syncing
+   */
+  async function addValueToSelectedItems({
+    table,
+    column,
+    value,
+    selectedIds,
+    allItems,
+    matchColumn = "id"
+  }) {
+    const updates = []; // Array of promises for parallel Supabase updates
+
+    // 🔁 Loop through each selected ID (can be a Set or Array)
+    for (const itemId of selectedIds) {
+      // 🔍 Find the corresponding item in your local allItems array
+      const item = allItems.find(i => i[matchColumn] === itemId);
+      if (!item) continue; // Skip if not found
+
+      // ✅ Ensure the target column is an array
+      const currentValues = Array.isArray(item[column])
+        ? [...item[column]] // shallow copy for safety
+        : [];
+
+      // 🛑 Skip if the value is already present
+      if (currentValues.includes(value)) continue;
+
+      // ➕ Add the new value
+      const updatedValues = [...currentValues, value];
+
+      // 🏗️ Build the Supabase update call
+      const updatePromise = supabase
+        .from(table) // dynamic table name
+        .update({ [column]: updatedValues }) // update the column with new array
+        .eq(matchColumn, itemId) // match by dynamic key (e.g. id)
+        .then(({ error }) => {
+          if (error) {
+            console.error(`❌ Error updating ${table}.${column} for item ${itemId}:`, error.message);
+          } else {
+            // ✅ Sync local item state
+            console.log(`✅ Updated ${column} for ${table} item ${itemId}`);
+            item[column] = updatedValues;
+          }
+        });
+
+      // 🧺 Add this update to the batch
+      updates.push(updatePromise);
+    }
+
+    // 🚀 Run all updates in parallel
+    await Promise.all(updates);
+  }
+
+  /** Function that will create the html block for the drop down, insert search bar, attach listener
+ * Renders a searchable dropdown and lets the caller define behavior
+ * for selecting existing options or creating new ones.
+ * @param {Object} config
+ * @param {string} config.menuId - ID of the DOM container
+ * @param {Array<string>} config.options - Array of string values to display
+ * @param {string} [config.searchId="category-search"] - Search input ID
+ * @param {string} [config.placeholder="Search..."] - Input placeholder text
+ * @param {string} [config.optionClass="dropdown-option"] - Class for each option div
+ * @param {string} [config.dataAttribute="cat"] - The data-* attribute key (e.g. "cat", "qr")
+ * @param {string} [config.optionsContainerClass="dropdown-options-container"]
+ * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
+ */
+  function renderDropdownOptionsCustom({
+    menuId,
+    options = [],
+    searchId = "category-search",
+    placeholder = "Search...",
+    optionClass = "dropdown-option",
+    dataAttribute = "cat",
+    optionsContainerClass = "dropdown-options-container",
+    onClick  // 🔥 REQUIRED: single handler for both new and existing
+  }) {
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+
+    // Initial HTML: search + full list
+    menu.innerHTML = `
+      <input type="text" id="${searchId}" placeholder="${placeholder}">
+      <div class="${optionsContainerClass}">
+        ${options.map(opt => `
+          <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+        `).join("")}
+      </div>
+    `;
+
+    const input = menu.querySelector(`#${searchId}`);
+    const container = menu.querySelector(`.${optionsContainerClass}`);
+
+    // Click handler (delegated to caller)
+    const attachClickHandlers = () => {
+      container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
+        optionEl.addEventListener("click", () => {
+          const value = optionEl.dataset.value;
+          const isNew = optionEl.dataset.new === "true";
+          if (typeof onClick === "function") {
+            onClick(value, isNew, optionEl);
+          }
+        });
+      });
+    };
+
+    attachClickHandlers(); // Initial options
+
+    // Live search filter + "create new" injection
+    input.addEventListener("input", (e) => {
+      const search = e.target.value.toLowerCase();
+      const filtered = options.filter(opt =>
+        opt.toLowerCase().includes(search)
+      );
+
+      let html = filtered.map(opt => `
+        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+      `).join("");
+
+      const exactMatch = options.some(opt => opt.toLowerCase() === search);
+
+      if (search && !exactMatch) {
+        html += `
+          <div class="${optionClass} new-entry" data-${dataAttribute}="${search}" data-value="${search}" data-new="true">
+            ➕ Create "${search}"
+          </div>
+        `;
+
+      }
+
+      container.innerHTML = html;
+      attachClickHandlers(); // Re-bind
+    });
+  }
+
+  //generate wrapper to populate and render the dropdown
+  function populateDropdowns({
+    data,
+    menuId,
+    toggleId,
+    column,
+    optionClass = "dropdown-option",
+    optionsContainerClass = "dropdown-options-container",
+    searchId = "dropdown-search",
+    placeholder = "Search...",
+    onClick = null,
+    dataAttribute,
+  }) {
+
+    // 🔸 Extract unique values from the specified column
+    const options = extractUniqueFromArrayColumn(data, column);
+    
+    // 🔸 Render the dropdown with those options
+    renderDropdownOptionsCustom({
+      menuId,
+      options,
+      items: data,
+      optionClass,
+      optionsContainerClass,
+      searchId,
+      placeholder,
+      onClick,
+      dataAttribute,
+    });
+
+    // 🔸 Setup toggle behavior
+    setupDropdownToggle(toggleId, menuId);
+  }
+
+//#endregion
+
+
+
+
 
 //1. first thing is you add an event listener to the DOMContentLoaded
 
@@ -284,7 +503,7 @@ async function fetchStockItems() {
 //pull a function that is keeping track of which items are being selected
 //which is going to be toggleselectitem, and it will make the bulk toolbar pop up
 
-
+//6 generate the drop down
 
 //then i will need a function to extract unique values or array from a colum in data table --> existing
 /** 🔧 Extract unique values from an array-type column in a dataset
@@ -369,6 +588,29 @@ document.addEventListener("DOMContentLoaded", async () => {
         toggleSelectItem(id, e.target.checked); /**the e.target.check is 
         a simple boolean */
     }
+    });
+
+    populateDropdowns({
+      data: allItems,                   // your full dataset
+      menuId: "bulk-category-menu",          // ID of the dropdown container
+      toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
+      optionsContainerClass: "bulk-category-container",
+      column: "categories",             // column to extract unique values from
+      dataAttribute: "cat", 
+      optionClass: "dropdown-option",
+      searchId: "category-search", //id of the search bar (injected by html)
+      placeholder: "Search categories...", //text that will show up in the search bar          
+      onClick: (value, isNew) => {
+        addValueToSelectedItems({
+          table: "item_types",
+          column: "categories",
+          value,
+          selectedIds: selectedItems,
+          allItems
+        }).then(() => {
+          refreshUIAfterCategoryChange(); // update DOM + dropdown
+        });
+      }
     });
       
   });
