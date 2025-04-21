@@ -13,9 +13,27 @@ body.stock-body {
 /*#region*/ 
 /* ========== 🍎 Unified Control Bar with Glassmorphic Elegance ========== */
 /* ====================== Unified Sticky Header ====================== */
-.stock-header.sticky {
+
+/* Optional sticky behavior */
+.sticky {
   position: sticky;
   top: 0;
+  z-index: 1000;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px 20px;
+  width: 100%;
+  box-sizing: border-box;
+  z-index:100;
+  overflow: visible;
+}
+
+.stock-header.sticky {
+  position: sticky;
+  top: 10px ;
   z-index: 1000;
   background: rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(24px) saturate(180%);
@@ -379,26 +397,27 @@ based on the general class look dropdown-toggle and dropdown-menu*/
 
 
 /* ================= Beautiful Floating Filter HUD ================= */
+
+
 .floating-filters {
-  background: linear-gradient(to top left, rgba(255,255,255,0.95), rgba(250,250,255,0.88));
   border-radius: 32px;
-  padding: 36px 0; /* <-- remove side padding if any */
-  margin: 0 auto 24px auto;
-  max-width: 1200px;
-  width: 100%;
+  background: linear-gradient(to top left, rgba(255,255,255,0.95), rgba(250,250,255,0.88));
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.06);
   transition: all 0.5s ease;
   opacity: 0;
   max-height: 0;
-  overflow: hidden;
   pointer-events: none;
+
+  /* REMOVE THESE */
+  /* max-width: 1200px; */
+  /* margin: 0 auto; */
+  /* padding: 36px 0; */
 }
 
 .floating-filters form {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
-  padding: 0 24px; /* <-- add this for internal padding like .top-controls */
 }
 
 
@@ -419,8 +438,8 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   justify-items: stretch;
   align-items: center;
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
+  /*max-width: 1200px;
+  margin: 0 auto;*/
 }
 
 .filter-grid input,
@@ -558,16 +577,11 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   transition: all 0.3s ease;
 }
 
-
-
 .dropdown-option:hover {
   background-color: rgba(0, 113, 227, 0.06);
   padding-left: 22px;
   transition: all 0.2s ease;
 }
-
-
-
 
 @media screen and (max-width: 768px) {
   .filter-buttons {
@@ -643,13 +657,15 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   transform: scale(0.97);
 }
 
-
-
 /* ================= PANEL CONTENT ================== */
 
 .filter-tab-content {
   display: none;
   animation: fadeSlideDown 0.3s ease;
+  margin: 0 auto;
+  padding: 0 24px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .filter-tab-content.active {
@@ -676,7 +692,6 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   margin-top: 28px;
   flex-wrap: wrap;
 }
-
 
 
 @keyframes fadeInTab {
@@ -709,6 +724,7 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   color: white;
   font-weight: bold;
 }
+
 
 
 /*the aesthetic of the toggle is being controlled by the 
@@ -1198,16 +1214,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   transform: scale(1.015);
 }
 
-
-
-/* Optional sticky behavior */
-.sticky {
-  position: sticky;
-  top: 0;
-  background: #f5f5f7;
-  z-index: 1000;
-  padding-top: 12px;
-}
 
 /*---------------------------------------------------------------------------*/
 

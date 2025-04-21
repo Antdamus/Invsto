@@ -217,7 +217,20 @@ function createFilterChip(label, key) {
   return chip;
 }
 
-
+//utility for the pagination control 
+function addBtn(label, page, isActive, container) {
+  const btn = document.createElement("button");
+  btn.textContent = label;
+  if (isActive) btn.classList.add("active");
+  btn.addEventListener("click", () => {
+    currentPage = page;
+    const filtered = getFilteredItems(allItems);
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+    updateURLFromForm();
+  });
+  container.appendChild(btn);
+}
 
 
 // 🔹 Utility: Extract Filter Values from Form and UI
