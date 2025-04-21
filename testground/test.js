@@ -1,4 +1,6 @@
 
+let selectedItems = new Set();  
+
 //#region function to render all the cards (renderstockitems)
     //#region getting the info of the card and the chips rendered
         // helped to get chip colors, returns a string saying the color class
@@ -225,8 +227,7 @@
 //#endregion
 
 //#region function render bulk toolbar after event listener capure change in select-box
-    
-
+    //function to count how many items have been selected
     function updateBulkToolbar() {
         const toolbar = document.getElementById("bulk-toolbar");
         const count = document.getElementById("selected-count");
@@ -252,8 +253,7 @@
     }
 
 //#endregion
-xcvzvcxzvcxvcxzv
-xcvzvcxzvcxvcxzv 
+
 
 //1. first thing is you add an event listener to the DOMContentLoaded
 
@@ -330,7 +330,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     allItems = await fetchStockItems();
     
     //3. render all the cards
-    renderStockItems(data)
+    renderStockItems(allItems)
 
     //4. set up the listeners for the elements of the cards
     document.addEventListener("click", (e) => { /**e in this case is
@@ -369,19 +369,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         toggleSelectItem(id, e.target.checked); /**the e.target.check is 
         a simple boolean */
     }
-    });
-  
-    // 🔹 Step 2: Fetch items from Supabase and store globally
-    allItems = await fetchStockItems();
-    populateDropdowns({ 
-      data: allItems, //data from where categories will be extracted
-      column: "categories", //the name of the column from where the categories will be extracted
-      optionsContainerClass: "category-dropdown-container", //id of the div container where all the stuff will be
-      toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
-      menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
-      optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
-      searchId: "category-search", //id of the search bar (injected by html)
-      placeholder: "Search categories...", //text that will show up in the search bar
     });
       
   });

@@ -7,7 +7,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <!-- 🪪 Page title -->
   <title>OG Jewelry Stock</title>
-<!-- test comment -->
 
   <!-- 🎨 Main CSS stylesheet -->
   <link rel="stylesheet" href="test.css" />
@@ -21,14 +20,24 @@
 
 <body class="stock-body">
 
-    <!-- categories dropdown -->
-    <div id="bulk-category-container" class="custom-dropdown">
-        <button id="bulk-category-toggle" type="button" class="dropdown-toggle">
-            Categories to add
-        </button>
-        <div id="bulk-category-menu" class="dropdown-menu"></div>
-            <!-- here is where the categories will be injected-->
-    </div>
+     <!-- 🧰 Bulk Action Toolbar -->
+     <div id="bulk-toolbar" class="bulk-toolbar">
+        <span id="selected-count">0 selected</span>
+        <button id="bulk-delete">🗑 Delete</button>
+        <button id="bulk-export">📥 Export CSV</button>
+        <button id="bulk-clear">❌ Clear Selection</button>
+        <button id="bulk-favorite" class="bulk-btn">⭐ Toggle Favorite</button>
+
+        <!-- categories dropdown -->
+        <div id="bulk-category-container" class="custom-dropdown">
+            <button id="bulk-category-toggle" type="button" class="dropdown-toggle">
+                Categories to add
+            </button>
+            <div id="bulk-category-menu" class="dropdown-menu"></div>
+                <!-- here is where the categories will be injected-->
+        </div>
+        
+      </div>
 
     <!-- 📦 Inventory Item Cards Grid -->
     <main class="stock-main">

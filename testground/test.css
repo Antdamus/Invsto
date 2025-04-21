@@ -1,0 +1,213 @@
+body {
+    font-family: 'DM Serif Display', serif;
+    background-color: #f5f5f7;
+    color: #1d1d1f;
+    margin: 0;
+    padding: 20px;
+  }
+  
+  .stock-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 24px;
+    padding-bottom: 40px;
+  }
+  
+  .stock-card {
+    background-color: #fff;
+    border-radius: 20px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+  
+  .stock-card:hover {
+    transform: scale(1.01);
+  }
+  
+  .stock-image-container {
+    position: relative;
+    margin-bottom: 12px;
+  }
+  
+  .carousel {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    overflow: hidden;
+    border-radius: 14px;
+  }
+  
+  .carousel-track {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    transition: transform 0.3s ease;
+  }
+  
+  .carousel-photo {
+    width: 100%;
+    height: 220px;
+    object-fit: cover;
+    flex-shrink: 0;
+    display: none;
+    border-radius: 14px;
+  }
+  
+  .carousel-photo.active {
+    display: block;
+  }
+  
+  .carousel-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 2rem;
+    background-color: rgba(255, 255, 255, 0.8);
+    border: none;
+    padding: 4px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 2;
+  }
+  
+  .carousel-btn.left { left: 10px; }
+  .carousel-btn.right { right: 10px; }
+  
+  .stock-content p {
+    font-size: 0.95rem;
+    margin: 0.2rem 0;
+    line-height: 1.4;
+  }
+  
+  .stock-count.stock-zero {
+    color: #e63946;
+    font-weight: bold;
+  }
+  
+  .select-checkbox {
+    transform: scale(1.1);
+  }
+  
+  .favorite-btn {
+    font-size: 1.4rem;
+    color: #bbb;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.3s ease;
+  }
+  
+  .favorite-btn:hover,
+  .stock-card.favorited .favorite-btn {
+    color: gold;
+  }
+  
+  .stock-card.favorited {
+    border: 2px solid gold;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  }
+  
+  .stock-card.selected {
+    border: 2px solid #0071e3;
+    box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
+  }
+  
+  .card-float-controls {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    z-index: 3;
+  }
+  
+  .category-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0;
+  }
+  
+  .category-chip {
+    border-radius: 14px;
+    padding: 4px 10px;
+    font-size: 0.9rem;
+    font-family: 'DM Serif Display', serif;
+    color: #1d1d1f;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    position: relative;
+    padding-right: 22px;
+  }
+  
+  .category-chip[data-color="blue"] { background-color: #e6f0ff; color: #1a3e6e; }
+  .category-chip[data-color="green"] { background-color: #e4fce9; color: #1c4f2b; }
+  .category-chip[data-color="purple"] { background-color: #f3e9ff; color: #4e2d84; }
+  .category-chip[data-color="gold"] { background-color: #fff6e0; color: #5c4200; }
+  .category-chip[data-color="gray"] { background-color: #eaeaea; color: #2a2a2a; }
+  
+  .category-chip button {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    border: none;
+    background: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  
+  .add-category-chip {
+    background-color: #0071e3;
+    color: white;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 14px;
+    font-size: 0.9rem;
+  }
+  
+  .bulk-toolbar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 24px;
+    font-family: 'DM Serif Display', serif;
+    font-size: 1rem;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+  
+  .bulk-toolbar.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  
+  .bulk-toolbar button {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1rem;
+    padding: 10px 20px;
+    border-radius: 14px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    background: rgba(255, 255, 255, 0.2);
+    color: #1d1d1f;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+  
