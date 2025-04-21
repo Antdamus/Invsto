@@ -280,12 +280,28 @@ let selectedItems = new Set();
   //refreshed after changes are made 
   function refreshUIAfterCategoryChange() {
     renderStockItems(allItems); // Rebuild the grid
+    updateBulkToolbar() 
     populateDropdowns({
-      data: allItems,
-      menuId: "category-menu",
-      toggleId: "category-toggle",
-      column: "categories",
-      dataAttribute: "cat"
+      data: allItems,                   // your full dataset
+      menuId: "bulk-category-menu",          // ID of the dropdown container
+      toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
+      optionsContainerClass: "bulk-category-container",
+      column: "categories",             // column to extract unique values from
+      dataAttribute: "cat", 
+      optionClass: "dropdown-option",
+      searchId: "category-search", //id of the search bar (injected by html)
+      placeholder: "Search categories...", //text that will show up in the search bar          
+      onClick: (value, isNew) => {
+        addValueToSelectedItems({
+          table: "item_types",
+          column: "categories",
+          value,
+          selectedIds: selectedItems,
+          allItems
+        }).then(() => {
+          refreshUIAfterCategoryChange(); // update DOM + dropdown
+        });
+      }
     });
   }
   
