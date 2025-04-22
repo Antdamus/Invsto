@@ -9,7 +9,7 @@ let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
 let activeDropdown = null;
 
 //---------------------------------------------------------------//
-//#region function to render all the cards (renderstockitems)
+//#region function to render all the cards (renderstockitems) with its chips
   //#region getting the info of the card and the chips rendered
     //#region utilities necessary color chip in the card, remove them, add them
       
@@ -148,6 +148,13 @@ let activeDropdown = null;
             <div class="category-chips">
             ${categoryChips}
             <div class="add-category-chip" data-id="${item.id}">+ Add Category</div> 
+            </div>
+
+            <div id="cardchip-dropdown-container" class="custom-dropdown">
+              <button id="cardchip-dropdown-toggle" type="button" class="dropdown-toggle">
+                + Add Category
+              </button>
+              <div id="cardchip-dropdown-menu" class="dropdown-menu"></div>
             </div>
         </div>
         `; /** the add-category-chip has a data-id so when the event listener is triggered
@@ -2030,6 +2037,31 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
     });
+
+    //dropdoww to add chips individually
+    populateDropdowns({
+      data: allItems,                   // your full dataset
+      menuId: "bulk-category-menu",          // ID of the dropdown container
+      toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
+      optionsContainerClass: "bulk-category-container",
+      column: "categories",             // column to extract unique values from
+      dataAttribute: "cat", 
+      optionClass: "dropdown-option",
+      searchId: "category-search", //id of the search bar (injected by html)
+      placeholder: "Search categories...", //text that will show up in the search bar          
+      onClick: (value, isNew) => {
+        addValueToSelectedItems({
+          table: "item_types",
+          column: "categories",
+          value,
+          selectedIds: selectedItems,
+          allItems
+        }).then(() => {
+          refreshUIAfterCategoryChange(); // update DOM + dropdown
+        });
+      }
+    });
+
   //#endregion
 
   //#region step 4 application of filter and chips in cards
@@ -2086,24 +2118,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateBulkToolbar();
 
 });
-
-// 🔍 Live Search in Category Dropdown
-function setupCategorySearch() {
-  const searchInput = document.getElementById("category-search");
-  const options = document.querySelectorAll("#category-dropdown-menu .dropdown-option");
-
-  if (!searchInput) return;
-
-  searchInput.addEventListener("input", () => {
-    const query = searchInput.value.trim().toLowerCase();
-
-    options.forEach(option => {
-      const text = option.textContent.toLowerCase();
-      option.style.display = text.includes(query) ? "block" : "none";
-    });
-  });
-}
-
 
 /* to be able to upload functions to run them in the console
 window.extractFilterValues = extractFilterValues;
