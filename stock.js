@@ -107,6 +107,16 @@ let activeDropdown = null;
         await refreshInventoryUI();
       }
 
+      // 🔧 Utility to update item categories from Supabase
+      async function updateItemCategories(itemId, newCategories) {
+        const { error } = await supabase
+          .from("item_types")
+          .update({ categories: newCategories })
+          .eq("id", itemId);
+
+        if (error) throw new Error(error.message);
+      }
+
     //#endregion
 
     //Build the full card body with data-driven text content and chips
@@ -147,14 +157,11 @@ let activeDropdown = null;
             <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
             <div class="category-chips">
             ${categoryChips}
-            <div class="add-category-chip" data-id="${item.id}">+ Add Category</div> 
-            </div>
-
-            <div id="cardchip-dropdown-container" class="custom-dropdown">
-              <button id="cardchip-dropdown-toggle" type="button" class="dropdown-toggle">
+            <div id="cardchip-category-container" class="custom-dropdown" data-id="${item.id}">
+              <button id="cardchip-category-toggle" type="button" class="dropdown-toggle" >
                 + Add Category
               </button>
-              <div id="cardchip-dropdown-menu" class="dropdown-menu"></div>
+              <div class="cardchip-category-menu dropdown-menu"></div>
             </div>
         </div>
         `; /** the add-category-chip has a data-id so when the event listener is triggered
@@ -1320,6 +1327,32 @@ let activeDropdown = null;
     updateURLFromForm();
   };
 
+  //deployed function on add category inside the chip 
+  /**
+  * 🔘 onClick handler for card-level "Add Category" dropdown
+  * ✅ Handles both existing and new categories
+  * ✅ Reads the specific item ID from the dropdown container
+  * ✅ Applies the selected category to that item via Supabase
+  *
+  * @param {string} value - The selected or newly created category value
+  * @param {boolean} isNew - Whether this is a brand-new category (true) or existing (false)
+  * @param {HTMLElement} optionEl - The clicked DOM element inside the dropdown
+  */
+  function onClickCardChipCategory(value, isNew, optionEl) {
+    // 🔍 Find the closest dropdown container (used to store item ID)
+    const container = optionEl.closest(".cardchip-category-container");
+
+    // 🆔 Extract the item ID from the data-id on the container
+    const itemId = container?.dataset.id;
+
+    // 🛑 Exit early if ID is missing or no value was selected
+    if (!itemId || !value) return;
+
+    // 🧠 Call existing logic to add the category to this one specific item
+    applyCategory(itemId, value);
+  }
+
+
   //deployed function on select for bulk operations
   /**
    * Adds a value (e.g. category/tag/type) to a specific column of all selected items in a table,
@@ -1621,16 +1654,6 @@ function showLoading(selector = "#loading-overlay") {
 function hideLoading(selector = "#loading-overlay") {
   const el = document.querySelector(selector);         // 🔍 Try to find the element
   if (el) el.classList.remove("show");                 // ✅ Remove .show class to hide it
-}
-
-// 🔧 Utility to update item categories in Supabase
-async function updateItemCategories(itemId, newCategories) {
-  const { error } = await supabase
-    .from("item_types")
-    .update({ categories: newCategories })
-    .eq("id", itemId);
-
-  if (error) throw new Error(error.message);
 }
 
 // 🔸 Helper: Create a category option DOM element
@@ -2041,24 +2064,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     //dropdoww to add chips individually
     populateDropdowns({
       data: allItems,                   // your full dataset
-      menuId: "bulk-category-menu",          // ID of the dropdown container
-      toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
-      optionsContainerClass: "bulk-category-container",
+      menuId: "cardchip-category-menu",          // ID of the dropdown container
+      toggleId: "cardchip-category-toggle",      // ID of the toggle button (if applicable)
+      optionsContainerClass:"cardchip-category-container",
       column: "categories",             // column to extract unique values from
-      dataAttribute: "cat", 
+      dataAttribute: "cardchip", 
       optionClass: "dropdown-option",
-      searchId: "category-search", //id of the search bar (injected by html)
+      searchId: "cardchip-search", //id of the search bar (injected by html)
       placeholder: "Search categories...", //text that will show up in the search bar          
-      onClick: (value, isNew) => {
-        addValueToSelectedItems({
-          table: "item_types",
-          column: "categories",
-          value,
-          selectedIds: selectedItems,
-          allItems
-        }).then(() => {
-          refreshUIAfterCategoryChange(); // update DOM + dropdown
-        });
+      onClick: (value, isNew, optionEl) => {
+        onClickCardChipCategory(value, isNew, optionEl);
+        refreshUIAfterCategoryChange(); // optional if you want to re-render right after each click
       }
     });
 
