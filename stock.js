@@ -318,10 +318,80 @@ let activeDropdown = null;
   
       grid.appendChild(fragment); //append the fragment which is the local DOM to the live DOM
   }
+  
+  //#region Event listeners of this section
+    /** Toggle a favorite state for a specific item
+     * ✅ Updates Supabase `favorites` table and local state
+     * ✅ Triggers re-render
+     */
+    async function toggleFavorite(itemId) {
+      if (!currentUser) return;
+
+      const isFav = userFavorites.has(itemId);
+      const { error } = isFav
+        ? await supabase.from("favorites").delete().eq("user_id", currentUser.id).eq("item_id", itemId)
+        : await supabase.from("favorites").insert([{ user_id: currentUser.id, item_id: itemId }]);
+
+      if (!error) {
+        isFav ? userFavorites.delete(itemId) : userFavorites.add(itemId);
+        const filtered = getFilteredItems(allItems);
+        applySortAndRender(filtered);
+      }
+    }
+
+    /**🔧 Initializes all delegated DOM event listeners related to card UI interactions.
+    * ✅ Should be called once after DOM is loaded or re-rendered (e.g., after filtering)
+    * ✅ Uses event delegation to reduce per-element listeners
+    */
+    function setupCardEventListeners() {
+      // 🎯 Handle all click-based interactions (e.g., favorite, category, carousel)
+      document.addEventListener("click", (e) => {
+        const id = e.target.dataset.id; // Common data-id used for most card actions
+
+        // ⭐ Toggle favorite status
+        if (e.target.matches(".favorite-btn")) {
+          toggleFavorite(id);
+        }
+
+        // ➕ Open dropdown to add category
+        if (e.target.matches(".add-category-chip")) {
+          showCategoryDropdown(id, e.target); // open dropdown attached to this card
+        }
+
+        // ❌ Remove a category chip from the card
+        if (e.target.matches(".remove-category-btn")) {
+          const chip = e.target.closest(".category-chip"); // get the full chip container
+          const cat = chip?.dataset.cat;                   // which category?
+          const itemId = chip?.dataset.id;                 // which item?
+          if (cat && itemId) {
+            removeCategory(itemId, cat);                   // update data & UI
+          }
+        }
+
+        // ⏪⏩ Carousel navigation: previous or next
+        if (e.target.matches(".carousel-btn")) {
+          const index = parseInt(e.target.dataset.carouselIndex, 10); // which carousel
+          const dir = e.target.dataset.dir;                            // "prev" or "next"
+          if (!isNaN(index) && dir) {
+            dir === "prev" ? prevSlide(index) : nextSlide(index);      // go left or right
+          }
+        }
+      });
+
+      // ☑️ Handle selection checkbox toggle (for bulk actions)
+      document.addEventListener("change", (e) => {
+        if (e.target.matches(".select-checkbox")) {
+          const id = e.target.dataset.id;
+          const checked = e.target.checked;
+          toggleSelectItem(id, checked); // update selectedItems Set + bulk toolbar
+        }
+      });
+    }
+  //#endregion 
 
 //#endregion
 
-//#region function of the filter system and URL system
+//#region function of the filter, URL, and pagination system
 
   // Parse a string or value, return null if blank or invalid
   const parseOrNull = (val) => {
@@ -439,7 +509,7 @@ let activeDropdown = null;
     }
   //#endregion
   
-  //#region engine to sort items and render the final sorted results
+  //#region engine to sort items and render the final sorted results, and pagination controls
     //function to sort the items in the appropriate order
     function sortItems(data, sortValue) {
       // If no sort option is selected, return a shallow copy (unsorted)
@@ -623,128 +693,342 @@ let activeDropdown = null;
 
   //#endregion
 
-  //obtain the curret parameters from the URL
-  function getURLParams() {
-    return Object.fromEntries(new URLSearchParams(window.location.search)); /**first part of the function
-    is retun object.fromentries is turning the object from URLSeachParam into a javascript object 
-    window.location.search gives you the query string of the current URL (everything after the ?)
-    stock.html?title=sasaas&sort=title-asc&limit=12&page=1 (in this case string after ?) 
-    title=sasaas&sort=title-asc&limit=12&page=1
-    URLSearchParams(...) turns that string into an object that acts like a Map
-    getURLParams(); → { category: "Rings", page: "2" }
-    */
-  }
-
-  //update the url with the current filters
-  function updateURLFromForm() {
-    const form = document.getElementById("filter-form");
-    const formData = new FormData(form); // 🔁 Get all input values
-
-    // 🔸 Get selected categories from the dropdown UI
-    const selectedCats = [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
-      .map(el => el.dataset.cat);
-
-    // 🔸 Match-all checkbox for categories
-    const matchAll = document.getElementById("match-all-toggle")?.checked;
-
-    // 🔸 Prepare the query string
-    const params = new URLSearchParams();
-
-    // 🔁 Add each non-empty field from the form to the URL params
-    for (const [key, value] of formData.entries()) {
-      if (value) params.set(key, value);
+  //#region engine to be able to put filters in the URL, update them, get them
+    //obtain the curret parameters from the URL
+    function getURLParams() {
+      return Object.fromEntries(new URLSearchParams(window.location.search)); /**first part of the function
+      is retun object.fromentries is turning the object from URLSeachParam into a javascript object 
+      window.location.search gives you the query string of the current URL (everything after the ?)
+      stock.html?title=sasaas&sort=title-asc&limit=12&page=1 (in this case string after ?) 
+      title=sasaas&sort=title-asc&limit=12&page=1
+      URLSearchParams(...) turns that string into an object that acts like a Map
+      getURLParams(); → { category: "Rings", page: "2" }
+      */
     }
 
-    // 🔁 Add category filter (comma-separated string) if any are selected
-    if (selectedCats.length > 0) {
-      params.set("categories", selectedCats.join(","));
-    }
+    //update the url with the current filters
+    function updateURLFromForm() {
+      const form = document.getElementById("filter-form");
+      const formData = new FormData(form); // 🔁 Get all input values
 
-    // 🔁 Add QR type filter (comma-separated string) if selected
-      const selectedQRs = [...document.querySelectorAll(".dropdown-option.selected[data-qr]")]
-      .map(el => el.dataset.qr);
-      if (selectedQRs.length > 0) {
-        params.set("qr_type", selectedQRs.join(","));
+      // 🔸 Get selected categories from the dropdown UI
+      const selectedCats = [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
+        .map(el => el.dataset.cat);
+
+      // 🔸 Match-all checkbox for categories
+      const matchAll = document.getElementById("match-all-toggle")?.checked;
+
+      // 🔸 Prepare the query string
+      const params = new URLSearchParams();
+
+      // 🔁 Add each non-empty field from the form to the URL params
+      for (const [key, value] of formData.entries()) {
+        if (value) params.set(key, value);
       }
 
+      // 🔁 Add category filter (comma-separated string) if any are selected
+      if (selectedCats.length > 0) {
+        params.set("categories", selectedCats.join(","));
+      }
 
-    // ✅ Add match-all toggle if enabled
-    if (matchAll) {
-      params.set("matchAll", "true");
+      // 🔁 Add QR type filter (comma-separated string) if selected
+        const selectedQRs = [...document.querySelectorAll(".dropdown-option.selected[data-qr]")]
+        .map(el => el.dataset.qr);
+        if (selectedQRs.length > 0) {
+          params.set("qr_type", selectedQRs.join(","));
+        }
+
+
+      // ✅ Add match-all toggle if enabled
+      if (matchAll) {
+        params.set("matchAll", "true");
+      }
+
+      // ✅ Add current sort option
+      const sortValue = document.getElementById("sort-select")?.value;
+      if (sortValue) {
+        params.set("sort", sortValue);
+      }
+
+      // ✅ Add cards-per-page limit if selected
+      const limitValue = document.getElementById("cards-per-page")?.value;
+      if (limitValue) {
+        params.set("limit", limitValue);
+      }
+
+      // ✅ Always store the current page
+      params.set("page", currentPage);
+
+      // 🔄 Update the browser URL without reloading the page
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState({}, "", newUrl);
+    }
+      
+    //application of the filters stored in theURL
+    function applyFiltersFromURL() {
+      const params = getURLParams(); /**so you can get the plain object parameters 
+      { page: "2", categories: "Rings,Gold", sort: "weight" }*/
+      const form = document.getElementById("filter-form");
+
+      // 🔁 Populate inputs with URL param values
+      for (const [key, value] of Object.entries(params)) { /**Loops over each key-value pair 
+        in the URL param object */
+        const input = form.querySelector(`[name="${key}"]`); /**if the form object has a name (key)
+        equal to that of the one taken from the URL, it goes ahead and velue sets its value equal
+        to the URL value */
+        if (input) input.value = value;
+      }
+
+      // 🧮 Page size
+      if (params.limit) {
+        itemsPerPage = parseInt(params.limit);
+        document.getElementById("cards-per-page").value = params.limit;
+      }
+
+      // 📄 Page number
+      if (params.page) currentPage = parseInt(params.page);
+
+      // ↕ Sort option
+      if (params.sort) document.getElementById("sort-select").value = params.sort;
+
+      // 📂 Pre-select categories from URL (comma-separated list)
+      if (params.categories) {
+        const catSet = new Set(params.categories.split(","));
+        document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
+          if (catSet.has(el.dataset.cat)) {
+            el.classList.add("selected");
+          }
+        });
+      }
+
+      // 📂 Pre-select qr types from URL (comma-separated list)
+      if (params.qr_type) {
+        const qrSet = new Set(params.qr_type.split(","));
+        document.querySelectorAll('.dropdown-option[data-qr]').forEach(el => {
+          if (qrSet.has(el.dataset.qr)) {
+            el.classList.add("selected");
+          }
+        });
+      }
+
+      // ☑ Match-all category toggle
+      if (params.matchAll === "true") {
+        const matchToggle = document.getElementById("match-all-toggle");
+        if (matchToggle) matchToggle.checked = true;
+      }
+    }
+  //#endregion
+
+  /** function to set up event listeners for a select dropdown
+  * @param {string} toggleId - ID of the toggle <button>
+  * @param {string} menuId - ID of the dropdown <ul> or <div> menu
+  * @param {string} containerSelector - Selector for outer container (ID or class)
+  * @param {string} selectId - (Optional) ID of native <select> element to sync
+  * @param {function} onSelect - (Optional) callback function when an option is selected
+  */
+  function setupCustomDropdown({ toggleId, menuId, containerSelector, selectId = null, onSelect = null }) {
+    const toggle = document.getElementById(toggleId);
+    const menu = document.getElementById(menuId);
+    const container = document.querySelector(containerSelector);
+
+    if (!toggle || !menu || !container) {
+      console.warn("Dropdown setup failed. Missing elements:", { toggle, menu, container });
+      return;
     }
 
-    // ✅ Add current sort option
-    const sortValue = document.getElementById("sort-select")?.value;
-    if (sortValue) {
-      params.set("sort", sortValue);
-    }
+    // 🔁 Toggle menu visibility
+    toggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.classList.toggle("show");
+      container.classList.toggle("active");
+    });
 
-    // ✅ Add cards-per-page limit if selected
-    const limitValue = document.getElementById("cards-per-page")?.value;
-    if (limitValue) {
-      params.set("limit", limitValue);
-    }
+    // 🔁 Handle option selection
+    menu.querySelectorAll("li").forEach((optionEl) => {
+      optionEl.addEventListener("click", () => {
+        const selectedValue = optionEl.getAttribute("data-value");
+        const selectedLabel = optionEl.textContent;
 
-    // ✅ Always store the current page
-    params.set("page", currentPage);
+        // ✏️ Update toggle button label
+        toggle.innerHTML = `${selectedLabel} <span class="material-icons">expand_more</span>`;
 
-    // 🔄 Update the browser URL without reloading the page
-    const newUrl = `${window.location.pathname}?${params.toString()}`;
-    window.history.replaceState({}, "", newUrl);
+        // 🧪 Sync with native <select> if provided
+        if (selectId) {
+          const nativeSelect = document.getElementById(selectId);
+          if (nativeSelect) {
+            nativeSelect.value = selectedValue;
+            nativeSelect.dispatchEvent(new Event("change"));
+          }
+        }
+
+        // ✅ Custom callback if provided
+        if (typeof onSelect === "function") {
+          onSelect(selectedValue, selectedLabel);
+        }
+
+        // 🎬 Close dropdown
+        menu.classList.remove("show");
+        container.classList.remove("active");
+      });
+    });
+
+    // 🧼 Close if user clicks outside
+    document.addEventListener("click", (e) => {
+      if (!container.contains(e.target)) {
+        menu.classList.remove("show");
+        container.classList.remove("active");
+      }
+    });
   }
-    
-  //application of the filters stored in theURL
-  function applyFiltersFromURL() {
-    const params = getURLParams(); /**so you can get the plain object parameters 
-    { page: "2", categories: "Rings,Gold", sort: "weight" }*/
-    const form = document.getElementById("filter-form");
 
-    // 🔁 Populate inputs with URL param values
-    for (const [key, value] of Object.entries(params)) { /**Loops over each key-value pair 
-      in the URL param object */
-      const input = form.querySelector(`[name="${key}"]`); /**if the form object has a name (key)
-      equal to that of the one taken from the URL, it goes ahead and velue sets its value equal
-      to the URL value */
-      if (input) input.value = value;
-    }
+  /**function toset up live filtering, sorting, pagination, and favorites (event listeners and refreshing)
+ * ✅ Attaches listeners to input elements in a filter form
+ * ✅ When any input changes, it re-runs:
+ *     - Filtering
+ *     - Sorting
+ *     - Pagination
+ *     - Filter chip update
+ *     - URL sync
+ *
+ * @param {string} formId - ID of the filter form (e.g. "filter-form")
+ * @param {string[]} additionalIds - Extra input IDs outside the form (e.g. sort dropdown, page size)
+ */
+  function setupDynamicFilters(formId, additionalIds = []) {
+    // 📌 Get the form element by ID
+    const form = document.getElementById(formId);
+    if (!form) return; // 🛑 Exit early if the form doesn't exist
 
-    // 🧮 Page size
-    if (params.limit) {
-      itemsPerPage = parseInt(params.limit);
-      document.getElementById("cards-per-page").value = params.limit;
-    }
+    /**
+     * 🧠 Central handler that runs every time any filter input changes
+     * It updates:
+     * - The filtered list
+     * - The sort order
+     * - The rendered cards
+     * - The filter chips
+     * - The URL query string
+     */
+    const handleFilterChange = () => {
+      currentPage = 1; // ⏮ Always reset pagination to page 1
 
-    // 📄 Page number
-    if (params.page) currentPage = parseInt(params.page);
+      const filtered = getFilteredItems(allItems); // 🧠 Apply all active filters
+      const filters = getActiveFilters();          // 🎯 Get the latest filters for chips & URL
 
-    // ↕ Sort option
-    if (params.sort) document.getElementById("sort-select").value = params.sort;
+      applySortAndRender(filtered); // 📦 Sort, paginate, and display the filtered list
+      updateFilterChips(filters);   // 💬 Update the visual summary of active filters (chips)
+      updateURLFromForm();          // 🔗 Sync the filter state to the browser URL
+    };
 
-    // 📂 Pre-select categories from URL (comma-separated list)
-    if (params.categories) {
-      const catSet = new Set(params.categories.split(","));
-      document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
-        if (catSet.has(el.dataset.cat)) {
-          el.classList.add("selected");
+    // 🔁 Attach event listeners to all <input> and <select> elements inside the form
+    const inputs = form.querySelectorAll("input, select");
+    inputs.forEach(input => {
+      input.addEventListener("input", handleFilterChange); // 👂 Live re-filtering on any input change
+    });
+
+    // 🔁 Also attach listeners to external filter-related inputs by ID
+    additionalIds.forEach(id => {
+      const el = document.getElementById(id); // 🎯 Try to find the element
+      if (!el) return;                        // 🚫 Skip if not found
+
+      el.addEventListener("change", (e) => {
+        if (id === "cards-per-page") {
+          itemsPerPage = parseInt(e.target.value); // 🔢 Update how many items to show per page
+        } else if (id === "sort-select") {
+          currentPage = 1;                         // 🔁 Reset page on sort change
         }
+        handleFilterChange();                      // 🔄 Re-run filtering and rendering logic
+      });
+    });
+
+    // ⭐ Attach listener for "Favorites Only" toggle if it exists
+    const favToggle = document.getElementById("show-favorites-only");
+    if (favToggle) {
+      favToggle.addEventListener("change", (e) => {
+        showOnlyFavorites = e.target.checked; // ✅ Enable or disable favorites-only filtering
+        handleFilterChange();                 // 🔄 Re-render filtered results accordingly
       });
     }
+  }
 
-    // 📂 Pre-select qr types from URL (comma-separated list)
-    if (params.qr_type) {
-      const qrSet = new Set(params.qr_type.split(","));
-      document.querySelectorAll('.dropdown-option[data-qr]').forEach(el => {
-        if (qrSet.has(el.dataset.qr)) {
-          el.classList.add("selected");
-        }
+  /**function to set up event listenes to the tabs to switch filter sections, and the match-All toggle
+   * Includes:
+   * - Tab switching between filter sections
+   * - Match-All toggle logic
+   */
+  function setupFilterPanelUI() {
+    // 🔘 Tab button switching (e.g., Basic / Range / Labels)
+    const tabButtons = document.querySelectorAll('.filter-tab-btn');
+    const tabContents = document.querySelectorAll('.filter-tab-content');
+
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const targetTab = button.getAttribute('data-tab');
+
+        // 🔄 Deselect all tab buttons
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+
+        // 🔄 Hide all tab contents
+        tabContents.forEach(content => content.classList.remove('active'));
+
+        // ✅ Highlight the clicked button
+        button.classList.add('active');
+
+        // ✅ Show the matching tab panel
+        const contentToShow = document.getElementById(`tab-${targetTab}`);
+        if (contentToShow) contentToShow.classList.add('active');
+      });
+    });
+
+    // ☑️ Match-All toggle for category logic (AND vs OR)
+    const matchAllToggleBtn = document.getElementById("match-all-toggle");
+    if (matchAllToggleBtn) {
+      matchAllToggleBtn.addEventListener("click", () => {
+        const isActive = matchAllToggleBtn.classList.toggle("active");
+
+        // Update label text and data attribute
+        matchAllToggleBtn.textContent = `Match All Categories: ${isActive ? "On" : "Off"}`;
+        matchAllToggleBtn.dataset.matchAll = isActive;
+
+        // Refilter items with new logic
+        currentPage = 1;
+        const filtered = getFilteredItems(allItems);
+        applySortAndRender(filtered);
+        updateFilterChips(getActiveFilters());
+        updateURLFromForm();
       });
     }
+  }
 
-    // ☑ Match-all category toggle
-    if (params.matchAll === "true") {
-      const matchToggle = document.getElementById("match-all-toggle");
-      if (matchToggle) matchToggle.checked = true;
-    }
+
+  // 🔧 function to clear filter from filter form button plus its logic
+  // @param {string} buttonId - ID of the "Clear Filters" button
+  // @param {string} formId - ID of the form to reset
+  function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
+    const button = document.getElementById(buttonId);
+    const form = document.getElementById(formId);
+
+    if (!button || !form) return;
+
+    button.addEventListener("click", () => {
+      // 🔹 Reset all input fields in the form
+      form.reset();
+
+      // 🔹 Deselect any selected category chips
+      document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el =>
+        el.classList.remove("selected")
+      );
+      document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el =>
+        el.classList.remove("selected")
+      );
+      
+
+      // 🔹 Reset pagination and re-apply filtering + rendering
+      currentPage = 1;
+      const filtered = getFilteredItems(allItems); 
+      applySortAndRender(filtered);
+      updateFilterChips(getActiveFilters());
+      updateURLFromForm();
+      showToast("🧼 Filters cleared!");
+    });
   }
 
 //#endregion
@@ -849,16 +1133,16 @@ let activeDropdown = null;
 //#endregion
 
 //#region function render bulk toolbar after event listener capure change in select-box
-    //function to count how many items have been selected
-    function updateBulkToolbar() {
-      const toolbar = document.getElementById("bulk-toolbar");
-      const count = document.getElementById("selected-count");
-      const selectedCount = selectedItems.size;
-  
-      count.textContent = `${selectedCount} selected`;
-      toolbar.classList.toggle("show", selectedCount > 0);
-      toolbar.classList.toggle("hide", selectedCount === 0);
-  }
+  //function to count how many items have been selected
+  function updateBulkToolbar() {
+    const toolbar = document.getElementById("bulk-toolbar");
+    const count = document.getElementById("selected-count");
+    const selectedCount = selectedItems.size;
+
+    count.textContent = `${selectedCount} selected`;
+    toolbar.classList.toggle("show", selectedCount > 0);
+    toolbar.classList.toggle("hide", selectedCount === 0);
+  } 
 
   //function activated upon selecting checkbox
   function toggleSelectItem(itemId, checked) {
@@ -872,6 +1156,97 @@ let activeDropdown = null;
 
       //const filtered = getFilteredItems(allItems);
       //applySortAndRender(filtered);
+  }
+
+  /** Clears selectedItems for toolbar and refreshes list + toolbar*/
+  function clearSelectionAndRefresh() {
+    selectedItems.clear();
+    updateBulkToolbar();
+    const filtered = getFilteredItems(allItems);
+    applySortAndRender(filtered);
+  }
+
+  /** 🧰 Sets up event listeners for all bulk toolbar actions, except dropwdown of of course
+  * - Clear selection
+  * - Delete selected items
+  * - Toggle favorite status
+  * - Export selected items to CSV
+  */
+  function setupBulkToolbarListeners() {
+    // 🚫 Clear all selected items
+    document.getElementById("bulk-clear")?.addEventListener("click", () => {
+      clearSelectionAndRefresh();         // Deselect all and re-render
+      showToast("✅ Cleared selection");  // Show toast notification
+    });
+
+    // 🗑 Delete selected items from Supabase
+    document.getElementById("bulk-delete")?.addEventListener("click", async () => {
+      if (selectedItems.size === 0) return;
+
+      showLoading(); // Show loading spinner
+
+      const idsToDelete = Array.from(selectedItems);
+
+      const { error } = await supabase
+        .from("item_types")
+        .delete()
+        .in("id", idsToDelete);
+
+      if (!error) {
+        allItems = await fetchStockItems(); // Refresh local copy from backend
+        const updatedCount = selectedItems.size;
+        clearSelectionAndRefresh();
+        updateFilterChips(getActiveFilters());
+        showToast(`🗑 Deleted ${updatedCount} items`);
+      }
+
+      hideLoading(); // Hide spinner either way
+    });
+
+    // ⭐ Add or remove favorites in bulk
+    document.getElementById("bulk-favorite")?.addEventListener("click", async () => {
+      if (!currentUser || selectedItems.size === 0) return;
+
+      showLoading();
+
+      const updates = [];
+
+      for (const id of selectedItems) {
+        const isFav = userFavorites.has(id);
+
+        if (isFav) {
+          // 🧹 Remove from favorites
+          updates.push(
+            supabase.from("favorites").delete().eq("item_id", id).eq("user_id", currentUser.id)
+          );
+          userFavorites.delete(id);
+        } else {
+          // ➕ Add to favorites
+          updates.push(
+            supabase.from("favorites").insert({ item_id: id, user_id: currentUser.id })
+          );
+          userFavorites.add(id);
+        }
+      }
+
+      await Promise.all(updates); // Run all Supabase operations in parallel
+
+      const updatedCount = selectedItems.size;
+      clearSelectionAndRefresh();
+      updateFilterChips(getActiveFilters());
+      showToast(`⭐ Updated ${updatedCount} favorites`);
+      hideLoading();
+    });
+
+    // 📄 Export selected cards to CSV
+    document.getElementById("bulk-export")?.addEventListener("click", () => {
+      const exportCards = Array.from(document.querySelectorAll(".stock-card"))
+        .filter(card => selectedItems.has(card.dataset.itemId));
+
+      if (exportCards.length === 0) return;
+
+      exportCardsToCSV(exportCards); // Export utility function
+    });
   }
 
 //#endregion
@@ -1280,7 +1655,6 @@ function setupClickOutsideToClose(dropdown, anchorElement, clearCallback) {
   setTimeout(() => document.addEventListener("click", handleClick), 0);
 }
 
-
 /**help to make toolbar visible */
 function setBulkToolbarVisibility(visible) {
   const toolbar = document.getElementById("bulk-toolbar");
@@ -1289,7 +1663,6 @@ function setBulkToolbarVisibility(visible) {
   toolbar.classList.toggle("show", visible);
   toolbar.classList.toggle("hide", !visible);
 }
-
 
 // 🔧 Utility: Setup toggle behavior for any button and target element
 // ✅ Parameters:
@@ -1320,156 +1693,6 @@ function setupToggleBehavior(toggleId, targetId, showLabel = "❌ Hide", hideLab
   });
 }
 
-// 🔧 Utility: Sets up live filtering, sorting, pagination, and favorites
-// ✅ Attaches listeners to input elements in a filter form
-// ✅ When inputs change, it re-runs:
-//     - Filtering
-//    - Sorting
-//    - Pagination
-//    - Filter chip update
-//    - URL sync
-//
- // @param {string} formId - ID of the filter form (e.g. "filter-form")
-//  @param {string[]} additionalIds - Extra elements to listen to e.g. sort or pagination
-function setupDynamicFilters(formId, additionalIds = []) {
- const form = document.getElementById(formId);
- if (!form) return; // 🛑 If form not found, exit safely
-
- // 🔁 Central handler to refilter, re-render, update UI + URL
- const handleFilterChange = () => {
-   currentPage = 1;                                // Reset to page 1
-   const filtered = getFilteredItems(allItems);    // Apply filter logic to all items
-   const filters = getActiveFilters();             // Extract latest filter values
-   applySortAndRender(filtered);                   // Sort + paginate + display
-   updateFilterChips(filters);                     // Show visual filter chips
-   updateURLFromForm();                            // Push state to URL bar
- };
-
- // 🔁 Attach input and select listeners inside the form
- const inputs = form.querySelectorAll("input, select");
- inputs.forEach(input => {
-   input.addEventListener("input", handleFilterChange); // Every change re-filters
- });
-
- // 🔁 Handle extra dropdowns like sort and cards-per-page
- additionalIds.forEach(id => {
-   const el = document.getElementById(id);
-   if (!el) return;
-
-   el.addEventListener("change", (e) => {
-     if (id === "cards-per-page") {
-       itemsPerPage = parseInt(e.target.value);    // Update items per page setting
-     } else if (id === "sort-select") {
-       currentPage = 1;                            // Reset page on sort
-     }
-     handleFilterChange();                         // Recalculate everything
-   });
- });
-
- // 🔁 Favorites-only checkbox toggle
- const favToggle = document.getElementById("show-favorites-only");
- if (favToggle) {
-   favToggle.addEventListener("change", (e) => {
-     showOnlyFavorites = e.target.checked;         // Global toggle
-     handleFilterChange();                         // Re-render with this applied
-   });
- }
-}
-
-// 🔧 Modular Setup: Clear filters with a button
- // @param {string} buttonId - ID of the "Clear Filters" button
- // @param {string} formId - ID of the form to reset
-function setupClearFilters(buttonId = "clear-filters", formId = "filter-form") {
-  const button = document.getElementById(buttonId);
-  const form = document.getElementById(formId);
-
-  if (!button || !form) return;
-
-  button.addEventListener("click", () => {
-    // 🔹 Reset all input fields in the form
-    form.reset();
-
-    // 🔹 Deselect any selected category chips
-    document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el =>
-      el.classList.remove("selected")
-    );
-    document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el =>
-      el.classList.remove("selected")
-    );
-    
-
-    // 🔹 Reset pagination and re-apply filtering + rendering
-    currentPage = 1;
-    const filtered = getFilteredItems(allItems); 
-    applySortAndRender(filtered);
-    updateFilterChips(getActiveFilters());
-    updateURLFromForm();
-    showToast("🧼 Filters cleared!");
-  });
-}
-
-/** 🔧 General Custom Dropdown Setup Utility
- * @param {string} toggleId - ID of the toggle <button>
- * @param {string} menuId - ID of the dropdown <ul> or <div> menu
- * @param {string} containerSelector - Selector for outer container (ID or class)
- * @param {string} selectId - (Optional) ID of native <select> element to sync
- * @param {function} onSelect - (Optional) callback function when an option is selected
- */
-function setupCustomDropdown({ toggleId, menuId, containerSelector, selectId = null, onSelect = null }) {
-  const toggle = document.getElementById(toggleId);
-  const menu = document.getElementById(menuId);
-  const container = document.querySelector(containerSelector);
-
-  if (!toggle || !menu || !container) {
-    console.warn("Dropdown setup failed. Missing elements:", { toggle, menu, container });
-    return;
-  }
-
-  // 🔁 Toggle menu visibility
-  toggle.addEventListener("click", (e) => {
-    e.stopPropagation();
-    menu.classList.toggle("show");
-    container.classList.toggle("active");
-  });
-
-  // 🔁 Handle option selection
-  menu.querySelectorAll("li").forEach((optionEl) => {
-    optionEl.addEventListener("click", () => {
-      const selectedValue = optionEl.getAttribute("data-value");
-      const selectedLabel = optionEl.textContent;
-
-      // ✏️ Update toggle button label
-      toggle.innerHTML = `${selectedLabel} <span class="material-icons">expand_more</span>`;
-
-      // 🧪 Sync with native <select> if provided
-      if (selectId) {
-        const nativeSelect = document.getElementById(selectId);
-        if (nativeSelect) {
-          nativeSelect.value = selectedValue;
-          nativeSelect.dispatchEvent(new Event("change"));
-        }
-      }
-
-      // ✅ Custom callback if provided
-      if (typeof onSelect === "function") {
-        onSelect(selectedValue, selectedLabel);
-      }
-
-      // 🎬 Close dropdown
-      menu.classList.remove("show");
-      container.classList.remove("active");
-    });
-  });
-
-  // 🧼 Close if user clicks outside
-  document.addEventListener("click", (e) => {
-    if (!container.contains(e.target)) {
-      menu.classList.remove("show");
-      container.classList.remove("active");
-    }
-  });
-}
-
 // 🔹 Closes category dropdown if user clicks outside of it
 // ✅ Prevents dropdown staying open when focus lost
 // ✅ Assumes presence of category-dropdown-container and category-dropdown-menu
@@ -1482,49 +1705,8 @@ document.addEventListener("click", (e) => {
 
 //#endregion
 
-//-------------------------------------------------------------------//
 
 /* ================= User Interface Rendering Functions ============= */
-//#region
-// 🔹 Central event listener to handle all dynamic actions safely
-// ✅ Uses event delegation to manage clicks and changes on any item card
-
-document.addEventListener("click", (e) => {
-  const id = e.target.dataset.id;
-
-  if (e.target.matches(".favorite-btn")) {
-    toggleFavorite(id);
-  }
-
-  if (e.target.matches(".add-category-chip")) {
-    showCategoryDropdown(id, e.target);
-  }
-
-  if (e.target.matches(".remove-category-btn")) {
-    const chip = e.target.closest(".category-chip");
-    const cat = chip?.dataset.cat;
-    const itemId = chip?.dataset.id;
-    if (cat && itemId) removeCategory(itemId, cat);
-  }
-
-  if (e.target.matches(".carousel-btn")) {
-    const index = parseInt(e.target.dataset.carouselIndex, 10);
-    const dir = e.target.dataset.dir;
-    if (!isNaN(index) && dir) {
-      dir === "prev" ? prevSlide(index) : nextSlide(index);
-    }
-  }
-});
-
-document.addEventListener("change", (e) => {
-  if (e.target.matches(".select-checkbox")) {
-    const id = e.target.dataset.id;
-    toggleSelectItem(id, e.target.checked);
-  }
-});
-
-//#endregion
-
 
 // 🔹 Category Loader: gets unique values and triggers dropdown
 async function loadCategories(items) {
@@ -1552,16 +1734,6 @@ async function refreshInventoryUI() {
   updateFilterChips(getActiveFilters());
 }
 
-
-
-//#endregion
-
-//-------------------------------------------------------------------//
-
-/* ================= Controller functions ============================== */ 
-//#region
-
-
 // 🔸 Load categories from Supabase and render dropdown in the
 // filter interface
 async function loadCategories() {
@@ -1576,12 +1748,6 @@ async function loadCategories() {
     optionsContainerClass: "dropdown-options-container", //name of the container holding the options
   }); ;
 }
-
-
-
-
-//#endregion
-
 
 // 🔹 UI Controller: Show category dropdown for an item
 // ✅ Allows selecting, creating, and assigning categories to an item in-place
@@ -1686,44 +1852,6 @@ async function showCategoryDropdown(itemId, anchorElement) {
     activeDropdown = null;
   });
 }
-
-
-/** 🔹 Toggle a favorite state for a specific item
- * ✅ Updates Supabase `favorites` table and local state
- * ✅ Triggers re-render
- */
-async function toggleFavorite(itemId) {
-  if (!currentUser) return;
-
-  const isFav = userFavorites.has(itemId);
-  const { error } = isFav
-    ? await supabase.from("favorites").delete().eq("user_id", currentUser.id).eq("item_id", itemId)
-    : await supabase.from("favorites").insert([{ user_id: currentUser.id, item_id: itemId }]);
-
-  if (!error) {
-    isFav ? userFavorites.delete(itemId) : userFavorites.add(itemId);
-    const filtered = getFilteredItems(allItems);
-    applySortAndRender(filtered);
-  }
-}
-
-/**  🔹 Clears selectedItems and refreshes list + toolbar
- */
-function clearSelectionAndRefresh() {
-  selectedItems.clear();
-  updateBulkToolbar();
-  const filtered = getFilteredItems(allItems);
-  applySortAndRender(filtered);
-}
-
-//#endregion
-
-//-------------------------------------------------------------------//
-
-
-
-
-//--------------------------------------------------------
 
 
 function setupCSVExport() {
@@ -1919,136 +2047,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateFilterChips(filters);
   //#endregion
 
-  // 🔹 Step 5: Populate and setup UI dropdowns
-  // this is for the dropdown of the categories
-  setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
-  setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
-  setupClearFilters("clear-filters", "filter-form");
-  setupCustomDropdown({
-    toggleId: "sortDropdownToggle",
-    menuId: "sortDropdownMenu",
-    containerSelector: ".custom-sort-dropdown",
-    selectId: "sort-select"
-  });
+  //#region step 5 set up the event listernes 
+    //event listeners for the form, pagination control, updating url, etc
+    setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);
 
-  // ✅ Bulk Toolbar Listeners
-  document.getElementById("bulk-clear")?.addEventListener("click", () => {
-    clearSelectionAndRefresh();
-    showToast("✅ Cleared selection");
-  });
-
-  document.getElementById("bulk-delete")?.addEventListener("click", async () => {
-    if (selectedItems.size === 0) return;
-    showLoading();
-    const idsToDelete = Array.from(selectedItems);
-
-    const { error } = await supabase
-      .from("item_types")
-      .delete()
-      .in("id", idsToDelete);
-
-    if (!error) {
-      allItems = await fetchStockItems();
-      const updatedCount = selectedItems.size;
-      clearSelectionAndRefresh();
-      updateFilterChips(getActiveFilters());
-      showToast(`🗑 Deleted ${updatedCount} items`);
-    }
-    hideLoading();
-  });
-
-  document.getElementById("bulk-favorite")?.addEventListener("click", async () => {
-    if (!currentUser || selectedItems.size === 0) return;
-    showLoading();
-    const updates = [];
-
-    for (const id of selectedItems) {
-      const isFav = userFavorites.has(id);
-      if (isFav) {
-        updates.push(
-          supabase.from("favorites").delete().eq("item_id", id).eq("user_id", currentUser.id)
-        );
-        userFavorites.delete(id);
-      } else {
-        updates.push(
-          supabase.from("favorites").insert({ item_id: id, user_id: currentUser.id })
-        );
-        userFavorites.add(id);
-      }
-    }
-
-    await Promise.all(updates);
-    const updatedCount = selectedItems.size;
-    clearSelectionAndRefresh();
-    updateFilterChips(getActiveFilters());
-    showToast(`⭐ Updated ${updatedCount} favorites`);
-    hideLoading();
-  });
-
-  // 🔹 Export Button for Selected Items
-  document.getElementById("bulk-export")?.addEventListener("click", () => {
-    const exportCards = Array.from(document.querySelectorAll(".stock-card"))
-      .filter(card => selectedItems.has(card.dataset.itemId));
-    if (exportCards.length === 0) return;
-    exportCardsToCSV(exportCards);
-  });
-
-  //listener for the toggle filter
-  document.querySelectorAll(".filter-toggle-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const content = btn.nextElementSibling;
-      content.classList.toggle("show");
-    });
-  });
-
-  // 🔘 Filter Tab Switching Logic for Horizontal Filter Buttons
-  const tabButtons = document.querySelectorAll('.filter-tab-btn');
-  const tabContents = document.querySelectorAll('.filter-tab-content');
-
-  tabButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      const targetTab = button.getAttribute('data-tab');
-
-      // 🔄 Remove active class from all buttons
-      tabButtons.forEach(btn => btn.classList.remove('active'));
-
-      // 🔄 Hide all tab contents
-      tabContents.forEach(content => content.classList.remove('active'));
-
-      // ✅ Activate the clicked button
-      button.classList.add('active');
-
-      // ✅ Show corresponding content panel
-      const contentToShow = document.getElementById(`tab-${targetTab}`);
-      if (contentToShow) contentToShow.classList.add('active');
-    });
-  });
-
-  const matchAllToggleBtn = document.getElementById("match-all-toggle");
-  if (matchAllToggleBtn) {
-    matchAllToggleBtn.addEventListener("click", () => {
-      const isActive = matchAllToggleBtn.classList.toggle("active");
-      matchAllToggleBtn.textContent = `Match All Categories: ${isActive ? "On" : "Off"}`;
-      matchAllToggleBtn.dataset.matchAll = isActive;
-
-      // Refresh filter with new match mode
-      currentPage = 1;
-      const filtered = getFilteredItems(allItems);
-      applySortAndRender(filtered);
-      updateFilterChips(getActiveFilters());
-      updateURLFromForm();
-    });
-  }
-
-  document.getElementById("toggle-controller").addEventListener("click", () => {
-    const header = document.querySelector(".container");
-    header.classList.toggle("collapsed");
-  });
-
-  updateBulkToolbar();
-  
-
+    //envent listener for the show or hide filter in main control
+    setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
     
+    //set up button to clears all items form (button and everything) the filter form and rerender everything
+    setupClearFilters("clear-filters", "filter-form");
+
+    //sets up the event listernest for the sort dropdown
+    setupCustomDropdown({
+      toggleId: "sortDropdownToggle",
+      menuId: "sortDropdownMenu",
+      containerSelector: ".custom-sort-dropdown",
+      selectId: "sort-select"
+    });
+
+    //event listener for card functions
+    setupCardEventListeners()
+
+    //event listener to switch filter tabs and the match all button
+    setupFilterPanelUI()
+    
+    //event listener for the bulk actions, except dropdown of course
+    setupBulkToolbarListeners
+
+    //event listener for the home button
+    document.getElementById("toggle-controller").addEventListener("click", () => {
+      const header = document.querySelector(".container");
+      header.classList.toggle("collapsed");
+    });
+    
+  //#endregion
+
+  //step 6 ensure there is function to update the toolbar
+  updateBulkToolbar();
+
 });
 
 // 🔍 Live Search in Category Dropdown
