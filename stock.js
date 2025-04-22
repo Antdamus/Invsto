@@ -143,26 +143,27 @@ let activeDropdown = null;
     
         return `
         <div class="stock-content">
-            <h2>${item.title}</h2>
-            <p>${item.description}</p>
-            <p><strong>Weight:</strong> ${item.weight}</p>
-            <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
-            <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
-            <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
-            <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
-            <p><strong>QR Type:</strong> ${item.qr_type}</p>
-            <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
-            <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
-            <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-            <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
-            <div class="category-chips">
-            ${categoryChips}
-            <div id="cardchip-category-container" class="custom-dropdown" data-id="${item.id}">
-              <button id="cardchip-category-toggle" type="button" class="dropdown-toggle" >
-                + Add Category
+          <h2>${item.title}</h2>
+          <p>${item.description}</p>
+          <p><strong>Weight:</strong> ${item.weight}</p>
+          <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
+          <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
+          <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
+          <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
+          <p><strong>QR Type:</strong> ${item.qr_type}</p>
+          <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
+          <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
+          <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
+          <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+          <div class="category-chips">
+          ${categoryChips}
+            <div id="cardchip-container-${item.id}" class="custom-dropdown" data-id="${item.id}">
+              <button id="cardchip-toggle-${item.id}" type="button" class="dropdown-toggle">
+                + Add category
               </button>
-              <div class="cardchip-category-menu dropdown-menu"></div>
+              <div id="cardchip-menu-${item.id}" class="dropdown-menu"></div>
             </div>
+          </div>
         </div>
         `; /** the add-category-chip has a data-id so when the event listener is triggered
         it knows specifically to what it needs to add the category */
@@ -1266,6 +1267,75 @@ let activeDropdown = null;
 //#endregion
 
 //#region function to generate a full dropwdown menu with search bar for normal and bulk operation
+  // 🔧 Custom dropdown toggle for per-card category injection
+  function setupCardChipDropdownDelegated() {
+    // 🧩 Event delegation: handle any click on the page
+    document.addEventListener("click", async (e) => {
+      // 🔍 Check if the clicked element is a "+ Add Category" toggle button
+      const isToggle = e.target.id?.startsWith("cardchip-toggle-");
+      if (!isToggle) return; // 🚫 Ignore clicks that aren't on toggle buttons
+  
+      // 🆔 Extract item ID from the toggle's ID (e.g., "cardchip-toggle-abc123" -> "abc123")
+      const button = e.target;
+      const itemId = button.id.replace("cardchip-toggle-", "");
+  
+      // 🎯 Find the matching dropdown menu element for that item
+      const menu = document.getElementById(`cardchip-menu-${itemId}`);
+      if (!menu) return; // 🛑 Exit if no matching menu found
+  
+      // 🧹 Close any other open dropdowns before opening this one
+      if (activeDropdown && activeDropdown !== menu) {
+        activeDropdown.classList.remove("show");
+      }
+  
+      // 🧠 Only render the dropdown content if it's not already populated
+      if (!menu.dataset.populated) {
+        // 📦 Get unique category values from the dataset
+        const options = extractUniqueFromArrayColumn(allItems, "categories");
+  
+        // 🔎 Set a unique ID for the search input (helps prevent conflicts)
+        const searchId = `cardchip-search-${itemId}`;
+  
+        // 🧱 Inject search bar + options into the dropdown container
+        renderDropdownOptionsCustom({
+          menuId: menu.id,                          // ID of the dropdown container
+          options,                                  // Array of category options to render
+          searchId,                                 // ID of the search input field
+          placeholder: "Search categories...",      // Placeholder text for the input
+          optionClass: "dropdown-option",           // Class given to each option item
+          dataAttribute: "cardchip",                // Custom data-* tag for card categories
+          optionsContainerClass: "dropdown-options-container", // Wraps option list
+          onClick: (value, isNew, optionEl) => {    // 🖱️ When an option is clicked
+            onClickCardChipCategory(value, isNew, optionEl); // Add it to the item
+            refreshUIAfterCategoryChange();               // Refresh the UI after update
+          }
+        });
+  
+        // ✅ Flag this dropdown as "already populated" to avoid future re-renders
+        menu.dataset.populated = "true";
+      }
+  
+      // 👁️ Toggle the visibility of this dropdown
+      menu.classList.toggle("show");
+  
+      // 📌 Track the currently open dropdown globally
+      activeDropdown = menu.classList.contains("show") ? menu : null;
+    });
+  
+    // 🧼 Global listener: close any open dropdown if user clicks outside it
+    document.addEventListener("click", (e) => {
+      if (
+        activeDropdown &&                                // There’s a menu open
+        !e.target.closest(".custom-dropdown") &&         // User clicked outside dropdown wrapper
+        !e.target.classList.contains("dropdown-option")  // and not on an option
+      ) {
+        activeDropdown.classList.remove("show");         // ❌ Hide dropdown
+        activeDropdown = null;                           // 🔁 Reset global pointer
+      }
+    });
+  }
+  
+  
   // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
   // ✅ Accepts: toggle button ID and dropdown menu ID
   // ✅ Adds toggle show/hide behavior and outside-click closing
@@ -1339,19 +1409,20 @@ let activeDropdown = null;
   * @param {HTMLElement} optionEl - The clicked DOM element inside the dropdown
   */
   function onClickCardChipCategory(value, isNew, optionEl) {
-    // 🔍 Find the closest dropdown container (used to store item ID)
-    const container = optionEl.closest(".cardchip-category-container");
-
-    // 🆔 Extract the item ID from the data-id on the container
-    const itemId = container?.dataset.id;
-
-    // 🛑 Exit early if ID is missing or no value was selected
+    // 🔍 Get the ID from the clicked element’s ancestors
+    const container = optionEl.closest(".custom-dropdown");
+  
+    // 🆔 Extract the item ID from the container's ID (e.g., "cardchip-container-abc123")
+    const idAttr = container?.id || "";
+    const itemId = idAttr.startsWith("cardchip-container-") ? idAttr.replace("cardchip-container-", "") : null;
+  
+    // 🛑 Exit if ID is missing or value is invalid
     if (!itemId || !value) return;
-
-    // 🧠 Call existing logic to add the category to this one specific item
+  
+    // ✅ Apply the selected category to that specific item
     applyCategory(itemId, value);
   }
-
+  
 
   //deployed function on select for bulk operations
   /**
@@ -1510,11 +1581,11 @@ let activeDropdown = null;
     placeholder = "Search...",
     onClick = null,
     dataAttribute,
+    setupToggle = setupDropdownToggle  // 🔧 Optional override!
   }) {
-
     // 🔸 Extract unique values from the specified column
     const options = extractUniqueFromArrayColumn(data, column);
-    
+  
     // 🔸 Render the dropdown with those options
     renderDropdownOptionsCustom({
       menuId,
@@ -1527,10 +1598,13 @@ let activeDropdown = null;
       onClick,
       dataAttribute,
     });
-
-    // 🔸 Setup toggle behavior
-    setupDropdownToggle(toggleId, menuId);
+  
+    // 🔸 Setup toggle behavior using either default or custom
+    if (typeof setupToggle === "function") {
+      setupToggle(toggleId, menuId);
+    }
   }
+  
 
 //#endregion
 
@@ -2014,7 +2088,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     populateDropdowns({ 
       data: allItems, //data from where categories will be extracted
       column: "categories", //the name of the column from where the categories will be extracted
-      optionsContainerClass: "category-dropdown-container", //id of the div container where all the stuff will be
+      optionsContainerClass: "category-dropdown-container", //class of the div container where all the stuff will be
       toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
       menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
       optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
@@ -2060,23 +2134,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
     });
-
-    //dropdoww to add chips individually
-    populateDropdowns({
-      data: allItems,                   // your full dataset
-      menuId: "cardchip-category-menu",          // ID of the dropdown container
-      toggleId: "cardchip-category-toggle",      // ID of the toggle button (if applicable)
-      optionsContainerClass:"cardchip-category-container",
-      column: "categories",             // column to extract unique values from
-      dataAttribute: "cardchip", 
-      optionClass: "dropdown-option",
-      searchId: "cardchip-search", //id of the search bar (injected by html)
-      placeholder: "Search categories...", //text that will show up in the search bar          
-      onClick: (value, isNew, optionEl) => {
-        onClickCardChipCategory(value, isNew, optionEl);
-        refreshUIAfterCategoryChange(); // optional if you want to re-render right after each click
-      }
-    });
+    
 
   //#endregion
 
@@ -2114,19 +2172,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     //event listener for card functions
-    setupCardEventListeners()
+    setupCardEventListeners();
 
     //event listener to switch filter tabs and the match all button
-    setupFilterPanelUI()
+    setupFilterPanelUI();
     
     //event listener for the bulk actions, except dropdown of course
-    setupBulkToolbarListeners
+    setupBulkToolbarListeners();
 
     //event listener for the home button
     document.getElementById("toggle-controller").addEventListener("click", () => {
       const header = document.querySelector(".container");
       header.classList.toggle("collapsed");
     });
+
+    //event listerner for the card dropdown
+    setupCardChipDropdownDelegated()
     
   //#endregion
 
