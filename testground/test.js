@@ -689,7 +689,7 @@ let selectedItems = new Set();
   }
 
   /**extract the information from the filters, transforms it to key and value
-  and uses top function to create HTML to then append it to */
+  and uses top function to create HTML to then append it to node */
   function updateFilterChips(filters) {
     const chipContainer = document.getElementById("header-filter-chips");
     if (!chipContainer) return;
@@ -817,6 +817,16 @@ let selectedItems = new Set();
       }
     });
   }
+
+  // ✅ Default handler (original behavior)
+  const defaultSelectHandler = (value, el) => {
+    el.classList.toggle("selected");
+    currentPage = 1;
+    const filtered = getFilteredItems(items);
+    applySortAndRender(filtered);
+    updateFilterChips(getActiveFilters());
+    updateURLFromForm();
+  };
   
   //deployed function on select for bulk operations
   /**
