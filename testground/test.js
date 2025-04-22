@@ -768,7 +768,6 @@ let selectedItems = new Set();
 //#endregion
 
 //#region function to generate a full dropwdown menu with search bar for bulk operation
-
   // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
   // ✅ Accepts: toggle button ID and dropdown menu ID
   // ✅ Adds toggle show/hide behavior and outside-click closing
@@ -818,8 +817,8 @@ let selectedItems = new Set();
     });
   }
 
-  // ✅ Default handler (original behavior)
-  const defaultSelectHandler = (value, el) => {
+  //function to just set dropdown-option as selected
+  const setAsSelected = (value, el) => {
     el.classList.toggle("selected");
     currentPage = 1;
     const filtered = getFilteredItems(items);
@@ -827,7 +826,7 @@ let selectedItems = new Set();
     updateFilterChips(getActiveFilters());
     updateURLFromForm();
   };
-  
+
   //deployed function on select for bulk operations
   /**
    * Adds a value (e.g. category/tag/type) to a specific column of all selected items in a table,
