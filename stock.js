@@ -1291,55 +1291,6 @@ function setBulkToolbarVisibility(visible) {
 }
 
 
-// 🔧 Utility: Extract unique non-null values from a specified column in a dataset
-// ✅ Parameters:
-//    - data: array of objects (e.g., inventory items)
-//    - column: the key to extract from each object (e.g., "category", "brand")
-// ✅ Returns:
-//    - an array of deduplicated, non-null string values
-function extractUniqueFromColumn(data, column) {
-  if (!Array.isArray(data) || !column) {
-    console.warn("extractUniqueFromColumn: Invalid input.");
-    return [];
-  }
-
-  const values = data.map(item => item[column]).filter(Boolean);
-  return [...new Set(values)]; // Deduplicate
-}
-
-// Utility: Populates a <select> dropdown with <option> tags from an array
-// ✅ Parameters:
-//    - selectId: string ID of the <select> element in the DOM
-//    - optionsArray: array of string values to inject as <option>
-//    - includeNewOption: whether to append a "New..." custom entry at the end
-function populateSelectOptions(selectId, optionsArray, includeNewOption = false) {
-  const select = document.getElementById(selectId);
-
-  if (!select) {
-    console.warn(`populateSelectOptions: No <select> found with ID "${selectId}"`);
-    return;
-  }
-
-  // 🧼 Clear existing <option> entries
-  select.innerHTML = "";
-
-  // 🔁 Inject options from array
-  optionsArray.forEach(value => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    select.appendChild(option);
-  });
-
-  // ➕ Optional: Add "New..." entry for dynamic category creation
-  if (includeNewOption) {
-    const customOption = document.createElement("option");
-    customOption.value = "__new__";
-    customOption.textContent = "➕ New Category...";
-    select.appendChild(customOption);
-  }
-}
-
 // 🔧 Utility: Setup toggle behavior for any button and target element
 // ✅ Parameters:
 //   - toggleId: ID of the button that will trigger the toggle
@@ -1736,14 +1687,6 @@ async function showCategoryDropdown(itemId, anchorElement) {
   });
 }
 
-// 🔹 Controller Function: Combines both helpers to populate category dropdown
-// ✅ Used in the bulk-category select logic
-// ✅ Extracts all unique categories from data and populates select with them
-function populateCategoryDropdown(data) {
-  const categories = extractUniqueFromColumn(data, "category");
-  populateSelectOptions("bulk-category", categories, true);
-}
-
 
 /** 🔹 Toggle a favorite state for a specific item
  * ✅ Updates Supabase `favorites` table and local state
@@ -1772,53 +1715,6 @@ function clearSelectionAndRefresh() {
   const filtered = getFilteredItems(allItems);
   applySortAndRender(filtered);
 }
-
-// =================== Bulk Category Assignment ===================== //
-document.getElementById("bulk-category").addEventListener("change", async (e) => {
-  let category = e.target.value;
-  if (!category || selectedItems.size === 0) return;
-
-  // ➕ Handle custom category entry
-  if (category === "__new__") {
-    const userInput = prompt("Enter a new category:");
-    if (!userInput) return;
-    category = userInput;
-
-    // 🧠 Add new category option to dropdown (if not already present)
-    const select = document.getElementById("bulk-category");
-    const exists = [...select.options].some(opt => opt.value === category);
-
-    if (!exists) {
-      const option = document.createElement("option");
-      option.value = category;
-      option.textContent = category;
-      select.insertBefore(option, select.lastElementChild);
-      select.value = category; // Keep it selected
-    }
-  }
-
-  showLoading();
-  const updates = [];
-
-  for (const id of selectedItems) {
-    updates.push(
-      supabase.from("item_types").update({ category }).eq("id", id)
-    );
-  }
-
-  await Promise.all(updates);
-
-  // 🔁 Refresh full dataset + UI
-  const { data, error } = await supabase.from("item_types").select("*");
-  if (error) return console.error("Error refreshing items:", error);
-
-  allItems = data;
-  populateCategoryDropdown(data);
-  clearSelectionAndRefresh();
-  updateFilterChips(getActiveFilters());
-  showToast(`📂 Moved ${selectedItems.size} items to “${category}”`);
-  hideLoading();
-});
 
 //#endregion
 
@@ -1942,7 +1838,7 @@ function setupPDFExport() {
 // ✅ Main entry point: Initializes app on DOM ready
 // ✅ Applies modular functions, loads user data, sets up all UI handlers
 document.addEventListener("DOMContentLoaded", async () => {
-  // 🔹 Step 1: Authenticate and load user favorites
+  // Step 1: Authenticate and load user favorites
   currentUser = (await supabase.auth.getUser()).data.user;
   if (currentUser) {
     const { data: favs } = await supabase
@@ -1952,77 +1848,79 @@ document.addEventListener("DOMContentLoaded", async () => {
     userFavorites = new Set(favs.map(f => f.item_id));
   }
 
-  // 🔹 Step 2: Fetch items from Supabase and store globally
+  // Step 2: Fetch items from Supabase and store globally
   allItems = await fetchStockItems();
-  populateDropdowns({ 
-    data: allItems, //data from where categories will be extracted
-    column: "categories", //the name of the column from where the categories will be extracted
-    optionsContainerClass: "category-dropdown-container", //id of the div container where all the stuff will be
-    toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
-    menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
-    optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
-    searchId: "category-search", //id of the search bar (injected by html)
-    placeholder: "Search categories...", //text that will show up in the search bar
-    onClick: setAsSelected
-  });
-  
-// this is for the dropdown of the qr types
-  populateDropdowns({
-    data: allItems,
-    column: "qr_type", // extract unique QR types
-    optionsContainerClass: "qr-dropdown-container",
-    toggleId: "qr-dropdown-toggle",
-    menuId: "qr-dropdown-menu",
-    optionClass: "dropdown-option",
-    searchId: "qr-search",
-    placeholder: "Search QR types...",
-    dataAttribute: "qr",
-    onClick: setAsSelected
-  });
 
-  populateDropdowns({
-    data: allItems,                   // your full dataset
-    menuId: "bulk-category-menu",          // ID of the dropdown container
-    toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
-    optionsContainerClass: "bulk-category-container",
-    column: "categories",             // column to extract unique values from
-    dataAttribute: "cat", 
-    optionClass: "dropdown-option",
-    searchId: "category-search", //id of the search bar (injected by html)
-    placeholder: "Search categories...", //text that will show up in the search bar          
-    onClick: (value, isNew) => {
-      addValueToSelectedItems({
-        table: "item_types",
-        column: "categories",
-        value,
-        selectedIds: selectedItems,
-        allItems
-      }).then(() => {
-        refreshUIAfterCategoryChange(); // update DOM + dropdown
-      });
-    }
-  });
+  //#region step 3 create all the necessary drop downs for the system
+    //dropdown for filter by categories
+    populateDropdowns({ 
+      data: allItems, //data from where categories will be extracted
+      column: "categories", //the name of the column from where the categories will be extracted
+      optionsContainerClass: "category-dropdown-container", //id of the div container where all the stuff will be
+      toggleId: "category-dropdown-toggle", //id of the button that will make the menu pop up (html)
+      menuId: "category-dropdown-menu", //id of the block that will show when toggle is in show (html)
+      optionClass: "dropdown-option", //class that will be given to each of the dropdown buttons (injected)
+      searchId: "category-search", //id of the search bar (injected by html)
+      placeholder: "Search categories...", //text that will show up in the search bar
+      onClick: setAsSelected
+    });
+  
+    // this is for the dropdown of the qr types
+    populateDropdowns({
+      data: allItems,
+      column: "qr_type", // extract unique QR types
+      optionsContainerClass: "qr-dropdown-container",
+      toggleId: "qr-dropdown-toggle",
+      menuId: "qr-dropdown-menu",
+      optionClass: "dropdown-option",
+      searchId: "qr-search",
+      placeholder: "Search QR types...",
+      dataAttribute: "qr",
+      onClick: setAsSelected
+    });
+
+    //dropdown for bulk effect of adding categories
+    populateDropdowns({
+      data: allItems,                   // your full dataset
+      menuId: "bulk-category-menu",          // ID of the dropdown container
+      toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
+      optionsContainerClass: "bulk-category-container",
+      column: "categories",             // column to extract unique values from
+      dataAttribute: "cat", 
+      optionClass: "dropdown-option",
+      searchId: "category-search", //id of the search bar (injected by html)
+      placeholder: "Search categories...", //text that will show up in the search bar          
+      onClick: (value, isNew) => {
+        addValueToSelectedItems({
+          table: "item_types",
+          column: "categories",
+          value,
+          selectedIds: selectedItems,
+          allItems
+        }).then(() => {
+          refreshUIAfterCategoryChange(); // update DOM + dropdown
+        });
+      }
+    });
+  //#endregion
+
+  //#region step 4 application of filter and chips in cards
+    //verify whether the url is not indicating you filters must be apply, load them to form
+    applyFiltersFromURL();
+
+    //get only the items that meet filtering critera
+    const filtered = getFilteredItems(allItems);
     
+    //get the filter from the from populated, render them
+    const filters = getActiveFilters();
+    applySortAndRender(filtered);
 
-  //console.log("Fetched items:", allItems);
-  //console.log("First item:", allItems[0]);
-
-  
-  // 🔹 Step 3: Apply filters from URL (syncs state)
-  applyFiltersFromURL();
-
-  // 🔹 Step 4: Render main view with filtering, sorting, chips
-  //console.log("Raw filters:", extractFilterValues());
-  const filtered = getFilteredItems(allItems);
-  //console.log("Filtered items:", filtered);
-  const filters = getActiveFilters();
-  applySortAndRender(filtered);
-  updateFilterChips(filters);
-
+    //render and update the chips in the unified panel depending on the filter values from form
+    updateFilterChips(filters);
+  //#endregion
 
   // 🔹 Step 5: Populate and setup UI dropdowns
   // this is for the dropdown of the categories
-  populateCategoryDropdown(allItems); //this funciton is going to be creating the dropdown for the bulk options
   setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);;
   setupToggleBehavior("toggle-filters", "filter-section", "Hide Filters", "Show Filters");
   setupClearFilters("clear-filters", "filter-form");
@@ -2084,42 +1982,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     clearSelectionAndRefresh();
     updateFilterChips(getActiveFilters());
     showToast(`⭐ Updated ${updatedCount} favorites`);
-    hideLoading();
-  });
-
-  document.getElementById("bulk-category")?.addEventListener("change", async (e) => {
-    let category = e.target.value;
-    if (!category || selectedItems.size === 0) return;
-
-    if (category === "__new__") {
-      const userInput = prompt("Enter a new category:");
-      if (!userInput) return;
-      category = userInput;
-
-      const select = document.getElementById("bulk-category");
-      const exists = [...select.options].some(opt => opt.value === category);
-      if (!exists) {
-        const option = document.createElement("option");
-        option.value = category;
-        option.textContent = category;
-        select.insertBefore(option, select.lastElementChild);
-        select.value = category;
-      }
-    }
-
-    showLoading();
-    const updates = Array.from(selectedItems).map(id =>
-      supabase.from("item_types").update({ category }).eq("id", id)
-    );
-
-    await Promise.all(updates);
-    allItems = await fetchStockItems();
-    populateCategoryDropdown(allItems);
-
-    const updatedCount = selectedItems.size;
-    clearSelectionAndRefresh();
-    updateFilterChips(getActiveFilters());
-    showToast(`📂 Moved ${updatedCount} items to “${category}”`);
     hideLoading();
   });
 
