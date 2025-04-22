@@ -639,7 +639,6 @@ let selectedItems = new Set();
 
 //#endregion
 
-
 //#region chip creating system for unified panel, no for cards
   //creates the chip that will be displayed in the main console
   function createFilterChip(label, key) {
@@ -1007,6 +1006,9 @@ let selectedItems = new Set();
   }
 
 //#endregion
+
+
+
 
 //1. first thing is you add an event listener to the DOMContentLoaded
 

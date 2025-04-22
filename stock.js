@@ -10,140 +10,227 @@ let activeDropdown = null;
 
 //---------------------------------------------------------------//
 //#region function to render all the cards (renderstockitems)
-    //#region getting the info of the card and the chips rendered
-        // helped to get chip colors, returns a string saying the color class
-        function getChipColor(label) {
-          const hash = [...label].reduce((acc, char) => acc + char.charCodeAt(0), 0);/**
-          * this is getting the label "Diamonds", then turning it into a hash
-          gets each characted unicode, adds it up, and this will be your hash */
-          const options = ["blue", "green", "purple", "gold", "gray"]; /**
-          difines classes that are styled for different colors */
-          return options[hash % options.length]; /** modulus function to consistently
-          return a number between 0 and 4, and you can pick a color */
+  //#region getting the info of the card and the chips rendered
+    //#region utilities necessary color chip in the card, remove them, add them
+      
+      // helped to get chip colors, returns a string saying the color class
+      function getChipColor(label) {
+        const hash = [...label].reduce((acc, char) => acc + char.charCodeAt(0), 0);/**
+        * this is getting the label "Diamonds", then turning it into a hash
+        gets each characted unicode, adds it up, and this will be your hash */
+        const options = ["blue", "green", "purple", "gold", "gray"]; /**
+        difines classes that are styled for different colors */
+        return options[hash % options.length]; /** modulus function to consistently
+        return a number between 0 and 4, and you can pick a color */
       } //will be used to render the stock card content
+      
+      // 🔹 Controller: Remove a category from a specific item in Supabase
+      // ✅ Steps:
+      //    1. Fetch the current categories for the item
+      //    2. Remove the given category from the list
+      //    3. Update the item in Supabase with the new list
+      //    4. Refresh the UI re-fetch re-filter re-render update chips
+      async function removeCategory(itemId, category) {
+        const { data, error } = await supabase
+          .from("item_types")
+          .select("categories")
+          .eq("id", itemId)
+          .single();
 
-      //Build the full card body with data-driven text content and chips
-      function buildCardContent(item) {
-          const stock = typeof item.stock === "number" ? item.stock : 0;
-          const stockClass = stock === 0 ? "stock-zero" : ""; /**this is
-          assigning a special class stock-zerp=0 for cards that have 0 stock 
-          otherwise nothing*/
-      
-          const categoryChips = (item.categories || []).map(cat => { /**this
-              specifies that if item.categories is undefinend, fall back to an 
-              empty array []
-              -map in this case will loop though each value of the array defined
-              by caterogories in the item row */
-              const color = getChipColor(cat); /**returns the color class */
-              return `
-                  <div class="category-chip" data-color="${color}" data-cat="${cat}" data-id="${item.id}">
-                  ${cat}
-                  <button class="remove-category-btn">&times;</button>
-                  </div>
-              `;
-          }).join(""); /**glues all the string into one HTML block that will be in the
-          javascrip object called category chips */
-      
-          return `
-          <div class="stock-content">
-              <h2>${item.title}</h2>
-              <p>${item.description}</p>
-              <p><strong>Weight:</strong> ${item.weight}</p>
-              <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
-              <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
-              <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
-              <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
-              <p><strong>QR Type:</strong> ${item.qr_type}</p>
-              <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
-              <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
-              <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-              <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
-              <div class="category-chips">
-              ${categoryChips}
-              <div class="add-category-chip" data-id="${item.id}">+ Add Category</div> 
-              </div>
-          </div>
-          `; /** the add-category-chip has a data-id so when the event listener is triggered
-          it knows specifically to what it needs to add the category */
-          /**it will resturn
-           <div class="stock-content">
-              <h2>Gold Ring</h2>
-              <p>14K yellow gold with diamonds</p>
-              <p><strong>Weight:</strong> 5</p>
-              <p><strong>Cost:</strong> $200</p>
-              ...
-              <div class="category-chips">
-                  <div class="category-chip" data-color="gold" data-cat="Rings" data-id="abc123">
-                  Rings <button class="remove-category-btn">&times;</button>
-                  </div>
-                  <div class="add-category-chip" data-id="abc123">+ Add Category</div>
-              </div>
-          </div>
-          */
+        if (error || !data) {
+          console.error("Error fetching item:", error);
+          return;
+        }
+
+        // Remove the category from the list (filter it out)
+        const updated = (data.categories || []).filter(cat => cat !== category);
+
+        // Update item in Supabase
+        await updateItemCategories(itemId, updated);
+
+        // Refresh filtered + sorted UI
+        await refreshInventoryUI();
       }
+
+      // 🔹 Controller: Prompt user to type a new category and add it to an item
+      // ✅ Steps:
+      //    1. Prompt user for a new category (via `prompt()`)
+      //    2. Fetch existing categories from Supabase
+      //    3. Merge the new category with the list (using Set to avoid duplicates)
+      //    4. Update Supabase
+      //    5. Refresh the UI
+      async function addCategory(itemId) {
+        const newCat = prompt("Enter new category:");
+        if (!newCat) return;
+
+        const { data, error } = await supabase
+          .from("item_types")
+          .select("categories")
+          .eq("id", itemId)
+          .single();
+
+        if (error || !data) {
+          console.error("Error fetching item:", error);
+          return;
+        }
+
+        // Add new category using a Set to prevent duplicates
+        const updated = Array.from(new Set([...(data.categories || []), newCat]));
+
+        // Push update to Supabase
+        await updateItemCategories(itemId, updated);
+
+        // Refresh inventory list and filters
+        await refreshInventoryUI();
+      }
+
+      // 🔹 Controller: Apply a selected category to an item (e.g., from dropdown)
+      // ✅ No user prompt — used for applying pre-existing category values
+      // ✅ Steps:
+      //    1. Fetch current item categories
+      //    2. Merge the selected category in (no duplicates)
+      //    3. Push update to Supabase
+      //    4. Refresh the UI
+      async function applyCategory(itemId, newCategory) {
+        const { data, error } = await supabase
+          .from("item_types")
+          .select("categories")
+          .eq("id", itemId)
+          .single();
+
+        if (error || !data) return;
+
+        const updated = Array.from(new Set([...(data.categories || []), newCategory]));
+
+        await updateItemCategories(itemId, updated);
+
+        await refreshInventoryUI();
+      }
+
+    //#endregion
+
+    //Build the full card body with data-driven text content and chips
+    function buildCardContent(item) {
+        const stock = typeof item.stock === "number" ? item.stock : 0;
+        const stockClass = stock === 0 ? "stock-zero" : ""; /**this is
+        assigning a special class stock-zerp=0 for cards that have 0 stock 
+        otherwise nothing*/
+    
+        const categoryChips = (item.categories || []).map(cat => { /**this
+            specifies that if item.categories is undefinend, fall back to an 
+            empty array []
+            -map in this case will loop though each value of the array defined
+            by caterogories in the item row */
+            const color = getChipColor(cat); /**returns the color class */
+            return `
+                <div class="category-chip" data-color="${color}" data-cat="${cat}" data-id="${item.id}">
+                ${cat}
+                <button class="remove-category-btn">&times;</button>
+                </div>
+            `;
+        }).join(""); /**glues all the string into one HTML block that will be in the
+        javascrip object called category chips */
+    
+        return `
+        <div class="stock-content">
+            <h2>${item.title}</h2>
+            <p>${item.description}</p>
+            <p><strong>Weight:</strong> ${item.weight}</p>
+            <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
+            <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
+            <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
+            <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
+            <p><strong>QR Type:</strong> ${item.qr_type}</p>
+            <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
+            <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
+            <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
+            <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+            <div class="category-chips">
+            ${categoryChips}
+            <div class="add-category-chip" data-id="${item.id}">+ Add Category</div> 
+            </div>
+        </div>
+        `; /** the add-category-chip has a data-id so when the event listener is triggered
+        it knows specifically to what it needs to add the category */
+        /**it will resturn
+         <div class="stock-content">
+            <h2>Gold Ring</h2>
+            <p>14K yellow gold with diamonds</p>
+            <p><strong>Weight:</strong> 5</p>
+            <p><strong>Cost:</strong> $200</p>
+            ...
+            <div class="category-chips">
+                <div class="category-chip" data-color="gold" data-cat="Rings" data-id="abc123">
+                Rings <button class="remove-category-btn">&times;</button>
+                </div>
+                <div class="add-category-chip" data-id="abc123">+ Add Category</div>
+            </div>
+        </div>
+        */
+    }
   //#endregion 
 
   //#region Build image carousel or fallback if no photos
-      // 🔹 Move to next image in carousel for a given card
-      function nextSlide(index) {
-          const carousel = document.getElementById(`carousel-${index}`);
-          const track = carousel.querySelector(".carousel-track");
-          const images = track.querySelectorAll(".carousel-photo");
-      
-          // 🔍 Find currently active image
-          const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
-          images[currentIndex].classList.remove("active");
-      
-          // 🔁 Move to next image (wrap around)
-          const nextIndex = (currentIndex + 1) % images.length;
-          images[nextIndex].classList.add("active");
-      } //needs event listener
-      
-      // 🔹 Move to previous image in carousel for a given card
-      function prevSlide(index) {
-          const carousel = document.getElementById(`carousel-${index}`);
-          const track = carousel.querySelector(".carousel-track");
-          const images = track.querySelectorAll(".carousel-photo");
-      
-          const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
-          images[currentIndex].classList.remove("active");
-      
-          // 🔁 Move to previous image (wrap around)
-          const prevIndex = (currentIndex - 1 + images.length) % images.length;
-          images[prevIndex].classList.add("active");
-      } //needs event listener
+    // 🔹 Move to next image in carousel for a given card
+    function nextSlide(index) {
+        const carousel = document.getElementById(`carousel-${index}`);
+        const track = carousel.querySelector(".carousel-track");
+        const images = track.querySelectorAll(".carousel-photo");
+    
+        // 🔍 Find currently active image
+        const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
+        images[currentIndex].classList.remove("active");
+    
+        // 🔁 Move to next image (wrap around)
+        const nextIndex = (currentIndex + 1) % images.length;
+        images[nextIndex].classList.add("active");
+    } //needs event listener
+    
+    // 🔹 Move to previous image in carousel for a given card
+    function prevSlide(index) {
+        const carousel = document.getElementById(`carousel-${index}`);
+        const track = carousel.querySelector(".carousel-track");
+        const images = track.querySelectorAll(".carousel-photo");
+    
+        const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
+        images[currentIndex].classList.remove("active");
+    
+        // 🔁 Move to previous image (wrap around)
+        const prevIndex = (currentIndex - 1 + images.length) % images.length;
+        images[prevIndex].classList.add("active");
+    } //needs event listener
 
-      //carousel html block
-      /**photos is going to be an array of photos URL 
-      * Index is going to give you the position of the card in the main array
-      * so you can see which carousel belongs to which item 
-      */
-      function buildCarousel(photos, index) {
-          if (!photos.length) return `<div class="no-photo">No Photos</div>`;
-      
-          return `
-          <div class="carousel" id="carousel-${index}">
-              <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">&#10094;</button>
-              <div class="carousel-track">
-                  ${photos.map((photo, i) => `
-                      <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
-                  `).join('')}
-              </div>
-              <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">&#10095;</button>
-          </div>
-          `;
-          /** the ouput will be something like this,this is what you will inject 
-          <div class="carousel" id="carousel-0">
-              <button class="carousel-btn left" data-carousel-index="0" data-dir="prev">❮</button>
-              <div class="carousel-track">
-                  <img src="photo1.jpg" class="carousel-photo active" />
-                  <img src="photo2.jpg" class="carousel-photo" />
-                  <img src="photo3.jpg" class="carousel-photo" />
-              </div>
-              <button class="carousel-btn right" data-carousel-index="0" data-dir="next">❯</button>
-          </div>
-          */
-      }
+    //carousel html block
+    /**photos is going to be an array of photos URL 
+    * Index is going to give you the position of the card in the main array
+    * so you can see which carousel belongs to which item 
+    */
+    function buildCarousel(photos, index) {
+        if (!photos.length) return `<div class="no-photo">No Photos</div>`;
+    
+        return `
+        <div class="carousel" id="carousel-${index}">
+            <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">&#10094;</button>
+            <div class="carousel-track">
+                ${photos.map((photo, i) => `
+                    <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
+                `).join('')}
+            </div>
+            <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">&#10095;</button>
+        </div>
+        `;
+        /** the ouput will be something like this,this is what you will inject 
+        <div class="carousel" id="carousel-0">
+            <button class="carousel-btn left" data-carousel-index="0" data-dir="prev">❮</button>
+            <div class="carousel-track">
+                <img src="photo1.jpg" class="carousel-photo active" />
+                <img src="photo2.jpg" class="carousel-photo" />
+                <img src="photo3.jpg" class="carousel-photo" />
+            </div>
+            <button class="carousel-btn right" data-carousel-index="0" data-dir="next">❯</button>
+        </div>
+        */
+    }
   //#endregion
 
   //getting the floating control for selection and favorited sections 
@@ -412,6 +499,21 @@ let activeDropdown = null;
       });
     }
 
+    //adding button for the render pagination
+    function addBtn(label, page, isActive, container) {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      if (isActive) btn.classList.add("active");
+      btn.addEventListener("click", () => {
+        currentPage = page;
+        const filtered = getFilteredItems(allItems);
+        applySortAndRender(filtered);
+        updateFilterChips(getActiveFilters());
+        updateURLFromForm();
+      });
+      container.appendChild(btn);
+    }
+
     //function to put buttons for the pages
     function renderPaginationControls(totalPages) {
       const container = document.getElementById("pagination-buttons");
@@ -645,6 +747,105 @@ let activeDropdown = null;
     }
   }
 
+//#endregion
+
+//#region chip creating system for unified panel, no for cards
+  //creates the chip that will be displayed in the main console
+  function createFilterChip(label, key) {
+    const chip = document.createElement("div");
+    chip.className = "filter-chip";
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = label;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.setAttribute("data-key", key);
+    closeBtn.innerHTML = "&times;";
+    closeBtn.className = "chip-close-btn";
+
+    closeBtn.addEventListener("click", () => {
+      chip.classList.add("removing");
+
+      setTimeout(() => {
+        if (key === "categories") {
+          document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
+            if (el.dataset.cat === label.split(": ")[1]) {
+              el.classList.remove("selected");
+            }
+          });
+        } else if (key === "qr_type") {
+          document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
+            if (el.dataset.qr === label.split(": ")[1]) {
+              el.classList.remove("selected");
+            }
+          });
+        } else {
+          const input = document.querySelector(`[name="${key}"]`);
+          if (input) input.value = "";
+        }
+
+        currentPage = 1;
+        const filtered = getFilteredItems(allItems);
+        applySortAndRender(filtered);
+        updateFilterChips(getActiveFilters());
+        updateURLFromForm();
+      }, 200);
+    });
+
+    chip.appendChild(labelSpan);
+    chip.appendChild(closeBtn);
+    return chip;
+  }
+
+  /**extract the information from the filters, transforms it to key and value
+  and uses top function to create HTML to then append it to node */
+  function updateFilterChips(filters) {
+    const chipContainer = document.getElementById("header-filter-chips");
+    if (!chipContainer) return;
+    chipContainer.innerHTML = "";
+
+    for (const [key, value] of Object.entries(filters)) {
+      if (value === null || value === "") continue;
+
+      let label = "";
+      switch (key) {
+        case "title":        label = `Title: "${value}"`; break;
+        case "description":  label = `Description: "${value}"`; break;
+        case "barcode":      label = `Barcode: ${value}`; break;
+        case "distributor":  label = `Distributor: ${value}`; break;
+        case "weightMin":    label = `Weight ≥ ${value}`; break;
+        case "weightMax":    label = `Weight ≤ ${value}`; break;
+        case "costMin":      label = `Cost ≥ ${value}`; break;
+        case "costMax":      label = `Cost ≤ ${value}`; break;
+        case "priceMin":     label = `Price ≥ ${value}`; break;
+        case "priceMax":     label = `Price ≤ ${value}`; break;
+        case "stockMin":     label = `Stock ≥ ${value}`; break;
+        case "stockMax":     label = `Stock ≤ ${value}`; break;
+        case "createdFrom":  label = `Created ≥ ${value}`; break;
+        case "createdTo":    label = `Created ≤ ${value}`; break;
+
+        case "categories":
+          if (Array.isArray(value) && value.length && value.some(v => v)) {
+            value.forEach(cat => {
+              chipContainer.appendChild(createFilterChip(`Category: ${cat}`, "categories"));
+            });
+          }
+          continue;
+
+        case "qr_type":
+          if (Array.isArray(value)) {
+            value.forEach(qr => {
+              chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
+            });
+          }
+          continue;
+
+        default: continue;
+      }
+
+      chipContainer.appendChild(createFilterChip(label, key));
+    }
+  }
 //#endregion
 
 //#region function render bulk toolbar after event listener capure change in select-box
@@ -919,10 +1120,6 @@ let activeDropdown = null;
 //#endregion
 
 
-
-
-
-
 /* ================= utilities ============================== */
 //#region
 // they are utililitieis be cause they are stateless, meaning they do not modify
@@ -1025,74 +1222,6 @@ async function fetchStockItems() {
   // ✅ If successful, return the full array of items
   return data;
 }
-
-// 🔹 Utility: Creates and appends a pagination button to a container
-// ✅ Parameters:
-//   - label: text content of the button (e.g., "Next »")
-//   - page: page number to assign to currentPage
-//   - isActive: whether this is the current page (for styling)
-//   - container: DOM element to append the button into
-function createFilterChip(label, key) {
-  const chip = document.createElement("div");
-  chip.className = "filter-chip";
-
-  const labelSpan = document.createElement("span");
-  labelSpan.textContent = label;
-
-  const closeBtn = document.createElement("button");
-  closeBtn.setAttribute("data-key", key);
-  closeBtn.innerHTML = "&times;";
-  closeBtn.className = "chip-close-btn";
-
-  closeBtn.addEventListener("click", () => {
-    chip.classList.add("removing");
-
-    setTimeout(() => {
-      if (key === "categories") {
-        document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
-          if (el.dataset.cat === label.split(": ")[1]) {
-            el.classList.remove("selected");
-          }
-        });
-      } else if (key === "qr_type") {
-        document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
-          if (el.dataset.qr === label.split(": ")[1]) {
-            el.classList.remove("selected");
-          }
-        });
-      } else {
-        const input = document.querySelector(`[name="${key}"]`);
-        if (input) input.value = "";
-      }
-
-      currentPage = 1;
-      const filtered = getFilteredItems(allItems);
-      applySortAndRender(filtered);
-      updateFilterChips(getActiveFilters());
-      updateURLFromForm();
-    }, 200);
-  });
-
-  chip.appendChild(labelSpan);
-  chip.appendChild(closeBtn);
-  return chip;
-}
-
-//utility for the pagination control 
-function addBtn(label, page, isActive, container) {
-  const btn = document.createElement("button");
-  btn.textContent = label;
-  if (isActive) btn.classList.add("active");
-  btn.addEventListener("click", () => {
-    currentPage = page;
-    const filtered = getFilteredItems(allItems);
-    applySortAndRender(filtered);
-    updateFilterChips(getActiveFilters());
-    updateURLFromForm();
-  });
-  container.appendChild(btn);
-}
-
 
 // 🔹 UI Utility: Show loading overlay (or any spinner by selector)
 // ✅ Adds a `.show` class to the target element
@@ -1446,57 +1575,6 @@ document.addEventListener("change", (e) => {
 //#endregion
 
 
-// 🔹 UI Renderer: Filter Chips
-// ✅ Displays current active filters as removable chips under the search bar
-function updateFilterChips(filters) {
-  const chipContainer = document.getElementById("header-filter-chips");
-  if (!chipContainer) return;
-  chipContainer.innerHTML = "";
-
-  for (const [key, value] of Object.entries(filters)) {
-    if (value === null || value === "") continue;
-
-    let label = "";
-    switch (key) {
-      case "title":        label = `Title: "${value}"`; break;
-      case "description":  label = `Description: "${value}"`; break;
-      case "barcode":      label = `Barcode: ${value}`; break;
-      case "distributor":  label = `Distributor: ${value}`; break;
-      case "weightMin":    label = `Weight ≥ ${value}`; break;
-      case "weightMax":    label = `Weight ≤ ${value}`; break;
-      case "costMin":      label = `Cost ≥ ${value}`; break;
-      case "costMax":      label = `Cost ≤ ${value}`; break;
-      case "priceMin":     label = `Price ≥ ${value}`; break;
-      case "priceMax":     label = `Price ≤ ${value}`; break;
-      case "stockMin":     label = `Stock ≥ ${value}`; break;
-      case "stockMax":     label = `Stock ≤ ${value}`; break;
-      case "createdFrom":  label = `Created ≥ ${value}`; break;
-      case "createdTo":    label = `Created ≤ ${value}`; break;
-
-      case "categories":
-        if (Array.isArray(value) && value.length && value.some(v => v)) {
-          value.forEach(cat => {
-            chipContainer.appendChild(createFilterChip(`Category: ${cat}`, "categories"));
-          });
-        }
-        continue;
-
-      case "qr_type":
-        if (Array.isArray(value)) {
-          value.forEach(qr => {
-            chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
-          });
-        }
-        continue;
-
-      default: continue;
-    }
-
-    chipContainer.appendChild(createFilterChip(label, key));
-  }
-}
-
-
 // 🔹 Category Loader: gets unique values and triggers dropdown
 async function loadCategories(items) {
   try {
@@ -1549,91 +1627,6 @@ async function loadCategories() {
 }
 
 
-// 🔸  add categories, remove them, apply them
-//#region
-
-// 🔹 Controller: Remove a category from a specific item in Supabase
-// ✅ Steps:
-//    1. Fetch the current categories for the item
-//    2. Remove the given category from the list
-//    3. Update the item in Supabase with the new list
-//    4. Refresh the UI re-fetch re-filter re-render update chips
-async function removeCategory(itemId, category) {
-  const { data, error } = await supabase
-    .from("item_types")
-    .select("categories")
-    .eq("id", itemId)
-    .single();
-
-  if (error || !data) {
-    console.error("Error fetching item:", error);
-    return;
-  }
-
-  // Remove the category from the list (filter it out)
-  const updated = (data.categories || []).filter(cat => cat !== category);
-
-  // Update item in Supabase
-  await updateItemCategories(itemId, updated);
-
-  // Refresh filtered + sorted UI
-  await refreshInventoryUI();
-}
-
-// 🔹 Controller: Prompt user to type a new category and add it to an item
-// ✅ Steps:
-//    1. Prompt user for a new category (via `prompt()`)
-//    2. Fetch existing categories from Supabase
-//    3. Merge the new category with the list (using Set to avoid duplicates)
-//    4. Update Supabase
-//    5. Refresh the UI
-async function addCategory(itemId) {
-  const newCat = prompt("Enter new category:");
-  if (!newCat) return;
-
-  const { data, error } = await supabase
-    .from("item_types")
-    .select("categories")
-    .eq("id", itemId)
-    .single();
-
-  if (error || !data) {
-    console.error("Error fetching item:", error);
-    return;
-  }
-
-  // Add new category using a Set to prevent duplicates
-  const updated = Array.from(new Set([...(data.categories || []), newCat]));
-
-  // Push update to Supabase
-  await updateItemCategories(itemId, updated);
-
-  // Refresh inventory list and filters
-  await refreshInventoryUI();
-}
-
-// 🔹 Controller: Apply a selected category to an item (e.g., from dropdown)
-// ✅ No user prompt — used for applying pre-existing category values
-// ✅ Steps:
-//    1. Fetch current item categories
-//    2. Merge the selected category in (no duplicates)
-//    3. Push update to Supabase
-//    4. Refresh the UI
-async function applyCategory(itemId, newCategory) {
-  const { data, error } = await supabase
-    .from("item_types")
-    .select("categories")
-    .eq("id", itemId)
-    .single();
-
-  if (error || !data) return;
-
-  const updated = Array.from(new Set([...(data.categories || []), newCategory]));
-
-  await updateItemCategories(itemId, updated);
-
-  await refreshInventoryUI();
-}
 
 
 //#endregion
