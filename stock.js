@@ -1048,6 +1048,7 @@ let activeDropdown = null;
             if (checkbox && checkbox.checked) {
               checkbox.checked = false;
               selectedItems.delete(id);
+              card.classList.remove("selected"); // 🧼 remove selected class
             }
           });
           selectAllBtn.textContent = "Select All Visible";
@@ -1059,6 +1060,7 @@ let activeDropdown = null;
             if (checkbox && !checkbox.checked) {
               checkbox.checked = true;
               selectedItems.add(id);
+              card.classList.add("selected"); // ✅ add selected class
             }
           });
           selectAllBtn.textContent = "Deselect All";
@@ -1067,6 +1069,7 @@ let activeDropdown = null;
         updateBulkToolbar();
       });
     }
+
 
   }
 
@@ -1269,6 +1272,11 @@ let activeDropdown = null;
       checked ? selectedItems.add(itemId) : selectedItems.delete(itemId); /**
       if the bookean checked is true it adds the item to the global, otherwise it
       deletes it from the list */
+
+      const card = document.querySelector(`.stock-card[data-item-id="${itemId}"]`);
+      if (card) {
+        card.classList.toggle("selected", checked); // adds or removes 'selected' class
+      }
      
       updateBulkToolbar(); /** this function will tell the system to show
       or to hided the div with the bulk-toolbar id, and to update the selected
@@ -1284,6 +1292,12 @@ let activeDropdown = null;
     updateBulkToolbar();
     const filtered = getFilteredItems(allItems);
     applySortAndRender(filtered);
+
+    // ✅ Reset the Select All Visible toggle label
+    const selectAllBtn = document.getElementById("select-all-visible");
+    if (selectAllBtn) {
+      selectAllBtn.textContent = "Select All Visible";
+    }
   }
 
   /** 🧰 Sets up event listeners for all bulk toolbar actions, except dropwdown of of course
