@@ -7,6 +7,9 @@ let currentUser = null;                // Holds authenticated user info
 let selectedItems = new Set();         // Tracks currently selected items for bulk actions
 let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
 let activeDropdown = null;
+let failedAttempts = 0;            // 🚫 Track how many wrong passwords
+let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
+
 
 //---------------------------------------------------------------//
 //#region function to render all the cards (renderstockitems) with its chips
@@ -1256,6 +1259,46 @@ let activeDropdown = null;
 //#endregion
 
 //#region function render bulk toolbar after event listener capure change in select-box
+  //function to get the user geographical location 
+  function getUserLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        return reject("Geolocation is not supported.");
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          resolve(coords);
+        },
+        (err) => {
+          reject(`Failed to get location: ${err.message}`);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    });
+  }
+
+  
+  //function to validate password before deleting items
+  async function validatePassword(password) {
+    if (!currentUser || !password) return false;
+  
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password,
+    });
+  
+    return !error; // ✅ valid if no error
+  }
+  
   //function to count how many items have been selected
   function updateBulkToolbar() {
     const toolbar = document.getElementById("bulk-toolbar");
@@ -1314,29 +1357,140 @@ let activeDropdown = null;
     });
 
     // 🗑 Delete selected items from Supabase
+    // 🔴 Event listener for the "Delete" button in the bulk toolbar
+    // ✅ Bulk Delete: Show password confirmation before deletion
     document.getElementById("bulk-delete")?.addEventListener("click", async () => {
-      if (selectedItems.size === 0) return;
-
-      showLoading(); // Show loading spinner
-
-      const idsToDelete = Array.from(selectedItems);
-
-      const { error } = await supabase
-        .from("item_types")
-        .delete()
-        .in("id", idsToDelete);
-
-      if (!error) {
-        allItems = await fetchStockItems(); // Refresh local copy from backend
-        const updatedCount = selectedItems.size;
-        clearSelectionAndRefresh();
-        updateFilterChips(getActiveFilters());
-        showToast(`🗑 Deleted ${updatedCount} items`);
+      if (selectedItems.size === 0) return; // 🛑 Exit if no items are selected
+    
+      const now = Date.now(); // 📅 Capture current time (used for lockout logic)
+      const modal = document.getElementById("password-confirm-modal");
+      const input = document.getElementById("password-input");
+      const confirmBtn = document.getElementById("confirm-password-btn");
+      const cancelBtn = document.getElementById("cancel-password-btn");
+      const errorMsg = document.getElementById("password-error");
+      const lockoutMsg = document.getElementById("lockout-message");
+      const body = document.body;
+    
+      // 🔐 Prevent deletion if currently in lockout period
+      if (lockoutUntil && now < lockoutUntil) {
+        const secondsLeft = Math.ceil((lockoutUntil - now) / 1000);
+        lockoutMsg.textContent = `⏳ Locked out. Try again in ${secondsLeft}s`;
+        lockoutMsg.style.display = "block";
+        modal.classList.add("show");
+        modal.classList.remove("hidden");
+        body.classList.add("modal-open");
+        setTimeout(() => {
+          modal.classList.remove("show");
+          body.classList.remove("modal-open");
+          modal.classList.add("hidden");
+        }, 2000);
+        return;
       }
-
-      hideLoading(); // Hide spinner either way
+    
+      // 🧼 Reset modal state and open it
+      input.value = "";
+      errorMsg.style.display = "none";
+      lockoutMsg.style.display = "none";
+      modal.classList.add("show");
+      body.classList.add("modal-open");
+      modal.classList.remove("hidden");
+      input.focus();
+    
+      // 🛑 Handle cancel action
+      cancelBtn.onclick = () => {
+        modal.classList.remove("show");
+        body.classList.remove("modal-open");
+        modal.classList.add("hidden");
+      };
+    
+      // ✅ Handle confirm deletion
+      confirmBtn.onclick = async () => {
+        const password = input.value.trim();
+        if (!password) return;
+    
+        const isValid = await validatePassword(password);
+    
+        // ❌ Invalid password logic
+        if (!isValid) {
+          failedAttempts += 1;
+    
+          if (failedAttempts >= 3) {
+            lockoutUntil = Date.now() + 30000; // 🔒 Lock for 30 seconds
+            errorMsg.style.display = "none";
+            lockoutMsg.textContent = `⛔ Too many attempts. Locked for 30s.`;
+            lockoutMsg.style.display = "block";
+    
+            setTimeout(() => {
+              modal.classList.remove("show");
+              body.classList.remove("modal-open");
+              modal.classList.add("hidden");
+            }, 2000);
+            return;
+          }
+    
+          errorMsg.style.display = "block";
+          return;
+        }
+    
+        // 📍 Attempt to get user geolocation before proceeding
+        let location;
+        try {
+          location = await getUserLocation(); // Returns { lat, lng }
+        } catch (e) {
+          errorMsg.textContent = "🌐 Unable to get location. Deletion blocked.";
+          errorMsg.style.display = "block";
+          return;
+        }
+    
+        // ✅ Reset lockout & proceed with deletion
+        failedAttempts = 0;
+        lockoutUntil = null;
+        modal.classList.remove("show");
+        body.classList.remove("modal-open");
+        modal.classList.add("hidden");
+        showLoading();
+    
+        // 🎯 Get list of selected item IDs
+        const idsToDelete = Array.from(selectedItems);
+    
+        // 📝 Retrieve full data of selected items for logging
+        const itemsToLog = allItems.filter(item => idsToDelete.includes(item.id));
+    
+        // 🔥 Perform actual deletion from Supabase
+        const { error } = await supabase
+          .from("item_types")
+          .delete()
+          .in("id", idsToDelete);
+    
+        if (!error) {
+          // 🧾 Log the deletion to a dedicated audit log table
+          await supabase.from("deletion_log").insert({
+            user_id: currentUser.id,
+            deleted_ids: idsToDelete,
+            deleted_data: itemsToLog, // 🆕 Save full item snapshot
+            timestamp: new Date().toISOString(), // ⏱ Exact time
+            location_lat: location.lat,
+            location_lng: location.lng
+          });
+    
+          // 🔄 Refresh UI with remaining items
+          allItems = await fetchStockItems();
+          const updatedCount = selectedItems.size;
+          clearSelectionAndRefresh();
+          updateFilterChips(getActiveFilters());
+          showToast(`🗑 Deleted ${updatedCount} items`);
+        }
+    
+        hideLoading();
+      };
+    
+      // 🚀 Allow Enter key to trigger confirmation
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") confirmBtn.click();
+      };
     });
-
+    
+    
     // ⭐ Add or remove favorites in bulk
     document.getElementById("bulk-favorite")?.addEventListener("click", async () => {
       if (!currentUser || selectedItems.size === 0) return;
@@ -1382,6 +1536,16 @@ let activeDropdown = null;
       exportCardsToCSV(exportCards); // Export utility function
     });
   }
+
+  /**event listerner for the modal button */
+  const closePasswordModalBtn = document.getElementById("close-password-modal");
+  if (closePasswordModalBtn) {
+    closePasswordModalBtn.addEventListener("click", () => {
+      document.getElementById("password-confirm-modal")?.classList.remove("show");
+      document.body.classList.remove("modal-open");
+    });
+  }
+
 
 //#endregion
 

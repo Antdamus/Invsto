@@ -173,19 +173,20 @@
   </div>
   
     <!-- 🔢 Pagination + Page Controls -->
-  <div class="pagination-controls">
-    <div class="page-size">
-      <label for="cards-per-page">Cards per page:</label>
-      <select id="cards-per-page">
-        <option value="8">8</option>
-        <option value="12" selected>12</option>
-        <option value="24">24</option>
-        <option value="48">48</option>
-      </select>
+    <div class="pagination-controls">
+      <div class="page-size">
+        <label for="cards-per-page">Cards per page:</label>
+        <select id="cards-per-page">
+          <option value="8">8</option>
+          <option value="12" selected>12</option>
+          <option value="24">24</option>
+          <option value="48">48</option>
+        </select>
+      </div>
+      <div id="pagination-buttons" class="pagination-buttons"></div>
     </div>
-    <div id="pagination-buttons" class="pagination-buttons"></div>
-  </div>
 
+    
   <!-- 📦 Inventory Item Cards Grid -->
   <main class="stock-main">
     <div id="stock-container" class="stock-grid"></div>
@@ -201,5 +202,40 @@
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
   <div id="loading-overlay"><div class="spinner"></div></div>
+
+  <!--modal for putting password on pressing delete-->
+  <<div id="password-confirm-modal" class="modal hidden">
+    <div class="modal-content">
+      <span class="material-icons-outlined close-icon" id="close-password-modal">close</span>
+  
+      <h3 class="modal-title">
+        <span class="material-icons-outlined" style="vertical-align: middle; font-size: 1.6rem; color: #ffb100; margin-right: 6px;">
+          lock
+        </span>
+        Confirm Deletion
+      </h3>
+  
+      <p class="modal-desc">Please enter your password to confirm this action.</p>
+  
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="material-icons-outlined" style="font-size: 1.4rem; color: #777;">vpn_key</span>
+        <input type="password" id="password-input" placeholder="Your password" class="password-input" />
+      </div>
+  
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button id="confirm-password-btn" class="confirm-btn">✅ Confirm</button>
+        <button id="cancel-password-btn" class="cancel-btn">❌ Cancel</button>
+      </div>
+  
+      <p id="password-error" class="error-message"></p>
+      <p id="lockout-message" class="error-message"></p>
+    </div>
+  </div>
+  
+  
+  
+  
+  
+
 </body>
 </html>
