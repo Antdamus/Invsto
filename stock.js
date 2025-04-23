@@ -430,6 +430,7 @@ let activeDropdown = null;
     // ✅ Used by both `getActiveFilters()` and `getFilteredItems()` to avoid duplication
     // ✅ Pulls values from form fields and selected categories
     function extractFilterValues() {
+      syncHiddenInputsWithDropdowns()
       const form = document.getElementById("filter-form");
       const formData = new FormData(form);
 
@@ -451,9 +452,12 @@ let activeDropdown = null;
         createdFrom: normalizeDate(formData.get("createdFrom")),
         createdTo: normalizeDate(formData.get("createdTo")),
 
-        categories: [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
-          .map(el => el.dataset.cat)
-          .filter(Boolean),
+        categories: [...new Set(
+          [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
+            .map(el => el.dataset.cat)
+            .filter(Boolean)
+        )],
+
         qr_type: [...document.querySelectorAll('.dropdown-option.selected[data-qr]')]
           .map(el => el.dataset.qr)
 
@@ -593,8 +597,8 @@ let activeDropdown = null;
         currentPage = page;
         const filtered = getFilteredItems(allItems);
         applySortAndRender(filtered);
-        updateFilterChips(getActiveFilters());
-        updateURLFromForm();
+        updateFilterChips(getActiveFilters()); //volver
+        //updateURLFromForm(); //volver
       });
       container.appendChild(btn);
     }
@@ -702,7 +706,7 @@ let activeDropdown = null;
     function applySortAndRender(data) {
       const sortValue = document.getElementById("sort-select")?.value;
       const sorted = sortItems(data, sortValue);
-      paginateAndRender(sorted);
+      paginateAndRender(sorted); //you update the chips are the end as well as the URL, be careful
       updateFilterSummary(sorted, getActiveFilters());
     }
 
@@ -723,12 +727,9 @@ let activeDropdown = null;
 
     //update the url with the current filters
     function updateURLFromForm() {
+      syncHiddenInputsWithDropdowns()
       const form = document.getElementById("filter-form");
       const formData = new FormData(form); // 🔁 Get all input values
-
-      // 🔸 Get selected categories from the dropdown UI
-      const selectedCats = [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
-        .map(el => el.dataset.cat);
 
       // 🔸 Match-all checkbox for categories
       const matchAll = document.getElementById("match-all-toggle")?.checked;
@@ -741,7 +742,9 @@ let activeDropdown = null;
         if (value) params.set(key, value);
       }
 
-      // 🔁 Add category filter (comma-separated string) if any are selected
+      // 🔸 Get selected categories from the dropdown UI
+      const selectedCats = [...document.querySelectorAll(".dropdown-option.selected[data-cat]")]
+      .map(el => el.dataset.cat);
       if (selectedCats.length > 0) {
         params.set("categories", selectedCats.join(","));
       }
@@ -781,32 +784,36 @@ let activeDropdown = null;
       
     //application of the filters stored in theURL
     function applyFiltersFromURL() {
-      const params = getURLParams(); /**so you can get the plain object parameters 
-      { page: "2", categories: "Rings,Gold", sort: "weight" }*/
+      const params = getURLParams();
+      console.log("🌐 URL Parameters on Load:", params);
       const form = document.getElementById("filter-form");
-
-      // 🔁 Populate inputs with URL param values
-      for (const [key, value] of Object.entries(params)) { /**Loops over each key-value pair 
-        in the URL param object */
-        const input = form.querySelector(`[name="${key}"]`); /**if the form object has a name (key)
-        equal to that of the one taken from the URL, it goes ahead and velue sets its value equal
-        to the URL value */
+    
+      // 🧹 Clear previous selection states to avoid duplicates
+      document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
+        el.classList.remove("selected");
+      });
+      document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
+        el.classList.remove("selected");
+      });
+    
+      // ✅ Now repopulate form inputs from URL
+      for (const [key, value] of Object.entries(params)) {
+        const input = form.querySelector(`[name="${key}"]`);
         if (input) input.value = value;
       }
-
-      // 🧮 Page size
+    
       if (params.limit) {
         itemsPerPage = parseInt(params.limit);
         document.getElementById("cards-per-page").value = params.limit;
       }
-
-      // 📄 Page number
+    
       if (params.page) currentPage = parseInt(params.page);
-
-      // ↕ Sort option
-      if (params.sort) document.getElementById("sort-select").value = params.sort;
-
-      // 📂 Pre-select categories from URL (comma-separated list)
+    
+      if (params.sort) {
+        document.getElementById("sort-select").value = params.sort;
+      }
+    
+      // 📂 Categories
       if (params.categories) {
         const catSet = new Set(params.categories.split(","));
         document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
@@ -815,23 +822,26 @@ let activeDropdown = null;
           }
         });
       }
-
-      // 📂 Pre-select qr types from URL (comma-separated list)
+    
+      // 📂 QR Types
       if (params.qr_type) {
         const qrSet = new Set(params.qr_type.split(","));
-        document.querySelectorAll('.dropdown-option[data-qr]').forEach(el => {
+        document.querySelectorAll(".dropdown-option[data-qr]").forEach(el => {
           if (qrSet.has(el.dataset.qr)) {
             el.classList.add("selected");
           }
         });
       }
-
-      // ☑ Match-all category toggle
+    
       if (params.matchAll === "true") {
         const matchToggle = document.getElementById("match-all-toggle");
         if (matchToggle) matchToggle.checked = true;
       }
+      const formData = new FormData(form);
+      const entries = Object.fromEntries(formData.entries());
+      console.log("🧾 Form Values After URL Apply:", entries)
     }
+    
   //#endregion
 
   /** function to set up event listeners for a select dropdown
@@ -1013,7 +1023,6 @@ let activeDropdown = null;
     }
   }
 
-
   // 🔧 function to clear filter from filter form button plus its logic
   // @param {string} buttonId - ID of the "Clear Filters" button
   // @param {string} formId - ID of the form to reset
@@ -1053,25 +1062,36 @@ let activeDropdown = null;
   function createFilterChip(label, key) {
     const chip = document.createElement("div");
     chip.className = "filter-chip";
-
+  
     const labelSpan = document.createElement("span");
     labelSpan.textContent = label;
-
+  
     const closeBtn = document.createElement("button");
     closeBtn.setAttribute("data-key", key);
     closeBtn.innerHTML = "&times;";
     closeBtn.className = "chip-close-btn";
-
+  
     closeBtn.addEventListener("click", () => {
       chip.classList.add("removing");
-
+  
       setTimeout(() => {
         if (key === "categories") {
+          const valueToRemove = label.split(": ")[1];
           document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
-            if (el.dataset.cat === label.split(": ")[1]) {
+            if (el.dataset.cat === valueToRemove) {
               el.classList.remove("selected");
+              console.log("📋I went inside");
+              syncHiddenInputsWithDropdowns()
             }
           });
+      
+          console.log("📋 Remaining selected categories after removal:");
+          document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
+            if (el.classList.contains("selected")) {
+              console.log("✅", el.dataset.cat, el);
+            }
+          });
+      
         } else if (key === "qr_type") {
           document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
             if (el.dataset.qr === label.split(": ")[1]) {
@@ -1082,15 +1102,22 @@ let activeDropdown = null;
           const input = document.querySelector(`[name="${key}"]`);
           if (input) input.value = "";
         }
-
+        syncHiddenInputsWithDropdowns()
         currentPage = 1;
         const filtered = getFilteredItems(allItems);
         applySortAndRender(filtered);
         updateFilterChips(getActiveFilters());
+        
+        // ✅ Ensure the URL is updated when any chip is dismissed
+        const form = document.getElementById("filter-form");
+        const formData = new FormData(form);
+        const entries = Object.fromEntries(formData.entries());
+        console.log("🧾 Form Values After chip is removed:", formData.getAll("categories"))
         updateURLFromForm();
       }, 200);
+      
     });
-
+  
     chip.appendChild(labelSpan);
     chip.appendChild(closeBtn);
     return chip;
@@ -1098,20 +1125,62 @@ let activeDropdown = null;
 
   /**extract the information from the filters, transforms it to key and value
   and uses top function to create HTML to then append it to node */
+  /**
+  * Updates the filter chip display panel based on the current active filters.
+  * It creates visual "chips" for each active filter field, allowing users to
+  * remove filters by clicking the ❌ button on each chip.
+  *
+  * @param {Object} filters - The object representing all active filters
+  */
   function updateFilterChips(filters) {
+    // 🔍 Locate the container element where chips will be displayed
     const chipContainer = document.getElementById("header-filter-chips");
     if (!chipContainer) return;
+
+    // 🧹 Clear out all previously rendered chips to avoid residual duplicates
     chipContainer.innerHTML = "";
 
+    // 🧱 Go through each key-value pair in the filters object
     for (const [key, value] of Object.entries(filters)) {
-      if (value === null || value === "") continue;
+      // 🚫 Skip null, empty string, or empty arrays
+      if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) continue;
 
+      // 🏷️ Label that will be rendered as chip text (set below)
       let label = "";
+
+      // 🧠 Handle special cases like arrays (categories, QR types)
       switch (key) {
+        // ✅ For category filters (multi-value array)
+        case "categories":
+          if (Array.isArray(value)) {
+            // 🧯 Deduplication guard: avoid rendering the same chip twice
+            const existingLabels = new Set();
+
+            value.forEach(cat => {
+              const chipLabel = `Category: ${cat}`;
+              if (!existingLabels.has(chipLabel)) {
+                chipContainer.appendChild(createFilterChip(chipLabel, "categories"));
+                existingLabels.add(chipLabel);
+              }
+            });
+          }
+          continue; // skip the rest of loop for this key
+
+        // ✅ For QR type filters (also array)
+        case "qr_type":
+          if (Array.isArray(value)) {
+            value.forEach(qr => {
+              chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
+            });
+          }
+          continue; // skip the rest of loop for this key
+
+        // ✅ Handle all other known keys with a single-value label
         case "title":        label = `Title: "${value}"`; break;
         case "description":  label = `Description: "${value}"`; break;
         case "barcode":      label = `Barcode: ${value}`; break;
         case "distributor":  label = `Distributor: ${value}`; break;
+
         case "weightMin":    label = `Weight ≥ ${value}`; break;
         case "weightMax":    label = `Weight ≤ ${value}`; break;
         case "costMin":      label = `Cost ≥ ${value}`; break;
@@ -1120,31 +1189,20 @@ let activeDropdown = null;
         case "priceMax":     label = `Price ≤ ${value}`; break;
         case "stockMin":     label = `Stock ≥ ${value}`; break;
         case "stockMax":     label = `Stock ≤ ${value}`; break;
+
         case "createdFrom":  label = `Created ≥ ${value}`; break;
         case "createdTo":    label = `Created ≤ ${value}`; break;
 
-        case "categories":
-          if (Array.isArray(value) && value.length && value.some(v => v)) {
-            value.forEach(cat => {
-              chipContainer.appendChild(createFilterChip(`Category: ${cat}`, "categories"));
-            });
-          }
+        // 🛑 Skip unknown or unhandled keys
+        default:
           continue;
-
-        case "qr_type":
-          if (Array.isArray(value)) {
-            value.forEach(qr => {
-              chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
-            });
-          }
-          continue;
-
-        default: continue;
       }
 
+      // 🧱 Create and add the chip for the current label to the container
       chipContainer.appendChild(createFilterChip(label, key));
     }
   }
+
 //#endregion
 
 //#region function render bulk toolbar after event listener capure change in select-box
@@ -1335,7 +1393,6 @@ let activeDropdown = null;
     });
   }
   
-  
   // 🔧 Utility: Attaches dropdown toggle logic to a trigger element
   // ✅ Accepts: toggle button ID and dropdown menu ID
   // ✅ Adds toggle show/hide behavior and outside-click closing
@@ -1386,6 +1443,33 @@ let activeDropdown = null;
     });
   }
 
+  //function to transform the inputs into selected so it can be read by the form 
+  function syncHiddenInputsWithDropdowns() {
+    const form = document.getElementById("filter-form");
+  
+    // 🔁 Remove old hidden inputs first
+    form.querySelectorAll("input[name='categories']").forEach(el => el.remove());
+    form.querySelectorAll("input[name='qr_type']").forEach(el => el.remove());
+  
+    // 🔁 Add new ones for all selected categories
+    document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "categories";
+      input.value = el.dataset.cat;
+      form.appendChild(input);
+    });
+  
+    // 🔁 Same for QR types
+    document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "qr_type";
+      input.value = el.dataset.qr;
+      form.appendChild(input);
+    });
+  }
+  
   //function to just set dropdown-option as selected
   const setAsSelected = (value, isNew, el) => {
     if (!el) return;
@@ -1423,7 +1507,6 @@ let activeDropdown = null;
     applyCategory(itemId, value);
   }
   
-
   //deployed function on select for bulk operations
   /**
    * Adds a value (e.g. category/tag/type) to a specific column of all selected items in a table,
@@ -1533,6 +1616,7 @@ let activeDropdown = null;
         optionEl.addEventListener("click", () => {
           const value = optionEl.dataset.value;
           const isNew = optionEl.dataset.new === "true";
+          syncHiddenInputsWithDropdowns();
           if (typeof onClick === "function") {
             onClick(value, isNew, optionEl);
           }
@@ -2142,14 +2226,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     //verify whether the url is not indicating you filters must be apply, load them to form
     applyFiltersFromURL();
 
+    //get the filter from the from populated, render them, this include chips too
+    const filters = getActiveFilters();
+    console.log("🎯 Active Filters Snapshot:");
+    console.table(filters);
+
+
     //get only the items that meet filtering critera
     const filtered = getFilteredItems(allItems);
     
-    //get the filter from the from populated, render them
-    const filters = getActiveFilters();
     applySortAndRender(filtered);
-
-    //render and update the chips in the unified panel depending on the filter values from form
     updateFilterChips(filters);
   //#endregion
 
