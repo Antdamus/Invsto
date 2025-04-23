@@ -13,13 +13,12 @@ body.stock-body {
   transition: filter 0.4s ease;
 }
 
-/* 🏠 Floating Home Button (Top Left) */
+/* 🏠 Floating Home Button (Top Left) with Lucide Icon */
 .toggle-controller-btn {
   position: fixed;
   top: 20px;
   left: 20px;
   z-index: 1500;
-  font-size: 1.5rem;
   background-color: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 14px;
@@ -29,15 +28,29 @@ body.stock-body {
   backdrop-filter: blur(10px);
   animation: popFadeIn 1s ease;
   transition: background 0.3s ease, transform 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.toggle-controller-btn.haptic {
-  animation: hapticPulse 0.3s ease;
+.toggle-controller-btn svg.icon {
+  width: 22px;
+  height: 22px;
+  color: #1d1d1f;
+  transition: transform 0.3s ease;
 }
 
 .toggle-controller-btn:hover {
   background-color: white;
   transform: scale(1.05);
+}
+
+.toggle-controller-btn:hover svg.icon {
+  transform: scale(1.1);
+}
+
+.toggle-controller-btn.haptic {
+  animation: hapticPulse 0.3s ease;
 }
 
 /* 📌 Sticky Behavior */
@@ -104,7 +117,8 @@ body.stock-body {
 }
 
 .top-controls.sticky-active {
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08); /* More lifted shadow */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
 }
 
 /* ✨ Universal Button + Label Styles */
@@ -124,6 +138,7 @@ body.stock-body {
   transition: all 0.3s ease;
   cursor: pointer;
   animation: controlFadeIn 0.4s ease both;
+  position: relative;
 }
 
 .top-controls button:active,
@@ -141,6 +156,23 @@ body.stock-body {
   transform: translateY(-1px);
 }
 
+.top-controls button::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -75%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(120deg, rgba(255,255,255,0.2), rgba(255,255,255,0));
+  transform: skewX(-20deg);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.top-controls button:hover::before {
+  left: 125%;
+}
+
 /* 🔙 Dashboard Back Button */
 .back-button {
   display: flex;
@@ -155,8 +187,8 @@ body.stock-body {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
   backdrop-filter: blur(10px);
   transition: all 0.3s ease;
-  font-family: 'DM Serif Display', serif; /* ✅ Ensure font match */
-  font-weight: 400;                        /* Or 500 for slight emphasis */
+  font-family: 'DM Serif Display', serif;
+  font-weight: 400;
 }
 
 .back-button:hover {
@@ -208,14 +240,6 @@ body.stock-body {
   display: inline-block;
 }
 
-.icon {
-  display: inline-block;
-  font-size: 1.1rem;
-  margin-right: 6px;
-  line-height: 1;
-}
-
-
 /* 🔄 Animations */
 @keyframes popFadeIn {
   from {
@@ -265,7 +289,6 @@ body.stock-body {
   }
 }
 
-
 /* =================== Dropdown Reveal Animation =================== */
 .dropdown-menu {
   animation: dropdownReveal 0.35s ease forwards;
@@ -282,7 +305,6 @@ body.stock-body {
   }
 }
 
-/* ✅ Smooth transition when dropdown is closed */
 .dropdown-menu:not(.show) {
   opacity: 0;
   transform: translateY(-10px) scale(0.98);
