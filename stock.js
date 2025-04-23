@@ -2092,26 +2092,36 @@ function setBulkToolbarVisibility(visible) {
 //   - showLabel: (Optional) Text to show when visible
 //   - hideLabel: (Optional) Text to show when hidden
 function setupToggleBehavior(toggleId, targetId, showLabel = "❌ Hide", hideLabel = "🔍 Show") {
-  // 🔍 Get the button element using its ID
   const toggleBtn = document.getElementById(toggleId);
-
-  // 🔍 Get the target element that should be shown/hidden
   const target = document.getElementById(targetId);
 
-  // ⚠️ Exit early if either element wasn't found in the DOM
   if (!toggleBtn || !target) {
     console.warn("setupToggleBehavior: Invalid IDs provided.");
     return;
   }
 
-  // ⏰ Attach click event to the toggle button
-  toggleBtn.addEventListener("click", () => {
-    // ◼ Toggle the "show" class on the target element
-    const isShown = target.classList.toggle("show");
+  // Get the span inside the button where the label text goes
+  const labelSpan = toggleBtn.querySelector("span.label");
 
-    // ✅ Update the button label depending on visibility state
-    toggleBtn.textContent = isShown ? showLabel : hideLabel;
+  toggleBtn.addEventListener("click", () => {
+    const isShown = target.classList.toggle("show");
+  
+    if (labelSpan) {
+      labelSpan.textContent = isShown ? showLabel : hideLabel;
+    }
+  
+    // 🌀 Animate the icon
+    const icon = toggleBtn.querySelector("svg.icon");
+    if (icon) {
+      icon.classList.add("spin");
+      setTimeout(() => icon.classList.remove("spin"), 600); // Remove after animation ends
+    }
+  
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
   });
+  
 }
 
 // 🔹 Closes category dropdown if user clicks outside of it

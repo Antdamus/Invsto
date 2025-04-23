@@ -2,7 +2,6 @@
 
 /* ================= Unified Top Control Bar – Ultra Aesthetic 🍎 ================= */
 /*#region*/
-
 /* 🌤 Global Body */
 body.stock-body {
   font-family: 'DM Serif Display', serif;
@@ -299,6 +298,17 @@ body.stock-body {
     transform: scale(1);
   }
 }
+
+@keyframes spin360 {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+svg.icon.spin {
+  animation: spin360 0.6s ease;
+  will-change: transform;
+}
+
 
 /* =================== Dropdown Reveal Animation =================== */
 .dropdown-menu {
