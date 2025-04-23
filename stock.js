@@ -785,8 +785,9 @@ let activeDropdown = null;
     //application of the filters stored in theURL
     function applyFiltersFromURL() {
       const params = getURLParams();
-      console.log("🌐 URL Parameters on Load:", params);
+      //console.log("🌐 URL Parameters on Load:", params);
       const form = document.getElementById("filter-form");
+
     
       // 🧹 Clear previous selection states to avoid duplicates
       document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
@@ -817,12 +818,16 @@ let activeDropdown = null;
       if (params.categories) {
         const catSet = new Set(params.categories.split(","));
         document.querySelectorAll(".dropdown-option[data-cat]").forEach(el => {
-          if (catSet.has(el.dataset.cat)) {
+          if (!el.classList.contains("selected") && catSet.has(el.dataset.cat)) {
             el.classList.add("selected");
           }
         });
       }
-    
+      //syncHiddenInputsWithDropdowns();
+      //const telli = document.getElementById("filter-form");
+      //const formi = new FormData(telli);
+      //const entries = Object.fromEntries(formi.entries());
+      //console.log("🧾 Form Values for categories inside the apply filter from url:", formi.getAll("categories"))
       // 📂 QR Types
       if (params.qr_type) {
         const qrSet = new Set(params.qr_type.split(","));
@@ -832,14 +837,13 @@ let activeDropdown = null;
           }
         });
       }
-    
+
       if (params.matchAll === "true") {
         const matchToggle = document.getElementById("match-all-toggle");
         if (matchToggle) matchToggle.checked = true;
       }
-      const formData = new FormData(form);
-      const entries = Object.fromEntries(formData.entries());
-      console.log("🧾 Form Values After URL Apply:", entries)
+
+      syncHiddenInputsWithDropdowns();
     }
     
   //#endregion
@@ -1109,10 +1113,10 @@ let activeDropdown = null;
         updateFilterChips(getActiveFilters());
         
         // ✅ Ensure the URL is updated when any chip is dismissed
-        const form = document.getElementById("filter-form");
-        const formData = new FormData(form);
-        const entries = Object.fromEntries(formData.entries());
-        console.log("🧾 Form Values After chip is removed:", formData.getAll("categories"))
+        //const form = document.getElementById("filter-form");
+        //const formData = new FormData(form);
+        //const entries = Object.fromEntries(formData.entries());
+        //console.log("🧾 Form Values After chip is removed:", formData.getAll("categories"))
         updateURLFromForm();
       }, 200);
       
@@ -1446,21 +1450,30 @@ let activeDropdown = null;
   //function to transform the inputs into selected so it can be read by the form 
   function syncHiddenInputsWithDropdowns() {
     const form = document.getElementById("filter-form");
+    //const telecooll = new FormData(form);
+    //console.log("🧾 Form Values from inside synchhindder:", telecooll.getAll("categories"))
+
+    // 🔍 Log current state before clearing
+    //console.log("🧹 Before clearing: categories =", [...form.querySelectorAll('input[name="categories"]')].map(i => i.value));
   
-    // 🔁 Remove old hidden inputs first
-    form.querySelectorAll("input[name='categories']").forEach(el => el.remove());
-    form.querySelectorAll("input[name='qr_type']").forEach(el => el.remove());
+    // 🔁 Clear previous category inputs
+    form.querySelectorAll('input[name="categories"]').forEach(el => el.remove());
+    form.querySelectorAll('input[name="qr_type"]').forEach(el => el.remove());
+
+    //let catInputCounter = 0;
   
-    // 🔁 Add new ones for all selected categories
+    // ✅ Add back categories from selected dropdowns
     document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
+      //catInputCounter++;
+      //console.log(`📌 Hidden category input #${catInputCounter}: ${el.dataset.cat}`);
       const input = document.createElement("input");
       input.type = "hidden";
       input.name = "categories";
       input.value = el.dataset.cat;
       form.appendChild(input);
     });
-  
-    // 🔁 Same for QR types
+    //catInputCounter = 0;
+    // ✅ Add back QR types from selected dropdowns
     document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
       const input = document.createElement("input");
       input.type = "hidden";
@@ -1468,6 +1481,9 @@ let activeDropdown = null;
       input.value = el.dataset.qr;
       form.appendChild(input);
     });
+  
+    // ✅ Log final result
+    //console.log("✅ After sync: categories =", [...form.querySelectorAll('input[name="categories"]')].map(i => i.value));
   }
   
   //function to just set dropdown-option as selected
@@ -1682,6 +1698,8 @@ let activeDropdown = null;
       onClick,
       dataAttribute,
     });
+
+    syncHiddenInputsWithDropdowns();
   
     // 🔸 Setup toggle behavior using either default or custom
     if (typeof setupToggle === "function") {
@@ -1689,7 +1707,6 @@ let activeDropdown = null;
     }
   }
   
-
 //#endregion
 
 
@@ -2202,7 +2219,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       toggleId: "bulk-category-toggle",      // ID of the toggle button (if applicable)
       optionsContainerClass: "bulk-category-container",
       column: "categories",             // column to extract unique values from
-      dataAttribute: "cat", 
+      dataAttribute: "catbulk", 
       optionClass: "dropdown-option",
       searchId: "category-search", //id of the search bar (injected by html)
       placeholder: "Search categories...", //text that will show up in the search bar          
@@ -2225,6 +2242,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   //#region step 4 application of filter and chips in cards
     //verify whether the url is not indicating you filters must be apply, load them to form
     applyFiltersFromURL();
+   // syncHiddenInputsWithDropdowns();
+    const form = document.getElementById("filter-form");
+    const formData = new FormData(form);
+    const entries = Object.fromEntries(formData.entries());
+    console.log("🧾 Form Values after the apply filter from url:", formData.getAll("categories"))
 
     //get the filter from the from populated, render them, this include chips too
     const filters = getActiveFilters();
