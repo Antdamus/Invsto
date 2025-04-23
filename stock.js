@@ -2504,11 +2504,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     //event listener for the bulk actions, except dropdown of course
     setupBulkToolbarListeners();
 
+    //event listener for scrolling 
+    window.addEventListener("scroll", () => {
+      const topBar = document.querySelector(".top-controls");
+      topBar.classList.toggle("sticky-active", window.scrollY > 10);
+    });
+    
+
     //event listener for the home button
     document.getElementById("toggle-controller").addEventListener("click", () => {
       const header = document.querySelector(".container");
+      const toggleBtn = document.getElementById("toggle-controller");
+    
+      // Toggle panel visibility
       header.classList.toggle("collapsed");
+    
+      // Trigger haptic pulse animation
+      toggleBtn.classList.add("haptic");
+      setTimeout(() => toggleBtn.classList.remove("haptic"), 1);
     });
+    
 
     //event listerner for the card dropdown
     setupCardChipDropdownDelegated()
