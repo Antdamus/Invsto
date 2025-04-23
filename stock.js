@@ -1025,6 +1025,49 @@ let activeDropdown = null;
         updateURLFromForm();
       });
     }
+
+    // ☑️ Select All / Deselect All Visible toggle
+    const selectAllBtn = document.getElementById("select-all-visible");
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener("click", () => {
+        const cards = document.querySelectorAll(".stock-card"); // Visible cards only
+        let allSelected = true;
+
+        cards.forEach(card => {
+          const id = card.dataset.itemId;
+          if (!selectedItems.has(id)) {
+            allSelected = false;
+          }
+        });
+
+        if (allSelected) {
+          // ❌ Deselect all
+          cards.forEach(card => {
+            const id = card.dataset.itemId;
+            const checkbox = card.querySelector(".select-checkbox");
+            if (checkbox && checkbox.checked) {
+              checkbox.checked = false;
+              selectedItems.delete(id);
+            }
+          });
+          selectAllBtn.textContent = "Select All Visible";
+        } else {
+          // ✅ Select all
+          cards.forEach(card => {
+            const id = card.dataset.itemId;
+            const checkbox = card.querySelector(".select-checkbox");
+            if (checkbox && !checkbox.checked) {
+              checkbox.checked = true;
+              selectedItems.add(id);
+            }
+          });
+          selectAllBtn.textContent = "Deselect All";
+        }
+
+        updateBulkToolbar();
+      });
+    }
+
   }
 
   // 🔧 function to clear filter from filter form button plus its logic
