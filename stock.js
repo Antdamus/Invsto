@@ -1360,9 +1360,9 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     // 🔴 Event listener for the "Delete" button in the bulk toolbar
     // ✅ Bulk Delete: Show password confirmation before deletion
     document.getElementById("bulk-delete")?.addEventListener("click", async () => {
-      if (selectedItems.size === 0) return; // 🛑 Exit if no items are selected
+      if (selectedItems.size === 0) return;
     
-      const now = Date.now(); // 📅 Capture current time (used for lockout logic)
+      const now = Date.now();
       const modal = document.getElementById("password-confirm-modal");
       const input = document.getElementById("password-input");
       const confirmBtn = document.getElementById("confirm-password-btn");
@@ -1371,109 +1371,105 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
       const lockoutMsg = document.getElementById("lockout-message");
       const body = document.body;
     
-      // 🔐 Prevent deletion if currently in lockout period
+      // 🛑 If in lockout period, show countdown
       if (lockoutUntil && now < lockoutUntil) {
         const secondsLeft = Math.ceil((lockoutUntil - now) / 1000);
         lockoutMsg.textContent = `⏳ Locked out. Try again in ${secondsLeft}s`;
-        lockoutMsg.style.display = "block";
+        lockoutMsg.classList.add("show");
+        errorMsg.classList.remove("show");
+    
         modal.classList.add("show");
         modal.classList.remove("hidden");
         body.classList.add("modal-open");
+    
         setTimeout(() => {
           modal.classList.remove("show");
-          body.classList.remove("modal-open");
           modal.classList.add("hidden");
+          body.classList.remove("modal-open");
         }, 2000);
         return;
       }
     
-      // 🧼 Reset modal state and open it
+      // Reset modal state and open
       input.value = "";
-      errorMsg.style.display = "none";
-      lockoutMsg.style.display = "none";
+      errorMsg.classList.remove("show");
+      lockoutMsg.classList.remove("show");
       modal.classList.add("show");
-      body.classList.add("modal-open");
       modal.classList.remove("hidden");
+      body.classList.add("modal-open");
       input.focus();
     
-      // 🛑 Handle cancel action
+      // Cancel logic
       cancelBtn.onclick = () => {
         modal.classList.remove("show");
-        body.classList.remove("modal-open");
         modal.classList.add("hidden");
+        body.classList.remove("modal-open");
       };
     
-      // ✅ Handle confirm deletion
+      // Confirm logic
       confirmBtn.onclick = async () => {
         const password = input.value.trim();
         if (!password) return;
     
         const isValid = await validatePassword(password);
     
-        // ❌ Invalid password logic
         if (!isValid) {
           failedAttempts += 1;
     
           if (failedAttempts >= 3) {
-            lockoutUntil = Date.now() + 30000; // 🔒 Lock for 30 seconds
-            errorMsg.style.display = "none";
+            lockoutUntil = Date.now() + 30000;
+            errorMsg.classList.remove("show");
             lockoutMsg.textContent = `⛔ Too many attempts. Locked for 30s.`;
-            lockoutMsg.style.display = "block";
+            lockoutMsg.classList.add("show");
     
             setTimeout(() => {
               modal.classList.remove("show");
-              body.classList.remove("modal-open");
               modal.classList.add("hidden");
+              body.classList.remove("modal-open");
             }, 2000);
             return;
           }
     
-          errorMsg.style.display = "block";
+          errorMsg.textContent = "❌ Incorrect password.";
+          errorMsg.classList.add("show");
           return;
         }
     
-        // 📍 Attempt to get user geolocation before proceeding
         let location;
         try {
-          location = await getUserLocation(); // Returns { lat, lng }
+          location = await getUserLocation();
         } catch (e) {
           errorMsg.textContent = "🌐 Unable to get location. Deletion blocked.";
-          errorMsg.style.display = "block";
+          errorMsg.classList.add("show");
           return;
         }
     
-        // ✅ Reset lockout & proceed with deletion
+        // Proceed
         failedAttempts = 0;
         lockoutUntil = null;
         modal.classList.remove("show");
-        body.classList.remove("modal-open");
         modal.classList.add("hidden");
+        body.classList.remove("modal-open");
         showLoading();
     
-        // 🎯 Get list of selected item IDs
         const idsToDelete = Array.from(selectedItems);
-    
-        // 📝 Retrieve full data of selected items for logging
         const itemsToLog = allItems.filter(item => idsToDelete.includes(item.id));
     
-        // 🔥 Perform actual deletion from Supabase
         const { error } = await supabase
           .from("item_types")
           .delete()
           .in("id", idsToDelete);
     
         if (!error) {
-          // 🧾 Log the deletion to a dedicated audit log table
           await supabase.from("deletion_log").insert({
             user_id: currentUser.id,
             deleted_ids: idsToDelete,
-            deleted_data: itemsToLog, // 🆕 Save full item snapshot
-            timestamp: new Date().toISOString(), // ⏱ Exact time
+            deleted_data: itemsToLog,
+            timestamp: new Date().toISOString(),
             location_lat: location.lat,
             location_lng: location.lng
           });
     
-          // 🔄 Refresh UI with remaining items
           allItems = await fetchStockItems();
           const updatedCount = selectedItems.size;
           clearSelectionAndRefresh();
@@ -1484,11 +1480,11 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         hideLoading();
       };
     
-      // 🚀 Allow Enter key to trigger confirmation
       input.onkeydown = (e) => {
         if (e.key === "Enter") confirmBtn.click();
       };
     });
+    
     
     
     // ⭐ Add or remove favorites in bulk
@@ -1929,7 +1925,6 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
   }
   
 //#endregion
-
 
 /* ================= utilities ============================== */
 //#region
