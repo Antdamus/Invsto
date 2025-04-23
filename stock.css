@@ -139,6 +139,17 @@ body.stock-body {
   cursor: pointer;
   animation: controlFadeIn 0.4s ease both;
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-controls button svg,
+.top-controls label svg {
+  width: 18px;
+  height: 18px;
+  color: #1d1d1f;
+  flex-shrink: 0;
 }
 
 .top-controls button:active,

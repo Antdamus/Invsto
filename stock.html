@@ -33,19 +33,21 @@
     <header class="stock-header sticky">
       <div class="top-controls">
         <!-- 🔙 Back Button to Dashboard -->
-        <a href="dashboard.html" class="back-button">← Back</a>
-
+        <a href="dashboard.html" class="back-button">
+          <i data-lucide="arrow-left" class="icon"></i> Back
+        </a>
+        
         <!-- ⭐ Favorites Toggle Checkbox -->
         <label class="favorite-toggle">
-          <input type="checkbox" id="show-favorites-only">
-          Show Only Favorites
+          <input type="checkbox" id="show-favorites-only" />
+          <i data-lucide="star" class="icon"></i> Show Only Favorites
         </label>
 
         <!-- 🔽 Custom Sort Dropdown Menu -->
         <div class="custom-sort-dropdown">
           <button id="sortDropdownToggle" class="dropdown-toggle">
-            Sort By...
-          </button>
+            <i data-lucide="chevron-down" class="icon"></i> Sort By...
+          </button>          
           <ul id="sortDropdownMenu" class="dropdown-menu">
             <!-- 📊 List of sort options -->
             <li data-value="title-asc">Title (A–Z)</li>
@@ -80,8 +82,14 @@
         </select>
 
         <!-- 🔘 Filter toggle and clear buttons -->
-        <button id="toggle-filters" class="filter-toggle-btn">Show Filters</button>
-        <button type="button" id="clear-filters" class="btn-clear">Clear</button>
+        <button id="toggle-filters" class="filter-toggle-btn">
+          <i data-lucide="sliders-horizontal" class="icon"></i> Show Filters
+        </button>
+        
+        <button type="button" id="clear-filters" class="btn-clear">
+          <i data-lucide="x-circle" class="icon"></i> Clear
+        </button>
+        
         <div id="filter-summary-wrapper">
           <div id="filter-summary" class="inline-filter-summary"></div>
           <div id="header-filter-chips" class="header-filter-chips"></div>
@@ -236,6 +244,12 @@
     </div>
   </div>
   
+  <!--initialize buttons-->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    lucide.createIcons();
+  </script>
+
   
 </body>
 </html>
