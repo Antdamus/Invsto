@@ -358,6 +358,7 @@ svg.icon.spin {
 
 /* ================= chip for unified control bar ================= */
 /*#region*/
+
 /* 🎯 Filter Summary Wrapper - Fully Enhanced Aesthetic */
 #filter-summary-wrapper {
   display: flex;
@@ -372,48 +373,70 @@ svg.icon.spin {
   backdrop-filter: blur(18px) saturate(180%);
   -webkit-backdrop-filter: blur(18px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.06), inset 0 0 0.5px rgba(255, 255, 255, 0.3);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.06),
+    inset 0 0 0.5px rgba(255, 255, 255, 0.3);
   max-width: 1200px;
   transition: all 0.4s ease;
-  animation: fadeSlideDown 0.4s ease;
+  animation: fadeSlideDown 0.4s ease, summaryFade 0.6s ease-in;
 }
 
+
 #filter-summary-wrapper:hover {
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.08),
+    inset 0 0 4px rgba(255, 255, 255, 0.15);
   transform: translateY(-1px);
 }
+
+#filter-summary {
+  font-weight: 1000;
+  letter-spacing: 0.2px;
+  opacity: 0.92;
+}
+
 
 /* 🧊 Aesthetic Filter Chips */
 .filter-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 6px 16px;
   font-size: 0.85rem;
   font-family: 'DM Serif Display', serif;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  min-height: 36px;
+  line-height: 1.4;
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.25), rgba(245, 245, 245, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.35);
   color: #1d1d1f;
   border-radius: 999px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   white-space: nowrap;
   box-sizing: border-box;
-  transition: all 0.25s ease;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-  animation: chipFadeIn 0.3s ease;
+  transition: all 0.35s ease;
+  box-shadow:
+    0 3px 14px rgba(0,0,0,0.05),
+    inset 0 1px 1px rgba(255,255,255,0.6);
+  animation: chipEnter 400ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.filter-chip.removing {
+  animation: chipExit 300ms ease forwards;
 }
 
 .filter-chip:hover {
-  background: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  background: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.08),
+    inset 0 1px 1px rgba(255,255,255,0.6);
   transform: translateY(-1px);
 }
 
 .filter-chip span {
   display: inline;
-  line-height: 1;
-  max-width: 180px;
+  line-height: 1.4;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -423,9 +446,9 @@ svg.icon.spin {
 .chip-close-btn {
   background: none;
   border: none;
-  font-size: 0.95rem;
-  width: 18px;
-  height: 18px;
+  font-size: 0.85rem;
+  width: 20px;
+  height: 20px;
   line-height: 1;
   border-radius: 999px;
   color: #555;
@@ -434,6 +457,7 @@ svg.icon.spin {
   justify-content: center;
   transition: all 0.2s ease;
   cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
 }
 
 .chip-close-btn:hover {
@@ -442,6 +466,7 @@ svg.icon.spin {
   transform: scale(1.15);
 }
 
+/* 🔎 Icon Alignment & Subtle Hover */
 #filter-summary .lucide-inline {
   display: inline-block;
   vertical-align: middle;
@@ -453,22 +478,43 @@ svg.icon.spin {
 }
 
 #filter-summary:hover .lucide-inline {
-  transform: scale(1.08);
+  transform: scale(1.1) rotate(-2deg);
 }
 
-
-
-@keyframes chipFadeIn {
-  from {
+/* 🎬 Entrance Animation */
+@keyframes chipEnter {
+  0% {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.7) translateY(-10px);
   }
-  to {
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 🎬 Exit Animation */
+@keyframes chipExit {
+  0% {
     opacity: 1;
     transform: scale(1);
   }
+  100% {
+    opacity: 0;
+    transform: scale(0.85) translateY(10px);
+  }
 }
 
+@keyframes summaryFade {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 /*#endregion*/
 
 
