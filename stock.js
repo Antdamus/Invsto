@@ -862,28 +862,29 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     const toggle = document.getElementById(toggleId);
     const menu = document.getElementById(menuId);
     const container = document.querySelector(containerSelector);
-
+  
     if (!toggle || !menu || !container) {
       console.warn("Dropdown setup failed. Missing elements:", { toggle, menu, container });
       return;
     }
-
+  
     // 🔁 Toggle menu visibility
     toggle.addEventListener("click", (e) => {
       e.stopPropagation();
-      menu.classList.toggle("show");
-      container.classList.toggle("active");
+      const isOpen = menu.classList.toggle("show");
+      container.classList.toggle("active", isOpen);
+      toggle.classList.toggle("open", isOpen); // 👉 This adds rotation class
     });
-
+  
     // 🔁 Handle option selection
     menu.querySelectorAll("li").forEach((optionEl) => {
       optionEl.addEventListener("click", () => {
         const selectedValue = optionEl.getAttribute("data-value");
         const selectedLabel = optionEl.textContent;
-
+  
         // ✏️ Update toggle button label
-        toggle.innerHTML = `${selectedLabel} <span class="material-icons">expand_more</span>`;
-
+        toggle.innerHTML = `${selectedLabel} <svg class="icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+  
         // 🧪 Sync with native <select> if provided
         if (selectId) {
           const nativeSelect = document.getElementById(selectId);
@@ -892,26 +893,29 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
             nativeSelect.dispatchEvent(new Event("change"));
           }
         }
-
+  
         // ✅ Custom callback if provided
         if (typeof onSelect === "function") {
           onSelect(selectedValue, selectedLabel);
         }
-
+  
         // 🎬 Close dropdown
         menu.classList.remove("show");
         container.classList.remove("active");
+        toggle.classList.remove("open"); // 👉 Reset icon rotation
       });
     });
-
+  
     // 🧼 Close if user clicks outside
     document.addEventListener("click", (e) => {
       if (!container.contains(e.target)) {
         menu.classList.remove("show");
         container.classList.remove("active");
+        toggle.classList.remove("open"); // 👉 Reset icon rotation
       }
     });
   }
+  
 
   /**function toset up live filtering, sorting, pagination, and favorites (event listeners and refreshing)
  * ✅ Attaches listeners to input elements in a filter form

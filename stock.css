@@ -183,6 +183,10 @@ body.stock-body {
   left: 125%;
 }
 
+.top-controls .dropdown-toggle::after {
+  content: none !important;
+}
+
 /* 🔙 Dashboard Back Button */
 .back-button {
   display: flex;
@@ -240,8 +244,17 @@ body.stock-body {
   position: relative;
   font-family: 'DM Serif Display', serif;
 }
+
 .custom-sort-dropdown select {
-  background-image: none !important;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background: transparent;
+  padding-right: 1.8rem; /* Add spacing so text doesn't overlap your SVG */
+}
+
+.custom-sort-dropdown select::-ms-expand {
+  display: none;
 }
 
 /* 🎚 Generic Dropdown Toggle System */
@@ -308,6 +321,16 @@ svg.icon.spin {
   animation: spin360 0.6s ease;
   will-change: transform;
 }
+
+/* 🎯 Dropdown toggle icon rotation */
+.dropdown-toggle svg.icon {
+  transition: transform 0.3s ease;
+}
+
+.dropdown-toggle.open svg.icon {
+  transform: rotate(-90deg);
+}
+
 
 
 /* =================== Dropdown Reveal Animation =================== */
