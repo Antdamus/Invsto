@@ -358,7 +358,6 @@ svg.icon.spin {
 
 /* ================= chip for unified control bar ================= */
 /*#region*/
-
 /* 🎯 Filter Summary Wrapper - Fully Enhanced Aesthetic */
 #filter-summary-wrapper {
   display: flex;
@@ -443,6 +442,22 @@ svg.icon.spin {
   transform: scale(1.15);
 }
 
+#filter-summary .lucide-inline {
+  display: inline-block;
+  vertical-align: middle;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  stroke-width: 2;
+  transition: transform 0.3s ease;
+}
+
+#filter-summary:hover .lucide-inline {
+  transform: scale(1.08);
+}
+
+
+
 @keyframes chipFadeIn {
   from {
     opacity: 0;
@@ -455,6 +470,7 @@ svg.icon.spin {
 }
 
 /*#endregion*/
+
 
 /* =================================== */
 /* 🧰 Ultra-Aesthetic Bulk Toolbar     */

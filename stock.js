@@ -698,11 +698,10 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         }
       }
 
-      const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by:` : ""}`;
-      //const result = `🔎 Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by ${parts.join(", ")}` : ""}.`;
-
-      summaryEl.textContent = result;
+      const result = `<i data-lucide="search" class="icon lucide-inline"></i> Showing ${count} item${count !== 1 ? "s" : ""}${parts.length ? ` filtered by:` : ""}`;
+      summaryEl.innerHTML = result;
       summaryEl.classList.add("active");
+      if (window.lucide) lucide.createIcons();
     }
 
     //function coordinating the sorting of the data
