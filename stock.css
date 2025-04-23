@@ -422,11 +422,13 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   flex-direction: column;
   transition: all 0.3s ease;         /* Smooth hover effect */
   position: relative;
+  z-index: 1;
 }
 
 /* Scale effect on hover */
 .stock-card:hover {
   transform: scale(1.01);
+  z-index: 5;
 }
 
 /* Container that holds the image (static or carousel) */
@@ -701,6 +703,7 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
   box-sizing: border-box;
   overscroll-behavior: contain;
+  z-index: 999;
 }
 
 .dropdown-options-container::before {
@@ -1232,7 +1235,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
   border: 1px solid #d0d0d0;
   backdrop-filter: blur(8px);
-  z-index: 2000;
+  z-index: 9999;
   max-height: 260px;
   overflow-y: auto;
   animation: fadeSlideIn 0.2s ease forwards;
