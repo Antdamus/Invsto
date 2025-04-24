@@ -1,5 +1,3 @@
--------------------------------------------------------------------------*/
-
 /* ================= Unified Top Control Bar – Ultra Aesthetic 🍎 ================= */
 /*#region*/
 /* 🌤 Global Body */
@@ -237,6 +235,19 @@ body.stock-body {
 
 .top-controls label.favorite-toggle input:hover {
   filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.5));
+}
+
+.favorite-toggle {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  color: #ddd;
+  user-select: none;
+}
+
+.favorite-toggle input {
+  margin-right: 8px;
+  transform: scale(1.2);
+  accent-color: gold;
 }
 
 /* ⬇️ Sort Dropdown Wrapper */
@@ -517,316 +528,10 @@ svg.icon.spin {
 }
 /*#endregion*/
 
-
-/* =================================== */
-/* 🧰 Ultra-Aesthetic Bulk Toolbar     */
-/* =================================== */
-.bulk-toolbar {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 16px 24px;
-  margin: 12px auto 0;
-  max-width: 1200px;
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
-  position: sticky;
-  top: 0;
-  z-index: 999;
-  opacity: 0;
-  transform: translateY(-10px);
-  transition: opacity 0.4s ease, transform 0.4s ease;
-}
-
-/* 👁️‍🗨️ Visibility toggling */
-.bulk-toolbar.show {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* 🙈 Hidden state */
-.bulk-toolbar.hidden {
-  display: none; /* Add this */
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-10px);
-  height: 0;
-  overflow: hidden;
-  padding: 0 !important;
-  margin: 0 !important;
-}
-
-.bulk-toolbar.hide {
-  opacity: 0;
-  transform: translateY(-20px);
-  pointer-events: none;
-  user-select: none;
-  height: 0;
-  overflow: hidden;
-  padding: 0;
-  margin: 0;
-  border: none;
-}
-
-/* ✨ Toolbar Buttons */
-.bulk-toolbar button {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  padding: 10px 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  background: rgba(255, 255, 255, 0.2);
-  color: #1d1d1f;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-  transition: all 0.3s ease;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 💫 Subtle Ripple Effect */
-.bulk-toolbar button::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  transition: width 0.5s ease, height 0.5s ease;
-  z-index: 0;
-}
-
-.bulk-toolbar button:active::after {
-  width: 200px;
-  height: 200px;
-}
-
-/* 🧊 Hover Feedback */
-.bulk-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.6);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
-}
-
-/* 🪟 Dropdown Select (Bulk Category) */
-.bulk-select {
-  padding: 10px 16px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-  font-size: 1rem;
-  color: #1d1d1f;
-  font-family: 'DM Serif Display', serif;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-  transition: all 0.3s ease;
-}
-
-.bulk-select:focus {
-  outline: none;
-  border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
-}
-
-/* 🧃 Smooth Fade + Slide Animations */
-@keyframes bulkToolbarSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/*all the elements of the sort box in the central panel are being formated
-based on the general class look dropdown-toggle and dropdown-menu*/
-
-
-/*#endregion*/
-
-/*---------------------------------------------------------------------------*/
-
-/* ================= Inventory Grid, carousel style, card style =============== */
-/*#region*/ 
-/* Styles the grid layout inside <main class="stock-main"><div id="stock-container" class="stock-grid"> */
-.stock-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); /* Responsive columns */
-  gap: 24px;                          /* Spacing between cards */
-  padding-bottom: 40px;              /* Bottom spacing below the grid */
-}
-
-/* === Individual Inventory Card === */
-/* Applies to each item card injected inside .stock-grid */
-.stock-card {
-  background-color: #fff;            /* White card background */
-  border-radius: 20px;               /* Rounded corners */
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);  /* Subtle shadow for elevation */
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s ease;         /* Smooth hover effect */
-  position: relative;
-  z-index: 1;
-}
-
-/* Scale effect on hover */
-.stock-card:hover {
-  transform: scale(1.01);
-  z-index: 5;
-}
-
-/* Container that holds the image (static or carousel) */
-.stock-image-container {
-  position: relative;
-  margin-bottom: 12px;
-}
-
-/* Preview image inside the card */
-.stock-photo-preview {
-  width: 100%;
-  height: 220px;
-  object-fit: cover;                /* Keeps aspect ratio, fills space */
-  border-radius: 14px;
-  cursor: pointer;                 /* Clickable image (modal or preview logic) */
-}
-
-/* Paragraphs inside the card content (e.g., title, weight, price, etc.) */
-.stock-content p {
-  font-size: 0.95rem;
-  margin: 0.2rem 0;
-  line-height: 1.4;
-  position: relative;
-}
-
-/* Special styling for items that are out of stock */
-.stock-count.stock-zero {
-  color: #e63946;                  /* Red text for zero stock */
-  font-weight: bold;
-}
-
-/* === Modal Viewer for Image === */
-.modal {
-  display: none;                   /* Hidden by default */
-  position: fixed;
-  z-index: 99;
-  left: 0;
-  top: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: auto;
-  background-color: rgba(0,0,0,0.8); /* Dark overlay */
-  justify-content: center;
-  align-items: center;
-}
-
-/* Enlarged image inside modal */
-.modal img {
-  max-width: 90vw;
-  max-height: 90vh;
-  border-radius: 14px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-}
-
-/* Close icon in the modal */
-.close-modal {
-  position: absolute;
-  top: 30px;
-  right: 40px;
-  font-size: 2rem;
-  color: white;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-/* When modal has class "show", it's visible and uses flex centering */
-.modal.show {
-  display: flex;
-}
-
-/* === Carousel Styling === */
-/* Wrapper for image carousel in stock-card */
-.carousel {
-  position: relative;
-  width: 100%;
-  height: 220px;
-  overflow: hidden;
-  border-radius: 14px;
-}
-
-/* Track that holds carousel images */
-.carousel-track {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  transition: transform 0.3s ease;
-}
-
-/* Each image in the carousel */
-.carousel-photo {
-  width: 100%;
-  height: 220px;
-  object-fit: cover;
-  flex-shrink: 0;
-  display: none;                 /* Hidden unless active */
-  border-radius: 14px;
-}
-
-/* Only the "active" carousel photo is shown */
-.carousel-photo.active {
-  display: block;
-}
-
-/* Left/right navigation buttons on the carousel */
-.carousel-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 2rem;
-  color: #333;
-  background-color: rgba(255, 255, 255, 0.8);
-  border: none;
-  padding: 4px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  z-index: 2;
-}
-
-.carousel-btn.left {
-  left: 10px;
-}
-
-.carousel-btn.right {
-  right: 10px;
-}
-	/*#endregion*/
-
-
-/*---------------------------------------------------------------------------*/
-
 /* ================= filter region =============================*/
 /*#region*/ 
 
-/* ================= sumamry of filtering activities================= */
-
-
-
 /* ================= Beautiful Floating Filter HUD ================= */
-
 
 .floating-filters {
   border-radius: 32px;
@@ -1043,7 +748,6 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   }
 }
 
-
 /* ================= FILTER TABS (FIXED) ================== */
 .filter-tabs {
   display: flex;
@@ -1155,6 +859,100 @@ based on the general class look dropdown-toggle and dropdown-menu*/
   font-weight: bold;
 }
 
+/*#region dropdown toggle and dropdown menu it shows when you toggle style */
+  /*#region*/ 
+  .dropdown-toggle {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1rem;
+    padding: 10px 16px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    background: #ffffffc7;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    line-height: 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+
+  .dropdown-toggle:hover {
+    background-color: #f5f5f5;
+    box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.05);
+  }
+  
+  .dropdown-toggle::after {
+    content: '▾';
+    font-size: 0.85rem;
+    color: #555;
+    margin-left: auto;
+    transition: transform 0.3s ease;
+  }
+  
+  .dropdown-toggle.open::after {
+    transform: rotate(180deg);
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 6px;
+    z-index: 9999;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(14px) saturate(200%);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 20px;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
+    padding: 10px 0;
+    width: 240px;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    animation: dropdownFadeIn 0.25s ease-out forwards;
+    transition: max-height 0.3s ease;
+  }
+
+  .dropdown-menu li {
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 1rem;
+    white-space: nowrap;
+  }
+
+  .dropdown-menu li:hover {
+    background: rgba(0, 113, 227, 0.07);
+  }
+
+  .dropdown-menu.show {
+    display: block;
+  }
+
+  @keyframes dropdownFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes dropdownExpand {
+    0% {
+      transform: scaleY(0.95);
+      opacity: 0.6;
+    }
+    100% {
+      transform: scaleY(1);
+      opacity: 1;
+    }
+  }
+/*#endregion*/ 
+/*#endregion*/ 
 
 
 /*the aesthetic of the toggle is being controlled by the 
@@ -1162,10 +960,506 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 /*#endregion*/ 
 
+/* ================= unified bulk operations ================= */
+/*#region*/
 
-/*---------------------------------------------------------------------------*/
+.bulk-toolbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px 24px;
+  margin: 12px auto 0;
+  max-width: 1200px;
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.05);
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
 
-/* === Pagination Controls === */
+/* 👁️‍🗨️ Visibility toggling */
+.bulk-toolbar.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 🙈 Hidden state */
+.bulk-toolbar.hidden {
+  display: none; /* Add this */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-10px);
+  height: 0;
+  overflow: hidden;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.bulk-toolbar.hide {
+  opacity: 0;
+  transform: translateY(-20px);
+  pointer-events: none;
+  user-select: none;
+  height: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+
+.bulk-toolbar button {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 10px 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.2);
+  color: #1d1d1f;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 💫 Subtle Ripple Effect */
+.bulk-toolbar button::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.5s ease, height 0.5s ease;
+  z-index: 0;
+}
+
+.bulk-toolbar button:active::after {
+  width: 200px;
+  height: 200px;
+}
+
+/* 🧊 Hover Feedback */
+.bulk-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+/* 🪟 Dropdown Select (Bulk Category) */
+.bulk-select {
+  padding: 10px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 1rem;
+  color: #1d1d1f;
+  font-family: 'DM Serif Display', serif;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s ease;
+}
+
+.bulk-select:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+}
+
+/* 🧃 Smooth Fade + Slide Animations */
+@keyframes bulkToolbarSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*all the elements of the sort box in the central panel are being formated
+based on the general class look dropdown-toggle and dropdown-menu */
+
+/*#endregion*/
+
+/* ================= Inventory Grid, carousel style, card style =============== */
+/*#region*/ 
+/* Styles the grid layout inside <main class="stock-main"><div id="stock-container" class="stock-grid"> */
+.stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); /* Responsive columns */
+  gap: 24px;                          /* Spacing between cards */
+  padding-bottom: 40px;              /* Bottom spacing below the grid */
+}
+
+/* === Individual Inventory Card === */
+/* Applies to each item card injected inside .stock-grid */
+.stock-card {
+  background-color: #fff;            /* White card background */
+  border-radius: 20px;               /* Rounded corners */
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);  /* Subtle shadow for elevation */
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;         /* Smooth hover effect */
+  position: relative;
+  z-index: 1;
+}
+
+/* Scale effect on hover */
+.stock-card:hover {
+  transform: scale(1.01);
+  z-index: 5;
+}
+
+/* Container that holds the image (static or carousel) */
+.stock-image-container {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+/* Preview image inside the card */
+.stock-photo-preview {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;                /* Keeps aspect ratio, fills space */
+  border-radius: 14px;
+  cursor: pointer;                 /* Clickable image (modal or preview logic) */
+}
+
+/* Paragraphs inside the card content (e.g., title, weight, price, etc.) */
+.stock-content p {
+  font-size: 0.95rem;
+  margin: 0.2rem 0;
+  line-height: 1.4;
+  position: relative;
+}
+
+/* Special styling for items that are out of stock */
+.stock-count.stock-zero {
+  color: #e63946;                  /* Red text for zero stock */
+  font-weight: bold;
+}
+
+/* === Modal Viewer for Image === */
+.modal {
+  display: none;                   /* Hidden by default */
+  position: fixed;
+  z-index: 99;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.8); /* Dark overlay */
+  justify-content: center;
+  align-items: center;
+}
+
+/* Enlarged image inside modal */
+.modal img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 14px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+}
+
+/* Close icon in the modal */
+.close-modal {
+  position: absolute;
+  top: 30px;
+  right: 40px;
+  font-size: 2rem;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+/* When modal has class "show", it's visible and uses flex centering */
+.modal.show {
+  display: flex;
+}
+
+/* === Carousel Styling === */
+/* Wrapper for image carousel in stock-card */
+.carousel {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+/* Track that holds carousel images */
+.carousel-track {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  transition: transform 0.3s ease;
+}
+
+/* Each image in the carousel */
+.carousel-photo {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: none;                 /* Hidden unless active */
+  border-radius: 14px;
+}
+
+/* Only the "active" carousel photo is shown */
+.carousel-photo.active {
+  display: block;
+}
+
+/* Left/right navigation buttons on the carousel */
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 2rem;
+  color: #333;
+  background-color: rgba(255, 255, 255, 0.8);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.carousel-btn.left {
+  left: 10px;
+}
+
+.carousel-btn.right {
+  right: 10px;
+}
+
+.card-float-controls {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.favorite-btn {
+  position: static;
+  font-size: 1.4rem;
+  color: #bbb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.3s ease;
+  z-index: 2;
+}
+
+.favorite-btn:hover,
+.stock-card.favorited .favorite-btn {
+  color: gold;
+}
+
+.favorite-btn:active {
+  transform: scale(1.3);
+}
+
+.favorite-btn:focus {
+  outline: none;
+}
+
+.stock-card.favorited {
+  border: 2px solid gold;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  animation: glowFade 1.5s ease-out;
+}
+
+@keyframes glowFade {
+  0% {
+    box-shadow: 0 0 0px rgba(255, 215, 0, 0.0);
+    transform: scale(1.02);
+  }
+  30% {
+    box-shadow: 0 0 14px rgba(255, 215, 0, 0.75);
+  }
+  100% {
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+    transform: scale(1.0);
+  }
+}
+
+.select-checkbox {
+  position: static;
+  transform: scale(1.1);
+  z-index: 2;
+}
+
+.stock-card.selected {
+  border: 2px solid #0071e3;
+  box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
+  animation: selectPulse 1.2s ease;
+  z-index: 5;
+
+}
+
+@keyframes selectPulse {
+  0% {
+    transform: scale(1.015);
+    box-shadow: 0 0 0 rgba(0, 113, 227, 0.0);
+  }
+  30% {
+    box-shadow: 0 0 14px rgba(0, 113, 227, 0.7);
+  }
+  100% {
+    transform: scale(1.0);
+    box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
+  }
+}
+
+.add-category-chip {
+  background-color: #0071e3;
+  color: white;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  font-family: 'DM Serif Display', serif;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.category-chip {
+  background-color: #e0e0e0;
+  border-radius: 14px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+  font-family: 'DM Serif Display', serif;
+  color: #1d1d1f;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  position: relative;
+  padding-right: 22px;
+  animation: chipFadeIn 0.3s ease;
+  transition: background-color 0.3s ease;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.category-chip button {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  border: none;
+  background: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.category-chip button:hover {
+  color: #d00;
+}
+
+.category-chip button {
+  transition: color 0.2s ease;
+}
+
+.category-chip[data-color="blue"] { background-color: #e6f0ff; color: #1a3e6e; }
+.category-chip[data-color="green"] { background-color: #e4fce9; color: #1c4f2b; }
+.category-chip[data-color="purple"] { background-color: #f3e9ff; color: #4e2d84; }
+.category-chip[data-color="gold"] { background-color: #fff6e0; color: #5c4200; }
+.category-chip[data-color="gray"] { background-color: #eaeaea; color: #2a2a2a; }
+
+
+@keyframes chipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/*styling for the categories dropdown in the cards */
+
+
+.category-dropdown {
+  position: absolute;
+  background: white;
+  border-radius: 16px;
+  padding: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+  border: 1px solid #d0d0d0;
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  max-height: 260px;
+  overflow-y: auto;
+  animation: fadeSlideIn 0.2s ease forwards;
+}
+
+.category-option {
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-family: 'DM Serif Display', serif;
+}
+
+.category-option.selected {
+  background-color: #0071e3;
+  color: white;
+}
+
+.category-option:hover {
+  background-color: #e8e8e8;
+}
+
+
+/*#endregion*/
+
+/* =============== Pagination Controls ====================== */
+/*#region*/
 .pagination-controls {
   max-width: 1200px;
   margin: 0 auto 30px auto;
@@ -1236,137 +1530,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     gap: 12px;
   }
 }
-
-/* === Smart Filter Chips === */
-
-
-.favorite-btn {
-  position: static;
-  font-size: 1.4rem;
-  color: #bbb;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: color 0.3s ease;
-  z-index: 2;
-}
-
-.favorite-btn:hover,
-.stock-card.favorited .favorite-btn {
-  color: gold;
-}
-
-.favorite-btn:active {
-  transform: scale(1.3);
-}
-
-.favorite-btn:focus {
-  outline: none;
-}
-
-#favorite-toggle-container {
-  display: flex;
-  justify-content: center;
-  margin: 10px 0 20px 0;
-}
-
-.favorite-toggle {
-  font-family: 'DM Serif Display', serif;
-  font-size: 1rem;
-  color: #ddd;
-  user-select: none;
-}
-
-.favorite-toggle input {
-  margin-right: 8px;
-  transform: scale(1.2);
-  accent-color: gold;
-}
-
-.stock-card.favorited {
-  border: 2px solid gold;
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-  animation: glowFade 1.5s ease-out;
-}
-
-@keyframes glowFade {
-  0% {
-    box-shadow: 0 0 0px rgba(255, 215, 0, 0.0);
-    transform: scale(1.02);
-  }
-  30% {
-    box-shadow: 0 0 14px rgba(255, 215, 0, 0.75);
-  }
-  100% {
-    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-    transform: scale(1.0);
-  }
-}
-
-
-.select-checkbox {
-  position: static;
-  transform: scale(1.1);
-  z-index: 2;
-}
-
-.stock-card.selected {
-  border: 2px solid #0071e3;
-  box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
-  animation: selectPulse 1.2s ease;
-  z-index: 5;
-
-}
-
-@keyframes selectPulse {
-  0% {
-    transform: scale(1.015);
-    box-shadow: 0 0 0 rgba(0, 113, 227, 0.0);
-  }
-  30% {
-    box-shadow: 0 0 14px rgba(0, 113, 227, 0.7);
-  }
-  100% {
-    transform: scale(1.0);
-    box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
-  }
-}
-
-.card-overlays {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 48px;
-  z-index: 5;
-  display: flex;
-  justify-content: space-between;
-  padding: 12px;
-  pointer-events: none;
-  align-items: center;
-}
-
-.card-overlays .select-checkbox,
-.card-overlays .favorite-btn {
-  pointer-events: auto;
-}
-
-.card-float-controls {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-  z-index: 3;
-  pointer-events: auto;
-}
+/*#endregion*/
 
 
 #toast-container {
@@ -1436,69 +1600,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   100% { transform: rotate(360deg); }
 }
 
-.category-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
-}
-
-.category-chip {
-  background-color: #e0e0e0;
-  border-radius: 14px;
-  padding: 4px 10px;
-  font-size: 0.9rem;
-  font-family: 'DM Serif Display', serif;
-  color: #1d1d1f;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.category-chip {
-  position: relative;
-  padding-right: 22px;
-}
-
-.category-chip button {
-  position: absolute;
-  top: 2px;
-  right: 4px;
-  border: none;
-  background: none;
-  color: #555;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  line-height: 1;
-}
-
-.category-chip button:hover {
-  color: #d00;
-}
-
-.add-category-chip {
-  background-color: #0071e3;
-  color: white;
-  cursor: pointer;
-  padding: 4px 10px;
-  border-radius: 14px;
-  font-size: 0.9rem;
-  font-family: 'DM Serif Display', serif;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.category-dropdown {
-  position: absolute;
-  background: white;
-  border-radius: 16px;
-  padding: 10px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d0d0d0;
-  backdrop-filter: blur(8px);
-  z-index: 9999;
-  max-height: 260px;
-  overflow-y: auto;
-  animation: fadeSlideIn 0.2s ease forwards;
-}
 
 @keyframes fadeSlideIn {
   from {
@@ -1513,168 +1614,9 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 
 
-.category-option {
-  padding: 8px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-  font-family: 'DM Serif Display', serif;
-}
-
-.category-option.selected {
-  background-color: #0071e3;
-  color: white;
-}
-
-.category-option:hover {
-  background-color: #e8e8e8;
-}
-
-.category-chip {
-  position: relative;
-  padding-right: 22px;
-  animation: chipFadeIn 0.3s ease;
-  transition: background-color 0.3s ease;
-}
-
-@keyframes chipFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.85);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.category-chip[data-color="blue"] { background-color: #e6f0ff; color: #1a3e6e; }
-.category-chip[data-color="green"] { background-color: #e4fce9; color: #1c4f2b; }
-.category-chip[data-color="purple"] { background-color: #f3e9ff; color: #4e2d84; }
-.category-chip[data-color="gold"] { background-color: #fff6e0; color: #5c4200; }
-.category-chip[data-color="gray"] { background-color: #eaeaea; color: #2a2a2a; }
-
-.category-chip button {
-  transition: color 0.2s ease;
-}
-
-
-
-
-@keyframes fadeSlideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-
-
-
-
-
-
 /*---------------------------------------------------------------------------*/
 
 /* ============= general class style ====================*/
-/*#region*/  /* dropdown toggle and dropdown menu it shows when you toggle style */
-  /*#region*/ 
-    .dropdown-toggle {
-      font-family: 'DM Serif Display', serif;
-      font-size: 1rem;
-      padding: 10px 16px;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 12px;
-      background: #ffffffc7;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-      line-height: 1.5;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: all 0.3s ease;
-      cursor: pointer;
-    }
-
-    .dropdown-toggle:hover {
-      background-color: #f5f5f5;
-      box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.05);
-    }
-    
-    .dropdown-toggle::after {
-      content: '▾';
-      font-size: 0.85rem;
-      color: #555;
-      margin-left: auto;
-      transition: transform 0.3s ease;
-    }
-    
-    .dropdown-toggle.open::after {
-      transform: rotate(180deg);
-    }
-
-    .dropdown-menu {
-      position: absolute;
-      top: 100%;
-      left: 0;
-      margin-top: 6px;
-      z-index: 9999;
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(14px) saturate(200%);
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 20px;
-      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
-      padding: 10px 0;
-      width: 240px;
-      max-height: 300px;
-      overflow-y: auto;
-      display: none;
-      animation: dropdownFadeIn 0.25s ease-out forwards;
-      transition: max-height 0.3s ease;
-    }
-
-    .dropdown-menu li {
-      padding: 10px 20px;
-      cursor: pointer;
-      transition: background 0.2s;
-      font-size: 1rem;
-      white-space: nowrap;
-    }
-
-    .dropdown-menu li:hover {
-      background: rgba(0, 113, 227, 0.07);
-    }
-
-    .dropdown-menu.show {
-      display: block;
-    }
-
-    @keyframes dropdownFadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    @keyframes dropdownExpand {
-      0% {
-        transform: scaleY(0.95);
-        opacity: 0.6;
-      }
-      100% {
-        transform: scaleY(1);
-        opacity: 1;
-      }
-    }
-  /*#endregion*/ 
-/*#endregion*/ 
 
 /*#region style for modal for requiring password confirmation to delete items */
   .modal-content {
