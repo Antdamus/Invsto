@@ -1,5 +1,5 @@
 // 🔹 Global App State
-let currentPage = 1;                    // Current page number for pagination
+let currentPage = 1;                    // Current page number or pagination
 let itemsPerPage = 12;                 // Number of items per page
 let allItems = [];                     // Holds all fetched stock items
 let userFavorites = new Set();         // Set of favorite item IDs for the current user
