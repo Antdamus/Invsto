@@ -224,31 +224,25 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     * so you can see which carousel belongs to which item 
     */
     function buildCarousel(photos, index) {
-        if (!photos.length) return `<div class="no-photo">No Photos</div>`;
+      if (!photos.length) return `<div class="no-photo">No Photos</div>`;
     
-        return `
+      return `
         <div class="carousel" id="carousel-${index}">
-            <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">&#10094;</button>
-            <div class="carousel-track">
-                ${photos.map((photo, i) => `
-                    <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
-                `).join('')}
-            </div>
-            <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">&#10095;</button>
+          <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">
+            <i data-lucide="chevron-left" class="carousel-icon"></i>
+          </button>
+          <div class="carousel-track">
+            ${photos.map((photo, i) => `
+              <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
+            `).join('')}
+          </div>
+          <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">
+            <i data-lucide="chevron-right" class="carousel-icon"></i>
+          </button>
         </div>
-        `;
-        /** the ouput will be something like this,this is what you will inject 
-        <div class="carousel" id="carousel-0">
-            <button class="carousel-btn left" data-carousel-index="0" data-dir="prev">❮</button>
-            <div class="carousel-track">
-                <img src="photo1.jpg" class="carousel-photo active" />
-                <img src="photo2.jpg" class="carousel-photo" />
-                <img src="photo3.jpg" class="carousel-photo" />
-            </div>
-            <button class="carousel-btn right" data-carousel-index="0" data-dir="next">❯</button>
-        </div>
-        */
-    }
+      `;
+      lucide.createIcons()
+    }    
   //#endregion
 
   //getting the floating control for selection and favorited sections 

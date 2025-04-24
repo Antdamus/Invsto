@@ -1121,176 +1121,223 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 /*#endregion*/
 
 /* ================= Inventory Grid, carousel style, card style =============== */
+
+/* =================== 🍎 Ultra-Aesthetic Card Grid + Modal =================== */
 /*#region*/ 
-/* Styles the grid layout inside <main class="stock-main"><div id="stock-container" class="stock-grid"> */
+/* Grid Layout */
 .stock-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); /* Responsive columns */
-  gap: 24px;                          /* Spacing between cards */
-  padding-bottom: 40px;              /* Bottom spacing below the grid */
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 28px;
+  padding-bottom: 60px;
 }
 
-/* === Individual Inventory Card === */
-/* Applies to each item card injected inside .stock-grid */
+/* Inventory Card */
 .stock-card {
-  background-color: #fff;            /* White card background */
-  border-radius: 20px;               /* Rounded corners */
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);  /* Subtle shadow for elevation */
-  padding: 20px;
+  background: linear-gradient(to bottom right, rgba(255,255,255,0.95), rgba(248,248,255,0.9));
+  border-radius: 24px;
+  padding: 24px;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.06),
+    inset 0 0 1px rgba(255, 255, 255, 0.4);
   display: flex;
   flex-direction: column;
-  transition: all 0.3s ease;         /* Smooth hover effect */
+  transition: all 0.35s ease;
   position: relative;
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
   z-index: 1;
+  animation: cardFadeIn 0.5s ease both;
 }
 
-/* Scale effect on hover */
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+
 .stock-card:hover {
-  transform: scale(1.01);
+  transform: translateY(-4px) scale(1.012);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.08),
+    inset 0 0 1px rgba(255, 255, 255, 0.5);
   z-index: 5;
 }
 
-/* Container that holds the image (static or carousel) */
+/* Image container */
 .stock-image-container {
   position: relative;
-  margin-bottom: 12px;
+  margin-bottom: 18px;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07);
 }
 
-/* Preview image inside the card */
-.stock-photo-preview {
+/* Static or active carousel image */
+.stock-photo-preview,
+.carousel-photo {
   width: 100%;
   height: 220px;
-  object-fit: cover;                /* Keeps aspect ratio, fills space */
-  border-radius: 14px;
-  cursor: pointer;                 /* Clickable image (modal or preview logic) */
+  object-fit: cover;
+  border-radius: 20px;
+  transition: transform 0.3s ease;
 }
 
-/* Paragraphs inside the card content (e.g., title, weight, price, etc.) */
-.stock-content p {
-  font-size: 0.95rem;
-  margin: 0.2rem 0;
-  line-height: 1.4;
-  position: relative;
+.stock-photo-preview:hover {
+  transform: scale(1.025);
+  cursor: zoom-in;
 }
 
-/* Special styling for items that are out of stock */
-.stock-count.stock-zero {
-  color: #e63946;                  /* Red text for zero stock */
-  font-weight: bold;
-}
-
-/* === Modal Viewer for Image === */
-.modal {
-  display: none;                   /* Hidden by default */
-  position: fixed;
-  z-index: 99;
-  left: 0;
-  top: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: auto;
-  background-color: rgba(0,0,0,0.8); /* Dark overlay */
-  justify-content: center;
-  align-items: center;
-}
-
-/* Enlarged image inside modal */
-.modal img {
-  max-width: 90vw;
-  max-height: 90vh;
-  border-radius: 14px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-}
-
-/* Close icon in the modal */
-.close-modal {
-  position: absolute;
-  top: 30px;
-  right: 40px;
-  font-size: 2rem;
-  color: white;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-/* When modal has class "show", it's visible and uses flex centering */
-.modal.show {
-  display: flex;
-}
-
-/* === Carousel Styling === */
-/* Wrapper for image carousel in stock-card */
+/* Carousel setup */
 .carousel {
   position: relative;
   width: 100%;
   height: 220px;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 20px;
 }
 
-/* Track that holds carousel images */
 .carousel-track {
+  display: flex;
   width: 100%;
   height: 100%;
-  display: flex;
   transition: transform 0.3s ease;
 }
 
-/* Each image in the carousel */
 .carousel-photo {
-  width: 100%;
-  height: 220px;
-  object-fit: cover;
+  display: none;
   flex-shrink: 0;
-  display: none;                 /* Hidden unless active */
-  border-radius: 14px;
 }
 
-/* Only the "active" carousel photo is shown */
 .carousel-photo.active {
   display: block;
 }
 
-/* Left/right navigation buttons on the carousel */
+/* Carousel buttons */
 .carousel-btn {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 2rem;
+  font-size: 1.8rem;
   color: #333;
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: rgba(255, 255, 255, 0.85);
   border: none;
-  padding: 4px 10px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: 12px;
   cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
   z-index: 2;
+  transition: background 0.3s ease;
 }
 
-.carousel-btn.left {
-  left: 10px;
+.carousel-btn:hover {
+  background-color: rgba(240, 240, 240, 0.95);
 }
 
-.carousel-btn.right {
-  right: 10px;
+.carousel-btn.left { left: 10px; }
+.carousel-btn.right { right: 10px; }
+
+.carousel-btn .carousel-icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2.2;
+  color: #1d1d1f;
+  transition: transform 0.3s ease;
 }
 
+.carousel-btn:hover .carousel-icon {
+  transform: scale(1.1);
+}
+
+/* Float Controls Overlay */
 .card-float-controls {
   position: absolute;
-  top: 14px;
-  left: 14px;
-  right: 14px;
+  bottom: 16px;
+  right: 16px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  gap: 10px;
   padding: 8px 12px;
-  border-radius: 16px;
   background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   z-index: 3;
-  pointer-events: auto;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
+.stock-card:hover .card-float-controls {
+  transform: translateY(-2px);
+  opacity: 1;
+}
+
+
+/* Card Text Info */
+.stock-content p {
+  font-size: 0.95rem;
+  margin: 0.25rem 0;
+  line-height: 1.5;
+  font-family: 'DM Serif Display', serif;
+  color: #1d1d1f;
+}
+
+.stock-count.stock-zero {
+  color: #e63946;
+  font-weight: bold;
+}
+
+/* Modal Viewer */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.8);
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(4px);
+  transition: opacity 0.3s ease;
+}
+
+.modal.show {
+  display: flex;
+}
+
+.modal img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  transition: transform 0.3s ease;
+}
+
+.modal img:hover {
+  transform: scale(1.02);
+}
+
+.close-modal {
+  position: absolute;
+  top: 24px;
+  right: 32px;
+  font-size: 2rem;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+.close-modal:hover {
+  color: #fefefe;
+}
+/*#endregion*/ 
 
 
 .favorite-btn {
