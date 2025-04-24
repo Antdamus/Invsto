@@ -529,29 +529,24 @@ svg.icon.spin {
 /*#endregion*/
 
 /* ================= filter region =============================*/
-/*#region*/ 
+/*#region*/
 
-/* ================= ✨ Ultra-Aesthetic Floating Filter Panel ================= */
-
+/* ================= 💎 Ultra-Aesthetic Floating Filter Panel ================= */
 
 .floating-filters {
   border-radius: 32px;
-  background: linear-gradient(to top left, rgba(255, 255, 255, 0.85), rgba(245, 245, 250, 0.9));
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08), inset 0 0 0.5px rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(26px) saturate(160%);
-  -webkit-backdrop-filter: blur(26px) saturate(160%);
-  transition: all 0.45s ease;
+  background: linear-gradient(to top left, rgba(255, 255, 255, 0.9), rgba(245, 245, 250, 0.86));
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.06),
+    inset 0 0 1px rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  transition: all 0.5s ease;
   opacity: 0;
   max-height: 0;
   pointer-events: none;
   overflow: hidden;
   animation: fadeSlideDown 0.3s ease;
-}
-
-.floating-filters form {
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
 }
 
 .floating-filters.show {
@@ -563,7 +558,13 @@ svg.icon.spin {
   animation: fadeSlideDown 0.5s ease;
 }
 
-/* ================= Grid for Filter Inputs ================= */
+.floating-filters form {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ================= 🧩 Filter Grid ================= */
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -573,37 +574,63 @@ svg.icon.spin {
   width: 100%;
 }
 
-/* ================= Inputs + Selects Styling ================= */
+/* ================= ✨ Ultra-Aesthetic Input Fields ================= */
 .filter-grid input,
 .filter-grid select,
 .filter-grid button {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
-  padding: 12px 18px;
+  padding: 14px 20px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04), inset 0 0 0.5px rgba(255, 255, 255, 0.6);
-  transition: all 0.25s ease;
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.92), rgba(245, 245, 255, 0.85));
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.04),
+    inset 0 0 0.6px rgba(255, 255, 255, 0.8);
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.2s ease;
   min-height: 52px;
   line-height: 1.4;
+  width: 100%;
   box-sizing: border-box;
+  color: #1d1d1f;
 }
 
 .filter-grid input:hover,
 .filter-grid select:hover {
-  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
-  transform: scale(1.015);
+  transform: translateY(-1px) scale(1.01);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.06),
+    inset 0 0 0.6px rgba(255, 255, 255, 0.85);
+  border-color: rgba(0, 113, 227, 0.12);
 }
 
 .filter-grid input:focus,
 .filter-grid select:focus {
   outline: none;
   border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
+  box-shadow:
+    0 0 0 4px rgba(0, 113, 227, 0.25),
+    inset 0 0 1px rgba(255, 255, 255, 0.7);
+  transform: translateY(-1px) scale(1.015);
 }
 
-/* ================= Tab Buttons ================= */
+.filter-grid input::placeholder,
+.filter-grid select::placeholder {
+  color: rgba(0, 0, 0, 0.35);
+  transition: opacity 0.3s ease;
+}
+
+.filter-grid input:focus::placeholder,
+.filter-grid select:focus::placeholder {
+  opacity: 0.2;
+}
+
+/* ================= 📑 Tab Buttons ================= */
 .filter-tabs {
   display: flex;
   justify-content: center;
@@ -629,10 +656,17 @@ svg.icon.spin {
   position: relative;
 }
 
-.filter-tab-btn.active {
-  background: linear-gradient(135deg, #0071e3, #005bb5);
-  color: white;
-  box-shadow: 0 6px 18px rgba(0, 113, 227, 0.25);
+.filter-tab-btn .icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+  vertical-align: middle;
+  margin-right: 6px;
+  transition: transform 0.3s ease;
+}
+
+.filter-tab-btn:hover .icon {
+  transform: scale(1.08) rotate(-2deg);
 }
 
 .filter-tab-btn:hover {
@@ -643,7 +677,13 @@ svg.icon.spin {
   transform: scale(0.97);
 }
 
-/* ================= Tab Content Wrapper ================= */
+.filter-tab-btn.active {
+  background: linear-gradient(135deg, #0071e3, #005bb5);
+  color: white;
+  box-shadow: 0 6px 18px rgba(0, 113, 227, 0.25);
+}
+
+/* ================= 📥 Tab Content Container ================= */
 .filter-tab-content {
   display: none;
   animation: fadeSlideDown 0.3s ease;
@@ -657,7 +697,7 @@ svg.icon.spin {
   display: block;
 }
 
-/* ================= Match All Toggle Button ================= */
+/* ================= 🔁 Match-All Button ================= */
 .match-mode-toggle-btn {
   font-family: 'DM Serif Display', serif;
   font-size: 1rem;
@@ -681,7 +721,7 @@ svg.icon.spin {
   box-shadow: 0 4px 14px rgba(0, 113, 227, 0.3);
 }
 
-/* ================= Animations ================= */
+/* ================= 🎬 Animations ================= */
 @keyframes fadeSlideDown {
   from {
     opacity: 0;
@@ -694,7 +734,6 @@ svg.icon.spin {
 }
 
 /*#endregion*/
-
 
 /*dropdown section*/
 .dropdown-options-container {
