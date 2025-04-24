@@ -176,18 +176,31 @@
     <!-- 🧰 Bulk Action Toolbar -->
     <div id="bulk-toolbar" class="bulk-toolbar">
       <span id="selected-count">0 selected</span>
-      <button id="bulk-delete">🗑 Delete</button>
-      <button id="bulk-export">📥 Export CSV</button>
-      <button id="bulk-clear">❌ Clear Selection</button>
-      <button id="bulk-favorite" class="bulk-btn">⭐ Toggle Favorite</button>
-      <!-- categories dropdown -->
+    
+      <button id="bulk-delete">
+        <i data-lucide="trash-2" class="icon"></i> Delete
+      </button>
+    
+      <button id="bulk-export">
+        <i data-lucide="download" class="icon"></i> Export CSV
+      </button>
+    
+      <button id="bulk-clear">
+        <i data-lucide="x" class="icon"></i> Clear Selection
+      </button>
+    
+      <button id="bulk-favorite">
+        <i data-lucide="star" class="icon"></i> Toggle Favorite
+      </button>
+    
       <div id="bulk-category-container" class="custom-dropdown">
         <button id="bulk-category-toggle" type="button" class="dropdown-toggle">
-            Categories to add
+          <i data-lucide="tags" class="icon"></i> Categories to add
         </button>
         <div id="bulk-category-menu" class="dropdown-menu"></div>
-            <!-- here is where the categories will be injected-->
+      </div>
     </div>
+    
 
     </div>
   </div>
