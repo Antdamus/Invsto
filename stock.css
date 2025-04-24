@@ -1388,7 +1388,197 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 /*#endregion*/ 
 
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 10px;
+}
 
+.dropdown-toggle {
+  font-family: 'DM Serif Display', serif;
+  font-size: 0.9rem;
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #1d1d1f;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.04),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dropdown-toggle:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 8px;
+  min-width: 200px;
+  border-radius: 20px;
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.96), rgba(250, 250, 255, 0.92));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  padding: 12px 0;
+  z-index: 9999;
+  max-height: 300px;
+  overflow-y: auto;
+  animation: dropdownReveal 0.3s ease forwards;
+  transition: all 0.3s ease;
+}
+
+@keyframes dropdownReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.category-option {
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-family: 'DM Serif Display', serif;
+  color: #1d1d1f;
+  transition: background 0.25s ease, padding-left 0.25s ease;
+  cursor: pointer;
+  border-radius: 14px;
+}
+
+.category-option:hover {
+  background-color: rgba(0, 113, 227, 0.06);
+  padding-left: 22px;
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-family: 'DM Serif Display', serif;
+  border-radius: 999px;
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.25), rgba(245, 245, 245, 0.18));
+  box-shadow:
+    0 3px 14px rgba(0, 0, 0, 0.05),
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+  color: #1d1d1f;
+  position: relative;
+  margin: 6px 6px 0 0;
+  transition: all 0.3s ease;
+  animation: chipFadeIn 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.category-chip:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+}
+
+.category-chip button {
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  border-radius: 999px;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+}
+
+.category-chip button:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  color: #000;
+  transform: scale(1.15);
+}
+
+.category-dropdown {
+  position: absolute;
+  background: white;
+  border-radius: 16px;
+  padding: 10px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+  border: 1px solid #d0d0d0;
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  max-height: 260px;
+  overflow-y: auto;
+  animation: fadeSlideIn 0.2s ease forwards;
+}
+
+.category-option {
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-family: 'DM Serif Display', serif;
+}
+
+.category-option.selected {
+  background-color: #0071e3;
+  color: white;
+}
+
+.category-option:hover {
+  background-color: #e8e8e8;
+}
+
+
+@keyframes chipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+
+/* */
 .favorite-btn {
   position: static;
   font-size: 1.4rem;
@@ -1460,120 +1650,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
   }
 }
-
-.add-category-chip {
-  background-color: #0071e3;
-  color: white;
-  cursor: pointer;
-  padding: 4px 10px;
-  border-radius: 14px;
-  font-size: 0.9rem;
-  font-family: 'DM Serif Display', serif;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.category-chip {
-  background-color: #e0e0e0;
-  border-radius: 14px;
-  padding: 4px 10px;
-  font-size: 0.9rem;
-  font-family: 'DM Serif Display', serif;
-  color: #1d1d1f;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-  position: relative;
-  padding-right: 22px;
-  animation: chipFadeIn 0.3s ease;
-  transition: background-color 0.3s ease;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
-}
-
-.category-chip button {
-  position: absolute;
-  top: 2px;
-  right: 4px;
-  border: none;
-  background: none;
-  color: #555;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  line-height: 1;
-}
-
-.category-chip button:hover {
-  color: #d00;
-}
-
-.category-chip button {
-  transition: color 0.2s ease;
-}
-
-.category-chip[data-color="blue"] { background-color: #e6f0ff; color: #1a3e6e; }
-.category-chip[data-color="green"] { background-color: #e4fce9; color: #1c4f2b; }
-.category-chip[data-color="purple"] { background-color: #f3e9ff; color: #4e2d84; }
-.category-chip[data-color="gold"] { background-color: #fff6e0; color: #5c4200; }
-.category-chip[data-color="gray"] { background-color: #eaeaea; color: #2a2a2a; }
-
-
-@keyframes chipFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.85);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes fadeSlideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/*styling for the categories dropdown in the cards */
-
-
-.category-dropdown {
-  position: absolute;
-  background: white;
-  border-radius: 16px;
-  padding: 10px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
-  border: 1px solid #d0d0d0;
-  backdrop-filter: blur(8px);
-  z-index: 9999;
-  max-height: 260px;
-  overflow-y: auto;
-  animation: fadeSlideIn 0.2s ease forwards;
-}
-
-.category-option {
-  padding: 8px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-  font-family: 'DM Serif Display', serif;
-}
-
-.category-option.selected {
-  background-color: #0071e3;
-  color: white;
-}
-
-.category-option:hover {
-  background-color: #e8e8e8;
-}
-
 
 /*#endregion*/
 
