@@ -1255,6 +1255,36 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   transform: scale(1.1);
 }
 
+.stock-photo-preview,
+.carousel-photo {
+  position: relative;
+  overflow: hidden;
+}
+
+.stock-photo-preview::before,
+.carousel-photo::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: skewX(-20deg);
+  transition: left 0.75s ease;
+}
+
+.stock-photo-preview:hover::before,
+.carousel-photo:hover::before {
+  left: 150%;
+}
+
+
 /* Float Controls Overlay */
 .card-float-controls {
   position: absolute;
@@ -1287,9 +1317,28 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .stock-count.stock-zero {
-  color: #e63946;
+  color: #d93025;
   font-weight: bold;
+  background: rgba(217, 48, 37, 0.08);
+  padding: 6px 14px 6px 12px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  box-shadow: 0 1px 4px rgba(217, 48, 37, 0.1);
+  font-family: 'DM Serif Display', serif;
 }
+
+.stock-alert-icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+  color: #d93025;
+  flex-shrink: 0;
+}
+
 
 /* Modal Viewer */
 .modal {

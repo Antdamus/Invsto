@@ -124,10 +124,13 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
     //Build the full card body with data-driven text content and chips
     function buildCardContent(item) {
-        const stock = typeof item.stock === "number" ? item.stock : 0;
-        const stockClass = stock === 0 ? "stock-zero" : ""; /**this is
-        assigning a special class stock-zerp=0 for cards that have 0 stock 
-        otherwise nothing*/
+      const stock = typeof item.stock === "number" ? item.stock : 0;
+      const stockClass = stock === 0 ? "stock-zero" : "";
+      const stockLabel = stock === 0
+        ? `<p class="stock-count ${stockClass}">
+             <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
+           </p>`
+        : `<p class="stock-count">In Stock: ${stock}</p>`;
     
         const categoryChips = (item.categories || []).map(cat => { /**this
             specifies that if item.categories is undefinend, fall back to an 
@@ -155,7 +158,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
-          <p class="stock-count ${stockClass}">In Stock: ${stock}</p>
+          ${stockLabel}
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
           <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
           <div class="category-chips">
@@ -168,7 +171,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
             </div>
           </div>
         </div>
-        `; /** the add-category-chip has a data-id so when the event listener is triggered
+        `; 
+        lucide.createIcons();/** the add-category-chip has a data-id so when the event listener is triggered
         it knows specifically to what it needs to add the category */
         /**it will resturn
          <div class="stock-content">
