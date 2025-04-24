@@ -1057,7 +1057,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
               card.classList.remove("selected"); // 🧼 remove selected class
             }
           });
-          selectAllBtn.textContent = "Select All Visible";
+          selectAllBtn.innerHTML = `<i data-lucide="check-square" class="icon"></i> Select All Visible`;
         } else {
           // ✅ Select all
           cards.forEach(card => {
@@ -1069,9 +1069,10 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
               card.classList.add("selected"); // ✅ add selected class
             }
           });
-          selectAllBtn.textContent = "Deselect All";
-        }
+          selectAllBtn.innerHTML = `<i data-lucide="square" class="icon"></i> Deselect All`;
 
+        }
+        if (window.lucide) lucide.createIcons(); // ✅ re-render injected icons
         updateBulkToolbar();
       });
     }
