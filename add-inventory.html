@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Add Inventory</title>
+  <link rel="stylesheet" href="add-inventory.css" />
+</head>
+<body>
+  <main class="add-inventory-wrapper">
+    <section class="top-section">
+      <h1>Add Inventory</h1>
+      <p>Scan an item's barcode to begin adding stock.</p>
+      <input type="text" id="input-to-search-inventory-item" placeholder="Scan barcode here..." autocomplete="off" />
+    </section>
+
+    <section class="batch-section">
+      <h2>Current Batch</h2>
+      <div id="batch-items-container" class="batch-container">
+        <!-- Items being added will be rendered here -->
+      </div>
+    </section>
+  </main>
+
+  <script src="add-inventory.js"></script>
+</body>
+</html>
