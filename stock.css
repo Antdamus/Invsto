@@ -1290,16 +1290,104 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   position: absolute;
   bottom: 16px;
   right: 16px;
-  display: flex;
-  gap: 10px;
-  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.6);
+  padding: 8px 12px;
   border-radius: 14px;
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   z-index: 3;
-  transition: transform 0.3s ease, opacity 0.3s ease;
 }
+
+.float-controls-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.select-checkbox {
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+  transform: scale(1.1);
+}
+
+.favorite-btn {
+  font-size: 1.3rem;
+  line-height: 1;
+  color: #bbb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.3s ease;
+}
+
+
+
+.favorite-btn:hover,
+.stock-card.favorited .favorite-btn {
+  color: gold;
+}
+
+.favorite-btn:active {
+  transform: scale(1.3);
+}
+
+.favorite-btn:focus {
+  outline: none;
+}
+
+.stock-card.favorited {
+  border: 2px solid gold;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+  animation: glowFade 1.5s ease-out;
+}
+
+@keyframes glowFade {
+  0% {
+    box-shadow: 0 0 0px rgba(255, 215, 0, 0.0);
+    transform: scale(1.02);
+  }
+  30% {
+    box-shadow: 0 0 14px rgba(255, 215, 0, 0.75);
+  }
+  100% {
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+    transform: scale(1.0);
+  }
+}
+
+.select-checkbox {
+  position: static;
+  transform: scale(1.1);
+  z-index: 2;
+}
+
+.stock-card.selected {
+  border: 2px solid #0071e3;
+  box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
+  animation: selectPulse 1.2s ease;
+  z-index: 5;
+
+}
+
+@keyframes selectPulse {
+  0% {
+    transform: scale(1.015);
+    box-shadow: 0 0 0 rgba(0, 113, 227, 0.0);
+  }
+  30% {
+    box-shadow: 0 0 14px rgba(0, 113, 227, 0.7);
+  }
+  100% {
+    transform: scale(1.0);
+    box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
+  }
+}
+
 
 
 
@@ -1699,79 +1787,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 /*#endregion*/ 
 
-.favorite-btn {
-  position: static;
-  font-size: 1.4rem;
-  color: #bbb;
-  background: none;
-  border: none;
-  cursor: pointer;
-  transition: color 0.3s ease;
-  z-index: 2;
-}
-
-.favorite-btn:hover,
-.stock-card.favorited .favorite-btn {
-  color: gold;
-}
-
-.favorite-btn:active {
-  transform: scale(1.3);
-}
-
-.favorite-btn:focus {
-  outline: none;
-}
-
-.stock-card.favorited {
-  border: 2px solid gold;
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-  animation: glowFade 1.5s ease-out;
-}
-
-@keyframes glowFade {
-  0% {
-    box-shadow: 0 0 0px rgba(255, 215, 0, 0.0);
-    transform: scale(1.02);
-  }
-  30% {
-    box-shadow: 0 0 14px rgba(255, 215, 0, 0.75);
-  }
-  100% {
-    box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
-    transform: scale(1.0);
-  }
-}
-
-.select-checkbox {
-  position: static;
-  transform: scale(1.1);
-  z-index: 2;
-}
-
-.stock-card.selected {
-  border: 2px solid #0071e3;
-  box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
-  animation: selectPulse 1.2s ease;
-  z-index: 5;
-
-}
-
-@keyframes selectPulse {
-  0% {
-    transform: scale(1.015);
-    box-shadow: 0 0 0 rgba(0, 113, 227, 0.0);
-  }
-  30% {
-    box-shadow: 0 0 14px rgba(0, 113, 227, 0.7);
-  }
-  100% {
-    transform: scale(1.0);
-    box-shadow: 0 0 12px rgba(0, 113, 227, 0.6);
-  }
-}
-
-/*#endregion*/
 
 /* =============== Pagination Controls ====================== */
 /*#region*/

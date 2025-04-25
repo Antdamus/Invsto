@@ -256,29 +256,24 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
   * is favoried another boolean
   */
   function buildFloatControls(id, isSelected, isFavorited) {
-      const checkbox = `
-        <input type="checkbox" class="select-checkbox" data-id="${id}" ${isSelected ? "checked" : ""}>
-      `; /**class set so we can add event listener for bulk operations
-      the id will let the ystem know which even was clicked
-      if isSelected is true add checked otherwise nothing */
-    
-      const favoriteBtn = currentUser
-        ? `<button class="favorite-btn" data-id="${id}">
-             ${isFavorited ? '★' : '☆'}
-           </button>`
-        : '';
-    
-      return checkbox + favoriteBtn;
-      /**this will be injected as
-      <div class="card-float-controls">
-          <!-- Checkbox -->
-          <input type="checkbox" class="select-checkbox" data-id="123" checked>
-
-          <!-- Favorite Button -->
-          <button class="favorite-btn" data-id="123">★</button>
+    const checkbox = `
+      <input type="checkbox" class="select-checkbox" data-id="${id}" ${isSelected ? "checked" : ""}>
+    `;
+  
+    const favoriteBtn = currentUser
+      ? `<button class="favorite-btn" data-id="${id}">
+           ${isFavorited ? '★' : '☆'}
+         </button>`
+      : '';
+  
+    return `
+      <div class="float-controls-inner">
+        ${checkbox}
+        ${favoriteBtn}
       </div>
-       */
-  } //neds an event listener 
+    `;
+  }
+  
 
   //function needed to coordinate html creation for one card
   /** item: individual inventory object with the full row of information
