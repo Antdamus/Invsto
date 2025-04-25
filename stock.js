@@ -158,16 +158,17 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
-          ${stockLabel}
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
           <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+          ${stockLabel}
+          <p class="chip-section-label">Categories:</p>
           <div class="category-chips">
           ${categoryChips}
             <div id="cardchip-container-${item.id}" class="custom-dropdown" data-id="${item.id}">
-              <button id="cardchip-toggle-${item.id}" type="button" class="dropdown-toggle">
-                + Add category
-              </button>
-              <div id="cardchip-menu-${item.id}" class="dropdown-menu"></div>
+              <button id="cardchip-toggle-${item.id}" type="button" class="dropdown-toggle" data-id="${item.id}">
+                <i data-lucide="plus" class="rotate-plus" id="cardchip-icon-${item.id}"></i>
+            </button>
+              <div id="cardchip-menu-${item.id}" class="dropdown-menu dropdown-menu--category"></div>
             </div>
           </div>
         </div>
@@ -1585,7 +1586,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           placeholder: "Search categories...",      // Placeholder text for the input
           optionClass: "dropdown-option",           // Class given to each option item
           dataAttribute: "cardchip",                // Custom data-* tag for card categories
-          optionsContainerClass: "dropdown-options-container", // Wraps option list
+          optionsContainerClass: "dropdown-options-chip", // Wraps option list
           onClick: (value, isNew, optionEl) => {    // 🖱️ When an option is clicked
             onClickCardChipCategory(value, isNew, optionEl); // Add it to the item
             refreshUIAfterCategoryChange();               // Refresh the UI after update
@@ -1598,6 +1599,10 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
   
       // 👁️ Toggle the visibility of this dropdown
       menu.classList.toggle("show");
+      // 🌀 Rotate the + icon
+      const icon = button.querySelector(".rotate-plus");
+      if (icon) icon.classList.toggle("rotated");
+
   
       // 📌 Track the currently open dropdown globally
       activeDropdown = menu.classList.contains("show") ? menu : null;
@@ -1610,6 +1615,11 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         !e.target.closest(".custom-dropdown") &&         // User clicked outside dropdown wrapper
         !e.target.classList.contains("dropdown-option")  // and not on an option
       ) {
+         // 🔄 Remove the rotated class from the icon
+        const wrapper = activeDropdown.closest(".custom-dropdown");
+        const icon = wrapper?.querySelector(".rotate-plus");
+        if (icon) icon.classList.remove("rotated");
+
         activeDropdown.classList.remove("show");         // ❌ Hide dropdown
         activeDropdown = null;                           // 🔁 Reset global pointer
       }
@@ -1834,7 +1844,9 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
     // Initial HTML: search + full list
     menu.innerHTML = `
-      <input type="text" id="${searchId}" placeholder="${placeholder}">
+      <div class="dropdown-search-container">
+        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+      </div>
       <div class="${optionsContainerClass}">
         ${options.map(opt => `
           <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
