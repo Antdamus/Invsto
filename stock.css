@@ -1388,7 +1388,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 .close-modal:hover {
   color: #fefefe;
 }
-/*#endregion*/ 
 
 .category-chips {
   position: relative; /* Needed for absolute positioning inside */
@@ -1698,9 +1697,8 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   }
 }
 
+/*#endregion*/ 
 
-
-/* */
 .favorite-btn {
   position: static;
   font-size: 1.4rem;
