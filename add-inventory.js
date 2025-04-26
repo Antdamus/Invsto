@@ -1,25 +1,62 @@
+
+
+const currentBatch = {}; 
+
+
 //#region Full logic to get an item from supabase and get the barcode
+    //show toast function
+    function showToast(message) {
+        const container = document.getElementById("toast-container"); // Target container
+        //-> you are accessing the div id= toast container node in the DOM (document object model)
+        const toast = document.createElement("div"); //this is creating a new div element
+        //-> in memory, not in the DOM per se, just a standalone javascript object for now
+        //remember the div is just a box
+        //and in here toast is not an html id, rather is just a varible holding the pointer to the
+        //the object
+        toast.className = "toast"; //it just gave the div you created called toast a class name
+        toast.textContent = message; //injects the message into the container
+        //<div class="toast">Item added!</div>
+        container.appendChild(toast); //this is injecting the full javascript object into the 
+        //node of the the DOM so now the user can see it live 
+        // <div id="toast-container">
+        //   <div class="toast">📦 Your toast message</div>
+        // </div>
+      
+        // Remove toast after 4 seconds
+        setTimeout(() => {
+          toast.remove();
+        }, 4000);
+    }
+
     //function to extract item from supabase if it match barcode item
-    async function ExtractItemWithBarcodeFromSupabase(barcode, table = "stock", column = "barcode") {
+    async function ExtractItemWithBarcodeFromSupabase(barcode, table = "item_types", column = "barcode", debug = false) {
         try {
-          const { data, error } = await supabase
-            .from(table)
-            .select("*")
-            .eq(column, barcode)
-            .single();
-      
-          if (error || !data) {
-            showToast("Item not found.", "error");
-            return null;
-          }
-      
-          return data;
+            const { data, error } = await supabase
+                .from(table)
+                .select("*")
+                .eq(column, barcode)
+                .single();
+    
+            if (debug) {
+                console.log("🔍 [DEBUG] Barcode Query Result:");
+                console.log(data);
+            }
+    
+            if (error || !data) {
+                if (debug) {
+                    console.warn("⚠️ [DEBUG] Item not found or error occurred.", { error });
+                }
+                return null;
+            }
+    
+            return data;
         } catch (err) {
-          console.error(err);
-          showToast("Error contacting database.", "error");
-          return null;
+            console.error("❌ [DEBUG] Unexpected error while querying Supabase:", err);
+            showToast("Error contacting database.", "error");
+            return null;
         }
     }
+    
 
     //#region Rendering card item that matched barcode
         //#region buil image carousel
@@ -151,7 +188,7 @@
             now the good thing is that this can be used by an event listener*/
         
             const photoCarousel = buildCarousel(item.photos || [], index);
-            const content = buildCardContent(item);
+            const content = buildCardContent({item});
         
             card.innerHTML = `
             <div class="${ImageContainerClass}">
@@ -168,7 +205,7 @@
     function resetBatch() {
         currentBatch = {};
         document.getElementById("batch-items-container").innerHTML = "";
-      }
+    }
       
     
     //function necessary to increment the stock count once the card has been already created
@@ -184,8 +221,8 @@
     }
 
     //function to render the card and put into the DOM
-    function createCardForItem(item) {
-        const batchContainer = document.getElementById("batch-items-container"); // your target div
+    function createCardForItem(item, ContainerForCardInjection = "batch-items-container") {
+        const batchContainer = document.getElementById(ContainerForCardInjection); // your target div
         const index = Object.keys(currentBatch).length; // for carousel IDs etc
         const card = renderInventoryItem({ item, index });
         batchContainer.appendChild(card);
@@ -210,7 +247,7 @@
         if (currentBatch[barcode]) {
           incrementCardCount(barcode);
         } else {
-          const item = await ExtractItemWithBarcodeFromSupabase(barcode);
+          const item = await ExtractItemWithBarcodeFromSupabase(barcode, "item_types", "barcode", true);
           if (item) {
             handleScannedItem(item);
           }
@@ -229,6 +266,24 @@
           }, 1000);
         });
     }
-      
-      
+
+//#endregion  
+    
+
+document.addEventListener("DOMContentLoaded", async () => {
+    const { data: { session }, error } = await supabase.auth.getSession();
+  
+    if (!session) {
+      showToast("Please log in to scan items.");
+      console.error("Session not found.");
+      // Redirect to login
+      setTimeout(() => {
+        window.location.href = "login.html";
+      }, 1500);
+      return;
+    }
+  
+    console.log("✅ Session loaded. User is authenticated.");
+    searchForBarcodeListener();
+});
   
