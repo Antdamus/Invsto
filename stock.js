@@ -274,7 +274,6 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     `;
   }
   
-
   //function needed to coordinate html creation for one card
   /** item: individual inventory object with the full row of information
   * index: position of the item in the array
@@ -314,8 +313,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
   }
 
   //function needed to create the HTML all the stock cards available
-  function renderStockItems(data) {
-      const grid = document.getElementById("stock-container"); //select the DOM node where to hold infnormation
+  function renderStockItems(data, containerIDToInjectCards = "stock-container") {
+      const grid = document.getElementById(containerIDToInjectCards); //select the DOM node where to hold infnormation
       grid.innerHTML = ""; //empty all the contents
   
       const fragment = document.createDocumentFragment(); /**create a document fragment
