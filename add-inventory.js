@@ -112,7 +112,7 @@ const currentBatch = {};
                     </button>
                 </div>
             `;
-            lucide.createIcons()
+           
             }    
         //#endregion
         
@@ -226,6 +226,7 @@ const currentBatch = {};
         const index = Object.keys(currentBatch).length; // for carousel IDs etc
         const card = renderInventoryItem({ item, index });
         batchContainer.appendChild(card);
+        lucide.createIcons();  
         return card;
     }
       
@@ -285,5 +286,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   
     console.log("✅ Session loaded. User is authenticated.");
     searchForBarcodeListener();
+
+    //event listeners
+
+    document.addEventListener("click", (e) => {
+        const id = e.target.dataset.id; // Common data-id used for most card actions
+
+        // ⏪⏩ Carousel navigation: previous or next
+        if (e.target.matches(".carousel-btn")) {
+          const index = parseInt(e.target.dataset.carouselIndex, 10); // which carousel
+          const dir = e.target.dataset.dir;                            // "prev" or "next"
+          if (!isNaN(index) && dir) {
+            dir === "prev" ? prevSlide(index) : nextSlide(index);      // go left or right
+          }
+        }
+      });
 });
   

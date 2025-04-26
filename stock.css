@@ -1389,8 +1389,6 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 
-
-
 .stock-card:hover .card-float-controls {
   transform: translateY(-2px);
   opacity: 1;
