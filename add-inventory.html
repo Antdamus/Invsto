@@ -28,7 +28,22 @@
 
   <!-- 📢 Toast + Loading Spinner Containers -->
   <div id="toast-container"></div>
-  
+
+  <!-- Modal Popup -->
+  <!-- Modal to Confirm Item -->
+  <div id="modalToConfirmItem" class="modal hidden">
+    <div class="modal-content-confirmitem">
+      <h2>Confirm Item</h2>
+      <div id="modalItemInfo"></div>
+      <div id="modal-buttons-confirmitem">
+        <button id="confirmAddItemBtn" class="confirm-btn">Confirm</button>
+        <button id="cancelAddItemBtn" class="cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+
+
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
