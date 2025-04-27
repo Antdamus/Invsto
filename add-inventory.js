@@ -93,21 +93,29 @@ const currentBatch = {};
             * Index is going to give you the position of the card in the main array
             * so you can see which carousel belongs to which item 
             */
-            function buildCarousel(photos, index) {
+            function buildCarousel({
+                photos, 
+                index,
+                carouselContainerClass = "carousel",
+                carouselBtnClass = "carousel-btn ",
+                iconOfNextCarouselButtonClass = "carousel-icon",
+                carouselTrackClass = "carousel-track",
+                photoActualClass = "carousel-photo"
+            } = {}) {
             if (!photos.length) return `<div class="no-photo">No Photos</div>`;
             
             return `
-                <div class="carousel" id="carousel-${index}">
-                    <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">
-                        <i data-lucide="chevron-left" class="carousel-icon"></i>
+                <div class="${CarouselContainerClass}" id="carousel-${index}">
+                    <button class="${carouselBtnClass} left" data-carousel-index="${index}" data-dir="prev">
+                        <i data-lucide="chevron-left" class="${iconOfNextCarouselButtonClass}"></i>
                     </button>
-                    <div class="carousel-track">
+                    <div class="${carouselTrackClass}">
                         ${photos.map((photo, i) => `
-                        <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
+                        <img src="${photo}" class="${photoActualClass} ${i === 0 ? 'active' : ''}" />
                         `).join('')}
                     </div>
-                    <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">
-                        <i data-lucide="chevron-right" class="carousel-icon"></i>
+                    <button class="${carouselBtnClass} right" data-carousel-index="${index}" data-dir="next">
+                        <i data-lucide="chevron-right" class="${iconOfNextCarouselButtonClass}"></i>
                     </button>
                 </div>
             `;
@@ -176,6 +184,15 @@ const currentBatch = {};
             CardContainerClass = "stock-card", 
             ImageContainerClass = "stock-image-container", 
             Identifier = "id"
+            chipOneCardDisplayClass = "category-chip",
+            ChipOneSectionTitleClass = "chip-section-label",
+            chipOneContainerClass = "category-chips",
+            cardOneContentOutsidePictureClass = "stock-content"
+            carouselOneContainerClass = "carousel",
+            carouselOneBtnClass = "carousel-btn ",
+            iconOneOfNextCarouselButtonClass = "carousel-icon",
+            carouselOneTrackClass = "carousel-track",
+            photoOneActualClass = "carousel-photo"
         } = {}) { 
             const card = document.createElement("div");
             card.className = CardContainerClass;
@@ -186,8 +203,23 @@ const currentBatch = {};
             (row from data array)
             now the good thing is that this can be used by an event listener*/
         
-            const photoCarousel = buildCarousel(item.photos || [], index);
-            const content = buildCardContent({item});
+            const photoCarousel = buildCarousel({
+              photos = item.photos || [], 
+              index = index,
+              carouselContainerClass = "carousel",
+              carouselBtnClass = "carousel-btn ",
+              iconOfNextCarouselButtonClass = "carousel-icon",
+              carouselTrackClass = "carousel-track",
+              photoActualClass = "carousel-photo"
+
+            });
+            const content = buildCardContent({
+                item = item,
+                chipCardDisplayClass = chipOneCardDisplayClass,
+                ChipSectionTitleClass = ChipOneSectionTitleClass,
+                chipContainerClass = chipOneContainerClass,
+                cardContentOutsidePictureClass = cardOneContentOutsidePictureClass
+            });
         
             card.innerHTML = `
             <div class="${ImageContainerClass}">
@@ -280,30 +312,35 @@ const currentBatch = {};
     //coorinating the rendering the pop up
     function showModalToConfirmItem(item) {
         pendingItem = item; // Save the item temporarily
-      
+    
         const modal = document.getElementById("modalToConfirmItem");
-        const modalInfo = document.getElementById("modalItemInfo");
-      
+        const modalInfo = document.querySelector("#modalItemInfo"); // ✅ No change here
+    
         // Clear any previous content
         modalInfo.innerHTML = "";
-      
+    
         // Build the card preview
         const previewCard = renderInventoryItem({
-          item,
-          index: 0, // Preview can just use index 0, no matter
-          CardContainerClass: "stock-card preview-mode", // Optional special styling if you want
-          ImageContainerClass: "stock-image-container",
-          Identifier: "id"
+            item,
+            index: 0, // Preview just uses index 0
+            CardContainerClass: "stock-container-addstock", // 💡 IMPORTANT: match the clean class, not "stock-card" anymore!
+            ImageContainerClass: "stock-image-container-addstock",
+            Identifier: "id",
+            chipOneCardDisplayClass = "category-chip-addstock",
+            ChipOneSectionTitleClass = "chip-section-label-addstock",
+            chipOneContainerClass = "category-chip-containeraddstock",
+            cardOneContentOutsidePictureClass = "stock-content-addstock"
         });
-      
+    
         modalInfo.appendChild(previewCard);
-      
+    
         // Re-activate lucide icons inside the modal
         lucide.createIcons();
-      
+    
         // Show the modal
         modal.classList.remove("hidden");
     }
+    
 
     //processing of the barcode, if present add, if not, render
     async function processBarcode(barcode) {

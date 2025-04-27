@@ -72,43 +72,173 @@ p {
 
 
 /* ================= Pop Up To Confirm Item ================*/
+/*#region*/
+
+/* Modal Background Overlay */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 9999;
+  overflow-y: auto;
+}
+
+/* Hide Modal */
 .modal.hidden {
   display: none;
 }
 
+/* Modal Card Container */
+.modal-content-confirmitem {
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.96), rgba(250, 250, 255, 0.95));
+  border-radius: 24px;
+  padding: 32px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.06),
+    inset 0 0 1px rgba(255, 255, 255, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: popFadeIn 0.5s ease;
+}
+
+/* Modal Header */
+.modal-header {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Scrollable Body */
+.modal-body-scrollable {
+  overflow-y: auto;
+  flex-grow: 1;
+  padding-right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Item Info Section */
+#modalItemInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+/* Item Image */
+#modalItemInfo img {
+  width: 100%;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+}
+
+/* Item Title */
+.modal-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  text-align: center;
+}
+
+/* Item Subdetails */
+.modal-subtitle {
+  font-size: 1rem;
+  font-weight: 400;
+  color: #555;
+  text-align: center;
+}
+
+/* General Detail Text */
+.modal-detail {
+  font-size: 0.95rem;
+  color: #333;
+  text-align: left;
+}
+
+/* Label Link */
+.modal-label {
+  font-size: 0.9rem;
+  color: #0071e3;
+  display: inline-block;
+}
+
+/* Stock Alert Badge */
+.modal-stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #d93025;
+  background: rgba(217, 48, 37, 0.08);
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-weight: 500;
+}
+
+/* Modal Button Section */
 #modal-buttons-confirmitem {
   display: flex;
   gap: 1rem;
   justify-content: center;
+  padding-top: 24px;
+  margin-top: 16px;
+  border-top: 1px solid rgba(0,0,0,0.05);
 }
 
+/* Buttons */
 .confirm-btn, .cancel-btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 12px;
+  flex: 1;
+  padding: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  font-weight: 600;
   font-size: 1rem;
+  color: #1d1d1f;
   cursor: pointer;
   transition: all 0.3s ease;
 }
 
+/* Confirm Button Specific */
 .confirm-btn {
-  background-color: #0071e3;
-  color: white;
+  color: #0071e3;
+  border-color: #0071e3;
 }
 
-.confirm-btn:hover {
-  background-color: #005ec2;
-}
-
+/* Cancel Button Specific */
 .cancel-btn {
-  background-color: #f44336;
-  color: white;
+  color: #d93025;
+  border-color: #d93025;
 }
 
-.cancel-btn:hover {
-  background-color: #d32f2f;
+/* Hover Effects */
+.confirm-btn:hover, .cancel-btn:hover {
+  background: rgba(0, 0, 0, 0.035);
+  transform: translateY(-2px);
 }
 
+/* Smooth Popup Animation */
+@keyframes popFadeIn {
+  0% { opacity: 0; transform: scale(0.96); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/*#endregion*/
 
 /* =============== Inventory Card ================*/
 /*#region*/
