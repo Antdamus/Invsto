@@ -594,12 +594,32 @@ p {
   }
     
     /* Card Text Info */
+
+    .stock-content-addstock {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 20px;
+      row-gap: 8px;
+      align-items: start;
+    }
+
     .stock-content-addstock p {
       font-size: 1.0rem;
       margin: 0.2rem 0;
       line-height: 1.45;
       font-family: 'DM Serif Display', serif;
       color: #1d1d1f;
+    }
+
+    .stock-content-addstock h2,
+    .stock-content-addstock .units-scanned,
+    .stock-content-addstock .chip-section-label-addstock,
+    .stock-content-addstock .category-chip-containeraddstock {
+      grid-column: span 2; /* Full width for headline, chips, etc */
+    }
+
+    .stock-content-addstock p {
+      margin: 0.1rem 0;
     }
     
     

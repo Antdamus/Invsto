@@ -344,6 +344,10 @@ let currentBatch = {};
             carouselOneTrackClass: "carousel-track-addstock",
             photoOneActualClass: "carousel-photo-addstock"
         });
+
+        // 🔍 Log the full preview card DOM element and item data
+        console.log("Preview Card Element:", previewCard);
+
     
         modalInfo.appendChild(previewCard);
     
