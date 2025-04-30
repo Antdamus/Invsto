@@ -133,58 +133,59 @@ let currentBatch = {};
         
         //build the HTML of the card content
         function buildCardContent({
-            item,
-            chipCardDisplayClass = "category-chip",
-            chipSectionTitleClass = "chip-section-label",
-            chipContainerClass = "category-chips",
-            cardContentOutsidePictureClass = "stock-content",
-            debug = false
-          } = {}) {
-            const stock = typeof item.stock === "number" ? item.stock : 0;
-            const stockClass = stock === 0 ? "stock-zero" : "";
-            const stockLabel = stock === 0
-              ? `<p class="stock-count ${stockClass}">
-                   <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
-                 </p>`
-              : `<p class="stock-count">In Stock: ${stock}</p>`;
-          
-            const categoryChips = (item.categories || []).map(cat => {
-              return `
-                <div class="${chipCardDisplayClass}" data-cat="${cat}" data-id="${item.id}">
-                  ${cat}
-                </div>
-              `;
-            }).join("");
-          
-            const html = `
-              <div class="${cardContentOutsidePictureClass}">
-                <h2>${item.title}</h2>
-                <p>${item.description}</p>
-                <p><strong>Weight:</strong> ${item.weight}</p>
-                <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
-                <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
-                <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
-                <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-                <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
-          
-                ${stockLabel}
-          
-                <p class="units-scanned"><strong>Units Scanned:</strong> 1</p> <!-- NEW -->
-          
+          item,
+          chipCardDisplayClass = "category-chip",
+          chipSectionTitleClass = "chip-section-label",
+          chipContainerClass = "category-chips",
+          cardContentOutsidePictureClass = "stock-content",
+          hiddenFieldsCardContent = [],
+          debug = false
+        } = {}) {
+          const stock = typeof item.stock === "number" ? item.stock : 0;
+          const stockClass = stock === 0 ? "stock-zero" : "";
+        
+          const show = (field) => !hiddenFieldsCardContent.includes(field); // ✅ Clean utility
+        
+          const stockLabel = stock === 0
+            ? `<p class="stock-count ${stockClass}">
+                 <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
+               </p>`
+            : `<p class="stock-count">In Stock: ${stock}</p>`;
+        
+          const categoryChips = (item.categories || []).map(cat => `
+            <div class="${chipCardDisplayClass}" data-cat="${cat}" data-id="${item.id}">
+              ${cat}
+            </div>
+          `).join("");
+        
+          const html = `
+            <div class="${cardContentOutsidePictureClass}">
+              ${show("title") ? `<h2>${item.title}</h2>` : ""}
+              ${show("description") ? `<p>${item.description}</p>` : ""}
+              ${show("weight") ? `<p><strong>Weight:</strong> ${item.weight}</p>` : ""}
+              ${show("cost") ? `<p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>` : ""}
+              ${show("sale_price") ? `<p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>` : ""}
+              ${show("barcode") ? `<p><strong>Barcode:</strong> ${item.barcode || "—"}</p>` : ""}
+              ${show("created_at") ? `<p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>` : ""}
+              ${show("dymo_label_url") ? `<p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>` : ""}
+              ${show("stock") ? stockLabel : ""}
+              ${show("units_scanned") ? `<p class="units-scanned"><strong>Units Scanned:</strong> 1</p>` : ""}
+              ${show("categories") ? `
                 <p class="${chipSectionTitleClass}">Categories:</p>
                 <div class="${chipContainerClass}">
                   ${categoryChips}
                 </div>
-              </div>
-            `;
-          
-            if (debug) {
-              console.log("[DEBUG] Generated Card HTML for barcode:", item.barcode, html);
-            }
-          
-            return html;
+              ` : ""}
+            </div>
+          `;
+        
+          if (debug) {
+            console.log("[DEBUG] Generated Card HTML for barcode:", item.barcode, html);
+          }
+        
+          return html;
         }
-          
+              
         //function to coordinate the rendering of one single item
         function renderInventoryItem({
             item,
@@ -200,7 +201,8 @@ let currentBatch = {};
             carouselOneBtnClass = "carousel-btn",
             iconOneOfNextCarouselButtonClass = "carousel-icon",
             carouselOneTrackClass = "carousel-track",
-            photoOneActualClass = "carousel-photo"
+            photoOneActualClass = "carousel-photo",
+            hiddenOneFieldsCardContent = []
         } = {}) { 
             const card = document.createElement("div");
             card.className = CardContainerClass;
@@ -226,7 +228,8 @@ let currentBatch = {};
                 chipCardDisplayClass: chipOneCardDisplayClass,
                 chipSectionTitleClass: chipOneSectionTitleClass,
                 chipContainerClass: chipOneContainerClass,
-                cardContentOutsidePictureClass: cardOneContentOutsidePictureClass
+                cardContentOutsidePictureClass: cardOneContentOutsidePictureClass,
+                hiddenFieldsCardContent: hiddenOneFieldsCardContent
             });
         
             card.innerHTML = `
@@ -262,7 +265,10 @@ let currentBatch = {};
     function createCardForItem(item, ContainerForCardInjection = "batch-items-container") {
         const batchContainer = document.getElementById(ContainerForCardInjection); // your target div
         const index = Object.keys(currentBatch).length; // for carousel IDs etc
-        const card = renderInventoryItem({ item, index });
+        const card = renderInventoryItem({ 
+        item, 
+        index,
+        hiddenOneFieldsCardContent: ["dymo_label_url", "description", "barcode", "cost", "created_at"] });
         batchContainer.appendChild(card);
         lucide.createIcons();  
         return card;
@@ -342,7 +348,8 @@ let currentBatch = {};
             carouselOneBtnClass: "carousel-btn-addstock",
             iconOneOfNextCarouselButtonClass: "carousel-icon-addstock",
             carouselOneTrackClass: "carousel-track-addstock",
-            photoOneActualClass: "carousel-photo-addstock"
+            photoOneActualClass: "carousel-photo-addstock",
+            hiddenOneFieldsCardContent: ["dymo_label_url", "description", "barcode", "cost", "created_at"]
         });
 
         // 🔍 Log the full preview card DOM element and item data
