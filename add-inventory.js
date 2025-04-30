@@ -452,6 +452,19 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     });
 
+    //event listener for the home button
+    document.getElementById("toggle-controller").addEventListener("click", () => {
+      const header = document.querySelector(".container");
+      const toggleBtn = document.getElementById("toggle-controller");
+    
+      // Toggle panel visibility
+      header.classList.toggle("collapsed");
+    
+      // Trigger haptic pulse animation
+      toggleBtn.classList.add("haptic");
+      setTimeout(() => toggleBtn.classList.remove("haptic"), 1);
+    });
+
     setupModalToConfirmItemListeners();
 });
   

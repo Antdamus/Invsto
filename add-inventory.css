@@ -17,6 +17,276 @@ main {
   align-items: center;
 }
 
+/* ================= Unified Top Control Bar – Ultra Aesthetic 🍎 ================= */
+/*#region*/
+/* 🌤 Global Body */
+main.stock-body {
+  font-family: 'DM Serif Display', serif;
+  background-color: #f5f5f7;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 20px;
+  transition: filter 0.4s ease;
+}
+
+/* 🏠 Floating Home Button (Top Left) with Lucide Icon */
+.toggle-controller-btn {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 1500;
+  background-color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  animation: popFadeIn 1s ease;
+  transition: background 0.3s ease, transform 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-controller-btn svg.icon {
+  width: 22px;
+  height: 22px;
+  color: #1d1d1f;
+  transition: transform 0.3s ease;
+}
+
+.toggle-controller-btn:hover {
+  background-color: white;
+  transform: scale(1.05);
+}
+
+.toggle-controller-btn:hover svg.icon {
+  transform: scale(1.1);
+}
+
+.toggle-controller-btn.haptic {
+  animation: hapticPulse 0.3s ease;
+}
+
+/* 📌 Sticky Behavior */
+.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+/* 🧊 Outer Wrapper Container */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px 20px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+  z-index: 100;
+  transition: max-height 0.5s ease, padding 0.5s ease, opacity 0.5s ease, transform 0.4s ease;
+  animation: fadeSlideDown 1s ease both;
+}
+
+.container.collapsed {
+  max-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-14px);
+}
+
+/* 🍸 Glassmorphic Floating Header Bar */
+.stock-header.sticky {
+  position: sticky;
+  top: 10px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(24px) saturate(180%);
+  padding: 20px;
+  border-radius: 28px;
+  margin: 0 auto 24px auto;
+  max-width: 1200px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  transition: all 0.4s ease;
+  animation: fadeSlideDown 1s ease both;
+}
+
+/* 🎛 Top Controls Flex Layout */
+.top-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  align-items: center;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 24px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(18px) saturate(180%);
+  max-width: 1200px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 800;
+  transition: box-shadow 0.3s ease;
+}
+
+.top-controls.sticky-active {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
+}
+
+/* ✨ Universal Button + Label Styles */
+.top-controls button,
+.top-controls .dropdown-toggle,
+.top-controls label {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  padding: 12px 20px;
+  text-align: center;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.2);
+  color: #1d1d1f;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  animation: controlFadeIn 0.4s ease both;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top-controls button svg,
+.top-controls label svg {
+  width: 18px;
+  height: 18px;
+  color: #1d1d1f;
+  flex-shrink: 0;
+}
+
+.top-controls button:active,
+.top-controls .dropdown-toggle:active,
+.top-controls label:active {
+  transform: scale(0.97) translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.top-controls button:hover,
+.top-controls .dropdown-toggle:hover,
+.top-controls label.favorite-toggle:hover {
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.top-controls button::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -75%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(120deg, rgba(255,255,255,0.2), rgba(255,255,255,0));
+  transform: skewX(-20deg);
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.top-controls button:hover::before {
+  left: 125%;
+}
+
+.top-controls .dropdown-toggle::after {
+  content: none !important;
+}
+
+/* 🔙 Dashboard Back Button */
+.back-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-decoration: none;
+  color: #1d1d1f;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  padding: 12px 24px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  font-family: 'DM Serif Display', serif;
+  font-weight: 400;
+}
+
+.back-button:hover {
+  background-color: rgba(235, 235, 240, 0.9);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 🔄 Animations */
+@keyframes popFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes controlFadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.97) translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes hapticPulse {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.92);
+  }
+  60% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes spin360 {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+svg.icon.spin {
+  animation: spin360 0.6s ease;
+  will-change: transform;
+}
+/*#endregion*/
+
 /* ======================= Top section saying add inventory and text ======================= */
 
 h1 {

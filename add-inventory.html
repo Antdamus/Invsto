@@ -5,17 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Add Inventory</title>
   <link rel="stylesheet" href="add-inventory.css" />
+  <!-- 🅰️ Google Fonts: Display Serif Font -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
+  <!-- 🧱 Google Icons: Outlined and Filled -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
 <body>
+  
   <main class="add-inventory-wrapper">
-    <section class="top-section">
-      <h1>Add Inventory</h1>
-      <p>Scan an item's barcode to begin adding stock.</p>
-      <input type="text" id="input-to-search-inventory-item" placeholder="Scan barcode here..." autocomplete="off" />
-    </section>
+
+    <button id="toggle-controller" class="toggle-controller-btn" title="Show/Hide Controls" aria-label="Toggle Controls">
+      <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
+        <path d="M9 22V12h6v10"/>
+      </svg>
+    </button>
+    
+
+    <div class="container sticky">
+      <!-- 🔹 Unified Sticky Header Control Bar -->
+      <header class="stock-header sticky">
+        <div class="top-controls">
+          <!-- 🔙 Back Button to Dashboard -->
+          <a href="dashboard.html" class="back-button">
+            <i data-lucide="arrow-left" class="icon"></i> Back
+          </a>
+          <input type="text" id="input-to-search-inventory-item" placeholder="Scan barcode here..." autocomplete="off" />
+        </div>
+      </header>
+      </div>
+    </div>
 
     <section class="batch-section">
-      <h2>Current Batch</h2>
+      <!-- <h2>Current Batch</h2> -->
       <div id="batch-items-container" class="batch-container">
         <!-- Items being added will be rendered here -->
       </div>
@@ -55,9 +78,6 @@
     </div>
   </div>
   
-
-
-
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
