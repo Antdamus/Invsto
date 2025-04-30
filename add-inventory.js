@@ -1,6 +1,6 @@
 
 let pendingItem = null; // Store the scanned item awaiting confirmation
-const currentBatch = {}; 
+let currentBatch = {}; 
 
 
 //#region Full logic to get an item from supabase and get the barcode
@@ -60,10 +60,14 @@ const currentBatch = {};
     //#region Rendering card item that matched barcode
         //#region buil image carousel
             //Move to next image in carousel for a given card
-            function nextSlide(index) {
+            function nextSlide({
+              index,
+              carouselTrackClass = "carousel-track",
+              photoActualClass = "carousel-photo"
+            }={}) {
                 const carousel = document.getElementById(`carousel-${index}`);
-                const track = carousel.querySelector(".carousel-track");
-                const images = track.querySelectorAll(".carousel-photo");
+                const track = carousel.querySelector(`.${carouselTrackClass}`);
+                const images = track.querySelectorAll(`.${photoActualClass}`);
             
                 // 🔍 Find currently active image
                 const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
@@ -75,10 +79,14 @@ const currentBatch = {};
             } //needs event listener
             
             //Move to previous image in carousel for a given card
-            function prevSlide(index) {
+            function prevSlide({
+              index,
+              carouselTrackClass = "carousel-track",
+              photoActualClass = "carousel-photo"
+            }={}) {
                 const carousel = document.getElementById(`carousel-${index}`);
-                const track = carousel.querySelector(".carousel-track");
-                const images = track.querySelectorAll(".carousel-photo");
+                const track = carousel.querySelector(`.${carouselTrackClass}`);
+                const images = track.querySelectorAll(`.${photoActualClass}`);
             
                 const currentIndex = [...images].findIndex(img => img.classList.contains("active"));
                 images[currentIndex].classList.remove("active");
@@ -97,7 +105,7 @@ const currentBatch = {};
                 photos, 
                 index,
                 carouselContainerClass = "carousel",
-                carouselBtnClass = "carousel-btn ",
+                carouselBtnClass = "carousel-btn",
                 iconOfNextCarouselButtonClass = "carousel-icon",
                 carouselTrackClass = "carousel-track",
                 photoActualClass = "carousel-photo"
@@ -105,7 +113,7 @@ const currentBatch = {};
             if (!photos.length) return `<div class="no-photo">No Photos</div>`;
             
             return `
-                <div class="${CarouselContainerClass}" id="carousel-${index}">
+                <div class="${carouselContainerClass}" id="carousel-${index}">
                     <button class="${carouselBtnClass} left" data-carousel-index="${index}" data-dir="prev">
                         <i data-lucide="chevron-left" class="${iconOfNextCarouselButtonClass}"></i>
                     </button>
@@ -127,7 +135,7 @@ const currentBatch = {};
         function buildCardContent({
             item,
             chipCardDisplayClass = "category-chip",
-            ChipSectionTitleClass = "chip-section-label",
+            chipSectionTitleClass = "chip-section-label",
             chipContainerClass = "category-chips",
             cardContentOutsidePictureClass = "stock-content",
             debug = false
@@ -163,7 +171,7 @@ const currentBatch = {};
           
                 <p class="units-scanned"><strong>Units Scanned:</strong> 1</p> <!-- NEW -->
           
-                <p class="${ChipSectionTitleClass}">Categories:</p>
+                <p class="${chipSectionTitleClass}">Categories:</p>
                 <div class="${chipContainerClass}">
                   ${categoryChips}
                 </div>
@@ -183,13 +191,13 @@ const currentBatch = {};
             index, 
             CardContainerClass = "stock-card", 
             ImageContainerClass = "stock-image-container", 
-            Identifier = "id"
+            Identifier = "id",
             chipOneCardDisplayClass = "category-chip",
-            ChipOneSectionTitleClass = "chip-section-label",
+            chipOneSectionTitleClass = "chip-section-label",
             chipOneContainerClass = "category-chips",
-            cardOneContentOutsidePictureClass = "stock-content"
+            cardOneContentOutsidePictureClass = "stock-content",
             carouselOneContainerClass = "carousel",
-            carouselOneBtnClass = "carousel-btn ",
+            carouselOneBtnClass = "carousel-btn",
             iconOneOfNextCarouselButtonClass = "carousel-icon",
             carouselOneTrackClass = "carousel-track",
             photoOneActualClass = "carousel-photo"
@@ -204,21 +212,21 @@ const currentBatch = {};
             now the good thing is that this can be used by an event listener*/
         
             const photoCarousel = buildCarousel({
-              photos = item.photos || [], 
-              index = index,
-              carouselContainerClass = "carousel",
-              carouselBtnClass = "carousel-btn ",
-              iconOfNextCarouselButtonClass = "carousel-icon",
-              carouselTrackClass = "carousel-track",
-              photoActualClass = "carousel-photo"
+              photos: item.photos || [], 
+              index: index,
+              carouselContainerClass: carouselOneContainerClass,
+              carouselBtnClass: carouselOneBtnClass,
+              iconOfNextCarouselButtonClass: iconOneOfNextCarouselButtonClass,
+              carouselTrackClass: carouselOneTrackClass,
+              photoActualClass: photoOneActualClass
 
             });
             const content = buildCardContent({
-                item = item,
-                chipCardDisplayClass = chipOneCardDisplayClass,
-                ChipSectionTitleClass = ChipOneSectionTitleClass,
-                chipContainerClass = chipOneContainerClass,
-                cardContentOutsidePictureClass = cardOneContentOutsidePictureClass
+                item: item,
+                chipCardDisplayClass: chipOneCardDisplayClass,
+                chipSectionTitleClass: chipOneSectionTitleClass,
+                chipContainerClass: chipOneContainerClass,
+                cardContentOutsidePictureClass: cardOneContentOutsidePictureClass
             });
         
             card.innerHTML = `
@@ -326,10 +334,15 @@ const currentBatch = {};
             CardContainerClass: "stock-container-addstock", // 💡 IMPORTANT: match the clean class, not "stock-card" anymore!
             ImageContainerClass: "stock-image-container-addstock",
             Identifier: "id",
-            chipOneCardDisplayClass = "category-chip-addstock",
-            ChipOneSectionTitleClass = "chip-section-label-addstock",
-            chipOneContainerClass = "category-chip-containeraddstock",
-            cardOneContentOutsidePictureClass = "stock-content-addstock"
+            chipOneCardDisplayClass: "category-chip-addstock",
+            chipOneSectionTitleClass: "chip-section-label-addstock",
+            chipOneContainerClass: "category-chip-containeraddstock",
+            cardOneContentOutsidePictureClass: "stock-content-addstock",
+            carouselOneContainerClass: "carousel-addstock",
+            carouselOneBtnClass: "carousel-btn-addstock",
+            iconOneOfNextCarouselButtonClass: "carousel-icon-addstock",
+            carouselOneTrackClass: "carousel-track-addstock",
+            photoOneActualClass: "carousel-photo-addstock"
         });
     
         modalInfo.appendChild(previewCard);
@@ -341,7 +354,6 @@ const currentBatch = {};
         modal.classList.remove("hidden");
     }
     
-
     //processing of the barcode, if present add, if not, render
     async function processBarcode(barcode) {
         if (!barcode) return;
@@ -394,11 +406,37 @@ document.addEventListener("DOMContentLoaded", async () => {
         const id = e.target.dataset.id; // Common data-id used for most card actions
 
         // ⏪⏩ Carousel navigation: previous or next
+        if (e.target.matches(".carousel-btn-addstock")) {
+          const index = parseInt(e.target.dataset.carouselIndex, 10); // which carousel
+          const dir = e.target.dataset.dir;                            // "prev" or "next"
+          if (!isNaN(index) && dir) {
+            dir === "prev" ? prevSlide({
+              index: index,
+              carouselTrackClass: "carousel-track-addstock",
+              photoActualClass: "carousel-photo-addstock"
+            }) : 
+            nextSlide({
+              index: index,
+              carouselTrackClass: "carousel-track-addstock",
+              photoActualClass: "carousel-photo-addstock"
+            });      // go left or right
+          }
+        }
+
         if (e.target.matches(".carousel-btn")) {
           const index = parseInt(e.target.dataset.carouselIndex, 10); // which carousel
           const dir = e.target.dataset.dir;                            // "prev" or "next"
           if (!isNaN(index) && dir) {
-            dir === "prev" ? prevSlide(index) : nextSlide(index);      // go left or right
+            dir === "prev" ? prevSlide({
+              index: index,
+              carouselTrackClass: "carousel-track",
+              photoActualClass: "carousel-photo"
+            }) : 
+            nextSlide({
+              index: index,
+              carouselTrackClass: "carousel-track",
+              photoActualClass: "carousel-photo"
+            });      // go left or right
           }
         }
     });

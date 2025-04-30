@@ -99,19 +99,23 @@ p {
 /* Modal Card Container */
 .modal-content-confirmitem {
   background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.96), rgba(250, 250, 255, 0.95));
-  border-radius: 24px;
-  padding: 32px;
+  border-radius: 20px;
+  padding: 20px;
   width: 100%;
   max-width: 500px;
   max-height: 90vh;
   box-shadow:
-    0 14px 32px rgba(0, 0, 0, 0.06),
+    0 10px 24px rgba(0, 0, 0, 0.06),
     inset 0 0 1px rgba(255, 255, 255, 0.4);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   animation: popFadeIn 0.5s ease;
+  transform: scale(0.9);              /* 💡 scale down everything visually */
+  transform-origin: center center;   /* Centered scale shrink */
 }
+
+
 
 /* Modal Header */
 .modal-header {
@@ -237,6 +241,8 @@ p {
   0% { opacity: 0; transform: scale(0.96); }
   100% { opacity: 1; transform: scale(1); }
 }
+
+
 
 /*#endregion*/
 
@@ -546,3 +552,293 @@ p {
 
     
 /*#endregion*/
+
+/* =============== Inventory Card preview ================*/
+/*#region*/
+  /*general stock card*/
+  .stock-container-addstock {
+    background: linear-gradient(to bottom right, rgba(255,255,255,0.96), rgba(248,248,255,0.92));
+    border-radius: 20px;
+    padding: 16px 20px;
+    box-shadow:
+      0 8px 24px rgba(0, 0, 0, 0.05),
+      inset 0 0 1px rgba(255, 255, 255, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: all 0.3s ease;
+    position: relative;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    z-index: 1;
+    animation: cardFadeInAddStock 0.4s ease both;
+  }
+  
+  
+  @keyframes cardFadeInAddStock {
+    from {
+      opacity: 0;
+      transform: scale(0.64) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(0.67) translateY(0);
+    }
+  }
+  
+  .stock-container-addstock:hover {
+    transform: scale(0.95);
+    box-shadow:
+      0 12px 36px rgba(0, 0, 0, 0.08),
+      inset 0 0 1px rgba(255, 255, 255, 0.4);
+  }
+    
+    /* Card Text Info */
+    .stock-content-addstock p {
+      font-size: 1.0rem;
+      margin: 0.2rem 0;
+      line-height: 1.45;
+      font-family: 'DM Serif Display', serif;
+      color: #1d1d1f;
+    }
+    
+    
+    .stock-count.stock-zero {
+      color: #d93025;
+      font-weight: bold;
+      background: rgba(217, 48, 37, 0.08);
+      padding: 6px 14px 6px 12px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 0.9rem;
+      box-shadow: 0 1px 4px rgba(217, 48, 37, 0.1);
+      font-family: 'DM Serif Display', serif;
+    }
+    
+    .stock-alert-icon {
+      width: 18px;
+      height: 18px;
+      stroke-width: 2;
+      color: #d93025;
+      flex-shrink: 0;
+    }
+    
+    /* image display and carousel */
+      /*Overal container*/
+      .stock-image-container-addstock {
+        position: relative;
+        margin-bottom: 18px;
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07);
+      }
+  
+      /* Carousel setup */
+      .stock-photo-preview,
+      .carousel-photo-addstock {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+        border-radius: 16px;
+        transition: transform 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+  
+      .stock-photo-preview::before,
+      .carousel-photo-addstock::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 60%;
+        height: 100%;
+        background: linear-gradient(
+          120deg,
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.25) 50%,
+          rgba(255, 255, 255, 0) 100%
+        );
+        transform: skewX(-20deg);
+        transition: left 0.75s ease;
+      }
+  
+      .stock-photo-preview:hover::before,
+      .carousel-photo-addstock:hover::before {
+        left: 150%;
+      }
+  
+      .stock-photo-preview:hover {
+        transform: scale(1.025);
+        cursor: zoom-in;
+      }
+  
+      .carousel-addstock {
+        position: relative;
+        width: 100%;
+        height: 160px;
+        overflow: hidden;
+        border-radius: 20px;
+      }
+  
+      .carousel-track-addstock {
+        display: flex;
+        width: 100%;
+        height: 100%;
+        transition: transform 0.3s ease;
+      }
+  
+      .carousel-photo-addstock {
+        display: none;
+        flex-shrink: 0;
+      }
+  
+      .carousel-photo-addstock.active {
+        display: block;
+      }
+  
+      /* Carousel buttons */
+      .carousel-btn-addstock {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.8rem;
+        color: #333;
+        background-color: rgba(255, 255, 255, 0.85);
+        border: none;
+        padding: 6px 12px;
+        border-radius: 12px;
+        cursor: pointer;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        z-index: 2;
+        transition: background 0.3s ease;
+      }
+  
+      .carousel-btn-addstock:hover {
+        background-color: rgba(240, 240, 240, 0.95);
+      }
+  
+      .carousel-btn-addstock.left { left: 10px; }
+      .carousel-btn-addstock.right { right: 10px; }
+  
+      .carousel-btn-addstock .carousel-icon-addstock{
+        width: 20px;
+        height: 20px;
+        stroke-width: 2.2;
+        color: #1d1d1f;
+        transition: transform 0.3s ease;
+        pointer-events: none; /* allows click to pass through to the button */
+      }
+  
+      .carousel-btn-addstock:hover .carousel-icon-addstock {
+        transform: scale(1.1);
+      }
+  
+      /*category chips*/
+      .category-chip-containeraddstock {
+        position: relative; /* Needed for absolute positioning inside */
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 12px;
+        align-items: flex-start;
+        justify-content: flex-start;
+        padding: 16px 60px 16px 18px;
+        margin-top: 14px;
+        background: linear-gradient(to bottom right, rgba(255,255,255,0.3), rgba(250,250,255,0.25));
+        border-radius: 16px;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        box-shadow:
+          inset 0 1px 2px rgba(255, 255, 255, 0.5),
+          0 8px 20px rgba(0, 0, 0, 0.04);
+        transition: all 0.3s ease;
+        min-height: auto; /* Ensures space even if only a few chips */
+      }
+  
+      .chip-section-label-addstock {
+        margin: 14px 0 4px 4px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #444;
+      }
+      
+      .category-chip-addstock {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 6px 14px;
+        font-size: 0.85rem;
+        font-family: 'DM Serif Display', serif;
+        border-radius: 999px;
+        backdrop-filter: blur(14px) saturate(160%);
+        -webkit-backdrop-filter: blur(14px) saturate(160%);
+        background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.25), rgba(245, 245, 245, 0.18));
+        box-shadow:
+          0 3px 14px rgba(0, 0, 0, 0.05),
+          inset 0 1px 1px rgba(255, 255, 255, 0.6);
+        color: #1d1d1f;
+        position: relative;
+        margin: 0px 6px 0 0;
+        transition: all 0.3s ease;
+        animation: chipGlowInAddItem 300ms cubic-bezier(0.23, 1, 0.32, 1);
+      }
+      
+      @keyframes chipGlowInAddItem {
+        0% {
+          transform: scale(0.95);
+          box-shadow: 0 0 0 rgba(0, 113, 227, 0.0);
+        }
+        50% {
+          box-shadow: 0 0 16px rgba(0, 113, 227, 0.25);
+        }
+        100% {
+          transform: scale(1);
+          box-shadow:
+            0 3px 14px rgba(0, 0, 0, 0.05),
+            inset 0 1px 1px rgba(255, 255, 255, 0.6);
+        }
+      }
+  
+      .category-chip-addstock {
+        animation: chipGlowIn 0.45s ease;
+      }
+      
+      .category-chip-addstock:hover {
+        background: rgba(255, 255, 255, 0.4);
+        transform: scale(1.02);
+        box-shadow:
+          0 6px 18px rgba(0, 0, 0, 0.06),
+          inset 0 1px 1px rgba(255, 255, 255, 0.5);
+      }
+      
+      .category-chip-addstock button {
+        background: none;
+        border: none;
+        font-size: 0.85rem;
+        width: 20px;
+        height: 20px;
+        line-height: 1;
+        border-radius: 999px;
+        color: #555;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+      }
+      
+      .category-chip-addstock button:hover {
+        background-color: rgba(0, 0, 0, 0.08);
+        color: #000;
+        transform: scale(1.15);
+      }
+      
+    /**/
+  
+      
+  /*#endregion*/
+

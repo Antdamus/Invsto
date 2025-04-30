@@ -1,4 +1,4 @@
-/* =============== Inventory Card ================*/
+/* =============== Inventory Card preview ================*/
 /*#region*/
   /*general stock card*/
   .stock-container-addstock {
@@ -37,7 +37,6 @@
         inset 0 0 1px rgba(255, 255, 255, 0.5);
       z-index: 5;
     }
-  
     
     .stock-container-addstock:hover{
       transform: translateY(-2px);
@@ -88,7 +87,7 @@
   
       /* Carousel setup */
       .stock-photo-preview,
-      .carousel-photo {
+      .carousel-photo-addstock {
         width: 100%;
         height: 220px;
         object-fit: cover;
@@ -99,7 +98,7 @@
       }
   
       .stock-photo-preview::before,
-      .carousel-photo::before {
+      .carousel-photo-addstock::before {
         content: "";
         position: absolute;
         top: 0;
@@ -117,7 +116,7 @@
       }
   
       .stock-photo-preview:hover::before,
-      .carousel-photo:hover::before {
+      .carousel-photo-addstock:hover::before {
         left: 150%;
       }
   
@@ -126,7 +125,7 @@
         cursor: zoom-in;
       }
   
-      .carousel {
+      .carousel-addstock {
         position: relative;
         width: 100%;
         height: 220px;
@@ -134,24 +133,24 @@
         border-radius: 20px;
       }
   
-      .carousel-track {
+      .carousel-track-addstock {
         display: flex;
         width: 100%;
         height: 100%;
         transition: transform 0.3s ease;
       }
   
-      .carousel-photo {
+      .carousel-photo-addstock {
         display: none;
         flex-shrink: 0;
       }
   
-      .carousel-photo.active {
+      .carousel-photo-addstock.active {
         display: block;
       }
   
       /* Carousel buttons */
-      .carousel-btn {
+      .carousel-btn-addstock {
         position: absolute;
         top: 50%;
         transform: translateY(-50%);
@@ -167,14 +166,14 @@
         transition: background 0.3s ease;
       }
   
-      .carousel-btn:hover {
+      .carousel-btn-addstock:hover {
         background-color: rgba(240, 240, 240, 0.95);
       }
   
-      .carousel-btn.left { left: 10px; }
-      .carousel-btn.right { right: 10px; }
+      .carousel-btn-addstock.left { left: 10px; }
+      .carousel-btn-addstock.right { right: 10px; }
   
-      .carousel-btn .carousel-icon {
+      .carousel-btn-addstock .carousel-icon-addstock{
         width: 20px;
         height: 20px;
         stroke-width: 2.2;
@@ -183,7 +182,7 @@
         pointer-events: none; /* allows click to pass through to the button */
       }
   
-      .carousel-btn:hover .carousel-icon {
+      .carousel-btn-addstock:hover .carousel-icon-addstock {
         transform: scale(1.1);
       }
   
