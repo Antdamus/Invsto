@@ -839,6 +839,43 @@ svg.icon.spin {
   transform: translateY(-1px);
 }
 
+/* 🔴 Red Border Glow for Reset Cards */
+.count-zero-alert {
+  box-shadow:
+    0 0 0 6px rgba(217, 48, 37, 0.5),
+    0 0 18px rgba(217, 48, 37, 0.45),
+    inset 0 0 3px rgba(217, 48, 37, 0.25);
+  border: 1px solid rgba(217, 48, 37, 0.6);
+  transition: box-shadow 0.4s ease, border 0.3s ease;
+  animation: countZeroPulse 1.4s ease-in-out infinite;
+}
+
+/* 🔴 Stronger Red Pulse Animation */
+@keyframes countZeroPulse {
+  0% {
+    box-shadow:
+      0 0 0 6px rgba(217, 48, 37, 0.5),
+      0 0 18px rgba(217, 48, 37, 0.45),
+      inset 0 0 3px rgba(217, 48, 37, 0.25);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 12px rgba(217, 48, 37, 0.3),
+      0 0 30px rgba(217, 48, 37, 0.6),
+      inset 0 0 6px rgba(217, 48, 37, 0.35);
+    transform: scale(1.015);
+  }
+  100% {
+    box-shadow:
+      0 0 0 6px rgba(217, 48, 37, 0.5),
+      0 0 18px rgba(217, 48, 37, 0.45),
+      inset 0 0 3px rgba(217, 48, 37, 0.25);
+    transform: scale(1);
+  }
+}
+
+
 
 
 /* Existing styles below remain unchanged */

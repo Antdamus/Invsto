@@ -84,21 +84,25 @@ let currentBatch = {};
       okButton.onclick = () => {
         const barcode = modal.dataset.barcode;
         if (!barcode || !currentBatch[barcode]) return;
-    
+      
         const batchItem = currentBatch[barcode];
         batchItem.count = 0;
-    
+      
         // Reset UI counter
         const unitDisplay = batchItem.cardEl.querySelector(".units-scanned");
         if (unitDisplay) {
           unitDisplay.textContent = `Units Scanned: 0`;
         }
-    
+      
+        // 🔴 Add red glow class
+        batchItem.cardEl.classList.add("count-zero-alert");
+      
         // Hide the modal and refocus scanner
         modal.classList.add("hidden");
         scannerInput.disabled = false;
         scannerInput.focus();
       };
+      
     }
     
   
@@ -394,6 +398,9 @@ let currentBatch = {};
       }
     
       batchItem.count++;
+
+      // 🧼 Remove red glow if previously flagged
+      batchItem.cardEl.classList.remove("count-zero-alert");
     
       const unitDisplay = batchItem.cardEl.querySelector(".units-scanned");
       if (unitDisplay) {
