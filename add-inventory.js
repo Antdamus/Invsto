@@ -3,8 +3,220 @@ let pendingItem = null; // Store the scanned item awaiting confirmation
 let currentBatch = {}; 
 
 //#region full logic to what will be done once the item reaches its limit
+  //function to turn on and off the autofocus and the input of adding items by barcode
+  function updateBarcodeInputStateBasedOnModals() {
+    const barcodeInput = document.getElementById("input-to-search-inventory-item");
+    const anyModalOpen = Array.from(document.querySelectorAll(".modal"))
+      .some(modal => !modal.classList.contains("hidden"));
+  
+    barcodeInput.disabled = anyModalOpen;
+    if (!anyModalOpen) {
+      barcodeInput.focus();
+    }
+  }
 
-  //function to coordinate the display of the mmodal
+  // ✅ Updated to pull from the `locations` table
+  async function fetchUniqueLocationNames() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("location_name")
+      .eq("active", true); // optional: only include active locations
+
+    if (error || !data) {
+      console.error("❌ Failed to fetch location names from `locations`:", error);
+      return [];
+    }
+
+    const unique = [...new Set(data.map(row => row.location_name).filter(Boolean))];
+    return unique.sort((a, b) => a.localeCompare(b)); // alphabetical
+  }
+
+  //function to transform the inputs into selected in case it is needed
+  function syncHiddenInputsWithDropdowns() {
+    const form = document.getElementById("filter-form");
+    if (!form) return; // 🛑 Prevent crashing if filter-form is not present
+    //const telecooll = new FormData(form);
+    //console.log("🧾 Form Values from inside synchhindder:", telecooll.getAll("categories"))
+
+    // 🔍 Log current state before clearing
+    //console.log("🧹 Before clearing: categories =", [...form.querySelectorAll('input[name="categories"]')].map(i => i.value));
+  
+    // 🔁 Clear previous category inputs
+    form.querySelectorAll('input[name="categories"]').forEach(el => el.remove());
+    form.querySelectorAll('input[name="qr_type"]').forEach(el => el.remove());
+
+    //let catInputCounter = 0;
+  
+    // ✅ Add back categories from selected dropdowns
+    document.querySelectorAll(".dropdown-option.selected[data-cat]").forEach(el => {
+      //catInputCounter++;
+      //console.log(`📌 Hidden category input #${catInputCounter}: ${el.dataset.cat}`);
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "categories";
+      input.value = el.dataset.cat;
+      form.appendChild(input);
+    });
+    //catInputCounter = 0;
+    // ✅ Add back QR types from selected dropdowns
+    document.querySelectorAll(".dropdown-option.selected[data-qr]").forEach(el => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "qr_type";
+      input.value = el.dataset.qr;
+      form.appendChild(input);
+    });
+  
+    // ✅ Log final result
+    //console.log("✅ After sync: categories =", [...form.querySelectorAll('input[name="categories"]')].map(i => i.value));
+  }
+    
+  /** Function that will create the html block for the drop down, insert search bar, attach listener
+ * Renders a searchable dropdown and lets the caller define behavior
+ * for selecting existing options or creating new ones.
+ * @param {Object} config
+ * @param {string} config.menuId - ID of the DOM container
+ * @param {Array<string>} config.options - Array of string values to display
+ * @param {string} [config.searchId="category-search"] - Search input ID
+ * @param {string} [config.placeholder="Search..."] - Input placeholder text
+ * @param {string} [config.optionClass="dropdown-option"] - Class for each option div
+ * @param {string} [config.dataAttribute="cat"] - The data-* attribute key (e.g. "cat", "qr")
+ * @param {string} [config.optionsContainerClass="dropdown-options-container"]
+ * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
+ */
+  function renderDropdownOptionsCustom({
+    menuId,
+    options = [],
+    searchId = "category-search",
+    placeholder = "Search...",
+    optionClass = "dropdown-option",
+    dataAttribute = "cat",
+    optionsContainerClass = "dropdown-options-container",
+    onClick,  // 🔥 REQUIRED: handler for both new and existing options
+    showHTMLInjected = true // 🆕 Optional debug flag
+  }) {
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+  
+    const searchHTML = `
+      <div class="dropdown-search-container">
+        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+      </div>
+    `;
+  
+    const optionsHTML = `
+      <div class="${optionsContainerClass}">
+        ${options.map(opt => `
+          <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+        `).join("")}
+      </div>
+    `;
+  
+    const fullHTML = searchHTML + optionsHTML;
+  
+    if (showHTMLInjected) {
+      console.log("🧪 [renderDropdownOptionsCustom] Injected HTML for", menuId);
+      console.log(fullHTML);
+      debugger;
+    }
+  
+    menu.innerHTML = fullHTML;
+  
+    const input = menu.querySelector(`#${searchId}`);
+    const container = menu.querySelector(`.${optionsContainerClass}`);
+  
+    const attachClickHandlers = () => {
+      container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
+        optionEl.addEventListener("click", () => {
+          const value = optionEl.dataset.value;
+          const isNew = optionEl.dataset.new === "true";
+          syncHiddenInputsWithDropdowns();
+          if (typeof onClick === "function") {
+            onClick(value, isNew, optionEl);
+          }
+        });
+      });
+    };
+  
+    attachClickHandlers();
+  
+    input.addEventListener("input", (e) => {
+      const search = e.target.value.toLowerCase();
+      const filtered = options.filter(opt =>
+        opt.toLowerCase().includes(search)
+      );
+  
+      let html = filtered.map(opt => `
+        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+      `).join("");
+  
+      const exactMatch = options.some(opt => opt.toLowerCase() === search);
+  
+      if (search && !exactMatch) {
+        html += `
+          <div class="${optionClass} new-entry" data-${dataAttribute}="${search}" data-value="${search}" data-new="true">
+            ➕ Create "${search}"
+          </div>
+        `;
+      }
+  
+      container.innerHTML = html;
+      attachClickHandlers();
+    });
+  }
+  
+  //function to populate the dropdown 
+  async function populateLocationDropdown() {
+    const options = await fetchUniqueLocationNames();
+    renderDropdownOptionsCustom({
+      menuId: "location-dropdown-list",
+      options,
+      searchId: "location-dropdown-search", // ✅ you'll add this ID to the search input
+      placeholder: "Search or select location...",
+      optionClass: "location-option",         // CSS class for styling
+      dataAttribute: "location",              // Used for dataset.location
+      optionsContainerClass: "location-options-container", // for styling
+      onClick: (value, isNew, el) => {
+        if (isNew) {
+          document.getElementById("location-name").value = value;
+          document.getElementById("modal-add-location").classList.remove("hidden");
+          updateBarcodeInputStateBasedOnModals();
+          document.getElementById("location-name").focus();
+          return;
+        }
+      
+        document.getElementById("location-dropdown-search").value = value;
+        showToast(`📦 Location selected: ${value}`);
+      }
+    });
+  }
+  
+  //function to coordinate the display of the assign location modal 
+  function showAssignLocationModal(batchItem) {
+    const modal = document.getElementById("modal-assign-location");
+    const searchInput = document.getElementById("location-dropdown-search");
+    const scanInput = document.getElementById("input-scan-location-barcode");
+    const lastUsedLabel = document.getElementById("last-used-location-name");
+  
+    // Clear previous states
+    searchInput.value = "";
+    scanInput.value = "";
+    document.getElementById("location-dropdown-list").innerHTML = "";
+  
+    // Show last used location if any
+    const lastLocation = batchItem.lastLocation || "—";
+    lastUsedLabel.textContent = lastLocation;
+  
+    modal.dataset.barcode = batchItem.item.barcode;
+    modal.classList.remove("hidden");
+    updateBarcodeInputStateBasedOnModals();
+
+    populateLocationDropdown();  // ⬅ Inject dropdown when modal opens
+
+    searchInput.focus();
+  }
+
+  //function to coordinate the display of the limit modal
   function showBatchThresholdModal(batchItem) {
     const modal = document.getElementById("modal-batch-threshold-reached");
     const scannedCountDisplay = document.getElementById("scanned-count-display");
@@ -25,11 +237,13 @@ let currentBatch = {};
     scannedCountDisplay.textContent = batchItem.count;
     inputField.value = "";
     errorMsg.classList.add("hidden");
+    updateBarcodeInputStateBasedOnModals();
   
     modal.classList.remove("hidden");
-    input.disabled = true;
+    updateBarcodeInputStateBasedOnModals();
     inputField.focus();
   }
+
   
   //listeners
     //manual countverification listener
@@ -44,36 +258,42 @@ let currentBatch = {};
       confirmBtn.onclick = () => {
         const barcode = modal.dataset.barcode;
         const batchItem = currentBatch[barcode];
-    
         const manualCount = parseInt(input.value.trim(), 10);
+    
         if (isNaN(manualCount)) return;
     
         if (manualCount === batchItem.count) {
-          showToast("✅ Manual count confirmed. Item finalized.");
+          showToast("✅ Manual count confirmed. Please assign location.");
           modal.classList.add("hidden");
           errorMsg.classList.add("hidden");
+          updateBarcodeInputStateBasedOnModals();
           inputScanner.disabled = false;
-          inputScanner.focus();
-          // 🧹 Optionally clear the batch entry
-          // delete currentBatch[barcode];
+          inputScanner.blur();
+    
+          showAssignLocationModal(batchItem); // 👈 trigger next modal
         } else {
           errorMsg.classList.remove("hidden");
-        
+          updateBarcodeInputStateBasedOnModals();
+
           const mismatchModal = document.getElementById("modal-manual-count-mismatch");
           mismatchModal.dataset.barcode = barcode;
           modal.classList.add("hidden");
+          updateBarcodeInputStateBasedOnModals();
           mismatchModal.classList.remove("hidden");
+          updateBarcodeInputStateBasedOnModals();
+
         }
-        
       };
     
       cancelBtn.onclick = () => {
         modal.classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
         errorMsg.classList.add("hidden");
         inputScanner.disabled = false;
         inputScanner.focus();
       };
     }
+    
 
     //missmatch in count listener 
     function setupMismatchResetModalListener() {
@@ -99,11 +319,143 @@ let currentBatch = {};
       
         // Hide the modal and refocus scanner
         modal.classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
         scannerInput.disabled = false;
         scannerInput.focus();
       };
       
     }
+
+    //event listener for assigning the location to item 
+    function setupAssignLocationModalListeners() {
+      const modal = document.getElementById("modal-assign-location");
+      const confirmBtn = document.getElementById("btn-confirm-location-assign");
+      const cancelBtn = document.getElementById("btn-cancel-location-assign");
+      const searchInput = document.getElementById("location-dropdown-search");
+      const scanInput = document.getElementById("input-scan-location-barcode");
+      const barcodeInput = document.getElementById("input-to-search-inventory-item");
+    
+      cancelBtn.addEventListener("click", () => {
+        modal.classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
+        barcodeInput.disabled = false;
+        barcodeInput.focus();
+      });
+    
+      confirmBtn.addEventListener("click", () => {
+        const barcode = modal.dataset.barcode;
+        const batchItem = currentBatch[barcode];
+        const selectedLocation = searchInput.value.trim() || scanInput.value.trim();
+    
+        if (!selectedLocation) {
+          showToast("⚠️ Please select or scan a location.");
+          return;
+        }
+    
+        // Store the location name in memory (could be used later)
+        batchItem.lastLocation = selectedLocation;
+    
+        // TODO: You’ll save to `item_stock_locations` later with a proper insert.
+    
+        showToast(`✅ Assigned to: ${selectedLocation}`);
+        modal.classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
+        barcodeInput.disabled = false;
+        barcodeInput.focus();
+      });
+    }
+    
+    //#region 🔧 Location Modal Logic
+    function setupLocationModalListeners() {
+      const modal = document.getElementById("modal-add-location");
+      const form = document.getElementById("form-add-location");
+      const cancelBtn = document.getElementById("btn-cancel-location");
+    
+      const nameInput = document.getElementById("location-name");
+      const barcodeInput = document.getElementById("location-barcode");
+      const capacityInput = document.getElementById("location-capacity");
+      const photoInput = document.getElementById("location-photo");
+      const notesInput = document.getElementById("location-notes");
+    
+      function clearForm() {
+        nameInput.value = "";
+        barcodeInput.value = "";
+        capacityInput.value = "";
+        notesInput.value = "";
+        photoInput.value = "";
+      }
+    
+      function toggleModal(show = true) {
+        if (show) {
+          modal.classList.remove("hidden");
+          updateBarcodeInputStateBasedOnModals();
+          nameInput.focus();
+        } else {
+          modal.classList.add("hidden");
+          updateBarcodeInputStateBasedOnModals();
+          clearForm();
+        }
+      }
+    
+      // Show modal externally via:
+      // toggleModal(true); (e.g. when "Create +" is clicked)
+    
+      cancelBtn.addEventListener("click", () => toggleModal(false));
+    
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+    
+        const location_name = nameInput.value.trim();
+        const location_code = barcodeInput.value.trim();
+        const max_capacity = capacityInput.value.trim();
+        const notes = notesInput.value.trim();
+        const photoFile = photoInput.files?.[0] || null;
+    
+        if (!location_name || !location_code) {
+          showToast("⚠️ Name and barcode are required.");
+          return;
+        }
+    
+        showToast("Uploading...");
+    
+        let photo_url = null;
+        if (photoFile) {
+          const { data, error } = await supabase.storage
+            .from("location-assets")
+            .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
+          if (error) {
+            showToast("❌ Failed to upload photo.");
+            return;
+          }
+          const { data: urlData } = supabase.storage.from("location-assets").getPublicUrl(data.path);
+          photo_url = urlData.publicUrl;
+        }
+    
+        const { error: insertError } = await supabase.from("locations").insert({
+          location_name,
+          location_code,
+          max_capacity: max_capacity ? parseInt(max_capacity) : null,
+          notes,
+          active: true,
+          photo_url
+        });
+    
+        if (insertError) {
+          console.error("❌ Error inserting location:", insertError);
+          showToast("❌ Failed to save location.");
+          return;
+        }
+    
+        showToast("✅ Location saved!");
+        toggleModal(false);
+        await populateLocationDropdown(); // Refresh dropdown options
+      });
+    }
+    
+    
+
+//#endregion
+
     
   
 
@@ -453,6 +805,7 @@ let currentBatch = {};
     function hideModalToConfirmItem() {
       const modal = document.getElementById("modalToConfirmItem");
       modal.classList.add("hidden"); // Hide the modal
+      updateBarcodeInputStateBasedOnModals();
       pendingItem = null; // Clear pending item
     
       // 👉 Refocus barcode input after modal closes
@@ -531,6 +884,9 @@ let currentBatch = {};
     
         // Show the modal
         modal.classList.remove("hidden");
+        
+        updateBarcodeInputStateBasedOnModals();
+
     }
     
     //processing of the barcode, if present add, if not, render
@@ -650,6 +1006,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     //event listener for error if the manual count does not match scanned count
     setupMismatchResetModalListener();
 
+    //event listener to assign the location to an item 
+    setupAssignLocationModalListeners();
+
+    //event listener to add locations to the locations table
+    setupLocationModalListeners();
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast
     document.addEventListener("click", (e) => {

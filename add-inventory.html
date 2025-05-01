@@ -112,7 +112,6 @@
       </div>
     </div>
 
-
     <!-- Modal: Manual Count Mismatch -->
     <div id="modal-manual-count-mismatch" class="modal hidden">
       <div class="modal-content-manual-mismatch">
@@ -131,6 +130,95 @@
       </div>
     </div>
 
+    <!-- Modal: Assign Location After Manual Count -->
+    <div id="modal-assign-location" class="modal hidden">
+      <div class="modal-content-assign-location">
+
+        <!-- Modal Header -->
+        <div class="modal-header-assign-location">
+          Select Storage Location
+        </div>
+
+        <!-- Modal Body -->
+        <div class="modal-body-assign-location">
+          
+          <!-- 🔍 Searchable Dropdown -->
+          <label for="location-dropdown-search" class="location-label">Search or Select Location</label>
+          <input
+            type="text"
+            id="location-dropdown-search"
+            class="location-search-input"
+            placeholder="Search location by name..."
+            autocomplete="off"
+          />
+
+          <div id="location-dropdown-list" class="location-dropdown-list">
+            <!-- Dropdown options will be populated dynamically -->
+          </div>
+
+          <!-- 📦 Scan Location Barcode -->
+          <label for="input-scan-location-barcode" class="location-label">
+            Or Scan Location Barcode:
+          </label>
+          <input
+            type="text"
+            id="input-scan-location-barcode"
+            class="location-scan-input"
+            placeholder="Scan barcode here..."
+            autocomplete="off"
+          />
+
+          <!-- 🕘 Last Used Location Info -->
+          <div id="last-used-location-info" class="location-last-used">
+            Last used location: <strong id="last-used-location-name">—</strong>
+          </div>
+
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer-assign-location">
+          <button id="btn-confirm-location-assign" class="btn-location-confirm">Confirm Location</button>
+          <button id="btn-cancel-location-assign" class="btn-location-cancel">Cancel</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Modal: add new location -->
+    <div id="modal-add-location" class="modal hidden">
+      <div class="modal-content-addlocation">
+        <h2>Add New Location</h2>
+    
+        <form id="form-add-location" enctype="multipart/form-data">
+          <!-- 📍 Location Name -->
+          <label for="location-name">Location Name</label>
+          <input type="text" id="location-name" name="location_name" required />
+    
+          <!-- 📦 Location Barcode -->
+          <label for="location-barcode">Barcode</label>
+          <input type="text" id="location-barcode" name="location_barcode" />
+    
+          <!-- 🧮 Max Capacity (optional) -->
+          <label for="location-capacity">Max Capacity</label>
+          <input type="number" id="location-capacity" name="max_capacity" min="0" />
+    
+          <!-- 📷 Upload Image -->
+          <label for="location-photo">Photo</label>
+          <input type="file" id="location-photo" name="photo" accept="image/*" />
+    
+          <!-- 📝 Notes -->
+          <label for="location-notes">Notes</label>
+          <textarea id="location-notes" name="notes" rows="3"></textarea>
+    
+          <!-- Action Buttons -->
+          <div class="modal-actions">
+            <button type="submit" id="btn-submit-location">✅ Add Location</button>
+            <button type="button" id="btn-cancel-location">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    
 
 
 
