@@ -12,7 +12,16 @@ let currentBatch = {};
     const errorMsg = document.getElementById("manual-count-error-msg");
     const input = document.getElementById("input-to-search-inventory-item");
   
-    modal.dataset.barcode = batchItem.item.barcode;
+    // 🧠 NEW: populate photo and title in the modal
+    const item = batchItem.item;
+    const itemPhotoEl = document.getElementById("batch-item-photo");
+    const itemTitleEl = document.getElementById("batch-item-title");
+  
+    itemPhotoEl.src = item.photos?.[0] || "";
+    itemPhotoEl.alt = item.title || "Item Photo";
+    itemTitleEl.textContent = item.title || "Unnamed Item";
+  
+    modal.dataset.barcode = item.barcode;
     scannedCountDisplay.textContent = batchItem.count;
     inputField.value = "";
     errorMsg.classList.add("hidden");

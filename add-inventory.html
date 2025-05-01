@@ -81,14 +81,16 @@
     <!-- Modal: Item Reached Batch Threshold -->
     <div id="modal-batch-threshold-reached" class="modal hidden">
       <div class="modal-content-batch-threshold">
-        <div class="modal-header-batch-threshold">
-          Item Reached Batch Limit
+        
+        <!-- 🏷️ Item Preview (Title + Image) -->
+        <div class="modal-batch-item-preview">
+          <img id="batch-item-photo" src="" alt="Item Photo" class="modal-batch-photo" />
+          <h2 id="batch-item-title" class="modal-batch-title">Item Name</h2>
         </div>
 
+        <!-- 💬 Instructions -->
         <div class="modal-body-batch-threshold">
-          <p>This item has been scanned the maximum allowed times for this batch.</p>
-          <p>Please place it in its assigned location and perform a manual count.</p>
-
+          <p>This item has been scanned the maximum allowed times for this batch. Please perform a manual count</p>
           <p><strong>Scanned Count:</strong> <span id="scanned-count-display">—</span></p>
 
           <label for="input-manual-count">
@@ -101,12 +103,15 @@
           </p>
         </div>
 
+        <!-- ✅ Buttons -->
         <div class="modal-footer-batch-threshold">
           <button id="btn-confirm-manual-count" class="btn-batch-threshold-confirm">Confirm Count</button>
           <button id="btn-cancel-manual-count" class="btn-batch-threshold-close">Cancel</button>
         </div>
+
       </div>
     </div>
+
 
     <!-- Modal: Manual Count Mismatch -->
     <div id="modal-manual-count-mismatch" class="modal hidden">
