@@ -9,11 +9,16 @@ let currentBatch = {};
     const anyModalOpen = Array.from(document.querySelectorAll(".modal"))
       .some(modal => !modal.classList.contains("hidden"));
   
+    // 🔒 Disable background scroll when any modal is open
+    document.body.classList.toggle("modal-open", anyModalOpen);
+  
+    // 🔧 Barcode field focus/blur
     barcodeInput.disabled = anyModalOpen;
     if (!anyModalOpen) {
       barcodeInput.focus();
     }
   }
+  
 
   // ✅ Updated to pull from the `locations` table
   async function fetchUniqueLocationNames() {

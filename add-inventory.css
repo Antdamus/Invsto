@@ -5,6 +5,11 @@ body {
   color: #1d1d1f;
   margin: 0;
   padding: 20px;
+  height: 100vh;
+}
+
+body.modal-open {
+  overflow: hidden;
 }
 
 
@@ -683,6 +688,10 @@ svg.icon.spin {
 
 /* ========== modal: Manual Count Input Styles ========== */
 /*#region*/
+#modal-manual-count-mismatch {
+  height: 100vh;
+}
+
 .manual-count-input-wrapper {
   display: flex;
   flex-direction: column;
@@ -1050,8 +1059,10 @@ svg.icon.spin {
   background: linear-gradient(to bottom right, #ffffff, #f8f8ff);
   border-radius: 24px;
   padding: 32px;
-  width: 100%;
-  max-width: 600px;
+  width: 90%;
+  max-width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
@@ -1059,7 +1070,24 @@ svg.icon.spin {
   animation: popFadeIn 0.5s ease;
   font-family: 'DM Serif Display', serif;
   border: 1px solid rgba(0, 0, 0, 0.06);
+  scrollbar-width: thin; /* For Firefox */
+  scrollbar-color: #bbb transparent;
 }
+
+/* Chrome / Safari scrollbar styling */
+.modal-content-addlocation::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-content-addlocation::-webkit-scrollbar-thumb {
+  background-color: #bbb;
+  border-radius: 8px;
+}
+
+.modal-content-addlocation::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 
 .modal-content-addlocation h2 {
   font-size: 1.7rem;
