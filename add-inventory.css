@@ -832,33 +832,45 @@ svg.icon.spin {
 
     /*Animation for card on scan*/
     @keyframes flipCard {
-      0%   { transform: perspective(1200px) rotateY(0deg)   rotateX(0deg)   scale(1)    translateY(0); }
-      5%   { transform: perspective(1200px) rotateY(36deg)  rotateX(0.5deg) scale(1.01)  translateY(-8px); }
-      10%  { transform: perspective(1200px) rotateY(72deg)  rotateX(1deg)   scale(1.015) translateY(-16px); }
-      15%  { transform: perspective(1200px) rotateY(108deg) rotateX(1.2deg) scale(1.02)  translateY(-24px); }
-      20%  { transform: perspective(1200px) rotateY(144deg) rotateX(1.5deg) scale(1.025) translateY(-32px); }
-      25%  { transform: perspective(1200px) rotateY(180deg) rotateX(1.8deg) scale(1.03)  translateY(-40px); }
-      30%  { transform: perspective(1200px) rotateY(216deg) rotateX(2deg)   scale(1.035) translateY(-48px); }
-      35%  { transform: perspective(1200px) rotateY(252deg) rotateX(1.5deg) scale(1.03)  translateY(-40px); }
-      40%  { transform: perspective(1200px) rotateY(288deg) rotateX(1deg)   scale(1.025) translateY(-32px); }
-      45%  { transform: perspective(1200px) rotateY(324deg) rotateX(0.5deg) scale(1.015) translateY(-16px); }
-      50%  { transform: perspective(1200px) rotateY(360deg) rotateX(0deg)   scale(1)     translateY(0); }
-      55%  { transform: perspective(1200px) rotateY(396deg) rotateX(-0.5deg) scale(1.01)  translateY(-8px); }
-      60%  { transform: perspective(1200px) rotateY(432deg) rotateX(-1deg)   scale(1.015) translateY(-16px); }
-      65%  { transform: perspective(1200px) rotateY(468deg) rotateX(-1.2deg) scale(1.02)  translateY(-24px); }
-      70%  { transform: perspective(1200px) rotateY(504deg) rotateX(-1.5deg) scale(1.025) translateY(-32px); }
-      75%  { transform: perspective(1200px) rotateY(540deg) rotateX(-1.8deg) scale(1.03)  translateY(-40px); }
-      80%  { transform: perspective(1200px) rotateY(576deg) rotateX(-1deg)   scale(1.025) translateY(-24px); }
-      85%  { transform: perspective(1200px) rotateY(612deg) rotateX(-0.5deg) scale(1.015) translateY(-12px); }
-      90%  { transform: perspective(1200px) rotateY(648deg) rotateX(0deg)    scale(1.005) translateY(-6px); }
-      95%  { transform: perspective(1200px) rotateY(684deg) rotateX(0deg)    scale(1.002) translateY(-2px); }
-      100% { transform: perspective(1200px) rotateY(720deg) rotateX(0deg)    scale(1)     translateY(0); }
+      0%    { transform: perspective(1200px) rotateY(0deg)    rotateX(0deg)   scale(1)     translateY(0); }
+      2.5%  { transform: perspective(1200px) rotateY(18deg)   rotateX(0.4deg) scale(1.005) translateY(-4px); }
+      5%    { transform: perspective(1200px) rotateY(36deg)   rotateX(0.7deg) scale(1.01)  translateY(-8px); }
+      7.5%  { transform: perspective(1200px) rotateY(54deg)   rotateX(1deg)   scale(1.012) translateY(-14px); }
+      10%   { transform: perspective(1200px) rotateY(72deg)   rotateX(1.2deg) scale(1.015) translateY(-20px); }
+      12.5% { transform: perspective(1200px) rotateY(90deg)   rotateX(1.4deg) scale(1.018) translateY(-26px); }
+      15%   { transform: perspective(1200px) rotateY(108deg)  rotateX(1.6deg) scale(1.02)  translateY(-32px); }
+      17.5% { transform: perspective(1200px) rotateY(126deg)  rotateX(1.7deg) scale(1.023) translateY(-38px); }
+      20%   { transform: perspective(1200px) rotateY(144deg)  rotateX(1.8deg) scale(1.025) translateY(-44px); }
+      22.5% { transform: perspective(1200px) rotateY(162deg)  rotateX(1.85deg)scale(1.027) translateY(-48px); }
+      25%   { transform: perspective(1200px) rotateY(180deg)  rotateX(2deg)   scale(1.03)  translateY(-52px); }
+    
+      27.5% { transform: perspective(1200px) rotateY(198deg)  rotateX(1.8deg) scale(1.027) translateY(-48px); }
+      30%   { transform: perspective(1200px) rotateY(216deg)  rotateX(1.6deg) scale(1.025) translateY(-42px); }
+      32.5% { transform: perspective(1200px) rotateY(234deg)  rotateX(1.3deg) scale(1.022) translateY(-36px); }
+      35%   { transform: perspective(1200px) rotateY(252deg)  rotateX(1deg)   scale(1.02)  translateY(-30px); }
+      37.5% { transform: perspective(1200px) rotateY(270deg)  rotateX(0.7deg) scale(1.015) translateY(-22px); }
+      40%   { transform: perspective(1200px) rotateY(288deg)  rotateX(0.5deg) scale(1.01)  translateY(-16px); }
+      42.5% { transform: perspective(1200px) rotateY(306deg)  rotateX(0.3deg) scale(1.005) translateY(-10px); }
+      45%   { transform: perspective(1200px) rotateY(324deg)  rotateX(0.15deg)scale(1.003) translateY(-5px); }
+      50%   { transform: perspective(1200px) rotateY(360deg)  rotateX(0deg)   scale(1)     translateY(0); }
+    
+      55%   { transform: perspective(1200px) rotateY(396deg)  rotateX(-0.15deg)scale(1.003) translateY(-5px); }
+      60%   { transform: perspective(1200px) rotateY(432deg)  rotateX(-0.3deg) scale(1.005) translateY(-10px); }
+      65%   { transform: perspective(1200px) rotateY(468deg)  rotateX(-0.6deg) scale(1.01)  translateY(-16px); }
+      70%   { transform: perspective(1200px) rotateY(504deg)  rotateX(-1deg)   scale(1.015) translateY(-22px); }
+      75%   { transform: perspective(1200px) rotateY(540deg)  rotateX(-1.4deg) scale(1.02)  translateY(-28px); }
+      80%   { transform: perspective(1200px) rotateY(576deg)  rotateX(-1.2deg) scale(1.015) translateY(-20px); }
+      85%   { transform: perspective(1200px) rotateY(612deg)  rotateX(-0.8deg) scale(1.01)  translateY(-12px); }
+      90%   { transform: perspective(1200px) rotateY(648deg)  rotateX(-0.4deg) scale(1.005) translateY(-6px); }
+      95%   { transform: perspective(1200px) rotateY(684deg)  rotateX(-0.2deg) scale(1.002) translateY(-2px); }
+      100%  { transform: perspective(1200px) rotateY(720deg)  rotateX(0deg)    scale(1)     translateY(0); }
     }
+    
 
   
     
     .stock-card.updated-flip {
-      animation: flipCard 1.4s cubic-bezier(0.33, 1, 0.68, 1);
+      animation: flipCard 0.5s cubic-bezier(0.33, 1, 0.68, 1);
       transform-style: preserve-3d;
       will-change: transform;
       backface-visibility: visible;

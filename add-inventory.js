@@ -270,18 +270,17 @@ let currentBatch = {};
       // Clean up after animation
       setTimeout(() => {
         cardElement.classList.remove("flash-border");
-      }, 1000);
+      }, 500);
     
       setTimeout(() => {
         cardElement.classList.remove("updated");
         // Optional: keep flip for more visual flair, or remove it here
-        // cardElement.classList.remove("updated-flip");
+        cardElement.classList.remove("updated-flip");
       }, 500);
     
       playScanSound();
     }
     
-      
     //function necessary to increment the stock count once the card has been already created
     function incrementCardCount(barcode) {
       const batchItem = currentBatch[barcode];
@@ -326,9 +325,12 @@ let currentBatch = {};
 
     // Function to hide the confirmation modal
     function hideModalToConfirmItem() {
-        const modal = document.getElementById("modalToConfirmItem");
-        modal.classList.add("hidden"); // Hide the modal
-        pendingItem = null; // Clear pending item
+      const modal = document.getElementById("modalToConfirmItem");
+      modal.classList.add("hidden"); // Hide the modal
+      pendingItem = null; // Clear pending item
+    
+      // 👉 Refocus barcode input after modal closes
+      document.getElementById("input-to-search-inventory-item").focus();
     }
 
     //function to create listener for the popup to appear
@@ -407,16 +409,20 @@ let currentBatch = {};
     
     //processing of the barcode, if present add, if not, render
     async function processBarcode(barcode) {
-        if (!barcode) return;
-      
-        if (currentBatch[barcode]) {
-          incrementCardCount(barcode);
-        } else {
-          const item = await ExtractItemWithBarcodeFromSupabase(barcode, "item_types", "barcode", true);
-          if (item) {
-            showModalToConfirmItem(item);
-          }
+      if (!barcode) return;
+    
+      const input = document.getElementById("input-to-search-inventory-item");
+      input.value = "";     // Clear input field
+      input.focus();        // Auto-focus back for next scan
+    
+      if (currentBatch[barcode]) {
+        incrementCardCount(barcode);
+      } else {
+        const item = await ExtractItemWithBarcodeFromSupabase(barcode, "item_types", "barcode", true);
+        if (item) {
+          showModalToConfirmItem(item);
         }
+      }
     }
       
     //listener for the barcode
@@ -428,7 +434,7 @@ let currentBatch = {};
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             processBarcode(input.value.trim());
-          }, 1000);
+          }, 200);
         });
     }
 
@@ -450,6 +456,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   
     console.log("✅ Session loaded. User is authenticated.");
     searchForBarcodeListener();
+    document.getElementById("input-to-search-inventory-item").focus();
+
 
     //event listeners
 
@@ -490,6 +498,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             });      // go left or right
           }
         }
+
     });
 
     //event listener for the home button
@@ -506,6 +515,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     setupModalToConfirmItemListeners();
+
+    // 🔁 Always refocus on barcode input when clicking outside modal or toast
+    document.addEventListener("click", (e) => {
+      const input = document.getElementById("input-to-search-inventory-item");
+      const modal = document.getElementById("modalToConfirmItem");
+
+      const clickedInsideModal = modal && modal.contains(e.target);
+      const clickedToast = e.target.closest("#toast-container");
+      const clickedInput = e.target === input;
+
+      if (!clickedInsideModal && !clickedToast && !clickedInput) {
+        input.focus();
+      }
+    });
+
 });
   
 //7b41b8f
