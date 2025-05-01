@@ -7,15 +7,6 @@ body {
   padding: 20px;
 }
 
-main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 40px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-  align-items: center;
-}
 
 /* ================= Unified Top Control Bar – Ultra Aesthetic 🍎 ================= */
 /*#region*/
@@ -227,6 +218,26 @@ main.stock-body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
+/*barcode to be connected to input that will search for the item to be added to the inventory*/
+#input-to-search-inventory-item{
+  padding: 14px 20px;
+  font-size: 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  background: white;
+  width: 100%;
+  max-width: 400px;
+  transition: border 0.3s ease;
+}
+
+#input-to-search-inventory-item:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+
 /* 🔄 Animations */
 @keyframes popFadeIn {
   from {
@@ -287,36 +298,6 @@ svg.icon.spin {
 }
 /*#endregion*/
 
-/* ======================= Top section saying add inventory and text ======================= */
-
-h1 {
-  font-size: 2.4rem;
-  margin-bottom: 8px;
-}
-
-p {
-  font-size: 1rem;
-  color: #555;
-}
-
-/*barcode to be connected to input that will search for the item to be added to the inventory*/
-#input-to-search-inventory-item{
-  padding: 14px 20px;
-  font-size: 1rem;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
-  background: white;
-  width: 100%;
-  max-width: 400px;
-  transition: border 0.3s ease;
-}
-
-#input-to-search-inventory-item:focus {
-  outline: none;
-  border-color: #0071e3;
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
-}
 
 /*Toast container*/
 #toast-container {
@@ -518,23 +499,38 @@ p {
 
 /* =============== Inventory Card ================*/
 /*#region*/
+
+  /*Container where the cards exist*/
+  .batch-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    padding: 24px;
+    justify-items: center; /* centers individual cards within grid cells */
+  }
+  
+  
   /*general stock card*/
   .stock-card {
-  background: linear-gradient(to bottom right, rgba(255,255,255,0.95), rgba(248,248,255,0.9));
-  border-radius: 24px;
-  padding: 24px;
-  box-shadow:
-    0 14px 32px rgba(0, 0, 0, 0.06),
-    inset 0 0 1px rgba(255, 255, 255, 0.4);
-  display: flex;
-  flex-direction: column;
-  transition: all 0.35s ease;
-  position: relative;
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  z-index: 1;
-  animation: cardFadeIn 0.5s ease both;
+    background: linear-gradient(to bottom right, rgba(255,255,255,0.95), rgba(248,248,255,0.9));
+    border-radius: 20px;
+    padding: 16px;
+    max-width: 340px;        /* 🔽 Slightly smaller */
+    width: 100%;
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.05),
+      inset 0 0 1px rgba(255, 255, 255, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    transition: all 0.3s ease;
+    position: relative;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    animation: cardFadeIn 0.4s ease both;
+    margin: 0 auto;           /* 🔁 Center card if parent is not flex */
   }
+  
 
   @keyframes cardFadeIn {
     from {
@@ -549,11 +545,10 @@ p {
 
 
   .stock-card:hover {
-    transform: translateY(-4px) scale(1.012);
+    transform: translateY(-2px) scale(1.01);
     box-shadow:
-      0 18px 48px rgba(0, 0, 0, 0.08),
-      inset 0 0 1px rgba(255, 255, 255, 0.5);
-    z-index: 5;
+      0 16px 32px rgba(0, 0, 0, 0.06),
+      inset 0 0 1px rgba(255, 255, 255, 0.4);
   }
 
   @keyframes selectPulse {
@@ -570,16 +565,12 @@ p {
     }
   }
   
-  .stock-card:hover{
-    transform: translateY(-2px);
-    opacity: 1;
-  }
   
   /* Card Text Info */
   .stock-content p {
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
     margin: 0.25rem 0;
-    line-height: 1.5;
     font-family: 'DM Serif Display', serif;
     color: #1d1d1f;
   }
@@ -621,7 +612,7 @@ p {
     .stock-photo-preview,
     .carousel-photo {
       width: 100%;
-      height: 220px;
+      height: 140px;
       object-fit: cover;
       border-radius: 20px;
       transition: transform 0.3s ease;
@@ -660,7 +651,7 @@ p {
     .carousel {
       position: relative;
       width: 100%;
-      height: 220px;
+      height: 140px;
       overflow: hidden;
       border-radius: 20px;
     }
@@ -668,7 +659,7 @@ p {
     .carousel-track {
       display: flex;
       width: 100%;
-      height: 100%;
+      height: 140px;
       transition: transform 0.3s ease;
     }
 

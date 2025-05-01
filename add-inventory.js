@@ -269,8 +269,13 @@ let currentBatch = {};
         item, 
         index,
         hiddenOneFieldsCardContent: ["dymo_label_url", "description", "barcode", "cost", "created_at"] });
+        
+        // 🔍 Log the full preview card DOM element and item data
+        console.log(" Card Element:", card);
+
         batchContainer.appendChild(card);
         lucide.createIcons();  
+
         return card;
     }
       
