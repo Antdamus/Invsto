@@ -657,8 +657,8 @@ svg.icon.spin {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -669,38 +669,48 @@ svg.icon.spin {
   display: none;
 }
 
-.modal-content-mismatch {
-  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.96), rgba(250, 250, 255, 0.95));
+.modal-content-manual-mismatch {
+  background: linear-gradient(to bottom right, #ffffff, #f8f8ff);
+  backdrop-filter: blur(24px) saturate(180%);
   border-radius: 20px;
-  padding: 28px;
+  padding: 32px 36px;
   width: 100%;
-  max-width: 460px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+  max-width: 500px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  align-items: center;
+  gap: 1.6rem;
   animation: popFadeIn 0.5s ease;
   font-family: 'DM Serif Display', serif;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.modal-header-mismatch {
+.modal-header-manual-mismatch {
   font-size: 1.6rem;
   font-weight: bold;
-  text-align: center;
   color: #d93025;
-}
-
-.modal-body-mismatch {
-  font-size: 1rem;
-  color: #333;
   text-align: center;
-  line-height: 1.5;
-  padding: 0 4px;
+  margin-bottom: 0.2rem;
 }
 
-.modal-footer-mismatch {
+.modal-body-manual-mismatch {
+  background: rgba(255, 255, 255, 0.75);
+  padding: 20px 24px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.04);
+  text-align: center;
+  font-size: 1.05rem;
+  color: #222;
+  line-height: 1.6;
+  max-width: 100%;
+}
+
+.modal-footer-manual-mismatch {
   display: flex;
   justify-content: center;
+  margin-top: 12px;
 }
 
 #btn-reset-count-to-zero {
@@ -714,13 +724,14 @@ svg.icon.spin {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
 }
 
 #btn-reset-count-to-zero:hover {
   background-color: #005bb5;
   transform: translateY(-1px);
 }
+
 
 
 /* Existing styles below remain unchanged */
