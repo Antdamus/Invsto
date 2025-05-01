@@ -22,43 +22,76 @@ let currentBatch = {};
     inputField.focus();
   }
   
-  
-  //add the listeners 
-  function setupManualCountVerificationListeners() {
-    const modal = document.getElementById("modal-batch-threshold-reached");
-    const confirmBtn = document.getElementById("btn-confirm-manual-count");
-    const cancelBtn = document.getElementById("btn-cancel-manual-count");
-    const input = document.getElementById("input-manual-count");
-    const errorMsg = document.getElementById("manual-count-error-msg");
-    const inputScanner = document.getElementById("input-to-search-inventory-item");
-  
-    confirmBtn.onclick = () => {
-      const barcode = modal.dataset.barcode;
-      const batchItem = currentBatch[barcode];
-  
-      const manualCount = parseInt(input.value.trim(), 10);
-      if (isNaN(manualCount)) return;
-  
-      if (manualCount === batchItem.count) {
-        showToast("✅ Manual count confirmed. Item finalized.");
+  //listeners
+    //manual countverification listener
+    function setupManualCountVerificationListeners() {
+      const modal = document.getElementById("modal-batch-threshold-reached");
+      const confirmBtn = document.getElementById("btn-confirm-manual-count");
+      const cancelBtn = document.getElementById("btn-cancel-manual-count");
+      const input = document.getElementById("input-manual-count");
+      const errorMsg = document.getElementById("manual-count-error-msg");
+      const inputScanner = document.getElementById("input-to-search-inventory-item");
+    
+      confirmBtn.onclick = () => {
+        const barcode = modal.dataset.barcode;
+        const batchItem = currentBatch[barcode];
+    
+        const manualCount = parseInt(input.value.trim(), 10);
+        if (isNaN(manualCount)) return;
+    
+        if (manualCount === batchItem.count) {
+          showToast("✅ Manual count confirmed. Item finalized.");
+          modal.classList.add("hidden");
+          errorMsg.classList.add("hidden");
+          inputScanner.disabled = false;
+          inputScanner.focus();
+          // 🧹 Optionally clear the batch entry
+          // delete currentBatch[barcode];
+        } else {
+          errorMsg.classList.remove("hidden");
+        
+          const mismatchModal = document.getElementById("modal-manual-count-mismatch");
+          mismatchModal.dataset.barcode = barcode;
+          modal.classList.add("hidden");
+          mismatchModal.classList.remove("hidden");
+        }
+        
+      };
+    
+      cancelBtn.onclick = () => {
         modal.classList.add("hidden");
         errorMsg.classList.add("hidden");
         inputScanner.disabled = false;
         inputScanner.focus();
-        // 🧹 Optionally clear the batch entry
-        // delete currentBatch[barcode];
-      } else {
-        errorMsg.classList.remove("hidden");
-      }
-    };
-  
-    cancelBtn.onclick = () => {
-      modal.classList.add("hidden");
-      errorMsg.classList.add("hidden");
-      inputScanner.disabled = false;
-      inputScanner.focus();
-    };
-  }
+      };
+    }
+
+    //missmatch in count listener 
+    function setupMismatchResetModalListener() {
+      const modal = document.getElementById("modal-manual-count-mismatch");
+      const okButton = document.getElementById("btn-reset-count-to-zero");
+      const scannerInput = document.getElementById("input-to-search-inventory-item");
+    
+      okButton.onclick = () => {
+        const barcode = modal.dataset.barcode;
+        if (!barcode || !currentBatch[barcode]) return;
+    
+        const batchItem = currentBatch[barcode];
+        batchItem.count = 0;
+    
+        // Reset UI counter
+        const unitDisplay = batchItem.cardEl.querySelector(".units-scanned");
+        if (unitDisplay) {
+          unitDisplay.textContent = `Units Scanned: 0`;
+        }
+    
+        // Hide the modal and refocus scanner
+        modal.classList.add("hidden");
+        scannerInput.disabled = false;
+        scannerInput.focus();
+      };
+    }
+    
   
 
 //#endregion 
@@ -593,9 +626,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Trigger haptic pulse animation
       toggleBtn.classList.add("haptic");
       setTimeout(() => toggleBtn.classList.remove("haptic"), 1);
-    });
+    }); 
 
+    //event listener for the confirm manual count
     setupModalToConfirmItemListeners();
+
+    //event listener for error if the manual count does not match scanned count
+    setupMismatchResetModalListener();
+
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast
     document.addEventListener("click", (e) => {
@@ -610,6 +648,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         input.focus();
       }
     });
+
 
 });
   
