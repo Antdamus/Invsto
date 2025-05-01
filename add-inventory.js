@@ -57,6 +57,13 @@ let currentBatch = {};
         }
     }
 
+    //function to play sound after item is scanned
+    function playScanSound() {
+      const audio = document.getElementById("scan-sound");
+      if (audio) audio.play();
+    }
+    
+
     //#region Rendering card item that matched barcode
         //#region buil image carousel
             //Move to next image in carousel for a given card
@@ -248,18 +255,46 @@ let currentBatch = {};
         currentBatch = {};
         document.getElementById("batch-items-container").innerHTML = "";
     }
+
+    //function to coordinate card animation on update
+    function animateCardUpdate(cardElement) {
+      // Remove any animation classes in case they’re still there
+      cardElement.classList.remove("updated", "updated-flip", "flash-border");
+    
+      // Force reflow to restart animation
+      void cardElement.offsetWidth;
+    
+      // Re-add animation classes
+      cardElement.classList.add("updated", "updated-flip", "flash-border");
+    
+      // Clean up after animation
+      setTimeout(() => {
+        cardElement.classList.remove("flash-border");
+      }, 500);
+    
+      setTimeout(() => {
+        cardElement.classList.remove("updated");
+        // Optional: keep flip for more visual flair, or remove it here
+        // cardElement.classList.remove("updated-flip");
+      }, 500);
+    
+      playScanSound();
+    }
+    
       
     //function necessary to increment the stock count once the card has been already created
     function incrementCardCount(barcode) {
-        const batchItem = currentBatch[barcode];
-        batchItem.count++;
-      
-        // Update the card's Units Scanned visually
-        const unitDisplay = batchItem.cardEl.querySelector(".units-scanned"); // You must put a class to find it
-        if (unitDisplay) {
-          unitDisplay.textContent = `Units Scanned: ${batchItem.count}`;
-        }
+      const batchItem = currentBatch[barcode];
+      batchItem.count++;
+    
+      const unitDisplay = batchItem.cardEl.querySelector(".units-scanned");
+      if (unitDisplay) {
+        unitDisplay.textContent = `Units Scanned: ${batchItem.count}`;
+      }
+    
+      animateCardUpdate(batchItem.cardEl);
     }
+    
 
     //function to render the card and put into the DOM
     function createCardForItem(item, ContainerForCardInjection = "batch-items-container") {
