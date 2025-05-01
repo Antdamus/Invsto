@@ -84,15 +84,30 @@
         <div class="modal-header-batch-threshold">
           Item Reached Batch Limit
         </div>
+
         <div class="modal-body-batch-threshold">
           <p>This item has been scanned the maximum allowed times for this batch.</p>
-          <p>Please place it in its assigned location and verify the count before continuing.</p>
+          <p>Please place it in its assigned location and perform a manual count.</p>
+
+          <p><strong>Scanned Count:</strong> <span id="scanned-count-display">—</span></p>
+
+          <label for="input-manual-count">
+            Enter Manual Count:
+            <input type="number" id="input-manual-count" min="0" class="input-style-manual-count" placeholder="Enter confirmed quantity" />
+          </label>
+
+          <p id="manual-count-error-msg" class="manual-count-error hidden">
+            ❌ The manual count does not match the scanned count. Please recount and try again.
+          </p>
         </div>
+
         <div class="modal-footer-batch-threshold">
-          <button id="btn-close-batch-threshold-modal" class="btn-batch-threshold-close">OK</button>
+          <button id="btn-confirm-manual-count" class="btn-batch-threshold-confirm">Confirm Count</button>
+          <button id="btn-cancel-manual-count" class="btn-batch-threshold-close">Cancel</button>
         </div>
       </div>
     </div>
+
 
 
   <audio id="scan-sound" src="scan-ding.mp3" preload="auto"></audio>

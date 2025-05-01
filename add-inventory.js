@@ -7,19 +7,57 @@ let currentBatch = {};
   //function to coordinate the display of the mmodal
   function showBatchThresholdModal(batchItem) {
     const modal = document.getElementById("modal-batch-threshold-reached");
-    const closeBtn = document.getElementById("btn-close-batch-threshold-modal");
+    const scannedCountDisplay = document.getElementById("scanned-count-display");
+    const inputField = document.getElementById("input-manual-count");
+    const errorMsg = document.getElementById("manual-count-error-msg");
     const input = document.getElementById("input-to-search-inventory-item");
   
-    modal.classList.remove("hidden");
-    input.disabled = true; // 🔒 Disable scanner input
+    modal.dataset.barcode = batchItem.item.barcode;
+    scannedCountDisplay.textContent = batchItem.count;
+    inputField.value = "";
+    errorMsg.classList.add("hidden");
   
-    closeBtn.onclick = () => {
-      modal.classList.add("hidden");
-      input.disabled = false; // ✅ Re-enable scanner input
-      input.focus(); // Refocus
+    modal.classList.remove("hidden");
+    input.disabled = true;
+    inputField.focus();
+  }
+  
+  
+  //add the listeners 
+  function setupManualCountVerificationListeners() {
+    const modal = document.getElementById("modal-batch-threshold-reached");
+    const confirmBtn = document.getElementById("btn-confirm-manual-count");
+    const cancelBtn = document.getElementById("btn-cancel-manual-count");
+    const input = document.getElementById("input-manual-count");
+    const errorMsg = document.getElementById("manual-count-error-msg");
+    const inputScanner = document.getElementById("input-to-search-inventory-item");
+  
+    confirmBtn.onclick = () => {
+      const barcode = modal.dataset.barcode;
+      const batchItem = currentBatch[barcode];
+  
+      const manualCount = parseInt(input.value.trim(), 10);
+      if (isNaN(manualCount)) return;
+  
+      if (manualCount === batchItem.count) {
+        showToast("✅ Manual count confirmed. Item finalized.");
+        modal.classList.add("hidden");
+        errorMsg.classList.add("hidden");
+        inputScanner.disabled = false;
+        inputScanner.focus();
+        // 🧹 Optionally clear the batch entry
+        // delete currentBatch[barcode];
+      } else {
+        errorMsg.classList.remove("hidden");
+      }
     };
   
-    modal.dataset.barcode = batchItem.item.barcode;
+    cancelBtn.onclick = () => {
+      modal.classList.add("hidden");
+      errorMsg.classList.add("hidden");
+      inputScanner.disabled = false;
+      inputScanner.focus();
+    };
   }
   
 
@@ -476,6 +514,10 @@ let currentBatch = {};
           }, 200);
         });
     }
+
+    //manual verification listerner count 
+    setupManualCountVerificationListeners();
+
 
 //#endregion  
     
