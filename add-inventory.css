@@ -506,9 +506,20 @@ svg.icon.spin {
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 24px;
     padding: 24px;
-    justify-items: center; /* centers individual cards within grid cells */
+    justify-items: center;
+    justify-content: center;  /* ⬅ Add this */
+    max-width: 1200px;        /* ⬅ Add this */
+    margin: 0 auto;           /* ⬅ Center horizontally */
   }
   
+  #current-batch-heading {
+    text-align: center;
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin: 32px 0 12px;
+    color: #1d1d1f;
+    font-family: 'DM Serif Display', serif;
+  }
   
   /*general stock card*/
   .stock-card {
