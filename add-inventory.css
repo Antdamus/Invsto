@@ -866,7 +866,7 @@ svg.icon.spin {
     
     
     .stock-card.flash-border {
-      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.3);
+      box-shadow: 0 0 0 4px rgba(0, 200, 83, 0.4); /* Bright green */
       transition: box-shadow 0.3s ease;
     }
     

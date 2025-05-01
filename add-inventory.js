@@ -270,7 +270,7 @@ let currentBatch = {};
       // Clean up after animation
       setTimeout(() => {
         cardElement.classList.remove("flash-border");
-      }, 500);
+      }, 1000);
     
       setTimeout(() => {
         cardElement.classList.remove("updated");
