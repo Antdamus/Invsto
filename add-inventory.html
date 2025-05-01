@@ -53,30 +53,47 @@
   <div id="toast-container"></div>
 
   <!-- Modal Popup -->
-  <!-- Modal to Confirm Item -->
-  <div id="modalToConfirmItem" class="modal hidden">
-    <div class="modal-content-confirmitem">
-      
-      <!-- Modal Title Header -->
-      <div class="modal-header">
-        Confirm Item
+    <!-- Modal to Confirm Item -->
+    <div id="modalToConfirmItem" class="modal hidden">
+      <div class="modal-content-confirmitem">
+        
+        <!-- Modal Title Header -->
+        <div class="modal-header">
+          Confirm Item
+        </div>
+    
+        <!-- Scrollable Content Section -->
+        <div class="modal-body-scrollable">
+          <div id="modalItemInfo">
+            <!-- Your dynamic item content will be injected here -->
+          </div>
+        </div>
+    
+        <!-- Button Footer -->
+        <div id="modal-buttons-confirmitem">
+          <button id="confirmAddItemBtn" class="confirm-btn">Confirm</button>
+          <button id="cancelAddItemBtn" class="cancel-btn">Cancel</button>
+        </div>
+    
       </div>
-  
-      <!-- Scrollable Content Section -->
-      <div class="modal-body-scrollable">
-        <div id="modalItemInfo">
-          <!-- Your dynamic item content will be injected here -->
+    </div>
+
+    <!-- Modal: Item Reached Batch Threshold -->
+    <div id="modal-batch-threshold-reached" class="modal hidden">
+      <div class="modal-content-batch-threshold">
+        <div class="modal-header-batch-threshold">
+          Item Reached Batch Limit
+        </div>
+        <div class="modal-body-batch-threshold">
+          <p>This item has been scanned the maximum allowed times for this batch.</p>
+          <p>Please place it in its assigned location and verify the count before continuing.</p>
+        </div>
+        <div class="modal-footer-batch-threshold">
+          <button id="btn-close-batch-threshold-modal" class="btn-batch-threshold-close">OK</button>
         </div>
       </div>
-  
-      <!-- Button Footer -->
-      <div id="modal-buttons-confirmitem">
-        <button id="confirmAddItemBtn" class="confirm-btn">Confirm</button>
-        <button id="cancelAddItemBtn" class="cancel-btn">Cancel</button>
-      </div>
-  
     </div>
-  </div>
+
 
   <audio id="scan-sound" src="scan-ding.mp3" preload="auto"></audio>
 

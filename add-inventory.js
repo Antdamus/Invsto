@@ -2,6 +2,28 @@
 let pendingItem = null; // Store the scanned item awaiting confirmation
 let currentBatch = {}; 
 
+//#region full logic to what will be done once the item reaches its limit
+
+  //function to coordinate the display of the mmodal
+  function showBatchThresholdModal(batchItem) {
+    const modal = document.getElementById("modal-batch-threshold-reached");
+    const closeBtn = document.getElementById("btn-close-batch-threshold-modal");
+    const input = document.getElementById("input-to-search-inventory-item");
+  
+    modal.classList.remove("hidden");
+    input.disabled = true; // 🔒 Disable scanner input
+  
+    closeBtn.onclick = () => {
+      modal.classList.add("hidden");
+      input.disabled = false; // ✅ Re-enable scanner input
+      input.focus(); // Refocus
+    };
+  
+    modal.dataset.barcode = batchItem.item.barcode;
+  }
+  
+
+//#endregion 
 
 //#region Full logic to get an item from supabase and get the barcode
     //show toast function
@@ -284,6 +306,13 @@ let currentBatch = {};
     //function necessary to increment the stock count once the card has been already created
     function incrementCardCount(barcode) {
       const batchItem = currentBatch[barcode];
+    
+      if (batchItem.count >= batchItem.maxCount) {
+        showToast("🚫 This item has already reached its batch limit.");
+        showBatchThresholdModal(batchItem); // 🔁 Re-trigger modal every time
+        return;
+      }
+    
       batchItem.count++;
     
       const unitDisplay = batchItem.cardEl.querySelector(".units-scanned");
@@ -292,7 +321,14 @@ let currentBatch = {};
       }
     
       animateCardUpdate(batchItem.cardEl);
+    
+      if (batchItem.count >= batchItem.maxCount) {
+        showBatchThresholdModal(batchItem); // 👈 Initial trigger
+      }
     }
+    
+    
+    
     
 
     //function to render the card and put into the DOM
@@ -315,13 +351,16 @@ let currentBatch = {};
       
     //function that will be used to initialize the card for the first time
     function handleScannedItem(item) {
-        const card = createCardForItem(item);
-        currentBatch[item.barcode] = {
-          item,
-          count: 1,
-          cardEl: card
-        };
+      const card = createCardForItem(item);
+    
+      currentBatch[item.barcode] = {
+        item,
+        count: 1,
+        maxCount: item.stock_batch_size_update || 10, // 🔢 Use item's custom batch size or default to 10
+        cardEl: card
+      };
     }
+    
 
     // Function to hide the confirmation modal
     function hideModalToConfirmItem() {
