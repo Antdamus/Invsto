@@ -21,8 +21,6 @@ body.modal-open {
   left: 0;
 }
 
-
-
 /* ================= Unified Top Control Bar – Ultra Aesthetic 🍎 ================= */
 /*#region*/
 /* 🌤 Global Body */
@@ -380,8 +378,6 @@ svg.icon.spin {
   transform-origin: center center;   /* Centered scale shrink */
 }
 
-
-
 /* Modal Header */
 .modal-header {
   font-size: 1.6rem;
@@ -506,8 +502,6 @@ svg.icon.spin {
   0% { opacity: 0; transform: scale(0.96); }
   100% { opacity: 1; transform: scale(1); }
 }
-
-
 
 /*#endregion*/
 
@@ -1097,7 +1091,6 @@ svg.icon.spin {
   background: transparent;
 }
 
-
 .modal-content-addlocation h2 {
   font-size: 1.7rem;
   font-weight: 600;
@@ -1109,13 +1102,16 @@ svg.icon.spin {
 #form-add-location {
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
+  gap: 1.4rem;
+  align-items: center; /* center content horizontally */
+  width: 100%;
 }
 
 #form-add-location label {
-  font-size: 1rem;
-  font-weight: 500;
-  color: #333;
+  align-self: flex-start;
+  padding-left: 8px;
+  max-width: 480px;
+  width: 100%;
 }
 
 #form-add-location input,
@@ -1128,8 +1124,10 @@ svg.icon.spin {
   background: white;
   font-family: 'DM Serif Display', serif;
   transition: border 0.3s ease, box-shadow 0.3s ease;
-  width: 100%;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 480px; /* or 100% on mobile */
+  box-sizing: border-box;
 }
 
 #form-add-location input:focus,
@@ -1177,8 +1175,60 @@ svg.icon.spin {
 #btn-cancel-location:hover {
   background-color: rgba(217, 48, 37, 0.05);
 }
-/*#endregion*/
 
+@media (max-width: 480px) {
+  #form-add-location input,
+  #form-add-location textarea,
+  #form-add-location select,
+  #form-add-location label {
+    max-width: 100%;
+  }
+}
+
+/* ===================== Barcode Preview in Modal ===================== */
+#barcode-canvas-location {
+  display: block;
+  margin: 0 auto;
+  padding: 12px 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: linear-gradient(to bottom, #fff, #f9f9f9);
+  border: 1px solid rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* 🔳 Barcode Preview for Add Location Modal */
+.barcode-preview-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 12px 0;
+  border: 1px dashed #ccc;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.generate-barcode-btn {
+  margin: 8px 0;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background-color: #0071e3;
+  color: white;
+  font-family: 'DM Serif Display', serif;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  width: fit-content;
+  align-self: flex-start;
+}
+
+.generate-barcode-btn:hover {
+  background-color: #005bb5;
+}
+
+/*#endregion*/
 
 /* =============== Inventory Card ================*/
 /*#region*/

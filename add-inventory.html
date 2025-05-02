@@ -10,6 +10,8 @@
   <!-- 🧱 Google Icons: Outlined and Filled -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+
 </head>
 <body>
   
@@ -196,7 +198,18 @@
     
           <!-- 📦 Location Barcode -->
           <label for="location-barcode">Barcode</label>
-          <input type="text" id="location-barcode" name="location_barcode" />
+          <input type="text" id="location-barcode" name="location_barcode" readonly />
+
+          <!-- 🔘 Manual Generate Button -->
+          <button type="button" id="btn-generate-location-barcode" class="generate-barcode-btn">
+            🔄 Generate New Barcode
+          </button>
+
+          <!-- 🖨 Barcode Preview -->
+          <div class="barcode-preview-wrapper">
+            <canvas id="barcode-canvas-location"></canvas>
+          </div>
+
     
           <!-- 🧮 Max Capacity (optional) -->
           <label for="location-capacity">Max Capacity</label>

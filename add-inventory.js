@@ -22,7 +22,6 @@ let currentBatch = {};
     }
   }
   
-
   // ✅ Updated to pull from the `locations` table
   async function fetchUniqueLocationNames() {
     const { data, error } = await supabase
@@ -252,7 +251,6 @@ let currentBatch = {};
     inputField.focus();
   }
 
-  
   //listeners
     //manual countverification listener
     function setupManualCountVerificationListeners() {
@@ -384,20 +382,40 @@ let currentBatch = {};
       const capacityInput = document.getElementById("location-capacity");
       const photoInput = document.getElementById("location-photo");
       const notesInput = document.getElementById("location-notes");
+      const generateBtn = document.getElementById("btn-generate-location-barcode");
     
+      // 🔁 Shared barcode generator
+      function generateAndRenderLocationBarcode() {
+        const generatedCode = `LOC-${Date.now().toString().slice(-6)}`;
+        JsBarcode("#barcode-canvas-location", generatedCode, {
+          format: "CODE128",
+          displayValue: true,
+          fontSize: 16,
+          height: 60
+        });
+        barcodeInput.value = generatedCode;
+      }
+    
+      // Clear form fields
       function clearForm() {
         nameInput.value = "";
         barcodeInput.value = "";
         capacityInput.value = "";
         notesInput.value = "";
         photoInput.value = "";
+        // Optionally clear canvas too:
+        const canvas = document.getElementById("barcode-canvas-location");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     
+      // 🪄 Open/close modal with optional barcode generation
       function toggleModal(show = true) {
         if (show) {
           modal.classList.remove("hidden");
           updateBarcodeInputStateBasedOnModals();
           nameInput.focus();
+          generateAndRenderLocationBarcode(); // 🆕 Auto-generate
         } else {
           modal.classList.add("hidden");
           updateBarcodeInputStateBasedOnModals();
@@ -405,8 +423,8 @@ let currentBatch = {};
         }
       }
     
-      // Show modal externally via:
-      // toggleModal(true); (e.g. when "Create +" is clicked)
+      // 🧲 Generate on button click
+      generateBtn.addEventListener("click", generateAndRenderLocationBarcode);
     
       cancelBtn.addEventListener("click", () => toggleModal(false));
     
@@ -456,12 +474,10 @@ let currentBatch = {};
     
         showToast("✅ Location saved!");
         toggleModal(false);
-        await populateLocationDropdown(); // Refresh dropdown options
+        await populateLocationDropdown();
       });
     }
     
-    
-
 //#endregion
 
     
