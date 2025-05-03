@@ -196,7 +196,6 @@
           <label for="location-name">Location Name</label>
           <input type="text" id="location-name" name="location_name" required />
 
-          <!-- 🏷️ Location Type (Custom Dropdown with Create Option) -->
           <!-- 🏷️ Location Type -->
           <label for="location-type">Location Type</label>
           <div id="location-type-dropdown-container" class="custom-dropdown">
@@ -207,8 +206,6 @@
           </div>
           <input type="hidden" id="location-type" name="type" />
 
-
-    
           <!-- 📦 Location Barcode -->
           <label for="location-barcode">Barcode</label>
           <input type="text" id="location-barcode" name="location_barcode" readonly />
@@ -234,7 +231,12 @@
           <!-- 📷 Upload Image -->
           <label for="location-photo">Photo</label>
           <input type="file" id="location-photo" name="photo" accept="image/*" />
-    
+
+          <!-- 📸 Live Photo Preview -->
+          <div id="photo-preview-wrapper" class="photo-preview-wrapper hidden">
+            <img id="photo-preview-image" alt="Preview" />
+          </div>
+
           <!-- 📝 Notes -->
           <label for="location-notes">Notes</label>
           <textarea id="location-notes" name="notes" rows="3"></textarea>

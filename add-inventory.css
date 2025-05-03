@@ -1333,6 +1333,24 @@ svg.icon.spin {
   box-sizing: border-box;
 }
 
+.photo-preview-wrapper {
+  margin-top: 12px;
+  padding: 8px;
+  border: 1px dashed rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  background: #fafafa;
+  text-align: center;
+  max-width: 480px;
+  width: 100%;
+}
+
+.photo-preview-wrapper img {
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
 /* ✨ Animation for dropdown reveal */
 @keyframes fadeSlideDown {
   0% {

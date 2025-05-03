@@ -398,6 +398,25 @@ let latestLocationDymoUrl = null;
       const barcodeInput = document.getElementById("location-barcode");
       const capacityInput = document.getElementById("location-capacity");
       const photoInput = document.getElementById("location-photo");
+      const previewWrapper = document.getElementById("photo-preview-wrapper");
+      const previewImage = document.getElementById("photo-preview-image");
+
+      photoInput.addEventListener("change", () => {
+        const file = photoInput.files?.[0];
+        if (!file) {
+          previewWrapper.classList.add("hidden");
+          previewImage.src = "";
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewImage.src = e.target.result;
+          previewWrapper.classList.remove("hidden");
+        };
+        reader.readAsDataURL(file);
+      });
+
       const notesInput = document.getElementById("location-notes");
       const generateBtn = document.getElementById("btn-generate-location-barcode");
     
@@ -702,6 +721,7 @@ let latestLocationDymoUrl = null;
         toggleModal(false);
         await populateLocationDropdown();
       });
+
     }
     
 //#endregion
