@@ -1228,6 +1228,17 @@ svg.icon.spin {
   background-color: #005bb5;
 }
 
+.dymo-link-preview {
+  font-size: 0.95rem;
+  font-family: "DM Serif Display", serif;
+  margin-top: 12px;
+}
+.dymo-link-preview a {
+  color: #0066cc;
+  text-decoration: underline;
+}
+
+
 /*#endregion*/
 
 /* =============== Inventory Card ================*/

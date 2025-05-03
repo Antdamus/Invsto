@@ -1,6 +1,8 @@
 
 let pendingItem = null; // Store the scanned item awaiting confirmation
 let currentBatch = {}; 
+let latestLocationDymoXml = null;
+let latestLocationDymoUrl = null;
 
 //#region full logic to what will be done once the item reaches its limit
   //function to turn on and off the autofocus and the input of adding items by barcode
@@ -394,7 +396,145 @@ let currentBatch = {};
           height: 60
         });
         barcodeInput.value = generatedCode;
+      
+        // ⬇️ Generate DYMO XML for location (only barcode)
+        latestLocationDymoXml = `<?xml version="1.0" encoding="utf-8"?>
+        <DesktopLabel Version="1">
+          <DYMOLabel Version="4">
+            <Description>DYMO Label</Description>
+            <Orientation>Landscape</Orientation>
+            <LabelName>Small30346</LabelName>
+            <InitialLength>0</InitialLength>
+            <BorderStyle>SolidLine</BorderStyle>
+            <DYMORect>
+              <DYMOPoint>
+                <X>0.22666666</X>
+                <Y>0.056666665</Y>
+              </DYMOPoint>
+              <Size>
+                <Width>1.59</Width>
+                <Height>0.4033333</Height>
+              </Size>
+            </DYMORect>
+            <BorderColor>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </BorderColor>
+            <BorderThickness>1</BorderThickness>
+            <Show_Border>False</Show_Border>
+            <HasFixedLength>False</HasFixedLength>
+            <FixedLengthValue>0</FixedLengthValue>
+            <DynamicLayoutManager>
+              <RotationBehavior>ClearObjects</RotationBehavior>
+              <LabelObjects>
+                <BarcodeObject>
+                  <Name>BarcodeObject0</Name>
+                  <Brushes>
+                    <BackgroundBrush>
+                      <SolidColorBrush>
+                        <Color A="1" R="1" G="1" B="1"></Color>
+                      </SolidColorBrush>
+                    </BackgroundBrush>
+                    <BorderBrush>
+                      <SolidColorBrush>
+                        <Color A="1" R="0" G="0" B="0"></Color>
+                      </SolidColorBrush>
+                    </BorderBrush>
+                    <StrokeBrush>
+                      <SolidColorBrush>
+                        <Color A="1" R="0" G="0" B="0"></Color>
+                      </SolidColorBrush>
+                    </StrokeBrush>
+                    <FillBrush>
+                      <SolidColorBrush>
+                        <Color A="1" R="0" G="0" B="0"></Color>
+                      </SolidColorBrush>
+                    </FillBrush>
+                  </Brushes>
+                  <Rotation>Rotation0</Rotation>
+                  <OutlineThickness>1</OutlineThickness>
+                  <IsOutlined>False</IsOutlined>
+                  <BorderStyle>SolidLine</BorderStyle>
+                  <Margin>
+                    <DYMOThickness Left="0" Top="0" Right="0" Bottom="0" />
+                  </Margin>
+                  <BarcodeFormat>Code128Auto</BarcodeFormat>
+                  <Data>
+                    <DataString>${generatedCode}</DataString>
+                  </Data>
+                  <HorizontalAlignment>Center</HorizontalAlignment>
+                  <VerticalAlignment>Middle</VerticalAlignment>
+                  <Size>AutoFit</Size>
+                  <TextPosition>Bottom</TextPosition>
+                  <FontInfo>
+                    <FontName>Arial</FontName>
+                    <FontSize>8</FontSize>
+                    <IsBold>False</IsBold>
+                    <IsItalic>False</IsItalic>
+                    <IsUnderline>False</IsUnderline>
+                    <FontBrush>
+                      <SolidColorBrush>
+                        <Color A="1" R="0" G="0" B="0"></Color>
+                      </SolidColorBrush>
+                    </FontBrush>
+                  </FontInfo>
+                  <ObjectLayout>
+                    <DYMOPoint>
+                      <X>0.22666667</X>
+                      <Y>0.06666668</Y>
+                    </DYMOPoint>
+                    <Size>
+                      <Width>1.3885133</Width>
+                      <Height>0.39078796</Height>
+                    </Size>
+                  </ObjectLayout>
+                </BarcodeObject>
+              </LabelObjects>
+            </DynamicLayoutManager>
+          </DYMOLabel>
+          <LabelApplication>Blank</LabelApplication>
+          <DataTable>
+            <Columns></Columns>
+            <Rows></Rows>
+          </DataTable>
+        </DesktopLabel>`;
+
+        // Immediately upload DYMO file and show link
+        (async () => {
+          const labelPath = `labels/location_${Date.now()}.dymo`;
+          const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+
+          const { error: uploadError } = await supabase.storage
+            .from("dymo-labels")
+            .upload(labelPath, blob, { upsert: true });
+
+          if (uploadError) {
+            console.error("❌ Failed to upload DYMO file early:", uploadError);
+            return;
+          }
+
+          const { data: signedData, error: urlError } = await supabase.storage
+            .from("dymo-labels")
+            .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10); // 10 years
+
+          if (urlError) {
+            console.error("❌ Failed to get signed URL for DYMO file:", urlError);
+            return;
+          }
+
+          latestLocationDymoUrl = signedData.signedUrl;
+
+          // Inject the link into the modal
+          const linkContainer = document.getElementById("dymo-link-preview");
+          if (linkContainer) {
+            linkContainer.innerHTML = `<a href="${latestLocationDymoUrl}" target="_blank">📎 View DYMO Label</a>`;
+          }
+        })();
+
+
       }
+      
     
       // Clear form fields
       function clearForm() {
@@ -445,6 +585,27 @@ let currentBatch = {};
         showToast("Uploading...");
     
         let photo_url = null;
+        let dymo_label_url = null;
+
+        if (latestLocationDymoXml) {
+          const labelPath = `labels/location_${Date.now()}.dymo`;
+          const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+
+          const { error: uploadError } = await supabase.storage
+            .from("dymo-labels")
+            .upload(labelPath, blob, { upsert: true });
+
+          if (!uploadError) {
+            const { data: signedData, error: urlError } = await supabase.storage
+              .from("dymo-labels")
+              .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10); // 10 years
+
+            if (!urlError) {
+              dymo_label_url = signedData.signedUrl;
+            }
+          }
+        }
+
         if (photoFile) {
           const { data, error } = await supabase.storage
             .from("location-assets")
@@ -463,7 +624,8 @@ let currentBatch = {};
           max_capacity: max_capacity ? parseInt(max_capacity) : null,
           notes,
           active: true,
-          photo_url
+          photo_url,
+          dymo_label_url
         });
     
         if (insertError) {
@@ -950,7 +1112,6 @@ let currentBatch = {};
 
 //#endregion  
     
-
 document.addEventListener("DOMContentLoaded", async () => {
     const { data: { session }, error } = await supabase.auth.getSession();
   
@@ -1052,5 +1213,3 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
 });
-  
-//7b41b8f
