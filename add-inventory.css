@@ -1238,6 +1238,112 @@ svg.icon.spin {
   text-decoration: underline;
 }
 
+/* ================= 🔽 Location Type Dropdown ================= */
+/* 🧱 Wrapper container with rounded button toggle */
+#location-type-dropdown-container.custom-dropdown {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+/* 🔘 Toggle button styling */
+#location-type-dropdown-toggle.dropdown-toggle {
+  width: 100%;
+  max-width: 480px;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  transition: all 0.25s ease;
+  text-align: left;
+}
+
+#location-type-dropdown-toggle:hover {
+  background: #f8f8f8;
+}
+
+/* 🧱 Dropdown menu box */
+#location-type-dropdown-menu.dropdown-menu {
+  position: absolute;
+  z-index: 999;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  max-height: 280px;
+  overflow-y: auto;
+  display: none;
+  animation: fadeSlideDown 0.25s ease-out;
+}
+
+/* 🔁 Show state */
+#location-type-dropdown-menu.show {
+  display: block;
+}
+
+/* 🔎 Search input inside dropdown */
+#location-type-search {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 8px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+#location-type-search:focus {
+  border-color: #888;
+}
+
+/* 🟫 Option item styling */
+.dropdown-option {
+  padding: 10px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  font-family: 'DM Serif Display', serif;
+}
+
+.dropdown-option:hover {
+  background: #f0f0f0;
+}
+
+/* 📐 Inner container if needed */
+.dropdown-options-container {
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#form-add-location .custom-dropdown {
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
+}
+
+/* ✨ Animation for dropdown reveal */
+@keyframes fadeSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /*#endregion*/
 

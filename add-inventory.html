@@ -195,6 +195,19 @@
           <!-- 📍 Location Name -->
           <label for="location-name">Location Name</label>
           <input type="text" id="location-name" name="location_name" required />
+
+          <!-- 🏷️ Location Type (Custom Dropdown with Create Option) -->
+          <!-- 🏷️ Location Type -->
+          <label for="location-type">Location Type</label>
+          <div id="location-type-dropdown-container" class="custom-dropdown">
+            <button id="location-type-dropdown-toggle" type="button" class="dropdown-toggle">
+              Select Location Type
+            </button>
+            <div id="location-type-dropdown-menu" class="dropdown-menu"></div>
+          </div>
+          <input type="hidden" id="location-type" name="type" />
+
+
     
           <!-- 📦 Location Barcode -->
           <label for="location-barcode">Barcode</label>

@@ -24,6 +24,22 @@ let latestLocationDymoUrl = null;
     }
   }
   
+  //function to fetch the unique location types from the lcoation tables 
+  async function fetchUniqueLocationTypes() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("type")
+      .neq("type", null);
+  
+    if (error) {
+      console.error("❌ Failed to fetch location types:", error);
+      return [];
+    }
+  
+    const uniqueTypes = [...new Set(data.map(row => row.type).filter(Boolean))];
+    return uniqueTypes.sort((a, b) => a.localeCompare(b));
+  }
+  
   // ✅ Updated to pull from the `locations` table
   async function fetchUniqueLocationNames() {
     const { data, error } = await supabase
@@ -301,7 +317,6 @@ let latestLocationDymoUrl = null;
         inputScanner.focus();
       };
     }
-    
 
     //missmatch in count listener 
     function setupMismatchResetModalListener() {
@@ -535,7 +550,48 @@ let latestLocationDymoUrl = null;
 
       }
       
-    
+      //lazy dropdown creation
+      let activeDropdown = null;
+      document.addEventListener("click", async (e) => {
+        const isToggle = e.target.id === "location-type-dropdown-toggle";
+        if (!isToggle) return;
+
+        const button = e.target;
+        const menu = document.getElementById("location-type-dropdown-menu");
+
+        // 🧹 Close any other dropdowns
+        if (activeDropdown && activeDropdown !== menu) {
+          activeDropdown.classList.remove("show");
+        }
+
+        // 🧠 Populate only once
+        if (!menu.dataset.populated) {
+          const types = await fetchUniqueLocationTypes();
+          renderDropdownOptionsCustom({
+            menuId: "location-type-dropdown-menu",
+            options: types,
+            searchId: "location-type-search",
+            placeholder: "Search or create location type...",
+            optionClass: "dropdown-option",
+            dataAttribute: "type",
+            optionsContainerClass: "location-type-dropdown-container",
+            onClick: (value, isNew, el) => {
+              document.getElementById("location-type").value = value;
+              button.innerText = value;
+              showToast(isNew ? `➕ Created new type: ${value}` : `🏷️ Selected type: ${value}`);
+              menu.classList.remove("show");
+              activeDropdown = null;
+            }
+          });
+          menu.dataset.populated = "true";
+        }
+
+        // 👁️ Toggle visibility
+        menu.classList.toggle("show");
+        activeDropdown = menu.classList.contains("show") ? menu : null;
+      });
+
+      
       // Clear form fields
       function clearForm() {
         nameInput.value = "";
@@ -547,6 +603,13 @@ let latestLocationDymoUrl = null;
         const canvas = document.getElementById("barcode-canvas-location");
         const ctx = canvas.getContext("2d");
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const typeBtn = document.getElementById("location-type-dropdown-toggle");
+        const typeMenu = document.getElementById("location-type-dropdown-menu");
+        document.getElementById("location-type").value = "";
+        typeBtn.innerText = "Select Location Type";
+        typeMenu.dataset.populated = "";
+        typeMenu.innerHTML = ""; // fully reset menu
+
       }
     
       // 🪄 Open/close modal with optional barcode generation
@@ -556,6 +619,7 @@ let latestLocationDymoUrl = null;
           updateBarcodeInputStateBasedOnModals();
           nameInput.focus();
           generateAndRenderLocationBarcode(); // 🆕 Auto-generate
+          
         } else {
           modal.classList.add("hidden");
           updateBarcodeInputStateBasedOnModals();
