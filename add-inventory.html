@@ -144,31 +144,25 @@
         <!-- Modal Body -->
         <div class="modal-body-assign-location">
           
-          <!-- 🔍 Searchable Dropdown -->
-          <label for="location-dropdown-search" class="location-label">Search or Select Location</label>
-          <input
-            type="text"
-            id="location-dropdown-search"
-            class="location-search-input"
-            placeholder="Search location by name..."
-            autocomplete="off"
-          />
-
-          <div id="location-dropdown-list" class="location-dropdown-list">
-            <!-- Dropdown options will be populated dynamically -->
+          <!-- 🏷️ Location Name Dropdown -->
+          <label for="assign-location-name">Search or Select by Name</label>
+          <div id="assign-location-name-dropdown-container" class="custom-dropdown">
+            <button id="assign-location-name-dropdown-toggle" type="button" class="dropdown-toggle">
+              Select Location Name
+            </button>
+            <div id="assign-location-name-dropdown-menu" class="dropdown-menu"></div>
           </div>
+          <input type="hidden" id="assign-location-name" name="location_name" />
 
-          <!-- 📦 Scan Location Barcode -->
-          <label for="input-scan-location-barcode" class="location-label">
-            Or Scan Location Barcode:
-          </label>
-          <input
-            type="text"
-            id="input-scan-location-barcode"
-            class="location-scan-input"
-            placeholder="Scan barcode here..."
-            autocomplete="off"
-          />
+          <!-- 📎 Location Barcode Dropdown -->
+          <label for="assign-location-barcode">Search by Barcode</label>
+          <div id="assign-location-barcode-dropdown-container" class="custom-dropdown">
+            <button id="assign-location-barcode-dropdown-toggle" type="button" class="dropdown-toggle">
+              Select Barcode
+            </button>
+            <div id="assign-location-barcode-dropdown-menu" class="dropdown-menu"></div>
+          </div>
+          <input type="hidden" id="assign-location-barcode" name="location_barcode" />
 
           <!-- 🕘 Last Used Location Info -->
           <div id="last-used-location-info" class="location-last-used">

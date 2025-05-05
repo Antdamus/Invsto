@@ -691,14 +691,16 @@ let latestLocationDymoUrl = null;
 
         if (photoFile) {
           const { data, error } = await supabase.storage
-            .from("location-assets")
-            .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
-          if (error) {
-            showToast("❌ Failed to upload photo.");
-            return;
-          }
+          .from("location-assets")
+          .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
+
+        if (error) {
+          showToast("❌ Failed to upload photo.");
+          return;
+        }
           const { data: urlData } = supabase.storage.from("location-assets").getPublicUrl(data.path);
           photo_url = urlData.publicUrl;
+          photo_path = data.path; // ⬅️ New
         }
     
         const { error: insertError } = await supabase.from("locations").insert({
@@ -708,7 +710,9 @@ let latestLocationDymoUrl = null;
           notes,
           active: true,
           photo_url,
-          dymo_label_url
+          dymo_label_url,
+          type: document.getElementById("location-type").value || null,
+          created_at: new Date().toISOString()
         });
     
         if (insertError) {
@@ -1035,9 +1039,6 @@ let latestLocationDymoUrl = null;
         showBatchThresholdModal(batchItem); // 👈 Initial trigger
       }
     }
-    
-    
-    
     
 
     //function to render the card and put into the DOM
