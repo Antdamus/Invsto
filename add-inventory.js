@@ -23,6 +23,22 @@ let latestLocationDymoUrl = null;
       barcodeInput.focus();
     }
   }
+
+  //fetch unique location barcode
+  async function fetchUniqueLocationBarcodes() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("location_code")
+      .neq("location_code", null);
+  
+    if (error) {
+      console.error("❌ Failed to fetch location barcodes:", error);
+      return [];
+    }
+  
+    const uniqueCodes = [...new Set(data.map(row => row.location_code).filter(Boolean))];
+    return uniqueCodes.sort((a, b) => a.localeCompare(b));
+  }  
   
   //function to fetch the unique location types from the lcoation tables 
   async function fetchUniqueLocationTypes() {
@@ -204,9 +220,7 @@ let latestLocationDymoUrl = null;
       onClick: (value, isNew, el) => {
         if (isNew) {
           document.getElementById("location-name").value = value;
-          document.getElementById("modal-add-location").classList.remove("hidden");
-          updateBarcodeInputStateBasedOnModals();
-          document.getElementById("location-name").focus();
+          toggleModal(true); // 🔁 Use this instead of manual classList.remove
           return;
         }
       
@@ -215,18 +229,30 @@ let latestLocationDymoUrl = null;
       }
     });
   }
+
+  //function to show the modal for add location 
+  // 🪄 Open/close modal with optional barcode generation
+  function toggleModal(show = true) {
+    const modal = document.getElementById("modal-add-location");
+    const nameInput = document.getElementById("location-name");
+  
+    if (show) {
+      modal.classList.remove("hidden");
+      updateBarcodeInputStateBasedOnModals();
+      nameInput.focus();
+      generateAndRenderLocationBarcode();
+    } else {
+      modal.classList.add("hidden");
+      updateBarcodeInputStateBasedOnModals();
+      clearForm();
+    }
+  }
+  
   
   //function to coordinate the display of the assign location modal 
   function showAssignLocationModal(batchItem) {
     const modal = document.getElementById("modal-assign-location");
-    const searchInput = document.getElementById("location-dropdown-search");
-    const scanInput = document.getElementById("input-scan-location-barcode");
     const lastUsedLabel = document.getElementById("last-used-location-name");
-  
-    // Clear previous states
-    searchInput.value = "";
-    scanInput.value = "";
-    document.getElementById("location-dropdown-list").innerHTML = "";
   
     // Show last used location if any
     const lastLocation = batchItem.lastLocation || "—";
@@ -234,13 +260,19 @@ let latestLocationDymoUrl = null;
   
     modal.dataset.barcode = batchItem.item.barcode;
     modal.classList.remove("hidden");
+  
     updateBarcodeInputStateBasedOnModals();
-
-    populateLocationDropdown();  // ⬅ Inject dropdown when modal opens
-
-    searchInput.focus();
+  
+    populateLocationDropdown(); // this injects search field
+  
+    // Delay the focus until dropdown search is actually injected
+    setTimeout(() => {
+      const searchInput = document.getElementById("assign-location-name-search");
+      if (searchInput) searchInput.value = ""; // clear previous
+      searchInput?.focus();
+    }, 100); // small delay to wait for DOM update
   }
-
+  
   //function to coordinate the display of the limit modal
   function showBatchThresholdModal(batchItem) {
     const modal = document.getElementById("modal-batch-threshold-reached");
@@ -629,21 +661,6 @@ let latestLocationDymoUrl = null;
         typeMenu.dataset.populated = "";
         typeMenu.innerHTML = ""; // fully reset menu
 
-      }
-    
-      // 🪄 Open/close modal with optional barcode generation
-      function toggleModal(show = true) {
-        if (show) {
-          modal.classList.remove("hidden");
-          updateBarcodeInputStateBasedOnModals();
-          nameInput.focus();
-          generateAndRenderLocationBarcode(); // 🆕 Auto-generate
-          
-        } else {
-          modal.classList.add("hidden");
-          updateBarcodeInputStateBasedOnModals();
-          clearForm();
-        }
       }
     
       // 🧲 Generate on button click
@@ -1040,7 +1057,6 @@ let latestLocationDymoUrl = null;
       }
     }
     
-
     //function to render the card and put into the DOM
     function createCardForItem(item, ContainerForCardInjection = "batch-items-container") {
         const batchContainer = document.getElementById(ContainerForCardInjection); // your target div
@@ -1281,6 +1297,73 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     //event listener to add locations to the locations table
     setupLocationModalListeners();
+
+    let activeLocationDropdown = null;
+
+    document.addEventListener("click", async (e) => {
+      const isNameToggle = e.target.id === "assign-location-name-dropdown-toggle";
+      const isBarcodeToggle = e.target.id === "assign-location-barcode-dropdown-toggle";
+
+      if (!isNameToggle && !isBarcodeToggle) return;
+
+      const button = e.target;
+      const isName = isNameToggle;
+      const menu = document.getElementById(isName ? "assign-location-name-dropdown-menu" : "assign-location-barcode-dropdown-menu");
+
+      if (activeLocationDropdown && activeLocationDropdown !== menu) {
+        activeLocationDropdown.classList.remove("show");
+      }
+
+      if (!menu.dataset.populated) {
+        const options = isName
+          ? await fetchUniqueLocationNames()
+          : await fetchUniqueLocationBarcodes();
+
+        renderDropdownOptionsCustom({
+          menuId: isName
+            ? "assign-location-name-dropdown-menu"
+            : "assign-location-barcode-dropdown-menu",
+          options,
+          searchId: isName
+            ? "assign-location-name-search"
+            : "assign-location-barcode-search",
+          placeholder: isName
+            ? "Search or create location..."
+            : "Search by barcode...",
+          optionClass: "dropdown-option",
+          dataAttribute: isName ? "location" : "barcode",
+          optionsContainerClass: isName
+            ? "location-name-dropdown-container"
+            : "location-barcode-dropdown-container",
+            onClick: (value, isNew, el) => {
+              const hiddenInputId = isName ? "assign-location-name" : "assign-location-barcode";
+              const toggleBtnId = isName
+                ? "assign-location-name-dropdown-toggle"
+                : "assign-location-barcode-dropdown-toggle";
+            
+              document.getElementById(hiddenInputId).value = value;
+              document.getElementById(toggleBtnId).innerText = value;
+            
+              if (isNew && isName) {
+                // 🪄 Only open the Add Location modal if creating a new location by name
+                document.getElementById("location-name").value = value;
+                toggleModal(true); // 👈 This is the key line that was missing
+              } else {
+                showToast(`🏷️ Selected ${isName ? "location" : "barcode"}: ${value}`);
+              }
+            
+              menu.classList.remove("show");
+              activeLocationDropdown = null;
+            }
+            
+        });
+
+        menu.dataset.populated = "true";
+      }
+
+      menu.classList.toggle("show");
+      activeLocationDropdown = menu.classList.contains("show") ? menu : null;
+    });
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast
     document.addEventListener("click", (e) => {

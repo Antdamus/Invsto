@@ -1036,6 +1036,118 @@ svg.icon.spin {
 .btn-location-cancel:hover {
   background-color: rgba(217, 48, 37, 0.05);
 }
+
+/* ================= 🔽 Assign Location Dropdowns (Name & Barcode) ================= */
+
+/* 🧱 Wrapper container */
+#assign-location-name-dropdown-container.custom-dropdown,
+#assign-location-barcode-dropdown-container.custom-dropdown {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+/* 🔘 Toggle button styling */
+#assign-location-name-dropdown-toggle.dropdown-toggle,
+#assign-location-barcode-dropdown-toggle.dropdown-toggle {
+  width: 100%;
+  max-width: 480px;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  transition: all 0.25s ease;
+  text-align: left;
+}
+
+#assign-location-name-dropdown-toggle:hover,
+#assign-location-barcode-dropdown-toggle:hover {
+  background: #f8f8f8;
+}
+
+/* 🧱 Dropdown menu box */
+#assign-location-name-dropdown-menu.dropdown-menu,
+#assign-location-barcode-dropdown-menu.dropdown-menu {
+  position: absolute;
+  z-index: 999;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  max-height: 280px;
+  overflow-y: auto;
+  display: none;
+  animation: fadeSlideDown 0.25s ease-out;
+}
+
+#assign-location-name-dropdown-menu.show,
+#assign-location-barcode-dropdown-menu.show {
+  display: block;
+}
+
+/* 🔎 Search inputs */
+#assign-location-name-search,
+#assign-location-barcode-search {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  margin-bottom: 8px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+#assign-location-name-search:focus,
+#assign-location-barcode-search:focus {
+  border-color: #888;
+}
+
+/* 🟫 Option item styling */
+#assign-location-name-dropdown-menu .dropdown-option,
+#assign-location-barcode-dropdown-menu .dropdown-option {
+  padding: 10px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  font-family: 'DM Serif Display', serif;
+}
+
+#assign-location-name-dropdown-menu .dropdown-option:hover,
+#assign-location-barcode-dropdown-menu .dropdown-option:hover {
+  background: #f0f0f0;
+}
+
+/* 📐 Optional scroll container class */
+.location-name-dropdown-container,
+.location-barcode-dropdown-container {
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* ✨ Dropdown reveal animation */
+@keyframes fadeSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /*#endregion*/
 
 /* ===================== Modal: Add New Location ===================== */
