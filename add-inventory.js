@@ -397,26 +397,49 @@ let latestLocationDymoUrl = null;
         barcodeInput.focus();
       });
     
-      confirmBtn.addEventListener("click", () => {
+      confirmBtn.addEventListener("click", async () => {
         const barcode = modal.dataset.barcode;
         const batchItem = currentBatch[barcode];
-        const selectedLocation = searchInput.value.trim() || scanInput.value.trim();
-    
-        if (!selectedLocation) {
-          showToast("⚠️ Please select or scan a location.");
+        const location_name = document.getElementById("assign-location-name").value.trim();
+        const location_code = document.getElementById("assign-location-barcode").value.trim();
+      
+        if (!location_name && !location_code) {
+          showToast("⚠️ Please select a location name or barcode.");
           return;
         }
-    
-        // Store the location name in memory (could be used later)
-        batchItem.lastLocation = selectedLocation;
-    
-        // TODO: You’ll save to `item_stock_locations` later with a proper insert.
-    
-        showToast(`✅ Assigned to: ${selectedLocation}`);
+      
+        // Retrieve the matching location ID
+        const { data: locationData, error } = await supabase
+          .from("locations")
+          .select("id")
+          .or(`location_name.eq.${location_name},location_code.eq.${location_code}`)
+          .single();
+      
+        if (error || !locationData) {
+          showToast("❌ Could not find matching location.");
+          return;
+        }
+      
+        const location_id = locationData.id;
+      
+        const insertResult = await supabase.from("item_stock_locations").insert({
+          item_id: batchItem.item.id,
+          location_id: location_id,
+          quantity: batchItem.count,
+          added_by: currentUser?.id || null,
+          created_at: new Date().toISOString()
+        });
+      
+        if (insertResult.error) {
+          console.error("❌ Error inserting stock location:", insertResult.error);
+          showToast("❌ Failed to assign location.");
+          return;
+        }
+      
+        showToast(`✅ Saved: ${batchItem.count} to ${location_name || location_code}`);
         modal.classList.add("hidden");
         updateBarcodeInputStateBasedOnModals();
-        barcodeInput.disabled = false;
-        barcodeInput.focus();
+        document.getElementById("input-to-search-inventory-item").focus();
       });
     }
     
@@ -1225,6 +1248,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }, 1500);
       return;
     }
+
+    // ✅ FIX: Define currentUser globally
+    window.currentUser = session.user;
   
     console.log("✅ Session loaded. User is authenticated.");
     searchForBarcodeListener();
