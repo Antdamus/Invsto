@@ -244,6 +244,42 @@
       </div>
     </div>
     
+    <!-- Modal: Password Confirmation for Location Assignment -->
+    <div id="modal-password-confirm" class="modal hidden">
+      <div class="modal-content-confirmitem">
+        
+        <!-- Modal Title -->
+        <div class="modal-header">Confirm Your Identity</div>
+
+        <!-- Scrollable Content -->
+        <div class="modal-body-scrollable">
+          <div class="modal-detail">
+            For security, please enter your password to confirm this stock assignment.
+          </div>
+
+          <label class="modal-detail">
+            Your Email
+            <input type="email" id="password-confirm-email" readonly class="location-search-input" />
+          </label>
+
+          <label class="modal-detail">
+            Password
+            <input type="password" id="password-confirm-password" class="location-search-input" placeholder="Enter your password" />
+          </label>
+
+          <p id="password-confirm-error" class="modal-stock" style="display: none;">
+            ❌ Incorrect password. Please try again.
+          </p>
+        </div>
+
+        <!-- Footer Buttons -->
+        <div id="modal-buttons-password-confirm" class="modal-footer-assign-location">
+          <button id="btn-confirm-password" class="btn-location-confirm">Confirm</button>
+          <button id="btn-cancel-password" class="btn-location-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
 
 
 

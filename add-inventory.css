@@ -1150,6 +1150,98 @@ svg.icon.spin {
 
 /*#endregion*/
 
+/* 🎯 Password Confirmation Modal Styling */
+/*#region*/
+#modal-password-confirm {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+#modal-password-confirm.hidden {
+  display: none;
+}
+
+#modal-password-confirm .modal-content-confirmitem {
+  background: linear-gradient(to bottom right, #ffffff, #f8f8ff);
+  border-radius: 20px;
+  padding: 32px 36px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  animation: popFadeIn 0.5s ease;
+  font-family: 'DM Serif Display', serif;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+#modal-password-confirm .modal-header {
+  font-size: 1.6rem;
+  font-weight: bold;
+  color: #1d1d1f;
+  text-align: center;
+}
+
+#modal-password-confirm .modal-body-scrollable {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+#modal-password-confirm .modal-detail {
+  font-size: 1rem;
+  color: #333;
+  line-height: 1.5;
+  text-align: center;
+}
+
+#modal-password-confirm input.location-search-input {
+  padding: 12px 20px;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: white;
+  font-family: 'DM Serif Display', serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  transition: border 0.3s ease, box-shadow 0.3s ease;
+}
+
+#modal-password-confirm input.location-search-input:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+#modal-password-confirm .modal-stock {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #d93025;
+  text-align: center;
+  background: rgba(217, 48, 37, 0.06);
+  padding: 10px 16px;
+  border-radius: 12px;
+}
+
+/* Reuse location footer buttons */
+#modal-password-confirm .modal-footer-assign-location {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+/*#endregion*/
+
 /* ===================== Modal: Add New Location ===================== */
 /*#region*/
 #modal-add-location {

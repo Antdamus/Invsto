@@ -408,7 +408,6 @@ let latestLocationDymoUrl = null;
           return;
         }
       
-        // Retrieve the matching location ID
         const { data: locationData, error } = await supabase
           .from("locations")
           .select("id")
@@ -420,27 +419,9 @@ let latestLocationDymoUrl = null;
           return;
         }
       
-        const location_id = locationData.id;
-      
-        const insertResult = await supabase.from("item_stock_locations").insert({
-          item_id: batchItem.item.id,
-          location_id: location_id,
-          quantity: batchItem.count,
-          added_by: currentUser?.id || null,
-          created_at: new Date().toISOString()
-        });
-      
-        if (insertResult.error) {
-          console.error("❌ Error inserting stock location:", insertResult.error);
-          showToast("❌ Failed to assign location.");
-          return;
-        }
-      
-        showToast(`✅ Saved: ${batchItem.count} to ${location_name || location_code}`);
-        modal.classList.add("hidden");
-        updateBarcodeInputStateBasedOnModals();
-        document.getElementById("input-to-search-inventory-item").focus();
-      });
+        // ✅ Trigger password modal
+        window.showPasswordConfirmModal(batchItem, locationData.id, location_name || location_code);
+      });      
     }
     
     //#region 🔧 Location Modal Logic
@@ -767,6 +748,76 @@ let latestLocationDymoUrl = null;
       });
 
     }
+
+    //event listener to have a confirmation of who added the batch 
+    function setupPasswordConfirmationModal() {
+      const modal = document.getElementById("modal-password-confirm");
+      const emailInput = document.getElementById("password-confirm-email");
+      const passwordInput = document.getElementById("password-confirm-password");
+      const errorMsg = document.getElementById("password-confirm-error");
+      const confirmBtn = document.getElementById("btn-confirm-password");
+      const cancelBtn = document.getElementById("btn-cancel-password");
+    
+      let pendingAssignment = null; // { batchItem, location_id, location_name }
+    
+      // 👇 Called from assign-location modal
+      window.showPasswordConfirmModal = (batchItem, location_id, location_name) => {
+        pendingAssignment = { batchItem, location_id, location_name };
+        emailInput.value = currentUser.email || "";
+        passwordInput.value = "";
+        errorMsg.style.display = "none";
+        modal.classList.remove("hidden");
+        updateBarcodeInputStateBasedOnModals();
+        passwordInput.focus();
+      };
+    
+      confirmBtn.onclick = async () => {
+        const password = passwordInput.value.trim();
+        if (!password) return;
+    
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: currentUser.email,
+          password: password,
+        });
+    
+        if (error || !data.session) {
+          errorMsg.style.display = "block";
+          return;
+        }
+    
+        // ✅ Password valid — insert
+        const { batchItem, location_id, location_name } = pendingAssignment;
+    
+        const { error: insertError } = await supabase.from("item_stock_locations").insert({
+          item_id: batchItem.item.id,
+          location_id,
+          quantity: batchItem.count,
+          added_by: currentUser.id,
+          confirmation_email: currentUser.email,
+          confirmation_method: "manual_password",
+          confirmed_at: new Date().toISOString(),
+        });
+    
+        if (insertError) {
+          console.error("❌ Failed to insert:", insertError);
+          showToast("❌ Failed to save stock assignment.");
+          return;
+        }
+    
+        showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
+        modal.classList.add("hidden");
+        document.getElementById("modal-assign-location").classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
+        document.getElementById("input-to-search-inventory-item").focus();
+      };
+    
+      cancelBtn.onclick = () => {
+        modal.classList.add("hidden");
+        updateBarcodeInputStateBasedOnModals();
+        document.getElementById("input-to-search-inventory-item").focus();
+      };
+    }
+    
     
 //#endregion
 
@@ -1389,6 +1440,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       menu.classList.toggle("show");
       activeLocationDropdown = menu.classList.contains("show") ? menu : null;
     });
+
+    //listerner for the password modal 
+    setupPasswordConfirmationModal();
+
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast
     document.addEventListener("click", (e) => {
