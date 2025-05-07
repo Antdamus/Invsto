@@ -835,7 +835,6 @@ let latestLocationDymoUrl = null;
       if (audio) audio.play();
     }
     
-
     //#region Rendering card item that matched barcode
         //#region buil image carousel
             //Move to next image in carousel for a given card
