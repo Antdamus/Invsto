@@ -250,13 +250,28 @@ let latestLocationDymoUrl = null;
   
   
   //function to coordinate the display of the assign location modal 
-  function showAssignLocationModal(batchItem) {
+  async function showAssignLocationModal(batchItem) {
     const modal = document.getElementById("modal-assign-location");
     const lastUsedLabel = document.getElementById("last-used-location-name");
   
-    // Show last used location if any
-    const lastLocation = batchItem.lastLocation || "—";
-    lastUsedLabel.textContent = lastLocation;
+    const { data: lastUsed, error } = await supabase
+      .from("item_stock_locations")
+      .select("quantity, confirmed_at, locations(location_name, location_code)")
+      .eq("item_id", batchItem.item.id)
+      .order("confirmed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("❌ Error fetching last used location:", error);
+      lastUsedLabel.textContent = "—";
+    } else if (lastUsed && lastUsed.locations) {
+      const { location_name, location_code } = lastUsed.locations;
+      lastUsedLabel.textContent = `${location_name || "—"} (${location_code || "—"})`;
+    } else {
+      lastUsedLabel.textContent = "—";
+    }
+
   
     modal.dataset.barcode = batchItem.item.barcode;
     modal.classList.remove("hidden");
@@ -809,6 +824,10 @@ let latestLocationDymoUrl = null;
         document.getElementById("modal-assign-location").classList.add("hidden");
         updateBarcodeInputStateBasedOnModals();
         document.getElementById("input-to-search-inventory-item").focus();
+
+        // ✅ Clean up UI and memory for this item
+        batchItem.cardEl.remove();
+        delete currentBatch[batchItem.item.barcode];
       };
     
       cancelBtn.onclick = () => {
