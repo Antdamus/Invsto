@@ -818,6 +818,28 @@ let latestLocationDymoUrl = null;
           showToast("❌ Failed to save stock assignment.");
           return;
         }
+
+       // ✅ Log transaction for audit trail
+        const transactionResult = await supabase.from("stock_transactions").insert({
+          item_id: batchItem.item.id,
+          location_id: location_id,
+          quantity: batchItem.count,
+          action_type: "checkin", // formerly `direction`, now matching your table schema
+          method: "manual_password",
+          user_id: currentUser.id,
+          email: currentUser.email,
+          timestamp: new Date().toISOString(),
+          confirmed_at: new Date().toISOString(),
+          notes: `Added via Add Inventory Module`,
+        });
+        
+
+        if (transactionResult.error) {
+          console.error("❌ Failed to insert into stock_transactions:", transactionResult.error);
+          showToast("⚠️ Stock saved, but audit log failed.");
+        } else {
+          showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
+        }
     
         showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
         modal.classList.add("hidden");
