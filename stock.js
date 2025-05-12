@@ -126,11 +126,13 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     function buildCardContent(item) {
       const stock = typeof item.stock === "number" ? item.stock : 0;
       const stockClass = stock === 0 ? "stock-zero" : "";
+      const tooltip = item.stock_tooltip || "";
       const stockLabel = stock === 0
-        ? `<p class="stock-count ${stockClass}">
-             <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
-           </p>`
-        : `<p class="stock-count">In Stock: ${stock}</p>`;
+        ? `<p class="stock-count ${stockClass}" data-tooltip="${tooltip}">
+            <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
+          </p>`
+        : `<p class="stock-count" data-tooltip="${tooltip}">In Stock: ${stock}</p>`;
+
     
         const categoryChips = (item.categories || []).map(cat => { /**this
             specifies that if item.categories is undefinend, fall back to an 
@@ -2022,19 +2024,66 @@ function extractUniqueFromArrayColumn(data, column) {
 // ✅ Usage: Server or client-side logic can call this to get item data
 // ✅ Side-effect-free: Doesn't modify state or interact with the DOM
 async function fetchStockItems() {
-  // 🔸 Perform a SELECT query on the "item_types" table in Supabase
-  // This fetches *all* columns (fields) for each item
-  const { data, error } = await supabase.from("item_types").select("*");
+  // Step 1: Get base item data
+  const { data: items, error: itemError } = await supabase
+    .from("item_types")
+    .select("*");
 
-  // ⚠️ If Supabase returns an error, log it to the console
-  // Return an empty array so downstream logic doesn't break
-  if (error) {
-    console.error("Error loading stock items:", error.message);
+  if (itemError || !items) {
+    console.error("❌ Failed to fetch item types:", itemError);
     return [];
   }
 
-  // ✅ If successful, return the full array of items
-  return data;
+  // Step 2: Fetch raw stock + location IDs
+  const { data: stockData, error: stockError } = await supabase
+    .from("item_stock_locations")
+    .select("item_id, quantity, location_id");
+
+  if (stockError || !stockData) {
+    console.error("❌ Failed to fetch stock quantities:", stockError);
+    return items;
+  }
+
+  // Step 3: Fetch location name map
+  const { data: locations, error: locError } = await supabase
+    .from("locations")
+    .select("id, location_name");
+
+  if (locError || !locations) {
+    console.error("❌ Failed to fetch location names:", locError);
+    return items;
+  }
+
+  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+
+  // Step 4: Aggregate stock per item
+  const stockMap = {};
+
+  stockData.forEach(({ item_id, quantity, location_id }) => {
+    const locName = locationMap[location_id] || "Unknown Location";
+    if (!stockMap[item_id]) {
+      stockMap[item_id] = { total: 0, breakdown: {} };
+    }
+    stockMap[item_id].total += quantity;
+    stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + quantity;
+  });
+
+  // Step 5: Inject into each item
+  items.forEach(item => {
+    const stockEntry = stockMap[item.id];
+    item.stock = stockEntry?.total || 0;
+
+    if (stockEntry) {
+      const tooltip = Object.entries(stockEntry.breakdown)
+        .map(([loc, qty]) => `${loc}: ${qty}`)
+        .join("\n");
+      item.stock_tooltip = tooltip;
+    } else {
+      item.stock_tooltip = "No stock data available";
+    }
+  });
+
+  return items;
 }
 
 // 🔹 UI Utility: Show loading overlay (or any spinner by selector)
