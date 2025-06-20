@@ -894,32 +894,54 @@ let latestLocationDymoUrl = null;
 
     //function to extract item from supabase if it match barcode item
     async function ExtractItemWithBarcodeFromSupabase(barcode, table = "item_types", column = "barcode", debug = false) {
-        try {
-            const { data, error } = await supabase
-                .from(table)
-                .select("*")
-                .eq(column, barcode)
-                .single();
-    
-            if (debug) {
-                console.log("🔍 [DEBUG] Barcode Query Result:");
-                console.log(data);
-            }
-    
-            if (error || !data) {
-                if (debug) {
-                    console.warn("⚠️ [DEBUG] Item not found or error occurred.", { error });
-                }
-                return null;
-            }
-    
-            return data;
-        } catch (err) {
-            console.error("❌ [DEBUG] Unexpected error while querying Supabase:", err);
-            showToast("Error contacting database.", "error");
-            return null;
-        }
+  try {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq(column, barcode)
+      .single();
+
+    if (debug) {
+      console.log("🔍 [DEBUG] Barcode Query Result:", data);
     }
+
+    if (error || !data) {
+      if (debug) {
+        console.warn("⚠️ [DEBUG] Item not found or error occurred.", { error });
+      }
+      return null;
+    }
+
+    // 🖼️ Transform photos (array of image paths) into public URLs
+    if (Array.isArray(data.photos)) {
+      const resolvedPhotos = await Promise.all(
+        data.photos.map(async (photoPath) => {
+          const { data: signed, error } = await supabase
+            .storage
+            .from("photos")
+            .createSignedUrl(photoPath, 60 * 60); // valid for 1 hour
+          if (error) {
+            console.warn("⚠️ Could not resolve signed URL for", photoPath, error);
+            return null;
+          }
+          return signed?.signedUrl || null;
+        })
+      );
+
+      data.photos = resolvedPhotos.filter(Boolean); // Remove any nulls
+    } else {
+      data.photos = [];
+    }
+
+
+    return data;
+  } catch (err) {
+    console.error("❌ [DEBUG] Unexpected error while querying Supabase:", err);
+    showToast("Error contacting database.", "error");
+    return null;
+  }
+    }
+
 
     //function to play sound after item is scanned
     function playScanSound() {

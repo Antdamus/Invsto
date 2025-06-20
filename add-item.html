@@ -28,12 +28,14 @@
         <textarea id="description" placeholder="Item Description" class="add-input add-textarea" required></textarea>
         <input type="number" step="0.01" id="weight" placeholder="Weight (g or ct)" class="add-input" required />
         
-        <select id="category" class="add-input" required>
-          <option value="" disabled selected>Category</option>
-          <option value="diamonds">Diamonds</option>
-          <option value="pendants">Pendants</option>
-          <option value="rings">Rings</option>
-        </select>
+        <label for="category">Category</label>
+        <div id="category-dropdown-container" class="custom-dropdown">
+          <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
+            Select or Create Category
+          </button>
+          <div id="category-dropdown-menu" class="dropdown-menu"></div>
+        </div>
+        <input type="hidden" id="category" name="category" />
 
         <input type="number" step="0.01" id="cost" placeholder="Cost of Item ($)" class="add-input" required />
         <input type="text" id="sale-price" placeholder="Sale Price (auto)" class="add-input" readonly />

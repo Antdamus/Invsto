@@ -36,6 +36,115 @@ document.getElementById('cost')?.addEventListener('input', () => {
   }
 });
 
+async function fetchUniqueCategories() {
+  const { data, error } = await supabase
+    .from("item_types")
+    .select("category")
+    .neq("category", null);
+
+  if (error) {
+    console.error("❌ Failed to fetch categories:", error);
+    return [];
+  }
+
+  const unique = [...new Set(data.map(row => row.category).filter(Boolean))];
+  return unique.sort((a, b) => a.localeCompare(b));
+}
+
+/** Function that will create the html block for the drop down, insert search bar, attach listener
+ * Renders a searchable dropdown and lets the caller define behavior
+ * for selecting existing options or creating new ones.
+ * @param {Object} config
+ * @param {string} config.menuId - ID of the DOM container
+ * @param {Array<string>} config.options - Array of string values to display
+ * @param {string} [config.searchId="category-search"] - Search input ID
+ * @param {string} [config.placeholder="Search..."] - Input placeholder text
+ * @param {string} [config.optionClass="dropdown-option"] - Class for each option div
+ * @param {string} [config.dataAttribute="cat"] - The data-* attribute key (e.g. "cat", "qr")
+ * @param {string} [config.optionsContainerClass="dropdown-options-container"]
+ * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
+ */
+  function renderDropdownOptionsCustom({
+    menuId,
+    options = [],
+    searchId = "category-search",
+    placeholder = "Search...",
+    optionClass = "dropdown-option",
+    dataAttribute = "cat",
+    optionsContainerClass = "dropdown-options-container",
+    onClick,  // 🔥 REQUIRED: handler for both new and existing options
+    showHTMLInjected = true // 🆕 Optional debug flag
+  }) {
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+  
+    const searchHTML = `
+      <div class="dropdown-search-container">
+        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+      </div>
+    `;
+  
+    const optionsHTML = `
+      <div class="${optionsContainerClass}">
+        ${options.map(opt => `
+          <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+        `).join("")}
+      </div>
+    `;
+  
+    const fullHTML = searchHTML + optionsHTML;
+  
+    if (showHTMLInjected) {
+      console.log("🧪 [renderDropdownOptionsCustom] Injected HTML for", menuId);
+      console.log(fullHTML);
+      debugger;
+    }
+  
+    menu.innerHTML = fullHTML;
+  
+    const input = menu.querySelector(`#${searchId}`);
+    const container = menu.querySelector(`.${optionsContainerClass}`);
+  
+    const attachClickHandlers = () => {
+      container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
+        optionEl.addEventListener("click", () => {
+          const value = optionEl.dataset.value;
+          const isNew = optionEl.dataset.new === "true";
+          syncHiddenInputsWithDropdowns();
+          if (typeof onClick === "function") {
+            onClick(value, isNew, optionEl);
+          }
+        });
+      });
+    };
+  
+    attachClickHandlers();
+  
+    input.addEventListener("input", (e) => {
+      const search = e.target.value.toLowerCase();
+      const filtered = options.filter(opt =>
+        opt.toLowerCase().includes(search)
+      );
+  
+      let html = filtered.map(opt => `
+        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
+      `).join("");
+  
+      const exactMatch = options.some(opt => opt.toLowerCase() === search);
+  
+      if (search && !exactMatch) {
+        html += `
+          <div class="${optionClass} new-entry" data-${dataAttribute}="${search}" data-value="${search}" data-new="true">
+            ➕ Create "${search}"
+          </div>
+        `;
+      }
+  
+      container.innerHTML = html;
+      attachClickHandlers();
+    });
+  }
+
 // === QR Code Rendering
 function renderQR(url) {
   QRCode.toCanvas(qrCanvas, url, {
@@ -80,6 +189,49 @@ document.getElementById('generate-barcode')?.addEventListener('click', () => {
   barcodeInput.value = code;
   renderBarcode(code);
 });
+
+// === dropdownoption=== //
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "category-dropdown-toggle") return;
+
+  const button = e.target;
+  const menu = document.getElementById("category-dropdown-menu");
+
+  // Close others
+  document.querySelectorAll(".dropdown-menu").forEach(el => {
+    if (el !== menu) el.classList.remove("show");
+  });
+
+  // Populate once
+  if (!menu.dataset.populated) {
+    const categories = await fetchUniqueCategories();
+
+    renderDropdownOptionsCustom({
+      menuId: "category-dropdown-menu",
+      options: categories,
+      searchId: "category-search",
+      placeholder: "Search or create category...",
+      optionClass: "dropdown-option",
+      dataAttribute: "cat",
+      optionsContainerClass: "category-options-container",
+      onClick: (value, isNew, el) => {
+        document.getElementById("category").value = value;
+        button.innerText = value;
+        menu.classList.remove("show");
+        if (isNew) {
+          showToast(`➕ Created new category: ${value}`);
+        } else {
+          showToast(`🏷️ Selected category: ${value}`);
+        }
+      }
+    });
+
+    menu.dataset.populated = "true";
+  }
+
+  menu.classList.toggle("show");
+});
+
 
 
 // === MULTI-IMAGE PREVIEW & UPLOAD ===
@@ -744,7 +896,8 @@ e.preventDefault();
 const title = document.getElementById("title").value.trim();
 const description = document.getElementById("description").value.trim();
 const weight = parseFloat(document.getElementById("weight").value);
-const category = document.getElementById("category").value;
+const categoryInput = document.getElementById("category").value.trim();
+const categories = categoryInput ? [categoryInput] : [];
 const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
 const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
 const distributor_name = document.getElementById("distributor-name").value.trim();
@@ -772,27 +925,18 @@ for (const file of photoFiles) {
     continue;
   }
 
-  const { data: signedData, error: urlError } = await supabase
-    .storage
-    .from("photos")
-    .createSignedUrl(path, 60 * 60 * 24 * 365 * 10);
-
-  if (urlError) {
-    console.error(`Signed URL error for ${file.name}:`, urlError.message);
-    photoStatus.innerHTML += `❌ Failed to sign URL for <strong>${file.name}</strong>: ${urlError.message}<br>`;
-    continue;
-  }
-
-  photoUrls.push(signedData.signedUrl);
+  // ✅ Store only the path, not signed URL
+  photoUrls.push(path);
   photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
 }
+
 
 
 const { error } = await supabase.from("item_types").insert({
   title,
   description,
   weight,
-  category,
+  categories,
   cost,
   sale_price,
   distributor_name,

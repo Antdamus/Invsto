@@ -2034,6 +2034,26 @@ async function fetchStockItems() {
     return [];
   }
 
+  // ✅ Step 1.5: Generate signed image URLs from stored paths
+  for (const item of items) {
+    if (Array.isArray(item.photos)) {
+      const signedUrls = await Promise.all(
+        item.photos.map(async (path) => {
+          const { data, error } = await supabase
+            .storage
+            .from("photos")
+            .createSignedUrl(path, 3600); // 1 hour validity
+          if (error) {
+            console.warn(`⚠️ Could not sign photo ${path}:`, error.message);
+            return null;
+          }
+          return data?.signedUrl;
+        })
+      );
+      item.photos = signedUrls.filter(Boolean);
+    }
+  }
+
   // Step 2: Fetch raw stock + location IDs
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
