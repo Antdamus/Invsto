@@ -79,6 +79,34 @@
     </main>
   </div>
 
+  <!-- 🔐 Modal: Assign Location + Quantity for Admin -->
+    <div id="modal-admin-assign-location" class="modal hidden">
+      <div class="modal-content-assign-location">
+        <div class="modal-header-assign-location">Assign Location and Quantity</div>
+        <div class="modal-body-assign-location">
+
+          <!-- 🔹 Location Name Dropdown -->
+          <label for="admin-location-name">Location</label>
+          <div class="custom-dropdown">
+            <button id="admin-location-dropdown-toggle" type="button" class="dropdown-toggle">Select Location</button>
+            <div id="admin-location-dropdown-menu" class="dropdown-menu"></div>
+          </div>
+          <input type="hidden" id="admin-location-name" />
+
+          <!-- 🔢 Quantity Input -->
+          <label for="admin-stock-quantity">Stock Quantity</label>
+          <input type="number" id="admin-stock-quantity" placeholder="Enter quantity" min="0" />
+
+        </div>
+
+        <div class="modal-footer-assign-location">
+          <button id="btn-confirm-admin-stock" class="btn-location-confirm">Confirm</button>
+          <button id="btn-cancel-admin-stock" class="btn-location-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+
   <script src="initSupabase.js"></script>
   <script src="additem.js"></script>
 </body>

@@ -13,7 +13,6 @@ let typeqr = "";
 })();
 
 
-
 // === DOM ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
@@ -148,6 +147,95 @@ async function fetchUniqueCategories() {
   });
 }
 
+// === modal to add stock and location ===
+function showAdminLocationStockModal(itemId) {
+  const modal = document.getElementById("modal-admin-assign-location");
+  document.getElementById("admin-stock-quantity").value = "";
+  document.getElementById("admin-location-name").value = "";
+  document.getElementById("admin-location-dropdown-toggle").innerText = "Select Location";
+  modal.dataset.itemId = itemId;
+  modal.classList.remove("hidden");
+
+  populateAdminLocationDropdown();
+}
+
+function setupAdminLocationModalListeners() {
+  const confirmBtn = document.getElementById("btn-confirm-admin-stock");
+  const cancelBtn = document.getElementById("btn-cancel-admin-stock");
+
+  cancelBtn.onclick = () => {
+    document.getElementById("modal-admin-assign-location").classList.add("hidden");
+  };
+
+  confirmBtn.onclick = async () => {
+    const itemId = document.getElementById("modal-admin-assign-location").dataset.itemId;
+    const location = document.getElementById("admin-location-name").value.trim();
+    const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
+
+    if (!location || isNaN(quantity)) {
+      showToast("❌ Please select a location and enter quantity.");
+      return;
+    }
+
+    const { data: loc, error } = await supabase
+      .from("locations")
+      .select("id")
+      .eq("location_name", location)
+      .single();
+
+    if (error || !loc) {
+      showToast("❌ Location not found.");
+      return;
+    }
+
+    const { error: insertError } = await supabase.from("item_stock_locations").insert({
+      item_id: itemId,
+      location_id: loc.id,
+      quantity,
+      added_by: currentUser.id,
+      confirmation_email: currentUser.email,
+      confirmed_at: new Date().toISOString(),
+    });
+
+    if (insertError) {
+      console.error(insertError);
+      showToast("❌ Failed to save stock.");
+    } else {
+      showToast(`✅ Saved ${quantity} items to ${location}`);
+      document.getElementById("modal-admin-assign-location").classList.add("hidden");
+    }
+  };
+}
+
+
+async function populateAdminLocationDropdown() {
+  const menu = document.getElementById("admin-location-dropdown-menu");
+  const button = document.getElementById("admin-location-dropdown-toggle");
+  const options = await fetchUniqueLocationNames(); // You already have this function
+
+  renderDropdownOptionsCustom({
+    menuId: "admin-location-dropdown-menu",
+    options,
+    searchId: "admin-location-search",
+    placeholder: "Search locations...",
+    optionClass: "dropdown-option",
+    dataAttribute: "location",
+    optionsContainerClass: "location-options-container",
+    onClick: (value, isNew, el) => {
+      document.getElementById("admin-location-name").value = value;
+      button.innerText = value;
+      menu.classList.remove("show");
+    }
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.id === "admin-location-dropdown-toggle") {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    menu.classList.toggle("show");
+  }
+});
+
 
 // === QR Code Rendering
 function renderQR(url) {
@@ -227,8 +315,6 @@ document.addEventListener("click", async (e) => {
 
   menu.classList.toggle("show");
 });
-
-
 
 
 // === MULTI-IMAGE PREVIEW & UPLOAD ===
@@ -964,6 +1050,11 @@ document.getElementById("dymo-status").innerText =
   "✅ DYMO label uploaded & path saved.";
 
 });
+
+//== run the add location modal only if the user is an admin
+if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
+  setupAdminLocationModalListeners();
+}
 
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {

@@ -1505,6 +1505,21 @@ document.addEventListener("DOMContentLoaded", async () => {
       activeLocationDropdown = menu.classList.contains("show") ? menu : null;
     });
 
+    //now the event listener for the button
+    document.getElementById("btn-manual-assign").addEventListener("click", () => {
+      const barcodes = Object.keys(currentBatch);
+      if (barcodes.length === 0) {
+        showToast("⚠️ No items scanned.");
+        return;
+      }
+
+      const firstBarcode = barcodes[0];
+      const batchItem = currentBatch[firstBarcode];
+
+      showAssignLocationModal(batchItem);
+    });
+
+
     //listerner for the password modal 
     setupPasswordConfirmationModal();
 
