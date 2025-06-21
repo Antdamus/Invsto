@@ -65,85 +65,89 @@ async function fetchUniqueCategories() {
  * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
  */
   function renderDropdownOptionsCustom({
-    menuId,
-    options = [],
-    searchId = "category-search",
-    placeholder = "Search...",
-    optionClass = "dropdown-option",
-    dataAttribute = "cat",
-    optionsContainerClass = "dropdown-options-container",
-    onClick,  // 🔥 REQUIRED: handler for both new and existing options
-    showHTMLInjected = true // 🆕 Optional debug flag
-  }) {
-    const menu = document.getElementById(menuId);
-    if (!menu) return;
-  
-    const searchHTML = `
-      <div class="dropdown-search-container">
-        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+  menuId,
+  toggleButtonId,
+  hiddenInputId,
+  options = [],
+  placeholder = "Search...",
+  dataAttribute = "value",
+  optionClass = "dropdown-option",
+  optionsContainerClass = "dropdown-options-container",
+  searchId = `${menuId}-search`,
+  onClick = () => {},
+  showHTMLInjected = false
+}) {
+  const menu = document.getElementById(menuId);
+  const toggleBtn = document.getElementById(toggleButtonId);
+  const hiddenInput = document.getElementById(hiddenInputId);
+  if (!menu || !toggleBtn || !hiddenInput) return;
+
+  const searchHTML = `
+    <div class="dropdown-search-container">
+      <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
+    </div>
+  `;
+
+  const buildOptionsHTML = (filteredOpts, searchTerm) => {
+    let html = filteredOpts.map(opt => `
+      <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">
+        ${opt}
       </div>
-    `;
-  
-    const optionsHTML = `
-      <div class="${optionsContainerClass}">
-        ${options.map(opt => `
-          <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
-        `).join("")}
-      </div>
-    `;
-  
-    const fullHTML = searchHTML + optionsHTML;
-  
-    if (showHTMLInjected) {
-      console.log("🧪 [renderDropdownOptionsCustom] Injected HTML for", menuId);
-      console.log(fullHTML);
-      debugger;
+    `).join("");
+
+    const exactMatch = options.some(opt => opt.toLowerCase() === searchTerm.toLowerCase());
+    if (searchTerm && !exactMatch) {
+      html += `
+        <div class="${optionClass} new-entry" data-${dataAttribute}="${searchTerm}" data-value="${searchTerm}" data-new="true">
+          ➕ Create "${searchTerm}"
+        </div>
+      `;
     }
-  
-    menu.innerHTML = fullHTML;
-  
-    const input = menu.querySelector(`#${searchId}`);
-    const container = menu.querySelector(`.${optionsContainerClass}`);
-  
-    const attachClickHandlers = () => {
-      container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
-        optionEl.addEventListener("click", () => {
-          const value = optionEl.dataset.value;
-          const isNew = optionEl.dataset.new === "true";
-          syncHiddenInputsWithDropdowns();
-          if (typeof onClick === "function") {
-            onClick(value, isNew, optionEl);
-          }
-        });
-      });
-    };
-  
-    attachClickHandlers();
-  
-    input.addEventListener("input", (e) => {
-      const search = e.target.value.toLowerCase();
-      const filtered = options.filter(opt =>
-        opt.toLowerCase().includes(search)
-      );
-  
-      let html = filtered.map(opt => `
-        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">${opt}</div>
-      `).join("");
-  
-      const exactMatch = options.some(opt => opt.toLowerCase() === search);
-  
-      if (search && !exactMatch) {
-        html += `
-          <div class="${optionClass} new-entry" data-${dataAttribute}="${search}" data-value="${search}" data-new="true">
-            ➕ Create "${search}"
-          </div>
-        `;
-      }
-  
-      container.innerHTML = html;
-      attachClickHandlers();
-    });
+    return html;
+  };
+
+  const fullHTML = `
+    ${searchHTML}
+    <div class="${optionsContainerClass}">
+      ${buildOptionsHTML(options, "")}
+    </div>
+  `;
+
+  if (showHTMLInjected) {
+    console.log("💡 Injected dropdown HTML for", menuId);
+    console.log(fullHTML);
   }
+
+  menu.innerHTML = fullHTML;
+
+  const input = menu.querySelector(`#${searchId}`);
+  const container = menu.querySelector(`.${optionsContainerClass}`);
+
+  const attachClickHandlers = () => {
+    container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
+      optionEl.addEventListener("click", () => {
+        const value = optionEl.dataset.value;
+        const isNew = optionEl.dataset.new === "true";
+
+        hiddenInput.value = value;
+        toggleBtn.innerText = value;
+
+        onClick(value, isNew, optionEl);
+
+        menu.classList.remove("show");
+      });
+    });
+  };
+
+  attachClickHandlers();
+
+  input?.addEventListener("input", (e) => {
+    const searchTerm = e.target.value.toLowerCase();
+    container.innerHTML = buildOptionsHTML(options, searchTerm);
+    requestAnimationFrame(() => attachClickHandlers());
+  });
+}
+
 
 // === QR Code Rendering
 function renderQR(url) {
@@ -194,30 +198,22 @@ document.getElementById('generate-barcode')?.addEventListener('click', () => {
 document.addEventListener("click", async (e) => {
   if (e.target.id !== "category-dropdown-toggle") return;
 
-  const button = e.target;
   const menu = document.getElementById("category-dropdown-menu");
 
-  // Close others
-  document.querySelectorAll(".dropdown-menu").forEach(el => {
-    if (el !== menu) el.classList.remove("show");
-  });
-
-  // Populate once
   if (!menu.dataset.populated) {
     const categories = await fetchUniqueCategories();
 
     renderDropdownOptionsCustom({
       menuId: "category-dropdown-menu",
+      toggleButtonId: "category-dropdown-toggle",
+      hiddenInputId: "category",
       options: categories,
-      searchId: "category-search",
       placeholder: "Search or create category...",
-      optionClass: "dropdown-option",
       dataAttribute: "cat",
+      optionClass: "dropdown-option",
       optionsContainerClass: "category-options-container",
-      onClick: (value, isNew, el) => {
-        document.getElementById("category").value = value;
-        button.innerText = value;
-        menu.classList.remove("show");
+      searchId: "category-dropdown-search",
+      onClick: (value, isNew) => {
         if (isNew) {
           showToast(`➕ Created new category: ${value}`);
         } else {
@@ -231,6 +227,7 @@ document.addEventListener("click", async (e) => {
 
   menu.classList.toggle("show");
 });
+
 
 
 
@@ -887,6 +884,12 @@ e.preventDefault();
 const title = document.getElementById("title").value.trim();
 const description = document.getElementById("description").value.trim();
 const weight = parseFloat(document.getElementById("weight").value);
+// force sync dropdown selection into hidden input if user typed or skipped selection
+const categoryButton = document.getElementById("category-dropdown-toggle");
+const categoryHiddenInput = document.getElementById("category");
+if (!categoryHiddenInput.value && categoryButton.innerText !== "Select or Create Category") {
+  categoryHiddenInput.value = categoryButton.innerText.trim();
+}
 const categoryInput = document.getElementById("category").value.trim();
 const categories = categoryInput ? [categoryInput] : [];
 const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
