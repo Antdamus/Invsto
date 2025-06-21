@@ -148,6 +148,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
             `;
         }).join(""); /**glues all the string into one HTML block that will be in the
         javascrip object called category chips */
+        
     
         return `
         <div class="stock-content">
@@ -161,7 +162,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-          <p><a href="${item.dymo_label_url}" target="_blank">📄 DYMO Label</a></p>
+          ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${item.dymo_label_url}">📄 DYMO Label</a></p>` : ""}
           ${stockLabel}
           <p class="chip-section-label">Categories:</p>
           <div class="category-chips">
@@ -2614,7 +2615,40 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     //event listerner for the card dropdown
     setupCardChipDropdownDelegated()
-    
+
+    //for the dynamo label
+    document.addEventListener("click", async (e) => {
+  const link = e.target.closest(".dymo-link");
+  if (!link) return;
+
+  e.preventDefault();
+  let fullPath = link.dataset.path;
+  if (!fullPath.startsWith("labels/")) {
+    fullPath = `labels/${fullPath}`;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .storage
+      .from("dymo-labels")
+      .createSignedUrl(fullPath, 60 * 60 * 24 * 365);
+
+    if (error || !data?.signedUrl) {
+      console.error("❌ Error generating signed URL:", error?.message);
+      alert("Unable to open DYMO label.");
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank");
+  } catch (err) {
+    console.error("❌ Exception generating DYMO URL:", err);
+    alert("Unexpected error opening label.");
+  }
+});
+
+
+
+
   //#endregion
 
   //step 6 ensure there is function to update the toolbar

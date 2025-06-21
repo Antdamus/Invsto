@@ -853,40 +853,31 @@ document.body.removeChild(a);
 URL.revokeObjectURL(url);
 
 // Upload
-const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`;
+const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`; // ✅ add folder prefix
+// Upload to Supabase
+const { error: uploadError } = await supabase
+  .storage
+  .from("dymo-labels")
+  .upload(labelPath, blob, {
+    upsert: true,
+    contentType: "application/octet-stream"
+  });
+
+if (uploadError) {
+  console.error("❌ Failed to upload DYMO label:", uploadError.message);
+  alert("Failed to upload DYMO label.");
+  return;
+}
+
 const { data } = await supabase.auth.getUser();
 console.log("🧾 JWT Payload:", data?.user?.user_metadata);
-const { error: uploadError } = await supabase.storage
-  .from("dymo-labels")
-  .upload(labelPath, blob, { upsert: true });
 
-  if (uploadError) {
-    console.error("❌ Upload failed:");
-    console.error("Message:", uploadError.message);
-    console.error("Status Code:", uploadError.statusCode);
-    console.error("Full Error Object:", uploadError);
-  
-    document.getElementById("dymo-status").innerText =
-      `❌ Failed to upload DYMO label: ${uploadError.message || "Unknown error"}`;
-  } else {
-    // Create a signed URL that lasts 10 years (in seconds)
-    const TEN_YEARS = 60 * 60 * 24 * 365 * 10;
-  
-    const { data: signedData, error: urlError } = await supabase.storage
-      .from("dymo-labels")
-      .createSignedUrl(labelPath, TEN_YEARS);
-  
-    if (urlError) {
-      console.error("❌ Signed URL failed:", urlError.message);
-      console.error("Full Signed URL Error Object:", urlError);
-      document.getElementById("dymo-status").innerText =
-        `❌ Failed to generate DYMO URL: ${urlError.message || "Unknown error"}`;
-    } else {
-      window.latestDymoUrl = signedData.signedUrl;
-      document.getElementById("dymo-status").innerText =
-        "✅ DYMO label uploaded & secured.";
-    }
-  }  
+// ✅ Store the path only — not the signed URL
+window.latestDymoUrl = labelPath;
+
+document.getElementById("dymo-status").innerText =
+  "✅ DYMO label uploaded & path saved.";
+
 });
 
 // === FORM SUBMIT ===
