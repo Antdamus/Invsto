@@ -725,18 +725,19 @@ let latestLocationDymoUrl = null;
           }
         }
 
+        let photo_path = null;
+
         if (photoFile) {
           const { data, error } = await supabase.storage
-          .from("location-assets")
-          .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
+            .from("location-assets")
+            .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
 
-        if (error) {
-          showToast("❌ Failed to upload photo.");
-          return;
-        }
-          const { data: urlData } = supabase.storage.from("location-assets").getPublicUrl(data.path);
-          photo_url = urlData.publicUrl;
-          photo_path = data.path; // ⬅️ New
+          if (error) {
+            showToast("❌ Failed to upload photo.");
+            return;
+          }
+
+          photo_url = data.path; // ✅ Save just the path
         }
     
         const { error: insertError } = await supabase.from("locations").insert({
