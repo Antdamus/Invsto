@@ -402,23 +402,20 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         if (checkoutModule.isCheckoutMode()) {
           const card = e.target.closest(".stock-card");
           if (card) {
+            const isInCart = card.classList.contains("in-cart");
             const itemId = card.querySelector(".select-checkbox")?.dataset.id || 
                           card.querySelector(".favorite-btn")?.dataset.id || 
                           card.dataset.id;
 
             if (!itemId) return;
 
-            // If item is already in cart, remove it; otherwise add it
-            const cart = checkoutModule.getCart();
-            const exists = cart.find(i => i.item_id === itemId);
-
-            if (exists) {
+            if (isInCart) {
               checkoutModule.removeFromCart(itemId);
             } else {
               checkoutModule.handleCardClickForCheckout(card);
             }
 
-            return; // ✅ Prevent other behavior
+            return;
           }
         }
 
@@ -2673,7 +2670,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     //#region events listeners for the checkout module
       //event listener fo the toggle button
-        checkoutModule.setupCheckoutToggleButton();
+      checkoutModule.setupCheckoutToggleButton();
+
+      //event lister to the checkout cart 
+      checkoutModule.setupCartPanelListeners();
+
     //#endregion
   //#endregion
 

@@ -39,9 +39,11 @@ window.checkoutModule = (function () {
             cart.push({ ...item, qty: 1 });
         }
 
-        // Apply visual style to the card
+        // Visual highlight
         const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
         if (card) card.classList.add("in-cart");
+
+        updateCartUI();
     }
     
     //function to add an event listener so the add to cart function is triggered on click (pointing towards)
@@ -82,20 +84,63 @@ window.checkoutModule = (function () {
 
     //function to remove from cart once deselected
     function removeFromCart(itemId) {
-        const originalLength = cart.length;
         cart = cart.filter(item => item.item_id !== itemId);
-        if (cart.length !== originalLength) {
-            console.log(`❌ Removed item ${itemId} from cart.`);
-        }
 
-        // Remove visual style from the card
         const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
         if (card) card.classList.remove("in-cart");
+
+        updateCartUI(); // make sure it's AFTER updating the cart
     }
 
     function getCart() {
         return [...cart];
     }
+
+  //#endregion
+
+  //#region function to update the cart interface 
+    //function to show the interface
+    function updateCartUI() {
+        const toggleBtn = document.getElementById("cart-toggle-btn");
+        const badge = document.getElementById("cart-count-badge");
+
+        if (!toggleBtn || !badge) return;
+
+        const totalQty = cart.reduce((sum, item) => sum + (item.qty || 0), 0);
+        const isCartEmpty = cart.length === 0;
+
+        if (isCartEmpty || totalQty === 0) {
+            badge.textContent = "0";
+            toggleBtn.classList.add("hidden");
+        } else {
+            badge.textContent = totalQty;
+            toggleBtn.classList.remove("hidden");
+        }
+    }
+
+
+    //function to set up the listener
+    function setupCartPanelListeners() {
+        const toggleBtn = document.getElementById("cart-toggle-btn");
+        const panel = document.getElementById("cart-panel");
+        const closeBtn = document.getElementById("close-cart-panel");
+
+        if (!toggleBtn || !panel || !closeBtn) return;
+
+        toggleBtn.addEventListener("click", () => {
+            panel.classList.toggle("hidden");
+            
+            // 🧠 Toggle a class on body to shift layout if needed
+             document.body.classList.toggle("cart-open", !panel.classList.contains("hidden"));
+        });
+
+
+        closeBtn.addEventListener("click", () => {
+            panel.classList.add("hidden");
+            document.body.classList.remove("cart-open");
+        });
+    }
+
   //#endregion
 
 
@@ -104,8 +149,9 @@ window.checkoutModule = (function () {
     setupCheckoutToggleButton,
     isCheckoutMode,
     addToCart,
+    removeFromCart,
     handleCardClickForCheckout,
     getCart,
-    removeFromCart // 👈 add this
+    setupCartPanelListeners,
   };
 })();
