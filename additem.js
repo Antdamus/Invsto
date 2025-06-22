@@ -54,17 +54,19 @@ document.getElementById('cost')?.addEventListener('input', () => {
 async function fetchUniqueCategories() {
   const { data, error } = await supabase
     .from("item_types")
-    .select("category")
-    .neq("category", null);
+    .select("categories");
 
   if (error) {
     console.error("❌ Failed to fetch categories:", error);
     return [];
   }
 
-  const unique = [...new Set(data.map(row => row.category).filter(Boolean))];
+  const flat = data.flatMap(row => Array.isArray(row.categories) ? row.categories : []);
+  const unique = [...new Set(flat.filter(Boolean))];
   return unique.sort((a, b) => a.localeCompare(b));
 }
+
+
 
 // === utility to get the unique location ===
 async function fetchUniqueLocationNames() {
