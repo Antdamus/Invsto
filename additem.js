@@ -7,14 +7,10 @@ async function waitForSupabaseInit() {
   });
 }
 
-
 console.log("Loaded JS")
 // === GLOBALS ===
 let latestDymoXml = "";
 let typeqr = "";
-
-
-
 
 // === DOM ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
@@ -25,8 +21,6 @@ const qrTypeSelect = document.getElementById("qr-type");
 const previewContainer = document.getElementById("carousel-preview");
 const photoInput = document.getElementById("item-photo");
 const pendingStockAssignments = {}; // { barcode: { location_name, quantity, location_id } }
-
-
 let uploadedImages = [];
 
 // === utility to show toast ===
@@ -86,7 +80,6 @@ async function fetchUniqueLocationNames() {
   const unique = [...new Set(data.map(loc => loc.location_name).filter(Boolean))];
   return unique.sort((a, b) => a.localeCompare(b));
 }
-
 
 /** Function that will create the html block for the drop down, insert search bar, attach listener
  * Renders a searchable dropdown and lets the caller define behavior
@@ -232,6 +225,13 @@ function setupAdminLocationModalListeners() {
       quantity,
       location_id: loc.id
     };
+
+    // ⬇️ Show assignment preview in the main form
+    const previewBox = document.getElementById("assignment-preview-box");
+    document.getElementById("assignment-location").textContent = `📍 Location: ${locationName}`;
+    document.getElementById("assignment-quantity").textContent = `📦 Quantity: ${quantity}`;
+    previewBox.classList.remove("hidden");
+
 
     showToast(`📦 Will assign ${quantity} to ${locationName} after item is saved`);
     document.getElementById("modal-admin-assign-location").classList.add("hidden");
@@ -1098,6 +1098,18 @@ if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
 e.preventDefault();
+// Check category selection
+const categoryValue = document.getElementById("category").value.trim();
+if (!categoryValue) {
+  showToast("❌ Please select or create a category.");
+  return;
+}
+
+// Check DYMO label generation
+if (!window.latestDymoUrl || typeof window.latestDymoUrl !== "string" || !window.latestDymoUrl.includes("labels/")) {
+  showToast("❌ Please generate the DYMO label before submitting.");
+  return;
+}
 
 const title = document.getElementById("title").value.trim();
 const description = document.getElementById("description").value.trim();
