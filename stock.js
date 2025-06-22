@@ -2644,11 +2644,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.error("❌ Exception generating DYMO URL:", err);
     alert("Unexpected error opening label.");
   }
-});
+    });
 
-
-
-
+    //#region events listeners for the checkout module
+      //event listener fo the toggle button
+        checkoutModule.setupCheckoutToggleButton();
+    //#endregion
   //#endregion
 
   //step 6 ensure there is function to update the toolbar

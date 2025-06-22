@@ -10,6 +10,7 @@
 
   <!-- 🎨 Main CSS stylesheet -->
   <link rel="stylesheet" href="stock.css" />
+  <link rel="stylesheet" href="stock-checkout.css" />
 
   <!-- 🅰️ Google Fonts: Display Serif Font -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
@@ -20,12 +21,19 @@
 
 <body class="stock-body">
 
+  <!-- Home Button -->
   <button id="toggle-controller" class="toggle-controller-btn" title="Show/Hide Controls" aria-label="Toggle Controls">
     <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
       <path d="M9 22V12h6v10"/>
     </svg>
   </button>
+
+  <!-- Checkout Mode Toggle Floating Button -->
+  <button id="toggle-checkout-mode" class="floating-action-btn" title="Toggle Checkout Mode">
+    🛒
+  </button>
+
   
 
   <div class="container sticky">
@@ -230,6 +238,7 @@
   <script src="initSupabase.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="stock-checkout.js"></script>
   <script src="stock.js"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->

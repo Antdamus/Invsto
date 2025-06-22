@@ -1,0 +1,39 @@
+/* Floating Action Button for Checkout Mode */
+/*#region*/
+.floating-action-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  font-size: 28px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.floating-action-btn:hover {
+  background: #222;
+  transform: scale(1.05);
+}
+
+/* Optional glowing effect when active */
+.floating-action-btn.active {
+  background: #1db954;
+  box-shadow: 0 0 12px #1db954, 0 0 30px rgba(29, 185, 84, 0.4);
+}
+/*#endregion*/
+
+/* changes in the style of the carts when the module is activated */
+/*#region*/
+body.checkout-mode-active .stock-card {
+  cursor: pointer;
+  outline: 2px solid #1db954;
+  outline-offset: -4px;
+}
+/*#endregion*/
