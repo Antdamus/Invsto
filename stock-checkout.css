@@ -36,4 +36,11 @@ body.checkout-mode-active .stock-card {
   outline: 2px solid #1db954;
   outline-offset: -4px;
 }
+
+.stock-card.in-cart {
+  outline: 3px solid #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+  transition: all 0.2s ease-in-out;
+}
+
 /*#endregion*/

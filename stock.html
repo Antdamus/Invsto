@@ -273,6 +273,28 @@
       <p id="lockout-message" class="error-message"></p>
     </div>
   </div>
+
+  <!-- 🛒 Side Cart Panel -->
+  <div id="cart-panel" class="cart-panel hidden">
+    <div class="cart-panel-header">
+      <h2>🛒 Your Cart</h2>
+      <button id="close-cart-panel" class="cart-close-btn">&times;</button>
+    </div>
+    <div id="cart-items-container" class="cart-items">
+      <!-- Items will be injected here -->
+    </div>
+    <div class="cart-footer">
+      <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
+      <button id="proceed-checkout-btn" class="checkout-btn">Proceed to Checkout</button>
+    </div>
+  </div>
+
+  <!-- 🛒 Floating Cart Toggle Button (appears only if cart has items) -->
+  <button id="cart-toggle-btn" class="cart-toggle-btn hidden" title="View Cart">
+    🛍️ <span id="cart-count-badge">0</span>
+  </button>
+
+
   
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>

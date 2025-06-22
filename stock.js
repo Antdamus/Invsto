@@ -397,6 +397,31 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         if (e.target.matches(".select-checkbox")) {
           const id = e.target.dataset.id;
           const checked = e.target.checked;
+
+        //event listener for adding to virtual cart the selected cards
+        if (checkoutModule.isCheckoutMode()) {
+          const card = e.target.closest(".stock-card");
+          if (card) {
+            const itemId = card.querySelector(".select-checkbox")?.dataset.id || 
+                          card.querySelector(".favorite-btn")?.dataset.id || 
+                          card.dataset.id;
+
+            if (!itemId) return;
+
+            // If item is already in cart, remove it; otherwise add it
+            const cart = checkoutModule.getCart();
+            const exists = cart.find(i => i.item_id === itemId);
+
+            if (exists) {
+              checkoutModule.removeFromCart(itemId);
+            } else {
+              checkoutModule.handleCardClickForCheckout(card);
+            }
+
+            return; // ✅ Prevent other behavior
+          }
+        }
+
           toggleSelectItem(id, checked); // update selectedItems Set + bulk toolbar
         }
       });
