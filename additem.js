@@ -12,6 +12,7 @@ console.log("Loaded JS")
 let latestDymoXml = "";
 let typeqr = "";
 
+
 // === DOM ELEMENTS ===
 const qrInput = document.getElementById('qr-code');
 const qrCanvas = document.getElementById('qr-canvas');
@@ -1199,7 +1200,9 @@ if (stockInfo) {
     item_id: newItem.id,
     location_id: stockInfo.location_id,
     quantity: stockInfo.quantity,
-    action_type: "add",
+    action_type: "checkin",
+    method: "unverified",  // ✅ new: set the method
+    email: window.currentUser?.email,  // ✅ new: log who did it
     user_id: currentUser.id,
     timestamp: new Date().toISOString()
   });
