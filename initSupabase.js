@@ -3,11 +3,21 @@ const SUPABASE_URL = 'https://byhytmarmigalvawkedi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5aHl0bWFybWlnYWx2YXdrZWRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ1MzI5MTcsImV4cCI6MjA2MDEwODkxN30.W5-2mXZ9FF9AVTkkhmH-UZUda4fU2rJB98vHDOWzGCQ';
 
 function initSupabaseClient() {
-    window.supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  window.supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+
+  document.dispatchEvent(new Event("supabase-ready")); // ✅ NEW: Signal it's ready
+
 }
 
 if (document.readyState === "complete" || document.readyState === "interactive") {
-    initSupabaseClient();
-  } else {
-    document.addEventListener("DOMContentLoaded", initSupabaseClient);
-  }
+  initSupabaseClient();
+} else {
+  document.addEventListener("DOMContentLoaded", initSupabaseClient);
+}
+

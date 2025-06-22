@@ -1,16 +1,19 @@
+
+
+async function waitForSupabaseInit() {
+  return new Promise((resolve) => {
+    if (window.supabase) return resolve(); // already available
+    document.addEventListener("supabase-ready", resolve); // wait if not yet ready
+  });
+}
+
+
 console.log("Loaded JS")
 // === GLOBALS ===
 let latestDymoXml = "";
 let typeqr = "";
 
-// === AUTH CHECK ===
-(async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || user.user_metadata.role !== "admin") {
-    alert("You must be an admin to access this page.");
-    window.location.href = "index.html";
-  }
-})();
+
 
 
 // === DOM ELEMENTS ===
@@ -21,8 +24,26 @@ const barcodeInput = document.getElementById('scanned-barcode');
 const qrTypeSelect = document.getElementById("qr-type");
 const previewContainer = document.getElementById("carousel-preview");
 const photoInput = document.getElementById("item-photo");
+const pendingStockAssignments = {}; // { barcode: { location_name, quantity, location_id } }
+
 
 let uploadedImages = [];
+
+// === utility to show toast ===
+function showToast(message) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = message;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 4000);
+}
 
 // === AUTO-CALCULATE SALE PRICE ===
 document.getElementById('cost')?.addEventListener('input', () => {
@@ -49,6 +70,23 @@ async function fetchUniqueCategories() {
   const unique = [...new Set(data.map(row => row.category).filter(Boolean))];
   return unique.sort((a, b) => a.localeCompare(b));
 }
+
+// === utility to get the unique location ===
+async function fetchUniqueLocationNames() {
+  const { data, error } = await supabase
+    .from("locations")
+    .select("location_name")
+    .neq("location_name", null);
+
+  if (error) {
+    console.error("❌ Error fetching locations:", error.message);
+    return [];
+  }
+
+  const unique = [...new Set(data.map(loc => loc.location_name).filter(Boolean))];
+  return unique.sort((a, b) => a.localeCompare(b));
+}
+
 
 /** Function that will create the html block for the drop down, insert search bar, attach listener
  * Renders a searchable dropdown and lets the caller define behavior
@@ -168,11 +206,11 @@ function setupAdminLocationModalListeners() {
   };
 
   confirmBtn.onclick = async () => {
-    const itemId = document.getElementById("modal-admin-assign-location").dataset.itemId;
-    const location = document.getElementById("admin-location-name").value.trim();
+    const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";
+    const locationName = document.getElementById("admin-location-name").value.trim();
     const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
 
-    if (!location || isNaN(quantity)) {
+    if (!locationName || isNaN(quantity)) {
       showToast("❌ Please select a location and enter quantity.");
       return;
     }
@@ -180,7 +218,7 @@ function setupAdminLocationModalListeners() {
     const { data: loc, error } = await supabase
       .from("locations")
       .select("id")
-      .eq("location_name", location)
+      .eq("location_name", locationName)
       .single();
 
     if (error || !loc) {
@@ -188,46 +226,47 @@ function setupAdminLocationModalListeners() {
       return;
     }
 
-    const { error: insertError } = await supabase.from("item_stock_locations").insert({
-      item_id: itemId,
-      location_id: loc.id,
+    // Save for later use
+    pendingStockAssignments[barcode] = {
+      location_name: locationName,
       quantity,
-      added_by: currentUser.id,
-      confirmation_email: currentUser.email,
-      confirmed_at: new Date().toISOString(),
-    });
+      location_id: loc.id
+    };
 
-    if (insertError) {
-      console.error(insertError);
-      showToast("❌ Failed to save stock.");
-    } else {
-      showToast(`✅ Saved ${quantity} items to ${location}`);
-      document.getElementById("modal-admin-assign-location").classList.add("hidden");
-    }
+    showToast(`📦 Will assign ${quantity} to ${locationName} after item is saved`);
+    document.getElementById("modal-admin-assign-location").classList.add("hidden");
   };
+
 }
 
+document.getElementById("btn-open-admin-stock")?.addEventListener("click", () => {
+  // Since the item isn't saved yet, we’ll pass a placeholder ID like -1
+  // You can later update this to real ID post-insert if needed
+  showAdminLocationStockModal("-1");
+});
 
 async function populateAdminLocationDropdown() {
   const menu = document.getElementById("admin-location-dropdown-menu");
   const button = document.getElementById("admin-location-dropdown-toggle");
-  const options = await fetchUniqueLocationNames(); // You already have this function
+  const options = await fetchUniqueLocationNames();
 
   renderDropdownOptionsCustom({
     menuId: "admin-location-dropdown-menu",
+    toggleButtonId: "admin-location-dropdown-toggle",
+    hiddenInputId: "admin-location-name",
     options,
-    searchId: "admin-location-search",
-    placeholder: "Search locations...",
-    optionClass: "dropdown-option",
+    placeholder: "Search or create location...",
     dataAttribute: "location",
-    optionsContainerClass: "location-options-container",
+    optionClass: "dropdown-option",
+    optionsContainerClass: "dropdown-options-container",
+    searchId: "admin-location-dropdown-search",
     onClick: (value, isNew, el) => {
       document.getElementById("admin-location-name").value = value;
       button.innerText = value;
-      menu.classList.remove("show");
     }
   });
 }
+
 
 document.addEventListener("click", (e) => {
   if (e.target.id === "admin-location-dropdown-toggle") {
@@ -1105,30 +1144,93 @@ for (const file of photoFiles) {
 
 
 
-const { error } = await supabase.from("item_types").insert({
-  title,
-  description,
-  weight,
-  categories,
-  cost,
-  sale_price,
-  distributor_name,
-  distributor_phone,
-  distributor_notes,
-  qr_type: typeqr,
-  qr_code,
-  barcode,
-  photos: photoUrls, // assuming 'photos' is a JSONB[] column
-  dymo_label_url: window.latestDymoUrl || ""
+const { data: insertedItems, error } = await supabase
+  .from("item_types")
+  .insert({
+    title,
+    description,
+    weight,
+    categories,
+    cost,
+    sale_price,
+    distributor_name,
+    distributor_phone,
+    distributor_notes,
+    qr_type: typeqr,
+    qr_code,
+    barcode,
+    photos: photoUrls,
+    dymo_label_url: window.latestDymoUrl || ""
+  })
+  .select()
+  .limit(1);
+
+if (error || !insertedItems || insertedItems.length === 0) {
+  alert("Failed to save item: " + (error?.message || "Unknown error"));
+  return;
+}
+
+const newItem = insertedItems[0];
+const stockInfo = pendingStockAssignments[newItem.barcode];
+
+if (stockInfo) {
+  const stockInsert = await supabase.from("item_stock_locations").insert({
+    item_id: newItem.id,
+    location_id: stockInfo.location_id,
+    quantity: stockInfo.quantity,
+    added_by: currentUser.id,
+    confirmation_email: currentUser.email,
+    confirmed_at: new Date().toISOString()
+  });
+
+  const stockLog = await supabase.from("stock_transactions").insert({
+    item_id: newItem.id,
+    location_id: stockInfo.location_id,
+    quantity: stockInfo.quantity,
+    action_type: "add",
+    user_id: currentUser.id,
+    timestamp: new Date().toISOString()
+  });
+
+  if (stockInsert.error || stockLog.error) {
+    console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
+    showToast("⚠️ Stock saved, but transaction log might be missing.");
+  } else {
+    showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
+  }
+
+  // Clean up
+  delete pendingStockAssignments[newItem.barcode];
+}
+
+alert("✅ Item successfully added!");
+document.getElementById("add-item-form").reset();
+previewContainer.innerHTML = "";
+uploadedImages = [];
+latestDymoXml = "";
 });
 
-if (error) {
-  alert("Failed to save item: " + error.message);
-} else {
-  alert("✅ Item successfully added!");
-  document.getElementById("add-item-form").reset();
-  previewContainer.innerHTML = "";
-  uploadedImages = [];
-  latestDymoXml = "";
-}
+
+// === DOM Loader ===
+document.addEventListener("DOMContentLoaded", async () => {
+  await waitForSupabaseInit(); // ✅ Supabase is initialized
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    const user = data?.user;
+
+    if (!user || user.user_metadata?.role !== "admin") {
+      alert("You must be an admin to access this page.");
+      window.location.href = "index.html";
+      return;
+    }
+
+    window.currentUser = user;
+    document.getElementById("btn-open-admin-stock")?.classList.remove("hidden");
+    setupAdminLocationModalListeners();
+  } catch (err) {
+    alert("Authentication error. Please try logging in again.");
+    console.error("❌ Auth error:", err);
+    window.location.href = "index.html";
+  }
 });

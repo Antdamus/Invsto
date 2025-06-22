@@ -4,7 +4,7 @@ document.getElementById('logout')?.addEventListener('click', async () => {
   });
   
   (async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session }, error } = await supabase.auth.getSession();
     if (!session) {
       window.location.href = 'index.html';
     } else {
