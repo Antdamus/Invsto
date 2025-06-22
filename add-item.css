@@ -485,6 +485,7 @@ select {
 /*#endregion*/
 
 /* 🔽 Custom Dropdown Styling */
+/*#region*/
 .custom-dropdown {
   position: relative;
   display: block;
@@ -555,3 +556,49 @@ select {
   border: 1px solid #ccc;
   border-radius: 10px;
 }
+/*#endregion*/
+
+/* 🔢 Stock Quantity Input (Aesthetic Match) */
+/*#region*/
+#admin-stock-quantity {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 1rem;
+  font-family: 'DM Serif Display', serif;
+  background: #ffffff;
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  appearance: textfield;
+}
+
+#admin-stock-quantity:hover,
+#admin-stock-quantity:focus {
+  box-shadow: 0 0 0 2px #222;
+  outline: none;
+  background: #f9f9f9;
+}
+
+/* Optional: Remove spinners for number input in Chrome/Edge */
+#admin-stock-quantity::-webkit-outer-spin-button,
+#admin-stock-quantity::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Optional: For Firefox */
+#admin-stock-quantity[type=number] {
+  -moz-appearance: textfield;
+}
+
+.modal-body-assign-location label {
+  font-weight: 600;
+  font-size: 1rem;
+  display: block;
+  margin: 1rem 0 0.4rem;
+  font-family: 'DM Serif Display', serif;
+  color: #1a1a1a;
+}
+
+/*#endregion*/
