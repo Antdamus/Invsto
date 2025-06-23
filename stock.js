@@ -11,7 +11,7 @@ let failedAttempts = 0;            // 🚫 Track how many wrong passwords
 let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 // 🔒 In-memory cache for signed photo URLs
 const signedUrlCache = new Map();
-const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
+const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 
 
@@ -240,8 +240,30 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
     * Index is going to give you the position of the card in the main array
     * so you can see which carousel belongs to which item 
     */
-    function buildCarousel(photos, index) {
-      if (!photos.length) return `<div class="no-photo">No Photos</div>`;
+    async function buildCarousel(item, index) {
+      const paths = Array.isArray(item.photoPaths)
+      ? item.photoPaths
+      : Array.isArray(item.photos)
+        ? item.photos
+        : [];
+
+      if (!paths.length) {
+        return `<div class="no-photo">No Photos</div>`;
+      }
+
+      // Lazily sign only what's needed
+      const validPaths = paths.filter(p => typeof p === "string" && p.includes("/"));
+
+      const signedUrls = await Promise.all(
+        validPaths.map(path => getSignedUrl(path))
+      );
+
+      const filteredOut = paths.filter(p => !(typeof p === "string" && p.includes("/")));
+      if (filteredOut.length) {
+        console.warn("⚠️ Skipping invalid paths:", filteredOut);
+      }
+
+
 
       return `
         <div class="carousel" id="carousel-${index}">
@@ -249,8 +271,8 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
             <i data-lucide="chevron-left" class="carousel-icon"></i>
           </button>
           <div class="carousel-track">
-            ${photos.map((photo, i) => `
-              <img loading="lazy" src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/>
+            ${signedUrls.map((url, i) => `
+              <img loading="lazy" src="${url}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/>
             `).join('')}
           </div>
           <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next" title="Next image">
@@ -259,6 +281,7 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
         </div>
       `;
     }
+
 
   //#endregion
 
@@ -290,58 +313,50 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
   /** item: individual inventory object with the full row of information
   * index: position of the item in the array
   */
-  function renderStockCard(item, index) { 
-      const card = document.createElement("div"); /**creates the javascript
-      object */
-      card.className = "stock-card";
-      card.style.position = "relative"; /**This will ensure all children inside
-      this cards are positioned related to it */
-      card.dataset.itemId = item.id; /** this is going to give to that card 
-      object a specific id, which is going to be in the id column (key) of the item
-      (row from data array)
-      now the good thing is that this can be used by an event listener*/
-    
-      const isFavorited = currentUser && userFavorites.has(item.id); /**check
-      if this caard was selected as favorite by user */
-      const isSelected = selectedItems.has(item.id); /** check whether this card
-      id exists within the selectedItems list */
-      if (isFavorited) card.classList.add("favorited"); /** add these
-      classes for rendering purposes if boolean true */
-      if (isSelected) card.classList.add("selected");
-    
-      const photoCarousel = buildCarousel(item.photos || [], index);
-      const floatControls = buildFloatControls(item.id, isSelected, isFavorited);
-      const content = buildCardContent(item);
-    
-      card.innerHTML = `
-        <div class="stock-image-container">
-          ${photoCarousel}
-          <div class="card-float-controls">${floatControls}</div>
-        </div>
-        ${content}
-      `;
-    
-      return card;
+  async function renderStockCard(item, index) {
+    const card = document.createElement("div");
+    card.className = "stock-card";
+    card.style.position = "relative";
+    card.dataset.itemId = item.id;
+
+    const isFavorited = currentUser && userFavorites.has(item.id);
+    const isSelected = selectedItems.has(item.id);
+    if (isFavorited) card.classList.add("favorited");
+    if (isSelected) card.classList.add("selected");
+
+    const photoCarousel = await buildCarousel(item, index);
+    const floatControls = buildFloatControls(item.id, isSelected, isFavorited);
+    const content = buildCardContent(item);
+
+    card.innerHTML = `
+      <div class="stock-image-container">
+        ${photoCarousel}
+        <div class="card-float-controls">${floatControls}</div>
+      </div>
+      ${content}
+    `;
+
+    return card;
   }
 
+
   //function needed to create the HTML all the stock cards available
-  function renderStockItems(data, containerIDToInjectCards = "stock-container") {
-      const grid = document.getElementById(containerIDToInjectCards); //select the DOM node where to hold infnormation
-      grid.innerHTML = ""; //empty all the contents
-  
-      const fragment = document.createDocumentFragment(); /**create a document fragment
-      it is like a local DOM where you can append all the items you want, and at the end
-      you append the whole thing */
-  
-      data.forEach((item, index) => { /** loop to create one card per item
-          and of course you append to the fragment */
-          const card = renderStockCard(item, index); //it will hold the html for the whole card
-          fragment.appendChild(card); //it will append the whole html to the fragment
-      });
-  
-      grid.appendChild(fragment); //append the fragment which is the local DOM to the live DOM
-      if (window.lucide) lucide.createIcons(); // ✅ Only once
+  async function renderStockItems(data, containerIDToInjectCards = "stock-container") {
+    const grid = document.getElementById(containerIDToInjectCards);
+    grid.innerHTML = "";
+
+    const fragment = document.createDocumentFragment();
+
+    for (let index = 0; index < data.length; index++) {
+      const item = data[index];
+      const card = await renderStockCard(item, index);
+      fragment.appendChild(card);
+    }
+
+    grid.appendChild(fragment);
+    if (window.lucide) lucide.createIcons();
   }
+
   
   //#region Event listeners of this section
     /** Toggle a favorite state for a specific item
@@ -671,7 +686,7 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
     // ✅ Triggers:
     //    - `renderStockItems()`: shows the paginated items on screen
     //    - `renderPaginationControls()`: updates the pagination buttons
-    function paginateAndRender(data) {
+    async function paginateAndRender(data) {
       // Total number of items and pages based on current page size
       const totalItems = data.length;
       const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -687,7 +702,7 @@ const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
       const paginatedItems = data.slice(start, end);
 
       // 🔁 Render those items into the grid or list
-      renderStockItems(paginatedItems);
+      await renderStockItems(paginatedItems);
 
       // 🔁 Render the pagination controls (e.g. page buttons)
       renderPaginationControls(totalPages);
@@ -2012,33 +2027,17 @@ async function refreshItemById(itemId) {
 
   // Step 2: Sign photo URLs
   if (Array.isArray(item.photos)) {
-  const signedUrls = await Promise.all(
-    item.photos.map(async (path) => {
-      const cached = signedUrlCache.get(path);
-      if (cached && Date.now() < cached.expiresAt) {
-        return cached.url;
-      }
+    const allArePaths = item.photos.every(p => typeof p === "string" && !p.includes("https://"));
+    if (allArePaths) {
+      item.photoPaths = item.photos; // ✅ Save raw paths only if they’re real paths
+      item.photos = [];              // ✅ Clear it for lazy signing
+    } else {
+      console.warn("⚠️ Skipped converting signed URLs to paths:", item.photos);
+      item.photoPaths = []; // Or leave undefined to skip carousel signing
+    }
+  }
 
-      const { data, error } = await supabase
-        .storage
-        .from("photos")
-        .createSignedUrl(path, 3600); // TTL in seconds
 
-      if (error || !data?.signedUrl) {
-        console.warn(`⚠️ Could not sign photo ${path}:`, error?.message);
-        return null;
-      }
-
-      signedUrlCache.set(path, {
-        url: data.signedUrl,
-        expiresAt: Date.now() + SIGNED_URL_TTL_MS
-      });
-
-      return data.signedUrl;
-    })
-  );
-  item.photos = signedUrls.filter(Boolean);
-}
 
 
 
@@ -2082,7 +2081,7 @@ async function refreshItemById(itemId) {
   // Step 5: Replace the item card
   const oldCard = document.querySelector(`.stock-card[data-item-id="${itemId}"]`);
   if (oldCard) {
-    const newCard = renderStockCard(item, allItems.findIndex(i => i.id === itemId));
+    const newCard = await renderStockCard(item, allItems.findIndex(i => i.id === itemId));
     if (newCard) oldCard.replaceWith(newCard);
     window.lucide.createIcons();
   }
@@ -2099,6 +2098,60 @@ async function refreshItemById(itemId) {
   console.log("✅ Item refreshed in place:", item.title);
 }
 
+//get the signed URL only for the items to be rendered
+async function getSignedUrl(path) {
+  if (!path || typeof path !== "string") {
+    console.warn("❌ Invalid photo path:", path);
+    return null;
+  }
+
+  const cached = signedUrlCache.get(path);
+  if (cached && Date.now() < cached.expiresAt) return cached.url;
+  //console.log("🔍 Attempting to sign path:", path);
+  const { data, error } = await supabase
+    .storage
+    .from("photos")
+    .createSignedUrl(path, 3600);
+
+  if (error || !data?.signedUrl) {
+    console.warn("⚠️ Failed to sign URL:", path, error?.message || "Unknown error");
+    return null;
+  }
+
+  signedUrlCache.set(path, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + SIGNED_URL_TTL_MS
+  });
+
+  return data.signedUrl;
+}
+
+//function to clean cache
+function cleanCachedPhotos() {
+  const cached = sessionStorage.getItem("cachedAllItems");
+  if (!cached) return;
+
+  try {
+    const parsed = JSON.parse(cached);
+    if (!Array.isArray(parsed.data)) return;
+
+    parsed.data.forEach(item => {
+      if (Array.isArray(item.photos)) {
+        const rawPaths = item.photos.filter(p =>
+          typeof p === "string" && !p.startsWith("https://")
+        );
+
+        item.photoPaths = rawPaths;
+        item.photos = []; // clear it to enable lazy signing
+      }
+    });
+
+    sessionStorage.setItem("cachedAllItems", JSON.stringify(parsed));
+    console.log("🧹 Cleaned photo paths in cachedAllItems");
+  } catch (err) {
+    console.warn("⚠️ Failed to clean cachedAllItems:", err);
+  }
+}
 
 // they are utililitieis be cause they are stateless, meaning they do not modify
 // a global variable, they just get an input, and produce an output as simple as that
@@ -2199,33 +2252,17 @@ async function fetchStockItems() {
   // Step 1.5: Generate signed image URLs from stored paths
   for (const item of items) {
     if (Array.isArray(item.photos)) {
-  const signedUrls = await Promise.all(
-    item.photos.map(async (path) => {
-      const cached = signedUrlCache.get(path);
-      if (cached && Date.now() < cached.expiresAt) {
-        return cached.url;
+      const allArePaths = item.photos.every(p => typeof p === "string" && !p.includes("https://"));
+      if (allArePaths) {
+        item.photoPaths = item.photos; // ✅ Save raw paths only if they’re real paths
+        item.photos = [];              // ✅ Clear it for lazy signing
+      } else {
+        console.warn("⚠️ Skipped converting signed URLs to paths:", item.photos);
+        item.photoPaths = []; // Or leave undefined to skip carousel signing
       }
+    }
 
-      const { data, error } = await supabase
-        .storage
-        .from("photos")
-        .createSignedUrl(path, 3600); // TTL in seconds
 
-      if (error || !data?.signedUrl) {
-        console.warn(`⚠️ Could not sign photo ${path}:`, error?.message);
-        return null;
-      }
-
-      signedUrlCache.set(path, {
-        url: data.signedUrl,
-        expiresAt: Date.now() + SIGNED_URL_TTL_MS
-      });
-
-      return data.signedUrl;
-    })
-  );
-  item.photos = signedUrls.filter(Boolean);
-}
 
   }
 
@@ -2287,6 +2324,7 @@ async function loadAllItemsWithCache() {
 
   const cached = sessionStorage.getItem("cachedAllItems");
   const currentVersion = await getCurrentInventoryVersionFromSupabase();
+  
 
   if (!currentVersion) {
     console.warn("⚠️ No version info — fallback to live fetch.");
