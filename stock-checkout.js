@@ -75,10 +75,13 @@ window.checkoutModule = (function () {
             item_id: item.id,
             title: item.title || "Untitled",
             sale_price: parseFloat(item.sale_price || "0"),
-            image_url: item.photo_url || null
+            image_url: (item.photos && item.photos.length > 0) ? item.photos[0] : null
         };
 
+        console.log("🖼️ Cart Image URL:", cartItem.image_url);
+
         addToCart(cartItem);
+        renderCartItems();
         console.log("🛒 Updated cart:", getCart());
     }
 
@@ -89,7 +92,8 @@ window.checkoutModule = (function () {
         const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
         if (card) card.classList.remove("in-cart");
 
-        updateCartUI(); // make sure it's AFTER updating the cart
+        updateCartUI();       // update badge / toggle visibility
+        renderCartItems();    // 💡 refresh the list in the side panel
     }
 
     function getCart() {
@@ -118,6 +122,31 @@ window.checkoutModule = (function () {
         }
     }
 
+    //rendering in the cart the items 
+    function renderCartItems() {
+        const container = document.getElementById("cart-items-container");
+        if (!container) return;
+
+        container.innerHTML = ""; // Clear previous content
+
+        if (cart.length === 0) {
+            container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
+            return;
+        }
+
+        cart.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "cart-item";
+            div.innerHTML = `
+            <img src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" class="cart-thumb" />
+            <div class="cart-item-details">
+                <p class="cart-item-title">${item.title}</p>
+                <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
+            </div>
+            `;
+            container.appendChild(div);
+        });
+    }
 
     //function to set up the listener
     function setupCartPanelListeners() {

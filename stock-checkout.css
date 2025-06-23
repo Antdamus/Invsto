@@ -47,7 +47,6 @@ body.checkout-mode-active .stock-card {
 
 /* ===================== 🛒 Cart Panel & Toggle Styles ===================== */
 /*#region*/
-
 /* === Cart Panel === */
 body.cart-open .main-content {
   margin-right: 320px; /* or match panel width */
@@ -185,4 +184,45 @@ body.cart-open .main-content {
   font-size: 0.9rem;
 }
 
+/*#endregion*/
+
+/* ===================== rendering of the items ===================== */
+/*#region*/
+.cart-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 12px;
+}
+
+.cart-thumb {
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.cart-item-details {
+  flex: 1;
+}
+
+.cart-item-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.cart-item-price {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  color: #555;
+}
+
+.cart-empty {
+  text-align: center;
+  color: #999;
+  margin-top: 20px;
+}
 /*#endregion*/
