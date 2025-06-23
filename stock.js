@@ -9,6 +9,10 @@ let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
 let activeDropdown = null;
 let failedAttempts = 0;            // 🚫 Track how many wrong passwords
 let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
+// 🔒 In-memory cache for signed photo URLs
+const signedUrlCache = new Map();
+const SIGNED_URL_TTL_MS = 3600 * 1000; // 1 hour
+
 
 
 //---------------------------------------------------------------//
@@ -2008,21 +2012,35 @@ async function refreshItemById(itemId) {
 
   // Step 2: Sign photo URLs
   if (Array.isArray(item.photos)) {
-    const signedUrls = await Promise.all(
-      item.photos.map(async (path) => {
-        const { data, error } = await supabase
-          .storage
-          .from("photos")
-          .createSignedUrl(path, 3600);
-        if (error) {
-          console.warn(`⚠️ Could not sign photo ${path}:`, error.message);
-          return null;
-        }
-        return data?.signedUrl;
-      })
-    );
-    item.photos = signedUrls.filter(Boolean);
-  }
+  const signedUrls = await Promise.all(
+    item.photos.map(async (path) => {
+      const cached = signedUrlCache.get(path);
+      if (cached && Date.now() < cached.expiresAt) {
+        return cached.url;
+      }
+
+      const { data, error } = await supabase
+        .storage
+        .from("photos")
+        .createSignedUrl(path, 3600); // TTL in seconds
+
+      if (error || !data?.signedUrl) {
+        console.warn(`⚠️ Could not sign photo ${path}:`, error?.message);
+        return null;
+      }
+
+      signedUrlCache.set(path, {
+        url: data.signedUrl,
+        expiresAt: Date.now() + SIGNED_URL_TTL_MS
+      });
+
+      return data.signedUrl;
+    })
+  );
+  item.photos = signedUrls.filter(Boolean);
+}
+
+
 
   // Step 3: Get stock info
   const { data: stockData, error: stockError } = await supabase
@@ -2181,21 +2199,34 @@ async function fetchStockItems() {
   // Step 1.5: Generate signed image URLs from stored paths
   for (const item of items) {
     if (Array.isArray(item.photos)) {
-      const signedUrls = await Promise.all(
-        item.photos.map(async (path) => {
-          const { data, error } = await supabase
-            .storage
-            .from("photos")
-            .createSignedUrl(path, 3600); // 1 hour validity
-          if (error) {
-            console.warn(`⚠️ Could not sign photo ${path}:`, error.message);
-            return null;
-          }
-          return data?.signedUrl;
-        })
-      );
-      item.photos = signedUrls.filter(Boolean);
-    }
+  const signedUrls = await Promise.all(
+    item.photos.map(async (path) => {
+      const cached = signedUrlCache.get(path);
+      if (cached && Date.now() < cached.expiresAt) {
+        return cached.url;
+      }
+
+      const { data, error } = await supabase
+        .storage
+        .from("photos")
+        .createSignedUrl(path, 3600); // TTL in seconds
+
+      if (error || !data?.signedUrl) {
+        console.warn(`⚠️ Could not sign photo ${path}:`, error?.message);
+        return null;
+      }
+
+      signedUrlCache.set(path, {
+        url: data.signedUrl,
+        expiresAt: Date.now() + SIGNED_URL_TTL_MS
+      });
+
+      return data.signedUrl;
+    })
+  );
+  item.photos = signedUrls.filter(Boolean);
+}
+
   }
 
   // Step 2: Fetch stock quantities
