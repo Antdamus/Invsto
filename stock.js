@@ -50,6 +50,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
         // Update item in Supabase
         await updateItemCategories(itemId, updated);
+        await bumpInventoryVersion();
 
         // Refresh filtered + sorted UI
         await refreshInventoryUI();
@@ -347,11 +348,12 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
       const { error } = isFav
         ? await supabase.from("favorites").delete().eq("user_id", currentUser.id).eq("item_id", itemId)
         : await supabase.from("favorites").insert([{ user_id: currentUser.id, item_id: itemId }]);
-
+        await bumpInventoryVersion();
       if (!error) {
         isFav ? userFavorites.delete(itemId) : userFavorites.add(itemId);
         const filtered = getFilteredItems(allItems);
         applySortAndRender(filtered);
+        
       }
     }
 
@@ -380,8 +382,10 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           const cat = chip?.dataset.cat;                   // which category?
           const itemId = chip?.dataset.id;                 // which item?
           if (cat && itemId) {
-            removeCategory(itemId, cat);                   // update data & UI
+            removeCategory(itemId, cat);
+                               // update data & UI
           }
+          
         }
 
         // ⏪⏩ Carousel navigation: previous or next
@@ -1310,7 +1314,6 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     });
   }
 
-  
   //function to validate password before deleting items
   async function validatePassword(password) {
     if (!currentUser || !password) return false;
@@ -1493,8 +1496,9 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
             location_lat: location.lat,
             location_lng: location.lng
           });
-    
-          allItems = await fetchStockItems();
+
+          await bumpInventoryVersion();
+          await loadAllItemsWithCache();
           const updatedCount = selectedItems.size;
           clearSelectionAndRefresh();
           updateFilterChips(getActiveFilters());
@@ -1526,6 +1530,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           // 🧹 Remove from favorites
           updates.push(
             supabase.from("favorites").delete().eq("item_id", id).eq("user_id", currentUser.id)
+            
           );
           userFavorites.delete(id);
         } else {
@@ -1544,6 +1549,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
       updateFilterChips(getActiveFilters());
       showToast(`⭐ Updated ${updatedCount} favorites`);
       hideLoading();
+      await bumpInventoryVersion();
     });
 
     // 📄 Export selected cards to CSV
@@ -1885,6 +1891,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           const value = optionEl.dataset.value;
           const isNew = optionEl.dataset.new === "true";
           syncHiddenInputsWithDropdowns();
+          bumpInventoryVersion();
           if (typeof onClick === "function") {
             onClick(value, isNew, optionEl);
           }
@@ -1963,6 +1970,22 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
 /* ================= utilities ============================== */
 //#region
+//function to get the version from the inventory 
+async function getCurrentInventoryVersionFromSupabase() {
+  const { data, error } = await supabase
+    .from("metadata")
+    .select("inventory_version")
+    .eq("id", "inventory")
+    .single();
+
+  if (error || !data?.inventory_version) {
+    console.error("❌ Failed to get inventory version:", error);
+    return null;
+  }
+
+  return data.inventory_version;
+}
+
 // they are utililitieis be cause they are stateless, meaning they do not modify
 // a global variable, they just get an input, and produce an output as simple as that
 // can be tested independently by pasting them in other codes     
@@ -2059,7 +2082,7 @@ async function fetchStockItems() {
     return [];
   }
 
-  // ✅ Step 1.5: Generate signed image URLs from stored paths
+  // Step 1.5: Generate signed image URLs from stored paths
   for (const item of items) {
     if (Array.isArray(item.photos)) {
       const signedUrls = await Promise.all(
@@ -2079,7 +2102,7 @@ async function fetchStockItems() {
     }
   }
 
-  // Step 2: Fetch raw stock + location IDs
+  // Step 2: Fetch stock quantities
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
     .select("item_id, quantity, location_id");
@@ -2103,7 +2126,6 @@ async function fetchStockItems() {
 
   // Step 4: Aggregate stock per item
   const stockMap = {};
-
   stockData.forEach(({ item_id, quantity, location_id }) => {
     const locName = locationMap[location_id] || "Unknown Location";
     if (!stockMap[item_id]) {
@@ -2113,22 +2135,79 @@ async function fetchStockItems() {
     stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + quantity;
   });
 
-  // Step 5: Inject into each item
+  // Step 5: Inject stock and tooltip
   items.forEach(item => {
     const stockEntry = stockMap[item.id];
     item.stock = stockEntry?.total || 0;
 
     if (stockEntry) {
-      const tooltip = Object.entries(stockEntry.breakdown)
+      item.stock_tooltip = Object.entries(stockEntry.breakdown)
         .map(([loc, qty]) => `${loc}: ${qty}`)
         .join("\n");
-      item.stock_tooltip = tooltip;
     } else {
       item.stock_tooltip = "No stock data available";
     }
   });
 
   return items;
+}
+
+// use the cache to load all the items and improve the user experience
+async function loadAllItemsWithCache() {
+  const overlay = document.getElementById("loading-overlay");
+  overlay.style.display = "flex"; // ✅ Show loading
+
+  const cached = sessionStorage.getItem("cachedAllItems");
+  const currentVersion = await getCurrentInventoryVersionFromSupabase();
+
+  if (!currentVersion) {
+    console.warn("⚠️ No version info — fallback to live fetch.");
+    allItems = await fetchStockItems(); // fallback load
+    overlay.style.display = "none"; // ✅ Hide loading
+    return;
+  }
+
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (parsed.version === currentVersion && Array.isArray(parsed.data)) {
+        console.log("✅ Loaded allItems from cache");
+        allItems = parsed.data;
+        overlay.style.display = "none"; // ✅ Hide loading
+        return;
+      } else {
+        console.log("🌀 Version mismatch — reloading from Supabase");
+      }
+    } catch (e) {
+      console.warn("⚠️ Failed to parse cached items:", e);
+    }
+  }
+
+  // If no cache or version mismatch, fetch live
+  allItems = await fetchStockItems();
+
+  // Then store it in session cache
+  sessionStorage.setItem("cachedAllItems", JSON.stringify({
+    version: currentVersion,
+    data: allItems
+  }));
+
+  overlay.style.display = "none"; // ✅ Hide loading
+}
+
+//function to change the version of the metadata the cache uses after each operation 
+async function bumpInventoryVersion() {
+  const { error } = await supabase
+    .from("metadata")
+    .update({ inventory_version: crypto.randomUUID() })
+    .eq("id", "inventory");
+
+  if (error) {
+    console.warn("⚠️ Failed to update inventory version:", error.message);
+  } else {
+    console.log("🔁 Inventory version updated");
+  }
+  await loadAllItemsWithCache();
 }
 
 // 🔹 UI Utility: Show loading overlay (or any spinner by selector)
@@ -2261,8 +2340,8 @@ async function loadCategories(items) {
 
 // 🔹 to re render a refreshed inventory
 async function refreshInventoryUI() {
-  const items = await fetchStockItems();
-  const filtered = getFilteredItems(items);
+  await loadAllItemsWithCache(); // populates allItems globally
+  const filtered = getFilteredItems(allItems);
   applySortAndRender(filtered);
   updateFilterChips(getActiveFilters());
 }
@@ -2334,12 +2413,15 @@ async function showCategoryDropdown(itemId, anchorElement) {
         if (selected.has(cat)) {
           selected.delete(cat);
           option.classList.remove("selected");
+          
         } else {
           selected.add(cat);
           option.classList.add("selected");
+          
         }
       });
       optionsContainer.appendChild(option);
+      
     });
 
     // ➕ Create new category option if not found
@@ -2349,6 +2431,7 @@ async function showCategoryDropdown(itemId, anchorElement) {
         renderOptions(); // Rerender full list
       });
       optionsContainer.appendChild(createOption);
+      
     }
   }
 
@@ -2363,11 +2446,12 @@ async function showCategoryDropdown(itemId, anchorElement) {
       .select("categories")
       .eq("id", itemId)
       .single();
-
+      
     if (error || !current) return console.error("Failed to fetch current categories");
+    console.log("🧪 Save button clicked");
 
     const updated = Array.from(new Set([...(current.categories || []), ...selected]));
-
+    await bumpInventoryVersion();
     await updateItemCategories(itemId, updated);
     dropdown.remove();
     activeDropdown = null;
@@ -2510,7 +2594,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Step 2: Fetch items from Supabase and store globally
-  allItems = await fetchStockItems();
+  await loadAllItemsWithCache();
 
   //#region step 3 create all the necessary drop downs for the system
     //dropdown for filter by categories

@@ -4,6 +4,20 @@ let currentBatch = {};
 let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 
+//update the inventory after adding items
+async function bumpInventoryVersion() {
+  const { error } = await supabase
+    .from("metadata")
+    .update({ inventory_version: crypto.randomUUID() })
+    .eq("id", "inventory");
+
+  if (error) {
+    console.warn("⚠️ Failed to update inventory version:", error.message);
+  } else {
+    console.log("🔁 Inventory version updated");
+  }
+}
+
 //#region full logic to what will be done once the item reaches its limit
   //function to turn on and off the autofocus and the input of adding items by barcode
   function updateBarcodeInputStateBasedOnModals() {
@@ -851,6 +865,8 @@ let latestLocationDymoUrl = null;
         // ✅ Clean up UI and memory for this item
         batchItem.cardEl.remove();
         delete currentBatch[batchItem.item.barcode];
+        await bumpInventoryVersion();
+        
       };
     
       cancelBtn.onclick = () => {

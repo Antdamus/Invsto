@@ -66,7 +66,19 @@ async function fetchUniqueCategories() {
   return unique.sort((a, b) => a.localeCompare(b));
 }
 
+//update the inventory after adding items
+async function bumpInventoryVersion() {
+  const { error } = await supabase
+    .from("metadata")
+    .update({ inventory_version: crypto.randomUUID() })
+    .eq("id", "inventory");
 
+  if (error) {
+    console.warn("⚠️ Failed to update inventory version:", error.message);
+  } else {
+    console.log("🔁 Inventory version updated");
+  }
+}
 
 // === utility to get the unique location ===
 async function fetchUniqueLocationNames() {
@@ -1157,8 +1169,6 @@ for (const file of photoFiles) {
   photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
 }
 
-
-
 const { data: insertedItems, error } = await supabase
   .from("item_types")
   .insert({
@@ -1225,6 +1235,7 @@ document.getElementById("add-item-form").reset();
 previewContainer.innerHTML = "";
 uploadedImages = [];
 latestDymoXml = "";
+await bumpInventoryVersion();
 });
 
 
