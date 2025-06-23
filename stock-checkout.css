@@ -225,4 +225,40 @@ body.cart-open .main-content {
   color: #999;
   margin-top: 20px;
 }
+
+/* ============================
+   📦 Quantity Controls in Cart
+   ============================ */
+.cart-qty-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cart-qty-controls button {
+  background-color: #e0e0e0;
+  border: none;
+  padding: 4px 10px;
+  font-size: 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.cart-qty-controls button:hover {
+  background-color: #d2d2d2;
+  transform: scale(1.05);
+}
+
+.cart-qty-count {
+  font-size: 1rem;
+  font-weight: 500;
+  min-width: 24px;
+  text-align: center;
+  color: #333;
+}
+
 /*#endregion*/

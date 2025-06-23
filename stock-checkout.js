@@ -127,10 +127,12 @@ window.checkoutModule = (function () {
         const container = document.getElementById("cart-items-container");
         if (!container) return;
 
-        container.innerHTML = ""; // Clear previous content
+        container.innerHTML = "";
 
         if (cart.length === 0) {
             container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
+            document.getElementById("cart-total-price").textContent = "$0.00";
+            document.getElementById("cart-item-count").textContent = "0 items";
             return;
         }
 
@@ -142,18 +144,57 @@ window.checkoutModule = (function () {
             <div class="cart-item-details">
                 <p class="cart-item-title">${item.title}</p>
                 <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
+                <div class="cart-qty-controls">
+                <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                <span class="cart-qty-count">${item.qty}</span>
+                <button class="qty-increase" data-id="${item.item_id}">+</button>
+                </div>
             </div>
             `;
             container.appendChild(div);
         });
 
-        const total = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
-        const totalPriceEl = document.getElementById("cart-total-price");
-        if (totalPriceEl) {
-        totalPriceEl.textContent = `$${total.toFixed(2)}`;
-        }
+        // Attach listeners after injecting items
+        container.querySelectorAll(".qty-increase").forEach(btn => {
+            btn.addEventListener("click", () => {
+            const id = btn.dataset.id;
+            const target = cart.find(i => i.item_id === id);
+            if (target) {
+                target.qty += 1;
+                updateCartUI();
+                renderCartItems();
+            }
+            });
+        });
 
+        container.querySelectorAll(".qty-decrease").forEach(btn => {
+            btn.addEventListener("click", () => {
+            const id = btn.dataset.id;
+            const target = cart.find(i => i.item_id === id);
+            if (target && target.qty > 1) {
+                target.qty -= 1;
+            } else {
+                // If qty reaches 0, remove the item entirely
+                cart = cart.filter(i => i.item_id !== id);
+                const card = document.querySelector(`.stock-card [data-id="${id}"]`)?.closest('.stock-card');
+                if (card) card.classList.remove("in-cart");
+                
+            }
+            updateCartUI();
+            renderCartItems();
+            });
+        });
+
+        // Update total price and item count
+        const total = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+        const itemCount = cart.reduce((sum, item) => sum + (item.qty || 1), 0);
+        const totalPriceEl = document.getElementById("cart-total-price");
+        const itemCountEl = document.getElementById("cart-item-count");
+
+        if (totalPriceEl) totalPriceEl.textContent = `$${total.toFixed(2)}`;
+        if (itemCountEl) itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
     }
+
 
     //function to set up the listener
     function setupCartPanelListeners() {
