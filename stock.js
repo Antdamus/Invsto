@@ -53,7 +53,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         await bumpInventoryVersion();
 
         // Refresh filtered + sorted UI
-        await refreshInventoryUI();
+        await refreshItemById(itemId); // ✅ Only re-renders that card
+
       }
 
       // 🔹 Controller: Prompt user to type a new category and add it to an item
@@ -85,7 +86,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
         await updateItemCategories(itemId, updated);
 
         // Refresh inventory list and filters
-        await refreshInventoryUI();
+        await refreshItemById(itemId); // ✅ Only re-renders that card
+
       }
 
       // 🔹 Controller: Apply a selected category to an item (e.g., from dropdown)
@@ -108,7 +110,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
         await updateItemCategories(itemId, updated);
 
-        await refreshInventoryUI();
+        await refreshItemById(itemId); // ✅ Only re-renders that card
+
       }
 
       // 🔧 Utility to update item categories from Supabase
@@ -1986,6 +1989,99 @@ async function getCurrentInventoryVersionFromSupabase() {
   return data.inventory_version;
 }
 
+//function to only refresh one item at a time
+async function refreshItemById(itemId) {
+  console.log(`🔄 Refreshing item by ID: ${itemId}`);
+
+  // Step 1: Fetch the updated item
+  const { data: items, error: itemError } = await supabase
+    .from("item_types")
+    .select("*")
+    .eq("id", itemId);
+
+  if (itemError || !items || items.length === 0) {
+    console.error("❌ Failed to fetch item:", itemError);
+    return;
+  }
+
+  const item = items[0];
+
+  // Step 2: Sign photo URLs
+  if (Array.isArray(item.photos)) {
+    const signedUrls = await Promise.all(
+      item.photos.map(async (path) => {
+        const { data, error } = await supabase
+          .storage
+          .from("photos")
+          .createSignedUrl(path, 3600);
+        if (error) {
+          console.warn(`⚠️ Could not sign photo ${path}:`, error.message);
+          return null;
+        }
+        return data?.signedUrl;
+      })
+    );
+    item.photos = signedUrls.filter(Boolean);
+  }
+
+  // Step 3: Get stock info
+  const { data: stockData, error: stockError } = await supabase
+    .from("item_stock_locations")
+    .select("item_id, quantity, location_id")
+    .eq("item_id", itemId);
+
+  if (!stockError && stockData) {
+    const { data: locations, error: locError } = await supabase
+      .from("locations")
+      .select("id, location_name");
+
+    if (!locError && locations) {
+      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+      const breakdown = {};
+      let total = 0;
+
+      stockData.forEach(({ quantity, location_id }) => {
+        const locName = locationMap[location_id] || "Unknown Location";
+        total += quantity;
+        breakdown[locName] = (breakdown[locName] || 0) + quantity;
+      });
+
+      item.stock = total;
+      item.stock_tooltip = Object.entries(breakdown)
+        .map(([loc, qty]) => `${loc}: ${qty}`)
+        .join("\n");
+    }
+  }
+
+  // Step 4: Update it in allItems
+  const index = allItems.findIndex(i => i.id === itemId);
+  if (index !== -1) {
+    allItems[index] = item;
+  } else {
+    allItems.push(item); // if it's new
+  }
+
+  // Step 5: Replace the item card
+  const oldCard = document.querySelector(`.stock-card[data-item-id="${itemId}"]`);
+  if (oldCard) {
+    const newCard = renderStockCard(item, allItems.findIndex(i => i.id === itemId));
+    if (newCard) oldCard.replaceWith(newCard);
+    window.lucide.createIcons();
+  }
+  
+  //step 6, update the cache
+  const version = await getCurrentInventoryVersionFromSupabase();
+  if (version) {
+    sessionStorage.setItem("cachedAllItems", JSON.stringify({
+      version,
+      data: allItems
+    }));
+  }
+
+  console.log("✅ Item refreshed in place:", item.title);
+}
+
+
 // they are utililitieis be cause they are stateless, meaning they do not modify
 // a global variable, they just get an input, and produce an output as simple as that
 // can be tested independently by pasting them in other codes     
@@ -2148,6 +2244,7 @@ async function fetchStockItems() {
       item.stock_tooltip = "No stock data available";
     }
   });
+  
 
   return items;
 }
@@ -2207,7 +2304,7 @@ async function bumpInventoryVersion() {
   } else {
     console.log("🔁 Inventory version updated");
   }
-  await loadAllItemsWithCache();
+  //await loadAllItemsWithCache();
 }
 
 // 🔹 UI Utility: Show loading overlay (or any spinner by selector)
@@ -2456,7 +2553,8 @@ async function showCategoryDropdown(itemId, anchorElement) {
     dropdown.remove();
     activeDropdown = null;
 
-    await refreshInventoryUI();
+    await refreshItemById(itemId); // ✅ Only re-renders that card
+
   };
 
   // 📌 Position dropdown and append to body
