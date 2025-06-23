@@ -348,7 +348,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
       const { error } = isFav
         ? await supabase.from("favorites").delete().eq("user_id", currentUser.id).eq("item_id", itemId)
         : await supabase.from("favorites").insert([{ user_id: currentUser.id, item_id: itemId }]);
-        await bumpInventoryVersion();
+        //await bumpInventoryVersion();
       if (!error) {
         isFav ? userFavorites.delete(itemId) : userFavorites.add(itemId);
         const filtered = getFilteredItems(allItems);
