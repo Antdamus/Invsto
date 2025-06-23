@@ -176,7 +176,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           </div>
         </div>
         `; 
-        lucide.createIcons();/** the add-category-chip has a data-id so when the event listener is triggered
+        //lucide.createIcons();
+        /** the add-category-chip has a data-id so when the event listener is triggered
         it knows specifically to what it needs to add the category */
         /**it will resturn
          <div class="stock-content">
@@ -233,7 +234,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     */
     function buildCarousel(photos, index) {
       if (!photos.length) return `<div class="no-photo">No Photos</div>`;
-    
+
       return `
         <div class="carousel" id="carousel-${index}">
           <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">
@@ -241,7 +242,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           </button>
           <div class="carousel-track">
             ${photos.map((photo, i) => `
-              <img src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
+              <img loading="lazy" src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
             `).join('')}
           </div>
           <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">
@@ -249,8 +250,8 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           </button>
         </div>
       `;
-      lucide.createIcons()
-    }    
+    }
+
   //#endregion
 
   //getting the floating control for selection and favorited sections 
@@ -331,6 +332,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
       });
   
       grid.appendChild(fragment); //append the fragment which is the local DOM to the live DOM
+      if (window.lucide) lucide.createIcons(); // ✅ Only once
   }
   
   //#region Event listeners of this section

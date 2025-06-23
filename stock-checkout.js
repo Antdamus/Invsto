@@ -140,7 +140,7 @@ window.checkoutModule = (function () {
             const div = document.createElement("div");
             div.className = "cart-item";
             div.innerHTML = `
-            <img src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" class="cart-thumb" />
+            <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" class="cart-thumb" />
             <div class="cart-item-details">
                 <p class="cart-item-title">${item.title}</p>
                 <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
