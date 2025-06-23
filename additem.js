@@ -78,6 +78,7 @@ async function bumpInventoryVersion() {
   } else {
     console.log("🔁 Inventory version updated");
   }
+  //await loadAllItemsWithCache();
 }
 
 // === utility to get the unique location ===
