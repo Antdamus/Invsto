@@ -47,13 +47,13 @@
         
         <!-- ⭐ Favorites Toggle Checkbox -->
         <label class="favorite-toggle">
-          <input type="checkbox" id="show-favorites-only" />
+          <input type="checkbox" id="show-favorites-only" title="Checkbox"/>
           <i data-lucide="star" class="icon"></i> Show Only Favorites
         </label>
 
         <!-- 🔽 Custom Sort Dropdown Menu -->
         <div class="custom-sort-dropdown">
-          <button id="sortDropdownToggle" class="dropdown-toggle">
+          <button id="sortDropdownToggle" class="dropdown-toggle" title="Activate dropdown">
             <i data-lucide="chevron-down" class="icon"></i> Sort By...
           </button>          
           <ul id="sortDropdownMenu" class="dropdown-menu">
@@ -74,7 +74,7 @@
         </div>
 
         <!-- 🕹 Hidden native <select> used by JS for syncing sort option -->
-        <select id="sort-select" style="display: none;">
+        <select id="sort-select" style="display: none;" title="sort select">
           <option value="title-asc"></option>
           <option value="title-desc"></option>
           <option value="weight-asc"></option>
@@ -90,12 +90,12 @@
         </select>
 
         <!-- 🔘 Filter toggle and clear buttons -->
-        <button id="toggle-filters" class="filter-toggle-btn">
+        <button id="toggle-filters" class="filter-toggle-btn" title="Open the filters">
           <i data-lucide="sliders-horizontal" class="icon"></i>
           <span class="label">Show Filters</span>
         </button>
         
-        <button type="button" id="clear-filters" class="btn-clear">
+        <button type="button" id="clear-filters" class="btn-clear" title="Clear all the filters">
           <i data-lucide="x-circle" class="icon"></i> Clear
         </button>
         
@@ -111,16 +111,16 @@
 
       <!-- 🔘 Filter Tab Buttons Row -->
       <div class="filter-tabs">
-        <button class="filter-tab-btn" data-tab="basic">
+        <button class="filter-tab-btn" data-tab="basic" title="Search">
           <i data-lucide="search" class="icon"></i> Basic Search
         </button>
-        <button class="filter-tab-btn" data-tab="range">
+        <button class="filter-tab-btn" data-tab="range" title="Range filters">
           <i data-lucide="equal-not" class="icon"></i> Range Filters
         </button>
-        <button class="filter-tab-btn" data-tab="labels">
+        <button class="filter-tab-btn" data-tab="labels" title="Labels & Types">
           <i data-lucide="tags" class="icon"></i> Labels & Types
         </button>
-        <button id="select-all-visible" class="filter-tab-btn">
+        <button id="select-all-visible" class="filter-tab-btn" title="Select All Visible">
           <i data-lucide="check-square" class="icon"></i> Select All Visible
         </button>
       </div>
@@ -149,20 +149,20 @@
             <input type="number" name="priceMax" placeholder="Max sale price" />
             <input type="number" name="stockMin" placeholder="Min stock" />
             <input type="number" name="stockMax" placeholder="Max stock" />
-            <input type="date" name="createdFrom" />
-            <input type="date" name="createdTo" />
+            <input type="date" name="createdFrom" placeholder="Created From" />
+            <input type="date" name="createdTo" placeholder="Created to"/>
           </div>
         </div>
 
         <!-- 🏷️ Labels & Types Panel -->
         <div class="filter-tab-content" id="tab-labels">
           <div class="filter-grid">
-            <button type="button" id="match-all-toggle" class="match-mode-toggle-btn">Match All Categories: Off</button>
+            <button type="button" id="match-all-toggle" class="match-mode-toggle-btn" title="Match by category">Match All Categories: Off</button>
 
 
             <!-- 🧷 Category Dropdown -->
             <div id="category-dropdown-container" class="custom-dropdown">
-              <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
+              <button id="category-dropdown-toggle" type="button" class="dropdown-toggle" title="Select Categories">
                 Select Categories
               </button>
               <div id="category-dropdown-menu" class="dropdown-menu"></div>
@@ -171,7 +171,7 @@
 
             <!-- 🔳 QR Type Dropdown -->
             <div id="qr-dropdown-container" class="custom-dropdown">
-              <button id="qr-dropdown-toggle" type="button" class="dropdown-toggle">
+              <button id="qr-dropdown-toggle" type="button" class="dropdown-toggle" title="QR Dropdown">
                 Select QR Type
               </button>
               <div id="qr-dropdown-menu" class="dropdown-menu"></div>
@@ -185,24 +185,24 @@
     <div id="bulk-toolbar" class="bulk-toolbar">
       <span id="selected-count">0 selected</span>
     
-      <button id="bulk-delete">
+      <button id="bulk-delete" title="Delete">
         <i data-lucide="trash-2" class="icon"></i> Delete
       </button>
     
-      <button id="bulk-export">
+      <button id="bulk-export" title="Export CVS">
         <i data-lucide="download" class="icon"></i> Export CSV
       </button>
     
-      <button id="bulk-clear">
+      <button id="bulk-clear" title="Clear Selection">
         <i data-lucide="x" class="icon"></i> Clear Selection
       </button>
     
-      <button id="bulk-favorite">
+      <button id="bulk-favorite" title="Toggle Favorite">
         <i data-lucide="star" class="icon"></i> Toggle Favorite
       </button>
     
       <div id="bulk-category-container" class="custom-dropdown">
-        <button id="bulk-category-toggle" type="button" class="dropdown-toggle">
+        <button id="bulk-category-toggle" type="button" class="dropdown-toggle" title="categories to add">
           <i data-lucide="tags" class="icon"></i> Categories to add
         </button>
         <div id="bulk-category-menu" class="dropdown-menu"></div>
@@ -217,9 +217,9 @@
     <div class="pagination-controls">
       <div class="page-size">
         <label for="cards-per-page">Cards per page:</label>
-        <select id="cards-per-page">
+        <select id="cards-per-page" title="Cards per page">
           <option value="8">8</option>
-          <option value="12" selected>12</option>
+          <option value="8" selected>12</option>
           <option value="24">24</option>
           <option value="48">48</option>
         </select>
@@ -265,8 +265,8 @@
       </div>
   
       <div class="modal-actions" style="margin-top: 20px;">
-        <button id="confirm-password-btn" class="confirm-btn">✅ Confirm</button>
-        <button id="cancel-password-btn" class="cancel-btn">❌ Cancel</button>
+        <button id="confirm-password-btn" class="confirm-btn" title="confirm button">✅ Confirm</button>
+        <button id="cancel-password-btn" class="cancel-btn" title="cancel button">❌ Cancel</button>
       </div>
   
       <p id="password-error" class="error-message"></p>
@@ -278,14 +278,14 @@
   <div id="cart-panel" class="cart-panel hidden">
     <div class="cart-panel-header">
       <h2>🛒 Your Cart</h2>
-      <button id="close-cart-panel" class="cart-close-btn">&times;</button>
+      <button id="close-cart-panel" class="cart-close-btn" title="Cart">&times;</button>
     </div>
     <div id="cart-items-container" class="cart-items">
       <!-- Items will be injected here -->
     </div>
     <div class="cart-footer">
       <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
-      <button id="proceed-checkout-btn" class="checkout-btn">Proceed to Checkout</button>
+      <button id="proceed-checkout-btn" class="checkout-btn" title="Proceed to checkout">Proceed to Checkout</button>
     </div>
   </div>
 

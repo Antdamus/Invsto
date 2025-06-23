@@ -145,9 +145,9 @@ window.checkoutModule = (function () {
                 <p class="cart-item-title">${item.title}</p>
                 <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
                 <div class="cart-qty-controls">
-                <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
                 <span class="cart-qty-count">${item.qty}</span>
-                <button class="qty-increase" data-id="${item.item_id}">+</button>
+                <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
                 </div>
             </div>
             `;

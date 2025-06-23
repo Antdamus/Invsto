@@ -143,7 +143,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
             return `
                 <div class="category-chip" data-color="${color}" data-cat="${cat}" data-id="${item.id}">
                 ${cat}
-                <button class="remove-category-btn">&times;</button>
+                <button class="remove-category-btn" title="Remove categories">&times;</button>
                 </div>
             `;
         }).join(""); /**glues all the string into one HTML block that will be in the
@@ -168,7 +168,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
           <div class="category-chips">
           ${categoryChips}
             <div id="cardchip-container-${item.id}" class="custom-dropdown" data-id="${item.id}">
-              <button id="cardchip-toggle-${item.id}" type="button" class="dropdown-toggle" data-id="${item.id}">
+              <button id="cardchip-toggle-${item.id}" type="button" class="dropdown-toggle" data-id="${item.id}" title="Add a category chip">
                 <i data-lucide="plus" class="rotate-plus" id="cardchip-icon-${item.id}"></i>
             </button>
               <div id="cardchip-menu-${item.id}" class="dropdown-menu dropdown-menu--category"></div>
@@ -237,15 +237,15 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 
       return `
         <div class="carousel" id="carousel-${index}">
-          <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev">
+          <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev" title="Previous image">
             <i data-lucide="chevron-left" class="carousel-icon"></i>
           </button>
           <div class="carousel-track">
             ${photos.map((photo, i) => `
-              <img loading="lazy" src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" />
+              <img loading="lazy" src="${photo}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/>
             `).join('')}
           </div>
-          <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next">
+          <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next" title="Next image">
             <i data-lucide="chevron-right" class="carousel-icon"></i>
           </button>
         </div>
@@ -265,7 +265,7 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
     `;
   
     const favoriteBtn = currentUser
-      ? `<button class="favorite-btn" data-id="${id}">
+      ? `<button class="favorite-btn" data-id="${id}" title="Add to favorites">
            ${isFavorited ? '★' : '☆'}
          </button>`
       : '';
