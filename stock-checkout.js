@@ -146,6 +146,13 @@ window.checkoutModule = (function () {
             `;
             container.appendChild(div);
         });
+
+        const total = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+        const totalPriceEl = document.getElementById("cart-total-price");
+        if (totalPriceEl) {
+        totalPriceEl.textContent = `$${total.toFixed(2)}`;
+        }
+
     }
 
     //function to set up the listener
