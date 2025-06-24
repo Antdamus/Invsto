@@ -267,7 +267,7 @@ window.checkoutModule = (function () {
             <div class="discount-row">
                 <label class="discount-label">Discount for this item:</label>
                 <div class="discount-inline-input">
-                <input
+                    <input
                     type="number"
                     min="0"
                     max="100"
@@ -276,11 +276,10 @@ window.checkoutModule = (function () {
                     data-id="${item.item_id}"
                     data-original-price="${item.sale_price.toFixed(2)}"
                     data-qty="${item.qty}"
-                />
-                <span class="percent-symbol">%</span>
+                    />
                 </div>
+                <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             </div>
-            <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             `;
 
             container.appendChild(itemRow);
