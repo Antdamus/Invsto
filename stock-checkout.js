@@ -9,21 +9,33 @@ window.checkoutModule = (function () {
   function setupCheckoutToggleButton(btnId = "toggle-checkout-mode") {
     const btn = document.getElementById(btnId);
     if (!btn) {
-      console.warn(`No button found with ID: ${btnId}`);
-      return;
+        console.warn(`No button found with ID: ${btnId}`);
+        return;
     }
 
     btn.addEventListener("click", () => {
-      checkoutMode = !checkoutMode;
+        checkoutMode = !checkoutMode;
 
-      // Update button appearance
-      btn.classList.toggle("active", checkoutMode);
-      btn.title = checkoutMode ? "Exit Checkout Mode" : "Enter Checkout Mode";
+        // Update button appearance
+        btn.classList.toggle("active", checkoutMode);
+        btn.title = checkoutMode ? "Exit Checkout Mode" : "Enter Checkout Mode";
 
-      // Update body styling
-      document.body.classList.toggle("checkout-mode-active", checkoutMode);
+        // Update body styling
+        document.body.classList.toggle("checkout-mode-active", checkoutMode);
+
+        // ✅ NEW: when entering checkout mode, restore visuals from cart
+        if (checkoutMode) {
+        cart.forEach(item => {
+            const checkbox = document.querySelector(`.select-checkbox[data-id="${item.item_id}"]`);
+            if (checkbox) checkbox.checked = true;
+
+            const card = checkbox?.closest('.stock-card');
+            if (card) card.classList.add("in-cart");
+        });
+        }
     });
   }
+
 
   function isCheckoutMode() {
     return checkoutMode;
@@ -80,6 +92,7 @@ window.checkoutModule = (function () {
         };
 
         addToCart(cartItem);
+        saveCartToStorage(); // ← ADD THIS
         renderCartItems();
     }
 
@@ -92,6 +105,7 @@ window.checkoutModule = (function () {
         if (card) card.classList.remove("in-cart");
 
         updateCartUI();       // update badge / toggle visibility
+        saveCartToStorage(); // ← ADD THIS
         renderCartItems();    // 💡 refresh the list in the side panel
     }
 
@@ -161,6 +175,7 @@ window.checkoutModule = (function () {
             if (target) {
                 target.qty += 1;
                 updateCartUI();
+                saveCartToStorage(); // ← ADD THIS
                 renderCartItems();
             }
             });
@@ -185,6 +200,7 @@ window.checkoutModule = (function () {
                 if (card) card.classList.remove("in-cart");
                 }
                 updateCartUI();
+                saveCartToStorage(); // ← ADD THIS
                 renderCartItems();
             });
         });
@@ -209,17 +225,25 @@ window.checkoutModule = (function () {
 
         toggleBtn.addEventListener("click", () => {
             panel.classList.toggle("hidden");
-            
-            // 🧠 Toggle a class on body to shift layout if needed
-             document.body.classList.toggle("cart-open", !panel.classList.contains("hidden"));
+            document.body.classList.toggle("cart-open", !panel.classList.contains("hidden"));
         });
-
 
         closeBtn.addEventListener("click", () => {
             panel.classList.add("hidden");
             document.body.classList.remove("cart-open");
         });
+
+        // ✅ Handle empty cart
+        const emptyBtn = document.getElementById("empty-cart-btn");
+        if (emptyBtn) {
+            emptyBtn.addEventListener("click", () => {
+            if (confirm("Are you sure you want to empty the cart?")) {
+                clearCart();
+            }
+            });
+        }
     }
+
 
     //resolve the URL 
     // Uses shared image signing logic from stock.js
@@ -302,6 +326,7 @@ window.checkoutModule = (function () {
                 if (target) {
                 target.qty += 1;
                 updateCartUI();         // ✅ update badge + toggle
+                saveCartToStorage(); // ← ADD THIS
                 renderCartItems();      // ✅ update side cart panel
                 openCheckoutModal();    // ✅ re-render modal
                 }
@@ -318,6 +343,7 @@ window.checkoutModule = (function () {
                 cart.splice(cart.findIndex(i => i.item_id === id), 1);
                 }
                 updateCartUI();         // ✅ update badge + toggle
+                saveCartToStorage(); // ← ADD THIS
                 renderCartItems();      // ✅ update side cart panel
                 openCheckoutModal();    // ✅ re-render modal
             });
@@ -383,6 +409,68 @@ window.checkoutModule = (function () {
 
   //#endregion
 
+  //#region logic to be able to preserve the cart even if something changes by accident
+    const STORAGE_KEY = "checkout-cart-og";
+
+    function saveCartToStorage() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+    }
+
+    async function loadCartFromStorage() {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+
+        try {
+            const rawCart = JSON.parse(stored);
+            const signedCart = await Promise.all(
+                rawCart.map(async (item) => {
+                    const signedUrl = await resolveImageUrl(item.image_url || "");
+                    return {
+                        ...item,
+                        image_url: signedUrl,
+                    };
+                })
+            );
+            cart = signedCart;
+
+            // 🔁 Update visuals after loading
+            updateCartUI();
+            renderCartItems();
+
+            // ✅ Optional: visually restore "in-cart" style
+            signedCart.forEach(item => {
+                const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+                if (card) card.classList.add("in-cart");
+            });
+
+        } catch (e) {
+            console.warn("❌ Could not parse or sign stored cart items:", e);
+            cart = [];
+        }
+    }
+
+
+
+    function clearCart() {
+        cart = [];
+        localStorage.removeItem(STORAGE_KEY);
+
+        // 🔄 Uncheck all select checkboxes and remove "in-cart" highlights
+        document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
+        document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+
+        updateCartUI();
+        saveCartToStorage();
+        renderCartItems();
+    }
+
+
+  //#endregion
+
+    (async () => {
+    await loadCartFromStorage();
+    })();
+
 
   return {
     setupCheckoutToggleButton,
@@ -394,5 +482,8 @@ window.checkoutModule = (function () {
     setupCartPanelListeners,
     setupCheckoutModalListeners, // ← 🧩 new
     resolveImageUrl,
+    clearCart,
+    renderCartItems,        // ✅ add this
+    loadCartFromStorage     // ✅ and this
   };
 })();

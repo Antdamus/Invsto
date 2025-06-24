@@ -2761,6 +2761,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Step 2: Fetch items from Supabase and store globally
   await loadAllItemsWithCache();
+  await checkoutModule.loadCartFromStorage();  // handles image signing + UI
 
   //#region step 3 create all the necessary drop downs for the system
     //dropdown for filter by categories
