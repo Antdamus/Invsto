@@ -256,23 +256,43 @@ window.checkoutModule = (function () {
 
         cart.forEach(item => {
             const itemRow = document.createElement("div");
-            itemRow.style.marginBottom = "18px";
+            itemRow.className = "checkout-item-card";
+            itemRow.setAttribute("data-item-id", item.item_id);
+
             itemRow.innerHTML = `
-            <p><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)} × ${item.qty}</p>
-            <label>Discount for this item (%):</label>
-            <input type="number" data-id="${item.item_id}" class="item-discount-input password-input" min="0" max="100" placeholder="Optional" />
+            <div class="item-header">
+                <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
+                <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)} × ${item.qty}</p>
+            </div>
+            <div class="discount-row">
+                <label class="discount-label">Discount for this item:</label>
+                <div class="discount-inline-input">
+                <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    class="item-discount-input"
+                    placeholder="0"
+                    data-id="${item.item_id}"
+                    data-original-price="${item.sale_price.toFixed(2)}"
+                    data-qty="${item.qty}"
+                />
+                <span class="percent-symbol">%</span>
+                </div>
+            </div>
+            <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             `;
+
             container.appendChild(itemRow);
         });
 
-        // Default reset general discount
         generalDiscountInput.value = "";
-
         calculateFinalCheckoutTotal();
 
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");
     }
+
 
     function closeCheckoutModal() {
     document.getElementById("checkout-modal").classList.add("hidden");
@@ -296,23 +316,31 @@ window.checkoutModule = (function () {
 
     // === Main Calculation Function
     function calculateFinalCheckoutTotal() {
-    const cart = checkoutModule.getCart();
-    const generalDiscount = parseFloat(document.getElementById("general-discount").value) || 0;
-    const finalTotalEl = document.getElementById("checkout-final-price");
+        const cart = checkoutModule.getCart();
+        const generalDiscount = parseFloat(document.getElementById("general-discount").value) || 0;
+        const finalTotalEl = document.getElementById("checkout-final-price");
 
-    let total = 0;
+        let total = 0;
 
-    cart.forEach(item => {
-        const input = document.querySelector(`.item-discount-input[data-id="${item.item_id}"]`);
-        const discount = input ? parseFloat(input.value) : null;
-        const appliedDiscount = isNaN(discount) ? generalDiscount : discount;
-        const priceAfter = item.sale_price * (1 - appliedDiscount / 100);
-        total += priceAfter * item.qty;
-    });
+        cart.forEach(item => {
+            const input = document.querySelector(`.item-discount-input[data-id="${item.item_id}"]`);
+            const discount = input ? parseFloat(input.value) : null;
+            const appliedDiscount = isNaN(discount) ? generalDiscount : discount;
+            const priceAfter = item.sale_price * (1 - appliedDiscount / 100);
+            const totalForItem = priceAfter * item.qty;
+            total += totalForItem;
 
-    finalTotalEl.textContent = `$${total.toFixed(2)}`;
+            // 🔁 Update the live discounted price preview
+            const previewEl = document.getElementById(`discounted-${item.item_id}`);
+            if (previewEl) {
+            previewEl.textContent = `$${totalForItem.toFixed(2)}`;
+            }
+        });
+
+        finalTotalEl.textContent = `$${total.toFixed(2)}`;
     }
 
+  //#endregion
 
 
   return {

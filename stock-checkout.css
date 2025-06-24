@@ -422,4 +422,103 @@ body.cart-open .main-content {
     transform: scale(1) translateY(0);
   }
 }
+
+/* === Checkout Item Card Enhancements === */
+.checkout-item-card {
+  background: #fff;
+  border-radius: 18px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s ease;
+}
+
+.checkout-item-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.item-header img.checkout-item-image {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+  border: 1px solid #ddd;
+}
+
+.item-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* === Discount row aligned horizontally === */
+.discount-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.discount-label {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #444;
+  margin-bottom: 0; /* inline now */
+}
+
+.discount-inline-input {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.discount-inline-input input {
+  width: 80px;
+  padding: 8px 30px 8px 12px;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  font-family: 'DM Serif Display', serif;
+}
+
+.discount-inline-input input:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.15);
+}
+
+.percent-symbol {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.95rem;
+  color: #777;
+  pointer-events: none;
+}
+
+.discounted-price-preview {
+  font-size: 0.95rem;
+  color: #0071e3;
+  font-weight: 500;
+  margin-left: 3px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /*#endregion*/
