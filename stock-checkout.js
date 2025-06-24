@@ -234,10 +234,84 @@ window.checkoutModule = (function () {
         return url || "https://placehold.co/60x60?text=No+Img";
     }
 
-
-
-
   //#endregion
+
+  //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
+    function openCheckoutModal() {
+        const modal = document.getElementById("checkout-modal");
+        const container = document.getElementById("checkout-items-container");
+        const generalDiscountInput = document.getElementById("general-discount");
+        const finalTotalEl = document.getElementById("checkout-final-price");
+
+        const cart = checkoutModule.getCart();
+        container.innerHTML = "";
+
+        if (cart.length === 0) {
+            container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
+            finalTotalEl.textContent = "$0.00";
+            modal.classList.remove("hidden");
+            document.body.classList.add("modal-open");
+            return;
+        }
+
+        cart.forEach(item => {
+            const itemRow = document.createElement("div");
+            itemRow.style.marginBottom = "18px";
+            itemRow.innerHTML = `
+            <p><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)} × ${item.qty}</p>
+            <label>Discount for this item (%):</label>
+            <input type="number" data-id="${item.item_id}" class="item-discount-input password-input" min="0" max="100" placeholder="Optional" />
+            `;
+            container.appendChild(itemRow);
+        });
+
+        // Default reset general discount
+        generalDiscountInput.value = "";
+
+        calculateFinalCheckoutTotal();
+
+        modal.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+    }
+
+    function closeCheckoutModal() {
+    document.getElementById("checkout-modal").classList.add("hidden");
+    document.body.classList.remove("modal-open");
+    }
+
+    // === Attach modal listeners
+    function setupCheckoutModalListeners() {
+        document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
+        document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
+        document.getElementById("general-discount")?.addEventListener("input", calculateFinalCheckoutTotal);
+
+        // Live update per-item discount fields
+        document.addEventListener("input", function (e) {
+            if (e.target.classList.contains("item-discount-input")) {
+            calculateFinalCheckoutTotal();
+            }
+        });
+    }
+
+
+    // === Main Calculation Function
+    function calculateFinalCheckoutTotal() {
+    const cart = checkoutModule.getCart();
+    const generalDiscount = parseFloat(document.getElementById("general-discount").value) || 0;
+    const finalTotalEl = document.getElementById("checkout-final-price");
+
+    let total = 0;
+
+    cart.forEach(item => {
+        const input = document.querySelector(`.item-discount-input[data-id="${item.item_id}"]`);
+        const discount = input ? parseFloat(input.value) : null;
+        const appliedDiscount = isNaN(discount) ? generalDiscount : discount;
+        const priceAfter = item.sale_price * (1 - appliedDiscount / 100);
+        total += priceAfter * item.qty;
+    });
+
+    finalTotalEl.textContent = `$${total.toFixed(2)}`;
+    }
 
 
 
@@ -249,6 +323,7 @@ window.checkoutModule = (function () {
     handleCardClickForCheckout,
     getCart,
     setupCartPanelListeners,
+    setupCheckoutModalListeners, // ← 🧩 new
     resolveImageUrl,
   };
 })();

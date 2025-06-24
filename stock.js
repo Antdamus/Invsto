@@ -2483,7 +2483,6 @@ document.addEventListener("click", (e) => {
 
 //#endregion
 
-
 /* ================= User Interface Rendering Functions ============= */
 
 // 🔹 Category Loader: gets unique values and triggers dropdown
@@ -2927,6 +2926,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       //event lister to the checkout cart 
       checkoutModule.setupCartPanelListeners();
+
+      //event listener for the modal checkout after items are added to the cart
+      checkoutModule.setupCheckoutModalListeners();
 
     //#endregion
   //#endregion

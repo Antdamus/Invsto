@@ -294,8 +294,36 @@
     🛍️ <span id="cart-count-badge">0</span>
   </button>
 
+  <!-- 🧾 Modal: Checkout Review -->
+  <div id="checkout-modal" class="modal hidden">
+    <div class="modal-content" style="max-width: 700px; width: 95%;">
+      <span class="material-icons-outlined close-icon" id="close-checkout-modal">close</span>
 
-  
+      <h3 class="modal-title">🧾 Review Your Checkout</h3>
+      <p class="modal-desc">Adjust discounts, apply credit tiers, and finalize the transaction.</p>
+
+      <!-- 🛍️ Cart Items Overview -->
+      <div id="checkout-items-container" style="max-height: 400px; overflow-y: auto; margin-top: 20px;"></div>
+
+      <!-- 🧮 General Discount Section -->
+      <div class="modal-section" style="margin-top: 24px;">
+        <label for="general-discount" style="font-weight: bold;">General Discount (%):</label>
+        <input type="number" id="general-discount" placeholder="e.g. 10" min="0" max="100" class="password-input" />
+      </div>
+
+      <!-- 💳 Credit System Trigger -->
+      <div style="margin-top: 20px;">
+        <button id="open-credit-modal" class="checkout-btn" style="background: #444;">💳 Apply Credit Tier</button>
+      </div>
+
+      <!-- 💰 Final Price Summary -->
+      <div class="cart-footer" style="margin-top: 24px;">
+        <p class="cart-total">Final Total: <span id="checkout-final-price">$0.00</span></p>
+        <button id="finalize-sale-btn" class="checkout-btn">✅ Finalize Sale</button>
+      </div>
+    </div>
+  </div>
+
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>
   <script>
