@@ -47,13 +47,11 @@ window.checkoutModule = (function () {
     }
     
     //function to add an event listener so the add to cart function is triggered on click (pointing towards)
-    function handleCardClickForCheckout(cardElement) {
+    async function handleCardClickForCheckout(cardElement) {
         if (!cardElement) return;
 
-        // Try to find a valid data-id in the clicked card area
         let itemId = cardElement.dataset.id;
 
-        // If not found directly, check common inner elements
         if (!itemId) {
             const checkbox = cardElement.querySelector(".select-checkbox");
             const favorite = cardElement.querySelector(".favorite-btn");
@@ -71,19 +69,20 @@ window.checkoutModule = (function () {
             return;
         }
 
+        const photoRef = (item.photoPaths || item.photos || [])[0] || null;
+        const signedUrl = await resolveImageUrl(photoRef);
+
         const cartItem = {
             item_id: item.id,
             title: item.title || "Untitled",
             sale_price: parseFloat(item.sale_price || "0"),
-            image_url: (item.photos && item.photos.length > 0) ? item.photos[0] : null
+            image_url: signedUrl
         };
-
-        console.log("🖼️ Cart Image URL:", cartItem.image_url);
 
         addToCart(cartItem);
         renderCartItems();
-        console.log("🛒 Updated cart:", getCart());
     }
+
 
     //function to remove from cart once deselected
     function removeFromCart(itemId) {
@@ -140,7 +139,7 @@ window.checkoutModule = (function () {
             const div = document.createElement("div");
             div.className = "cart-item";
             div.innerHTML = `
-            <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" class="cart-thumb" />
+            <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
             <div class="cart-item-details">
                 <p class="cart-item-title">${item.title}</p>
                 <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
@@ -169,19 +168,24 @@ window.checkoutModule = (function () {
 
         container.querySelectorAll(".qty-decrease").forEach(btn => {
             btn.addEventListener("click", () => {
-            const id = btn.dataset.id;
-            const target = cart.find(i => i.item_id === id);
-            if (target && target.qty > 1) {
+                const id = btn.dataset.id;
+                const target = cart.find(i => i.item_id === id);
+                if (target && target.qty > 1) {
                 target.qty -= 1;
-            } else {
-                // If qty reaches 0, remove the item entirely
+                } else {
+                // If qty reaches 0, remove the item from cart
                 cart = cart.filter(i => i.item_id !== id);
-                const card = document.querySelector(`.stock-card [data-id="${id}"]`)?.closest('.stock-card');
+
+                // 🔄 Uncheck the select checkbox if it exists
+                const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
+                if (checkbox) checkbox.checked = false;
+
+                // 🧼 Also remove the in-cart highlight
+                const card = checkbox?.closest('.stock-card');
                 if (card) card.classList.remove("in-cart");
-                
-            }
-            updateCartUI();
-            renderCartItems();
+                }
+                updateCartUI();
+                renderCartItems();
             });
         });
 
@@ -194,7 +198,6 @@ window.checkoutModule = (function () {
         if (totalPriceEl) totalPriceEl.textContent = `$${total.toFixed(2)}`;
         if (itemCountEl) itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
     }
-
 
     //function to set up the listener
     function setupCartPanelListeners() {
@@ -218,6 +221,22 @@ window.checkoutModule = (function () {
         });
     }
 
+    //resolve the URL 
+    // Uses shared image signing logic from stock.js
+    async function resolveImageUrl(photoRef) {
+        if (!photoRef || typeof photoRef !== "string") return null;
+
+        // If it's already a full URL (signed), use as-is
+        if (photoRef.startsWith("https://")) return photoRef;
+
+        // Otherwise sign it using global stock.js helper
+        const url = await getSignedUrl(photoRef);
+        return url || "https://placehold.co/60x60?text=No+Img";
+    }
+
+
+
+
   //#endregion
 
 
@@ -230,5 +249,6 @@ window.checkoutModule = (function () {
     handleCardClickForCheckout,
     getCart,
     setupCartPanelListeners,
+    resolveImageUrl,
   };
 })();
