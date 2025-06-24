@@ -262,12 +262,21 @@ window.checkoutModule = (function () {
             itemRow.innerHTML = `
             <div class="item-header">
                 <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
-                <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)} × ${item.qty}</p>
+                <div class="item-info-flex">
+                    <div class="title-qty-row">
+                    <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
+                    <div class="checkout-qty-controls">
+                        <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                        <span class="checkout-qty-count">${item.qty}</span>
+                        <button class="qty-increase" data-id="${item.item_id}">+</button>
+                    </div>
+                    </div>
+                </div>
             </div>
             <div class="discount-row">
                 <label class="discount-label">Discount for this item:</label>
                 <div class="discount-inline-input">
-                    <input
+                <input
                     type="number"
                     min="0"
                     max="100"
@@ -276,7 +285,8 @@ window.checkoutModule = (function () {
                     data-id="${item.item_id}"
                     data-original-price="${item.sale_price.toFixed(2)}"
                     data-qty="${item.qty}"
-                    />
+                />
+                <span class="percent-symbol">%</span>
                 </div>
                 <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             </div>
@@ -285,12 +295,45 @@ window.checkoutModule = (function () {
             container.appendChild(itemRow);
         });
 
+        // Attach live quantity control handlers
+        container.querySelectorAll(".qty-increase").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const id = btn.dataset.id;
+                const target = cart.find(i => i.item_id === id);
+                if (target) {
+                target.qty += 1;
+                updateCartUI();         // ✅ update badge + toggle
+                renderCartItems();      // ✅ update side cart panel
+                openCheckoutModal();    // ✅ re-render modal
+                }
+            });
+            });
+
+        container.querySelectorAll(".qty-decrease").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const id = btn.dataset.id;
+                const target = cart.find(i => i.item_id === id);
+                if (target && target.qty > 1) {
+                target.qty -= 1;
+                } else {
+                cart.splice(cart.findIndex(i => i.item_id === id), 1);
+                }
+                updateCartUI();         // ✅ update badge + toggle
+                renderCartItems();      // ✅ update side cart panel
+                openCheckoutModal();    // ✅ re-render modal
+            });
+        });
+
+
+   
+
         generalDiscountInput.value = "";
         calculateFinalCheckoutTotal();
 
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");
     }
+
 
 
     function closeCheckoutModal() {
