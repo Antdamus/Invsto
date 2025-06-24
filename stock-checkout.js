@@ -286,7 +286,6 @@ window.checkoutModule = (function () {
                     data-original-price="${item.sale_price.toFixed(2)}"
                     data-qty="${item.qty}"
                 />
-                <span class="percent-symbol">%</span>
                 </div>
                 <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             </div>
