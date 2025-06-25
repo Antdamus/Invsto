@@ -143,10 +143,33 @@ window.checkoutModule = (function () {
 
         if (cart.length === 0) {
             container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
-            document.getElementById("cart-total-price").textContent = "$0.00";
-            document.getElementById("cart-item-count").textContent = "0 items";
+
+            // === 💳 Subtract credit
+            let creditValue = 0;
+            const creditEl = document.getElementById("credit-value-display");
+            if (creditEl) {
+                const raw = creditEl.textContent.replace("$", "");
+                creditValue = parseFloat(raw) || 0;
+            }
+
+            const adjustedTotal = -creditValue;
+
+            const totalPriceEl = document.getElementById("cart-total-price");
+            const itemCountEl = document.getElementById("cart-item-count");
+
+            const label = adjustedTotal < 0 ? "Balance Left" : adjustedTotal > 0 ? "Owes Store" : "Total";
+            const colorClass = adjustedTotal < 0 ? "credit-positive" : adjustedTotal > 0 ? "credit-negative" : "credit-neutral";
+
+            if (totalPriceEl) {
+                totalPriceEl.innerHTML = `<span class="${colorClass}">${label}: $${adjustedTotal.toFixed(2)}</span>`;
+            }
+            if (itemCountEl) {
+                itemCountEl.textContent = "0 items";
+            }
+
             return;
         }
+
 
         cart.forEach(item => {
             const div = document.createElement("div");
@@ -330,23 +353,50 @@ window.checkoutModule = (function () {
     }
 
     function updateCreditValue() {
-        const tierValues = {
-            "credit-3mm": 20,
-            "credit-5mm": 35,
-            "credit-8mm": 50
+        const tierLabels = {
+            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
+            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
+            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
         };
 
         let totalCredit = 0;
+        let breakdownHtml = "";
+        let anyInput = false;
 
-        for (const id in tierValues) {
+        for (const id in tierLabels) {
             const input = document.getElementById(id);
-            const count = parseInt(input.value) || 0;
-            totalCredit += count * tierValues[id];
+            const count = parseInt(input?.value || "0");
+            const unitValue = tierLabels[id].value;
+
+            if (count > 0) {
+            anyInput = true;
+            const lineTotal = count * unitValue;
+
+            breakdownHtml += `
+                <p class="credit-breakdown-line">
+                <span class="tier-emoji">${tierLabels[id].emoji}</span>
+                <span class="tier-label">${tierLabels[id].label}</span>
+                <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
+                </p>
+            `;
+
+            totalCredit += lineTotal;
+            }
         }
 
         const display = document.getElementById("credit-value-display");
         if (display) display.textContent = `$${totalCredit.toFixed(2)}`;
 
+        const breakdownContainer = document.getElementById("credit-breakdown-display");
+        if (breakdownContainer) {
+            if (anyInput) {
+            breakdownContainer.innerHTML = breakdownHtml;
+            breakdownContainer.classList.remove("hidden");
+            } else {
+            breakdownContainer.classList.add("hidden");
+            breakdownContainer.innerHTML = "";
+            }
+        }
         return totalCredit;
     }
 

@@ -47,7 +47,6 @@ body.checkout-mode-active .stock-card {
 
 /* ===================== 🛒 Cart Panel & Toggle Styles ===================== */
 /*#region*/
-
 /* === Cart Panel === */
 body.cart-open .main-content {
   margin-right: 320px;
@@ -292,6 +291,59 @@ body.cart-open .main-content {
   color: #333;
   font-weight: bold;
 }
+
+/* === 💳 Live Credit Breakdown Summary === */
+.credit-breakdown {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  font-size: 0.9rem;
+  color: #222;
+  transition: all 0.3s ease;
+}
+
+.credit-breakdown p {
+  margin: 6px 0;
+  font-weight: 500;
+}
+
+.credit-breakdown strong {
+  color: #000;
+}
+
+.credit-breakdown.hidden {
+  display: none;
+}
+
+.credit-breakdown-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.tier-emoji {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.tier-label {
+  font-weight: 600;
+  min-width: 85px;
+}
+
+.math-line {
+  font-family: 'SF Pro Text', sans-serif;
+  font-weight: 500;
+  color: #444;
+  flex: 1;
+}
+
 
 /*#endregion*/
 
