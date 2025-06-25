@@ -277,18 +277,22 @@
   <!-- 🛒 Side Cart Panel -->
   <div id="cart-panel" class="cart-panel hidden">
     <div class="cart-panel-header">
-      <h2>🛒 Your Cart</h2>
+      <!-- Tabs First -->
+      <div class="cart-tabs">
+        <button class="cart-tab-btn active" data-tab="cart-view">🛒 Cart</button>
+        <button class="cart-tab-btn" data-tab="credits-view">💳 Credits</button>
+      </div>
+
+      <!-- Right side: Empty and Close -->
       <div class="cart-header-actions">
-        <button id="empty-cart-btn" title="Empty cart">🗑️</button>
-        <button id="close-cart-panel" class="cart-close-btn" title="Close">&times;</button>
+        <button id="empty-cart-btn" title="Empty cart" class="icon-btn">🗑️</button>
+        <button id="close-cart-panel" class="cart-close-btn icon-btn" title="Close">&times;</button>
       </div>
     </div>
 
-    <!-- 🧩 Cart Tab Buttons -->
-    <div class="cart-tabs">
-      <button class="cart-tab-btn active" data-tab="cart-view">🛒 Cart</button>
-      <button class="cart-tab-btn" data-tab="credits-view">💳 Credits</button>
-    </div>
+
+
+   
 
     <!-- 🛍️ Cart View -->
     <div id="cart-view" class="cart-tab-content active">
