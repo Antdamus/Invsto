@@ -192,6 +192,84 @@ body.cart-open .main-content {
   display: block;
 }
 
+/* ===================== 🍏 Ultra-Aesthetic Cart Tabs & Credit Form ===================== */
+/* === Tab Buttons === */
+.cart-tabs {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+  gap: 12px;
+}
+
+.cart-tab-btn {
+  padding: 10px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 12px;
+  background: #f5f5f7;
+  color: #333;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+  transition: all 0.2s ease;
+}
+
+.cart-tab-btn.active {
+  background: #000;
+  color: white;
+  box-shadow: inset 0 0 0 1px #000;
+  transform: translateY(-1px);
+}
+
+/* === Credit Form Section === */
+.credits-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 0;
+}
+
+.credits-form h3 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #111;
+  margin-bottom: 8px;
+}
+
+.credits-form label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95rem;
+  gap: 10px;
+}
+
+.credits-form input[type="number"] {
+  padding: 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  background: #fff;
+  transition: border-color 0.2s ease;
+  width: 120px;
+}
+
+.credits-form input[type="number"]:focus {
+  border-color: #007aff;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0,122,255,0.2);
+}
+
+.credit-total {
+  font-weight: bold;
+  font-size: 1.05rem;
+  margin-top: 10px;
+  text-align: right;
+  color: #111;
+}
+
 
 /*#endregion*/
 
