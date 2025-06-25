@@ -205,12 +205,22 @@ window.checkoutModule = (function () {
         });
 
         // Update total price and item count
-        const total = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+        const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
         const itemCount = cart.reduce((sum, item) => sum + (item.qty || 1), 0);
+
+        // 💳 Subtract credit value from preview total
+        let creditValue = 0;
+        const creditEl = document.getElementById("credit-value-display");
+        if (creditEl) {
+        const raw = creditEl.textContent.replace("$", "");
+        creditValue = parseFloat(raw) || 0;
+        }
+        const adjustedTotal = subtotal - creditValue;
+
         const totalPriceEl = document.getElementById("cart-total-price");
         const itemCountEl = document.getElementById("cart-item-count");
 
-        if (totalPriceEl) totalPriceEl.textContent = `$${total.toFixed(2)}`;
+        if (totalPriceEl) totalPriceEl.textContent = `$${adjustedTotal.toFixed(2)}`;
         if (itemCountEl) itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
     }
 
