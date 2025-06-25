@@ -96,7 +96,6 @@ window.checkoutModule = (function () {
         renderCartItems();
     }
 
-
     //function to remove from cart once deselected
     function removeFromCart(itemId) {
         cart = cart.filter(item => item.item_id !== itemId);
@@ -244,7 +243,6 @@ window.checkoutModule = (function () {
         }
     }
 
-
     //resolve the URL 
     // Uses shared image signing logic from stock.js
     async function resolveImageUrl(photoRef) {
@@ -257,6 +255,79 @@ window.checkoutModule = (function () {
         const url = await getSignedUrl(photoRef);
         return url || "https://placehold.co/60x60?text=No+Img";
     }
+
+    // === 🔁 Cart Tab Switching Logic ===
+    function setupCartTabs() {
+        const tabButtons = document.querySelectorAll(".cart-tab-btn");
+        const tabContents = document.querySelectorAll(".cart-tab-content");
+
+        tabButtons.forEach(btn => {
+            btn.addEventListener("click", () => {
+            const targetTab = btn.dataset.tab;
+
+            // Activate selected button
+            tabButtons.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            // Show the correct content section
+            tabContents.forEach(section => {
+                section.classList.toggle("active", section.id === targetTab);
+            });
+
+            // If switching to the cart view, re-render items and recalculate
+            if (targetTab === "cart-view") {
+                renderCartItems();
+            }
+
+            // If switching to the credits view, recalculate total credits
+            if (targetTab === "credits-view") {
+                updateCreditValue();
+            }
+
+            // Always recalculate final total when switching views
+            calculateFinalCheckoutTotal();
+            });
+        });
+    }
+
+
+    // === 💳 Credit Calculation Logic ===
+    function setupCreditTierListeners() {
+        const inputs = [
+            { id: "credit-3mm", value: 20 },
+            { id: "credit-5mm", value: 35 },
+            { id: "credit-8mm", value: 50 }
+        ];
+
+        inputs.forEach(({ id }) => {
+            const input = document.getElementById(id);
+            if (input) {
+            input.addEventListener("input", updateCreditValue);
+            }
+        });
+    }
+
+    function updateCreditValue() {
+        const tierValues = {
+            "credit-3mm": 20,
+            "credit-5mm": 35,
+            "credit-8mm": 50
+        };
+
+        let totalCredit = 0;
+
+        for (const id in tierValues) {
+            const input = document.getElementById(id);
+            const count = parseInt(input.value) || 0;
+            totalCredit += count * tierValues[id];
+        }
+
+        const display = document.getElementById("credit-value-display");
+        if (display) display.textContent = `$${totalCredit.toFixed(2)}`;
+
+        return totalCredit;
+    }
+
 
   //#endregion
 
@@ -359,8 +430,6 @@ window.checkoutModule = (function () {
         document.body.classList.add("modal-open");
     }
 
-
-
     function closeCheckoutModal() {
     document.getElementById("checkout-modal").classList.add("hidden");
     document.body.classList.remove("modal-open");
@@ -387,7 +456,7 @@ window.checkoutModule = (function () {
         const generalDiscount = parseFloat(document.getElementById("general-discount").value) || 0;
         const finalTotalEl = document.getElementById("checkout-final-price");
 
-        let total = 0;
+        let subtotal = 0;
 
         cart.forEach(item => {
             const input = document.querySelector(`.item-discount-input[data-id="${item.item_id}"]`);
@@ -395,7 +464,7 @@ window.checkoutModule = (function () {
             const appliedDiscount = isNaN(discount) ? generalDiscount : discount;
             const priceAfter = item.sale_price * (1 - appliedDiscount / 100);
             const totalForItem = priceAfter * item.qty;
-            total += totalForItem;
+            subtotal += totalForItem;
 
             // 🔁 Update the live discounted price preview
             const previewEl = document.getElementById(`discounted-${item.item_id}`);
@@ -404,8 +473,19 @@ window.checkoutModule = (function () {
             }
         });
 
-        finalTotalEl.textContent = `$${total.toFixed(2)}`;
+        // 💳 Subtract credit if credit tab is present
+        let creditValue = 0;
+        const creditEl = document.getElementById("credit-value-display");
+        if (creditEl) {
+            const raw = creditEl.textContent.replace("$", "");
+            creditValue = parseFloat(raw) || 0;
+        }
+
+        const final = subtotal - creditValue;
+        finalTotalEl.textContent = `$${final.toFixed(2)}`;
     }
+
+
 
   //#endregion
 
@@ -484,6 +564,8 @@ window.checkoutModule = (function () {
     resolveImageUrl,
     clearCart,
     renderCartItems,        // ✅ add this
-    loadCartFromStorage     // ✅ and this
+    loadCartFromStorage,    // ✅ and this
+    setupCartTabs,
+    setupCreditTierListeners,
   };
 })();

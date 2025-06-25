@@ -283,14 +283,42 @@
         <button id="close-cart-panel" class="cart-close-btn" title="Close">&times;</button>
       </div>
     </div>
-    <div id="cart-items-container" class="cart-items">
-      <!-- Items will be injected here -->
+
+    <!-- 🧩 Cart Tab Buttons -->
+    <div class="cart-tabs">
+      <button class="cart-tab-btn active" data-tab="cart-view">🛒 Cart</button>
+      <button class="cart-tab-btn" data-tab="credits-view">💳 Credits</button>
     </div>
-    <div class="cart-footer">
-      <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
-      <button id="proceed-checkout-btn" class="checkout-btn" title="Proceed to checkout">Proceed to Checkout</button>
+
+    <!-- 🛍️ Cart View -->
+    <div id="cart-view" class="cart-tab-content active">
+      <div id="cart-items-container" class="cart-items">
+        <!-- Items will be injected here -->
+      </div>
+      <div class="cart-footer">
+        <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
+        <button id="proceed-checkout-btn" class="checkout-btn" title="Proceed to checkout">Proceed to Checkout</button>
+      </div>
+    </div>
+
+    <!-- 💳 Credits View -->
+    <div id="credits-view" class="cart-tab-content">
+      <div class="credits-form">
+        <h3>Credit Tier Breakdown</h3>
+        <label for="credit-3mm">3mm Credits:</label>
+        <input type="number" id="credit-3mm" min="0" placeholder="e.g. 3" />
+
+        <label for="credit-5mm">5mm Credits:</label>
+        <input type="number" id="credit-5mm" min="0" placeholder="e.g. 2" />
+
+        <label for="credit-8mm">8mm Credits:</label>
+        <input type="number" id="credit-8mm" min="0" placeholder="e.g. 1" />
+
+        <p class="credit-total">Total Credit Value: <span id="credit-value-display">$0.00</span></p>
+      </div>
     </div>
   </div>
+
 
   <!-- 🛒 Floating Cart Toggle Button (appears only if cart has items) -->
   <button id="cart-toggle-btn" class="cart-toggle-btn hidden" title="View Cart">

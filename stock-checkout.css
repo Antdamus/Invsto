@@ -184,6 +184,15 @@ body.cart-open .main-content {
   font-size: 0.9rem;
 }
 
+.cart-tab-content {
+  display: none;
+}
+
+.cart-tab-content.active {
+  display: block;
+}
+
+
 /*#endregion*/
 
 /* ===================== rendering of the items ===================== */

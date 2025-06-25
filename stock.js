@@ -2931,6 +2931,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       //event listener for the modal checkout after items are added to the cart
       checkoutModule.setupCheckoutModalListeners();
 
+      //lister for the tabs 
+      checkoutModule.setupCartTabs();
+      checkoutModule.setupCreditTierListeners();
+      
+
     //#endregion
   //#endregion
 
