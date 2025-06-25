@@ -270,6 +270,19 @@ body.cart-open .main-content {
   color: #111;
 }
 
+.credit-positive {
+  color: #1db954; /* Green for extra credit */
+  font-weight: bold;
+}
+.credit-negative {
+  color: #e53935; /* Red for owed money */
+  font-weight: bold;
+}
+.credit-neutral {
+  color: #333;
+  font-weight: bold;
+}
+
 
 /*#endregion*/
 
