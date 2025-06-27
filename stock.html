@@ -10,6 +10,7 @@
 
   <!-- 🎨 Main CSS stylesheet -->
   <link rel="stylesheet" href="stock.css" />
+  <link rel="stylesheet" href="stock-editcards.css" />
   <link rel="stylesheet" href="stock-checkout.css" />
   <link rel="stylesheet" href="stock-export.css" />
 
@@ -243,6 +244,8 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="additem-dymolabel.js"></script>
+  <script src="stock-editcards.js"></script>
   <script src="ebayExport.js"></script>
   <script src="stock-checkout.js"></script>
   <script src="stock.js"></script>
@@ -296,10 +299,6 @@
       </div>
     </div>
 
-
-
-   
-
     <!-- 🛍️ Cart View -->
     <div id="cart-view" class="cart-tab-content active">
       <div id="cart-items-container" class="cart-items">
@@ -329,7 +328,6 @@
       </div>
     </div>
   </div>
-
 
   <!-- 🛒 Floating Cart Toggle Button (appears only if cart has items) -->
   <button id="cart-toggle-btn" class="cart-toggle-btn hidden" title="View Cart">
@@ -400,9 +398,56 @@
     </div>
   </div>
 
+  <!-- editing modal -->
+  <div id="editItemModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
+      <h2>Edit Inventory Item</h2>
 
+      <form id="edit-item-form">
+        <label for="edit-title">Title:</label>
+        <input type="text" id="edit-title" name="title" required>
 
+        <label for="edit-description">Description:</label>
+        <textarea id="edit-description" name="description"></textarea>
 
+        <label for="edit-weight">Weight:</label>
+        <input type="number" id="edit-weight" name="weight" step="0.01" min="0">
+
+        <label for="edit-barcode">Barcode (read-only):</label>
+        <input type="text" id="edit-barcode" name="barcode" readonly>
+
+        <label for="edit-qr-type">QR Type:</label>
+        <input type="text" id="edit-qr-type" name="qr_type">
+
+        <label for="edit-qr">QR Data:</label>
+        <input type="text" id="edit-qr" name="qr">
+
+        <button type="button" id="generate-edit-dymo-label">🔖 Generate DYMO Label</button>
+
+        <label for="edit-cost">Cost ($):</label>
+        <input type="number" id="edit-cost" name="cost" step="0.01" min="0">
+
+        <label for="edit-sale-price">Sale Price ($):</label>
+        <input type="number" id="edit-sale-price" name="sale_price" step="0.01" min="0">
+
+        <label for="edit-price-per-weight">Price per Weight ($):</label>
+        <input type="number" id="edit-price-per-weight" name="price_per_weight" step="0.01" min="0">
+
+        <label for="edit-stock-batch">Stock Batch Size Update:</label>
+        <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
+
+        <label for="edit-photos">Photos:</label>
+          <label>Current Photos:</label>
+          <div id="current-photos-preview" class="photos-preview-grid">
+            <!-- Thumbnails will be injected here dynamically -->
+          </div>
+        <input type="file" id="edit-photos" name="photos" multiple accept="image/*">
+
+        <button type="submit" class="save-edit-btn">💾 Save Changes</button>
+      </form>
+    </div>
+  </div>
 
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>

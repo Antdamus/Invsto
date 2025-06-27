@@ -2732,114 +2732,6 @@ async function showCategoryDropdown(itemId, anchorElement) {
   });
 }
 
-function setupCSVExport() {
-  const exportBtn = document.getElementById("export-csv");
-  exportBtn.addEventListener("click", () => {
-    const headers = [
-      "Title", "Description", "Weight", "Cost", "Sale Price", "Category",
-      "Distributor Name", "Distributor Phone", "Notes", "Barcode", "Stock", "Last Updated"
-    ];
-
-    const rows = [headers];
-
-    const visibleCards = document.querySelectorAll(".stock-card");
-
-    visibleCards.forEach(card => {
-      const content = card.querySelector(".stock-content");
-      const getField = (label) => {
-        const p = [...content.querySelectorAll("p")].find(el => el.innerText.startsWith(label));
-        return p ? p.innerText.replace(`${label}:`, '').trim() : '';
-      };
-
-      const title = content.querySelector("h2")?.innerText || "";
-      const description = content.querySelector("p:nth-of-type(1)")?.innerText || "";
-
-      const weight = getField("Weight");
-      const cost = getField("Cost");
-      const salePrice = getField("Sale Price");
-      const category = getField("Category");
-      const distName = getField("Distributor").split('\n')[0];
-      const distPhone = getField("Distributor").split('\n')[1] || "";
-      const notes = getField("Notes");
-      const barcode = getField("Barcode");
-      const stock = getField("In Stock")?.replace("In Stock: ", "").trim();
-      const updated = getField("Last Updated");
-
-      rows.push([
-        title, description, weight, cost, salePrice, category,
-        distName, distPhone, notes, barcode, stock, updated
-      ]);
-    });
-
-    const csvContent = rows.map(r => r.map(cell => `"${cell}"`).join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "filtered_inventory.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  });
-}
-
-function setupPDFExport() {
-  const exportBtn = document.getElementById("export-pdf");
-  exportBtn.addEventListener("click", () => {
-    const headers = [
-      "Title", "Description", "Weight", "Sale Price",
-      "Distributor Name", "Distributor Phone",  "Stock"
-    ];
-
-    const visibleCards = document.querySelectorAll(".stock-card");
-
-    const rows = [];
-
-    visibleCards.forEach(card => {
-      const content = card.querySelector(".stock-content");
-      const getField = (label) => {
-        const p = [...content.querySelectorAll("p")].find(el => el.innerText.startsWith(label));
-        return p ? p.innerText.replace(`${label}:`, '').trim() : '';
-      };
-
-      const title = content.querySelector("h2")?.innerText || "";
-      const description = content.querySelector("p:nth-of-type(1)")?.innerText || "";
-
-      const weight = getField("Weight");
-      const salePrice = getField("Sale Price");
-      const distName = getField("Distributor").split('\n')[0];
-      const distPhone = getField("Distributor").split('\n')[1] || "";
-      const stock = getField("In Stock")?.replace("In Stock: ", "").trim();
-
-      rows.push([
-        title, description, weight, salePrice,
-        distName, distPhone, stock,
-      ]);
-    });
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-
-    doc.autoTable({
-      head: [headers],
-      body: rows,
-      styles: {
-        font: "helvetica",
-        fontSize: 9,
-        overflow: "linebreak",
-        cellPadding: 3,
-      },
-      headStyles: {
-        fillColor: [0, 113, 227],
-        textColor: 255,
-      },
-      margin: { top: 20 },
-      theme: "striped"
-    });
-
-    doc.save("filtered_inventory.pdf");
-  });
-}
 
 // ✅ Main entry point: Initializes app on DOM ready
 // ✅ Applies modular functions, loads user data, sets up all UI handlers
@@ -2955,6 +2847,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     //event listener for card functions
     setupCardEventListeners();
+    editCardModule.setupEditCardListeners();
 
     //event listener to switch filter tabs and the match all button
     setupFilterPanelUI();
