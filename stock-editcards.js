@@ -146,7 +146,21 @@ window.editCardModule = (function () {
     }
 
     // 🔹 Show the edit modal prefilled with item data
-    async function openEditModal(item) {
+    async function openEditModal(itemId) {
+        console.log(`🔍 Fetching fresh item data for modal: ${itemId}`);
+        const { data: items, error } = await supabase
+            .from("item_types")
+            .select("*")
+            .eq("id", itemId)
+            .limit(1);
+
+        if (error || !items || items.length === 0) {
+            console.error("❌ Failed to fetch item data for modal:", error);
+            alert("Failed to load item data. Please try again.");
+            return;
+        }
+
+        const item = items[0];
         currentItemId = item.id;
         originalWeight = parseFloat(item.weight) || 0;
         deletedPhotos.clear();
@@ -163,21 +177,25 @@ window.editCardModule = (function () {
         document.getElementById("edit-qr-type").value = item.qr_type || "";
         document.getElementById("edit-qr").value = item.qr_code || "";
 
-
         // 🔹 Inject current photos preview
         const previewContainer = document.getElementById("current-photos-preview");
-        previewContainer.innerHTML = ""; // clear old previews
+        previewContainer.innerHTML = "";
 
         const photoPaths = item.photos || [];
+        console.log("🖼️ Fetched photoPaths:", photoPaths);
+
         for (const path of photoPaths) {
-            const signedUrl = await getSignedUrl(path); // 🔸 your helper function
-            const div = document.createElement("div");
-            div.classList.add("photo-thumb-container");
-            div.innerHTML = `
-            <img src="${signedUrl}" alt="Photo thumbnail">
-            <button type="button" class="delete-photo-btn" data-path="${path}">&times;</button>
-            `;
-            previewContainer.appendChild(div);
+            const signedUrl = await getSignedUrl(path);
+            console.log("🔗 Signed URL:", signedUrl);
+            if (signedUrl) {
+                const div = document.createElement("div");
+                div.classList.add("photo-thumb-container");
+                div.innerHTML = `
+                    <img src="${signedUrl}" alt="Photo thumbnail">
+                    <button type="button" class="delete-photo-btn" data-path="${path}">&times;</button>
+                `;
+                previewContainer.appendChild(div);
+            }
         }
 
         const modal = document.getElementById("editItemModal");
@@ -186,6 +204,7 @@ window.editCardModule = (function () {
             document.body.classList.add("modal-open");
         }
     }
+
 
     // 🔹 Close the modal and clear state
     function closeEditModal() {
@@ -215,11 +234,20 @@ window.editCardModule = (function () {
         const stockBatch = parseInt(document.getElementById("edit-stock-batch").value, 10) || 0;
         const photosInput = document.getElementById("edit-photos");
 
-        const existingItem = allItems.find(i => i.id === currentItemId);
-        if (!existingItem) {
-            console.error("Existing item not found in allItems.");
+        // 🔄 Fetch latest item directly from database
+        const { data: items, error: fetchError } = await supabase
+            .from("item_types")
+            .select("*")
+            .eq("id", currentItemId)
+            .limit(1);
+
+        if (fetchError || !items || items.length === 0) {
+            console.error("❌ Failed to fetch item before saving:", fetchError);
+            alert("Failed to fetch current item data. Please try again.");
             return;
         }
+
+        const existingItem = items[0];
 
         let newDymoLabelUrl = existingItem.dymo_label_url;
 
@@ -271,7 +299,7 @@ window.editCardModule = (function () {
         if (photosInput?.files?.length) {
             for (let i = 0; i < photosInput.files.length; i++) {
             const photoFile = photosInput.files[i];
-            const photoPath = `item-photos/${currentItemId}-${Date.now()}-${photoFile.name}`;
+            const photoPath = `item_photos/${currentItemId}-${Date.now()}-${photoFile.name}`;
             const { error: photoErr } = await supabase.storage.from("photos").upload(photoPath, photoFile, { upsert: true });
             if (photoErr) {
                 console.error(`Error uploading photo ${photoFile.name}:`, photoErr);
@@ -283,6 +311,15 @@ window.editCardModule = (function () {
 
         // 🔹 Combine kept + new photos
         let newPhotos = [...updatedPhotos, ...uploadedPaths];
+
+        // 🔥 Delete replaced photos not kept or manually deleted
+        const photosToRemove = (existingItem.photos || []).filter(
+        oldPath => !newPhotos.includes(oldPath)
+        );
+        for (const oldPath of photosToRemove) {
+        console.log(`🗑️ Deleting replaced photo: ${oldPath}`);
+        await supabase.storage.from("photos").remove([oldPath]);
+        }
 
         const updates = {
             title,
@@ -319,16 +356,9 @@ window.editCardModule = (function () {
         // Delegated listener: clicks on edit buttons
         document.addEventListener("click", (e) => {
             if (e.target.matches(".edit-item-btn")) {
-            const itemId = e.target.dataset.id;
-            if (!itemId) return;
-
-            const item = allItems.find(i => i.id === itemId);
-            if (!item) {
-                console.warn(`Item with ID ${itemId} not found in allItems`);
-                return;
-            }
-
-            openEditModal(item);
+                const itemId = e.target.dataset.id;
+                if (!itemId) return;
+                openEditModal(itemId); // now just pass the ID!
             }
         });
 
