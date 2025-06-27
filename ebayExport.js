@@ -3,6 +3,7 @@
 
 const requiredHeaders = {
   action: "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)",
+  categoryid: "Category ID"
   category: "Category name",
   title: "Title",
   startPrice: "Start price",
@@ -73,7 +74,6 @@ async function getPublicImageUrl(privatePath) {
         return "";
       }
 
-      console.log(`✅ Uploaded ${filename} to public-ebay-photos`);
     } else {
       console.log(`⚠️ ${filename} already exists in public-ebay-photos`);
     }
@@ -111,6 +111,7 @@ window.exportToEbayXLSX = async function (items) {
       const imageUrl = await getPublicImageUrl(photoPath);
 
       row[headers.indexOf(requiredHeaders.action)] = "Add";
+      row[headers.indexOf(requiredHeaders.categoryid)] = "261993";
       row[headers.indexOf(requiredHeaders.category)] = "/Jewelry & Watches/Fine Jewelry/Necklaces & Pendants";
       row[headers.indexOf(requiredHeaders.title)] = item.title || "";
       row[headers.indexOf(requiredHeaders.startPrice)] = item.sale_price || 0;
