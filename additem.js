@@ -440,138 +440,148 @@ let uploadedImages = [];
 
 //#endregion
 
-
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
-e.preventDefault();
-// Check category selection
-const categoryValue = document.getElementById("category").value.trim();
-if (!categoryValue) {
-  showToast("❌ Please select or create a category.");
-  return;
-}
-
-// Check DYMO label generation
-if (!window.latestDymoUrl || typeof window.latestDymoUrl !== "string" || !window.latestDymoUrl.includes("labels/")) {
-  showToast("❌ Please generate the DYMO label before submitting.");
-  return;
-}
-
-const title = document.getElementById("title").value.trim();
-const description = document.getElementById("description").value.trim();
-const weight = parseFloat(document.getElementById("weight").value);
-const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
-// force sync dropdown selection into hidden input if user typed or skipped selection
-const categoryButton = document.getElementById("category-dropdown-toggle");
-const categoryHiddenInput = document.getElementById("category");
-if (!categoryHiddenInput.value && categoryButton.innerText !== "Select or Create Category") {
-  categoryHiddenInput.value = categoryButton.innerText.trim();
-}
-const categoryInput = document.getElementById("category").value.trim();
-const categories = categoryInput ? [categoryInput] : [];
-const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
-const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
-const distributor_name = document.getElementById("distributor-name").value.trim();
-const distributor_phone = document.getElementById("distributor-phone").value.trim();
-const distributor_notes = document.getElementById("distributor-notes").value.trim();
-const qr_code = document.getElementById("qr-code").value.trim();
-const barcode = barcodeInput.value;
-
-const photoFiles = photoInput.files;
-const photoUrls = [];
-const photoStatus = document.getElementById("photo-status");
-photoStatus.innerHTML = ""; // Clear previous messages
-
-for (const file of photoFiles) {
-  const path = `item_photos/${Date.now()}_${file.name}`;
-
-  const { error: uploadError } = await supabase
-    .storage
-    .from('photos')
-    .upload(path, file, { upsert: true });
-
-  if (uploadError) {
-    console.error(`Upload photo failed for ${file.name}:`, uploadError.message);
-    photoStatus.innerHTML += `❌ Failed to upload <strong>${file.name}</strong>: ${uploadError.message}<br>`;
-    continue;
+  e.preventDefault();
+  // Check category selection
+  const categoryValue = document.getElementById("category").value.trim();
+  if (!categoryValue) {
+    showToast("❌ Please select or create a category.");
+    return;
   }
 
-  // ✅ Store only the path, not signed URL
-  photoUrls.push(path);
-  photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
-}
-
-const { data: insertedItems, error } = await supabase
-  .from("item_types")
-  .insert({
-    title,
-    description,
-    weight,
-    price_per_weight, // ✅ NEW FIELD
-    categories,
-    cost,
-    sale_price,
-    distributor_name,
-    distributor_phone,
-    distributor_notes,
-    qr_type: typeqr,
-    qr_code,
-    barcode,
-    photos: photoUrls,
-    dymo_label_url: window.latestDymoUrl || ""
-  })
-  .select()
-  .limit(1);
-
-if (error || !insertedItems || insertedItems.length === 0) {
-  alert("Failed to save item: " + (error?.message || "Unknown error"));
-  return;
-}
-
-const newItem = insertedItems[0];
-const stockInfo = pendingStockAssignments[newItem.barcode];
-
-if (stockInfo) {
-  const stockInsert = await supabase.from("item_stock_locations").insert({
-    item_id: newItem.id,
-    location_id: stockInfo.location_id,
-    quantity: stockInfo.quantity,
-    added_by: currentUser.id,
-    confirmation_email: currentUser.email,
-    confirmed_at: new Date().toISOString()
-  });
-
-  const stockLog = await supabase.from("stock_transactions").insert({
-    item_id: newItem.id,
-    location_id: stockInfo.location_id,
-    quantity: stockInfo.quantity,
-    action_type: "checkin",
-    method: "unverified",  // ✅ new: set the method
-    email: window.currentUser?.email,  // ✅ new: log who did it
-    user_id: currentUser.id,
-    timestamp: new Date().toISOString()
-  });
-
-  if (stockInsert.error || stockLog.error) {
-    console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
-    showToast("⚠️ Stock saved, but transaction log might be missing.");
-  } else {
-    showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
+  // Check DYMO label generation
+  if (!window.latestDymoUrl || typeof window.latestDymoUrl !== "string" || !window.latestDymoUrl.includes("labels/")) {
+    showToast("❌ Please generate the DYMO label before submitting.");
+    return;
   }
 
-  // Clean up
-  delete pendingStockAssignments[newItem.barcode];
-}
+  const title = document.getElementById("title").value.trim();
+  const description = document.getElementById("description").value.trim();
+  const weight = parseFloat(document.getElementById("weight").value);
+  const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
+  // force sync dropdown selection into hidden input if user typed or skipped selection
+  const categoryButton = document.getElementById("category-dropdown-toggle");
+  const categoryHiddenInput = document.getElementById("category");
+  if (!categoryHiddenInput.value && categoryButton.innerText !== "Select or Create Category") {
+    categoryHiddenInput.value = categoryButton.innerText.trim();
+  }
+  const categoryInput = document.getElementById("category").value.trim();
+  const categories = categoryInput ? [categoryInput] : [];
+  const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
+  const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
+  const distributor_name = document.getElementById("distributor-name").value.trim();
+  const distributor_phone = document.getElementById("distributor-phone").value.trim();
+  const distributor_notes = document.getElementById("distributor-notes").value.trim();
+  const qr_code = document.getElementById("qr-code").value.trim();
+  const barcode = barcodeInput.value;
 
-alert("✅ Item successfully added!");
+  const photoFiles = photoInput.files;
+  const photoUrls = [];
+  const photoStatus = document.getElementById("photo-status");
+  photoStatus.innerHTML = ""; // Clear previous messages
 
-document.getElementById("add-item-form").reset();
-previewContainer.innerHTML = "";
-uploadedImages = [];
-latestDymoXml = "";
-pricePerWeightInput.value = "";
-autoCostCheckbox.checked = true;
-await bumpInventoryVersion();
+  for (const file of photoFiles) {
+    const path = `item_photos/${Date.now()}_${file.name}`;
+
+    const { error: uploadError } = await supabase
+      .storage
+      .from('photos')
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      console.error(`Upload photo failed for ${file.name}:`, uploadError.message);
+      photoStatus.innerHTML += `❌ Failed to upload <strong>${file.name}</strong>: ${uploadError.message}<br>`;
+      continue;
+    }
+
+    // ✅ Store only the path, not signed URL
+    photoUrls.push(path);
+    photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
+  }
+
+  let finalDymoPath;
+  try {
+    finalDymoPath = await dymoModule.uploadFinalDymoLabel();
+  } catch (err) {
+    alert(`❌ Failed to upload DYMO label: ${err.message || err}`);
+    return;
+  }
+
+
+  const { data: insertedItems, error } = await supabase
+    .from("item_types")
+    .insert({
+      title,
+      description,
+      weight,
+      price_per_weight,
+      categories,
+      cost,
+      sale_price,
+      distributor_name,
+      distributor_phone,
+      distributor_notes,
+      qr_type: typeqr,
+      qr_code,
+      barcode,
+      photos: photoUrls,
+      dymo_label_url: window.latestDymoUrl || "",
+      added_by: currentUser.id,              // ✅ NEW: track user ID
+      added_by_email: currentUser.email      // ✅ NEW: track user email
+    })
+    .select()
+    .limit(1);
+
+  if (error || !insertedItems || insertedItems.length === 0) {
+    alert("Failed to save item: " + (error?.message || "Unknown error"));
+    return;
+  }
+
+  const newItem = insertedItems[0];
+  const stockInfo = pendingStockAssignments[newItem.barcode];
+
+  if (stockInfo) {
+    const stockInsert = await supabase.from("item_stock_locations").insert({
+      item_id: newItem.id,
+      location_id: stockInfo.location_id,
+      quantity: stockInfo.quantity,
+      added_by: currentUser.id,
+      confirmation_email: currentUser.email,
+      confirmed_at: new Date().toISOString()
+    });
+
+    const stockLog = await supabase.from("stock_transactions").insert({
+      item_id: newItem.id,
+      location_id: stockInfo.location_id,
+      quantity: stockInfo.quantity,
+      action_type: "checkin",
+      method: "unverified",  // ✅ new: set the method
+      email: window.currentUser?.email,  // ✅ new: log who did it
+      user_id: currentUser.id,
+      timestamp: new Date().toISOString()
+    });
+
+    if (stockInsert.error || stockLog.error) {
+      console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
+      showToast("⚠️ Stock saved, but transaction log might be missing.");
+    } else {
+      showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
+    }
+
+    // Clean up
+    delete pendingStockAssignments[newItem.barcode];
+  }
+
+  alert("✅ Item successfully added!");
+
+  document.getElementById("add-item-form").reset();
+  previewContainer.innerHTML = "";
+  uploadedImages = [];
+  latestDymoXml = "";
+  pricePerWeightInput.value = "";
+  autoCostCheckbox.checked = true;
+  await bumpInventoryVersion();
 });
 
 

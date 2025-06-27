@@ -704,79 +704,105 @@ window.dymoModule = (function () {
         </DataTable>
         </DesktopLabel>`;
 
-        const blob = new Blob([templateXml], { type: "application/octet-stream" });
-
+        //create the label path
         const labelPath = `labels/${Date.now()}_OGJewelryLabel.dymo`;
 
+        // Check if a DYMO label already exists with same path
         const exists = await dymoLabelExists(labelPath);
         if (exists) throw new Error(`DYMO label path "${labelPath}" already exists.`);
 
-        const { error: uploadError } = await supabase
-        .storage
-        .from("dymo-labels")
-        .upload(labelPath, blob, {
-            upsert: true,
-            contentType: "application/octet-stream",
-        });
-
-        if (uploadError) throw uploadError;
-
+        // ✅ Do not upload here — just return XML + path
         return { templateXml, labelPath };
+
     }
 
     //set up the event listener 
     function setupGenerateDymoButtonListener() {
         const button = document.getElementById("generate-dymo-label");
         if (!button) {
-        console.error("❌ generate-dymo-label button not found!");
-        return;
+            console.error("❌ generate-dymo-label button not found!");
+            return;
         }
 
         button.addEventListener("click", async () => {
-        try {
-            const barcode = barcodeInput.value || "OG" + Date.now();
+            try {
+                const barcode = barcodeInput.value || "OG" + Date.now();
 
-            const exists = await dymoModule.barcodeExists(barcode);
-            if (exists) {
-            alert(`❌ Barcode "${barcode}" already exists in inventory. Please generate a new one.`);
-            return;
+                const exists = await dymoModule.barcodeExists(barcode);
+                if (exists) {
+                    alert(`❌ Barcode "${barcode}" already exists in inventory. Please generate a new one.`);
+                    return;
+                }
+
+                const qr = qrInput.value.trim() || (
+                    typeqr === "website"
+                        ? "https://ogjeweler.com/"
+                        : "https://ogjewelry.store/auth?id=" + barcode
+                );
+                const price = document.getElementById("weight").value?.trim() || "0.0"; // pass weight as price
+
+                const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
+                    barcode, qr, price, typeqr,
+                });
+
+                // ✅ Download label locally for preview only
+                const blob = new Blob([templateXml], { type: "application/octet-stream" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "OGJewelryLabel.dymo";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                // ✅ Save XML and reserved path for later upload on final submit
+                window.latestDymoXml = templateXml;
+                window.latestDymoUrl = labelPath;
+
+                console.log(`✅ DYMO label generated, path reserved: ${labelPath}`);
+                document.getElementById("dymo-status").innerText =
+                    "✅ DYMO label generated & ready for final upload.";
+
+            } catch (err) {
+                console.error("❌ DYMO generation failed:", err);
+                alert(`DYMO generation failed: ${err.message || err}`);
             }
-
-            const qr = qrInput.value.trim() || (
-            typeqr === "website"
-                ? "https://ogjeweler.com/"
-                : "https://ogjewelry.store/auth?id=" + barcode
-            );
-            const price = document.getElementById("weight").value?.trim() || "0.0"; // i am just passing here the weight
-
-            const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
-            barcode, qr, price, typeqr,
-            });
-
-            const blob = new Blob([templateXml], { type: "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "OGJewelryLabel.dymo";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            console.log(`✅ DYMO label uploaded: ${labelPath}`);
-            window.latestDymoUrl = labelPath;
-
-            document.getElementById("dymo-status").innerText =
-            "✅ DYMO label uploaded & path saved.";
-
-        } catch (err) {
-            console.error("❌ DYMO generation failed:", err);
-            alert(`DYMO generation failed: ${err.message || err}`);
-        }
         });
     }
 
+    // In additem-dymolabel.js, inside window.dymoModule = (function() { ... }) block
+    async function uploadFinalDymoLabel() {
+        if (!window.latestDymoXml || !window.latestDymoUrl) {
+            throw new Error("No DYMO label generated. Please generate it first before submitting.");
+        }
 
+        const blob = new Blob([window.latestDymoXml], { type: "application/octet-stream" });
 
-  return { generateAndUploadDymoLabel, barcodeExists, dymoLabelExists, setupGenerateDymoButtonListener };
+        const exists = await dymoModule.dymoLabelExists(window.latestDymoUrl);
+        if (exists) {
+            throw new Error(`DYMO label path "${window.latestDymoUrl}" already exists.`);
+        }
+
+        const { error: uploadError } = await supabase
+            .storage
+            .from("dymo-labels")
+            .upload(window.latestDymoUrl, blob, {
+                upsert: true,
+                contentType: "application/octet-stream",
+            });
+
+        if (uploadError) throw uploadError;
+
+        console.log(`✅ DYMO label uploaded to ${window.latestDymoUrl}`);
+        return window.latestDymoUrl;
+    }
+
+  return { 
+    generateAndUploadDymoLabel, 
+    barcodeExists, 
+    dymoLabelExists, 
+    setupGenerateDymoButtonListener, 
+    uploadFinalDymoLabel 
+};
 })();
