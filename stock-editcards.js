@@ -4,6 +4,147 @@ window.editCardModule = (function () {
     let originalWeight = null;
     let deletedPhotos = new Set();
 
+    //functions needes
+    if (typeof getSignedUrl !== "function") {
+        async function getSignedUrl(path) {
+            if (!path || typeof path !== "string") {
+            console.warn("❌ Invalid photo path:", path);
+            return null;
+            }
+            const { data, error } = await supabase
+            .storage
+            .from("photos")
+            .createSignedUrl(path, 3600);
+            if (error || !data?.signedUrl) {
+            console.warn("⚠️ Failed to sign URL:", path, error?.message || "Unknown error");
+            return null;
+            }
+            return data.signedUrl;
+        }
+
+        async function bumpInventoryVersion() {
+            const { error } = await supabase
+                .from("metadata")
+                .update({ inventory_version: crypto.randomUUID() })
+                .eq("id", "inventory");
+
+            if (error) {
+                console.warn("⚠️ Failed to update inventory version:", error.message);
+            } else {
+                console.log("🔁 Inventory version updated");
+            }
+            //await loadAllItemsWithCache();
+        }
+
+        async function refreshItemById(itemId) {
+        console.log(`🔄 Refreshing item by ID: ${itemId}`);
+
+        // Step 1: Fetch the updated item
+        const { data: items, error: itemError } = await supabase
+            .from("item_types")
+            .select("*")
+            .eq("id", itemId);
+
+        if (itemError || !items || items.length === 0) {
+            console.error("❌ Failed to fetch item:", itemError);
+            return;
+        }
+
+        const item = items[0];
+
+        // Step 2: Sign photo URLs
+        if (Array.isArray(item.photos)) {
+            const allArePaths = item.photos.every(p => typeof p === "string" && !p.includes("https://"));
+            if (allArePaths) {
+            item.photoPaths = item.photos; // ✅ Save raw paths only if they’re real paths
+            item.photos = [];              // ✅ Clear it for lazy signing
+            } else {
+            console.warn("⚠️ Skipped converting signed URLs to paths:", item.photos);
+            item.photoPaths = []; // Or leave undefined to skip carousel signing
+            }
+        }
+
+        // Step 3: Get stock info
+        const { data: stockData, error: stockError } = await supabase
+            .from("item_stock_locations")
+            .select("item_id, quantity, location_id")
+            .eq("item_id", itemId);
+
+        if (!stockError && stockData) {
+            const { data: locations, error: locError } = await supabase
+            .from("locations")
+            .select("id, location_name");
+
+            if (!locError && locations) {
+            const locationMap = Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+            const breakdown = {};
+            let total = 0;
+
+            stockData.forEach(({ quantity, location_id }) => {
+                const locName = locationMap[location_id] || "Unknown Location";
+                total += quantity;
+                breakdown[locName] = (breakdown[locName] || 0) + quantity;
+            });
+
+            item.stock = total;
+            item.stock_tooltip = Object.entries(breakdown)
+                .map(([loc, qty]) => `${loc}: ${qty}`)
+                .join("\n");
+            }
+        }
+
+        // Step 4: Update it in allItems
+        const index = allItems.findIndex(i => i.id === itemId);
+        if (index !== -1) {
+            allItems[index] = item;
+        } else {
+            allItems.push(item); // if it's new
+        }
+
+        // Step 5: Replace the item card
+        const oldCard = document.querySelector(`.stock-card[data-item-id="${itemId}"]`);
+        if (oldCard) {
+            const newCard = await renderStockCard(item, allItems.findIndex(i => i.id === itemId));
+            if (newCard) oldCard.replaceWith(newCard);
+            window.lucide.createIcons();
+        }
+        
+        //step 6, update the cache
+        const version = await getCurrentInventoryVersionFromSupabase();
+        if (version) {
+            sessionStorage.setItem("cachedAllItems", JSON.stringify({
+            version,
+            data: allItems
+            }));
+        }
+
+        console.log("✅ Item refreshed in place:", item.title);
+        }
+        
+        function showToast(message) {
+        const container = document.getElementById("toast-container"); // Target container
+        //-> you are accessing the div id= toast container node in the DOM (document object model)
+        const toast = document.createElement("div"); //this is creating a new div element
+        //-> in memory, not in the DOM per se, just a standalone javascript object for now
+        //remember the div is just a box
+        //and in here toast is not an html id, rather is just a varible holding the pointer to the
+        //the object
+        toast.className = "toast"; //it just gave the div you created called toast a class name
+        toast.textContent = message; //injects the message into the container
+        //<div class="toast">Item added!</div>
+        container.appendChild(toast); //this is injecting the full javascript object into the 
+        //node of the the DOM so now the user can see it live 
+        // <div id="toast-container">
+        //   <div class="toast">📦 Your toast message</div>
+        // </div>
+
+        // Remove toast after 4 seconds
+        setTimeout(() => {
+            toast.remove();
+        }, 4000);
+        }
+    }
+
     // 🔹 Show the edit modal prefilled with item data
     async function openEditModal(item) {
         currentItemId = item.id;
