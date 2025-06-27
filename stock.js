@@ -1078,50 +1078,52 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
       });
     }
 
-    // ☑️ Select All / Deselect All Visible toggle
+    //select all logic
     const selectAllBtn = document.getElementById("select-all-visible");
     if (selectAllBtn) {
       selectAllBtn.addEventListener("click", () => {
-        const cards = document.querySelectorAll(".stock-card"); // Visible cards only
-        let allSelected = true;
+        const filtered = getFilteredItems(allItems); // ✅ all items matching filters
+        const visibleIds = new Set(filtered.map(item => item.id));
 
-        cards.forEach(card => {
-          const id = card.dataset.itemId;
-          if (!selectedItems.has(id)) {
-            allSelected = false;
-          }
-        });
+        const allSelected = filtered.every(item => selectedItems.has(item.id));
 
         if (allSelected) {
-          // ❌ Deselect all
-          cards.forEach(card => {
+          // ❌ Deselect all filtered
+          filtered.forEach(item => {
+            selectedItems.delete(item.id);
+          });
+          // Optional: update only visible DOM cards
+          document.querySelectorAll(".stock-card").forEach(card => {
             const id = card.dataset.itemId;
-            const checkbox = card.querySelector(".select-checkbox");
-            if (checkbox && checkbox.checked) {
-              checkbox.checked = false;
-              selectedItems.delete(id);
-              card.classList.remove("selected"); // 🧼 remove selected class
+            if (visibleIds.has(id)) {
+              card.classList.remove("selected");
+              const checkbox = card.querySelector(".select-checkbox");
+              if (checkbox) checkbox.checked = false;
             }
           });
           selectAllBtn.innerHTML = `<i data-lucide="check-square" class="icon"></i> Select All Visible`;
         } else {
-          // ✅ Select all
-          cards.forEach(card => {
+          // ✅ Select all filtered
+          filtered.forEach(item => {
+            selectedItems.add(item.id);
+          });
+          // Optional: update only visible DOM cards
+          document.querySelectorAll(".stock-card").forEach(card => {
             const id = card.dataset.itemId;
-            const checkbox = card.querySelector(".select-checkbox");
-            if (checkbox && !checkbox.checked) {
-              checkbox.checked = true;
-              selectedItems.add(id);
-              card.classList.add("selected"); // ✅ add selected class
+            if (visibleIds.has(id)) {
+              card.classList.add("selected");
+              const checkbox = card.querySelector(".select-checkbox");
+              if (checkbox) checkbox.checked = true;
             }
           });
           selectAllBtn.innerHTML = `<i data-lucide="square" class="icon"></i> Deselect All`;
-
         }
-        if (window.lucide) lucide.createIcons(); // ✅ re-render injected icons
+
+        if (window.lucide) lucide.createIcons();
         updateBulkToolbar();
       });
     }
+
 
 
   }
@@ -1388,8 +1390,41 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
     // ✅ Reset the Select All Visible toggle label
     const selectAllBtn = document.getElementById("select-all-visible");
     if (selectAllBtn) {
-      selectAllBtn.textContent = "Select All Visible";
+      selectAllBtn.addEventListener("click", () => {
+        const filtered = getFilteredItems(allItems); // this is your current logic
+        let allSelected = filtered.every(item => selectedItems.has(item.id));
+
+        if (allSelected) {
+          // ❌ Deselect all filtered
+          filtered.forEach(item => {
+            selectedItems.delete(item.id);
+            const card = document.querySelector(`.stock-card[data-item-id="${item.id}"]`);
+            if (card) {
+              const checkbox = card.querySelector(".select-checkbox");
+              if (checkbox) checkbox.checked = false;
+              card.classList.remove("selected");
+            }
+          });
+          selectAllBtn.innerHTML = `<i data-lucide="check-square" class="icon"></i> Select All Visible`;
+        } else {
+          // ✅ Select all filtered
+          filtered.forEach(item => {
+            selectedItems.add(item.id);
+            const card = document.querySelector(`.stock-card[data-item-id="${item.id}"]`);
+            if (card) {
+              const checkbox = card.querySelector(".select-checkbox");
+              if (checkbox) checkbox.checked = true;
+              card.classList.add("selected");
+            }
+          });
+          selectAllBtn.innerHTML = `<i data-lucide="square" class="icon"></i> Deselect All`;
+        }
+
+        if (window.lucide) lucide.createIcons();
+        updateBulkToolbar();
+      });
     }
+
   }
 
   /** 🧰 Sets up event listeners for all bulk toolbar actions, except dropwdown of of course
@@ -1581,7 +1616,7 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
 
       if (exportCards.length === 0) return;
 
-      exportCardsToCSV(exportCards); // Export utility function
+      //exportCardsToCSV(exportCards); // Export utility function
     });
   }
 
@@ -2481,6 +2516,68 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// 🔧 Utility:open the export modal
+function setupExportModal() {
+  const exportBtn = document.getElementById("bulk-export"); // This already exists
+  const modal = document.getElementById("export-modal");
+  const closeBtn = document.getElementById("close-export-modal");
+
+  if (!exportBtn || !modal || !closeBtn) return;
+
+  exportBtn.addEventListener("click", () => {
+    modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+  });
+
+  closeBtn.addEventListener("click", () => {
+    modal.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+  });
+
+  // Close modal if user clicks outside modal content
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      modal.classList.add("hidden");
+      document.body.classList.remove("modal-open");
+    }
+  });
+}
+
+//ebuy export function
+function setupEbayExportButton() {
+  const ebayBtn = document.getElementById("export-ebay-btn");
+  const modal = document.getElementById("export-modal");
+
+  if (!ebayBtn || !modal) return;
+
+  ebayBtn.addEventListener("click", async () => {
+    const itemsToExport = allItems.filter(item => selectedItems.has(item.id));
+
+    if (!itemsToExport.length) {
+      showToast("🛑 No items selected for export.");
+      return;
+    }
+
+    try {
+      showToast("⏳ Generating eBay export...");
+      await window.exportToEbayXLSX(itemsToExport);
+      showToast("✅ Your eBay Excel file is ready.");
+    } catch (err) {
+      console.error("Export error:", err);
+      showToast("❌ Failed to generate export.");
+    }
+
+    modal.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+  });
+}
+
+
+
+
+
+
+
 //#endregion
 
 /* ================= User Interface Rendering Functions ============= */
@@ -2886,7 +2983,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       toggleBtn.classList.add("haptic");
       setTimeout(() => toggleBtn.classList.remove("haptic"), 1);
     });
-    
+
+    //event listerner for the export modal and logic
+    setupExportModal();
+    setupEbayExportButton(); // <— this must run
+
 
     //event listerner for the card dropdown
     setupCardChipDropdownDelegated()

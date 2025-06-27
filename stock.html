@@ -11,6 +11,8 @@
   <!-- 🎨 Main CSS stylesheet -->
   <link rel="stylesheet" href="stock.css" />
   <link rel="stylesheet" href="stock-checkout.css" />
+  <link rel="stylesheet" href="stock-export.css" />
+
 
   <!-- 🅰️ Google Fonts: Display Serif Font -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet"/>
@@ -238,6 +240,10 @@
   <script src="initSupabase.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="ebayExport.js"></script>
   <script src="stock-checkout.js"></script>
   <script src="stock.js"></script>
 
@@ -359,6 +365,42 @@
       </div>
     </div>
   </div>
+
+  <!-- 📦 Export Options Modal -->
+  <div id="export-modal" class="modal hidden">
+    <div class="modal-content export-modal-content">
+      <span class="material-icons-outlined close-icon" id="close-export-modal">close</span>
+
+      <h2 class="modal-header">📤 Export Options</h2>
+      <p class="modal-subtext">Choose how you want to export your selected items.</p>
+
+      <!-- 📁 Excel Template Upload Field -->
+      <label for="base-ebay-template" class="upload-label">Upload your eBay template (.xlsx)</label>
+      <input type="file" id="base-ebay-template" accept=".xlsx" class="upload-input" />
+
+      <div class="export-options-grid">
+        <button id="export-csv-btn" class="export-option-btn">
+          📄 Export CSV
+          <span class="export-subtext">Standard spreadsheet for backups or reports</span>
+        </button>
+
+        <button id="export-ebay-btn" class="export-option-btn">
+          🛒 Export for eBay
+          <span class="export-subtext">Fills your uploaded Excel template with selected inventory</span>
+        </button>
+
+        <!-- Future: PDF label option -->
+        <!--
+        <button id="export-pdf-btn" class="export-option-btn">
+          🖨️ Export Labels PDF
+          <span class="export-subtext">Generate printable barcode label sheets</span>
+        </button>
+        -->
+      </div>
+    </div>
+  </div>
+
+
 
 
 
