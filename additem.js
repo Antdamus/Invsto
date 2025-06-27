@@ -74,6 +74,24 @@ let uploadedImages = [];
     //await loadAllItemsWithCache();
   }
 
+  // === MULTI-IMAGE PREVIEW & UPLOAD ===
+  function setupPhotoUploadPreview() {
+    photoInput.addEventListener('change', () => {
+      previewContainer.innerHTML = "";
+      uploadedImages = [];
+
+      [...photoInput.files].forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = document.createElement("img");
+          img.src = e.target.result;
+          previewContainer.appendChild(img);
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+  }
+
 //#endregion
 
 //#region dropdown creation 
@@ -175,38 +193,41 @@ let uploadedImages = [];
   }
 
   // === dropdownoption=== //
-  document.addEventListener("click", async (e) => {
-    if (e.target.id !== "category-dropdown-toggle") return;
+  function setupCategoryDropdownToggle() {
+    document.addEventListener("click", async (e) => {
+      if (e.target.id !== "category-dropdown-toggle") return;
 
-    const menu = document.getElementById("category-dropdown-menu");
+      const menu = document.getElementById("category-dropdown-menu");
 
-    if (!menu.dataset.populated) {
-      const categories = await fetchUniqueCategories();
+      if (!menu.dataset.populated) {
+        const categories = await fetchUniqueCategories();
 
-      renderDropdownOptionsCustom({
-        menuId: "category-dropdown-menu",
-        toggleButtonId: "category-dropdown-toggle",
-        hiddenInputId: "category",
-        options: categories,
-        placeholder: "Search or create category...",
-        dataAttribute: "cat",
-        optionClass: "dropdown-option",
-        optionsContainerClass: "category-options-container",
-        searchId: "category-dropdown-search",
-        onClick: (value, isNew) => {
-          if (isNew) {
-            showToast(`➕ Created new category: ${value}`);
-          } else {
-            showToast(`🏷️ Selected category: ${value}`);
+        renderDropdownOptionsCustom({
+          menuId: "category-dropdown-menu",
+          toggleButtonId: "category-dropdown-toggle",
+          hiddenInputId: "category",
+          options: categories,
+          placeholder: "Search or create category...",
+          dataAttribute: "cat",
+          optionClass: "dropdown-option",
+          optionsContainerClass: "category-options-container",
+          searchId: "category-dropdown-search",
+          onClick: (value, isNew) => {
+            if (isNew) {
+              showToast(`➕ Created new category: ${value}`);
+            } else {
+              showToast(`🏷️ Selected category: ${value}`);
+            }
           }
-        }
-      });
+        });
 
-      menu.dataset.populated = "true";
-    }
+        menu.dataset.populated = "true";
+      }
 
-    menu.classList.toggle("show");
-  });
+      menu.classList.toggle("show");
+    });
+  }
+
 //#endregion
 
 //#region functions needed to set the final sale cost of items
@@ -280,11 +301,14 @@ let uploadedImages = [];
   }
 
   //respective event listener
-  document.getElementById('generate-barcode')?.addEventListener('click', () => {
-    const code = 'OG' + Date.now();
-    barcodeInput.value = code;
-    renderBarcode(code);
-  });
+  function setupBarcodeGeneration() {
+    document.getElementById('generate-barcode')?.addEventListener('click', () => {
+      const code = 'OG' + Date.now();
+      barcodeInput.value = code;
+      renderBarcode(code);
+    });
+  }
+
 
 //#endregion
 
@@ -390,42 +414,29 @@ let uploadedImages = [];
     });
   }
 
+  //allow the thing to be opened
+  function setupAdminStockOpenButton() {
+    document.getElementById("btn-open-admin-stock")?.addEventListener("click", () => {
+      showAdminLocationStockModal("-1");
+    });
+  }
+
+  //event listener for the dropdown in the moddal
+  function setupAdminLocationDropdownToggle() {
+    document.addEventListener("click", (e) => {
+      if (e.target.id === "admin-location-dropdown-toggle") {
+        const menu = document.getElementById("admin-location-dropdown-menu");
+        menu.classList.toggle("show");
+      }
+    });
+  }
+
   //== run the add location modal only if the user is an admin
   if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
     setupAdminLocationModalListeners();
   }
 
 //#endregion
-
-document.getElementById("btn-open-admin-stock")?.addEventListener("click", () => {
-  // Since the item isn't saved yet, we’ll pass a placeholder ID like -1
-  // You can later update this to real ID post-insert if needed
-  showAdminLocationStockModal("-1");
-});
-
-document.addEventListener("click", (e) => {
-  if (e.target.id === "admin-location-dropdown-toggle") {
-    const menu = document.getElementById("admin-location-dropdown-menu");
-    menu.classList.toggle("show");
-  }
-});
-
-
-// === MULTI-IMAGE PREVIEW & UPLOAD ===
-photoInput.addEventListener('change', () => {
-  previewContainer.innerHTML = "";
-  uploadedImages = [];
-
-  [...photoInput.files].forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = document.createElement("img");
-      img.src = e.target.result;
-      previewContainer.appendChild(img);
-    };
-    reader.readAsDataURL(file);
-  });
-});
 
 // === GENERATE DYMO LABEL ===
 document.getElementById("generate-dymo-label").addEventListener("click", async () => {
@@ -1145,7 +1156,6 @@ document.getElementById("dymo-status").innerText =
 
 });
 
-
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
 e.preventDefault();
@@ -1302,4 +1312,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.error("❌ Auth error:", err);
     window.location.href = "index.html";
   }
+
+  //addition of important event listeners
+  setupCostAndPriceListeners();
+  setupPhotoUploadPreview();
+  setupBarcodeGeneration();
+  setupAdminStockOpenButton();
+  setupAdminLocationDropdownToggle();
+  setupCategoryDropdownToggle();
 });
