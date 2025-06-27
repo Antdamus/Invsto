@@ -26,8 +26,17 @@
       <form id="add-item-form" class="add-form">
         <input type="text" id="title" placeholder="Item Title" class="add-input" required />
         <textarea id="description" placeholder="Item Description" class="add-input add-textarea" required></textarea>
-        <input type="number" step="0.01" id="weight" placeholder="Weight (g or ct)" class="add-input" required />
-        
+        <input type="number" step="0.01" id="weight" placeholder="Weight (g)" class="add-input" required />
+        <!-- 💎 Price Per Weight -->
+        <input type="number" step="0.01" id="price-per-weight" placeholder="Price per Weight ($/g or $/ct)" class="add-input" />
+
+        <!-- ✅ Toggle: Auto-calculate Cost or Manual -->
+        <div class="auto-cost-toggle">
+          <label style="display: flex; align-items: center; gap: 0.5rem;">
+            <input type="checkbox" id="auto-cost-checkbox" checked />
+            Auto-calculate cost from weight × price per weight
+          </label>
+        </div>
         <label for="category">Category</label>
         <div id="category-dropdown-container" class="custom-dropdown">
           <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">

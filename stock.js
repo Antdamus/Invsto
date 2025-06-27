@@ -294,21 +294,26 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
     const checkbox = `
       <input type="checkbox" class="select-checkbox" data-id="${id}" ${isSelected ? "checked" : ""}>
     `;
-  
+
     const favoriteBtn = currentUser
       ? `<button class="favorite-btn" data-id="${id}" title="Add to favorites">
-           ${isFavorited ? '★' : '☆'}
-         </button>`
+          ${isFavorited ? '★' : '☆'}
+        </button>`
       : '';
-  
+
+    const editBtn = `
+      <button class="edit-item-btn" data-id="${id}" title="Edit this item"> 📝 </button> <!-- 🆕 -->
+    `;
+
     return `
       <div class="float-controls-inner">
         ${checkbox}
         ${favoriteBtn}
+        ${editBtn} <!-- 🆕 placed edit button with existing float controls -->
       </div>
     `;
   }
-  
+
   //function needed to coordinate html creation for one card
   /** item: individual inventory object with the full row of information
   * index: position of the item in the array
@@ -2572,12 +2577,6 @@ function setupEbayExportButton() {
   });
 }
 
-
-
-
-
-
-
 //#endregion
 
 /* ================= User Interface Rendering Functions ============= */
@@ -2732,7 +2731,6 @@ async function showCategoryDropdown(itemId, anchorElement) {
     activeDropdown = null;
   });
 }
-
 
 function setupCSVExport() {
   const exportBtn = document.getElementById("export-csv");

@@ -21,239 +21,381 @@ const barcodeInput = document.getElementById('scanned-barcode');
 const qrTypeSelect = document.getElementById("qr-type");
 const previewContainer = document.getElementById("carousel-preview");
 const photoInput = document.getElementById("item-photo");
+const pricePerWeightInput = document.getElementById("price-per-weight");
+const autoCostCheckbox = document.getElementById("auto-cost-checkbox");
 const pendingStockAssignments = {}; // { barcode: { location_name, quantity, location_id } }
 let uploadedImages = [];
 
-// === utility to show toast ===
-function showToast(message) {
-  const container = document.getElementById("toast-container");
-  if (!container) return;
+//#region general utilities needed to run theh program
+  // === utility to show toast ===
+  function showToast(message) {
+    const container = document.getElementById("toast-container");
+    if (!container) return;
 
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = message;
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = message;
 
-  container.appendChild(toast);
+    container.appendChild(toast);
 
-  setTimeout(() => {
-    toast.remove();
-  }, 4000);
-}
-
-// === AUTO-CALCULATE SALE PRICE ===
-document.getElementById('cost')?.addEventListener('input', () => {
-  const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
-  if (cost > 0) {
-    const salePrice = Math.round(cost * 7.5);
-    document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
-  } else {
-    document.getElementById('sale-price').value = '';
-  }
-});
-
-async function fetchUniqueCategories() {
-  const { data, error } = await supabase
-    .from("item_types")
-    .select("categories");
-
-  if (error) {
-    console.error("❌ Failed to fetch categories:", error);
-    return [];
+    setTimeout(() => {
+      toast.remove();
+    }, 4000);
   }
 
-  const flat = data.flatMap(row => Array.isArray(row.categories) ? row.categories : []);
-  const unique = [...new Set(flat.filter(Boolean))];
-  return unique.sort((a, b) => a.localeCompare(b));
-}
+  //obtain unique categories to display in the tab
+  async function fetchUniqueCategories() {
+    const { data, error } = await supabase
+      .from("item_types")
+      .select("categories");
 
-//update the inventory after adding items
-async function bumpInventoryVersion() {
-  const { error } = await supabase
-    .from("metadata")
-    .update({ inventory_version: crypto.randomUUID() })
-    .eq("id", "inventory");
+    if (error) {
+      console.error("❌ Failed to fetch categories:", error);
+      return [];
+    }
 
-  if (error) {
-    console.warn("⚠️ Failed to update inventory version:", error.message);
-  } else {
-    console.log("🔁 Inventory version updated");
-  }
-  //await loadAllItemsWithCache();
-}
-
-// === utility to get the unique location ===
-async function fetchUniqueLocationNames() {
-  const { data, error } = await supabase
-    .from("locations")
-    .select("location_name")
-    .neq("location_name", null);
-
-  if (error) {
-    console.error("❌ Error fetching locations:", error.message);
-    return [];
+    const flat = data.flatMap(row => Array.isArray(row.categories) ? row.categories : []);
+    const unique = [...new Set(flat.filter(Boolean))];
+    return unique.sort((a, b) => a.localeCompare(b));
   }
 
-  const unique = [...new Set(data.map(loc => loc.location_name).filter(Boolean))];
-  return unique.sort((a, b) => a.localeCompare(b));
-}
+  //function to bump the cache after items are added
+  async function bumpInventoryVersion() {
+    const { error } = await supabase
+      .from("metadata")
+      .update({ inventory_version: crypto.randomUUID() })
+      .eq("id", "inventory");
 
-/** Function that will create the html block for the drop down, insert search bar, attach listener
- * Renders a searchable dropdown and lets the caller define behavior
- * for selecting existing options or creating new ones.
- * @param {Object} config
- * @param {string} config.menuId - ID of the DOM container
- * @param {Array<string>} config.options - Array of string values to display
- * @param {string} [config.searchId="category-search"] - Search input ID
- * @param {string} [config.placeholder="Search..."] - Input placeholder text
- * @param {string} [config.optionClass="dropdown-option"] - Class for each option div
- * @param {string} [config.dataAttribute="cat"] - The data-* attribute key (e.g. "cat", "qr")
- * @param {string} [config.optionsContainerClass="dropdown-options-container"]
- * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
- */
+    if (error) {
+      console.warn("⚠️ Failed to update inventory version:", error.message);
+    } else {
+      console.log("🔁 Inventory version updated");
+    }
+    //await loadAllItemsWithCache();
+  }
+
+//#endregion
+
+//#region dropdown creation 
+  /** Function that will create the html block for the drop down, insert search bar, attach listener
+   * Renders a searchable dropdown and lets the caller define behavior
+   * for selecting existing options or creating new ones.
+   * @param {Object} config
+   * @param {string} config.menuId - ID of the DOM container
+   * @param {Array<string>} config.options - Array of string values to display
+   * @param {string} [config.searchId="category-search"] - Search input ID
+   * @param {string} [config.placeholder="Search..."] - Input placeholder text
+   * @param {string} [config.optionClass="dropdown-option"] - Class for each option div
+   * @param {string} [config.dataAttribute="cat"] - The data-* attribute key (e.g. "cat", "qr")
+   * @param {string} [config.optionsContainerClass="dropdown-options-container"]
+   * @param {Function} config.onClick - What to do when any option is clicked (new or existing)
+   */
   function renderDropdownOptionsCustom({
-  menuId,
-  toggleButtonId,
-  hiddenInputId,
-  options = [],
-  placeholder = "Search...",
-  dataAttribute = "value",
-  optionClass = "dropdown-option",
-  optionsContainerClass = "dropdown-options-container",
-  searchId = `${menuId}-search`,
-  onClick = () => {},
-  showHTMLInjected = false
-}) {
-  const menu = document.getElementById(menuId);
-  const toggleBtn = document.getElementById(toggleButtonId);
-  const hiddenInput = document.getElementById(hiddenInputId);
-  if (!menu || !toggleBtn || !hiddenInput) return;
+    menuId,
+    toggleButtonId,
+    hiddenInputId,
+    options = [],
+    placeholder = "Search...",
+    dataAttribute = "value",
+    optionClass = "dropdown-option",
+    optionsContainerClass = "dropdown-options-container",
+    searchId = `${menuId}-search`,
+    onClick = () => {},
+    showHTMLInjected = false
+  }) {
+    const menu = document.getElementById(menuId);
+    const toggleBtn = document.getElementById(toggleButtonId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+    if (!menu || !toggleBtn || !hiddenInput) return;
 
-  const searchHTML = `
-    <div class="dropdown-search-container">
-      <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
-    </div>
-  `;
-
-  const buildOptionsHTML = (filteredOpts, searchTerm) => {
-    let html = filteredOpts.map(opt => `
-      <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">
-        ${opt}
+    const searchHTML = `
+      <div class="dropdown-search-container">
+        <input type="text" id="${searchId}" class="dropdown-search" placeholder="${placeholder}">
       </div>
-    `).join("");
+    `;
 
-    const exactMatch = options.some(opt => opt.toLowerCase() === searchTerm.toLowerCase());
-    if (searchTerm && !exactMatch) {
-      html += `
-        <div class="${optionClass} new-entry" data-${dataAttribute}="${searchTerm}" data-value="${searchTerm}" data-new="true">
-          ➕ Create "${searchTerm}"
+    const buildOptionsHTML = (filteredOpts, searchTerm) => {
+      let html = filteredOpts.map(opt => `
+        <div class="${optionClass}" data-${dataAttribute}="${opt}" data-value="${opt}">
+          ${opt}
         </div>
-      `;
-    }
-    return html;
-  };
+      `).join("");
 
-  const fullHTML = `
-    ${searchHTML}
-    <div class="${optionsContainerClass}">
-      ${buildOptionsHTML(options, "")}
-    </div>
-  `;
-
-  if (showHTMLInjected) {
-    console.log("💡 Injected dropdown HTML for", menuId);
-    console.log(fullHTML);
-  }
-
-  menu.innerHTML = fullHTML;
-
-  const input = menu.querySelector(`#${searchId}`);
-  const container = menu.querySelector(`.${optionsContainerClass}`);
-
-  const attachClickHandlers = () => {
-    container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
-      optionEl.addEventListener("click", () => {
-        const value = optionEl.dataset.value;
-        const isNew = optionEl.dataset.new === "true";
-
-        hiddenInput.value = value;
-        toggleBtn.innerText = value;
-
-        onClick(value, isNew, optionEl);
-
-        menu.classList.remove("show");
-      });
-    });
-  };
-
-  attachClickHandlers();
-
-  input?.addEventListener("input", (e) => {
-    const searchTerm = e.target.value.toLowerCase();
-    container.innerHTML = buildOptionsHTML(options, searchTerm);
-    requestAnimationFrame(() => attachClickHandlers());
-  });
-}
-
-// === modal to add stock and location ===
-function showAdminLocationStockModal(itemId) {
-  const modal = document.getElementById("modal-admin-assign-location");
-  document.getElementById("admin-stock-quantity").value = "";
-  document.getElementById("admin-location-name").value = "";
-  document.getElementById("admin-location-dropdown-toggle").innerText = "Select Location";
-  modal.dataset.itemId = itemId;
-  modal.classList.remove("hidden");
-
-  populateAdminLocationDropdown();
-}
-
-function setupAdminLocationModalListeners() {
-  const confirmBtn = document.getElementById("btn-confirm-admin-stock");
-  const cancelBtn = document.getElementById("btn-cancel-admin-stock");
-
-  cancelBtn.onclick = () => {
-    document.getElementById("modal-admin-assign-location").classList.add("hidden");
-  };
-
-  confirmBtn.onclick = async () => {
-    const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";
-    const locationName = document.getElementById("admin-location-name").value.trim();
-    const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
-
-    if (!locationName || isNaN(quantity)) {
-      showToast("❌ Please select a location and enter quantity.");
-      return;
-    }
-
-    const { data: loc, error } = await supabase
-      .from("locations")
-      .select("id")
-      .eq("location_name", locationName)
-      .single();
-
-    if (error || !loc) {
-      showToast("❌ Location not found.");
-      return;
-    }
-
-    // Save for later use
-    pendingStockAssignments[barcode] = {
-      location_name: locationName,
-      quantity,
-      location_id: loc.id
+      const exactMatch = options.some(opt => opt.toLowerCase() === searchTerm.toLowerCase());
+      if (searchTerm && !exactMatch) {
+        html += `
+          <div class="${optionClass} new-entry" data-${dataAttribute}="${searchTerm}" data-value="${searchTerm}" data-new="true">
+            ➕ Create "${searchTerm}"
+          </div>
+        `;
+      }
+      return html;
     };
 
-    // ⬇️ Show assignment preview in the main form
-    const previewBox = document.getElementById("assignment-preview-box");
-    document.getElementById("assignment-location").textContent = `📍 Location: ${locationName}`;
-    document.getElementById("assignment-quantity").textContent = `📦 Quantity: ${quantity}`;
-    previewBox.classList.remove("hidden");
+    const fullHTML = `
+      ${searchHTML}
+      <div class="${optionsContainerClass}">
+        ${buildOptionsHTML(options, "")}
+      </div>
+    `;
+
+    if (showHTMLInjected) {
+      console.log("💡 Injected dropdown HTML for", menuId);
+      console.log(fullHTML);
+    }
+
+    menu.innerHTML = fullHTML;
+
+    const input = menu.querySelector(`#${searchId}`);
+    const container = menu.querySelector(`.${optionsContainerClass}`);
+
+    const attachClickHandlers = () => {
+      container.querySelectorAll(`.${optionClass}[data-${dataAttribute}]`).forEach(optionEl => {
+        optionEl.addEventListener("click", () => {
+          const value = optionEl.dataset.value;
+          const isNew = optionEl.dataset.new === "true";
+
+          hiddenInput.value = value;
+          toggleBtn.innerText = value;
+
+          onClick(value, isNew, optionEl);
+
+          menu.classList.remove("show");
+        });
+      });
+    };
+
+    attachClickHandlers();
+
+    input?.addEventListener("input", (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      container.innerHTML = buildOptionsHTML(options, searchTerm);
+      requestAnimationFrame(() => attachClickHandlers());
+    });
+  }
+
+  // === dropdownoption=== //
+  document.addEventListener("click", async (e) => {
+    if (e.target.id !== "category-dropdown-toggle") return;
+
+    const menu = document.getElementById("category-dropdown-menu");
+
+    if (!menu.dataset.populated) {
+      const categories = await fetchUniqueCategories();
+
+      renderDropdownOptionsCustom({
+        menuId: "category-dropdown-menu",
+        toggleButtonId: "category-dropdown-toggle",
+        hiddenInputId: "category",
+        options: categories,
+        placeholder: "Search or create category...",
+        dataAttribute: "cat",
+        optionClass: "dropdown-option",
+        optionsContainerClass: "category-options-container",
+        searchId: "category-dropdown-search",
+        onClick: (value, isNew) => {
+          if (isNew) {
+            showToast(`➕ Created new category: ${value}`);
+          } else {
+            showToast(`🏷️ Selected category: ${value}`);
+          }
+        }
+      });
+
+      menu.dataset.populated = "true";
+    }
+
+    menu.classList.toggle("show");
+  });
+//#endregion
+
+//#region functions needed to set the final sale cost of items
+  //Cost & Sale Price Auto-Calculation
+  function updateCostFromWeight() {
+    if (!autoCostCheckbox?.checked) return; // ❌ skip auto-calc if disabled
+    const weight = parseFloat(document.getElementById("weight")?.value || "0");
+    const pricePerWeight = parseFloat(pricePerWeightInput?.value || "0");
+    if (weight > 0 && pricePerWeight > 0) {
+      const newCost = weight * pricePerWeight;
+      document.getElementById('cost').value = newCost.toFixed(2);
+      const salePrice = Math.round(newCost * 7.5);
+      document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
+    }
+  }
+  //listeners for the calculation and calculation of the final prince
+  function setupCostAndPriceListeners() {
+    document.getElementById("weight")?.addEventListener('input', updateCostFromWeight);
+    pricePerWeightInput?.addEventListener('input', updateCostFromWeight);
+    document.getElementById('cost')?.addEventListener('input', () => {
+      const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
+      if (cost > 0) {
+        const salePrice = Math.round(cost * 7.5);
+        document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
+      } else {
+        document.getElementById('sale-price').value = '';
+      }
+    });
+  }
+
+//#endregion
+
+//#region function needed for the QR code and barcode generation 
+  // === QR Code Rendering
+  function renderQR(url) {
+    QRCode.toCanvas(qrCanvas, url, {
+      errorCorrectionLevel: 'H',
+      color: { dark: "#ffffff", light: "#2c2c2e" },
+      width: 180
+    }, err => { if (err) console.error("QR error:", err); });
+  }
+
+  // === QR TYPE SELECTION
+  qrTypeSelect?.addEventListener("change", () => {
+    typeqr = qrTypeSelect.value;
+    if (typeqr === "website") {
+      document.getElementById("qr-code").value = "https://ogjeweler.com/";
+      renderQR("https://ogjeweler.com/");
+    }
+  });
+
+  qrInput?.addEventListener('input', () => {
+    const url = qrInput.value.trim();
+    if (url) renderQR(url);
+  });
+
+  // === Barcode Rendering
+  function renderBarcode(code) {
+    const ctx = barcodeCanvas.getContext('2d');
+    ctx.clearRect(0, 0, barcodeCanvas.width, barcodeCanvas.height);
+    JsBarcode(barcodeCanvas, code, {
+      format: "CODE128",
+      lineColor: "#ffffff",
+      background: "#2c2c2e",
+      displayValue: true,
+      fontOptions: "bold",
+      fontSize: 16,
+      height: 60,
+      margin: 10
+    });
+  }
+
+  //respective event listener
+  document.getElementById('generate-barcode')?.addEventListener('click', () => {
+    const code = 'OG' + Date.now();
+    barcodeInput.value = code;
+    renderBarcode(code);
+  });
+
+//#endregion
+
+//#region functions needed for the add stock modal
+  // === modal to add stock and location ===
+  function showAdminLocationStockModal(itemId) {
+    const modal = document.getElementById("modal-admin-assign-location");
+    document.getElementById("admin-stock-quantity").value = "";
+    document.getElementById("admin-location-name").value = "";
+    document.getElementById("admin-location-dropdown-toggle").innerText = "Select Location";
+    modal.dataset.itemId = itemId;
+    modal.classList.remove("hidden");
+
+    populateAdminLocationDropdown();
+  }
+
+  // === utility to get the unique location ===
+  async function fetchUniqueLocationNames() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("location_name")
+      .neq("location_name", null);
+
+    if (error) {
+      console.error("❌ Error fetching locations:", error.message);
+      return [];
+    }
+
+    const unique = [...new Set(data.map(loc => loc.location_name).filter(Boolean))];
+    return unique.sort((a, b) => a.localeCompare(b));
+  }
+
+  //event listeners for the modal and other logic
+  function setupAdminLocationModalListeners() {
+    const confirmBtn = document.getElementById("btn-confirm-admin-stock");
+    const cancelBtn = document.getElementById("btn-cancel-admin-stock");
+
+    cancelBtn.onclick = () => {
+      document.getElementById("modal-admin-assign-location").classList.add("hidden");
+    };
+
+    confirmBtn.onclick = async () => {
+      const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";
+      const locationName = document.getElementById("admin-location-name").value.trim();
+      const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
+
+      if (!locationName || isNaN(quantity)) {
+        showToast("❌ Please select a location and enter quantity.");
+        return;
+      }
+
+      const { data: loc, error } = await supabase
+        .from("locations")
+        .select("id")
+        .eq("location_name", locationName)
+        .single();
+
+      if (error || !loc) {
+        showToast("❌ Location not found.");
+        return;
+      }
+
+      // Save for later use
+      pendingStockAssignments[barcode] = {
+        location_name: locationName,
+        quantity,
+        location_id: loc.id
+      };
+
+      // ⬇️ Show assignment preview in the main form
+      const previewBox = document.getElementById("assignment-preview-box");
+      document.getElementById("assignment-location").textContent = `📍 Location: ${locationName}`;
+      document.getElementById("assignment-quantity").textContent = `📦 Quantity: ${quantity}`;
+      previewBox.classList.remove("hidden");
 
 
-    showToast(`📦 Will assign ${quantity} to ${locationName} after item is saved`);
-    document.getElementById("modal-admin-assign-location").classList.add("hidden");
-  };
+      showToast(`📦 Will assign ${quantity} to ${locationName} after item is saved`);
+      document.getElementById("modal-admin-assign-location").classList.add("hidden");
+    };
 
-}
+  }
+
+  //location dropdown only opening for admins
+  async function populateAdminLocationDropdown() {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    const button = document.getElementById("admin-location-dropdown-toggle");
+    const options = await fetchUniqueLocationNames();
+
+    renderDropdownOptionsCustom({
+      menuId: "admin-location-dropdown-menu",
+      toggleButtonId: "admin-location-dropdown-toggle",
+      hiddenInputId: "admin-location-name",
+      options,
+      placeholder: "Search or create location...",
+      dataAttribute: "location",
+      optionClass: "dropdown-option",
+      optionsContainerClass: "dropdown-options-container",
+      searchId: "admin-location-dropdown-search",
+      onClick: (value, isNew, el) => {
+        document.getElementById("admin-location-name").value = value;
+        button.innerText = value;
+      }
+    });
+  }
+
+  //== run the add location modal only if the user is an admin
+  if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
+    setupAdminLocationModalListeners();
+  }
+
+//#endregion
 
 document.getElementById("btn-open-admin-stock")?.addEventListener("click", () => {
   // Since the item isn't saved yet, we’ll pass a placeholder ID like -1
@@ -261,114 +403,11 @@ document.getElementById("btn-open-admin-stock")?.addEventListener("click", () =>
   showAdminLocationStockModal("-1");
 });
 
-async function populateAdminLocationDropdown() {
-  const menu = document.getElementById("admin-location-dropdown-menu");
-  const button = document.getElementById("admin-location-dropdown-toggle");
-  const options = await fetchUniqueLocationNames();
-
-  renderDropdownOptionsCustom({
-    menuId: "admin-location-dropdown-menu",
-    toggleButtonId: "admin-location-dropdown-toggle",
-    hiddenInputId: "admin-location-name",
-    options,
-    placeholder: "Search or create location...",
-    dataAttribute: "location",
-    optionClass: "dropdown-option",
-    optionsContainerClass: "dropdown-options-container",
-    searchId: "admin-location-dropdown-search",
-    onClick: (value, isNew, el) => {
-      document.getElementById("admin-location-name").value = value;
-      button.innerText = value;
-    }
-  });
-}
-
-
 document.addEventListener("click", (e) => {
   if (e.target.id === "admin-location-dropdown-toggle") {
     const menu = document.getElementById("admin-location-dropdown-menu");
     menu.classList.toggle("show");
   }
-});
-
-
-// === QR Code Rendering
-function renderQR(url) {
-  QRCode.toCanvas(qrCanvas, url, {
-    errorCorrectionLevel: 'H',
-    color: { dark: "#ffffff", light: "#2c2c2e" },
-    width: 180
-  }, err => { if (err) console.error("QR error:", err); });
-}
-
-// === Barcode Rendering
-function renderBarcode(code) {
-  const ctx = barcodeCanvas.getContext('2d');
-  ctx.clearRect(0, 0, barcodeCanvas.width, barcodeCanvas.height);
-  JsBarcode(barcodeCanvas, code, {
-    format: "CODE128",
-    lineColor: "#ffffff",
-    background: "#2c2c2e",
-    displayValue: true,
-    fontOptions: "bold",
-    fontSize: 16,
-    height: 60,
-    margin: 10
-  });
-}
-
-// === QR TYPE SELECTION
-qrTypeSelect?.addEventListener("change", () => {
-  typeqr = qrTypeSelect.value;
-  if (typeqr === "website") {
-    document.getElementById("qr-code").value = "https://ogjeweler.com/";
-    renderQR("https://ogjeweler.com/");
-  }
-});
-
-qrInput?.addEventListener('input', () => {
-  const url = qrInput.value.trim();
-  if (url) renderQR(url);
-});
-
-document.getElementById('generate-barcode')?.addEventListener('click', () => {
-  const code = 'OG' + Date.now();
-  barcodeInput.value = code;
-  renderBarcode(code);
-});
-
-// === dropdownoption=== //
-document.addEventListener("click", async (e) => {
-  if (e.target.id !== "category-dropdown-toggle") return;
-
-  const menu = document.getElementById("category-dropdown-menu");
-
-  if (!menu.dataset.populated) {
-    const categories = await fetchUniqueCategories();
-
-    renderDropdownOptionsCustom({
-      menuId: "category-dropdown-menu",
-      toggleButtonId: "category-dropdown-toggle",
-      hiddenInputId: "category",
-      options: categories,
-      placeholder: "Search or create category...",
-      dataAttribute: "cat",
-      optionClass: "dropdown-option",
-      optionsContainerClass: "category-options-container",
-      searchId: "category-dropdown-search",
-      onClick: (value, isNew) => {
-        if (isNew) {
-          showToast(`➕ Created new category: ${value}`);
-        } else {
-          showToast(`🏷️ Selected category: ${value}`);
-        }
-      }
-    });
-
-    menu.dataset.populated = "true";
-  }
-
-  menu.classList.toggle("show");
 });
 
 
@@ -1106,10 +1145,6 @@ document.getElementById("dymo-status").innerText =
 
 });
 
-//== run the add location modal only if the user is an admin
-if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
-  setupAdminLocationModalListeners();
-}
 
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
@@ -1130,6 +1165,7 @@ if (!window.latestDymoUrl || typeof window.latestDymoUrl !== "string" || !window
 const title = document.getElementById("title").value.trim();
 const description = document.getElementById("description").value.trim();
 const weight = parseFloat(document.getElementById("weight").value);
+const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
 // force sync dropdown selection into hidden input if user typed or skipped selection
 const categoryButton = document.getElementById("category-dropdown-toggle");
 const categoryHiddenInput = document.getElementById("category");
@@ -1176,6 +1212,7 @@ const { data: insertedItems, error } = await supabase
     title,
     description,
     weight,
+    price_per_weight, // ✅ NEW FIELD
     categories,
     cost,
     sale_price,
@@ -1232,10 +1269,13 @@ if (stockInfo) {
 }
 
 alert("✅ Item successfully added!");
+
 document.getElementById("add-item-form").reset();
 previewContainer.innerHTML = "";
 uploadedImages = [];
 latestDymoXml = "";
+pricePerWeightInput.value = "";
+autoCostCheckbox.checked = true;
 await bumpInventoryVersion();
 });
 
