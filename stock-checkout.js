@@ -3,12 +3,14 @@ window.checkoutModule = (function () {
     //global be used to start checkout mode
     let checkoutMode = false;
     let cartState = {
-    items: [],
-    credits: { "credit-3mm": "0", "credit-5mm": "0", "credit-8mm": "0" },
-    generalDiscount: "",
-    itemDiscounts: {},
-    platformFee: 0, // NEW: store platform fee percentage
+        items: [],
+        credits: { "credit-3mm": "0", "credit-5mm": "0", "credit-8mm": "0" },
+        generalDiscount: "",
+        itemDiscounts: {},
+        platformFee: 0,
+        salesId: "", // ✅ NEW: Sales ID
     };
+
 
 
 
@@ -850,76 +852,85 @@ function getCart() {
     }
 
 
-  //#endregion
+    //#endregion
 
   //#region logic to be able to preserve the cart even if something changes by accident
     const STORAGE_KEY = "checkout-cart-og";
 
-function saveCartToStorage() {
-  const creditInputs = {
-    "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
-    "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
-    "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
-  };
+    function saveCartToStorage() {
+        const creditInputs = {
+            "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
+            "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
+            "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
+        };
 
-  const generalDiscountVal = document.getElementById("general-discount")?.value || "";
+        const generalDiscountVal = document.getElementById("general-discount")?.value || "";
 
-  const perItemDiscounts = {};
-  cartState.items.forEach(item => {
-    const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-    const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-    perItemDiscounts[item.item_id] = {
-      percent: percentInput?.value || "",
-      absolute: absoluteInput?.value || "",
-    };
-  });
+        const perItemDiscounts = {};
+        cartState.items.forEach(item => {
+            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+            perItemDiscounts[item.item_id] = {
+            percent: percentInput?.value || "",
+            absolute: absoluteInput?.value || "",
+            };
+        });
 
-  cartState.credits = creditInputs;
-  cartState.generalDiscount = generalDiscountVal;
-  cartState.itemDiscounts = perItemDiscounts;
+        const salesIdVal = document.getElementById("sales-id")?.value || "";
+        cartState.salesId = salesIdVal;
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cartState));
-}
 
-async function loadCartFromStorage() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return;
+        cartState.credits = creditInputs;
+        cartState.generalDiscount = generalDiscountVal;
+        cartState.itemDiscounts = perItemDiscounts;
 
-  try {
-    const parsed = JSON.parse(stored);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cartState));
+    }
 
-    // Restore items + sign images
-    const rawItems = parsed.items || [];
-    const signedItems = await Promise.all(
-      rawItems.map(async (item) => {
-        const signedUrl = await resolveImageUrl(item.image_url || "");
-        return { ...item, image_url: signedUrl };
-      })
-    );
-    cartState.items = signedItems;
+    async function loadCartFromStorage() {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
 
-    // Restore credits & discounts
-    cartState.credits = parsed.credits || cartState.credits;
-    cartState.generalDiscount = parsed.generalDiscount || "";
-    cartState.itemDiscounts = parsed.itemDiscounts || {};
+        try {
+            const parsed = JSON.parse(stored);
 
-    updateCartUI();
-    renderCartItems();
-    updateCreditInputsFromCartState();
-    updateGeneralDiscountInputFromCartState();
-    updateCreditValue();
-    calculateFinalCheckoutTotal();
+            // Restore items + sign images
+            const rawItems = parsed.items || [];
+            const signedItems = await Promise.all(
+                rawItems.map(async (item) => {
+                    const signedUrl = await resolveImageUrl(item.image_url || "");
+                    return { ...item, image_url: signedUrl };
+                })
+            );
+            cartState.items = signedItems;
 
-    signedItems.forEach(item => {
-      const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-      if (card) card.classList.add("in-cart");
-    });
+            // Restore credits & discounts
+            cartState.credits = parsed.credits || cartState.credits;
+            cartState.generalDiscount = parsed.generalDiscount || "";
+            cartState.itemDiscounts = parsed.itemDiscounts || {};
 
-  } catch (e) {
-    console.warn("❌ Could not parse or restore stored cart data:", e);
-    cartState.items = [];
-  }
-}
+            // ✅ Restore sales ID
+            cartState.salesId = parsed.salesId || "";
+            const salesIdEl = document.getElementById("sales-id");
+            if (salesIdEl) salesIdEl.value = cartState.salesId;
+
+            updateCartUI();
+            renderCartItems();
+            updateCreditInputsFromCartState();
+            updateGeneralDiscountInputFromCartState();
+            updateCreditValue();
+            calculateFinalCheckoutTotal();
+
+            signedItems.forEach(item => {
+                const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+                if (card) card.classList.add("in-cart");
+            });
+
+        } catch (e) {
+            console.warn("❌ Could not parse or restore stored cart data:", e);
+            cartState.items = [];
+        }
+    }
 
     function clearCart() {
         cartState = {
@@ -956,10 +967,6 @@ async function loadCartFromStorage() {
             checkoutBreakdownEl.classList.add("hidden");
         }
     }
-
-
-
-
   //#endregion
 
 function updateCreditInputsFromCartState() {
