@@ -178,6 +178,13 @@ function getCart() {
                 itemCountEl.textContent = "0 items";
             }
 
+            const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
+                if (previewSummaryContainer) {
+                previewSummaryContainer.innerHTML = "";
+                previewSummaryContainer.classList.add("hidden");
+            }
+
+
             return;
         }
 
@@ -857,29 +864,42 @@ async function loadCartFromStorage() {
   }
 }
 
-function clearCart() {
-  cartState = {
-    items: [],
-    credits: {
-      "credit-3mm": "0",
-      "credit-5mm": "0",
-      "credit-8mm": "0",
-    },
-    generalDiscount: "",
-    itemDiscounts: {},
-  };
+    function clearCart() {
+        cartState = {
+            items: [],
+            credits: {
+            "credit-3mm": "0",
+            "credit-5mm": "0",
+            "credit-8mm": "0",
+            },
+            generalDiscount: "",
+            itemDiscounts: {},
+        };
 
-  localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY);
 
-  document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
-  document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+        document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
+        document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
 
-  updateCartUI();
-  updateCreditInputsFromCartState();
-  updateGeneralDiscountInputFromCartState();
-  renderCartItems();
-  calculateFinalCheckoutTotal();
-}
+        updateCartUI();
+        updateCreditInputsFromCartState();
+        updateGeneralDiscountInputFromCartState();
+        renderCartItems();
+        calculateFinalCheckoutTotal();
+
+        const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
+        if (previewSummaryContainer) {
+            previewSummaryContainer.innerHTML = "";
+            previewSummaryContainer.classList.add("hidden");
+        }
+
+        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+        if (checkoutBreakdownEl) {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+        }
+    }
+
 
 
 
