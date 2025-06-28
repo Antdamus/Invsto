@@ -398,13 +398,14 @@
     </div>
   </div>
 
-  <!-- editing modal -->
-  <div id="editItemModal" class="modal hidden">
-    <div class="modal-content">
-      <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
-      <h2>Edit Inventory Item</h2>
+<!-- editing modal -->
+<div id="editItemModal" class="modal hidden">
+  <div class="modal-content">
+    <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
+    <h2>Edit Inventory Item</h2>
 
-      <form id="edit-item-form">
+    <form id="edit-item-form">
+      <div class="form-content-wrapper">
         <label for="edit-title">Title:</label>
         <input type="text" id="edit-title" name="title" required>
 
@@ -437,17 +438,21 @@
         <label for="edit-stock-batch">Stock Batch Size Update:</label>
         <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
 
-        <label for="edit-photos">Photos:</label>
-          <label>Current Photos:</label>
-          <div id="current-photos-preview" class="photos-preview-grid">
-            <!-- Thumbnails will be injected here dynamically -->
+        <div class="photos-section-wrapper">
+          <h3>Current Photos</h3>
+          <div id="current-photos-preview" class="photos-preview-grid"></div>
+          <div class="file-input-wrapper">
+            <input type="file" id="edit-photos" name="photos" multiple accept="image/*">
           </div>
-        <input type="file" id="edit-photos" name="photos" multiple accept="image/*">
+        </div>
 
         <button type="submit" class="save-edit-btn">💾 Save Changes</button>
-      </form>
-    </div>
+      </div>
+    </form>
   </div>
+</div>
+
+
 
   <!--initialize buttons-->
   <script src="https://unpkg.com/lucide@latest"></script>
