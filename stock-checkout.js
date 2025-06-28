@@ -785,14 +785,12 @@ function getCart() {
             const totalAfterItemDiscount = originalTotal - itemDiscountAmount;
             subtotalAfterItemDiscounts += totalAfterItemDiscount;
 
-            // 🔄 Update the live discounted price preview
             const previewEl = document.getElementById(`discounted-${item.item_id}`);
             if (previewEl) {
                 previewEl.textContent = `$${totalAfterItemDiscount.toFixed(2)}`;
             }
         });
 
-        // ➕ General discount on subtotal after item-level discounts
         const generalDiscountAmount = (generalDiscountPercent / 100) * subtotalAfterItemDiscounts;
 
         // 💳 Credits
@@ -803,18 +801,28 @@ function getCart() {
             creditValue = parseFloat(raw) || 0;
         }
 
+        // Calculate subtotal after credits
+        const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
+        const denominator = Math.max(adjustedSubtotal, 0.01);
+
         // ➕ Calculate final total
         const final = subtotalAfterItemDiscounts - generalDiscountAmount - creditValue;
         finalTotalEl.textContent = `$${final.toFixed(2)}`;
-        // ➕ Calculate platform fee amount (your cost) and what the store actually receives
+
         const platformFeeAmount = (cartState.platformFee / 100) * final;
         const storeReceives = final - platformFeeAmount;
 
-        // ✅ Update summary card with separated discount lines
         const checkoutSummaryEl = document.getElementById("checkout-summary-display");
         if (checkoutSummaryEl) {
             const balanceLabel = final < 0 ? "Balance Left" : final > 0 ? "Owes Store" : "Settled";
             const colorClass = final < 0 ? "credit-positive" : final > 0 ? "credit-negative" : "credit-neutral";
+
+            // ✅ Calculate effective discount percentage relative to adjusted subtotal (after credits)
+            const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
+            const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
+            const needsFlag = discountPercentAfterCredits > 10;
+            const discountColor = needsFlag ? 'red' : '#333';
+            const flagText = needsFlag ? ' 🔴 Sale will be flagged' : '';
 
             checkoutSummaryEl.innerHTML = `
             <div class="checkout-summary-card">
@@ -824,12 +832,17 @@ function getCart() {
                 <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
                 <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
                 <p><strong>Estimated Store Receives (after ${cartState.platformFee.toFixed(1)}% fee):</strong> $${storeReceives.toFixed(2)} <span class="platform-fee-detail">(-$${platformFeeAmount.toFixed(2)})</span></p>
+                <p style="margin-top:8px; font-weight:600; color:${discountColor};">
+                    Effective Discount (post-credits): ${discountPercentAfterCredits.toFixed(1)}%${flagText}
+                </p>
             </div>
             `;
 
             checkoutSummaryEl.classList.remove("hidden");
         }
     }
+
+
   //#endregion
 
   //#region logic to be able to preserve the cart even if something changes by accident
