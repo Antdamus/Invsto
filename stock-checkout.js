@@ -758,22 +758,7 @@ window.checkoutModule = (function () {
     const STORAGE_KEY = "checkout-cart-og";
 
     function saveCartToStorage() {
-        const dataToStore = {
-            cart,
-            generalDiscount: parseFloat(document.getElementById("general-discount")?.value || "0"),
-            credits: {
-                credit3mm: parseInt(document.getElementById("credit-3mm")?.value || "0"),
-                credit5mm: parseInt(document.getElementById("credit-5mm")?.value || "0"),
-                credit8mm: parseInt(document.getElementById("credit-8mm")?.value || "0"),
-            },
-            perItemDiscounts: cart.map(item => ({
-                item_id: item.item_id,
-                percent: parseFloat(document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`)?.value || "0"),
-                absolute: parseFloat(document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`)?.value || "0")
-            }))
-        };
-
-        localStorage.setItem("checkout-cart-og", JSON.stringify(dataToStore));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
     }
 
     async function loadCartFromStorage() {
@@ -808,6 +793,8 @@ window.checkoutModule = (function () {
             cart = [];
         }
     }
+
+
 
     function clearCart() {
         cart = [];
