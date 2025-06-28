@@ -2931,6 +2931,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       //lister for the tabs 
       checkoutModule.setupCartTabs();
       checkoutModule.setupCreditTierListeners();
+      await checkoutModule.loadCartFromStorage();
+
       
 
     //#endregion

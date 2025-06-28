@@ -2,7 +2,17 @@
 window.checkoutModule = (function () {
   //global be used to start checkout mode
   let checkoutMode = false;
-  let cart = [];
+  let cartState = {
+    items: [],
+    credits: {
+        "credit-3mm": "0",
+        "credit-5mm": "0",
+        "credit-8mm": "0",
+    },
+    generalDiscount: "",
+    itemDiscounts: {},
+  };
+
 
   
   //function to activate the toggle to start the checkout mode
@@ -25,7 +35,7 @@ window.checkoutModule = (function () {
 
         // ✅ NEW: when entering checkout mode, restore visuals from cart
         if (checkoutMode) {
-        cart.forEach(item => {
+        cartState.items.forEach(item => {
             const checkbox = document.querySelector(`.select-checkbox[data-id="${item.item_id}"]`);
             if (checkbox) checkbox.checked = true;
 
@@ -43,20 +53,31 @@ window.checkoutModule = (function () {
 
   //#region function to add to cart one i click on the cards and i am in checkout mode
     //function responsible for adding to the card
-    function addToCart(item) {
-        const existing = cart.find(i => i.item_id === item.item_id);
-        if (existing) {
-            existing.qty += 1;
-        } else {
-            cart.push({ ...item, qty: 1 });
-        }
+ function addToCart(item) {
+  const existing = cartState.items.find(i => i.item_id === item.item_id);
+  if (existing) {
+    existing.qty += 1;
+  } else {
+    cartState.items.push({ ...item, qty: 1 });
+  }
 
-        // Visual highlight
-        const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-        if (card) card.classList.add("in-cart");
+  const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+  if (card) card.classList.add("in-cart");
 
-        updateCartUI();
-    }
+  updateCartUI();
+}
+
+function removeFromCart(itemId) {
+  cartState.items = cartState.items.filter(item => item.item_id !== itemId);
+
+  const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
+  if (card) card.classList.remove("in-cart");
+
+  updateCartUI();
+  saveCartToStorage();
+  renderCartItems();
+}
+
     
     //function to add an event listener so the add to cart function is triggered on click (pointing towards)
     async function handleCardClickForCheckout(cardElement) {
@@ -96,21 +117,10 @@ window.checkoutModule = (function () {
         renderCartItems();
     }
 
-    //function to remove from cart once deselected
-    function removeFromCart(itemId) {
-        cart = cart.filter(item => item.item_id !== itemId);
+function getCart() {
+  return [...cartState.items];
+}
 
-        const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
-        if (card) card.classList.remove("in-cart");
-
-        updateCartUI();       // update badge / toggle visibility
-        saveCartToStorage(); // ← ADD THIS
-        renderCartItems();    // 💡 refresh the list in the side panel
-    }
-
-    function getCart() {
-        return [...cart];
-    }
 
   //#endregion
 
@@ -122,8 +132,9 @@ window.checkoutModule = (function () {
 
         if (!toggleBtn || !badge) return;
 
-        const totalQty = cart.reduce((sum, item) => sum + (item.qty || 0), 0);
-        const isCartEmpty = cart.length === 0;
+        const items = cartState.items;
+        const totalQty = items.reduce((sum, item) => sum + (item.qty || 0), 0);
+        const isCartEmpty = items.length === 0;
 
         if (isCartEmpty || totalQty === 0) {
             badge.textContent = "0";
@@ -140,8 +151,8 @@ window.checkoutModule = (function () {
         if (!container) return;
 
         container.innerHTML = "";
-
-        if (cart.length === 0) {
+        const items = cartState.items;
+        if (items.length === 0) {
             container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
 
             // === 💳 Subtract credit
@@ -171,7 +182,7 @@ window.checkoutModule = (function () {
         }
 
 
-        cart.forEach(item => {
+        items.forEach(item => {
             const div = document.createElement("div");
             div.className = "cart-item";
             div.innerHTML = `
@@ -193,7 +204,7 @@ window.checkoutModule = (function () {
         container.querySelectorAll(".qty-increase").forEach(btn => {
             btn.addEventListener("click", () => {
             const id = btn.dataset.id;
-            const target = cart.find(i => i.item_id === id);
+            const target = items.find(i => i.item_id === id);
             if (target) {
                 target.qty += 1;
                 updateCartUI();
@@ -211,7 +222,7 @@ window.checkoutModule = (function () {
                 target.qty -= 1;
                 } else {
                 // If qty reaches 0, remove the item from cart
-                cart = cart.filter(i => i.item_id !== id);
+                cartState.items  = items.filter(i => i.item_id !== id);
 
                 // 🔄 Uncheck the select checkbox if it exists
                 const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
@@ -229,8 +240,8 @@ window.checkoutModule = (function () {
 
         // Update total price and item count
         // === 🧮 Calculate subtotal
-        const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
-        const itemCount = cart.reduce((sum, item) => sum + (item.qty || 1), 0);
+        const subtotal = items.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+        const itemCount = items.reduce((sum, item) => sum + (item.qty || 1), 0);
 
         // === 💳 Subtract credit
         let creditValue = 0;
@@ -360,7 +371,10 @@ window.checkoutModule = (function () {
         inputs.forEach(({ id }) => {
             const input = document.getElementById(id);
             if (input) {
-            input.addEventListener("input", updateCreditValue);
+                input.addEventListener("input", () => {
+                updateCreditValue();
+                saveCartToStorage(); // ✅ Save credits on change
+                });
             }
         });
     }
@@ -625,9 +639,24 @@ window.checkoutModule = (function () {
         });
         });
 
+// Apply saved general discount
+updateGeneralDiscountInputFromCartState();
+
+// Apply saved per-item discounts
+cartState.items.forEach(item => {
+  const saved = cartState.itemDiscounts[item.item_id];
+  if (saved) {
+    const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+    const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+    if (percentInput) percentInput.value = saved.percent || "";
+    if (absoluteInput) absoluteInput.value = saved.absolute || "";
+  }
+});
 
 
-        generalDiscountInput.value = "";
+
+
+        generalDiscountInput.value = cartState.generalDiscount || "";
         calculateFinalCheckoutTotal();
 
         modal.classList.remove("hidden");
@@ -643,7 +672,10 @@ window.checkoutModule = (function () {
     function setupCheckoutModalListeners() {
         document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
         document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
-        document.getElementById("general-discount")?.addEventListener("input", calculateFinalCheckoutTotal);
+        document.getElementById("general-discount")?.addEventListener("input", () => {
+            calculateFinalCheckoutTotal();
+            saveCartToStorage(); // ✅ Save general discount on change
+        });
 
         // Live update per-item discount fields
         document.addEventListener("input", function (e) {
@@ -757,60 +789,112 @@ window.checkoutModule = (function () {
   //#region logic to be able to preserve the cart even if something changes by accident
     const STORAGE_KEY = "checkout-cart-og";
 
-    function saveCartToStorage() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
-    }
+function saveCartToStorage() {
+  const creditInputs = {
+    "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
+    "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
+    "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
+  };
 
-    async function loadCartFromStorage() {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) return;
+  const generalDiscountVal = document.getElementById("general-discount")?.value || "";
 
-        try {
-            const rawCart = JSON.parse(stored);
-            const signedCart = await Promise.all(
-                rawCart.map(async (item) => {
-                    const signedUrl = await resolveImageUrl(item.image_url || "");
-                    return {
-                        ...item,
-                        image_url: signedUrl,
-                    };
-                })
-            );
-            cart = signedCart;
+  const perItemDiscounts = {};
+  cartState.items.forEach(item => {
+    const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+    const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+    perItemDiscounts[item.item_id] = {
+      percent: percentInput?.value || "",
+      absolute: absoluteInput?.value || "",
+    };
+  });
 
-            // 🔁 Update visuals after loading
-            updateCartUI();
-            renderCartItems();
+  cartState.credits = creditInputs;
+  cartState.generalDiscount = generalDiscountVal;
+  cartState.itemDiscounts = perItemDiscounts;
 
-            // ✅ Optional: visually restore "in-cart" style
-            signedCart.forEach(item => {
-                const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-                if (card) card.classList.add("in-cart");
-            });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cartState));
+}
 
-        } catch (e) {
-            console.warn("❌ Could not parse or sign stored cart items:", e);
-            cart = [];
-        }
-    }
+async function loadCartFromStorage() {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) return;
 
+  try {
+    const parsed = JSON.parse(stored);
 
+    // Restore items + sign images
+    const rawItems = parsed.items || [];
+    const signedItems = await Promise.all(
+      rawItems.map(async (item) => {
+        const signedUrl = await resolveImageUrl(item.image_url || "");
+        return { ...item, image_url: signedUrl };
+      })
+    );
+    cartState.items = signedItems;
 
-    function clearCart() {
-        cart = [];
-        localStorage.removeItem(STORAGE_KEY);
+    // Restore credits & discounts
+    cartState.credits = parsed.credits || cartState.credits;
+    cartState.generalDiscount = parsed.generalDiscount || "";
+    cartState.itemDiscounts = parsed.itemDiscounts || {};
 
-        // 🔄 Uncheck all select checkboxes and remove "in-cart" highlights
-        document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
-        document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+    updateCartUI();
+    renderCartItems();
+    updateCreditInputsFromCartState();
+    updateGeneralDiscountInputFromCartState();
+    updateCreditValue();
+    calculateFinalCheckoutTotal();
 
-        updateCartUI();
-        saveCartToStorage();
-        renderCartItems();
-    }
+    signedItems.forEach(item => {
+      const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+      if (card) card.classList.add("in-cart");
+    });
+
+  } catch (e) {
+    console.warn("❌ Could not parse or restore stored cart data:", e);
+    cartState.items = [];
+  }
+}
+
+function clearCart() {
+  cartState = {
+    items: [],
+    credits: {
+      "credit-3mm": "0",
+      "credit-5mm": "0",
+      "credit-8mm": "0",
+    },
+    generalDiscount: "",
+    itemDiscounts: {},
+  };
+
+  localStorage.removeItem(STORAGE_KEY);
+
+  document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
+  document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+
+  updateCartUI();
+  updateCreditInputsFromCartState();
+  updateGeneralDiscountInputFromCartState();
+  renderCartItems();
+  calculateFinalCheckoutTotal();
+}
+
 
 
   //#endregion
+
+function updateCreditInputsFromCartState() {
+  for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
+    const el = document.getElementById(key);
+    if (el) el.value = cartState.credits[key] || "0";
+  }
+  updateCreditValue();
+}
+
+function updateGeneralDiscountInputFromCartState() {
+  const el = document.getElementById("general-discount");
+  if (el) el.value = cartState.generalDiscount || "";
+}
 
     (async () => {
     await loadCartFromStorage();
