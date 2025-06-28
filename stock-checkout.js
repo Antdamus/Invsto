@@ -651,6 +651,31 @@ window.checkoutModule = (function () {
             calculateFinalCheckoutTotal();
             }
         });
+
+        // === Listen to Apply Credit Tier button inside the modal
+        document.getElementById("open-credit-modal")?.addEventListener("click", () => {
+            // 1️⃣ Close the checkout modal
+            closeCheckoutModal();
+
+            // 2️⃣ Make sure the cart panel is open
+            const cartPanel = document.getElementById("cart-panel");
+            cartPanel.classList.remove("hidden");
+            document.body.classList.add("cart-open");
+
+            // 3️⃣ Activate the credits tab
+            const tabButtons = document.querySelectorAll(".cart-tab-btn");
+            const tabContents = document.querySelectorAll(".cart-tab-content");
+
+            tabButtons.forEach(btn => btn.classList.remove("active"));
+            tabContents.forEach(content => content.classList.remove("active"));
+
+            const creditsTabBtn = document.querySelector('.cart-tab-btn[data-tab="credits-view"]');
+            const creditsTabContent = document.getElementById("credits-view");
+
+            creditsTabBtn?.classList.add("active");
+            creditsTabContent?.classList.add("active");
+        });
+
     }
 
 
@@ -733,7 +758,22 @@ window.checkoutModule = (function () {
     const STORAGE_KEY = "checkout-cart-og";
 
     function saveCartToStorage() {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+        const dataToStore = {
+            cart,
+            generalDiscount: parseFloat(document.getElementById("general-discount")?.value || "0"),
+            credits: {
+                credit3mm: parseInt(document.getElementById("credit-3mm")?.value || "0"),
+                credit5mm: parseInt(document.getElementById("credit-5mm")?.value || "0"),
+                credit8mm: parseInt(document.getElementById("credit-8mm")?.value || "0"),
+            },
+            perItemDiscounts: cart.map(item => ({
+                item_id: item.item_id,
+                percent: parseFloat(document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`)?.value || "0"),
+                absolute: parseFloat(document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`)?.value || "0")
+            }))
+        };
+
+        localStorage.setItem("checkout-cart-og", JSON.stringify(dataToStore));
     }
 
     async function loadCartFromStorage() {
@@ -768,8 +808,6 @@ window.checkoutModule = (function () {
             cart = [];
         }
     }
-
-
 
     function clearCart() {
         cart = [];
