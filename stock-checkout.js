@@ -826,18 +826,25 @@ function getCart() {
 
             checkoutSummaryEl.innerHTML = `
             <div class="checkout-summary-card">
-                <p><strong>Subtotal:</strong> $${subtotalBeforeDiscounts.toFixed(2)}</p>
-                <p><strong>Per-item Discounts:</strong> -$${perItemDiscountTotal.toFixed(2)}</p>
-                <p><strong>General Discount:</strong> -$${generalDiscountAmount.toFixed(2)}</p>
-                <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
-                <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
-                <p><strong>Estimated Store Receives (after ${cartState.platformFee.toFixed(1)}% fee):</strong> $${storeReceives.toFixed(2)} <span class="platform-fee-detail">(-$${platformFeeAmount.toFixed(2)})</span></p>
-                <p style="margin-top:8px; font-weight:600; color:${discountColor};">
-                    Effective Discount (post-credits): ${discountPercentAfterCredits.toFixed(1)}%${flagText}
-                </p>
+            <p><strong>Subtotal:</strong> $${subtotalBeforeDiscounts.toFixed(2)}</p>
+
+            <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
+
+            <p><strong>Owes After Credits:</strong> $${adjustedSubtotal.toFixed(2)}</p>
+
+            <p><strong>Per-item Discounts:</strong> -$${perItemDiscountTotal.toFixed(2)}</p>
+
+            <p><strong>General Discount:</strong> -$${generalDiscountAmount.toFixed(2)}</p>
+
+            <p style="margin-top:8px; font-weight:600; color:${discountColor};">
+                Effective Discount (post-credits): ${discountPercentAfterCredits.toFixed(1)}%${flagText}
+            </p>
+
+            <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
+
+            <p><strong>Estimated Store Receives (after ${cartState.platformFee.toFixed(1)}% fee):</strong> $${storeReceives.toFixed(2)} <span class="platform-fee-detail">(-$${platformFeeAmount.toFixed(2)})</span></p>
             </div>
             `;
-
             checkoutSummaryEl.classList.remove("hidden");
         }
     }
