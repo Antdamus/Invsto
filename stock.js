@@ -302,8 +302,13 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
       : '';
 
     const editBtn = `
-      <button class="edit-item-btn" data-id="${id}" title="Edit this item"> 📝 </button> <!-- 🆕 -->
+      <button class="edit-item-btn" data-id="${id}" title="Edit this item">
+        <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-pencil-line" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+        </svg>
+      </button>
     `;
+
 
     return `
       <div class="float-controls-inner">

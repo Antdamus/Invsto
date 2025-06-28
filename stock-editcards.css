@@ -1,7 +1,7 @@
-/* modal to edit items*/
-/*#region*/
+/* ================= Apple-Inspired Modal Styling ================ */
+/*#region Modal Base */
 .modal {
-  display: flex;            /* Center the content */
+  display: flex;
   align-items: center;
   justify-content: center;
   position: fixed;
@@ -9,151 +9,207 @@
   left: 0; top: 0;
   width: 100%; height: 100%;
   overflow: auto;
-  background-color: rgba(0,0,0,0.5);
-  backdrop-filter: blur(6px);
+  background-color: rgba(0,0,0,0.35);
+  backdrop-filter: blur(12px);
 }
 
 .modal.hidden {
   display: none;
 }
 
-
 .modal-content {
-  background: linear-gradient(to bottom right, #fefefe, #f4f4f6);
-  border-radius: 24px;
-  padding: 24px 28px;
-  width: 90%;
-  max-width: 620px;
-  max-height: 90vh;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(30px);
+  border-radius: 28px;
+  padding: 32px;
+  width: 95%;
+  max-width: 600px;
+  max-height: 92vh;
   overflow-y: auto;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  animation: modalPopIn 0.4s ease;
-  font-family: 'DM Serif Display', serif;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  gap: 1.4rem;
+  animation: modalFadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: #1d1d1f;
   position: relative;
   box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
-@keyframes modalPopIn {
-  from {
-    opacity: 0;
-    transform: scale(0.94) translateY(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+@keyframes modalFadeIn {
+  from {opacity: 0; transform: scale(0.96);}
+  to {opacity: 1; transform: scale(1);}
 }
 
+/*#endregion*/
 
+/* Close Button */
 .close-modal {
   position: absolute;
-  top: 20px;
-  right: 24px;
-  font-size: 1.4rem;
-  color: #666;
+  top: 24px;
+  right: 28px;
+  font-size: 1.6rem;
+  color: #555;
   cursor: pointer;
-  transition: color 0.3s ease;
+  transition: color 0.3s ease, transform 0.3s ease;
 }
-
 .close-modal:hover {
   color: #000;
+  transform: rotate(90deg);
 }
 
-
+/* Heading */
 .modal h2 {
-  margin-bottom: 1rem;
-  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+  font-size: 2rem;
+  font-weight: 600;
+  color: #0b0b0d;
 }
 
+/* Labels & Inputs */
 .modal form label {
   display: block;
-  margin: 1rem 0 0.3rem;
+  margin: 0.8rem 0 0.3rem;
   font-weight: 500;
+  color: #222;
 }
 
 .modal form input,
 .modal form textarea {
   width: 100%;
-  padding: 0.6rem 0.8rem;
-  border: 1px solid #ccc;
-  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 12px;
   font-size: 1rem;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(10px);
 }
 
+.modal form input:focus,
+.modal form textarea:focus {
+  border-color: #007aff;
+  box-shadow: 0 0 0 4px rgba(0,122,255,0.2);
+  outline: none;
+}
+
+/* DYMO Button */
+.modal form #generate-edit-dymo-label {
+  margin-top: 1rem;
+  padding: 0.75rem 1.4rem;
+  background: linear-gradient(90deg, #007aff, #0051da);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.3s ease;
+}
+.modal form #generate-edit-dymo-label:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(0,122,255,0.4);
+}
+
+/* Save Button */
 .modal form button.save-edit-btn {
   margin-top: 1.5rem;
-  padding: 0.8rem 1.2rem;
+  padding: 0.85rem 1.4rem;
   background-color: #000;
   color: #fff;
   border: none;
-  border-radius: 8px;
-  font-size: 1rem;
+  border-radius: 12px;
+  font-size: 1.1rem;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, transform 0.2s ease;
 }
-
 .modal form button.save-edit-btn:hover {
-  background-color: #444;
+  background-color: #222;
+  transform: scale(1.04);
 }
 
-@keyframes fadeSlideDown {
-  from {opacity:0; transform: translateY(-20px);}
-  to {opacity:1; transform: translateY(0);}
-}
-
-.modal.hidden {
-  display: none;
-}
-
+/* Photos Grid */
 .photos-preview-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 0.5rem;
+  gap: 10px;
+  margin-top: 0.6rem;
 }
 
 .photo-thumb-container {
   position: relative;
-  width: 60px;
-  height: 60px;
-  border-radius: 8px;
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .photo-thumb-container img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 8px;
 }
 
 .delete-photo-btn {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 4px;
   background: rgba(0,0,0,0.6);
   color: #fff;
   border: none;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   font-size: 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
-
 .delete-photo-btn:hover {
   background: rgba(255,0,0,0.8);
+  transform: scale(1.15);
 }
 
+/* 🎨 Ultra-Aesthetic Edit Button Fix */
+.edit-item-btn {
+  display: inline-flex;            /* force flex to center content */
+  align-items: center;
+  justify-content: center;
+  width: 40px;                     /* fixed square size */
+  height: 40px;
+  padding: 0;                      /* remove inherited horizontal padding */
+  background: rgba(255, 255, 255, 0.6);
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  backdrop-filter: blur(8px) saturate(150%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+}
+
+.edit-item-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+  transform: scale(1.08);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+.edit-item-btn:active {
+  transform: scale(0.95);
+}
+
+.edit-item-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(0,113,227,0.25);
+}
+
+.edit-item-btn > * {
+  pointer-events: none;  /* make sure clicks go to the button, not child emoji/svg */
+  font-size: 1.2rem;     /* ensures emoji/SVG fills nicely */
+  line-height: 1;
+}
 
 /*#endregion*/
