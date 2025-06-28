@@ -249,6 +249,19 @@ window.checkoutModule = (function () {
         // === 🖼️ Label logic
         const label = adjustedTotal < 0 ? "Balance Left" : adjustedTotal > 0 ? "Owes Store" : "Total";
         const colorClass = adjustedTotal < 0 ? "credit-positive" : adjustedTotal > 0 ? "credit-negative" : "credit-neutral";
+        // === 📊 Generate concise summary with subtotal and credits only (no grand total)
+        const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
+        if (previewSummaryContainer) {
+        let summaryHtml = "";
+        summaryHtml += `<p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>`;
+
+        if (creditValue > 0) {
+            summaryHtml += `<p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>`;
+        }
+
+        previewSummaryContainer.innerHTML = summaryHtml;
+        previewSummaryContainer.classList.remove("hidden");
+        }
 
         if (totalPriceEl) {
         totalPriceEl.innerHTML = `<span class="${colorClass}">${label}: $${adjustedTotal.toFixed(2)}</span>`;
@@ -430,29 +443,39 @@ window.checkoutModule = (function () {
             <div class="item-header">
                 <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
                 <div class="item-info-flex">
-                    <div class="title-qty-row">
+                <div class="title-qty-row">
                     <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
                     <div class="checkout-qty-controls">
-                        <button class="qty-decrease" data-id="${item.item_id}">−</button>
-                        <span class="checkout-qty-count">${item.qty}</span>
-                        <button class="qty-increase" data-id="${item.item_id}">+</button>
+                    <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                    <span class="checkout-qty-count">${item.qty}</span>
+                    <button class="qty-increase" data-id="${item.item_id}">+</button>
                     </div>
-                    </div>
+                </div>
                 </div>
             </div>
             <div class="discount-row">
                 <label class="discount-label">Discount for this item:</label>
-                <div class="discount-inline-input">
+                <div class="discount-inline-inputs">
                 <input
                     type="number"
                     min="0"
                     max="100"
-                    class="item-discount-input"
+                    class="item-discount-input-percent"
                     placeholder="0"
                     data-id="${item.item_id}"
                     data-original-price="${item.sale_price.toFixed(2)}"
                     data-qty="${item.qty}"
-                />
+                /> %
+                or
+                <input
+                    type="number"
+                    min="0"
+                    class="item-discount-input-absolute"
+                    placeholder="0"
+                    data-id="${item.item_id}"
+                    data-original-price="${item.sale_price.toFixed(2)}"
+                    data-qty="${item.qty}"
+                /> $
                 </div>
                 <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
             </div>
@@ -492,8 +515,117 @@ window.checkoutModule = (function () {
             });
         });
 
+        // Generate credit breakdown HTML for checkout modal
+        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+        if (checkoutBreakdownEl) {
+        const tierLabels = {
+            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
+            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
+            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
+        };
 
-   
+        let breakdownHtml = "";
+        let anyInput = false;
+
+        for (const id in tierLabels) {
+            const input = document.getElementById(id);
+            const count = parseInt(input?.value || "0");
+            const unitValue = tierLabels[id].value;
+
+            if (count > 0) {
+            anyInput = true;
+            const lineTotal = count * unitValue;
+            breakdownHtml += `
+                <p class="credit-breakdown-line">
+                <span class="tier-emoji">${tierLabels[id].emoji}</span>
+                <span class="tier-label">${tierLabels[id].label}</span>
+                <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
+                </p>
+            `;
+            }
+        }
+
+        if (anyInput) {
+            checkoutBreakdownEl.innerHTML = breakdownHtml;
+            checkoutBreakdownEl.classList.remove("hidden");
+        } else {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+        }
+        }
+
+        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+        if (checkoutSummaryEl) {
+        const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+
+        const creditEl = document.getElementById("credit-value-display");
+        const rawCredit = creditEl?.textContent.replace("$", "") || "0";
+        const creditValue = parseFloat(rawCredit) || 0;
+
+        const finalBalance = subtotal - creditValue;
+
+        const balanceLabel = finalBalance < 0 ? "Balance Left" : finalBalance > 0 ? "Owes Store" : "Settled";
+        const colorClass = finalBalance < 0 ? "credit-positive" : finalBalance > 0 ? "credit-negative" : "credit-neutral";
+
+        // Calculate total discount amount
+        let totalDiscount = 0;
+        cart.forEach(item => {
+        const discountInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+        const discountPercent = discountInput ? parseFloat(discountInput.value) || 0 : 0;
+        const originalTotal = item.sale_price * item.qty;
+        totalDiscount += originalTotal * (discountPercent / 100);
+        });
+
+        checkoutSummaryEl.innerHTML = `
+        <div class="checkout-summary-card">
+            <p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>
+            <p><strong>Discounts Applied:</strong> -$${totalDiscount.toFixed(2)}</p>
+            <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
+            <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${finalBalance.toFixed(2)}</p>
+        </div>
+        `;
+
+        checkoutSummaryEl.classList.remove("hidden");
+        }
+
+        // Live update: sync absolute discount → percent input
+        container.querySelectorAll(".item-discount-input-absolute").forEach(input => {
+        input.addEventListener("input", () => {
+            const id = input.dataset.id;
+            const absoluteValue = parseFloat(input.value) || 0;
+            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+            const qty = parseInt(input.dataset.qty) || 1;
+
+            const maxDiscount = originalPrice * qty;
+            const cappedValue = Math.min(absoluteValue, maxDiscount);
+            const calculatedPercent = (cappedValue / maxDiscount) * 100;
+
+            const percentInput = container.querySelector(`.item-discount-input-percent[data-id="${id}"]`);
+            if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
+
+            calculateFinalCheckoutTotal();
+        });
+        });
+
+        // Live update: sync percent discount → absolute input
+        container.querySelectorAll(".item-discount-input-percent").forEach(input => {
+        input.addEventListener("input", () => {
+            const id = input.dataset.id;
+            const percentValue = parseFloat(input.value) || 0;
+            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+            const qty = parseInt(input.dataset.qty) || 1;
+
+            const maxDiscount = originalPrice * qty;
+            const calculatedAbsolute = (percentValue / 100) * maxDiscount;
+
+            const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
+            if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
+
+            calculateFinalCheckoutTotal();
+        });
+        });
+
+
 
         generalDiscountInput.value = "";
         calculateFinalCheckoutTotal();
@@ -525,27 +657,47 @@ window.checkoutModule = (function () {
     // === Main Calculation Function
     function calculateFinalCheckoutTotal() {
         const cart = checkoutModule.getCart();
-        const generalDiscount = parseFloat(document.getElementById("general-discount").value) || 0;
+        const generalDiscountPercent = parseFloat(document.getElementById("general-discount").value) || 0;
         const finalTotalEl = document.getElementById("checkout-final-price");
 
-        let subtotal = 0;
+        let subtotalBeforeDiscounts = 0;
+        let perItemDiscountTotal = 0;
+        let subtotalAfterItemDiscounts = 0;
 
         cart.forEach(item => {
-            const input = document.querySelector(`.item-discount-input[data-id="${item.item_id}"]`);
-            const discount = input ? parseFloat(input.value) : null;
-            const appliedDiscount = isNaN(discount) ? generalDiscount : discount;
-            const priceAfter = item.sale_price * (1 - appliedDiscount / 100);
-            const totalForItem = priceAfter * item.qty;
-            subtotal += totalForItem;
+            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
 
-            // 🔁 Update the live discounted price preview
+            const qty = item.qty || 1;
+            const originalTotal = item.sale_price * qty;
+
+            subtotalBeforeDiscounts += originalTotal;
+
+            let itemDiscountAmount = 0;
+
+            if (absoluteInput && absoluteInput.value) {
+                itemDiscountAmount = Math.min(parseFloat(absoluteInput.value) || 0, originalTotal);
+            } else if (percentInput && percentInput.value) {
+                const percent = parseFloat(percentInput.value) || 0;
+                itemDiscountAmount = (percent / 100) * originalTotal;
+            }
+
+            perItemDiscountTotal += itemDiscountAmount;
+
+            const totalAfterItemDiscount = originalTotal - itemDiscountAmount;
+            subtotalAfterItemDiscounts += totalAfterItemDiscount;
+
+            // 🔄 Update the live discounted price preview
             const previewEl = document.getElementById(`discounted-${item.item_id}`);
             if (previewEl) {
-            previewEl.textContent = `$${totalForItem.toFixed(2)}`;
+                previewEl.textContent = `$${totalAfterItemDiscount.toFixed(2)}`;
             }
         });
 
-        // 💳 Subtract credit if credit tab is present
+        // ➕ General discount on subtotal after item-level discounts
+        const generalDiscountAmount = (generalDiscountPercent / 100) * subtotalAfterItemDiscounts;
+
+        // 💳 Credits
         let creditValue = 0;
         const creditEl = document.getElementById("credit-value-display");
         if (creditEl) {
@@ -553,12 +705,28 @@ window.checkoutModule = (function () {
             creditValue = parseFloat(raw) || 0;
         }
 
-        const final = subtotal - creditValue;
+        // ➕ Calculate final total
+        const final = subtotalAfterItemDiscounts - generalDiscountAmount - creditValue;
         finalTotalEl.textContent = `$${final.toFixed(2)}`;
+
+        // ✅ Update summary card with separated discount lines
+        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+        if (checkoutSummaryEl) {
+            const balanceLabel = final < 0 ? "Balance Left" : final > 0 ? "Owes Store" : "Settled";
+            const colorClass = final < 0 ? "credit-positive" : final > 0 ? "credit-negative" : "credit-neutral";
+
+            checkoutSummaryEl.innerHTML = `
+                <div class="checkout-summary-card">
+                    <p><strong>Subtotal:</strong> $${subtotalBeforeDiscounts.toFixed(2)}</p>
+                    <p><strong>Per-item Discounts:</strong> -$${perItemDiscountTotal.toFixed(2)}</p>
+                    <p><strong>General Discount:</strong> -$${generalDiscountAmount.toFixed(2)}</p>
+                    <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
+                    <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
+                </div>
+            `;
+            checkoutSummaryEl.classList.remove("hidden");
+        }
     }
-
-
-
   //#endregion
 
   //#region logic to be able to preserve the cart even if something changes by accident

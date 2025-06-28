@@ -799,6 +799,65 @@ body.cart-open .main-content {
   transition: background 0.2s ease;
 }
 
+.checkout-summary-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 14px 18px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+  margin-top: 16px;
+  font-size: 1rem;
+  line-height: 1.4;
+}
 
+.checkout-summary-card p {
+  margin: 6px 0;
+}
+
+/* === Dual Discount Inputs Section === */
+.discount-inline-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.discount-inline-inputs input {
+  width: 80px;
+  padding: 8px 12px;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  font-family: 'DM Serif Display', serif;
+  appearance: textfield;
+  transition: border-color 0.2s ease;
+}
+
+/* Remove spinners on number inputs */
+.discount-inline-inputs input::-webkit-inner-spin-button,
+.discount-inline-inputs input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.discount-inline-inputs input:focus {
+  outline: none;
+  border-color: #0071e3;
+  box-shadow: 0 0 0 2px rgba(0,113,227,0.15);
+}
+
+.discount-inline-inputs input:last-child::after {
+  content: "$";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.95rem;
+  color: #777;
+  pointer-events: none;
+  user-select: none;
+}
 
 /*#endregion*/

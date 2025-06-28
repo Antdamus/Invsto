@@ -304,11 +304,19 @@
       <div id="cart-items-container" class="cart-items">
         <!-- Items will be injected here -->
       </div>
-    <div class="cart-footer">
-      <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
-      <div id="credit-breakdown-display" class="credit-breakdown hidden"></div>
-      <button id="proceed-checkout-btn" class="checkout-btn" title="Proceed to checkout">Proceed to Checkout</button>
-    </div>
+      <div class="cart-footer">
+
+        <!-- ✅ Existing Credit Breakdown in Credits View -->
+        <div id="credit-breakdown-display" class="credit-breakdown hidden"></div>
+
+        <!-- ✅ NEW: Credit Breakdown Summary directly in Cart View -->
+        <div id="cart-preview-summary-display" class="credit-breakdown hidden"></div>
+
+        <p class="cart-total">Total: <span id="cart-total-price">$0.00</span></p>
+
+        <button id="proceed-checkout-btn" class="checkout-btn" title="Proceed to checkout">Proceed to Checkout</button>
+      </div>
+
     </div>
 
     <!-- 💳 Credits View -->
@@ -344,6 +352,11 @@
 
       <!-- 🛍️ Cart Items Overview -->
       <div id="checkout-items-container" class="modal-scrollable-body"></div>
+
+      <!-- 💳 Credit Breakdown (hidden by default) -->
+      <div id="checkout-credit-breakdown" class="credit-breakdown hidden"></div>
+      <div id="checkout-summary-display" class="hidden"></div>
+
 
       <!-- ⬇️ New grouped controls -->
       <div class="checkout-controls">

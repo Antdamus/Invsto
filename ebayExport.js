@@ -3,7 +3,7 @@
 
 const requiredHeaders = {
   action: "*Action(SiteID=US|Country=US|Currency=USD|Version=1193)",
-  categoryid: "Category ID"
+  categoryid: "Category ID",
   category: "Category name",
   title: "Title",
   startPrice: "Start price",
@@ -85,12 +85,28 @@ async function getPublicImageUrl(privatePath) {
   }
 }
 
-
 window.exportToEbayXLSX = async function (items) {
   const input = document.getElementById("base-ebay-template");
   if (!input?.files?.length) {
     alert("Please upload the base eBay template first.");
     return;
+  }
+
+  // ✅ 1) Fetch quantities from item_stock_locations
+  const quantitiesByItemId = {};
+  const { data: stockRows, error: stockError } = await supabase
+    .from("item_stock_locations")
+    .select("item_id, quantity");
+
+  if (stockError) {
+    console.error("❌ Error fetching item_stock_locations:", stockError.message);
+    alert("Failed to fetch quantities. Check console for details.");
+    return;
+  }
+
+  for (const row of stockRows) {
+    if (!quantitiesByItemId[row.item_id]) quantitiesByItemId[row.item_id] = 0;
+    quantitiesByItemId[row.item_id] += row.quantity;
   }
 
   const file = input.files[0];
@@ -105,6 +121,17 @@ window.exportToEbayXLSX = async function (items) {
     const output = [headers];
 
     for (const item of items) {
+      if (!item.id) {
+        console.warn(`❗ Skipping item without ID:`, item);
+        continue;
+      }
+
+      const totalQty = quantitiesByItemId[item.id];
+      if (totalQty === undefined) {
+        console.warn(`❗ Skipping item with ID ${item.id}: no quantity found in item_stock_locations.`);
+        continue;
+      }
+
       const row = new Array(headers.length).fill("");
 
       const photoPath = (item.photoPaths || item.photos || [])[0] || null;
@@ -115,7 +142,7 @@ window.exportToEbayXLSX = async function (items) {
       row[headers.indexOf(requiredHeaders.category)] = "/Jewelry & Watches/Fine Jewelry/Necklaces & Pendants";
       row[headers.indexOf(requiredHeaders.title)] = item.title || "";
       row[headers.indexOf(requiredHeaders.startPrice)] = item.sale_price || 0;
-      row[headers.indexOf(requiredHeaders.quantity)] = item.total_quantity || 1;
+      row[headers.indexOf(requiredHeaders.quantity)] = totalQty; // ✅ safe quantity use
       row[headers.indexOf(requiredHeaders.photoUrl)] = imageUrl;
       row[headers.indexOf(requiredHeaders.condition)] = "1000-New with tags";
       row[headers.indexOf(requiredHeaders.description)] = item.description || "";
@@ -146,3 +173,4 @@ window.exportToEbayXLSX = async function (items) {
 
   reader.readAsArrayBuffer(file);
 };
+
