@@ -1,17 +1,15 @@
 /* ================= general wrapper to call it in other JS files and keep things clean============= */
 window.checkoutModule = (function () {
-  //global be used to start checkout mode
-  let checkoutMode = false;
-  let cartState = {
+    //global be used to start checkout mode
+    let checkoutMode = false;
+    let cartState = {
     items: [],
-    credits: {
-        "credit-3mm": "0",
-        "credit-5mm": "0",
-        "credit-8mm": "0",
-    },
+    credits: { "credit-3mm": "0", "credit-5mm": "0", "credit-8mm": "0" },
     generalDiscount: "",
     itemDiscounts: {},
-  };
+    platformFee: 0, // NEW: store platform fee percentage
+    };
+
 
 
   
@@ -224,12 +222,14 @@ function getCart() {
         container.querySelectorAll(".qty-decrease").forEach(btn => {
             btn.addEventListener("click", () => {
                 const id = btn.dataset.id;
-                const target = cart.find(i => i.item_id === id);
+                const target = items.find(i => i.item_id === id);
                 if (target && target.qty > 1) {
                 target.qty -= 1;
                 } else {
                 // If qty reaches 0, remove the item from cart
                 cartState.items  = items.filter(i => i.item_id !== id);
+                // ✅ Clear any lingering discounts:
+                delete cartState.itemDiscounts[id];
 
                 // 🔄 Uncheck the select checkbox if it exists
                 const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
@@ -448,12 +448,28 @@ function getCart() {
         container.innerHTML = "";
 
         if (cart.length === 0) {
-            container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
-            finalTotalEl.textContent = "$0.00";
-            modal.classList.remove("hidden");
-            document.body.classList.add("modal-open");
-            return;
+        container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
+        finalTotalEl.textContent = "$0.00";
+
+        // ✅ Clear summary card content
+        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+        if (checkoutSummaryEl) {
+            checkoutSummaryEl.innerHTML = "";
+            checkoutSummaryEl.classList.add("hidden");
         }
+
+        // ✅ Clear credit breakdown
+        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+        if (checkoutBreakdownEl) {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+        }
+
+        modal.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+        return;
+        }
+
 
         cart.forEach(item => {
             const itemRow = document.createElement("div");
@@ -518,23 +534,29 @@ function getCart() {
                 openCheckoutModal();    // ✅ re-render modal
                 }
             });
-            });
+        });
 
         container.querySelectorAll(".qty-decrease").forEach(btn => {
             btn.addEventListener("click", () => {
                 const id = btn.dataset.id;
-                const target = cart.find(i => i.item_id === id);
-                if (target && target.qty > 1) {
-                target.qty -= 1;
+                const targetIndex = cart.findIndex(i => i.item_id === id);
+
+                if (targetIndex !== -1) {
+                const target = cart[targetIndex];
+                if (target.qty > 1) {
+                    target.qty -= 1;
                 } else {
-                cart.splice(cart.findIndex(i => i.item_id === id), 1);
+                    cart.splice(targetIndex, 1);
+                    delete cartState.itemDiscounts[id]; // ✅ Clear lingering discounts
                 }
-                updateCartUI();         // ✅ update badge + toggle
-                saveCartToStorage(); // ← ADD THIS
-                renderCartItems();      // ✅ update side cart panel
-                openCheckoutModal();    // ✅ re-render modal
+                updateCartUI();
+                saveCartToStorage();
+                renderCartItems();
+                setTimeout(openCheckoutModal, 0); // ✅ Re-render modal after updates
+                }
             });
         });
+
 
         // Generate credit breakdown HTML for checkout modal
         const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
@@ -631,39 +653,36 @@ function getCart() {
 
         // Live update: sync percent discount → absolute input
         container.querySelectorAll(".item-discount-input-percent").forEach(input => {
-        input.addEventListener("input", () => {
-            const id = input.dataset.id;
-            const percentValue = parseFloat(input.value) || 0;
-            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
-            const qty = parseInt(input.dataset.qty) || 1;
+            input.addEventListener("input", () => {
+                const id = input.dataset.id;
+                const percentValue = parseFloat(input.value) || 0;
+                const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+                const qty = parseInt(input.dataset.qty) || 1;
 
-            const maxDiscount = originalPrice * qty;
-            const calculatedAbsolute = (percentValue / 100) * maxDiscount;
+                const maxDiscount = originalPrice * qty;
+                const calculatedAbsolute = (percentValue / 100) * maxDiscount;
 
-            const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
-            if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
+                const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
+                if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
 
-            calculateFinalCheckoutTotal();
-            saveCartToStorage();
+                calculateFinalCheckoutTotal();
+                saveCartToStorage();
+            });
         });
+
+        // Apply saved general discount
+        updateGeneralDiscountInputFromCartState();
+
+        // Apply saved per-item discounts
+        cartState.items.forEach(item => {
+        const saved = cartState.itemDiscounts[item.item_id];
+        if (saved) {
+            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+            if (percentInput) percentInput.value = saved.percent || "";
+            if (absoluteInput) absoluteInput.value = saved.absolute || "";
+        }
         });
-
-// Apply saved general discount
-updateGeneralDiscountInputFromCartState();
-
-// Apply saved per-item discounts
-cartState.items.forEach(item => {
-  const saved = cartState.itemDiscounts[item.item_id];
-  if (saved) {
-    const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-    const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-    if (percentInput) percentInput.value = saved.percent || "";
-    if (absoluteInput) absoluteInput.value = saved.absolute || "";
-  }
-});
-
-
-
 
         generalDiscountInput.value = cartState.generalDiscount || "";
         calculateFinalCheckoutTotal();
@@ -717,6 +736,19 @@ cartState.items.forEach(item => {
             creditsTabContent?.classList.add("active");
         });
 
+        // 🛒 Listen for platform selection
+        document.getElementById("platform-select")?.addEventListener("change", (e) => {
+        const value = e.target.value;
+        if (value === "whatnot") {
+            cartState.platformFee = 11.8;
+        } else if (value === "ebay") {
+            cartState.platformFee = 1;
+        } else {
+            cartState.platformFee = 0;
+        }
+        calculateFinalCheckoutTotal();
+        saveCartToStorage();
+        });
     }
 
 
@@ -774,6 +806,9 @@ cartState.items.forEach(item => {
         // ➕ Calculate final total
         const final = subtotalAfterItemDiscounts - generalDiscountAmount - creditValue;
         finalTotalEl.textContent = `$${final.toFixed(2)}`;
+        // ➕ Calculate platform fee amount (your cost) and what the store actually receives
+        const platformFeeAmount = (cartState.platformFee / 100) * final;
+        const storeReceives = final - platformFeeAmount;
 
         // ✅ Update summary card with separated discount lines
         const checkoutSummaryEl = document.getElementById("checkout-summary-display");
@@ -782,14 +817,16 @@ cartState.items.forEach(item => {
             const colorClass = final < 0 ? "credit-positive" : final > 0 ? "credit-negative" : "credit-neutral";
 
             checkoutSummaryEl.innerHTML = `
-                <div class="checkout-summary-card">
-                    <p><strong>Subtotal:</strong> $${subtotalBeforeDiscounts.toFixed(2)}</p>
-                    <p><strong>Per-item Discounts:</strong> -$${perItemDiscountTotal.toFixed(2)}</p>
-                    <p><strong>General Discount:</strong> -$${generalDiscountAmount.toFixed(2)}</p>
-                    <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
-                    <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
-                </div>
+            <div class="checkout-summary-card">
+                <p><strong>Subtotal:</strong> $${subtotalBeforeDiscounts.toFixed(2)}</p>
+                <p><strong>Per-item Discounts:</strong> -$${perItemDiscountTotal.toFixed(2)}</p>
+                <p><strong>General Discount:</strong> -$${generalDiscountAmount.toFixed(2)}</p>
+                <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
+                <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${final.toFixed(2)}</p>
+                <p><strong>Estimated Store Receives (after ${cartState.platformFee.toFixed(1)}% fee):</strong> $${storeReceives.toFixed(2)} <span class="platform-fee-detail">(-$${platformFeeAmount.toFixed(2)})</span></p>
+            </div>
             `;
+
             checkoutSummaryEl.classList.remove("hidden");
         }
     }
