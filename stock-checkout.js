@@ -618,6 +618,7 @@ function getCart() {
             if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
 
             calculateFinalCheckoutTotal();
+            saveCartToStorage();  // ✅ This saves discounts immediately when changed
         });
         });
 
@@ -636,6 +637,7 @@ function getCart() {
             if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
 
             calculateFinalCheckoutTotal();
+            saveCartToStorage();
         });
         });
 
