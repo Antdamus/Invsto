@@ -365,18 +365,22 @@
           <input type="number" id="general-discount" placeholder="e.g. 10" min="0" max="100" />
         </div>
 
+        
         <div class="modal-input-section">
-          <button id="open-credit-modal" class="btn-modal-secondary">💳 Apply Credit Tier</button>
+          <label for="platform-select">Redeem Credits</label>
+          <button id="open-credit-modal" class="btn-modal-secondary">💳 Credit Tier</button>
         </div>
 
         <!-- 🛒 Platform Selector -->
         <div class="modal-input-section">
           <label for="platform-select">Selling Platform</label>
-          <select id="platform-select">
-            <option value="none" selected>-- Choose Platform --</option>
-            <option value="whatnot">Whatnot (11.8% fee)</option>
-            <option value="ebay">eBay (1% fee)</option>
-          </select>
+          <div class="select-wrapper">
+            <select id="platform-select">
+              <option value="none" selected>-- Choose Platform --</option>
+              <option value="whatnot">Whatnot (11.8% fee)</option>
+              <option value="ebay">eBay (1% fee)</option>
+            </select>
+          </div>
         </div>
 
         <div class="checkout-footer">

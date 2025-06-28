@@ -860,4 +860,95 @@ body.cart-open .main-content {
   user-select: none;
 }
 
+  /*#region ================= Ultra-Aesthetic Platform Dropdown ================== */
+    .modal-input-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 24px;
+      width: 100%;
+    }
+
+    .modal-input-section label {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #333;
+      transition: color 0.3s ease;
+    }
+
+    .select-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    /* Fix vertical centering & spacing issues */
+    .select-wrapper select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      width: 100%;
+      padding: 10px 0px 11px 11px; /* More balanced vertical padding */
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      border-radius: 16px;
+      background-color: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(16px) saturate(180%);
+      font-size: 1rem;
+      font-weight: 500;
+      color: #333;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+      line-height: 1.4; /* improves vertical alignment */
+    }
+
+    /* Crisp custom arrow centered vertically */
+    .select-wrapper::after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      width: 14px;
+      height: 14px;
+      background: url("data:image/svg+xml;utf8,<svg fill='%23333' height='14' width='14' viewBox='0 0 24 24'><path d='M7 10l5 5 5-5z'/></svg>") no-repeat center;
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+
+    /* Hover and focus styling */
+    .select-wrapper select:hover,
+    .select-wrapper select:focus {
+      border-color: rgba(0, 0, 0, 0.25);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+      outline: none;
+    }
+
+    /* Disabled state styling */
+    .select-wrapper select:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Smooth label color change on focus */
+    .modal-input-section:focus-within label {
+      color: #000;
+    }
+
+    /* Optional: dark mode support */
+    @media (prefers-color-scheme: dark) {
+      .modal-input-section label {
+        color: #eee;
+      }
+      .select-wrapper select {
+        background-color: rgba(40, 40, 40, 0.6);
+        color: #eee;
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+      .select-wrapper::after {
+        background: url("data:image/svg+xml;utf8,<svg fill='%23eee' height='14' width='14' viewBox='0 0 24 24'><path d='M7 10l5 5 5-5z'/></svg>") no-repeat center;
+      }
+    }
+
+  /*#endregion*/
+
+
 /*#endregion*/
