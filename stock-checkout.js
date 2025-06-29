@@ -11,46 +11,47 @@ window.checkoutModule = (function () {
         salesId: "",      // ✅ NEW: Sales ID
         flagged: false,   // ✅ NEW: flag state
     };
+    let locksAcquired = false; // 🔐 Tracks if locks have been acquired during current modal session
 
-window.addEventListener("beforeunload", async () => {
-  await unlockSelectedLocationsForCurrentUser();
-});
 
+    window.addEventListener("beforeunload", async () => {
+    await unlockSelectedLocationsForCurrentUser();
+    });
 
   //function to activate the toggle to start the checkout mode
-  function setupCheckoutToggleButton(btnId = "toggle-checkout-mode") {
-    const btn = document.getElementById(btnId);
-    if (!btn) {
-        console.warn(`No button found with ID: ${btnId}`);
-        return;
+    function setupCheckoutToggleButton(btnId = "toggle-checkout-mode") {
+        const btn = document.getElementById(btnId);
+        if (!btn) {
+            console.warn(`No button found with ID: ${btnId}`);
+            return;
+        }
+
+        btn.addEventListener("click", () => {
+            checkoutMode = !checkoutMode;
+
+            // Update button appearance
+            btn.classList.toggle("active", checkoutMode);
+            btn.title = checkoutMode ? "Exit Checkout Mode" : "Enter Checkout Mode";
+
+            // Update body styling
+            document.body.classList.toggle("checkout-mode-active", checkoutMode);
+
+            // ✅ NEW: when entering checkout mode, restore visuals from cart
+            if (checkoutMode) {
+            cartState.items.forEach(item => {
+                const checkbox = document.querySelector(`.select-checkbox[data-id="${item.item_id}"]`);
+                if (checkbox) checkbox.checked = true;
+
+                const card = checkbox?.closest('.stock-card');
+                if (card) card.classList.add("in-cart");
+            });
+            }
+        });
     }
 
-    btn.addEventListener("click", () => {
-        checkoutMode = !checkoutMode;
-
-        // Update button appearance
-        btn.classList.toggle("active", checkoutMode);
-        btn.title = checkoutMode ? "Exit Checkout Mode" : "Enter Checkout Mode";
-
-        // Update body styling
-        document.body.classList.toggle("checkout-mode-active", checkoutMode);
-
-        // ✅ NEW: when entering checkout mode, restore visuals from cart
-        if (checkoutMode) {
-        cartState.items.forEach(item => {
-            const checkbox = document.querySelector(`.select-checkbox[data-id="${item.item_id}"]`);
-            if (checkbox) checkbox.checked = true;
-
-            const card = checkbox?.closest('.stock-card');
-            if (card) card.classList.add("in-cart");
-        });
-        }
-    });
-  }
-
-  function isCheckoutMode() {
-    return checkoutMode;
-  }
+    function isCheckoutMode() {
+        return checkoutMode;
+    }
 
   //#region function to add to cart one i click on the cards and i am in checkout mode
     //function responsible for adding to the card
@@ -158,7 +159,7 @@ window.addEventListener("beforeunload", async () => {
     items.forEach(async item => {
         const div = document.createElement("div");
         div.className = "cart-item";
-        div.setAttribute("data-item-id", item.item_id); // 🔹 makes it easy to remove this item later
+        div.setAttribute("data-item-id", item.item_id);
         div.innerHTML = `
         <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
         <div class="cart-item-details">
@@ -166,7 +167,7 @@ window.addEventListener("beforeunload", async () => {
             <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
             <div class="cart-qty-controls">
             <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
-            <span class="cart-qty-count" id="qty-count-${item.item_id}">${item.qty}</span> <!-- 🔹 unique qty ID -->
+            <span class="cart-qty-count" id="qty-count-${item.item_id}">${item.qty}</span>
             <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
             </div>
             <div class="cart-location-select" id="location-select-${item.item_id}">
@@ -203,7 +204,7 @@ window.addEventListener("beforeunload", async () => {
 
         const options = data.map(loc => {
             const locked = loc.locked_by !== null || loc.locked_at !== null;
-            return `<option value="${loc.id}" data-qty="${loc.quantity}" ${locked ? "disabled style='color:red;'" : ""}>
+            return `<option value="${loc.id}" data-qty="${loc.quantity}" data-physical-loc-id="${loc.location.id}" ${locked ? "disabled style='color:red;'" : ""}>
             ${loc.location.location_name} (${loc.quantity} in stock)${locked ? " - LOCKED" : ""}
             </option>`;
         }).join("");
@@ -217,36 +218,45 @@ window.addEventListener("beforeunload", async () => {
 
         const dropdown = selectContainer.querySelector("select");
 
+        // ✅ Update cart item when user changes selection
         dropdown.addEventListener("change", e => {
             const selectedLocId = e.target.value;
             const selectedOption = e.target.options[e.target.selectedIndex];
             const availableQty = parseInt(selectedOption.dataset.qty) || 0;
+            const physicalLocId = selectedOption.dataset.physicalLocId;
+
             const cartItem = cartState.items.find(i => i.item_id === item.item_id);
             if (cartItem) {
             cartItem.selected_location_id = selectedLocId;
-            cartItem.available_qty = availableQty; // ✅ Save selected location's quantity
+            cartItem.physical_location_id = physicalLocId;
+            cartItem.available_qty = availableQty;
             saveCartToStorage();
             }
         });
 
+        // ✅ Handle pre-selection: if already saved, re-select it and update quantity & physical ID
         if (item.selected_location_id) {
-            // 🔹 Pre-select saved location if present
             dropdown.value = item.selected_location_id;
             const preselectedOption = dropdown.querySelector(`option[value="${item.selected_location_id}"]`);
             if (preselectedOption) {
-                const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
-                item.available_qty = availableQty;
+            const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
+            const physicalLocId = preselectedOption.dataset.physicalLocId;
+            item.available_qty = availableQty;
+            item.physical_location_id = physicalLocId;
             }
         } else {
-            // 🔹 No previous selection → set selected_location_id to the first available option
+            // ✅ Set first available as default selection
             const firstOption = dropdown.options[0];
             if (firstOption) {
-                const selectedLocId = firstOption.value;
-                const availableQty = parseInt(firstOption.dataset.qty) || 0;
-                item.selected_location_id = selectedLocId;
-                item.available_qty = availableQty;
-                dropdown.value = selectedLocId;
-                saveCartToStorage();
+            const selectedLocId = firstOption.value;
+            const availableQty = parseInt(firstOption.dataset.qty) || 0;
+            const physicalLocId = firstOption.dataset.physicalLocId;
+
+            item.selected_location_id = selectedLocId;
+            item.physical_location_id = physicalLocId;
+            item.available_qty = availableQty;
+            dropdown.value = selectedLocId;
+            saveCartToStorage();
             }
         }
         } catch (err) {
@@ -260,7 +270,6 @@ window.addEventListener("beforeunload", async () => {
 
     attachCartQtyListeners(items);
     }
-
 
     function attachCartQtyListeners(items) {
     document.querySelectorAll(".qty-increase").forEach(btn => {
@@ -492,255 +501,264 @@ window.addEventListener("beforeunload", async () => {
 
   //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
     async function openCheckoutModal() {
-    const locked = await lockSelectedLocationsForCurrentUser();
-    if (!locked) {
-        showToast("❌ Checkout canceled: could not lock all items.", "error");
-        return; // 🚫 don't open modal if locking failed
-    }
-    
-    const modal = document.getElementById("checkout-modal");
-    const container = document.getElementById("checkout-items-container");
-    const generalDiscountInput = document.getElementById("general-discount");
-    const finalTotalEl = document.getElementById("checkout-final-price");
-
-    const cart = checkoutModule.getCart();
-    container.innerHTML = "";
-
-    if (cart.length === 0) {
-        container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
-        finalTotalEl.textContent = "$0.00";
-
-        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
-        if (checkoutSummaryEl) {
-        checkoutSummaryEl.innerHTML = "";
-        checkoutSummaryEl.classList.add("hidden");
+        if (!locksAcquired) {
+            const locked = await lockSelectedLocationsForCurrentUser();
+            if (!locked) {
+            showToast("❌ Checkout canceled: could not lock all items.", "error");
+            return; // 🚫 don't open modal if locking failed
+            }
         }
+        
+        const modal = document.getElementById("checkout-modal");
+        const container = document.getElementById("checkout-items-container");
+        const generalDiscountInput = document.getElementById("general-discount");
+        const finalTotalEl = document.getElementById("checkout-final-price");
+
+        const cart = checkoutModule.getCart();
+        container.innerHTML = "";
+
+        if (cart.length === 0) {
+            container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
+            finalTotalEl.textContent = "$0.00";
+
+            const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+            if (checkoutSummaryEl) {
+            checkoutSummaryEl.innerHTML = "";
+            checkoutSummaryEl.classList.add("hidden");
+            }
+
+            const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+            if (checkoutBreakdownEl) {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+            }
+
+            modal.classList.remove("hidden");
+            document.body.classList.add("modal-open");
+            return;
+        }
+
+        cart.forEach(item => {
+            const itemRow = document.createElement("div");
+            itemRow.className = "checkout-item-card";
+            itemRow.setAttribute("data-item-id", item.item_id);
+
+            itemRow.innerHTML = `
+            <div class="item-header">
+                <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
+                <div class="item-info-flex">
+                <div class="title-qty-row">
+                    <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
+                    <div class="checkout-qty-controls">
+                    <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                    <span class="checkout-qty-count">${item.qty}</span>
+                    <button class="qty-increase" data-id="${item.item_id}">+</button>
+                    </div>
+                </div>
+                </div>
+            </div>
+            <div class="discount-row">
+                <label class="discount-label">Discount for this item:</label>
+                <div class="discount-inline-inputs">
+                <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    class="item-discount-input-percent"
+                    placeholder="0"
+                    data-id="${item.item_id}"
+                    data-original-price="${item.sale_price.toFixed(2)}"
+                    data-qty="${item.qty}"
+                /> %
+                or
+                <input
+                    type="number"
+                    min="0"
+                    class="item-discount-input-absolute"
+                    placeholder="0"
+                    data-id="${item.item_id}"
+                    data-original-price="${item.sale_price.toFixed(2)}"
+                    data-qty="${item.qty}"
+                /> $
+                </div>
+                <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
+            </div>
+            `;
+
+            container.appendChild(itemRow);
+        });
+
+        // ✅ Updated quantity control handlers with per-location available_qty limit
+        container.querySelectorAll(".qty-increase").forEach(btn => {
+            btn.addEventListener("click", () => {
+            const id = btn.dataset.id;
+            const target = cart.find(i => i.item_id === id);
+            if (target) {
+                const maxQty = target.available_qty || 0;
+                if (maxQty > 0 && target.qty < maxQty) {
+                target.qty += 1;
+                } else {
+                showToast(`❌ Cannot add more than ${maxQty} at the selected location for ${target.title}`, "error");
+                }
+                updateCartUI();
+                saveCartToStorage();
+                renderCartItems();
+                openCheckoutModal();
+            }
+            });
+        });
+
+        container.querySelectorAll(".qty-decrease").forEach(btn => {
+            btn.addEventListener("click", () => {
+            const id = btn.dataset.id;
+            const targetIndex = cart.findIndex(i => i.item_id === id);
+
+            if (targetIndex !== -1) {
+                const target = cart[targetIndex];
+                if (target.qty > 1) {
+                target.qty -= 1;
+                } else {
+                cart.splice(targetIndex, 1);
+                delete cartState.itemDiscounts[id];
+                }
+                updateCartUI();
+                saveCartToStorage();
+                renderCartItems();
+                setTimeout(openCheckoutModal, 0);
+            }
+            });
+        });
 
         const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
         if (checkoutBreakdownEl) {
-        checkoutBreakdownEl.innerHTML = "";
-        checkoutBreakdownEl.classList.add("hidden");
+            const tierLabels = {
+            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
+            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
+            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
+            };
+
+            let breakdownHtml = "";
+            let anyInput = false;
+
+            for (const id in tierLabels) {
+            const input = document.getElementById(id);
+            const count = parseInt(input?.value || "0");
+            const unitValue = tierLabels[id].value;
+
+            if (count > 0) {
+                anyInput = true;
+                const lineTotal = count * unitValue;
+                breakdownHtml += `
+                <p class="credit-breakdown-line">
+                    <span class="tier-emoji">${tierLabels[id].emoji}</span>
+                    <span class="tier-label">${tierLabels[id].label}</span>
+                    <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
+                </p>
+                `;
+            }
+            }
+
+            if (anyInput) {
+            checkoutBreakdownEl.innerHTML = breakdownHtml;
+            checkoutBreakdownEl.classList.remove("hidden");
+            } else {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+            }
         }
+
+        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+        if (checkoutSummaryEl) {
+            const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+
+            const creditEl = document.getElementById("credit-value-display");
+            const rawCredit = creditEl?.textContent.replace("$", "") || "0";
+            const creditValue = parseFloat(rawCredit) || 0;
+
+            const finalBalance = subtotal - creditValue;
+
+            const balanceLabel = finalBalance < 0 ? "Balance Left" : finalBalance > 0 ? "Owes Store" : "Settled";
+            const colorClass = finalBalance < 0 ? "credit-positive" : finalBalance > 0 ? "credit-negative" : "credit-neutral";
+
+            let totalDiscount = 0;
+            cart.forEach(item => {
+            const discountInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const discountPercent = discountInput ? parseFloat(discountInput.value) || 0 : 0;
+            const originalTotal = item.sale_price * item.qty;
+            totalDiscount += originalTotal * (discountPercent / 100);
+            });
+
+            checkoutSummaryEl.innerHTML = `
+            <div class="checkout-summary-card">
+                <p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>
+                <p><strong>Discounts Applied:</strong> -$${totalDiscount.toFixed(2)}</p>
+                <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
+                <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${finalBalance.toFixed(2)}</p>
+            </div>
+            `;
+            checkoutSummaryEl.classList.remove("hidden");
+        }
+
+        container.querySelectorAll(".item-discount-input-absolute").forEach(input => {
+            input.addEventListener("input", () => {
+            const id = input.dataset.id;
+            const absoluteValue = parseFloat(input.value) || 0;
+            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+            const qty = parseInt(input.dataset.qty) || 1;
+
+            const maxDiscount = originalPrice * qty;
+            const cappedValue = Math.min(absoluteValue, maxDiscount);
+            const calculatedPercent = (cappedValue / maxDiscount) * 100;
+
+            const percentInput = container.querySelector(`.item-discount-input-percent[data-id="${id}"]`);
+            if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
+
+            calculateFinalCheckoutTotal();
+            saveCartToStorage();
+            });
+        });
+
+        container.querySelectorAll(".item-discount-input-percent").forEach(input => {
+            input.addEventListener("input", () => {
+            const id = input.dataset.id;
+            const percentValue = parseFloat(input.value) || 0;
+            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+            const qty = parseInt(input.dataset.qty) || 1;
+
+            const maxDiscount = originalPrice * qty;
+            const calculatedAbsolute = (percentValue / 100) * maxDiscount;
+
+            const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
+            if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
+
+            calculateFinalCheckoutTotal();
+            saveCartToStorage();
+            });
+        });
+
+        updateGeneralDiscountInputFromCartState();
+        cartState.items.forEach(item => {
+            const saved = cartState.itemDiscounts[item.item_id];
+            if (saved) {
+            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+            if (percentInput) percentInput.value = saved.percent || "";
+            if (absoluteInput) absoluteInput.value = saved.absolute || "";
+            }
+        });
+
+    
+        generalDiscountInput.value = cartState.generalDiscount || "";
+        calculateFinalCheckoutTotal();
+
+        const salesIdEl = document.getElementById("sales-id");
+        if (salesIdEl) {
+            salesIdEl.value = cartState.salesId || ""; // always sync latest salesId, even if blank
+        }
+
 
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");
-        return;
-    }
-
-    cart.forEach(item => {
-        const itemRow = document.createElement("div");
-        itemRow.className = "checkout-item-card";
-        itemRow.setAttribute("data-item-id", item.item_id);
-
-        itemRow.innerHTML = `
-        <div class="item-header">
-            <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
-            <div class="item-info-flex">
-            <div class="title-qty-row">
-                <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
-                <div class="checkout-qty-controls">
-                <button class="qty-decrease" data-id="${item.item_id}">−</button>
-                <span class="checkout-qty-count">${item.qty}</span>
-                <button class="qty-increase" data-id="${item.item_id}">+</button>
-                </div>
-            </div>
-            </div>
-        </div>
-        <div class="discount-row">
-            <label class="discount-label">Discount for this item:</label>
-            <div class="discount-inline-inputs">
-            <input
-                type="number"
-                min="0"
-                max="100"
-                class="item-discount-input-percent"
-                placeholder="0"
-                data-id="${item.item_id}"
-                data-original-price="${item.sale_price.toFixed(2)}"
-                data-qty="${item.qty}"
-            /> %
-            or
-            <input
-                type="number"
-                min="0"
-                class="item-discount-input-absolute"
-                placeholder="0"
-                data-id="${item.item_id}"
-                data-original-price="${item.sale_price.toFixed(2)}"
-                data-qty="${item.qty}"
-            /> $
-            </div>
-            <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
-        </div>
-        `;
-
-        container.appendChild(itemRow);
-    });
-
-    // ✅ Updated quantity control handlers with per-location available_qty limit
-    container.querySelectorAll(".qty-increase").forEach(btn => {
-        btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        const target = cart.find(i => i.item_id === id);
-        if (target) {
-            const maxQty = target.available_qty || 0;
-            if (maxQty > 0 && target.qty < maxQty) {
-            target.qty += 1;
-            } else {
-            showToast(`❌ Cannot add more than ${maxQty} at the selected location for ${target.title}`, "error");
-            }
-            updateCartUI();
-            saveCartToStorage();
-            renderCartItems();
-            openCheckoutModal();
-        }
-        });
-    });
-
-    container.querySelectorAll(".qty-decrease").forEach(btn => {
-        btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        const targetIndex = cart.findIndex(i => i.item_id === id);
-
-        if (targetIndex !== -1) {
-            const target = cart[targetIndex];
-            if (target.qty > 1) {
-            target.qty -= 1;
-            } else {
-            cart.splice(targetIndex, 1);
-            delete cartState.itemDiscounts[id];
-            }
-            updateCartUI();
-            saveCartToStorage();
-            renderCartItems();
-            setTimeout(openCheckoutModal, 0);
-        }
-        });
-    });
-
-    const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
-    if (checkoutBreakdownEl) {
-        const tierLabels = {
-        "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
-        "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
-        "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
-        };
-
-        let breakdownHtml = "";
-        let anyInput = false;
-
-        for (const id in tierLabels) {
-        const input = document.getElementById(id);
-        const count = parseInt(input?.value || "0");
-        const unitValue = tierLabels[id].value;
-
-        if (count > 0) {
-            anyInput = true;
-            const lineTotal = count * unitValue;
-            breakdownHtml += `
-            <p class="credit-breakdown-line">
-                <span class="tier-emoji">${tierLabels[id].emoji}</span>
-                <span class="tier-label">${tierLabels[id].label}</span>
-                <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
-            </p>
-            `;
-        }
-        }
-
-        if (anyInput) {
-        checkoutBreakdownEl.innerHTML = breakdownHtml;
-        checkoutBreakdownEl.classList.remove("hidden");
-        } else {
-        checkoutBreakdownEl.innerHTML = "";
-        checkoutBreakdownEl.classList.add("hidden");
-        }
-    }
-
-    const checkoutSummaryEl = document.getElementById("checkout-summary-display");
-    if (checkoutSummaryEl) {
-        const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
-
-        const creditEl = document.getElementById("credit-value-display");
-        const rawCredit = creditEl?.textContent.replace("$", "") || "0";
-        const creditValue = parseFloat(rawCredit) || 0;
-
-        const finalBalance = subtotal - creditValue;
-
-        const balanceLabel = finalBalance < 0 ? "Balance Left" : finalBalance > 0 ? "Owes Store" : "Settled";
-        const colorClass = finalBalance < 0 ? "credit-positive" : finalBalance > 0 ? "credit-negative" : "credit-neutral";
-
-        let totalDiscount = 0;
-        cart.forEach(item => {
-        const discountInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-        const discountPercent = discountInput ? parseFloat(discountInput.value) || 0 : 0;
-        const originalTotal = item.sale_price * item.qty;
-        totalDiscount += originalTotal * (discountPercent / 100);
-        });
-
-        checkoutSummaryEl.innerHTML = `
-        <div class="checkout-summary-card">
-            <p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>
-            <p><strong>Discounts Applied:</strong> -$${totalDiscount.toFixed(2)}</p>
-            <p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>
-            <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${finalBalance.toFixed(2)}</p>
-        </div>
-        `;
-        checkoutSummaryEl.classList.remove("hidden");
-    }
-
-    container.querySelectorAll(".item-discount-input-absolute").forEach(input => {
-        input.addEventListener("input", () => {
-        const id = input.dataset.id;
-        const absoluteValue = parseFloat(input.value) || 0;
-        const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
-        const qty = parseInt(input.dataset.qty) || 1;
-
-        const maxDiscount = originalPrice * qty;
-        const cappedValue = Math.min(absoluteValue, maxDiscount);
-        const calculatedPercent = (cappedValue / maxDiscount) * 100;
-
-        const percentInput = container.querySelector(`.item-discount-input-percent[data-id="${id}"]`);
-        if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
-
-        calculateFinalCheckoutTotal();
-        saveCartToStorage();
-        });
-    });
-
-    container.querySelectorAll(".item-discount-input-percent").forEach(input => {
-        input.addEventListener("input", () => {
-        const id = input.dataset.id;
-        const percentValue = parseFloat(input.value) || 0;
-        const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
-        const qty = parseInt(input.dataset.qty) || 1;
-
-        const maxDiscount = originalPrice * qty;
-        const calculatedAbsolute = (percentValue / 100) * maxDiscount;
-
-        const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
-        if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
-
-        calculateFinalCheckoutTotal();
-        saveCartToStorage();
-        });
-    });
-
-    updateGeneralDiscountInputFromCartState();
-    cartState.items.forEach(item => {
-        const saved = cartState.itemDiscounts[item.item_id];
-        if (saved) {
-        const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-        const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-        if (percentInput) percentInput.value = saved.percent || "";
-        if (absoluteInput) absoluteInput.value = saved.absolute || "";
-        }
-    });
-
-    generalDiscountInput.value = cartState.generalDiscount || "";
-    calculateFinalCheckoutTotal();
-
-    modal.classList.remove("hidden");
-    document.body.classList.add("modal-open");
     }
 
     async function closeCheckoutModal() {
@@ -770,7 +788,6 @@ window.addEventListener("beforeunload", async () => {
     for (const locationId of locksToAcquire) {
         console.log(`🔎 Checking lock status for location ${locationId}`);
 
-        // Step 1: fetch current lock status
         const { data: locData, error: fetchError } = await supabase
         .from("item_stock_locations")
         .select("locked_by")
@@ -787,16 +804,15 @@ window.addEventListener("beforeunload", async () => {
         if (locData.locked_by) {
         if (locData.locked_by === userId) {
             console.log(`✅ Location ${locationId} is already locked by you. Proceeding.`);
-            continue; // ✔️ skip re-locking if you already own it
+            continue; // ✔️ skip re-locking if already owned
         } else {
             console.warn(`⚠️ Location ${locationId} is locked by another user.`);
-            showToast(`⚠️ Location ${locationId} is locked by someone else.`, "warning");
+            showToast(`⚠️ Location is locked by someone else.`, "warning");
             allLocked = false;
             continue;
         }
         }
 
-        // Step 2: acquire lock if not locked by anyone
         console.log(`🔒 Locking location ${locationId} for user ${userId}`);
         const { error: lockError } = await supabase
         .from("item_stock_locations")
@@ -812,16 +828,18 @@ window.addEventListener("beforeunload", async () => {
         allLocked = false;
         } else {
         console.log(`✅ Successfully locked location ${locationId}.`);
-        showToast(`✅ Successfully locked stock for your checkout.`, "success");
+        showToast(`✅ Locked stock for checkout.`, "success");
         }
     }
+
+    if (allLocked) locksAcquired = true; // 🔐 mark locks as acquired
 
     return allLocked;
     }
 
     //unlocking mechanism
     async function unlockSelectedLocationsForCurrentUser() {
-    const { data: currentUser, error: userError } = await supabase.auth.getUser();
+        const { data: currentUser, error: userError } = await supabase.auth.getUser();
     if (userError || !currentUser?.user) {
         console.warn("❌ Cannot unlock locations: no authenticated user.");
         return;
@@ -842,6 +860,8 @@ window.addEventListener("beforeunload", async () => {
     } else {
         console.log("✅ Successfully unlocked all locations locked by this user.");
     }
+
+    locksAcquired = false; // 🔓 reset flag so locks can be acquired again next time
     }
 
     // === Attach modal listeners
@@ -898,7 +918,6 @@ window.addEventListener("beforeunload", async () => {
         saveCartToStorage();
         });
     }
-
 
     // === Main Calculation Function
     function calculateFinalCheckoutTotal() {
@@ -999,8 +1018,7 @@ window.addEventListener("beforeunload", async () => {
         }
     }
 
-
-    //#endregion
+  //#endregion
 
   //#region logic to be able to preserve the cart even if something changes by accident
     const STORAGE_KEY = "checkout-cart-og";
@@ -1025,21 +1043,22 @@ function saveCartToStorage() {
     });
 
     const salesIdVal = document.getElementById("sales-id")?.value || "";
-    cartState.salesId = salesIdVal;
+    const platformVal = document.getElementById("platform-select")?.value || "";
 
+    cartState.salesId = salesIdVal;
     cartState.credits = creditInputs;
     cartState.generalDiscount = generalDiscountVal;
     cartState.itemDiscounts = perItemDiscounts;
 
-    // ✅ Save flagged state
     const persistedState = {
         ...cartState,
         flagged: cartState.flagged || false,
+        platformFee: cartState.platformFee || 0,
+        platform: platformVal, // 🔥 Save platform selection
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
 }
-
 
 async function loadCartFromStorage() {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -1058,15 +1077,21 @@ async function loadCartFromStorage() {
         );
         cartState.items = signedItems;
 
-        // Restore other cart state
         cartState.credits = parsed.credits || cartState.credits;
         cartState.generalDiscount = parsed.generalDiscount || "";
         cartState.itemDiscounts = parsed.itemDiscounts || {};
         cartState.salesId = parsed.salesId || "";
-        cartState.flagged = parsed.flagged || false; // ✅ Restore flagged
+        cartState.flagged = parsed.flagged || false;
+        cartState.platformFee = parsed.platformFee !== undefined ? parsed.platformFee : 0;
 
         const salesIdEl = document.getElementById("sales-id");
         if (salesIdEl) salesIdEl.value = cartState.salesId;
+
+        // 🔥 Restore platform dropdown
+        const platformSelect = document.getElementById("platform-select");
+        if (platformSelect && parsed.platform) {
+            platformSelect.value = parsed.platform;
+        }
 
         updateCartUI();
         renderCartItems();
@@ -1085,7 +1110,6 @@ async function loadCartFromStorage() {
         cartState.items = [];
     }
 }
-
 
     function clearCart() {
         cartState = {
@@ -1203,122 +1227,134 @@ async function loadCartFromStorage() {
         return true; // Password correct
     }
 
+async function finalizeCheckout(password) {
+  const loadingOverlay = document.getElementById("loading-overlay");
 
-    async function finalizeCheckout(password) {
-        const loadingOverlay = document.getElementById("loading-overlay");
+  try {
+    loadingOverlay?.classList.add("active");
 
-        try {
-            loadingOverlay?.classList.add("active");
+    // ✅ Verify password
+    const isValid = await verifyPasswordForCurrentUser(password);
+    if (!isValid) throw new Error("Incorrect password. Please try again.");
 
-            // ✅ Verify password
-            const isValid = await verifyPasswordForCurrentUser(password);
-            if (!isValid) throw new Error("Incorrect password. Please try again.");
+    // ✅ Get cart & user
+    const cart = checkoutModule.getCart();
+    const { data, error: userError } = await supabase.auth.getUser();
+    if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
+    const user = data.user;
 
-            // ✅ Get cart & user
-            const cart = checkoutModule.getCart();
-            const { data, error: userError } = await supabase.auth.getUser();
-            if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
-            const user = data.user;
+    const platform = document.getElementById("platform-select")?.value || "none";
+    const salesId = document.getElementById("sales-id")?.value || null;
+    const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
+    const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
 
-            const platform = document.getElementById("platform-select")?.value || "none";
-            const salesId = document.getElementById("sales-id")?.value || null;
-            const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
-            const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
+    if (!cartState) throw new Error("Cart state is missing or corrupted.");
 
-            if (!cartState || !cartState.itemDiscounts) {
-                throw new Error("Cart state is missing or corrupted.");
-            }
+    // ✅ Use persisted flagged state
+    const flagged = !!cartState.flagged;
 
-            // ✅ Use persisted flagged state
-            const flagged = !!cartState.flagged;
+    // ✅ First: insert per-item transaction logs
+    for (const item of cart) {
+      const physicalLocId = item.physical_location_id;
+      if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
 
-            // ✅ Update stock quantities using your RPC and insert transactions
-            for (const item of cart) {
-                const { error: rpcError } = await supabase.rpc('decrement_stock', {
-                    item_id: item.item_id,
-                    qty: item.qty,
-                });
+      const txPayload = {
+        item_id: item.item_id,
+        location_id: physicalLocId,
+        quantity: -item.qty,
+        action_type: 'checkout',
+        confirmed_at: new Date().toISOString(),
+        user_id: user.id,
+        email: user.email,
+        notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
+        method: 'checkout',
+      };
 
-                if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
-
-                const txPayload = {
-                    item_id: item.item_id,
-                    quantity: -item.qty,
-                    action_type: 'sale',
-                    confirmed_at: new Date().toISOString(),
-                    user_id: user.id,
-                    email: user.email,
-                    notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
-                    method: 'checkout',
-                };
-
-                const { error: txError } = await supabase.from("stock_transactions").insert(txPayload);
-                if (txError) throw new Error(`Failed transaction log: ${item.title} — ${txError.message}`);
-            }
-
-            // ✅ Calculate credits
-            let creditValue = 0;
-            const creditEl = document.getElementById("credit-value-display");
-            if (creditEl) {
-                const raw = creditEl.textContent.replace("$", "");
-                creditValue = parseFloat(raw) || 0;
-            }
-
-            // ✅ Calculate effective discount again (optional, but good for audit)
-            let subtotalBeforeDiscounts = 0;
-            let perItemDiscountTotal = 0;
-            cart.forEach(item => {
-                const qty = item.qty || 1;
-                const originalTotal = item.sale_price * qty;
-                subtotalBeforeDiscounts += originalTotal;
-
-                const savedDiscount = checkoutModule.cartState.itemDiscounts[item.item_id];
-                if (savedDiscount) {
-                    const percent = parseFloat(savedDiscount.percent || "0") || 0;
-                    perItemDiscountTotal += (percent / 100) * originalTotal;
-                }
-            });
-            const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
-            const denominator = Math.max(adjustedSubtotal, 0.01);
-            const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
-            const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
-            const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
-            const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
-
-            // ✅ Insert sales audit
-            const auditPayload = {
-                user_id: user.id,
-                external_sales_id: salesId,
-                platform: platform,
-                platform_fee: checkoutModule.cartState.platformFee,
-                credits_applied: creditValue,
-                effective_discount: discountPercentAfterCredits,
-                flagged: flagged,
-                verified_method: 'password',
-                verified_at: new Date().toISOString(),
-                created_at: new Date().toISOString(),
-                notes: `Completed via checkout, flagged=${flagged}`,
-                cart_snapshot: cart,
-                total_amount: finalTotal,
-            };
-
-            const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
-            if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
-
-            // ✅ Clear cart & success message
-            await unlockSelectedLocationsForCurrentUser();
-            checkoutModule.clearCart();
-            showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
-            
-        } catch (err) {
-            console.error("❌ Checkout error:", err);
-            showToast(`❌ Checkout failed: ${err.message}`, "error");
-            throw err;
-        } finally {
-            loadingOverlay?.classList.remove("active");
-        }
+      const { error: itemTxError } = await supabase.from("stock_transactions").insert(txPayload);
+      if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
     }
+
+    // ✅ Calculate credits
+    let creditValue = 0;
+    const creditEl = document.getElementById("credit-value-display");
+    if (creditEl) {
+      const raw = creditEl.textContent.replace("$", "");
+      creditValue = parseFloat(raw) || 0;
+    }
+
+    // ✅ Calculate effective discount again (with safe fallback)
+    let subtotalBeforeDiscounts = 0;
+    let perItemDiscountTotal = 0;
+    const discounts = cartState.itemDiscounts || {}; // ✅ always use a defined object
+    cart.forEach(item => {
+      const qty = item.qty || 1;
+      const originalTotal = item.sale_price * qty;
+      subtotalBeforeDiscounts += originalTotal;
+
+      const savedDiscount = discounts[item.item_id];
+      const percent = savedDiscount ? parseFloat(savedDiscount.percent || "0") || 0 : 0;
+      perItemDiscountTotal += (percent / 100) * originalTotal;
+    });
+
+    const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
+    const denominator = Math.max(adjustedSubtotal, 0.01);
+    const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
+    const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
+    const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
+    const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
+
+    // ✅ Insert sales audit
+    const auditPayload = {
+      user_id: user.id,
+      external_sales_id: salesId,
+      platform: platform,
+      platform_fee: checkoutModule.cartState.platformFee,
+      credits_applied: creditValue,
+      effective_discount: discountPercentAfterCredits,
+      flagged: flagged,
+      verified_method: 'password',
+      verified_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      notes: `Completed via checkout, flagged=${flagged}`,
+      cart_snapshot: cart,
+      total_amount: finalTotal,
+    };
+
+    const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
+    if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
+
+    // ✅ Second: only if everything above succeeded, decrement stock
+    for (const item of cart) {
+      const locationId = item.selected_location_id;
+      if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
+
+      console.log(`🔄 Decrementing stock at location ${locationId} by ${item.qty} units...`);
+      const { error: rpcError } = await supabase.rpc('subtract_quantity', {
+        loc_id: locationId,
+        delta: item.qty,
+      });
+      if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
+    }
+
+    // ✅ Unlock locations & clear cart
+    await unlockSelectedLocationsForCurrentUser();
+    checkoutModule.clearCart();
+
+    showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
+
+  } catch (err) {
+    console.error("❌ Checkout error:", err);
+    showToast(`❌ Checkout failed: ${err.message}`, "error");
+    throw err;
+  } finally {
+    loadingOverlay?.classList.remove("active");
+  }
+}
+
+
+
   //#endregion
+   
     function updateCreditInputsFromCartState() {
     for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
         const el = document.getElementById(key);
@@ -1335,7 +1371,6 @@ async function loadCartFromStorage() {
     (async () => {
     await loadCartFromStorage();
     })();
-
 
   return {
     setupCheckoutToggleButton,
