@@ -226,11 +226,23 @@ window.checkoutModule = (function () {
         });
 
         if (item.selected_location_id) {
+            // 🔹 Pre-select saved location if present
             dropdown.value = item.selected_location_id;
             const preselectedOption = dropdown.querySelector(`option[value="${item.selected_location_id}"]`);
             if (preselectedOption) {
-            const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
-            item.available_qty = availableQty; // ✅ Load saved location's quantity
+                const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
+                item.available_qty = availableQty;
+            }
+        } else {
+            // 🔹 No previous selection → set selected_location_id to the first available option
+            const firstOption = dropdown.options[0];
+            if (firstOption) {
+                const selectedLocId = firstOption.value;
+                const availableQty = parseInt(firstOption.dataset.qty) || 0;
+                item.selected_location_id = selectedLocId;
+                item.available_qty = availableQty;
+                dropdown.value = selectedLocId;
+                saveCartToStorage();
             }
         }
         } catch (err) {
@@ -475,7 +487,13 @@ window.checkoutModule = (function () {
   //#endregion
 
   //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
-    function openCheckoutModal() {
+    async function openCheckoutModal() {
+    const locked = await lockSelectedLocationsForCurrentUser();
+    if (!locked) {
+        showToast("❌ Checkout canceled: could not lock all items.", "error");
+        return; // 🚫 don't open modal if locking failed
+    }
+    
     const modal = document.getElementById("checkout-modal");
     const container = document.getElementById("checkout-items-container");
     const generalDiscountInput = document.getElementById("general-discount");
@@ -725,6 +743,79 @@ window.checkoutModule = (function () {
     document.getElementById("checkout-modal").classList.add("hidden");
     document.body.classList.remove("modal-open");
     }
+
+    //locking the selected locations for other users 
+async function lockSelectedLocationsForCurrentUser() {
+  const { data: currentUser, error: userError } = await supabase.auth.getUser();
+  if (userError || !currentUser?.user) {
+    console.warn("❌ Cannot lock locations: no authenticated user.");
+    showToast("❌ Could not lock items: you are not signed in.", "error");
+    return false;
+  }
+
+  const userId = currentUser.user.id;
+  const locksToAcquire = cartState.items
+    .filter(item => item.selected_location_id)
+    .map(item => item.selected_location_id);
+
+  console.log("🔒 Attempting to lock selected_location_ids:", locksToAcquire);
+
+  let allLocked = true;
+
+  for (const locationId of locksToAcquire) {
+    console.log(`🔎 Checking lock status for location ${locationId}`);
+
+    // Step 1: fetch current lock status
+    const { data: locData, error: fetchError } = await supabase
+      .from("item_stock_locations")
+      .select("locked_by")
+      .eq("id", locationId)
+      .single();
+
+    if (fetchError || !locData) {
+      console.error(`❌ Failed to fetch lock status for location ${locationId}:`, fetchError?.message);
+      showToast(`❌ Could not check location ${locationId}: ${fetchError?.message || "Unknown error"}`, "error");
+      allLocked = false;
+      continue;
+    }
+
+    if (locData.locked_by) {
+      if (locData.locked_by === userId) {
+        console.log(`✅ Location ${locationId} is already locked by you. Proceeding.`);
+        continue; // ✔️ skip re-locking if you already own it
+      } else {
+        console.warn(`⚠️ Location ${locationId} is locked by another user.`);
+        showToast(`⚠️ Location ${locationId} is locked by someone else.`, "warning");
+        allLocked = false;
+        continue;
+      }
+    }
+
+    // Step 2: acquire lock if not locked by anyone
+    console.log(`🔒 Locking location ${locationId} for user ${userId}`);
+    const { error: lockError } = await supabase
+      .from("item_stock_locations")
+      .update({
+        locked_by: userId,
+        locked_at: new Date().toISOString()
+      })
+      .eq("id", locationId);
+
+    if (lockError) {
+      console.error(`❌ Failed to lock location ${locationId}:`, lockError.message);
+      showToast(`❌ Could not lock location ${locationId}: ${lockError.message}`, "error");
+      allLocked = false;
+    } else {
+      console.log(`✅ Successfully locked location ${locationId}.`);
+      showToast(`✅ Successfully locked stock for your checkout.`, "success");
+    }
+  }
+
+  return allLocked;
+}
+
+
+
 
     // === Attach modal listeners
     function setupCheckoutModalListeners() {
@@ -1233,6 +1324,7 @@ async function finalizeCheckout(password) {
     setupCartTabs,
     setupCreditTierListeners,
     setupCheckoutConfirmationModal,
-    verifyPasswordForCurrentUser
+    verifyPasswordForCurrentUser,
+    lockSelectedLocationsForCurrentUser
   };
 })();
