@@ -1275,14 +1275,11 @@ async function finalizeCheckout(password) {
     const loadingOverlay = document.getElementById("loading-overlay");
 
     try {
-        // ✅ Show loading overlay immediately
         loadingOverlay?.classList.add("active");
 
-        // ✅ Verify password
         const isValid = await verifyPasswordForCurrentUser(password);
         if (!isValid) throw new Error("Incorrect password. Please try again.");
 
-        // ✅ Get cart & authenticated user
         const cart = checkoutModule.getCart();
         const { data, error: userError } = await supabase.auth.getUser();
         if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
@@ -1296,7 +1293,7 @@ async function finalizeCheckout(password) {
         if (!cartState) throw new Error("Cart state is missing or corrupted.");
         const flagged = !!cartState.flagged;
 
-        // ✅ Insert per-item transaction logs
+        // Insert per-item transaction logs
         for (const item of cart) {
             const physicalLocId = item.physical_location_id;
             if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
@@ -1317,7 +1314,7 @@ async function finalizeCheckout(password) {
             if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
         }
 
-        // ✅ Calculate credits
+        // Calculate credits
         let creditValue = 0;
         const creditEl = document.getElementById("credit-value-display");
         if (creditEl) {
@@ -1325,12 +1322,12 @@ async function finalizeCheckout(password) {
             creditValue = parseFloat(raw) || 0;
         }
 
-        // ✅ Calculate discounts & details
+        // Calculate subtotal and discounts
         let subtotalBeforeDiscounts = 0;
         let perItemDiscountTotal = 0;
         const discounts = cartState.itemDiscounts || {};
 
-        const perItemDiscountsDetails = cart.map(item => {
+        const cartDetails = cart.map(item => {
             const qty = item.qty || 1;
             const originalTotal = item.sale_price * qty;
 
@@ -1348,6 +1345,11 @@ async function finalizeCheckout(password) {
                 original_total: originalTotal,
                 discount_percent: percent,
                 discount_amount: discountAmount,
+                sale_price: item.sale_price,
+                photo_path: item.photo_path || "",
+                selected_location_id: item.selected_location_id,
+                physical_location_id: item.physical_location_id,
+                available_qty: item.available_qty,
             };
         });
 
@@ -1358,43 +1360,37 @@ async function finalizeCheckout(password) {
         const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
         const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
 
-        // ✅ Create sanitized cart snapshot: keep permanent photo_path, remove signed URL
-        const cartSnapshot = cart.map(item => ({
-            item_id: item.item_id,
-            title: item.title,
-            qty: item.qty,
-            sale_price: item.sale_price,
-            selected_location_id: item.selected_location_id,
-            physical_location_id: item.physical_location_id,
-            available_qty: item.available_qty,
-            photo_path: item.photo_path || "", // ✅ permanent path for later re-signing
-            // explicitly omit image_url so it's not saved in audit
-        }));
+        const owesStore = finalTotal;
+        const platformFeeAmount = (cartState.platformFee / 100) * owesStore;
+        const profitAmount = owesStore - platformFeeAmount;
 
-        // ✅ Insert sales audit with all details
+        // Build the audit payload matching your redesigned table
         const auditPayload = {
-            user_id: user.id,
             external_sales_id: salesId,
-            platform: platform,
-            platform_fee: cartState.platformFee,
+            subtotal: subtotalBeforeDiscounts,
             credits_applied: creditValue,
-            effective_discount: discountPercentAfterCredits,
+            owes_after_credit: adjustedSubtotal,
+            per_item_discount: perItemDiscountTotal,
+            general_discount: generalDiscountAmount,
+            effective_discount_pct: discountPercentAfterCredits,
+            owes_store: owesStore,
+            platform_fee_amount: platformFeeAmount,
+            platform_fee_percent: cartState.platformFee,
+            profit_amount: profitAmount,
+            platform: platform,
+            cart_snapshot: cartDetails,
             flagged: flagged,
+            notes: `Completed via checkout, flagged=${flagged}`,
             verified_method: 'password',
             verified_at: new Date().toISOString(),
             created_at: new Date().toISOString(),
-            notes: `Completed via checkout, flagged=${flagged}`,
-            cart_snapshot: cartSnapshot, // ✅ clean snapshot with photo_path
-            per_item_discounts: perItemDiscountsDetails,
-            general_discount_percent: generalDiscountPercent,
-            general_discount_amount: generalDiscountAmount,
-            total_amount: finalTotal,
+            email: user.email,
+            user_id: user.id,
         };
 
         const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
         if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
 
-        // ✅ Decrement stock quantities
         for (const item of cart) {
             const locationId = item.selected_location_id;
             if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
@@ -1406,18 +1402,13 @@ async function finalizeCheckout(password) {
             });
             if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
         }
-        
-        // ✅ Collect all item IDs
-        const changedItemIds = cart.map(item => item.item_id);
 
-        // ✅ Update inventory version & record changed items
+        const changedItemIds = cart.map(item => item.item_id);
         await bumpInventoryVersion(changedItemIds);
 
-        // ✅ Unlock locations & clear cart
         await unlockSelectedLocationsForCurrentUser();
         checkoutModule.clearCart();
 
-        // ✅ Close modals ONLY if successful
         document.getElementById("checkout-modal")?.classList.add("hidden");
         document.getElementById("password-confirm-modal")?.classList.add("hidden");
         document.body.classList.remove("modal-open");
