@@ -110,7 +110,8 @@ window.checkoutModule = (function () {
             item_id: item.id,
             title: item.title || "Untitled",
             sale_price: parseFloat(item.sale_price || "0"),
-            image_url: signedUrl
+            image_url: signedUrl,                      // for immediate UI use
+            photo_path: photoRef,        // permanent storage path
         };
 
         addToCart(cartItem);
@@ -865,64 +866,64 @@ window.checkoutModule = (function () {
     }
 
     // === Attach modal listeners
-function setupCheckoutModalListeners() {
-    document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
-    document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
-    document.getElementById("general-discount")?.addEventListener("input", () => {
-        calculateFinalCheckoutTotal();
-        saveCartToStorage(); // ✅ Save general discount on change
-    });
-
-    // ✅ Save Sales ID immediately on input
-    document.getElementById("sales-id")?.addEventListener("input", () => {
-        saveCartToStorage();
-    });
-
-    // Live update per-item discount fields
-    document.addEventListener("input", function (e) {
-        if (e.target.classList.contains("item-discount-input")) {
+    function setupCheckoutModalListeners() {
+        document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
+        document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
+        document.getElementById("general-discount")?.addEventListener("input", () => {
             calculateFinalCheckoutTotal();
-        }
-    });
+            saveCartToStorage(); // ✅ Save general discount on change
+        });
 
-    // === Listen to Apply Credit Tier button inside the modal
-    document.getElementById("open-credit-modal")?.addEventListener("click", () => {
-        // 1️⃣ Close the checkout modal
-        closeCheckoutModal();
+        // ✅ Save Sales ID immediately on input
+        document.getElementById("sales-id")?.addEventListener("input", () => {
+            saveCartToStorage();
+        });
 
-        // 2️⃣ Make sure the cart panel is open
-        const cartPanel = document.getElementById("cart-panel");
-        cartPanel.classList.remove("hidden");
-        document.body.classList.add("cart-open");
+        // Live update per-item discount fields
+        document.addEventListener("input", function (e) {
+            if (e.target.classList.contains("item-discount-input")) {
+                calculateFinalCheckoutTotal();
+            }
+        });
 
-        // 3️⃣ Activate the credits tab
-        const tabButtons = document.querySelectorAll(".cart-tab-btn");
-        const tabContents = document.querySelectorAll(".cart-tab-content");
+        // === Listen to Apply Credit Tier button inside the modal
+        document.getElementById("open-credit-modal")?.addEventListener("click", () => {
+            // 1️⃣ Close the checkout modal
+            closeCheckoutModal();
 
-        tabButtons.forEach(btn => btn.classList.remove("active"));
-        tabContents.forEach(content => content.classList.remove("active"));
+            // 2️⃣ Make sure the cart panel is open
+            const cartPanel = document.getElementById("cart-panel");
+            cartPanel.classList.remove("hidden");
+            document.body.classList.add("cart-open");
 
-        const creditsTabBtn = document.querySelector('.cart-tab-btn[data-tab="credits-view"]');
-        const creditsTabContent = document.getElementById("credits-view");
+            // 3️⃣ Activate the credits tab
+            const tabButtons = document.querySelectorAll(".cart-tab-btn");
+            const tabContents = document.querySelectorAll(".cart-tab-content");
 
-        creditsTabBtn?.classList.add("active");
-        creditsTabContent?.classList.add("active");
-    });
+            tabButtons.forEach(btn => btn.classList.remove("active"));
+            tabContents.forEach(content => content.classList.remove("active"));
 
-    // 🛒 Listen for platform selection
-    document.getElementById("platform-select")?.addEventListener("change", (e) => {
-        const value = e.target.value;
-        if (value === "whatnot") {
-            cartState.platformFee = 11.8;
-        } else if (value === "ebay") {
-            cartState.platformFee = 1;
-        } else {
-            cartState.platformFee = 0;
-        }
-        calculateFinalCheckoutTotal();
-        saveCartToStorage();
-    });
-}
+            const creditsTabBtn = document.querySelector('.cart-tab-btn[data-tab="credits-view"]');
+            const creditsTabContent = document.getElementById("credits-view");
+
+            creditsTabBtn?.classList.add("active");
+            creditsTabContent?.classList.add("active");
+        });
+
+        // 🛒 Listen for platform selection
+        document.getElementById("platform-select")?.addEventListener("change", (e) => {
+            const value = e.target.value;
+            if (value === "whatnot") {
+                cartState.platformFee = 11.8;
+            } else if (value === "ebay") {
+                cartState.platformFee = 1;
+            } else {
+                cartState.platformFee = 0;
+            }
+            calculateFinalCheckoutTotal();
+            saveCartToStorage();
+        });
+    }
 
 
     // === Main Calculation Function
@@ -1029,146 +1030,144 @@ function setupCheckoutModalListeners() {
   //#region logic to be able to preserve the cart even if something changes by accident
     const STORAGE_KEY = "checkout-cart-og";
 
-function saveCartToStorage() {
-    const creditInputs = {
-        "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
-        "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
-        "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
-    };
-
-    const generalDiscountVal = document.getElementById("general-discount")?.value || "";
-
-    const perItemDiscounts = {};
-    cartState.items.forEach(item => {
-        const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-        const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-        perItemDiscounts[item.item_id] = {
-            percent: percentInput?.value || "",
-            absolute: absoluteInput?.value || "",
+    function saveCartToStorage() {
+        const creditInputs = {
+            "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
+            "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
+            "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
         };
-    });
 
-    const salesIdVal = document.getElementById("sales-id")?.value || "";
-    const platformVal = document.getElementById("platform-select")?.value || "";
+        const generalDiscountVal = document.getElementById("general-discount")?.value || "";
 
-    cartState.salesId = salesIdVal;
-    cartState.credits = creditInputs;
-    cartState.generalDiscount = generalDiscountVal;
-    cartState.itemDiscounts = perItemDiscounts;
-
-    const persistedState = {
-        ...cartState,
-        flagged: cartState.flagged || false,
-        platformFee: cartState.platformFee || 0,
-        platform: platformVal, // 🔥 Save platform selection
-    };
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
-}
-
-async function loadCartFromStorage() {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return;
-
-    try {
-        const parsed = JSON.parse(stored);
-
-        // Restore items + sign images
-        const rawItems = parsed.items || [];
-        const signedItems = await Promise.all(
-            rawItems.map(async (item) => {
-                const signedUrl = await resolveImageUrl(item.image_url || "");
-                return { ...item, image_url: signedUrl };
-            })
-        );
-        cartState.items = signedItems;
-
-        cartState.credits = parsed.credits || cartState.credits;
-        cartState.generalDiscount = parsed.generalDiscount || "";
-        cartState.itemDiscounts = parsed.itemDiscounts || {};
-        cartState.salesId = parsed.salesId || "";
-        cartState.flagged = parsed.flagged || false;
-        cartState.platformFee = parsed.platformFee !== undefined ? parsed.platformFee : 0;
-
-        const salesIdEl = document.getElementById("sales-id");
-        if (salesIdEl && parsed.salesId) {
-            salesIdEl.value = parsed.salesId; // ✅ restore saved Sales ID input
-        } else if (salesIdEl) {
-            salesIdEl.value = ""; // clear input if none saved
-        }
-
-        const platformSelect = document.getElementById("platform-select");
-        if (platformSelect && parsed.platform) {
-            platformSelect.value = parsed.platform;
-        }
-
-        updateCartUI();
-        renderCartItems();
-        updateCreditInputsFromCartState();
-        updateGeneralDiscountInputFromCartState();
-        updateCreditValue();
-
-        // ✅ only calculate total if checkout modal elements exist
-        if (document.getElementById("checkout-final-price") && document.getElementById("general-discount")) {
-            calculateFinalCheckoutTotal();
-        }
-
-        signedItems.forEach(item => {
-            const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-            if (card) card.classList.add("in-cart");
+        const perItemDiscounts = {};
+        cartState.items.forEach(item => {
+            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+            perItemDiscounts[item.item_id] = {
+                percent: percentInput?.value || "",
+                absolute: absoluteInput?.value || "",
+            };
         });
 
-    } catch (e) {
-        console.warn("❌ Could not parse or restore stored cart data:", e);
-        cartState.items = [];
-    }
-}
+        const salesIdVal = document.getElementById("sales-id")?.value || "";
+        const platformVal = document.getElementById("platform-select")?.value || "";
 
-function clearCart() {
-    cartState = {
-        items: [],
-        credits: {
-            "credit-3mm": "0",
-            "credit-5mm": "0",
-            "credit-8mm": "0",
-        },
-        generalDiscount: "",
-        itemDiscounts: {},
-        platformFee: 0,  // ✅ reset platformFee
-        salesId: "",     // ✅ reset salesId
-        flagged: false,  // ✅ reset flagged
-    };
+        cartState.salesId = salesIdVal;
+        cartState.credits = creditInputs;
+        cartState.generalDiscount = generalDiscountVal;
+        cartState.itemDiscounts = perItemDiscounts;
 
-    localStorage.removeItem(STORAGE_KEY);
+        const persistedState = {
+            ...cartState,
+            flagged: cartState.flagged || false,
+            platformFee: cartState.platformFee || 0,
+            platform: platformVal, // 🔥 Save platform selection
+        };
 
-    document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
-    document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
-
-    updateCartUI();
-    updateCreditInputsFromCartState();
-    updateGeneralDiscountInputFromCartState();
-    renderCartItems();
-    calculateFinalCheckoutTotal();
-
-    const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
-    if (previewSummaryContainer) {
-        previewSummaryContainer.innerHTML = "";
-        previewSummaryContainer.classList.add("hidden");
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
     }
 
-    const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
-    if (checkoutBreakdownEl) {
-        checkoutBreakdownEl.innerHTML = "";
-        checkoutBreakdownEl.classList.add("hidden");
+    async function loadCartFromStorage() {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) return;
+
+        try {
+            const parsed = JSON.parse(stored);
+
+            // 🔥 Restore items and always re-sign from the saved stable photo_path
+            const rawItems = parsed.items || [];
+            const signedItems = await Promise.all(
+                rawItems.map(async (item) => {
+                    const signedUrl = await resolveImageUrl(item.photo_path || "");
+                    return { ...item, image_url: signedUrl }; // keep photo_path intact
+                })
+            );
+            cartState.items = signedItems;
+
+            cartState.credits = parsed.credits || cartState.credits;
+            cartState.generalDiscount = parsed.generalDiscount || "";
+            cartState.itemDiscounts = parsed.itemDiscounts || {};
+            cartState.salesId = parsed.salesId || "";
+            cartState.flagged = parsed.flagged || false;
+            cartState.platformFee = parsed.platformFee !== undefined ? parsed.platformFee : 0;
+
+            const salesIdEl = document.getElementById("sales-id");
+            if (salesIdEl) {
+                salesIdEl.value = cartState.salesId || "";
+            }
+
+            const platformSelect = document.getElementById("platform-select");
+            if (platformSelect && parsed.platform) {
+                platformSelect.value = parsed.platform;
+            }
+
+            updateCartUI();
+            renderCartItems();
+            updateCreditInputsFromCartState();
+            updateGeneralDiscountInputFromCartState();
+            updateCreditValue();
+
+            // ✅ only calculate total if checkout modal elements exist
+            if (document.getElementById("checkout-final-price") && document.getElementById("general-discount")) {
+                calculateFinalCheckoutTotal();
+            }
+
+            signedItems.forEach(item => {
+                const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+                if (card) card.classList.add("in-cart");
+            });
+
+        } catch (e) {
+            console.warn("❌ Could not parse or restore stored cart data:", e);
+            cartState.items = [];
+        }
     }
 
-    // 🔥 Explicitly clear Sales ID and platform inputs
-    const salesIdEl = document.getElementById("sales-id");
-    if (salesIdEl) salesIdEl.value = "";
+    function clearCart() {
+        cartState = {
+            items: [],
+            credits: {
+                "credit-3mm": "0",
+                "credit-5mm": "0",
+                "credit-8mm": "0",
+            },
+            generalDiscount: "",
+            itemDiscounts: {},
+            platformFee: 0,  // ✅ reset platformFee
+            salesId: "",     // ✅ reset salesId
+            flagged: false,  // ✅ reset flagged
+        };
 
-    const platformSelect = document.getElementById("platform-select");
-    if (platformSelect) platformSelect.value = "";
-}
+        localStorage.removeItem(STORAGE_KEY);
+
+        document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
+        document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+
+        updateCartUI();
+        updateCreditInputsFromCartState();
+        updateGeneralDiscountInputFromCartState();
+        renderCartItems();
+        calculateFinalCheckoutTotal();
+
+        const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
+        if (previewSummaryContainer) {
+            previewSummaryContainer.innerHTML = "";
+            previewSummaryContainer.classList.add("hidden");
+        }
+
+        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+        if (checkoutBreakdownEl) {
+            checkoutBreakdownEl.innerHTML = "";
+            checkoutBreakdownEl.classList.add("hidden");
+        }
+
+        // 🔥 Explicitly clear Sales ID and platform inputs
+        const salesIdEl = document.getElementById("sales-id");
+        if (salesIdEl) salesIdEl.value = "";
+
+        const platformSelect = document.getElementById("platform-select");
+        if (platformSelect) platformSelect.value = "";
+    }
 
   //#endregion
 
@@ -1272,18 +1271,18 @@ function clearCart() {
         return true; // Password correct
     }
 
-    async function finalizeCheckout(password) {
+async function finalizeCheckout(password) {
     const loadingOverlay = document.getElementById("loading-overlay");
 
     try {
-        // ✅ Show loading overlay right away
+        // ✅ Show loading overlay immediately
         loadingOverlay?.classList.add("active");
 
-        // ✅ Verify password first
+        // ✅ Verify password
         const isValid = await verifyPasswordForCurrentUser(password);
         if (!isValid) throw new Error("Incorrect password. Please try again.");
 
-        // ✅ Get cart & user
+        // ✅ Get cart & authenticated user
         const cart = checkoutModule.getCart();
         const { data, error: userError } = await supabase.auth.getUser();
         if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
@@ -1299,31 +1298,31 @@ function clearCart() {
 
         // ✅ Insert per-item transaction logs
         for (const item of cart) {
-        const physicalLocId = item.physical_location_id;
-        if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
+            const physicalLocId = item.physical_location_id;
+            if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
 
-        const txPayload = {
-            item_id: item.item_id,
-            location_id: physicalLocId,
-            quantity: -item.qty,
-            action_type: 'checkout',
-            confirmed_at: new Date().toISOString(),
-            user_id: user.id,
-            email: user.email,
-            notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
-            method: 'checkout',
-        };
+            const txPayload = {
+                item_id: item.item_id,
+                location_id: physicalLocId,
+                quantity: -item.qty,
+                action_type: 'checkout',
+                confirmed_at: new Date().toISOString(),
+                user_id: user.id,
+                email: user.email,
+                notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
+                method: 'checkout',
+            };
 
-        const { error: itemTxError } = await supabase.from("stock_transactions").insert(txPayload);
-        if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
+            const { error: itemTxError } = await supabase.from("stock_transactions").insert(txPayload);
+            if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
         }
 
         // ✅ Calculate credits
         let creditValue = 0;
         const creditEl = document.getElementById("credit-value-display");
         if (creditEl) {
-        const raw = creditEl.textContent.replace("$", "");
-        creditValue = parseFloat(raw) || 0;
+            const raw = creditEl.textContent.replace("$", "");
+            creditValue = parseFloat(raw) || 0;
         }
 
         // ✅ Calculate discounts & details
@@ -1332,24 +1331,24 @@ function clearCart() {
         const discounts = cartState.itemDiscounts || {};
 
         const perItemDiscountsDetails = cart.map(item => {
-        const qty = item.qty || 1;
-        const originalTotal = item.sale_price * qty;
+            const qty = item.qty || 1;
+            const originalTotal = item.sale_price * qty;
 
-        subtotalBeforeDiscounts += originalTotal;
+            subtotalBeforeDiscounts += originalTotal;
 
-        const savedDiscount = discounts[item.item_id];
-        const percent = savedDiscount ? parseFloat(savedDiscount.percent || "0") || 0 : 0;
-        const discountAmount = (percent / 100) * originalTotal;
-        perItemDiscountTotal += discountAmount;
+            const savedDiscount = discounts[item.item_id];
+            const percent = savedDiscount ? parseFloat(savedDiscount.percent || "0") || 0 : 0;
+            const discountAmount = (percent / 100) * originalTotal;
+            perItemDiscountTotal += discountAmount;
 
-        return {
-            item_id: item.item_id,
-            title: item.title,
-            quantity: qty,
-            original_total: originalTotal,
-            discount_percent: percent,
-            discount_amount: discountAmount,
-        };
+            return {
+                item_id: item.item_id,
+                title: item.title,
+                quantity: qty,
+                original_total: originalTotal,
+                discount_percent: percent,
+                discount_amount: discountAmount,
+            };
         });
 
         const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
@@ -1359,24 +1358,37 @@ function clearCart() {
         const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
         const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
 
-        // ✅ Insert sales audit with complete details
+        // ✅ Create sanitized cart snapshot: keep permanent photo_path, remove signed URL
+        const cartSnapshot = cart.map(item => ({
+            item_id: item.item_id,
+            title: item.title,
+            qty: item.qty,
+            sale_price: item.sale_price,
+            selected_location_id: item.selected_location_id,
+            physical_location_id: item.physical_location_id,
+            available_qty: item.available_qty,
+            photo_path: item.photo_path || "", // ✅ permanent path for later re-signing
+            // explicitly omit image_url so it's not saved in audit
+        }));
+
+        // ✅ Insert sales audit with all details
         const auditPayload = {
-        user_id: user.id,
-        external_sales_id: salesId,
-        platform: platform,
-        platform_fee: cartState.platformFee,
-        credits_applied: creditValue,
-        effective_discount: discountPercentAfterCredits,
-        flagged: flagged,
-        verified_method: 'password',
-        verified_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        notes: `Completed via checkout, flagged=${flagged}`,
-        cart_snapshot: cart,
-        per_item_discounts: perItemDiscountsDetails,
-        general_discount_percent: generalDiscountPercent,
-        general_discount_amount: generalDiscountAmount,
-        total_amount: finalTotal,
+            user_id: user.id,
+            external_sales_id: salesId,
+            platform: platform,
+            platform_fee: cartState.platformFee,
+            credits_applied: creditValue,
+            effective_discount: discountPercentAfterCredits,
+            flagged: flagged,
+            verified_method: 'password',
+            verified_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            notes: `Completed via checkout, flagged=${flagged}`,
+            cart_snapshot: cartSnapshot, // ✅ clean snapshot with photo_path
+            per_item_discounts: perItemDiscountsDetails,
+            general_discount_percent: generalDiscountPercent,
+            general_discount_amount: generalDiscountAmount,
+            total_amount: finalTotal,
         };
 
         const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
@@ -1384,22 +1396,28 @@ function clearCart() {
 
         // ✅ Decrement stock quantities
         for (const item of cart) {
-        const locationId = item.selected_location_id;
-        if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
+            const locationId = item.selected_location_id;
+            if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
 
-        console.log(`🔄 Decrementing stock at location ${locationId} by ${item.qty} units...`);
-        const { error: rpcError } = await supabase.rpc('subtract_quantity', {
-            loc_id: locationId,
-            delta: item.qty,
-        });
-        if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
+            console.log(`🔄 Decrementing stock at location ${locationId} by ${item.qty} units...`);
+            const { error: rpcError } = await supabase.rpc('subtract_quantity', {
+                loc_id: locationId,
+                delta: item.qty,
+            });
+            if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
         }
+        
+        // ✅ Collect all item IDs
+        const changedItemIds = cart.map(item => item.item_id);
+
+        // ✅ Update inventory version & record changed items
+        await bumpInventoryVersion(changedItemIds);
 
         // ✅ Unlock locations & clear cart
         await unlockSelectedLocationsForCurrentUser();
         checkoutModule.clearCart();
 
-        // ✅ Close all modals ONLY if everything succeeded
+        // ✅ Close modals ONLY if successful
         document.getElementById("checkout-modal")?.classList.add("hidden");
         document.getElementById("password-confirm-modal")?.classList.add("hidden");
         document.body.classList.remove("modal-open");
@@ -1413,7 +1431,8 @@ function clearCart() {
     } finally {
         loadingOverlay?.classList.remove("active");
     }
-    }
+}
+
 
   //#endregion
    

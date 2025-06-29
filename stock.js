@@ -2407,18 +2407,49 @@ async function loadAllItemsWithCache() {
 }
 
 //function to change the version of the metadata the cache uses after each operation 
-async function bumpInventoryVersion() {
+async function bumpInventoryVersion(changedIds = null) {
+  const payload = {
+    inventory_version: crypto.randomUUID(),
+    changed_item_ids: Array.isArray(changedIds) && changedIds.length > 0 ? changedIds : null,
+  };
+
   const { error } = await supabase
     .from("metadata")
-    .update({ inventory_version: crypto.randomUUID() })
+    .update(payload)
     .eq("id", "inventory");
 
   if (error) {
     console.warn("⚠️ Failed to update inventory version:", error.message);
   } else {
-    console.log("🔁 Inventory version updated");
+    console.log("🔁 Inventory version updated", payload);
   }
-  //await loadAllItemsWithCache();
+}
+
+
+//function to listen to changes in cache version
+function setupInventoryRealtimeListener() {
+  const channel = supabase
+    .channel("inventory_version")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "metadata" },
+      payload => {
+        console.log("🔔 Realtime: inventory version changed!", payload);
+
+        const changedIds = payload.new?.changed_item_ids;
+
+        if (Array.isArray(changedIds) && changedIds.length > 0) {
+          console.log("🎯 Targeted refresh for items:", changedIds);
+          changedIds.forEach(id => refreshItemById(id));
+        } else {
+          console.log("🔄 No item IDs provided, reloading entire inventory.");
+          loadAllItemsWithCache();
+        }
+      }
+    )
+    .subscribe();
+
+  console.log("✅ Realtime listener for inventory version initialized:", channel);
 }
 
 // 🔹 UI Utility: Show loading overlay (or any spinner by selector)
@@ -2753,6 +2784,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Step 2: Fetch items from Supabase and store globally
   await loadAllItemsWithCache();
+  setupInventoryRealtimeListener();
   await checkoutModule.loadCartFromStorage();  // handles image signing + UI
 
   //#region step 3 create all the necessary drop downs for the system
