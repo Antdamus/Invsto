@@ -865,47 +865,52 @@ window.checkoutModule = (function () {
     }
 
     // === Attach modal listeners
-    function setupCheckoutModalListeners() {
-        document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
-        document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
-        document.getElementById("general-discount")?.addEventListener("input", () => {
+function setupCheckoutModalListeners() {
+    document.getElementById("proceed-checkout-btn")?.addEventListener("click", openCheckoutModal);
+    document.getElementById("close-checkout-modal")?.addEventListener("click", closeCheckoutModal);
+    document.getElementById("general-discount")?.addEventListener("input", () => {
+        calculateFinalCheckoutTotal();
+        saveCartToStorage(); // ✅ Save general discount on change
+    });
+
+    // ✅ Save Sales ID immediately on input
+    document.getElementById("sales-id")?.addEventListener("input", () => {
+        saveCartToStorage();
+    });
+
+    // Live update per-item discount fields
+    document.addEventListener("input", function (e) {
+        if (e.target.classList.contains("item-discount-input")) {
             calculateFinalCheckoutTotal();
-            saveCartToStorage(); // ✅ Save general discount on change
-        });
+        }
+    });
 
-        // Live update per-item discount fields
-        document.addEventListener("input", function (e) {
-            if (e.target.classList.contains("item-discount-input")) {
-            calculateFinalCheckoutTotal();
-            }
-        });
+    // === Listen to Apply Credit Tier button inside the modal
+    document.getElementById("open-credit-modal")?.addEventListener("click", () => {
+        // 1️⃣ Close the checkout modal
+        closeCheckoutModal();
 
-        // === Listen to Apply Credit Tier button inside the modal
-        document.getElementById("open-credit-modal")?.addEventListener("click", () => {
-            // 1️⃣ Close the checkout modal
-            closeCheckoutModal();
+        // 2️⃣ Make sure the cart panel is open
+        const cartPanel = document.getElementById("cart-panel");
+        cartPanel.classList.remove("hidden");
+        document.body.classList.add("cart-open");
 
-            // 2️⃣ Make sure the cart panel is open
-            const cartPanel = document.getElementById("cart-panel");
-            cartPanel.classList.remove("hidden");
-            document.body.classList.add("cart-open");
+        // 3️⃣ Activate the credits tab
+        const tabButtons = document.querySelectorAll(".cart-tab-btn");
+        const tabContents = document.querySelectorAll(".cart-tab-content");
 
-            // 3️⃣ Activate the credits tab
-            const tabButtons = document.querySelectorAll(".cart-tab-btn");
-            const tabContents = document.querySelectorAll(".cart-tab-content");
+        tabButtons.forEach(btn => btn.classList.remove("active"));
+        tabContents.forEach(content => content.classList.remove("active"));
 
-            tabButtons.forEach(btn => btn.classList.remove("active"));
-            tabContents.forEach(content => content.classList.remove("active"));
+        const creditsTabBtn = document.querySelector('.cart-tab-btn[data-tab="credits-view"]');
+        const creditsTabContent = document.getElementById("credits-view");
 
-            const creditsTabBtn = document.querySelector('.cart-tab-btn[data-tab="credits-view"]');
-            const creditsTabContent = document.getElementById("credits-view");
+        creditsTabBtn?.classList.add("active");
+        creditsTabContent?.classList.add("active");
+    });
 
-            creditsTabBtn?.classList.add("active");
-            creditsTabContent?.classList.add("active");
-        });
-
-        // 🛒 Listen for platform selection
-        document.getElementById("platform-select")?.addEventListener("change", (e) => {
+    // 🛒 Listen for platform selection
+    document.getElementById("platform-select")?.addEventListener("change", (e) => {
         const value = e.target.value;
         if (value === "whatnot") {
             cartState.platformFee = 11.8;
@@ -916,8 +921,9 @@ window.checkoutModule = (function () {
         }
         calculateFinalCheckoutTotal();
         saveCartToStorage();
-        });
-    }
+    });
+}
+
 
     // === Main Calculation Function
     function calculateFinalCheckoutTotal() {
@@ -1085,9 +1091,12 @@ async function loadCartFromStorage() {
         cartState.platformFee = parsed.platformFee !== undefined ? parsed.platformFee : 0;
 
         const salesIdEl = document.getElementById("sales-id");
-        if (salesIdEl) salesIdEl.value = cartState.salesId;
+        if (salesIdEl && parsed.salesId) {
+            salesIdEl.value = parsed.salesId; // ✅ restore saved Sales ID input
+        } else if (salesIdEl) {
+            salesIdEl.value = ""; // clear input if none saved
+        }
 
-        // 🔥 Restore platform dropdown
         const platformSelect = document.getElementById("platform-select");
         if (platformSelect && parsed.platform) {
             platformSelect.value = parsed.platform;
@@ -1098,7 +1107,11 @@ async function loadCartFromStorage() {
         updateCreditInputsFromCartState();
         updateGeneralDiscountInputFromCartState();
         updateCreditValue();
-        calculateFinalCheckoutTotal();
+
+        // ✅ only calculate total if checkout modal elements exist
+        if (document.getElementById("checkout-final-price") && document.getElementById("general-discount")) {
+            calculateFinalCheckoutTotal();
+        }
 
         signedItems.forEach(item => {
             const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
@@ -1121,9 +1134,9 @@ function clearCart() {
         },
         generalDiscount: "",
         itemDiscounts: {},
-        platformFee: 0,  // ✅ reset platformFee too
-        salesId: "",     // ✅ reset salesId too
-        flagged: false,  // ✅ reset flagged too
+        platformFee: 0,  // ✅ reset platformFee
+        salesId: "",     // ✅ reset salesId
+        flagged: false,  // ✅ reset flagged
     };
 
     localStorage.removeItem(STORAGE_KEY);
@@ -1149,11 +1162,10 @@ function clearCart() {
         checkoutBreakdownEl.classList.add("hidden");
     }
 
-    // 🔥 Reset Sales ID input in the modal
+    // 🔥 Explicitly clear Sales ID and platform inputs
     const salesIdEl = document.getElementById("sales-id");
     if (salesIdEl) salesIdEl.value = "";
 
-    // 🔥 Reset platform dropdown
     const platformSelect = document.getElementById("platform-select");
     if (platformSelect) platformSelect.value = "";
 }
@@ -1162,59 +1174,80 @@ function clearCart() {
 
   //#region logic for confirmation modal
     function setupCheckoutConfirmationModal() {
-        const finalizeBtn = document.getElementById("finalize-sale-btn");
-        const modal = document.getElementById("password-confirm-modal");
-        const title = modal.querySelector(".modal-title");
-        const desc = modal.querySelector(".modal-desc");
-        const confirmBtn = document.getElementById("confirm-password-btn");
-        const cancelBtn = document.getElementById("cancel-password-btn");
-        const passwordInput = document.getElementById("password-input");
-        const errorMsg = document.getElementById("password-error");
+    const finalizeBtn = document.getElementById("finalize-sale-btn");
+    const modal = document.getElementById("password-confirm-modal");
+    const title = modal.querySelector(".modal-title");
+    const desc = modal.querySelector(".modal-desc");
+    const confirmBtn = document.getElementById("confirm-password-btn");
+    const cancelBtn = document.getElementById("cancel-password-btn");
+    const passwordInput = document.getElementById("password-input");
+    const errorMsg = document.getElementById("password-error");
 
-        if (!finalizeBtn || !modal) {
-            console.warn("Finalize button or confirmation modal not found!");
-            return;
+    if (!finalizeBtn || !modal) {
+        console.warn("Finalize button or confirmation modal not found!");
+        return;
+    }
+
+    finalizeBtn.addEventListener("click", () => {
+        const cart = checkoutModule.getCart();
+        const platformSelectEl = document.getElementById("platform-select");
+        const platformVal = platformSelectEl?.value || "";
+        const salesIdVal = document.getElementById("sales-id")?.value.trim() || "";
+
+        // ✅ Check cart has items
+        if (!cart || cart.length === 0) {
+        showToast("❌ Cannot finalize: your cart is empty.", "error");
+        return;
         }
 
-        finalizeBtn.addEventListener("click", () => {
-            // Update modal title & description
-            title.innerHTML = `
-            <span class="material-icons-outlined" style="vertical-align: middle; font-size: 1.6rem; color: #0071e3; margin-right: 6px;">
-                verified
-            </span>
-            Confirm Checkout
-            `;
-            desc.textContent = "Please enter your password to finalize and sign this transaction.";
+        // ✅ Check platform selected and platformFee set
+        if (!platformVal || platformVal === "-- Choose Platform --" || cartState.platformFee === 0) {
+        showToast("❌ Please select a selling platform before finalizing.", "error");
+        return;
+        }
 
-            // Reset input and error
-            passwordInput.value = "";
-            errorMsg.textContent = "";
+        // ✅ Check sales ID filled
+        if (!salesIdVal) {
+        showToast("❌ Please enter a Sales ID before finalizing.", "error");
+        return;
+        }
 
-            // Show the modal
-            modal.classList.remove("hidden");
-            document.body.classList.add("modal-open");
+        // ✅ All checks passed → open password modal
+        title.innerHTML = `
+        <span class="material-icons-outlined" style="vertical-align: middle; font-size: 1.6rem; color: #0071e3; margin-right: 6px;">
+            verified
+        </span>
+        Confirm Checkout
+        `;
+        desc.textContent = "Please enter your password to finalize and sign this transaction.";
 
-            confirmBtn.onclick = async () => {
-            const password = passwordInput.value.trim();
-            if (!password) {
-                errorMsg.textContent = "Password required.";
-                return;
-            }
-            errorMsg.textContent = "";
-            try {
-                await finalizeCheckout(password); // 👈 implement this function!
-                modal.classList.add("hidden");
-                document.body.classList.remove("modal-open");
-            } catch (err) {
-                errorMsg.textContent = "Failed to finalize: " + (err.message || "Unknown error");
-            }
-            };
-        });
+        passwordInput.value = "";
+        errorMsg.textContent = "";
 
-        cancelBtn?.addEventListener("click", () => {
+        modal.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+
+        confirmBtn.onclick = async () => {
+        const password = passwordInput.value.trim();
+        if (!password) {
+            errorMsg.textContent = "Password required.";
+            return;
+        }
+        errorMsg.textContent = "";
+        try {
+            await finalizeCheckout(password);
             modal.classList.add("hidden");
             document.body.classList.remove("modal-open");
-        });
+        } catch (err) {
+            errorMsg.textContent = "Failed to finalize: " + (err.message || "Unknown error");
+        }
+        };
+    });
+
+    cancelBtn?.addEventListener("click", () => {
+        modal.classList.add("hidden");
+        document.body.classList.remove("modal-open");
+    });
     }
 
     async function verifyPasswordForCurrentUser(password) {
