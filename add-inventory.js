@@ -5,18 +5,24 @@ let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 
 //update the inventory after adding items
-async function bumpInventoryVersion() {
+async function bumpInventoryVersion(changedIds = null) {
+  const payload = {
+    inventory_version: crypto.randomUUID(),
+    changed_item_ids: Array.isArray(changedIds) && changedIds.length > 0 ? changedIds : null,
+  };
+
   const { error } = await supabase
     .from("metadata")
-    .update({ inventory_version: crypto.randomUUID() })
+    .update(payload)
     .eq("id", "inventory");
 
   if (error) {
     console.warn("⚠️ Failed to update inventory version:", error.message);
   } else {
-    console.log("🔁 Inventory version updated");
+    console.log("🔁 Inventory version updated", payload);
   }
 }
+
 
 //#region full logic to what will be done once the item reaches its limit
   //function to turn on and off the autofocus and the input of adding items by barcode
