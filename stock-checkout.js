@@ -12,6 +12,10 @@ window.checkoutModule = (function () {
         flagged: false,   // ✅ NEW: flag state
     };
 
+window.addEventListener("beforeunload", async () => {
+  await unlockSelectedLocationsForCurrentUser();
+});
+
 
   //function to activate the toggle to start the checkout mode
   function setupCheckoutToggleButton(btnId = "toggle-checkout-mode") {
@@ -739,83 +743,106 @@ window.checkoutModule = (function () {
     document.body.classList.add("modal-open");
     }
 
-    function closeCheckoutModal() {
-    document.getElementById("checkout-modal").classList.add("hidden");
-    document.body.classList.remove("modal-open");
+    async function closeCheckoutModal() {
+        document.getElementById("checkout-modal").classList.add("hidden");
+        document.body.classList.remove("modal-open");
+        await unlockSelectedLocationsForCurrentUser();
     }
 
     //locking the selected locations for other users 
-async function lockSelectedLocationsForCurrentUser() {
-  const { data: currentUser, error: userError } = await supabase.auth.getUser();
-  if (userError || !currentUser?.user) {
-    console.warn("❌ Cannot lock locations: no authenticated user.");
-    showToast("❌ Could not lock items: you are not signed in.", "error");
-    return false;
-  }
-
-  const userId = currentUser.user.id;
-  const locksToAcquire = cartState.items
-    .filter(item => item.selected_location_id)
-    .map(item => item.selected_location_id);
-
-  console.log("🔒 Attempting to lock selected_location_ids:", locksToAcquire);
-
-  let allLocked = true;
-
-  for (const locationId of locksToAcquire) {
-    console.log(`🔎 Checking lock status for location ${locationId}`);
-
-    // Step 1: fetch current lock status
-    const { data: locData, error: fetchError } = await supabase
-      .from("item_stock_locations")
-      .select("locked_by")
-      .eq("id", locationId)
-      .single();
-
-    if (fetchError || !locData) {
-      console.error(`❌ Failed to fetch lock status for location ${locationId}:`, fetchError?.message);
-      showToast(`❌ Could not check location ${locationId}: ${fetchError?.message || "Unknown error"}`, "error");
-      allLocked = false;
-      continue;
+    async function lockSelectedLocationsForCurrentUser() {
+    const { data: currentUser, error: userError } = await supabase.auth.getUser();
+    if (userError || !currentUser?.user) {
+        console.warn("❌ Cannot lock locations: no authenticated user.");
+        showToast("❌ Could not lock items: you are not signed in.", "error");
+        return false;
     }
 
-    if (locData.locked_by) {
-      if (locData.locked_by === userId) {
-        console.log(`✅ Location ${locationId} is already locked by you. Proceeding.`);
-        continue; // ✔️ skip re-locking if you already own it
-      } else {
-        console.warn(`⚠️ Location ${locationId} is locked by another user.`);
-        showToast(`⚠️ Location ${locationId} is locked by someone else.`, "warning");
+    const userId = currentUser.user.id;
+    const locksToAcquire = cartState.items
+        .filter(item => item.selected_location_id)
+        .map(item => item.selected_location_id);
+
+    console.log("🔒 Attempting to lock selected_location_ids:", locksToAcquire);
+
+    let allLocked = true;
+
+    for (const locationId of locksToAcquire) {
+        console.log(`🔎 Checking lock status for location ${locationId}`);
+
+        // Step 1: fetch current lock status
+        const { data: locData, error: fetchError } = await supabase
+        .from("item_stock_locations")
+        .select("locked_by")
+        .eq("id", locationId)
+        .single();
+
+        if (fetchError || !locData) {
+        console.error(`❌ Failed to fetch lock status for location ${locationId}:`, fetchError?.message);
+        showToast(`❌ Could not check location ${locationId}: ${fetchError?.message || "Unknown error"}`, "error");
         allLocked = false;
         continue;
-      }
+        }
+
+        if (locData.locked_by) {
+        if (locData.locked_by === userId) {
+            console.log(`✅ Location ${locationId} is already locked by you. Proceeding.`);
+            continue; // ✔️ skip re-locking if you already own it
+        } else {
+            console.warn(`⚠️ Location ${locationId} is locked by another user.`);
+            showToast(`⚠️ Location ${locationId} is locked by someone else.`, "warning");
+            allLocked = false;
+            continue;
+        }
+        }
+
+        // Step 2: acquire lock if not locked by anyone
+        console.log(`🔒 Locking location ${locationId} for user ${userId}`);
+        const { error: lockError } = await supabase
+        .from("item_stock_locations")
+        .update({
+            locked_by: userId,
+            locked_at: new Date().toISOString()
+        })
+        .eq("id", locationId);
+
+        if (lockError) {
+        console.error(`❌ Failed to lock location ${locationId}:`, lockError.message);
+        showToast(`❌ Could not lock location ${locationId}: ${lockError.message}`, "error");
+        allLocked = false;
+        } else {
+        console.log(`✅ Successfully locked location ${locationId}.`);
+        showToast(`✅ Successfully locked stock for your checkout.`, "success");
+        }
     }
 
-    // Step 2: acquire lock if not locked by anyone
-    console.log(`🔒 Locking location ${locationId} for user ${userId}`);
-    const { error: lockError } = await supabase
-      .from("item_stock_locations")
-      .update({
-        locked_by: userId,
-        locked_at: new Date().toISOString()
-      })
-      .eq("id", locationId);
+    return allLocked;
+    }
 
-    if (lockError) {
-      console.error(`❌ Failed to lock location ${locationId}:`, lockError.message);
-      showToast(`❌ Could not lock location ${locationId}: ${lockError.message}`, "error");
-      allLocked = false;
+    //unlocking mechanism
+    async function unlockSelectedLocationsForCurrentUser() {
+    const { data: currentUser, error: userError } = await supabase.auth.getUser();
+    if (userError || !currentUser?.user) {
+        console.warn("❌ Cannot unlock locations: no authenticated user.");
+        return;
+    }
+
+    const userId = currentUser.user.id;
+
+    const { error: unlockError } = await supabase
+        .from("item_stock_locations")
+        .update({
+        locked_by: null,
+        locked_at: null
+        })
+        .eq("locked_by", userId);
+
+    if (unlockError) {
+        console.error("❌ Failed to unlock locations:", unlockError.message);
     } else {
-      console.log(`✅ Successfully locked location ${locationId}.`);
-      showToast(`✅ Successfully locked stock for your checkout.`, "success");
+        console.log("✅ Successfully unlocked all locations locked by this user.");
     }
-  }
-
-  return allLocked;
-}
-
-
-
+    }
 
     // === Attach modal listeners
     function setupCheckoutModalListeners() {
@@ -1177,118 +1204,120 @@ async function loadCartFromStorage() {
     }
 
 
-async function finalizeCheckout(password) {
-    const loadingOverlay = document.getElementById("loading-overlay");
+    async function finalizeCheckout(password) {
+        const loadingOverlay = document.getElementById("loading-overlay");
 
-    try {
-        loadingOverlay?.classList.add("active");
+        try {
+            loadingOverlay?.classList.add("active");
 
-        // ✅ Verify password
-        const isValid = await verifyPasswordForCurrentUser(password);
-        if (!isValid) throw new Error("Incorrect password. Please try again.");
+            // ✅ Verify password
+            const isValid = await verifyPasswordForCurrentUser(password);
+            if (!isValid) throw new Error("Incorrect password. Please try again.");
 
-        // ✅ Get cart & user
-        const cart = checkoutModule.getCart();
-        const { data, error: userError } = await supabase.auth.getUser();
-        if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
-        const user = data.user;
+            // ✅ Get cart & user
+            const cart = checkoutModule.getCart();
+            const { data, error: userError } = await supabase.auth.getUser();
+            if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
+            const user = data.user;
 
-        const platform = document.getElementById("platform-select")?.value || "none";
-        const salesId = document.getElementById("sales-id")?.value || null;
-        const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
-        const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
+            const platform = document.getElementById("platform-select")?.value || "none";
+            const salesId = document.getElementById("sales-id")?.value || null;
+            const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
+            const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
 
-        if (!cartState || !cartState.itemDiscounts) {
-            throw new Error("Cart state is missing or corrupted.");
-        }
+            if (!cartState || !cartState.itemDiscounts) {
+                throw new Error("Cart state is missing or corrupted.");
+            }
 
-        // ✅ Use persisted flagged state
-        const flagged = !!cartState.flagged;
+            // ✅ Use persisted flagged state
+            const flagged = !!cartState.flagged;
 
-        // ✅ Update stock quantities using your RPC and insert transactions
-        for (const item of cart) {
-            const { error: rpcError } = await supabase.rpc('decrement_stock', {
-                item_id: item.item_id,
-                qty: item.qty,
+            // ✅ Update stock quantities using your RPC and insert transactions
+            for (const item of cart) {
+                const { error: rpcError } = await supabase.rpc('decrement_stock', {
+                    item_id: item.item_id,
+                    qty: item.qty,
+                });
+
+                if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
+
+                const txPayload = {
+                    item_id: item.item_id,
+                    quantity: -item.qty,
+                    action_type: 'sale',
+                    confirmed_at: new Date().toISOString(),
+                    user_id: user.id,
+                    email: user.email,
+                    notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
+                    method: 'checkout',
+                };
+
+                const { error: txError } = await supabase.from("stock_transactions").insert(txPayload);
+                if (txError) throw new Error(`Failed transaction log: ${item.title} — ${txError.message}`);
+            }
+
+            // ✅ Calculate credits
+            let creditValue = 0;
+            const creditEl = document.getElementById("credit-value-display");
+            if (creditEl) {
+                const raw = creditEl.textContent.replace("$", "");
+                creditValue = parseFloat(raw) || 0;
+            }
+
+            // ✅ Calculate effective discount again (optional, but good for audit)
+            let subtotalBeforeDiscounts = 0;
+            let perItemDiscountTotal = 0;
+            cart.forEach(item => {
+                const qty = item.qty || 1;
+                const originalTotal = item.sale_price * qty;
+                subtotalBeforeDiscounts += originalTotal;
+
+                const savedDiscount = checkoutModule.cartState.itemDiscounts[item.item_id];
+                if (savedDiscount) {
+                    const percent = parseFloat(savedDiscount.percent || "0") || 0;
+                    perItemDiscountTotal += (percent / 100) * originalTotal;
+                }
             });
+            const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
+            const denominator = Math.max(adjustedSubtotal, 0.01);
+            const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
+            const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
+            const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
+            const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
 
-            if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
-
-            const txPayload = {
-                item_id: item.item_id,
-                quantity: -item.qty,
-                action_type: 'sale',
-                confirmed_at: new Date().toISOString(),
+            // ✅ Insert sales audit
+            const auditPayload = {
                 user_id: user.id,
-                email: user.email,
-                notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
-                method: 'checkout',
+                external_sales_id: salesId,
+                platform: platform,
+                platform_fee: checkoutModule.cartState.platformFee,
+                credits_applied: creditValue,
+                effective_discount: discountPercentAfterCredits,
+                flagged: flagged,
+                verified_method: 'password',
+                verified_at: new Date().toISOString(),
+                created_at: new Date().toISOString(),
+                notes: `Completed via checkout, flagged=${flagged}`,
+                cart_snapshot: cart,
+                total_amount: finalTotal,
             };
 
-            const { error: txError } = await supabase.from("stock_transactions").insert(txPayload);
-            if (txError) throw new Error(`Failed transaction log: ${item.title} — ${txError.message}`);
+            const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
+            if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
+
+            // ✅ Clear cart & success message
+            await unlockSelectedLocationsForCurrentUser();
+            checkoutModule.clearCart();
+            showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
+            
+        } catch (err) {
+            console.error("❌ Checkout error:", err);
+            showToast(`❌ Checkout failed: ${err.message}`, "error");
+            throw err;
+        } finally {
+            loadingOverlay?.classList.remove("active");
         }
-
-        // ✅ Calculate credits
-        let creditValue = 0;
-        const creditEl = document.getElementById("credit-value-display");
-        if (creditEl) {
-            const raw = creditEl.textContent.replace("$", "");
-            creditValue = parseFloat(raw) || 0;
-        }
-
-        // ✅ Calculate effective discount again (optional, but good for audit)
-        let subtotalBeforeDiscounts = 0;
-        let perItemDiscountTotal = 0;
-        cart.forEach(item => {
-            const qty = item.qty || 1;
-            const originalTotal = item.sale_price * qty;
-            subtotalBeforeDiscounts += originalTotal;
-
-            const savedDiscount = checkoutModule.cartState.itemDiscounts[item.item_id];
-            if (savedDiscount) {
-                const percent = parseFloat(savedDiscount.percent || "0") || 0;
-                perItemDiscountTotal += (percent / 100) * originalTotal;
-            }
-        });
-        const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
-        const denominator = Math.max(adjustedSubtotal, 0.01);
-        const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
-        const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
-        const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
-        const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
-
-        // ✅ Insert sales audit
-        const auditPayload = {
-            user_id: user.id,
-            external_sales_id: salesId,
-            platform: platform,
-            platform_fee: checkoutModule.cartState.platformFee,
-            credits_applied: creditValue,
-            effective_discount: discountPercentAfterCredits,
-            flagged: flagged,
-            verified_method: 'password',
-            verified_at: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            notes: `Completed via checkout, flagged=${flagged}`,
-            cart_snapshot: cart,
-            total_amount: finalTotal,
-        };
-
-        const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
-        if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
-
-        // ✅ Clear cart & success message
-        checkoutModule.clearCart();
-        showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
-    } catch (err) {
-        console.error("❌ Checkout error:", err);
-        showToast(`❌ Checkout failed: ${err.message}`, "error");
-        throw err;
-    } finally {
-        loadingOverlay?.classList.remove("active");
     }
-}
   //#endregion
     function updateCreditInputsFromCartState() {
     for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
@@ -1325,6 +1354,7 @@ async function finalizeCheckout(password) {
     setupCreditTierListeners,
     setupCheckoutConfirmationModal,
     verifyPasswordForCurrentUser,
-    lockSelectedLocationsForCurrentUser
+    lockSelectedLocationsForCurrentUser,
+    unlockSelectedLocationsForCurrentUser
   };
 })();
