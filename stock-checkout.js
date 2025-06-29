@@ -139,112 +139,112 @@ window.checkoutModule = (function () {
         }
     }
 
-    async function renderCartItems() { 
-        const container = document.getElementById("cart-items-container");
-        if (!container) return;
+    async function renderCartItems() {
+    const container = document.getElementById("cart-items-container");
+    if (!container) return;
 
-        container.innerHTML = "";
-        const items = cartState.items;
-        if (items.length === 0) {
-            container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
-            updateCartSummary(0, 0);
+    container.innerHTML = "";
+    const items = cartState.items;
+    if (items.length === 0) {
+        container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
+        updateCartSummary(0, 0);
+        return;
+    }
+
+    items.forEach(async item => {
+        const div = document.createElement("div");
+        div.className = "cart-item";
+        div.setAttribute("data-item-id", item.item_id); // 🔹 makes it easy to remove this item later
+        div.innerHTML = `
+        <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
+        <div class="cart-item-details">
+            <p class="cart-item-title">${item.title}</p>
+            <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
+            <div class="cart-qty-controls">
+            <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
+            <span class="cart-qty-count" id="qty-count-${item.item_id}">${item.qty}</span> <!-- 🔹 unique qty ID -->
+            <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
+            </div>
+            <div class="cart-location-select" id="location-select-${item.item_id}">
+            <p class="location-loading">🔄 Loading locations...</p>
+            </div>
+        </div>
+        `;
+        container.appendChild(div);
+
+        try {
+        const { data, error } = await supabase
+            .from("item_stock_locations")
+            .select(`
+            id,
+            quantity,
+            locked_by,
+            locked_at,
+            location:location_id (id, location_name)
+            `)
+            .eq("item_id", item.item_id)
+            .gt("quantity", 0);
+
+        const selectContainer = div.querySelector(`#location-select-${item.item_id}`);
+        if (error || !data) {
+            console.error(`Failed to fetch locations for item ${item.item_id}:`, error);
+            selectContainer.innerHTML = `<p class="location-error">⚠️ Could not load locations</p>`;
             return;
         }
 
-        items.forEach(async item => {
-            const div = document.createElement("div");
-            div.className = "cart-item";
-            div.innerHTML = `
-                <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
-                <div class="cart-item-details">
-                    <p class="cart-item-title">${item.title}</p>
-                    <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
-                    <div class="cart-qty-controls">
-                        <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
-                        <span class="cart-qty-count">${item.qty}</span>
-                        <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
-                    </div>
-                    <div class="cart-location-select" id="location-select-${item.item_id}">
-                        <p class="location-loading">🔄 Loading locations...</p>
-                    </div>
-                </div>
-            `;
-            container.appendChild(div);
+        if (data.length === 0) {
+            selectContainer.innerHTML = `<p class="location-error">❌ No stock available</p>`;
+            return;
+        }
 
-            try {
-                const { data, error } = await supabase
-                    .from("item_stock_locations")
-                    .select(`
-                        id,
-                        quantity,
-                        locked_by,
-                        locked_at,
-                        location:location_id (id, location_name)
-                    `)
-                    .eq("item_id", item.item_id)
-                    .gt("quantity", 0);
+        const options = data.map(loc => {
+            const locked = loc.locked_by !== null || loc.locked_at !== null;
+            return `<option value="${loc.id}" data-qty="${loc.quantity}" ${locked ? "disabled style='color:red;'" : ""}>
+            ${loc.location.location_name} (${loc.quantity} in stock)${locked ? " - LOCKED" : ""}
+            </option>`;
+        }).join("");
 
-                const selectContainer = div.querySelector(`#location-select-${item.item_id}`);
-                if (error || !data) {
-                    console.error(`Failed to fetch locations for item ${item.item_id}:`, error);
-                    selectContainer.innerHTML = `<p class="location-error">⚠️ Could not load locations</p>`;
-                    return;
-                }
+        selectContainer.innerHTML = `
+            <label>Pick location:</label>
+            <select data-item-id="${item.item_id}" class="location-dropdown">
+            ${options}
+            </select>
+        `;
 
-                if (data.length === 0) {
-                    selectContainer.innerHTML = `<p class="location-error">❌ No stock available</p>`;
-                    return;
-                }
+        const dropdown = selectContainer.querySelector("select");
 
-                const options = data.map(loc => {
-                    const locked = loc.locked_by !== null || loc.locked_at !== null;
-                    return `<option value="${loc.id}" data-qty="${loc.quantity}" ${locked ? "disabled style='color:red;'" : ""}>
-                        ${loc.location.location_name} (${loc.quantity} in stock)${locked ? " - LOCKED" : ""}
-                    </option>`;
-                }).join("");
-
-                selectContainer.innerHTML = `
-                    <label>Pick location:</label>
-                    <select data-item-id="${item.item_id}" class="location-dropdown">
-                        ${options}
-                    </select>
-                `;
-
-                const dropdown = selectContainer.querySelector("select");
-
-                dropdown.addEventListener("change", e => {
-                    const selectedLocId = e.target.value;
-                    const selectedOption = e.target.options[e.target.selectedIndex];
-                    const availableQty = parseInt(selectedOption.dataset.qty) || 0;
-                    const cartItem = cartState.items.find(i => i.item_id === item.item_id);
-                    if (cartItem) {
-                        cartItem.selected_location_id = selectedLocId;
-                        cartItem.available_qty = availableQty;  // ✅ Store selected location's available qty
-                        saveCartToStorage();
-                    }
-                });
-
-                if (item.selected_location_id) {
-                    dropdown.value = item.selected_location_id;
-
-                    // ✅ Set available_qty for pre-selected location
-                    const preselectedOption = dropdown.querySelector(`option[value="${item.selected_location_id}"]`);
-                    if (preselectedOption) {
-                        const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
-                        item.available_qty = availableQty;
-                    }
-                }
-            } catch (err) {
-                console.error(`Unexpected error fetching locations for item ${item.item_id}:`, err);
+        dropdown.addEventListener("change", e => {
+            const selectedLocId = e.target.value;
+            const selectedOption = e.target.options[e.target.selectedIndex];
+            const availableQty = parseInt(selectedOption.dataset.qty) || 0;
+            const cartItem = cartState.items.find(i => i.item_id === item.item_id);
+            if (cartItem) {
+            cartItem.selected_location_id = selectedLocId;
+            cartItem.available_qty = availableQty; // ✅ Save selected location's quantity
+            saveCartToStorage();
             }
         });
 
-        const subtotal = items.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
-        const itemCount = items.reduce((sum, item) => sum + (item.qty || 1), 0);
-        updateCartSummary(subtotal, itemCount);
+        if (item.selected_location_id) {
+            dropdown.value = item.selected_location_id;
+            const preselectedOption = dropdown.querySelector(`option[value="${item.selected_location_id}"]`);
+            if (preselectedOption) {
+            const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
+            item.available_qty = availableQty; // ✅ Load saved location's quantity
+            }
+        }
+        } catch (err) {
+        console.error(`Unexpected error fetching locations for item ${item.item_id}:`, err);
+        }
+    });
 
-        attachCartQtyListeners(items);
+    const subtotal = items.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+    const itemCount = items.reduce((sum, item) => sum + (item.qty || 1), 0);
+    updateCartSummary(subtotal, itemCount);
+
+    attachCartQtyListeners(items);
     }
+
 
     function attachCartQtyListeners(items) {
     document.querySelectorAll(".qty-increase").forEach(btn => {
@@ -252,15 +252,22 @@ window.checkoutModule = (function () {
         const id = btn.dataset.id;
         const target = items.find(i => i.item_id === id);
         if (target) {
-            const maxQty = target.available_qty || 0; // 🟢 enforce selected location limit only
+            const maxQty = target.available_qty || 0;
             if (maxQty > 0 && target.qty < maxQty) {
             target.qty += 1;
             } else {
-            showToast(`❌ Cannot add more than ${maxQty} in stock at the selected location for ${target.title}`, "error");
+            showToast(`❌ Cannot add more than ${maxQty} at the selected location for ${target.title}`, "error");
             }
+
+            const qtyEl = document.getElementById(`qty-count-${id}`);
+            if (qtyEl) qtyEl.textContent = target.qty;
+
             updateCartUI();
             saveCartToStorage();
-            renderCartItems();
+            updateCartSummary(
+            cartState.items.reduce((sum, i) => sum + (i.sale_price * i.qty), 0),
+            cartState.items.reduce((sum, i) => sum + i.qty, 0)
+            );
         }
         });
     });
@@ -268,20 +275,31 @@ window.checkoutModule = (function () {
     document.querySelectorAll(".qty-decrease").forEach(btn => {
         btn.addEventListener("click", () => {
         const id = btn.dataset.id;
-        const target = items.find(i => i.item_id === id);
-        if (target && target.qty > 1) {
+        const targetIndex = items.findIndex(i => i.item_id === id);
+        if (targetIndex !== -1) {
+            const target = items[targetIndex];
+            if (target.qty > 1) {
             target.qty -= 1;
-        } else {
+            const qtyEl = document.getElementById(`qty-count-${id}`);
+            if (qtyEl) qtyEl.textContent = target.qty;
+            } else {
             cartState.items = items.filter(i => i.item_id !== id);
             delete cartState.itemDiscounts[id];
+            const itemEl = document.querySelector(`.cart-item[data-item-id="${id}"]`);
+            if (itemEl) itemEl.remove();
+
             const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
             if (checkbox) checkbox.checked = false;
             const card = checkbox?.closest('.stock-card');
             if (card) card.classList.remove("in-cart");
+            }
+            updateCartUI();
+            saveCartToStorage();
+            updateCartSummary(
+            cartState.items.reduce((sum, i) => sum + (i.sale_price * i.qty), 0),
+            cartState.items.reduce((sum, i) => sum + i.qty, 0)
+            );
         }
-        updateCartUI();
-        saveCartToStorage();
-        renderCartItems();
         });
     });
     }
