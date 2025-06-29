@@ -139,7 +139,7 @@ window.checkoutModule = (function () {
         }
     }
 
-    async function renderCartItems() {
+    async function renderCartItems() { 
         const container = document.getElementById("cart-items-container");
         if (!container) return;
 
@@ -150,13 +150,6 @@ window.checkoutModule = (function () {
             updateCartSummary(0, 0);
             return;
         }
-
-        const { data: currentUserData, error: userError } = await supabase.auth.getUser();
-        if (userError || !currentUserData?.user) {
-            console.error("❌ Could not fetch authenticated user:", userError);
-            return;
-        }
-        const currentUser = currentUserData.user;
 
         items.forEach(async item => {
             const div = document.createElement("div");
@@ -181,7 +174,13 @@ window.checkoutModule = (function () {
             try {
                 const { data, error } = await supabase
                     .from("item_stock_locations")
-                    .select("id, quantity, locked_by, locked_at, location:location_id (id, location_name)")
+                    .select(`
+                        id,
+                        quantity,
+                        locked_by,
+                        locked_at,
+                        location:location_id (id, location_name)
+                    `)
                     .eq("item_id", item.item_id)
                     .gt("quantity", 0);
 
@@ -198,9 +197,9 @@ window.checkoutModule = (function () {
                 }
 
                 const options = data.map(loc => {
-                    const lockedByOther = loc.locked_by && loc.locked_by !== currentUser.id;
-                    return `<option value="${loc.id}" ${lockedByOther ? "disabled style='color:red;'" : ""}>
-                        ${loc.location.location_name} (${loc.quantity} in stock)${lockedByOther ? " - LOCKED" : ""}
+                    const locked = loc.locked_by !== null || loc.locked_at !== null;
+                    return `<option value="${loc.id}" data-qty="${loc.quantity}" ${locked ? "disabled style='color:red;'" : ""}>
+                        ${loc.location.location_name} (${loc.quantity} in stock)${locked ? " - LOCKED" : ""}
                     </option>`;
                 }).join("");
 
@@ -213,19 +212,27 @@ window.checkoutModule = (function () {
 
                 const dropdown = selectContainer.querySelector("select");
 
-                // ✅ Save selected location to cartState on change
                 dropdown.addEventListener("change", e => {
                     const selectedLocId = e.target.value;
+                    const selectedOption = e.target.options[e.target.selectedIndex];
+                    const availableQty = parseInt(selectedOption.dataset.qty) || 0;
                     const cartItem = cartState.items.find(i => i.item_id === item.item_id);
                     if (cartItem) {
                         cartItem.selected_location_id = selectedLocId;
+                        cartItem.available_qty = availableQty;  // ✅ Store selected location's available qty
                         saveCartToStorage();
                     }
                 });
 
-                // ✅ Preselect previously saved location if available
                 if (item.selected_location_id) {
                     dropdown.value = item.selected_location_id;
+
+                    // ✅ Set available_qty for pre-selected location
+                    const preselectedOption = dropdown.querySelector(`option[value="${item.selected_location_id}"]`);
+                    if (preselectedOption) {
+                        const availableQty = parseInt(preselectedOption.dataset.qty) || 0;
+                        item.available_qty = availableQty;
+                    }
                 }
             } catch (err) {
                 console.error(`Unexpected error fetching locations for item ${item.item_id}:`, err);
@@ -240,38 +247,43 @@ window.checkoutModule = (function () {
     }
 
     function attachCartQtyListeners(items) {
-        document.querySelectorAll(".qty-increase").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const id = btn.dataset.id;
-                const target = items.find(i => i.item_id === id);
-                if (target) {
-                    target.qty += 1;
-                    updateCartUI();
-                    saveCartToStorage();
-                    renderCartItems();
-                }
-            });
+    document.querySelectorAll(".qty-increase").forEach(btn => {
+        btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const target = items.find(i => i.item_id === id);
+        if (target) {
+            const maxQty = target.available_qty || 0; // 🟢 enforce selected location limit only
+            if (maxQty > 0 && target.qty < maxQty) {
+            target.qty += 1;
+            } else {
+            showToast(`❌ Cannot add more than ${maxQty} in stock at the selected location for ${target.title}`, "error");
+            }
+            updateCartUI();
+            saveCartToStorage();
+            renderCartItems();
+        }
         });
+    });
 
-        document.querySelectorAll(".qty-decrease").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const id = btn.dataset.id;
-                const target = items.find(i => i.item_id === id);
-                if (target && target.qty > 1) {
-                    target.qty -= 1;
-                } else {
-                    cartState.items = items.filter(i => i.item_id !== id);
-                    delete cartState.itemDiscounts[id];
-                    const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
-                    if (checkbox) checkbox.checked = false;
-                    const card = checkbox?.closest('.stock-card');
-                    if (card) card.classList.remove("in-cart");
-                }
-                updateCartUI();
-                saveCartToStorage();
-                renderCartItems();
-            });
+    document.querySelectorAll(".qty-decrease").forEach(btn => {
+        btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const target = items.find(i => i.item_id === id);
+        if (target && target.qty > 1) {
+            target.qty -= 1;
+        } else {
+            cartState.items = items.filter(i => i.item_id !== id);
+            delete cartState.itemDiscounts[id];
+            const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
+            if (checkbox) checkbox.checked = false;
+            const card = checkbox?.closest('.stock-card');
+            if (card) card.classList.remove("in-cart");
+        }
+        updateCartUI();
+        saveCartToStorage();
+        renderCartItems();
         });
+    });
     }
 
     function updateCartSummary(subtotal, itemCount) {
@@ -446,166 +458,166 @@ window.checkoutModule = (function () {
 
   //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
     function openCheckoutModal() {
-        const modal = document.getElementById("checkout-modal");
-        const container = document.getElementById("checkout-items-container");
-        const generalDiscountInput = document.getElementById("general-discount");
-        const finalTotalEl = document.getElementById("checkout-final-price");
+    const modal = document.getElementById("checkout-modal");
+    const container = document.getElementById("checkout-items-container");
+    const generalDiscountInput = document.getElementById("general-discount");
+    const finalTotalEl = document.getElementById("checkout-final-price");
 
-        const cart = checkoutModule.getCart();
-        container.innerHTML = "";
+    const cart = checkoutModule.getCart();
+    container.innerHTML = "";
 
-        if (cart.length === 0) {
+    if (cart.length === 0) {
         container.innerHTML = "<p class='cart-empty'>🕳️ Cart is empty</p>";
         finalTotalEl.textContent = "$0.00";
 
-        // ✅ Clear summary card content
         const checkoutSummaryEl = document.getElementById("checkout-summary-display");
         if (checkoutSummaryEl) {
-            checkoutSummaryEl.innerHTML = "";
-            checkoutSummaryEl.classList.add("hidden");
+        checkoutSummaryEl.innerHTML = "";
+        checkoutSummaryEl.classList.add("hidden");
         }
 
-        // ✅ Clear credit breakdown
         const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
         if (checkoutBreakdownEl) {
-            checkoutBreakdownEl.innerHTML = "";
-            checkoutBreakdownEl.classList.add("hidden");
+        checkoutBreakdownEl.innerHTML = "";
+        checkoutBreakdownEl.classList.add("hidden");
         }
 
         modal.classList.remove("hidden");
         document.body.classList.add("modal-open");
         return;
+    }
+
+    cart.forEach(item => {
+        const itemRow = document.createElement("div");
+        itemRow.className = "checkout-item-card";
+        itemRow.setAttribute("data-item-id", item.item_id);
+
+        itemRow.innerHTML = `
+        <div class="item-header">
+            <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
+            <div class="item-info-flex">
+            <div class="title-qty-row">
+                <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
+                <div class="checkout-qty-controls">
+                <button class="qty-decrease" data-id="${item.item_id}">−</button>
+                <span class="checkout-qty-count">${item.qty}</span>
+                <button class="qty-increase" data-id="${item.item_id}">+</button>
+                </div>
+            </div>
+            </div>
+        </div>
+        <div class="discount-row">
+            <label class="discount-label">Discount for this item:</label>
+            <div class="discount-inline-inputs">
+            <input
+                type="number"
+                min="0"
+                max="100"
+                class="item-discount-input-percent"
+                placeholder="0"
+                data-id="${item.item_id}"
+                data-original-price="${item.sale_price.toFixed(2)}"
+                data-qty="${item.qty}"
+            /> %
+            or
+            <input
+                type="number"
+                min="0"
+                class="item-discount-input-absolute"
+                placeholder="0"
+                data-id="${item.item_id}"
+                data-original-price="${item.sale_price.toFixed(2)}"
+                data-qty="${item.qty}"
+            /> $
+            </div>
+            <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
+        </div>
+        `;
+
+        container.appendChild(itemRow);
+    });
+
+    // ✅ Updated quantity control handlers with per-location available_qty limit
+    container.querySelectorAll(".qty-increase").forEach(btn => {
+        btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const target = cart.find(i => i.item_id === id);
+        if (target) {
+            const maxQty = target.available_qty || 0;
+            if (maxQty > 0 && target.qty < maxQty) {
+            target.qty += 1;
+            } else {
+            showToast(`❌ Cannot add more than ${maxQty} at the selected location for ${target.title}`, "error");
+            }
+            updateCartUI();
+            saveCartToStorage();
+            renderCartItems();
+            openCheckoutModal();
         }
-
-
-        cart.forEach(item => {
-            const itemRow = document.createElement("div");
-            itemRow.className = "checkout-item-card";
-            itemRow.setAttribute("data-item-id", item.item_id);
-
-            itemRow.innerHTML = `
-            <div class="item-header">
-                <img class="checkout-item-image" src="${item.image_url || 'https://via.placeholder.com/60'}" alt="${item.title}" />
-                <div class="item-info-flex">
-                <div class="title-qty-row">
-                    <p class="item-title"><strong>${item.title}</strong> — $${item.sale_price.toFixed(2)}</p>
-                    <div class="checkout-qty-controls">
-                    <button class="qty-decrease" data-id="${item.item_id}">−</button>
-                    <span class="checkout-qty-count">${item.qty}</span>
-                    <button class="qty-increase" data-id="${item.item_id}">+</button>
-                    </div>
-                </div>
-                </div>
-            </div>
-            <div class="discount-row">
-                <label class="discount-label">Discount for this item:</label>
-                <div class="discount-inline-inputs">
-                <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    class="item-discount-input-percent"
-                    placeholder="0"
-                    data-id="${item.item_id}"
-                    data-original-price="${item.sale_price.toFixed(2)}"
-                    data-qty="${item.qty}"
-                /> %
-                or
-                <input
-                    type="number"
-                    min="0"
-                    class="item-discount-input-absolute"
-                    placeholder="0"
-                    data-id="${item.item_id}"
-                    data-original-price="${item.sale_price.toFixed(2)}"
-                    data-qty="${item.qty}"
-                /> $
-                </div>
-                <p class="discounted-price-preview">💲 <span class="discounted-price-value" id="discounted-${item.item_id}">$${(item.sale_price * item.qty).toFixed(2)}</span></p>
-            </div>
-            `;
-
-            container.appendChild(itemRow);
         });
+    });
 
-        // Attach live quantity control handlers
-        container.querySelectorAll(".qty-increase").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const id = btn.dataset.id;
-                const target = cart.find(i => i.item_id === id);
-                if (target) {
-                target.qty += 1;
-                updateCartUI();         // ✅ update badge + toggle
-                saveCartToStorage(); // ← ADD THIS
-                renderCartItems();      // ✅ update side cart panel
-                openCheckoutModal();    // ✅ re-render modal
-                }
-            });
+    container.querySelectorAll(".qty-decrease").forEach(btn => {
+        btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const targetIndex = cart.findIndex(i => i.item_id === id);
+
+        if (targetIndex !== -1) {
+            const target = cart[targetIndex];
+            if (target.qty > 1) {
+            target.qty -= 1;
+            } else {
+            cart.splice(targetIndex, 1);
+            delete cartState.itemDiscounts[id];
+            }
+            updateCartUI();
+            saveCartToStorage();
+            renderCartItems();
+            setTimeout(openCheckoutModal, 0);
+        }
         });
+    });
 
-        container.querySelectorAll(".qty-decrease").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const id = btn.dataset.id;
-                const targetIndex = cart.findIndex(i => i.item_id === id);
-
-                if (targetIndex !== -1) {
-                const target = cart[targetIndex];
-                if (target.qty > 1) {
-                    target.qty -= 1;
-                } else {
-                    cart.splice(targetIndex, 1);
-                    delete cartState.itemDiscounts[id]; // ✅ Clear lingering discounts
-                }
-                updateCartUI();
-                saveCartToStorage();
-                renderCartItems();
-                setTimeout(openCheckoutModal, 0); // ✅ Re-render modal after updates
-                }
-            });
-        });
-
-
-        // Generate credit breakdown HTML for checkout modal
-        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
-        if (checkoutBreakdownEl) {
+    const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+    if (checkoutBreakdownEl) {
         const tierLabels = {
-            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
-            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
-            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
+        "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
+        "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
+        "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
         };
 
         let breakdownHtml = "";
         let anyInput = false;
 
         for (const id in tierLabels) {
-            const input = document.getElementById(id);
-            const count = parseInt(input?.value || "0");
-            const unitValue = tierLabels[id].value;
+        const input = document.getElementById(id);
+        const count = parseInt(input?.value || "0");
+        const unitValue = tierLabels[id].value;
 
-            if (count > 0) {
+        if (count > 0) {
             anyInput = true;
             const lineTotal = count * unitValue;
             breakdownHtml += `
-                <p class="credit-breakdown-line">
+            <p class="credit-breakdown-line">
                 <span class="tier-emoji">${tierLabels[id].emoji}</span>
                 <span class="tier-label">${tierLabels[id].label}</span>
                 <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
-                </p>
+            </p>
             `;
-            }
+        }
         }
 
         if (anyInput) {
-            checkoutBreakdownEl.innerHTML = breakdownHtml;
-            checkoutBreakdownEl.classList.remove("hidden");
+        checkoutBreakdownEl.innerHTML = breakdownHtml;
+        checkoutBreakdownEl.classList.remove("hidden");
         } else {
-            checkoutBreakdownEl.innerHTML = "";
-            checkoutBreakdownEl.classList.add("hidden");
+        checkoutBreakdownEl.innerHTML = "";
+        checkoutBreakdownEl.classList.add("hidden");
         }
-        }
+    }
 
-        const checkoutSummaryEl = document.getElementById("checkout-summary-display");
-        if (checkoutSummaryEl) {
+    const checkoutSummaryEl = document.getElementById("checkout-summary-display");
+    if (checkoutSummaryEl) {
         const subtotal = cart.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
 
         const creditEl = document.getElementById("credit-value-display");
@@ -617,7 +629,6 @@ window.checkoutModule = (function () {
         const balanceLabel = finalBalance < 0 ? "Balance Left" : finalBalance > 0 ? "Owes Store" : "Settled";
         const colorClass = finalBalance < 0 ? "credit-positive" : finalBalance > 0 ? "credit-negative" : "credit-neutral";
 
-        // Calculate total discount amount
         let totalDiscount = 0;
         cart.forEach(item => {
         const discountInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
@@ -634,68 +645,62 @@ window.checkoutModule = (function () {
             <p class="${colorClass}"><strong>${balanceLabel}:</strong> $${finalBalance.toFixed(2)}</p>
         </div>
         `;
-
         checkoutSummaryEl.classList.remove("hidden");
-        }
+    }
 
-        // Live update: sync absolute discount → percent input
-        container.querySelectorAll(".item-discount-input-absolute").forEach(input => {
+    container.querySelectorAll(".item-discount-input-absolute").forEach(input => {
         input.addEventListener("input", () => {
-            const id = input.dataset.id;
-            const absoluteValue = parseFloat(input.value) || 0;
-            const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
-            const qty = parseInt(input.dataset.qty) || 1;
+        const id = input.dataset.id;
+        const absoluteValue = parseFloat(input.value) || 0;
+        const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+        const qty = parseInt(input.dataset.qty) || 1;
 
-            const maxDiscount = originalPrice * qty;
-            const cappedValue = Math.min(absoluteValue, maxDiscount);
-            const calculatedPercent = (cappedValue / maxDiscount) * 100;
+        const maxDiscount = originalPrice * qty;
+        const cappedValue = Math.min(absoluteValue, maxDiscount);
+        const calculatedPercent = (cappedValue / maxDiscount) * 100;
 
-            const percentInput = container.querySelector(`.item-discount-input-percent[data-id="${id}"]`);
-            if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
+        const percentInput = container.querySelector(`.item-discount-input-percent[data-id="${id}"]`);
+        if (percentInput) percentInput.value = calculatedPercent.toFixed(0);
 
-            calculateFinalCheckoutTotal();
-            saveCartToStorage();  // ✅ This saves discounts immediately when changed
+        calculateFinalCheckoutTotal();
+        saveCartToStorage();
         });
+    });
+
+    container.querySelectorAll(".item-discount-input-percent").forEach(input => {
+        input.addEventListener("input", () => {
+        const id = input.dataset.id;
+        const percentValue = parseFloat(input.value) || 0;
+        const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
+        const qty = parseInt(input.dataset.qty) || 1;
+
+        const maxDiscount = originalPrice * qty;
+        const calculatedAbsolute = (percentValue / 100) * maxDiscount;
+
+        const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
+        if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
+
+        calculateFinalCheckoutTotal();
+        saveCartToStorage();
         });
+    });
 
-        // Live update: sync percent discount → absolute input
-        container.querySelectorAll(".item-discount-input-percent").forEach(input => {
-            input.addEventListener("input", () => {
-                const id = input.dataset.id;
-                const percentValue = parseFloat(input.value) || 0;
-                const originalPrice = parseFloat(input.dataset.originalPrice) || 0;
-                const qty = parseInt(input.dataset.qty) || 1;
-
-                const maxDiscount = originalPrice * qty;
-                const calculatedAbsolute = (percentValue / 100) * maxDiscount;
-
-                const absoluteInput = container.querySelector(`.item-discount-input-absolute[data-id="${id}"]`);
-                if (absoluteInput) absoluteInput.value = calculatedAbsolute.toFixed(2);
-
-                calculateFinalCheckoutTotal();
-                saveCartToStorage();
-            });
-        });
-
-        // Apply saved general discount
-        updateGeneralDiscountInputFromCartState();
-
-        // Apply saved per-item discounts
-        cartState.items.forEach(item => {
+    updateGeneralDiscountInputFromCartState();
+    cartState.items.forEach(item => {
         const saved = cartState.itemDiscounts[item.item_id];
         if (saved) {
-            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-            if (percentInput) percentInput.value = saved.percent || "";
-            if (absoluteInput) absoluteInput.value = saved.absolute || "";
+        const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+        const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+        if (percentInput) percentInput.value = saved.percent || "";
+        if (absoluteInput) absoluteInput.value = saved.absolute || "";
         }
-        });
+    });
 
-        generalDiscountInput.value = cartState.generalDiscount || "";
-        calculateFinalCheckoutTotal();
+    generalDiscountInput.value = cartState.generalDiscount || "";
+    calculateFinalCheckoutTotal();
 
-        modal.classList.remove("hidden");
-        document.body.classList.add("modal-open");
+    modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
     }
 
     function closeCheckoutModal() {
