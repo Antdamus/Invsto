@@ -685,11 +685,14 @@ window.checkoutModule = (function () {
 
         const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
         if (checkoutBreakdownEl) {
-            const tierLabels = {
-            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
-            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
-            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
-            };
+            const tierLabels = {};
+            creditTiers.forEach(tier => {
+                tierLabels[tier.id] = {
+                    label: tier.label,
+                    emoji: tier.emoji,
+                    value: tier.unit_value,
+                };
+            });
 
             let breakdownHtml = "";
             let anyInput = false;
@@ -1175,52 +1178,54 @@ window.checkoutModule = (function () {
             cartState.items = [];
         }
     }
+function clearCart() {
+    // 🔥 Build dynamic credits object with 0s for each credit tier
+    const dynamicCredits = {};
+    creditTiers.forEach(tier => {
+        dynamicCredits[tier.id] = "0";
+    });
 
-    function clearCart() {
-        cartState = {
-            items: [],
-            credits: {
-                "credit-3mm": "0",
-                "credit-5mm": "0",
-                "credit-8mm": "0",
-            },
-            generalDiscount: "",
-            itemDiscounts: {},
-            platformFee: 0,  // ✅ reset platformFee
-            salesId: "",     // ✅ reset salesId
-            flagged: false,  // ✅ reset flagged
-        };
+    cartState = {
+        items: [],
+        credits: dynamicCredits,  // ✅ dynamically generated credits object
+        generalDiscount: "",
+        itemDiscounts: {},
+        platformFee: 0,  // ✅ reset platformFee
+        salesId: "",     // ✅ reset salesId
+        flagged: false,  // ✅ reset flagged
+    };
 
-        localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
 
-        document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
-        document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
+    document.querySelectorAll(".select-checkbox").forEach(cb => cb.checked = false);
+    document.querySelectorAll(".stock-card.in-cart").forEach(card => card.classList.remove("in-cart"));
 
-        updateCartUI();
-        updateCreditInputsFromCartState();
-        updateGeneralDiscountInputFromCartState();
-        renderCartItems();
-        calculateFinalCheckoutTotal();
+    updateCartUI();
+    updateCreditInputsFromCartState();
+    updateGeneralDiscountInputFromCartState();
+    renderCartItems();
+    calculateFinalCheckoutTotal();
 
-        const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
-        if (previewSummaryContainer) {
-            previewSummaryContainer.innerHTML = "";
-            previewSummaryContainer.classList.add("hidden");
-        }
-
-        const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
-        if (checkoutBreakdownEl) {
-            checkoutBreakdownEl.innerHTML = "";
-            checkoutBreakdownEl.classList.add("hidden");
-        }
-
-        // 🔥 Explicitly clear Sales ID and platform inputs
-        const salesIdEl = document.getElementById("sales-id");
-        if (salesIdEl) salesIdEl.value = "";
-
-        const platformSelect = document.getElementById("platform-select");
-        if (platformSelect) platformSelect.value = "";
+    const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
+    if (previewSummaryContainer) {
+        previewSummaryContainer.innerHTML = "";
+        previewSummaryContainer.classList.add("hidden");
     }
+
+    const checkoutBreakdownEl = document.getElementById("checkout-credit-breakdown");
+    if (checkoutBreakdownEl) {
+        checkoutBreakdownEl.innerHTML = "";
+        checkoutBreakdownEl.classList.add("hidden");
+    }
+
+    // 🔥 Explicitly clear Sales ID and platform inputs
+    const salesIdEl = document.getElementById("sales-id");
+    if (salesIdEl) salesIdEl.value = "";
+
+    const platformSelect = document.getElementById("platform-select");
+    if (platformSelect) platformSelect.value = "";
+}
+
 
   //#endregion
 
