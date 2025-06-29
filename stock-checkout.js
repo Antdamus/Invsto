@@ -1422,6 +1422,20 @@ async function finalizeCheckout(password) {
         const platformFeeAmount = (cartState.platformFee / 100) * owesStore;
         const profitAmount = owesStore - platformFeeAmount;
 
+        const creditsBreakdown = creditTiers.map(tier => {
+        const quantity = parseInt(cartState.credits[tier.id] || "0");
+        const total = quantity * tier.unit_value;
+
+        return {
+            id: tier.id,
+            label: tier.label,
+            emoji: tier.emoji,
+            unit_value: tier.unit_value,
+            quantity,
+            total, // 🔥 new field: total amount for this tier
+        };
+        });
+
         // Build the audit payload matching your redesigned table
         const auditPayload = {
             external_sales_id: salesId,
@@ -1438,6 +1452,7 @@ async function finalizeCheckout(password) {
             platform: platform,
             cart_snapshot: cartDetails,
             flagged: flagged,
+            credits_breakdown: creditsBreakdown,          // 🔥 include credit tier breakdown
             notes: `Completed via checkout, flagged=${flagged}`,
             verified_method: 'password',
             verified_at: new Date().toISOString(),
