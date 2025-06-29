@@ -1239,129 +1239,148 @@ function clearCart() {
         return true; // Password correct
     }
 
-    async function finalizeCheckout(password) {
-    const loadingOverlay = document.getElementById("loading-overlay");
+async function finalizeCheckout(password) {
+  const loadingOverlay = document.getElementById("loading-overlay");
 
-    try {
-        loadingOverlay?.classList.add("active");
+  try {
+    // ✅ Show loading overlay right away
+    loadingOverlay?.classList.add("active");
 
-        // ✅ Verify password
-        const isValid = await verifyPasswordForCurrentUser(password);
-        if (!isValid) throw new Error("Incorrect password. Please try again.");
+    // ✅ Verify password first
+    const isValid = await verifyPasswordForCurrentUser(password);
+    if (!isValid) throw new Error("Incorrect password. Please try again.");
 
-        // ✅ Get cart & user
-        const cart = checkoutModule.getCart();
-        const { data, error: userError } = await supabase.auth.getUser();
-        if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
-        const user = data.user;
+    // ✅ Get cart & user
+    const cart = checkoutModule.getCart();
+    const { data, error: userError } = await supabase.auth.getUser();
+    if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
+    const user = data.user;
 
-        const platform = document.getElementById("platform-select")?.value || "none";
-        const salesId = document.getElementById("sales-id")?.value || null;
-        const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
-        const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
+    const platform = document.getElementById("platform-select")?.value || "none";
+    const salesId = document.getElementById("sales-id")?.value || null;
+    const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
+    const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
 
-        if (!cartState) throw new Error("Cart state is missing or corrupted.");
+    if (!cartState) throw new Error("Cart state is missing or corrupted.");
+    const flagged = !!cartState.flagged;
 
-        // ✅ Use persisted flagged state
-        const flagged = !!cartState.flagged;
+    // ✅ Insert per-item transaction logs
+    for (const item of cart) {
+      const physicalLocId = item.physical_location_id;
+      if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
 
-        // ✅ First: insert per-item transaction logs
-        for (const item of cart) {
-        const physicalLocId = item.physical_location_id;
-        if (!physicalLocId) throw new Error(`Item "${item.title}" missing location selection.`);
-
-        const txPayload = {
-            item_id: item.item_id,
-            location_id: physicalLocId,
-            quantity: -item.qty,
-            action_type: 'checkout',
-            confirmed_at: new Date().toISOString(),
-            user_id: user.id,
-            email: user.email,
-            notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
-            method: 'checkout',
-        };
-
-        const { error: itemTxError } = await supabase.from("stock_transactions").insert(txPayload);
-        if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
-        }
-
-        // ✅ Calculate credits
-        let creditValue = 0;
-        const creditEl = document.getElementById("credit-value-display");
-        if (creditEl) {
-        const raw = creditEl.textContent.replace("$", "");
-        creditValue = parseFloat(raw) || 0;
-        }
-
-        // ✅ Calculate effective discount again (with safe fallback)
-        let subtotalBeforeDiscounts = 0;
-        let perItemDiscountTotal = 0;
-        const discounts = cartState.itemDiscounts || {}; // ✅ always use a defined object
-        cart.forEach(item => {
-        const qty = item.qty || 1;
-        const originalTotal = item.sale_price * qty;
-        subtotalBeforeDiscounts += originalTotal;
-
-        const savedDiscount = discounts[item.item_id];
-        const percent = savedDiscount ? parseFloat(savedDiscount.percent || "0") || 0 : 0;
-        perItemDiscountTotal += (percent / 100) * originalTotal;
-        });
-
-        const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
-        const denominator = Math.max(adjustedSubtotal, 0.01);
-        const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
-        const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
-        const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
-        const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
-
-        // ✅ Insert sales audit
-        const auditPayload = {
+      const txPayload = {
+        item_id: item.item_id,
+        location_id: physicalLocId,
+        quantity: -item.qty,
+        action_type: 'checkout',
+        confirmed_at: new Date().toISOString(),
         user_id: user.id,
-        external_sales_id: salesId,
-        platform: platform,
-        platform_fee: cartState.platformFee,
-        credits_applied: creditValue,
-        effective_discount: discountPercentAfterCredits,
-        flagged: flagged,
-        verified_method: 'password',
-        verified_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        notes: `Completed via checkout, flagged=${flagged}`,
-        cart_snapshot: cart,
-        total_amount: finalTotal,
-        };
+        email: user.email,
+        notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
+        method: 'checkout',
+      };
 
-        const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
-        if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
-
-        // ✅ Second: only if everything above succeeded, decrement stock
-        for (const item of cart) {
-        const locationId = item.selected_location_id;
-        if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
-
-        console.log(`🔄 Decrementing stock at location ${locationId} by ${item.qty} units...`);
-        const { error: rpcError } = await supabase.rpc('subtract_quantity', {
-            loc_id: locationId,
-            delta: item.qty,
-        });
-        if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
-        }
-
-        // ✅ Unlock locations & clear cart
-        await unlockSelectedLocationsForCurrentUser();
-        checkoutModule.clearCart();
-
-        showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
-
-    } catch (err) {
-        console.error("❌ Checkout error:", err);
-        showToast(`❌ Checkout failed: ${err.message}`, "error");
-        throw err;
-    } finally {
-        loadingOverlay?.classList.remove("active");
+      const { error: itemTxError } = await supabase.from("stock_transactions").insert(txPayload);
+      if (itemTxError) throw new Error(`Failed transaction log: ${item.title} — ${itemTxError.message}`);
     }
+
+    // ✅ Calculate credits
+    let creditValue = 0;
+    const creditEl = document.getElementById("credit-value-display");
+    if (creditEl) {
+      const raw = creditEl.textContent.replace("$", "");
+      creditValue = parseFloat(raw) || 0;
     }
+
+    // ✅ Calculate discounts & details
+    let subtotalBeforeDiscounts = 0;
+    let perItemDiscountTotal = 0;
+    const discounts = cartState.itemDiscounts || {};
+
+    const perItemDiscountsDetails = cart.map(item => {
+      const qty = item.qty || 1;
+      const originalTotal = item.sale_price * qty;
+
+      subtotalBeforeDiscounts += originalTotal;
+
+      const savedDiscount = discounts[item.item_id];
+      const percent = savedDiscount ? parseFloat(savedDiscount.percent || "0") || 0 : 0;
+      const discountAmount = (percent / 100) * originalTotal;
+      perItemDiscountTotal += discountAmount;
+
+      return {
+        item_id: item.item_id,
+        title: item.title,
+        quantity: qty,
+        original_total: originalTotal,
+        discount_percent: percent,
+        discount_amount: discountAmount,
+      };
+    });
+
+    const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
+    const denominator = Math.max(adjustedSubtotal, 0.01);
+    const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
+    const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
+    const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
+    const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
+
+    // ✅ Insert sales audit with complete details
+    const auditPayload = {
+      user_id: user.id,
+      external_sales_id: salesId,
+      platform: platform,
+      platform_fee: cartState.platformFee,
+      credits_applied: creditValue,
+      effective_discount: discountPercentAfterCredits,
+      flagged: flagged,
+      verified_method: 'password',
+      verified_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      notes: `Completed via checkout, flagged=${flagged}`,
+      cart_snapshot: cart,
+      per_item_discounts: perItemDiscountsDetails,
+      general_discount_percent: generalDiscountPercent,
+      general_discount_amount: generalDiscountAmount,
+      total_amount: finalTotal,
+    };
+
+    const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
+    if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
+
+    // ✅ Decrement stock quantities
+    for (const item of cart) {
+      const locationId = item.selected_location_id;
+      if (!locationId) throw new Error(`Item "${item.title}" missing location selection for stock update.`);
+
+      console.log(`🔄 Decrementing stock at location ${locationId} by ${item.qty} units...`);
+      const { error: rpcError } = await supabase.rpc('subtract_quantity', {
+        loc_id: locationId,
+        delta: item.qty,
+      });
+      if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
+    }
+
+    // ✅ Unlock locations & clear cart
+    await unlockSelectedLocationsForCurrentUser();
+    checkoutModule.clearCart();
+
+    // ✅ Close all modals ONLY if everything succeeded
+    document.getElementById("checkout-modal")?.classList.add("hidden");
+    document.getElementById("password-confirm-modal")?.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+
+    showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
+
+  } catch (err) {
+    console.error("❌ Checkout error:", err);
+    showToast(`❌ Checkout failed: ${err.message}`, "error");
+    throw err;
+  } finally {
+    loadingOverlay?.classList.remove("active");
+  }
+}
 
   //#endregion
    
