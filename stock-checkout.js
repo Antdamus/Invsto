@@ -12,7 +12,7 @@ window.checkoutModule = (function () {
         flagged: false,   // ✅ NEW: flag state
     };
     let locksAcquired = false; // 🔐 Tracks if locks have been acquired during current modal session
-
+    let creditTiers = [];
 
     window.addEventListener("beforeunload", async () => {
     await unlockSelectedLocationsForCurrentUser();
@@ -118,6 +118,31 @@ window.checkoutModule = (function () {
         saveCartToStorage(); // ← ADD THIS
         renderCartItems();
     }
+
+    //function to load credit tiers
+    async function loadCreditTiers() {
+        const { data, error } = await supabase
+            .from("credit_tiers")
+            .select("*")
+            .order("id");
+
+        if (error) {
+            console.error("❌ Failed to load credit tiers:", error.message);
+            creditTiers = [];
+            return;
+        }
+
+        // ✅ Replace the global creditTiers with the fetched data
+        creditTiers = data.map(tier => ({
+            id: tier.id,               // e.g., "credit-3mm"
+            label: tier.label,         // e.g., "3mm Tier"
+            emoji: tier.emoji,         // e.g., "💎"
+            unit_value: tier.unit_value, // dynamic price from DB
+        }));
+
+        //console.log("✅ Loaded credit tiers:", creditTiers);
+    }
+
 
     function getCart() {
     return [...cartState.items];
@@ -355,7 +380,6 @@ window.checkoutModule = (function () {
         if (itemCountEl) itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
     }
 
-
     //function to set up the listener
     function setupCartPanelListeners() {
         const toggleBtn = document.getElementById("cart-toggle-btn");
@@ -434,54 +458,65 @@ window.checkoutModule = (function () {
 
     // === 💳 Credit Calculation Logic ===
     function setupCreditTierListeners() {
-        const inputs = [
-            { id: "credit-3mm", value: 20 },
-            { id: "credit-5mm", value: 35 },
-            { id: "credit-8mm", value: 50 }
-        ];
+        console.log("🔎 Running setupCreditTierListeners, current creditTiers:", creditTiers);
+
+        if (!creditTiers || creditTiers.length === 0) {
+            console.warn("⚠️ No credit tiers loaded! Listeners will not be set up.");
+            return;
+        }
+
+        const inputs = creditTiers.map(tier => ({
+            id: tier.id,
+            value: tier.unit_value
+        }));
 
         inputs.forEach(({ id }) => {
             const input = document.getElementById(id);
             if (input) {
+                console.log(`✅ Setting up listener on credit input: ${id}`);
                 input.addEventListener("input", () => {
-                updateCreditValue();
-                saveCartToStorage(); // ✅ Save credits on change
+                    updateCreditValue();
+                    saveCartToStorage();
                 });
+            } else {
+                console.warn(`⚠️ No input element found in DOM for credit ID: ${id}`);
             }
         });
     }
 
     function updateCreditValue() {
-        const tierLabels = {
-            "credit-3mm": { label: "3mm Tier", emoji: "💎", value: 20 },
-            "credit-5mm": { label: "5mm Tier", emoji: "🔷", value: 35 },
-            "credit-8mm": { label: "8mm Tier", emoji: "🟣", value: 50 }
-        };
+        if (!creditTiers.length) {
+            console.error("🚨 updateCreditValue called before creditTiers loaded!");
+            return 0;
+        }
 
         let totalCredit = 0;
         let breakdownHtml = "";
         let anyInput = false;
 
-        for (const id in tierLabels) {
-            const input = document.getElementById(id);
+        creditTiers.forEach(tier => {
+            const input = document.getElementById(tier.id);
             const count = parseInt(input?.value || "0");
-            const unitValue = tierLabels[id].value;
+            const unitValue = tier.unit_value;
+
+            // 🔥 Keep cart state updated with credit quantities
+            cartState.credits[tier.id] = count.toString();
 
             if (count > 0) {
-            anyInput = true;
-            const lineTotal = count * unitValue;
+                anyInput = true;
+                const lineTotal = count * unitValue;
 
-            breakdownHtml += `
-                <p class="credit-breakdown-line">
-                <span class="tier-emoji">${tierLabels[id].emoji}</span>
-                <span class="tier-label">${tierLabels[id].label}</span>
-                <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
-                </p>
-            `;
+                breakdownHtml += `
+                    <p class="credit-breakdown-line">
+                    <span class="tier-emoji">${tier.emoji}</span>
+                    <span class="tier-label">${tier.label}</span>
+                    <span class="math-line">→ ${count} × $${unitValue.toFixed(2)} = <strong>$${lineTotal.toFixed(2)}</strong></span>
+                    </p>
+                `;
 
-            totalCredit += lineTotal;
+                totalCredit += lineTotal;
             }
-        }
+        });
 
         const display = document.getElementById("credit-value-display");
         if (display) display.textContent = `$${totalCredit.toFixed(2)}`;
@@ -489,15 +524,33 @@ window.checkoutModule = (function () {
         const breakdownContainer = document.getElementById("credit-breakdown-display");
         if (breakdownContainer) {
             if (anyInput) {
-            breakdownContainer.innerHTML = breakdownHtml;
-            breakdownContainer.classList.remove("hidden");
+                breakdownContainer.innerHTML = breakdownHtml;
+                breakdownContainer.classList.remove("hidden");
             } else {
-            breakdownContainer.classList.add("hidden");
-            breakdownContainer.innerHTML = "";
+                breakdownContainer.classList.add("hidden");
+                breakdownContainer.innerHTML = "";
             }
         }
+
         return totalCredit;
     }
+
+    function updateCreditInputsFromCartState() {
+        if (!creditTiers.length) {
+            console.error("🚨 updateCreditInputsFromCartState called BEFORE creditTiers loaded! This will break summary updates. Make sure loadCreditTiers() finishes before restoring cart.");
+            return;
+        }
+
+        creditTiers.forEach(tier => {
+            const el = document.getElementById(tier.id);
+            if (el) {
+                el.value = cartState.credits[tier.id] || "0";
+            }
+        });
+
+        updateCreditValue();
+    }
+
   //#endregion
 
   //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
@@ -1031,11 +1084,11 @@ window.checkoutModule = (function () {
     const STORAGE_KEY = "checkout-cart-og";
 
     function saveCartToStorage() {
-        const creditInputs = {
-            "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
-            "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
-            "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
-        };
+        const creditInputs = {};
+        creditTiers.forEach(tier => {
+            const inputEl = document.getElementById(tier.id);
+            creditInputs[tier.id] = inputEl?.value || "0";
+        });
 
         const generalDiscountVal = document.getElementById("general-discount")?.value || "";
 
@@ -1427,13 +1480,6 @@ async function finalizeCheckout(password) {
 
   //#endregion
    
-    function updateCreditInputsFromCartState() {
-    for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
-        const el = document.getElementById(key);
-        if (el) el.value = cartState.credits[key] || "0";
-    }
-    updateCreditValue();
-    }
 
     function updateGeneralDiscountInputFromCartState() {
     const el = document.getElementById("general-discount");
@@ -1458,10 +1504,13 @@ async function finalizeCheckout(password) {
     renderCartItems,        // ✅ add this
     loadCartFromStorage,    // ✅ and this
     setupCartTabs,
+    loadCreditTiers,
     setupCreditTierListeners,
     setupCheckoutConfirmationModal,
     verifyPasswordForCurrentUser,
     lockSelectedLocationsForCurrentUser,
-    unlockSelectedLocationsForCurrentUser
+    unlockSelectedLocationsForCurrentUser,
+    updateCreditInputsFromCartState,
+    updateCreditValue
   };
 })();

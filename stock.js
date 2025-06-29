@@ -2784,6 +2784,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Step 2: Fetch items from Supabase and store globally
   await loadAllItemsWithCache();
+  await checkoutModule.loadCreditTiers();
   setupInventoryRealtimeListener();
   await checkoutModule.loadCartFromStorage();  // handles image signing + UI
 
@@ -2865,6 +2866,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   //#endregion
 
   //#region step 5 set up the event listernes 
+    
     //event listeners for the form, pagination control, updating url, etc
     setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);
 
@@ -2957,14 +2959,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       //event lister to the checkout cart 
       checkoutModule.setupCartPanelListeners();
 
+      //lister for the tabs 
+      checkoutModule.loadCartFromStorage();
+      checkoutModule.setupCartTabs();
+      checkoutModule.setupCreditTierListeners();
+      checkoutModule.updateCreditInputsFromCartState(); // 🔥 Then update UI with correct credits
+      checkoutModule.updateCreditValue();               // 🔥 Ensure summary is calculated on load
+      checkoutModule.setupCheckoutConfirmationModal();
+
       //event listener for the modal checkout after items are added to the cart
       checkoutModule.setupCheckoutModalListeners();
 
-      //lister for the tabs 
-      checkoutModule.setupCartTabs();
-      checkoutModule.setupCreditTierListeners();
-      await checkoutModule.loadCartFromStorage();
-      checkoutModule.setupCheckoutConfirmationModal();
+     
       
 
     //#endregion
