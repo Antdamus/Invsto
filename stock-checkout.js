@@ -8,13 +8,11 @@ window.checkoutModule = (function () {
         generalDiscount: "",
         itemDiscounts: {},
         platformFee: 0,
-        salesId: "", // ✅ NEW: Sales ID
+        salesId: "",      // ✅ NEW: Sales ID
+        flagged: false,   // ✅ NEW: flag state
     };
 
 
-
-
-  
   //function to activate the toggle to start the checkout mode
   function setupCheckoutToggleButton(btnId = "toggle-checkout-mode") {
     const btn = document.getElementById(btnId);
@@ -46,39 +44,37 @@ window.checkoutModule = (function () {
     });
   }
 
-
   function isCheckoutMode() {
     return checkoutMode;
   }
 
   //#region function to add to cart one i click on the cards and i am in checkout mode
     //function responsible for adding to the card
- function addToCart(item) {
-  const existing = cartState.items.find(i => i.item_id === item.item_id);
-  if (existing) {
-    existing.qty += 1;
-  } else {
-    cartState.items.push({ ...item, qty: 1 });
-  }
+    function addToCart(item) {
+    const existing = cartState.items.find(i => i.item_id === item.item_id);
+    if (existing) {
+        existing.qty += 1;
+    } else {
+        cartState.items.push({ ...item, qty: 1 });
+    }
 
-  const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-  if (card) card.classList.add("in-cart");
+    const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+    if (card) card.classList.add("in-cart");
 
-  updateCartUI();
-}
+    updateCartUI();
+    }
 
-function removeFromCart(itemId) {
-  cartState.items = cartState.items.filter(item => item.item_id !== itemId);
+    function removeFromCart(itemId) {
+    cartState.items = cartState.items.filter(item => item.item_id !== itemId);
 
-  const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
-  if (card) card.classList.remove("in-cart");
+    const card = document.querySelector(`.stock-card [data-id="${itemId}"]`)?.closest('.stock-card');
+    if (card) card.classList.remove("in-cart");
 
-  updateCartUI();
-  saveCartToStorage();
-  renderCartItems();
-}
+    updateCartUI();
+    saveCartToStorage();
+    renderCartItems();
+    }
 
-    
     //function to add an event listener so the add to cart function is triggered on click (pointing towards)
     async function handleCardClickForCheckout(cardElement) {
         if (!cardElement) return;
@@ -117,11 +113,9 @@ function removeFromCart(itemId) {
         renderCartItems();
     }
 
-function getCart() {
-  return [...cartState.items];
-}
-
-
+    function getCart() {
+    return [...cartState.items];
+    }
   //#endregion
 
   //#region function to update the cart interface 
@@ -145,8 +139,7 @@ function getCart() {
         }
     }
 
-    //rendering in the cart the items 
-    function renderCartItems() {
+    async function renderCartItems() {
         const container = document.getElementById("cart-items-container");
         if (!container) return;
 
@@ -154,143 +147,158 @@ function getCart() {
         const items = cartState.items;
         if (items.length === 0) {
             container.innerHTML = `<p class="cart-empty">🕳️ Your cart is empty</p>`;
-
-            // === 💳 Subtract credit
-            let creditValue = 0;
-            const creditEl = document.getElementById("credit-value-display");
-            if (creditEl) {
-                const raw = creditEl.textContent.replace("$", "");
-                creditValue = parseFloat(raw) || 0;
-            }
-
-            const adjustedTotal = -creditValue;
-
-            const totalPriceEl = document.getElementById("cart-total-price");
-            const itemCountEl = document.getElementById("cart-item-count");
-
-            const label = adjustedTotal < 0 ? "Balance Left" : adjustedTotal > 0 ? "Owes Store" : "Total";
-            const colorClass = adjustedTotal < 0 ? "credit-positive" : adjustedTotal > 0 ? "credit-negative" : "credit-neutral";
-
-            if (totalPriceEl) {
-                totalPriceEl.innerHTML = `<span class="${colorClass}">${label}: $${adjustedTotal.toFixed(2)}</span>`;
-            }
-            if (itemCountEl) {
-                itemCountEl.textContent = "0 items";
-            }
-
-            const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
-                if (previewSummaryContainer) {
-                previewSummaryContainer.innerHTML = "";
-                previewSummaryContainer.classList.add("hidden");
-            }
-
-
+            updateCartSummary(0, 0);
             return;
         }
 
+        const { data: currentUserData, error: userError } = await supabase.auth.getUser();
+        if (userError || !currentUserData?.user) {
+            console.error("❌ Could not fetch authenticated user:", userError);
+            return;
+        }
+        const currentUser = currentUserData.user;
 
-        items.forEach(item => {
+        items.forEach(async item => {
             const div = document.createElement("div");
             div.className = "cart-item";
             div.innerHTML = `
-            <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
-            <div class="cart-item-details">
-                <p class="cart-item-title">${item.title}</p>
-                <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
-                <div class="cart-qty-controls">
-                <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
-                <span class="cart-qty-count">${item.qty}</span>
-                <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
+                <img loading="lazy" src="${item.image_url || 'https://via.placeholder.com/60x60?text=No+Image'}" alt="${item.title}" class="cart-thumb" />
+                <div class="cart-item-details">
+                    <p class="cart-item-title">${item.title}</p>
+                    <p class="cart-item-price">$${item.sale_price.toFixed(2)}</p>
+                    <div class="cart-qty-controls">
+                        <button class="qty-decrease" data-id="${item.item_id}" title="Decrease the quantity of the item">−</button>
+                        <span class="cart-qty-count">${item.qty}</span>
+                        <button class="qty-increase" data-id="${item.item_id}" title="Increase the quantity of the item">+</button>
+                    </div>
+                    <div class="cart-location-select" id="location-select-${item.item_id}">
+                        <p class="location-loading">🔄 Loading locations...</p>
+                    </div>
                 </div>
-            </div>
             `;
             container.appendChild(div);
+
+            try {
+                const { data, error } = await supabase
+                    .from("item_stock_locations")
+                    .select("id, quantity, locked_by, locked_at, location:location_id (id, location_name)")
+                    .eq("item_id", item.item_id)
+                    .gt("quantity", 0);
+
+                const selectContainer = div.querySelector(`#location-select-${item.item_id}`);
+                if (error || !data) {
+                    console.error(`Failed to fetch locations for item ${item.item_id}:`, error);
+                    selectContainer.innerHTML = `<p class="location-error">⚠️ Could not load locations</p>`;
+                    return;
+                }
+
+                if (data.length === 0) {
+                    selectContainer.innerHTML = `<p class="location-error">❌ No stock available</p>`;
+                    return;
+                }
+
+                const options = data.map(loc => {
+                    const lockedByOther = loc.locked_by && loc.locked_by !== currentUser.id;
+                    return `<option value="${loc.id}" ${lockedByOther ? "disabled style='color:red;'" : ""}>
+                        ${loc.location.location_name} (${loc.quantity} in stock)${lockedByOther ? " - LOCKED" : ""}
+                    </option>`;
+                }).join("");
+
+                selectContainer.innerHTML = `
+                    <label>Pick location:</label>
+                    <select data-item-id="${item.item_id}" class="location-dropdown">
+                        ${options}
+                    </select>
+                `;
+
+                const dropdown = selectContainer.querySelector("select");
+
+                // ✅ Save selected location to cartState on change
+                dropdown.addEventListener("change", e => {
+                    const selectedLocId = e.target.value;
+                    const cartItem = cartState.items.find(i => i.item_id === item.item_id);
+                    if (cartItem) {
+                        cartItem.selected_location_id = selectedLocId;
+                        saveCartToStorage();
+                    }
+                });
+
+                // ✅ Preselect previously saved location if available
+                if (item.selected_location_id) {
+                    dropdown.value = item.selected_location_id;
+                }
+            } catch (err) {
+                console.error(`Unexpected error fetching locations for item ${item.item_id}:`, err);
+            }
         });
 
-        // Attach listeners after injecting items
-        container.querySelectorAll(".qty-increase").forEach(btn => {
+        const subtotal = items.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
+        const itemCount = items.reduce((sum, item) => sum + (item.qty || 1), 0);
+        updateCartSummary(subtotal, itemCount);
+
+        attachCartQtyListeners(items);
+    }
+
+    function attachCartQtyListeners(items) {
+        document.querySelectorAll(".qty-increase").forEach(btn => {
             btn.addEventListener("click", () => {
-            const id = btn.dataset.id;
-            const target = items.find(i => i.item_id === id);
-            if (target) {
-                target.qty += 1;
-                updateCartUI();
-                saveCartToStorage(); // ← ADD THIS
-                renderCartItems();
-            }
+                const id = btn.dataset.id;
+                const target = items.find(i => i.item_id === id);
+                if (target) {
+                    target.qty += 1;
+                    updateCartUI();
+                    saveCartToStorage();
+                    renderCartItems();
+                }
             });
         });
 
-        container.querySelectorAll(".qty-decrease").forEach(btn => {
+        document.querySelectorAll(".qty-decrease").forEach(btn => {
             btn.addEventListener("click", () => {
                 const id = btn.dataset.id;
                 const target = items.find(i => i.item_id === id);
                 if (target && target.qty > 1) {
-                target.qty -= 1;
+                    target.qty -= 1;
                 } else {
-                // If qty reaches 0, remove the item from cart
-                cartState.items  = items.filter(i => i.item_id !== id);
-                // ✅ Clear any lingering discounts:
-                delete cartState.itemDiscounts[id];
-
-                // 🔄 Uncheck the select checkbox if it exists
-                const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
-                if (checkbox) checkbox.checked = false;
-
-                // 🧼 Also remove the in-cart highlight
-                const card = checkbox?.closest('.stock-card');
-                if (card) card.classList.remove("in-cart");
+                    cartState.items = items.filter(i => i.item_id !== id);
+                    delete cartState.itemDiscounts[id];
+                    const checkbox = document.querySelector(`.select-checkbox[data-id="${id}"]`);
+                    if (checkbox) checkbox.checked = false;
+                    const card = checkbox?.closest('.stock-card');
+                    if (card) card.classList.remove("in-cart");
                 }
                 updateCartUI();
-                saveCartToStorage(); // ← ADD THIS
+                saveCartToStorage();
                 renderCartItems();
             });
         });
+    }
 
-        // Update total price and item count
-        // === 🧮 Calculate subtotal
-        const subtotal = items.reduce((sum, item) => sum + (item.sale_price * (item.qty || 1)), 0);
-        const itemCount = items.reduce((sum, item) => sum + (item.qty || 1), 0);
-
-        // === 💳 Subtract credit
+    function updateCartSummary(subtotal, itemCount) {
         let creditValue = 0;
         const creditEl = document.getElementById("credit-value-display");
         if (creditEl) {
-        const raw = creditEl.textContent.replace("$", "");
-        creditValue = parseFloat(raw) || 0;
+            const raw = creditEl.textContent.replace("$", "");
+            creditValue = parseFloat(raw) || 0;
         }
-
         const adjustedTotal = subtotal - creditValue;
-
-        // === 🧾 DOM Elements
         const totalPriceEl = document.getElementById("cart-total-price");
         const itemCountEl = document.getElementById("cart-item-count");
-
-        // === 🖼️ Label logic
         const label = adjustedTotal < 0 ? "Balance Left" : adjustedTotal > 0 ? "Owes Store" : "Total";
         const colorClass = adjustedTotal < 0 ? "credit-positive" : adjustedTotal > 0 ? "credit-negative" : "credit-neutral";
-        // === 📊 Generate concise summary with subtotal and credits only (no grand total)
+
         const previewSummaryContainer = document.getElementById("cart-preview-summary-display");
         if (previewSummaryContainer) {
-        let summaryHtml = "";
-        summaryHtml += `<p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>`;
-
-        if (creditValue > 0) {
-            summaryHtml += `<p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>`;
+            let summaryHtml = `<p><strong>Subtotal:</strong> $${subtotal.toFixed(2)}</p>`;
+            if (creditValue > 0) summaryHtml += `<p><strong>Credits Applied:</strong> -$${creditValue.toFixed(2)}</p>`;
+            previewSummaryContainer.innerHTML = summaryHtml;
+            previewSummaryContainer.classList.remove("hidden");
         }
 
-        previewSummaryContainer.innerHTML = summaryHtml;
-        previewSummaryContainer.classList.remove("hidden");
-        }
-
-        if (totalPriceEl) {
-        totalPriceEl.innerHTML = `<span class="${colorClass}">${label}: $${adjustedTotal.toFixed(2)}</span>`;
-        }
-        if (itemCountEl) {
-        itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
-        }
-
+        if (totalPriceEl) totalPriceEl.innerHTML = `<span class="${colorClass}">${label}: $${adjustedTotal.toFixed(2)}</span>`;
+        if (itemCountEl) itemCountEl.textContent = `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
     }
+
 
     //function to set up the listener
     function setupCartPanelListeners() {
@@ -368,7 +376,6 @@ function getCart() {
         });
     }
 
-
     // === 💳 Credit Calculation Logic ===
     function setupCreditTierListeners() {
         const inputs = [
@@ -435,8 +442,6 @@ function getCart() {
         }
         return totalCredit;
     }
-
-
   //#endregion
 
   //#region funciton to open and close the checkout modal and make it operational modal Control & Discount Logic
@@ -823,6 +828,8 @@ function getCart() {
             const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
             const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
             const needsFlag = discountPercentAfterCredits > 10;
+            cartState.flagged = needsFlag; // ✅ PERSIST FLAG STATE HERE
+
             const discountColor = needsFlag ? 'red' : '#333';
             const flagText = needsFlag ? ' 🔴 Sale will be flagged' : '';
 
@@ -857,80 +864,87 @@ function getCart() {
   //#region logic to be able to preserve the cart even if something changes by accident
     const STORAGE_KEY = "checkout-cart-og";
 
-    function saveCartToStorage() {
-        const creditInputs = {
-            "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
-            "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
-            "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
-        };
+function saveCartToStorage() {
+    const creditInputs = {
+        "credit-3mm": document.getElementById("credit-3mm")?.value || "0",
+        "credit-5mm": document.getElementById("credit-5mm")?.value || "0",
+        "credit-8mm": document.getElementById("credit-8mm")?.value || "0",
+    };
 
-        const generalDiscountVal = document.getElementById("general-discount")?.value || "";
+    const generalDiscountVal = document.getElementById("general-discount")?.value || "";
 
-        const perItemDiscounts = {};
-        cartState.items.forEach(item => {
-            const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
-            const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
-            perItemDiscounts[item.item_id] = {
+    const perItemDiscounts = {};
+    cartState.items.forEach(item => {
+        const percentInput = document.querySelector(`.item-discount-input-percent[data-id="${item.item_id}"]`);
+        const absoluteInput = document.querySelector(`.item-discount-input-absolute[data-id="${item.item_id}"]`);
+        perItemDiscounts[item.item_id] = {
             percent: percentInput?.value || "",
             absolute: absoluteInput?.value || "",
-            };
+        };
+    });
+
+    const salesIdVal = document.getElementById("sales-id")?.value || "";
+    cartState.salesId = salesIdVal;
+
+    cartState.credits = creditInputs;
+    cartState.generalDiscount = generalDiscountVal;
+    cartState.itemDiscounts = perItemDiscounts;
+
+    // ✅ Save flagged state
+    const persistedState = {
+        ...cartState,
+        flagged: cartState.flagged || false,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedState));
+}
+
+
+async function loadCartFromStorage() {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
+
+    try {
+        const parsed = JSON.parse(stored);
+
+        // Restore items + sign images
+        const rawItems = parsed.items || [];
+        const signedItems = await Promise.all(
+            rawItems.map(async (item) => {
+                const signedUrl = await resolveImageUrl(item.image_url || "");
+                return { ...item, image_url: signedUrl };
+            })
+        );
+        cartState.items = signedItems;
+
+        // Restore other cart state
+        cartState.credits = parsed.credits || cartState.credits;
+        cartState.generalDiscount = parsed.generalDiscount || "";
+        cartState.itemDiscounts = parsed.itemDiscounts || {};
+        cartState.salesId = parsed.salesId || "";
+        cartState.flagged = parsed.flagged || false; // ✅ Restore flagged
+
+        const salesIdEl = document.getElementById("sales-id");
+        if (salesIdEl) salesIdEl.value = cartState.salesId;
+
+        updateCartUI();
+        renderCartItems();
+        updateCreditInputsFromCartState();
+        updateGeneralDiscountInputFromCartState();
+        updateCreditValue();
+        calculateFinalCheckoutTotal();
+
+        signedItems.forEach(item => {
+            const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
+            if (card) card.classList.add("in-cart");
         });
 
-        const salesIdVal = document.getElementById("sales-id")?.value || "";
-        cartState.salesId = salesIdVal;
-
-
-        cartState.credits = creditInputs;
-        cartState.generalDiscount = generalDiscountVal;
-        cartState.itemDiscounts = perItemDiscounts;
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(cartState));
+    } catch (e) {
+        console.warn("❌ Could not parse or restore stored cart data:", e);
+        cartState.items = [];
     }
+}
 
-    async function loadCartFromStorage() {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (!stored) return;
-
-        try {
-            const parsed = JSON.parse(stored);
-
-            // Restore items + sign images
-            const rawItems = parsed.items || [];
-            const signedItems = await Promise.all(
-                rawItems.map(async (item) => {
-                    const signedUrl = await resolveImageUrl(item.image_url || "");
-                    return { ...item, image_url: signedUrl };
-                })
-            );
-            cartState.items = signedItems;
-
-            // Restore credits & discounts
-            cartState.credits = parsed.credits || cartState.credits;
-            cartState.generalDiscount = parsed.generalDiscount || "";
-            cartState.itemDiscounts = parsed.itemDiscounts || {};
-
-            // ✅ Restore sales ID
-            cartState.salesId = parsed.salesId || "";
-            const salesIdEl = document.getElementById("sales-id");
-            if (salesIdEl) salesIdEl.value = cartState.salesId;
-
-            updateCartUI();
-            renderCartItems();
-            updateCreditInputsFromCartState();
-            updateGeneralDiscountInputFromCartState();
-            updateCreditValue();
-            calculateFinalCheckoutTotal();
-
-            signedItems.forEach(item => {
-                const card = document.querySelector(`.stock-card [data-id="${item.item_id}"]`)?.closest('.stock-card');
-                if (card) card.classList.add("in-cart");
-            });
-
-        } catch (e) {
-            console.warn("❌ Could not parse or restore stored cart data:", e);
-            cartState.items = [];
-        }
-    }
 
     function clearCart() {
         cartState = {
@@ -969,18 +983,211 @@ function getCart() {
     }
   //#endregion
 
-function updateCreditInputsFromCartState() {
-  for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
-    const el = document.getElementById(key);
-    if (el) el.value = cartState.credits[key] || "0";
-  }
-  updateCreditValue();
-}
+  //#region logic for confirmation modal
+    function setupCheckoutConfirmationModal() {
+        const finalizeBtn = document.getElementById("finalize-sale-btn");
+        const modal = document.getElementById("password-confirm-modal");
+        const title = modal.querySelector(".modal-title");
+        const desc = modal.querySelector(".modal-desc");
+        const confirmBtn = document.getElementById("confirm-password-btn");
+        const cancelBtn = document.getElementById("cancel-password-btn");
+        const passwordInput = document.getElementById("password-input");
+        const errorMsg = document.getElementById("password-error");
 
-function updateGeneralDiscountInputFromCartState() {
-  const el = document.getElementById("general-discount");
-  if (el) el.value = cartState.generalDiscount || "";
+        if (!finalizeBtn || !modal) {
+            console.warn("Finalize button or confirmation modal not found!");
+            return;
+        }
+
+        finalizeBtn.addEventListener("click", () => {
+            // Update modal title & description
+            title.innerHTML = `
+            <span class="material-icons-outlined" style="vertical-align: middle; font-size: 1.6rem; color: #0071e3; margin-right: 6px;">
+                verified
+            </span>
+            Confirm Checkout
+            `;
+            desc.textContent = "Please enter your password to finalize and sign this transaction.";
+
+            // Reset input and error
+            passwordInput.value = "";
+            errorMsg.textContent = "";
+
+            // Show the modal
+            modal.classList.remove("hidden");
+            document.body.classList.add("modal-open");
+
+            confirmBtn.onclick = async () => {
+            const password = passwordInput.value.trim();
+            if (!password) {
+                errorMsg.textContent = "Password required.";
+                return;
+            }
+            errorMsg.textContent = "";
+            try {
+                await finalizeCheckout(password); // 👈 implement this function!
+                modal.classList.add("hidden");
+                document.body.classList.remove("modal-open");
+            } catch (err) {
+                errorMsg.textContent = "Failed to finalize: " + (err.message || "Unknown error");
+            }
+            };
+        });
+
+        cancelBtn?.addEventListener("click", () => {
+            modal.classList.add("hidden");
+            document.body.classList.remove("modal-open");
+        });
+    }
+
+    async function verifyPasswordForCurrentUser(password) {
+        const { data, error: userError } = await supabase.auth.getUser();
+        if (userError || !data?.user) {
+            console.error("❌ Failed to fetch current user:", userError?.message);
+            throw new Error("Could not fetch authenticated user.");
+        }
+
+        const user = data.user;
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password,
+        });
+
+        if (error) {
+            console.error("❌ Password verification failed:", error.message);
+            return false; // Incorrect password
+        }
+
+        return true; // Password correct
+    }
+
+
+async function finalizeCheckout(password) {
+    const loadingOverlay = document.getElementById("loading-overlay");
+
+    try {
+        loadingOverlay?.classList.add("active");
+
+        // ✅ Verify password
+        const isValid = await verifyPasswordForCurrentUser(password);
+        if (!isValid) throw new Error("Incorrect password. Please try again.");
+
+        // ✅ Get cart & user
+        const cart = checkoutModule.getCart();
+        const { data, error: userError } = await supabase.auth.getUser();
+        if (userError || !data?.user) throw new Error("Could not fetch authenticated user.");
+        const user = data.user;
+
+        const platform = document.getElementById("platform-select")?.value || "none";
+        const salesId = document.getElementById("sales-id")?.value || null;
+        const finalTotalText = document.getElementById("checkout-final-price")?.textContent || "$0.00";
+        const finalTotal = parseFloat(finalTotalText.replace(/[^0-9.]/g, "")) || 0;
+
+        if (!cartState || !cartState.itemDiscounts) {
+            throw new Error("Cart state is missing or corrupted.");
+        }
+
+        // ✅ Use persisted flagged state
+        const flagged = !!cartState.flagged;
+
+        // ✅ Update stock quantities using your RPC and insert transactions
+        for (const item of cart) {
+            const { error: rpcError } = await supabase.rpc('decrement_stock', {
+                item_id: item.item_id,
+                qty: item.qty,
+            });
+
+            if (rpcError) throw new Error(`Failed stock update: ${item.title} — ${rpcError.message}`);
+
+            const txPayload = {
+                item_id: item.item_id,
+                quantity: -item.qty,
+                action_type: 'sale',
+                confirmed_at: new Date().toISOString(),
+                user_id: user.id,
+                email: user.email,
+                notes: `Sold via ${platform}, Sales ID: ${salesId || 'N/A'}`,
+                method: 'checkout',
+            };
+
+            const { error: txError } = await supabase.from("stock_transactions").insert(txPayload);
+            if (txError) throw new Error(`Failed transaction log: ${item.title} — ${txError.message}`);
+        }
+
+        // ✅ Calculate credits
+        let creditValue = 0;
+        const creditEl = document.getElementById("credit-value-display");
+        if (creditEl) {
+            const raw = creditEl.textContent.replace("$", "");
+            creditValue = parseFloat(raw) || 0;
+        }
+
+        // ✅ Calculate effective discount again (optional, but good for audit)
+        let subtotalBeforeDiscounts = 0;
+        let perItemDiscountTotal = 0;
+        cart.forEach(item => {
+            const qty = item.qty || 1;
+            const originalTotal = item.sale_price * qty;
+            subtotalBeforeDiscounts += originalTotal;
+
+            const savedDiscount = checkoutModule.cartState.itemDiscounts[item.item_id];
+            if (savedDiscount) {
+                const percent = parseFloat(savedDiscount.percent || "0") || 0;
+                perItemDiscountTotal += (percent / 100) * originalTotal;
+            }
+        });
+        const adjustedSubtotal = subtotalBeforeDiscounts - creditValue;
+        const denominator = Math.max(adjustedSubtotal, 0.01);
+        const generalDiscountPercent = parseFloat(document.getElementById("general-discount")?.value || "0") || 0;
+        const generalDiscountAmount = (generalDiscountPercent / 100) * adjustedSubtotal;
+        const totalDiscountGiven = perItemDiscountTotal + generalDiscountAmount;
+        const discountPercentAfterCredits = (totalDiscountGiven / denominator) * 100;
+
+        // ✅ Insert sales audit
+        const auditPayload = {
+            user_id: user.id,
+            external_sales_id: salesId,
+            platform: platform,
+            platform_fee: checkoutModule.cartState.platformFee,
+            credits_applied: creditValue,
+            effective_discount: discountPercentAfterCredits,
+            flagged: flagged,
+            verified_method: 'password',
+            verified_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            notes: `Completed via checkout, flagged=${flagged}`,
+            cart_snapshot: cart,
+            total_amount: finalTotal,
+        };
+
+        const { error: auditError } = await supabase.from("sales_audit").insert(auditPayload);
+        if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
+
+        // ✅ Clear cart & success message
+        checkoutModule.clearCart();
+        showToast(`✅ Checkout complete! Sale finalized${flagged ? ' ⚠️ Flagged for high discount.' : ''}`, "success");
+    } catch (err) {
+        console.error("❌ Checkout error:", err);
+        showToast(`❌ Checkout failed: ${err.message}`, "error");
+        throw err;
+    } finally {
+        loadingOverlay?.classList.remove("active");
+    }
 }
+  //#endregion
+    function updateCreditInputsFromCartState() {
+    for (const key of ["credit-3mm", "credit-5mm", "credit-8mm"]) {
+        const el = document.getElementById(key);
+        if (el) el.value = cartState.credits[key] || "0";
+    }
+    updateCreditValue();
+    }
+
+    function updateGeneralDiscountInputFromCartState() {
+    const el = document.getElementById("general-discount");
+    if (el) el.value = cartState.generalDiscount || "";
+    }
 
     (async () => {
     await loadCartFromStorage();
@@ -1002,5 +1209,7 @@ function updateGeneralDiscountInputFromCartState() {
     loadCartFromStorage,    // ✅ and this
     setupCartTabs,
     setupCreditTierListeners,
+    setupCheckoutConfirmationModal,
+    verifyPasswordForCurrentUser
   };
 })();

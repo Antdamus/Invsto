@@ -1937,7 +1937,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   position: fixed;
   bottom: 30px;
   right: 30px;
-  z-index: 9999;
+  z-index: 999999;
 }
 
 .toast {
@@ -2030,6 +2030,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     font-family: 'DM Serif Display', serif;
     position: relative;
     animation: modalPopIn 0.35s ease;
+    z-index: 100000;
   }
 
   

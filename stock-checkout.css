@@ -422,6 +422,61 @@ body.cart-open .main-content {
   color: #333;
 }
 
+/* ================= Cart Location Selector Styling ================= */
+.cart-location-select {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+.cart-location-select label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: #333;
+}
+
+.cart-location-select select.location-dropdown {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 0.95rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background-color: #f9f9f9;
+  transition: border-color 0.2s ease;
+}
+
+.cart-location-select select.location-dropdown:focus {
+  border-color: #0071e3;
+  outline: none;
+}
+
+/* Loading and error text */
+.cart-location-select p.location-loading,
+.cart-location-select p.location-error {
+  font-size: 0.85rem;
+  color: #999;
+  margin-top: 4px;
+}
+
+.cart-location-select p.location-error {
+  color: #d9534f; /* red tone for errors */
+}
+
+/* ✅ Locked options styling inside the dropdown */
+.cart-location-select select.location-dropdown option[disabled] {
+  color: #d9534f !important; /* force red text for locked options */
+  background-color: #f9f9f9;
+}
+
+/* Optional: visually highlight the dropdown if the selected option is locked */
+.cart-location-select select.location-dropdown.locked-selected {
+  border-color: #d9534f;
+  background-color: #fff3f3;
+}
+
+
+
+
 /*#endregion*/
 
 /* ===================== the checkout modal part ===================== */
@@ -429,7 +484,7 @@ body.cart-open .main-content {
 #checkout-modal {
   position: fixed;
   inset: 0;
-  z-index: 99999;
+  z-index: 9999;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(6px);
   display: none;
@@ -460,6 +515,7 @@ body.cart-open .main-content {
   color: #1d1d1f;
   position: relative;
   box-sizing: border-box;
+  z-index: 9999;
 }
 
 .modal-content-checkout h2 {
@@ -988,5 +1044,8 @@ body.cart-open .main-content {
   }
 }
 
+#password-confirm-modal {
+  z-index: 100000; /* ⬅️ Must be higher than checkout modal */
+}
 
 /*#endregion*/

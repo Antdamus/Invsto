@@ -2932,7 +2932,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       checkoutModule.setupCartTabs();
       checkoutModule.setupCreditTierListeners();
       await checkoutModule.loadCartFromStorage();
-
+      checkoutModule.setupCheckoutConfirmationModal();
       
 
     //#endregion
