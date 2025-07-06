@@ -2960,7 +2960,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       checkoutModule.setupCartPanelListeners();
 
       //lister for the tabs 
-      checkoutModule.loadCartFromStorage();
+      await checkoutModule.loadCartFromStorage();
       checkoutModule.setupCartTabs();
       checkoutModule.setupCreditTierListeners();
       checkoutModule.updateCreditInputsFromCartState(); // 🔥 Then update UI with correct credits
@@ -2981,27 +2981,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 
-/* special utility to be able to clean the filenames from spaces*/
-// ✅ Existing bumpInventoryVersion function
-async function bumpInventoryVersion(changedIds = null) {
-  const payload = {
-    inventory_version: crypto.randomUUID(),
-    changed_item_ids: Array.isArray(changedIds) && changedIds.length > 0 ? changedIds : null,
-  };
-
-  const { error } = await supabase
-    .from("metadata")
-    .update(payload)
-    .eq("id", "inventory");
-
-  if (error) {
-    console.warn("⚠️ Failed to update inventory version:", error.message);
-  } else {
-    console.log("🔁 Inventory version updated", payload);
-  }
-}
 
 // ✅ New fixer function
+/*
 window.fixPhotoFilenames = async function () {
   console.log("🔎 Starting photo filename fixer...");
 
@@ -3105,3 +3087,4 @@ window.fixPhotoFilenames = async function () {
 
   console.log(`🎉 Finished fixing photos. Processed ${processedCount} items. Fixed ${fixedCount} files.`);
 };
+*/
