@@ -173,6 +173,15 @@
   text-align: center;
 }
 
+.transfer-current-stock {
+  font-size: 0.95rem;
+  color: #555;
+  font-weight: 500;
+  margin-top: -8px;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
 @keyframes modalPopIn {
   from {
     opacity: 0;

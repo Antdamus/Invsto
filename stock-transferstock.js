@@ -98,6 +98,37 @@ window.transferModule = (function () {
     document.getElementById("confirm-transfer-btn")?.addEventListener("click", handleConfirmTransfer);
     document.getElementById("cancel-transfer-btn")?.addEventListener("click", closeTransferModal);
     document.getElementById("close-transfer-modal")?.addEventListener("click", closeTransferModal);
+
+    document.getElementById("transfer-destination-location")?.addEventListener("change", async (e) => {
+        const destId = e.target.value;
+        const destStockEl = document.getElementById("transfer-dest-current-stock");
+        destStockEl.classList.add("hidden");
+        destStockEl.textContent = "";
+
+        if (!destId) return; // nothing selected
+
+        try {
+            const { data: existingDest, error: destFetchError } = await supabase
+            .from("item_stock_locations")
+            .select("quantity")
+            .eq("item_id", currentItem.id)
+            .eq("location_id", destId)
+            .single();
+
+            if (destFetchError && destFetchError.details !== "Results contain 0 rows") {
+            console.error("❌ Could not check destination stock:", destFetchError.message);
+            return;
+            }
+
+            if (existingDest && existingDest.quantity > 0) {
+            destStockEl.textContent = `📦 Destination currently has ${existingDest.quantity} units.`;
+            destStockEl.classList.remove("hidden");
+            }
+        } catch (err) {
+            console.error("❌ Failed to fetch destination stock:", err);
+        }
+    });
+
   }
 
     // ✅ Confirm transfer – fully revamped
