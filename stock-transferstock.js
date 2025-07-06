@@ -22,7 +22,7 @@ window.transferModule = (function () {
   }
 
   // 📊 Load current stock breakdown into the modal
-  async function loadStockBreakdown(itemId) {
+    async function loadStockBreakdown(itemId) {
     const breakdownList = document.getElementById("transfer-stock-breakdown");
     const sourceSelect = document.getElementById("transfer-source-location");
     const destSelect = document.getElementById("transfer-destination-location");
@@ -30,45 +30,59 @@ window.transferModule = (function () {
     sourceSelect.innerHTML = `<option value="">-- Choose Source --</option>`;
     destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
 
-    const { data, error } = await supabase
-      .from("item_stock_locations")
-      .select(`
+    // Load existing stock breakdown
+    const { data: stockData, error: stockError } = await supabase
+        .from("item_stock_locations")
+        .select(`
         id, quantity, locked_by, locked_at,
         location:location_id (id, location_name)
-      `)
-      .eq("item_id", itemId);
+        `)
+        .eq("item_id", itemId);
 
-    if (error || !data) {
-      console.error("❌ Could not fetch stock locations:", error);
-      breakdownList.innerHTML = `<li class="error-message">⚠️ Error loading stock data.</li>`;
-      return;
+    if (stockError || !stockData) {
+        console.error("❌ Could not fetch stock locations:", stockError);
+        breakdownList.innerHTML = `<li class="error-message">⚠️ Error loading stock data.</li>`;
+        return;
     }
 
-    data.forEach(loc => {
-      const locked = loc.locked_by !== null;
-      breakdownList.innerHTML += `
+    stockData.forEach(loc => {
+        const locked = loc.locked_by !== null;
+        breakdownList.innerHTML += `
         <li>
-          ${loc.location.location_name}: ${loc.quantity} 
-          ${locked ? "<span style='color:red;'>🔒 LOCKED</span>" : ""}
+            ${loc.location.location_name}: ${loc.quantity} 
+            ${locked ? "<span style='color:red;'>🔒 LOCKED</span>" : ""}
         </li>
-      `;
-
-      if (loc.quantity > 0) {
-        sourceSelect.innerHTML += `
-          <option value="${loc.id}" data-available-qty="${loc.quantity}">
-            ${loc.location.location_name} (${loc.quantity})
-          </option>
         `;
-      }
 
-      // Destination should include all active locations
-      destSelect.innerHTML += `
-        <option value="${loc.location.id}">
-          ${loc.location.location_name}
-        </option>
-      `;
+        if (loc.quantity > 0) {
+        sourceSelect.innerHTML += `
+            <option value="${loc.id}" data-available-qty="${loc.quantity}">
+            ${loc.location.location_name} (${loc.quantity})
+            </option>
+        `;
+        }
     });
-  }
+
+    // 🚦 Now populate destination locations from the locations table
+    const { data: locationsData, error: locationsError } = await supabase
+        .from("locations")
+        .select("id, location_name")
+        .eq("active", true);
+
+    if (locationsError || !locationsData) {
+        console.error("❌ Could not fetch available locations:", locationsError);
+        destSelect.innerHTML = `<option value="">⚠️ Error loading locations</option>`;
+        return;
+    }
+
+    locationsData.forEach(loc => {
+        destSelect.innerHTML += `
+        <option value="${loc.id}">
+            ${loc.location_name}
+        </option>
+        `;
+    });
+    }
 
   // 🚦 Listen for source selection change to update max quantity display
   function setupListeners() {
@@ -86,8 +100,8 @@ window.transferModule = (function () {
     document.getElementById("close-transfer-modal")?.addEventListener("click", closeTransferModal);
   }
 
-  // ✅ Confirm transfer
-  async function handleConfirmTransfer() {
+    // ✅ Confirm transfer – fully revamped
+    async function handleConfirmTransfer() {
     const sourceId = document.getElementById("transfer-source-location").value;
     const destId = document.getElementById("transfer-destination-location").value;
     const qty = parseInt(document.getElementById("transfer-quantity").value);
@@ -95,42 +109,104 @@ window.transferModule = (function () {
     errorEl.textContent = "";
 
     if (!sourceId || !destId || !qty || qty <= 0) {
-      errorEl.textContent = "Please select valid source, destination, and quantity.";
-      return;
+        errorEl.textContent = "Please select valid source, destination, and quantity.";
+        return;
     }
     if (qty > maxTransferQty) {
-      errorEl.textContent = `Quantity exceeds max available (${maxTransferQty}).`;
-      return;
+        errorEl.textContent = `Quantity exceeds max available (${maxTransferQty}).`;
+        return;
     }
     if (sourceId === destId) {
-      errorEl.textContent = "Source and destination cannot be the same.";
-      return;
+        errorEl.textContent = "Source and destination cannot be the same.";
+        return;
     }
 
     try {
-      showToast("🔄 Processing transfer...", "info");
+        showToast("🔄 Processing transfer...", "info");
 
-      // 🚦 Lock the source location
-      const locked = await lockLocationForTransfer(sourceId);
-      if (!locked) throw new Error("Could not lock source location.");
+        const { data: currentUser, error: userError } = await supabase.auth.getUser();
+        if (userError || !currentUser?.user) throw new Error("Could not authenticate user.");
 
-      // 🚚 Perform transfer (subtract from source, add to destination)
-      const { error: subErr } = await supabase.rpc('subtract_quantity', { loc_id: sourceId, delta: qty });
-      if (subErr) throw new Error(`Failed to subtract from source: ${subErr.message}`);
+        // 🚦 Lock the source location
+        const locked = await lockLocationForTransfer(sourceId);
+        if (!locked) throw new Error("Could not lock source location.");
 
-      const { error: addErr } = await supabase.rpc('add_quantity', { loc_id: destId, delta: qty });
-      if (addErr) throw new Error(`Failed to add to destination: ${addErr.message}`);
+        // 🚚 Subtract quantity from source
+        const { error: subErr } = await supabase.rpc('subtract_quantity', { loc_id: sourceId, delta: qty });
+        if (subErr) throw new Error(`Failed to subtract from source: ${subErr.message}`);
 
-      await unlockLocationForTransfer(sourceId);
-      await bumpInventoryVersion([currentItem.id]);
+        // 🚦 Check if destination record exists
+        const { data: existingDest, error: destFetchError } = await supabase
+        .from("item_stock_locations")
+        .select("id, quantity")
+        .eq("item_id", currentItem.id)
+        .eq("location_id", destId)
+        .single();
 
-      closeTransferModal();
-      showToast("✅ Transfer complete!", "success");
+        if (destFetchError && destFetchError.details !== "Results contain 0 rows") {
+        throw new Error(`Error checking destination: ${destFetchError.message}`);
+        }
+
+        if (existingDest) {
+        // Update existing destination record
+        const { error: updateError } = await supabase
+            .from("item_stock_locations")
+            .update({
+            quantity: existingDest.quantity + qty,
+            last_updated: new Date().toISOString(),
+            added_by: currentUser.user.id,
+            confirmation_email: currentUser.email,
+            confirmed_at: new Date().toISOString(),
+            confirmation_method: "transfer"
+            })
+            .eq("id", existingDest.id);
+
+        if (updateError) throw new Error(`Failed to update destination quantity: ${updateError.message}`);
+        } else {
+        // Insert new destination record
+        const { error: insertError } = await supabase
+            .from("item_stock_locations")
+            .insert({
+            item_id: currentItem.id,
+            location_id: destId,
+            quantity: qty,
+            added_by: currentUser.user.id,
+            confirmation_email: currentUser.email,
+            confirmed_at: new Date().toISOString(),
+            confirmation_method: "transfer"
+            });
+
+        if (insertError) throw new Error(`Failed to insert destination quantity: ${insertError.message}`);
+        }
+
+        // 📑 Log the transfer in stock_transactions
+        const { error: logError } = await supabase
+        .from("stock_transactions")
+        .insert({
+            item_id: currentItem.id,
+            location_id: destId,
+            quantity: qty,
+            action_type: "transfer",
+            confirmed_at: new Date().toISOString(),
+            method: "transfer",
+            email: currentUser.email,
+            user_id: currentUser.user.id,
+            notes: `Transferred ${qty} from source ID ${sourceId} to destination ID ${destId}`
+        });
+
+        if (logError) throw new Error(`Failed to log transfer: ${logError.message}`);
+
+        // ✅ Unlock source, bump cache, close modal
+        await unlockLocationForTransfer(sourceId);
+        await bumpInventoryVersion([currentItem.id]);
+
+        closeTransferModal();
+        showToast("✅ Transfer complete!", "success");
     } catch (err) {
-      console.error("❌ Transfer failed:", err);
-      showToast(`❌ Transfer failed: ${err.message}`, "error");
+        console.error("❌ Transfer failed:", err);
+        showToast(`❌ Transfer failed: ${err.message}`, "error");
     }
-  }
+    }
 
   function closeTransferModal() {
     document.getElementById("transfer-modal").classList.add("hidden");
