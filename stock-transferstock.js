@@ -8,9 +8,23 @@ window.transferModule = (function () {
     try {
       const modal = document.getElementById("transfer-modal");
       currentItem = allItems.find(i => i.id === itemId);
+      console.log("🔍 currentItem object:", currentItem);
       if (!currentItem) throw new Error("Item not found.");
 
       document.getElementById("transfer-item-title").textContent = currentItem.title || "Untitled";
+
+        const itemImageEl = document.getElementById("transfer-item-image");
+        console.log("🖼️ Attempting to resolve photo:", currentItem.photoPaths[0]);
+        if (currentItem.photoPaths && currentItem.photoPaths.length > 0) {
+            const photoPath = currentItem.photoPaths[0]; // just like your checkout uses
+            const signedUrl = await checkoutModule.resolveImageUrl(photoPath); // ✅ call the same helper
+
+            itemImageEl.src = signedUrl || "https://via.placeholder.com/100x100?text=No+Image";
+        } else {
+            itemImageEl.src = "https://via.placeholder.com/100x100?text=No+Image";
+        }
+
+
       await loadStockBreakdown(itemId);
 
       modal.classList.remove("hidden");

@@ -182,6 +182,21 @@
   text-align: center;
 }
 
+.transfer-item-image-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.transfer-item-image {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border: 1px solid rgba(0,0,0,0.1);
+}
+
 @keyframes modalPopIn {
   from {
     opacity: 0;
