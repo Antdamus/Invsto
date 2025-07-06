@@ -22,7 +22,8 @@ const requiredHeaders = {
   metal: "C:Metal",
   purity: "C:Metal Purity",
   style: "C:Style",
-  type: "C:Type"
+  type: "C:Type",
+  sku: "Custom label (SKU)" // ✅ NEW: custom SKU column
 };
 
 async function getPublicImageUrl(privatePath) {
@@ -158,6 +159,11 @@ window.exportToEbayXLSX = async function (items) {
       row[headers.indexOf(requiredHeaders.purity)] = "925";
       row[headers.indexOf(requiredHeaders.style)] = "Pendant";
       row[headers.indexOf(requiredHeaders.type)] = "Pendant";
+      // ✅ Add SKU (barcode) to the Custom label (SKU) column
+      const skuIndex = headers.indexOf(requiredHeaders.sku);
+      if (skuIndex !== -1) {
+        row[skuIndex] = item.barcode || "";
+      }
 
       output.push(row);
     }

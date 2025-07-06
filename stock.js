@@ -2981,7 +2981,127 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 });
 
-/* to be able to upload functions to run them in the console
-window.extractFilterValues = extractFilterValues;
-window.getFilteredItems = getFilteredItems;
-*/
+/* special utility to be able to clean the filenames from spaces*/
+// ✅ Existing bumpInventoryVersion function
+async function bumpInventoryVersion(changedIds = null) {
+  const payload = {
+    inventory_version: crypto.randomUUID(),
+    changed_item_ids: Array.isArray(changedIds) && changedIds.length > 0 ? changedIds : null,
+  };
+
+  const { error } = await supabase
+    .from("metadata")
+    .update(payload)
+    .eq("id", "inventory");
+
+  if (error) {
+    console.warn("⚠️ Failed to update inventory version:", error.message);
+  } else {
+    console.log("🔁 Inventory version updated", payload);
+  }
+}
+
+// ✅ New fixer function
+window.fixPhotoFilenames = async function () {
+  console.log("🔎 Starting photo filename fixer...");
+
+  // 1) Fetch all items with their IDs and photo arrays
+  const { data: items, error } = await supabase
+    .from("item_types")
+    .select("id, photos");
+
+  if (error) {
+    console.error("❌ Failed to fetch item_types:", error.message);
+    return;
+  }
+
+  let processedCount = 0;
+  let fixedCount = 0;
+
+  for (const item of items) {
+    if (!item.photos || !Array.isArray(item.photos)) continue;
+
+    let updatedPhotos = [...item.photos];
+    let itemChanged = false;
+
+    for (let i = 0; i < item.photos.length; i++) {
+      const oldPath = item.photos[i];
+      const filename = oldPath.split("/").pop();
+
+      if (filename.includes(" ")) {
+        console.log(`🚨 Found space in photo: ${oldPath}`);
+
+        const cleanFilename = filename.replace(/\s+/g, "_");
+        const newPath = oldPath.replace(filename, cleanFilename);
+
+        try {
+          // 2) Download the existing file
+          const { data: fileData, error: downloadError } = await supabase
+            .storage
+            .from("photos")
+            .download(oldPath);
+
+          if (downloadError || !fileData) {
+            console.error(`❌ Failed to download ${oldPath}:`, downloadError?.message);
+            continue;
+          }
+
+          // 3) Upload the sanitized file
+          const { error: uploadError } = await supabase
+            .storage
+            .from("photos")
+            .upload(newPath, fileData, { upsert: true });
+
+          if (uploadError) {
+            console.error(`❌ Failed to upload ${newPath}:`, uploadError.message);
+            continue;
+          }
+
+          // 4) Update the photos array locally
+          updatedPhotos[i] = newPath;
+
+          // 5) Delete the old file
+          const { error: deleteError } = await supabase
+            .storage
+            .from("photos")
+            .remove([oldPath]);
+
+          if (deleteError) {
+            console.warn(`⚠️ Could not delete old file ${oldPath}:`, deleteError.message);
+            // Not fatal: we can clean later manually if needed.
+          }
+
+          console.log(`✅ Fixed ${oldPath} → ${newPath}`);
+          itemChanged = true;
+          fixedCount++;
+
+        } catch (e) {
+          console.error(`❌ Unexpected error processing ${oldPath}:`, e);
+          continue;
+        }
+      }
+    }
+
+    // 6) If we made changes to this item, update it in DB
+    if (itemChanged) {
+      const { error: updateError } = await supabase
+        .from("item_types")
+        .update({ photos: updatedPhotos })
+        .eq("id", item.id);
+
+      if (updateError) {
+        console.error(`❌ Failed to update item ${item.id}:`, updateError.message);
+        continue;
+      }
+
+      console.log(`🔄 Updated item ID ${item.id} with cleaned photo paths.`);
+
+      // ✅ Update the inventory version with the changed item ID
+      await bumpInventoryVersion([item.id]);
+    }
+
+    processedCount++;
+  }
+
+  console.log(`🎉 Finished fixing photos. Processed ${processedCount} items. Fixed ${fixedCount} files.`);
+};
