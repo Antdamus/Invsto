@@ -146,6 +146,7 @@ window.transferModule = (function () {
   }
 
     // ✅ Confirm transfer – fully revamped
+    // ✅ Confirm transfer – fully revamped and fixed to prevent same-location transfers
     async function handleConfirmTransfer() {
     const sourceId = document.getElementById("transfer-source-location").value;
     const destId = document.getElementById("transfer-destination-location").value;
@@ -161,8 +162,22 @@ window.transferModule = (function () {
         errorEl.textContent = `Quantity exceeds max available (${maxTransferQty}).`;
         return;
     }
-    if (sourceId === destId) {
-        errorEl.textContent = "Source and destination cannot be the same.";
+
+    // 🔍 Fetch the location_id of the selected source
+    const { data: sourceRecord, error: sourceFetchError } = await supabase
+        .from("item_stock_locations")
+        .select("location_id")
+        .eq("id", sourceId)
+        .single();
+
+    if (sourceFetchError || !sourceRecord) {
+        errorEl.textContent = "Could not validate source location.";
+        return;
+    }
+
+    // ✅ Prevent transfer to the same location
+    if (sourceRecord.location_id === destId) {
+        errorEl.textContent = "Source and destination cannot be the same location.";
         return;
     }
 
@@ -236,7 +251,7 @@ window.transferModule = (function () {
             method: "transfer",
             email: currentUser.email,
             user_id: currentUser.user.id,
-            notes: `Transferred ${qty} from source ID ${sourceId} to destination ID ${destId}`
+            notes: `Transferred ${qty} from source location ID ${sourceRecord.location_id} to destination ID ${destId}`
         });
 
         if (logError) throw new Error(`Failed to log transfer: ${logError.message}`);
@@ -252,6 +267,7 @@ window.transferModule = (function () {
         showToast(`❌ Transfer failed: ${err.message}`, "error");
     }
     }
+
 
   function closeTransferModal() {
     document.getElementById("transfer-modal").classList.add("hidden");
