@@ -136,10 +136,10 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
       const stockLabel = stock === 0
-        ? `<p class="stock-count ${stockClass}" data-tooltip="${tooltip}">
+        ? `<p class="stock-count ${stockClass}" data-tooltip="${tooltip}" data-id="${item.id}">
             <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
           </p>`
-        : `<p class="stock-count" data-tooltip="${tooltip}">In Stock: ${stock}</p>`;
+        : `<p class="stock-count" data-tooltip="${tooltip}" data-id="${item.id}">In Stock: ${stock}</p>`;
 
     
         const categoryChips = (item.categories || []).map(cat => { /**this
@@ -428,6 +428,14 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
             dir === "prev" ? prevSlide(index) : nextSlide(index);      // go left or right
           }
         }
+
+        // ✅ 🟢 NEW: Handle clicks on stock-count to open transfer modal
+        if (e.target.matches(".stock-count")) {
+          const itemId = e.target.dataset.id;
+          if (itemId) {
+            transferModule.openTransferModal(itemId);
+          }
+        }
       });
 
       // ☑️ Handle selection checkbox toggle (for bulk actions)
@@ -460,7 +468,9 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
           toggleSelectItem(id, checked); // update selectedItems Set + bulk toolbar
         }
       });
+
     }
+
   //#endregion 
 
 //#endregion
@@ -2969,11 +2979,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       //event listener for the modal checkout after items are added to the cart
       checkoutModule.setupCheckoutModalListeners();
-
-     
-      
-
     //#endregion
+ 
+    //#region event listener for transfer stock module
+      transferModule.setupListeners();
+
+    //#endregion 
   //#endregion
 
   //step 6 ensure there is function to update the toolbar

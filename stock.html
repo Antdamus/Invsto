@@ -248,6 +248,7 @@
   <script src="stock-editcards.js"></script>
   <script src="ebayExport.js"></script>
   <script src="stock-checkout.js"></script>
+  <script src="stock-transferstock.js"></script>
   <script src="stock.js"></script>
 
   <!-- 📢 Toast + Loading Spinner Containers -->
@@ -431,60 +432,112 @@
     </div>
   </div>
 
-<!-- editing modal -->
-<div id="editItemModal" class="modal hidden">
-  <div class="modal-content">
-    <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
-    <h2>Edit Inventory Item</h2>
+  <!-- editing modal -->
+  <div id="editItemModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
+      <h2>Edit Inventory Item</h2>
 
-    <form id="edit-item-form">
-      <div class="form-content-wrapper">
-        <label for="edit-title">Title:</label>
-        <input type="text" id="edit-title" name="title" required>
+      <form id="edit-item-form">
+        <div class="form-content-wrapper">
+          <label for="edit-title">Title:</label>
+          <input type="text" id="edit-title" name="title" required>
 
-        <label for="edit-description">Description:</label>
-        <textarea id="edit-description" name="description"></textarea>
+          <label for="edit-description">Description:</label>
+          <textarea id="edit-description" name="description"></textarea>
 
-        <label for="edit-weight">Weight:</label>
-        <input type="number" id="edit-weight" name="weight" step="0.01" min="0">
+          <label for="edit-weight">Weight:</label>
+          <input type="number" id="edit-weight" name="weight" step="0.01" min="0">
 
-        <label for="edit-barcode">Barcode (read-only):</label>
-        <input type="text" id="edit-barcode" name="barcode" readonly>
+          <label for="edit-barcode">Barcode (read-only):</label>
+          <input type="text" id="edit-barcode" name="barcode" readonly>
 
-        <label for="edit-qr-type">QR Type:</label>
-        <input type="text" id="edit-qr-type" name="qr_type">
+          <label for="edit-qr-type">QR Type:</label>
+          <input type="text" id="edit-qr-type" name="qr_type">
 
-        <label for="edit-qr">QR Data:</label>
-        <input type="text" id="edit-qr" name="qr">
+          <label for="edit-qr">QR Data:</label>
+          <input type="text" id="edit-qr" name="qr">
 
-        <button type="button" id="generate-edit-dymo-label">🔖 Generate DYMO Label</button>
+          <button type="button" id="generate-edit-dymo-label">🔖 Generate DYMO Label</button>
 
-        <label for="edit-cost">Cost ($):</label>
-        <input type="number" id="edit-cost" name="cost" step="0.01" min="0">
+          <label for="edit-cost">Cost ($):</label>
+          <input type="number" id="edit-cost" name="cost" step="0.01" min="0">
 
-        <label for="edit-sale-price">Sale Price ($):</label>
-        <input type="number" id="edit-sale-price" name="sale_price" step="0.01" min="0">
+          <label for="edit-sale-price">Sale Price ($):</label>
+          <input type="number" id="edit-sale-price" name="sale_price" step="0.01" min="0">
 
-        <label for="edit-price-per-weight">Price per Weight ($):</label>
-        <input type="number" id="edit-price-per-weight" name="price_per_weight" step="0.01" min="0">
+          <label for="edit-price-per-weight">Price per Weight ($):</label>
+          <input type="number" id="edit-price-per-weight" name="price_per_weight" step="0.01" min="0">
 
-        <label for="edit-stock-batch">Stock Batch Size Update:</label>
-        <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
+          <label for="edit-stock-batch">Stock Batch Size Update:</label>
+          <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
 
-        <div class="photos-section-wrapper">
-          <h3>Current Photos</h3>
-          <div id="current-photos-preview" class="photos-preview-grid"></div>
-          <div class="file-input-wrapper">
-            <input type="file" id="edit-photos" name="photos" multiple accept="image/*">
+          <div class="photos-section-wrapper">
+            <h3>Current Photos</h3>
+            <div id="current-photos-preview" class="photos-preview-grid"></div>
+            <div class="file-input-wrapper">
+              <input type="file" id="edit-photos" name="photos" multiple accept="image/*">
+            </div>
           </div>
+
+          <button type="submit" class="save-edit-btn">💾 Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 🔄 Modal: Transfer Stock Between Locations -->
+  <div id="transfer-modal" class="modal hidden">
+    <div class="modal-content">
+      <span class="material-icons-outlined close-icon" id="close-transfer-modal" title="Close">close</span>
+
+      <h2 class="modal-header">🔄 Transfer Stock</h2>
+      <p class="modal-subtext">Move stock between locations. You can only transfer up to the available quantity at the source location.</p>
+
+      <div class="modal-scrollable-body">
+        <!-- ✅ Display item information -->
+        <p><strong>Item:</strong> <span id="transfer-item-title">Loading...</span></p>
+
+        <!-- ✅ Current stock breakdown -->
+        <p><strong>Current Stock Breakdown:</strong></p>
+        <ul id="transfer-stock-breakdown" class="transfer-stock-list">
+          <!-- dynamically injected location quantities -->
+        </ul>
+
+        <!-- ✅ Source location selector -->
+        <div class="modal-input-section">
+          <label for="transfer-source-location">Source Location</label>
+          <select id="transfer-source-location">
+            <option value="">-- Choose Source --</option>
+          </select>
         </div>
 
-        <button type="submit" class="save-edit-btn">💾 Save Changes</button>
-      </div>
-    </form>
-  </div>
-</div>
+        <!-- ✅ Destination location selector -->
+        <div class="modal-input-section">
+          <label for="transfer-destination-location">Destination Location</label>
+          <select id="transfer-destination-location">
+            <option value="">-- Choose Destination --</option>
+          </select>
+        </div>
 
+        <!-- ✅ Quantity input with max display -->
+        <div class="modal-input-section">
+          <label for="transfer-quantity">Quantity to Transfer</label>
+          <div class="transfer-qty-wrapper">
+            <input type="number" id="transfer-quantity" min="1" placeholder="e.g. 3" />
+            <span class="transfer-max-info">Max: <span id="transfer-max-qty">0</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button id="confirm-transfer-btn" class="confirm-btn" title="Confirm transfer">✅ Confirm Transfer</button>
+        <button id="cancel-transfer-btn" class="cancel-btn" title="Cancel transfer">❌ Cancel</button>
+      </div>
+
+      <p id="transfer-error-message" class="error-message"></p>
+    </div>
+  </div>
 
 
   <!--initialize buttons-->
