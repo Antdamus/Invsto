@@ -98,15 +98,63 @@ window.transferModule = (function () {
     });
     }
 
-  // 🚦 Listen for source selection change to update max quantity display
-  function setupListeners() {
-    document.getElementById("transfer-source-location")?.addEventListener("change", (e) => {
-      const selected = e.target.options[e.target.selectedIndex];
-      maxTransferQty = parseInt(selected?.dataset.availableQty || "0");
-      document.getElementById("transfer-max-qty").textContent = maxTransferQty;
-      const qtyInput = document.getElementById("transfer-quantity");
-      qtyInput.max = maxTransferQty;
-      qtyInput.value = ""; // reset quantity input
+    // 🚦 Listen for source selection change to update max quantity display
+    function setupListeners() {
+    const sourceSelect = document.getElementById("transfer-source-location");
+    const destSelect = document.getElementById("transfer-destination-location");
+
+    sourceSelect?.addEventListener("change", async (e) => {
+        const selected = e.target.options[e.target.selectedIndex];
+        maxTransferQty = parseInt(selected?.dataset.availableQty || "0");
+        document.getElementById("transfer-max-qty").textContent = maxTransferQty;
+        const qtyInput = document.getElementById("transfer-quantity");
+        qtyInput.max = maxTransferQty;
+        qtyInput.value = ""; // reset quantity input
+
+        const sourceId = sourceSelect.value;
+
+        if (!sourceId) {
+        destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
+        return;
+        }
+
+        // 🔍 Fetch the selected source's location_id
+        const { data: sourceRecord, error: sourceFetchError } = await supabase
+        .from("item_stock_locations")
+        .select("location_id")
+        .eq("id", sourceId)
+        .single();
+
+        if (sourceFetchError || !sourceRecord) {
+        console.error("❌ Could not get source location_id:", sourceFetchError?.message);
+        return;
+        }
+
+        // 🚦 Rebuild destination dropdown excluding the selected source's location
+        destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
+
+        const { data: locationsData, error: locationsError } = await supabase
+        .from("locations")
+        .select("id, location_name")
+        .eq("active", true);
+
+        if (locationsError || !locationsData) {
+        console.error("❌ Could not fetch available locations:", locationsError);
+        destSelect.innerHTML = `<option value="">⚠️ Error loading locations</option>`;
+        return;
+        }
+
+        locationsData.forEach(loc => {
+        if (loc.id === sourceRecord.location_id) {
+            // ✅ Skip source location
+            return;
+        }
+        destSelect.innerHTML += `
+            <option value="${loc.id}">
+            ${loc.location_name}
+            </option>
+        `;
+        });
     });
 
     document.getElementById("confirm-transfer-btn")?.addEventListener("click", handleConfirmTransfer);
@@ -122,28 +170,28 @@ window.transferModule = (function () {
         if (!destId) return; // nothing selected
 
         try {
-            const { data: existingDest, error: destFetchError } = await supabase
+        const { data: existingDest, error: destFetchError } = await supabase
             .from("item_stock_locations")
             .select("quantity")
             .eq("item_id", currentItem.id)
             .eq("location_id", destId)
             .single();
 
-            if (destFetchError && destFetchError.details !== "Results contain 0 rows") {
+        if (destFetchError && destFetchError.details !== "Results contain 0 rows") {
             console.error("❌ Could not check destination stock:", destFetchError.message);
             return;
-            }
+        }
 
-            if (existingDest && existingDest.quantity > 0) {
+        if (existingDest && existingDest.quantity > 0) {
             destStockEl.textContent = `📦 Destination currently has ${existingDest.quantity} units.`;
             destStockEl.classList.remove("hidden");
-            }
+        }
         } catch (err) {
-            console.error("❌ Failed to fetch destination stock:", err);
+        console.error("❌ Failed to fetch destination stock:", err);
         }
     });
+    }
 
-  }
 
     // ✅ Confirm transfer – fully revamped
     // ✅ Confirm transfer – fully revamped and fixed to prevent same-location transfers
