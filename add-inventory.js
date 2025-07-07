@@ -793,9 +793,9 @@ async function bumpInventoryVersion(changedIds = null) {
       const errorMsg = document.getElementById("password-confirm-error");
       const confirmBtn = document.getElementById("btn-confirm-password");
       const cancelBtn = document.getElementById("btn-cancel-password");
-    
+
       let pendingAssignment = null; // { batchItem, location_id, location_name }
-    
+
       // 👇 Called from assign-location modal
       window.showPasswordConfirmModal = (batchItem, location_id, location_name) => {
         pendingAssignment = { batchItem, location_id, location_name };
@@ -806,81 +806,123 @@ async function bumpInventoryVersion(changedIds = null) {
         updateBarcodeInputStateBasedOnModals();
         passwordInput.focus();
       };
-    
+
       confirmBtn.onclick = async () => {
         const password = passwordInput.value.trim();
         if (!password) return;
-    
+
         const { data, error } = await supabase.auth.signInWithPassword({
           email: currentUser.email,
           password: password,
         });
-    
+
         if (error || !data.session) {
           errorMsg.style.display = "block";
           return;
         }
-    
-        // ✅ Password valid — insert
+
         const { batchItem, location_id, location_name } = pendingAssignment;
-    
-        const { error: insertError } = await supabase.from("item_stock_locations").insert({
-          item_id: batchItem.item.id,
-          location_id,
-          quantity: batchItem.count,
-          added_by: currentUser.id,
-          confirmation_email: currentUser.email,
-          confirmation_method: "manual_password",
-          confirmed_at: new Date().toISOString(),
-        });
-    
-        if (insertError) {
-          console.error("❌ Failed to insert:", insertError);
-          showToast("❌ Failed to save stock assignment.");
-          return;
+
+        try {
+          // ✅ Check if stock already exists at this location
+          const { data: existingStock, error: fetchError } = await supabase
+            .from("item_stock_locations")
+            .select("id, quantity")
+            .eq("item_id", batchItem.item.id)
+            .eq("location_id", location_id)
+            .maybeSingle();
+
+          if (fetchError) {
+            console.error("❌ Failed to check existing stock:", fetchError);
+            showToast("❌ Could not check existing stock.");
+            return;
+          }
+
+          if (existingStock) {
+            // ✅ Update existing stock
+            const { error: updateError } = await supabase
+              .from("item_stock_locations")
+              .update({
+                quantity: existingStock.quantity + batchItem.count,
+                last_updated: new Date().toISOString(),
+                added_by: currentUser.id,
+                confirmation_email: currentUser.email,
+                confirmation_method: "manual_password",
+                confirmed_at: new Date().toISOString(),
+              })
+              .eq("id", existingStock.id);
+
+            if (updateError) {
+              console.error("❌ Failed to update existing stock:", updateError);
+              showToast("❌ Failed to update existing stock.");
+              return;
+            }
+          } else {
+            // ✅ Insert new stock
+            const { error: insertError } = await supabase
+              .from("item_stock_locations")
+              .insert({
+                item_id: batchItem.item.id,
+                location_id,
+                quantity: batchItem.count,
+                added_by: currentUser.id,
+                confirmation_email: currentUser.email,
+                confirmation_method: "manual_password",
+                confirmed_at: new Date().toISOString(),
+              });
+
+            if (insertError) {
+              console.error("❌ Failed to insert new stock:", insertError);
+              showToast("❌ Failed to save stock assignment.");
+              return;
+            }
+          }
+
+          // ✅ Log transaction for audit trail
+          const { error: txError } = await supabase.from("stock_transactions").insert({
+            item_id: batchItem.item.id,
+            location_id,
+            quantity: batchItem.count,
+            action_type: "checkin",
+            method: "manual_password",
+            user_id: currentUser.id,
+            email: currentUser.email,
+            timestamp: new Date().toISOString(),
+            confirmed_at: new Date().toISOString(),
+            notes: `Added via Add Inventory Module`,
+          });
+
+          if (txError) {
+            console.error("❌ Failed to log transaction:", txError);
+            showToast("⚠️ Stock saved, but audit log failed.");
+          } else {
+            showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
+          }
+
+          modal.classList.add("hidden");
+          document.getElementById("modal-assign-location").classList.add("hidden");
+          updateBarcodeInputStateBasedOnModals();
+          document.getElementById("input-to-search-inventory-item").focus();
+
+          // ✅ Clean up UI and memory for this item
+          batchItem.cardEl.remove();
+          delete currentBatch[batchItem.item.barcode];
+
+          await bumpInventoryVersion([batchItem.item.id]);
+
+        } catch (err) {
+          console.error("❌ Unexpected error during stock confirmation:", err);
+          showToast(`❌ Failed to confirm stock: ${err.message || err}`);
         }
-
-       // ✅ Log transaction for audit trail
-        const transactionResult = await supabase.from("stock_transactions").insert({
-          item_id: batchItem.item.id,
-          location_id: location_id,
-          quantity: batchItem.count,
-          action_type: "checkin", // formerly `direction`, now matching your table schema
-          method: "manual_password",
-          user_id: currentUser.id,
-          email: currentUser.email,
-          timestamp: new Date().toISOString(),
-          confirmed_at: new Date().toISOString(),
-          notes: `Added via Add Inventory Module`,
-        });
-        
-
-        if (transactionResult.error) {
-          console.error("❌ Failed to insert into stock_transactions:", transactionResult.error);
-          showToast("⚠️ Stock saved, but audit log failed.");
-        } else {
-          showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
-        }
-    
-        showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
-        modal.classList.add("hidden");
-        document.getElementById("modal-assign-location").classList.add("hidden");
-        updateBarcodeInputStateBasedOnModals();
-        document.getElementById("input-to-search-inventory-item").focus();
-
-        // ✅ Clean up UI and memory for this item
-        batchItem.cardEl.remove();
-        delete currentBatch[batchItem.item.barcode];
-        await bumpInventoryVersion();
-        
       };
-    
+
       cancelBtn.onclick = () => {
         modal.classList.add("hidden");
         updateBarcodeInputStateBasedOnModals();
         document.getElementById("input-to-search-inventory-item").focus();
       };
     }
+
     
     
 //#endregion
