@@ -957,56 +957,85 @@ async function bumpInventoryVersion(changedIds = null) {
         }, 4000);
     }
 
-    //function to extract item from supabase if it match barcode item
+    // 🚀 Fully revamped: extract item + stock quantities for Add Inventory
     async function ExtractItemWithBarcodeFromSupabase(barcode, table = "item_types", column = "barcode", debug = false) {
-  try {
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .eq(column, barcode)
-      .single();
+      try {
+        // 1️⃣ Fetch item data
+        const { data, error } = await supabase
+          .from(table)
+          .select("*")
+          .eq(column, barcode)
+          .single();
 
-    if (debug) {
-      console.log("🔍 [DEBUG] Barcode Query Result:", data);
-    }
+        if (debug) console.log("🔍 [DEBUG] Barcode Query Result:", data);
 
-    if (error || !data) {
-      if (debug) {
-        console.warn("⚠️ [DEBUG] Item not found or error occurred.", { error });
+        if (error || !data) {
+          if (debug) console.warn("⚠️ [DEBUG] Item not found or error occurred.", { error });
+          return null;
+        }
+
+        // 2️⃣ Resolve photos to signed URLs
+        if (Array.isArray(data.photos)) {
+          const resolvedPhotos = await Promise.all(
+            data.photos.map(async (photoPath) => {
+              const { data: signed, error } = await supabase
+                .storage
+                .from("photos")
+                .createSignedUrl(photoPath, 60 * 60); // valid 1 hour
+              if (error) {
+                console.warn("⚠️ Could not resolve signed URL for", photoPath, error);
+                return null;
+              }
+              return signed?.signedUrl || null;
+            })
+          );
+          data.photos = resolvedPhotos.filter(Boolean);
+        } else {
+          data.photos = [];
+        }
+
+        // 3️⃣ Fetch stock quantities for this item across all locations
+        const { data: stockData, error: stockError } = await supabase
+          .from("item_stock_locations")
+          .select("quantity, location_id")
+          .eq("item_id", data.id);
+
+        if (stockError) {
+          console.error("❌ Failed to fetch stock data:", stockError);
+          data.stock = 0;
+          data.stock_tooltip = "Failed to load stock info.";
+          return data;
+        }
+
+        const { data: locations, error: locError } = await supabase
+          .from("locations")
+          .select("id, location_name");
+
+        const locationMap = locError || !locations
+          ? {}
+          : Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+
+        let totalStock = 0;
+        const breakdown = {};
+
+        stockData.forEach(({ quantity, location_id }) => {
+          const locName = locationMap[location_id] || "Unknown Location";
+          totalStock += quantity;
+          breakdown[locName] = (breakdown[locName] || 0) + quantity;
+        });
+
+        data.stock = totalStock;
+        data.stock_tooltip = Object.entries(breakdown).length > 0
+          ? Object.entries(breakdown).map(([loc, qty]) => `${loc}: ${qty}`).join("\n")
+          : "No stock found.";
+
+        return data;
+      } catch (err) {
+        console.error("❌ [DEBUG] Unexpected error while querying Supabase:", err);
+        showToast("Error contacting database.", "error");
+        return null;
       }
-      return null;
     }
-
-    // 🖼️ Transform photos (array of image paths) into public URLs
-    if (Array.isArray(data.photos)) {
-      const resolvedPhotos = await Promise.all(
-        data.photos.map(async (photoPath) => {
-          const { data: signed, error } = await supabase
-            .storage
-            .from("photos")
-            .createSignedUrl(photoPath, 60 * 60); // valid for 1 hour
-          if (error) {
-            console.warn("⚠️ Could not resolve signed URL for", photoPath, error);
-            return null;
-          }
-          return signed?.signedUrl || null;
-        })
-      );
-
-      data.photos = resolvedPhotos.filter(Boolean); // Remove any nulls
-    } else {
-      data.photos = [];
-    }
-
-
-    return data;
-  } catch (err) {
-    console.error("❌ [DEBUG] Unexpected error while querying Supabase:", err);
-    showToast("Error contacting database.", "error");
-    return null;
-  }
-    }
-
 
     //function to play sound after item is scanned
     function playScanSound() {
@@ -1103,11 +1132,12 @@ async function bumpInventoryVersion(changedIds = null) {
         
           const show = (field) => !hiddenFieldsCardContent.includes(field); // ✅ Clean utility
         
-          const stockLabel = stock === 0
-            ? `<p class="stock-count ${stockClass}">
-                 <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
-               </p>`
-            : `<p class="stock-count">In Stock: ${stock}</p>`;
+          const stockLabel = `<p class="stock-count ${stockClass}" title="${item.stock_tooltip || 'No breakdown available'}">
+            ${stock === 0 
+              ? `<i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: 0`
+              : `In Stock: ${stock}`
+            }
+          </p>`;
         
           const categoryChips = (item.categories || []).map(cat => `
             <div class="${chipCardDisplayClass}" data-cat="${cat}" data-id="${item.id}">
