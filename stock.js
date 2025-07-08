@@ -528,7 +528,14 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
         )],
 
         qr_type: [...document.querySelectorAll('.dropdown-option.selected[data-qr]')]
-          .map(el => el.dataset.qr)
+          .map(el => el.dataset.qr),
+
+        location: [...new Set(
+          [...document.querySelectorAll(".dropdown-option.selected[data-location]")]
+            .map(el => el.dataset.location)
+            .filter(Boolean)
+        )],
+
 
       };
       /**this is a nutshell will return a key value object that then you can feed into other things
@@ -590,7 +597,9 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
           (!filters.createdTo || item.created_at <= filters.createdTo) &&
           (filters.qr_type.length === 0 || filters.qr_type.includes(item.qr_type)) &&
           matchesCategory &&
-          (showOnlyFavorites ? userFavorites.has(item.id) : true)
+          (showOnlyFavorites ? userFavorites.has(item.id) : true) &&
+          (filters.location.length === 0 || filters.location.some(loc => (item.stock_locations || []).includes(loc))) 
+
         );
       });
       /**in this case you will return an array of items that passed the filter conditions nothing else */
@@ -824,6 +833,11 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
           params.set("qr_type", selectedQRs.join(","));
         }
 
+      const selectedLocations = [...document.querySelectorAll(".dropdown-option.selected[data-location]")]
+        .map(el => el.dataset.location);
+      if (selectedLocations.length > 0) {
+        params.set("location", selectedLocations.join(","));
+      }
 
       // ✅ Add match-all toggle if enabled
       if (matchAll) {
@@ -901,6 +915,15 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
         const qrSet = new Set(params.qr_type.split(","));
         document.querySelectorAll(".dropdown-option[data-qr]").forEach(el => {
           if (qrSet.has(el.dataset.qr)) {
+            el.classList.add("selected");
+          }
+        });
+      }
+
+      if (params.location) {
+        const locSet = new Set(params.location.split(","));
+        document.querySelectorAll(".dropdown-option[data-location]").forEach(el => {
+          if (locSet.has(el.dataset.location)) {
             el.classList.add("selected");
           }
         });
@@ -1223,6 +1246,14 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
               el.classList.remove("selected");
             }
           });
+        } else if (key === "location") {
+  const valueToRemove = label.split(": ")[1];
+  document.querySelectorAll(".dropdown-option.selected[data-location]").forEach(el => {
+    if (el.dataset.location === valueToRemove) {
+      el.classList.remove("selected");
+    }
+  });
+
         } else {
           const input = document.querySelector(`[name="${key}"]`);
           if (input) input.value = "";
@@ -1296,6 +1327,15 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
           if (Array.isArray(value)) {
             value.forEach(qr => {
               chipContainer.appendChild(createFilterChip(`QR: ${qr}`, "qr_type"));
+            });
+          }
+          continue; // skip the rest of loop for this key
+
+        // ✅ For location filters (also array)
+        case "location":
+          if (Array.isArray(value)) {
+            value.forEach(loc => {
+              chipContainer.appendChild(createFilterChip(`Location: ${loc}`, "location"));
             });
           }
           continue; // skip the rest of loop for this key
@@ -1814,6 +1854,18 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
       input.value = el.dataset.qr;
       form.appendChild(input);
     });
+
+    // Clear and re-add location filters
+    form.querySelectorAll('input[name="location"]').forEach(el => el.remove());
+
+    document.querySelectorAll(".dropdown-option.selected[data-location]").forEach(el => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "location";
+      input.value = el.dataset.location;
+      form.appendChild(input);
+    });
+
   
     // ✅ Log final result
     //console.log("✅ After sync: categories =", [...form.querySelectorAll('input[name="categories"]')].map(i => i.value));
@@ -2366,6 +2418,8 @@ async function fetchStockItems() {
     } else {
       item.stock_tooltip = "No stock data available";
     }
+
+    item.stock_locations = Object.keys(stockEntry?.breakdown || {}); // ← ✅ this is the key line
   });
   
 
@@ -2849,6 +2903,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
     });
+
+    //dropdown for location selection
+populateDropdowns({
+  data: allItems,
+  column: "stock_locations",
+  menuId: "location-filter-menu",
+  toggleId: "location-filter-toggle",
+  optionsContainerClass: "dropdown-options-location",
+  dataAttribute: "location",
+  optionClass: "dropdown-option",
+  searchId: null,
+  placeholder: "Search locations...",
+  onClick: setAsSelected,
+});
+
     
 
   //#endregion
