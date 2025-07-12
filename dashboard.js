@@ -34,7 +34,7 @@ async function loadInventoryData() {
 
   for (const item of itemTypes) {
     const quantity = quantityMap[item.id] || 0;
-    if (quantity > 0) {
+    if (quantity > 0 && !Array.isArray(item.categories) || !item.categories.includes("testcard")) {
       allItems.push({
         ...item,
         quantity,
@@ -57,23 +57,30 @@ function computeSummaryByCategory(items) {
   };
 
   for (const item of items) {
-    const { category, quantity, totalCost, totalValue } = item;
+    const { categories, quantity, totalCost, totalValue } = item;
+    const categoryList = Array.isArray(categories) ? categories : [];
+
+      // ❌ Skip if it includes testcard
+       if (categoryList.includes("testcard")) continue;
+
     summary.totalItems += quantity;
     summary.totalCost += totalCost;
     summary.totalValue += totalValue;
 
-    if (!summary.categories[category]) {
-      summary.categories[category] = {
-        category,
-        quantity: 0,
-        totalCost: 0,
-        totalValue: 0,
-      };
-    }
+    for (const category of categoryList) {
+      if (!summary.categories[category]) {
+        summary.categories[category] = {
+          category,
+          quantity: 0,
+          totalCost: 0,
+          totalValue: 0,
+        };
+      }
 
-    summary.categories[category].quantity += quantity;
-    summary.categories[category].totalCost += totalCost;
-    summary.categories[category].totalValue += totalValue;
+      summary.categories[category].quantity += quantity;
+      summary.categories[category].totalCost += totalCost;
+      summary.categories[category].totalValue += totalValue;
+    }
   }
 
   return summary;
