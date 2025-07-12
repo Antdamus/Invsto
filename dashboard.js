@@ -181,6 +181,12 @@ document.getElementById('logout')?.addEventListener('click', async () => {
   window.location.href = 'index.html';
 });
 
+document.getElementById('logout-mobile')?.addEventListener('click', async () => {
+  await supabase.auth.signOut();
+  window.location.href = 'index.html';
+});
+
+
 document.addEventListener("DOMContentLoaded", async () => {
   await checkAuth();
   const items = await loadInventoryData();
