@@ -285,6 +285,15 @@ body {
     padding: 0.5rem 0.75rem;
     font-size: 0.9rem;
   }
+
+  .metric-card {
+      flex: none;
+      width: fit-content;
+      min-width: 220px;
+      max-width: 100%;
+      margin: 0 auto;
+  }
+  
 }
 
 /* Force mobile menu to appear properly */
