@@ -4,18 +4,25 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OG Jewelry Dashboard</title>
+
+  <!-- Core Styles -->
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
+  <!-- Mobile Header -->
   <div class="mobile-header">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
-      <i class="ti ti-menu"></i>
+      <i data-lucide="menu"></i>
     </button>
     <span class="mobile-title">OG Dashboard</span>
   </div>
 
+  <!-- Mobile Menu -->
   <div class="mobile-menu" id="mobile-menu">
     <nav class="mobile-nav-links">
       <a href="dashboard.html">Dashboard</a>
@@ -26,6 +33,7 @@
     </nav>
   </div>
 
+  <!-- Desktop Sidebar + Main -->
   <div class="page">
     <aside class="sidebar">
       <div class="sidebar-inner">
@@ -63,16 +71,6 @@
     </div>
   </div>
 
-  <script>
-    document.getElementById("menu-toggle")?.addEventListener("click", () => {
-      document.getElementById("mobile-menu")?.classList.toggle("show");
-    });
-
-    document.getElementById("logout-mobile")?.addEventListener("click", async () => {
-      const { error } = await supabase.auth.signOut();
-      if (!error) window.location.href = 'index.html';
-    });
-  </script>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>

@@ -1,5 +1,4 @@
-
-/** Check if user is authenticated */
+/** =================== Auth =================== */
 async function checkAuth() {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (!session) {
@@ -9,7 +8,7 @@ async function checkAuth() {
   }
 }
 
-/** Load inventory data by joining item_types and item_stock_locations */
+/** =================== Data Loading =================== */
 async function loadInventoryData() {
   let allItems = [];
 
@@ -34,7 +33,7 @@ async function loadInventoryData() {
 
   for (const item of itemTypes) {
     const quantity = quantityMap[item.id] || 0;
-    if (quantity > 0 && !Array.isArray(item.categories) || !item.categories.includes("testcard")) {
+    if (quantity > 0 && (!Array.isArray(item.categories) || !item.categories.includes("testcard"))) {
       allItems.push({
         ...item,
         quantity,
@@ -47,7 +46,7 @@ async function loadInventoryData() {
   return allItems;
 }
 
-/** Group and summarize by category */
+/** =================== Data Summary =================== */
 function computeSummaryByCategory(items) {
   const summary = {
     totalItems: 0,
@@ -59,9 +58,7 @@ function computeSummaryByCategory(items) {
   for (const item of items) {
     const { categories, quantity, totalCost, totalValue } = item;
     const categoryList = Array.isArray(categories) ? categories : [];
-
-      // ❌ Skip if it includes testcard
-       if (categoryList.includes("testcard")) continue;
+    if (categoryList.includes("testcard")) continue;
 
     summary.totalItems += quantity;
     summary.totalCost += totalCost;
@@ -86,7 +83,7 @@ function computeSummaryByCategory(items) {
   return summary;
 }
 
-/** Render metric cards at top */
+/** =================== UI Rendering =================== */
 function renderMetricCards(summary) {
   const container = document.getElementById("metric-cards");
   container.innerHTML = `
@@ -97,7 +94,6 @@ function renderMetricCards(summary) {
   `;
 }
 
-/** Render detailed category breakdown table */
 function renderCategoryTable(summary) {
   const tableContainer = document.getElementById("inventory-table-container");
   const categories = Object.values(summary.categories);
@@ -130,7 +126,6 @@ function renderCategoryTable(summary) {
   `;
 }
 
-/** Render category breakdown pie chart */
 function renderCategoryChart(summary) {
   const categories = Object.values(summary.categories);
   const ctx = document.getElementById("category-chart").getContext("2d");
@@ -162,7 +157,6 @@ function renderCategoryChart(summary) {
   });
 }
 
-/** Generate pastel color palette */
 function generateColors(count) {
   const base = [
     "#74b9ff", "#55efc4", "#ffeaa7", "#fab1a0", "#a29bfe",
@@ -175,20 +169,31 @@ function generateColors(count) {
   return colors;
 }
 
-/** Logout handler */
-document.getElementById('logout')?.addEventListener('click', async () => {
-  await supabase.auth.signOut();
-  window.location.href = 'index.html';
-});
+/** =================== Navigation =================== */
+function setupNavigation() {
+  document.getElementById('logout')?.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    window.location.href = 'index.html';
+  });
 
-document.getElementById('logout-mobile')?.addEventListener('click', async () => {
-  await supabase.auth.signOut();
-  window.location.href = 'index.html';
-});
+  document.getElementById('logout-mobile')?.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    window.location.href = 'index.html';
+  });
 
+  document.getElementById("menu-toggle")?.addEventListener("click", () => {
+    document.getElementById("mobile-menu")?.classList.toggle("show");
+  });
 
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+/** =================== Init =================== */
 document.addEventListener("DOMContentLoaded", async () => {
   await checkAuth();
+  setupNavigation();
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);
   renderMetricCards(summary);

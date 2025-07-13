@@ -28,6 +28,7 @@ body {
   border: none;
   font-size: 1.5rem;
   color: white;
+  z-index: 1000;
 }
 
 .mobile-title {
