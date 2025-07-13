@@ -1,4 +1,8 @@
 /* =============== Base Styles =============== */
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: 'DM Serif Display', serif;
@@ -21,6 +25,8 @@ body {
   padding: 1rem;
   background-color: #1c1c1e;
   color: white;
+  position: relative;
+  z-index: 20;
 }
 
 .menu-toggle {
@@ -42,24 +48,35 @@ body {
   display: none;
   flex-direction: column;
   background: #2c2c2e;
-  position: absolute;
-  top: 56px;
-  left: 0;
   width: 100%;
-  z-index: 999;
-  padding: 1rem;
+  padding: 0.5rem 0;
+  animation: slideDown 0.3s ease forwards;
+  position: relative;
+  z-index: 15;
+  border-bottom: 1px solid #444;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
 }
 
 .mobile-menu.show {
   display: flex;
 }
 
+.mobile-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+}
+
 .mobile-nav-links a {
-  padding: 1rem;
-  font-size: 1.1rem;
+  display: block;
   color: white;
+  font-size: 1.1rem;
+  padding: 1rem;
   text-decoration: none;
   border-bottom: 1px solid #444;
+  width: 100%;
 }
 
 .mobile-nav-links a:hover {
@@ -78,7 +95,7 @@ body {
   top: 0;
   left: 0;
   height: 100vh;
-  z-index: 100;
+  z-index: 10;
 }
 
 .sidebar:hover {
@@ -268,6 +285,14 @@ body {
     flex-direction: column;
   }
 
+  .metric-card {
+    flex: none;
+    width: fit-content;
+    min-width: 220px;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+
   .chart-canvas {
     max-width: 100%;
   }
@@ -285,47 +310,16 @@ body {
     padding: 0.5rem 0.75rem;
     font-size: 0.9rem;
   }
+}
 
-  .metric-card {
-      flex: none;
-      width: fit-content;
-      min-width: 220px;
-      max-width: 100%;
-      margin: 0 auto;
+/* =============== Animations =============== */
+@keyframes slideDown {
+  from {
+    transform: translateY(-10%);
+    opacity: 0;
   }
-  
-}
-
-/* Force mobile menu to appear properly */
-.mobile-menu {
-  display: none;
-  flex-direction: column;
-  background: #2c2c2e;
-  position: fixed;
-  top: 56px;
-  left: 0;
-  width: 100%;
-  height: calc(100vh - 56px);
-  z-index: 9999;
-  padding: 1rem;
-  transition: transform 0.3s ease;
-  transform: translateY(-100%);
-}
-
-.mobile-menu.show {
-  display: flex;
-  transform: translateY(0%);
-}
-
-.mobile-menu a {
-  color: white;
-  font-size: 1.1rem;
-  padding: 1rem;
-  border-bottom: 1px solid #444;
-  text-decoration: none;
-}
-
-.mobile-menu a:hover {
-  background-color: #3a3a3c;
-  border-radius: 6px;
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
