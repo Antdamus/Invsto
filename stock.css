@@ -2147,3 +2147,73 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     user-select: none;
   }
 /*#endregion*/
+
+/* ================= Mobile Floating Filter Behavior (Overrides) ================= */
+@media (max-width: 768px) {
+  .floating-filters {
+    position: relative;
+    top: 0;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 16px;
+    border-radius: 28px;
+    display: none;
+    animation: slideDown 0.3s ease-out;
+    z-index: 10;
+    width: 100%;
+    max-width: 1200px;
+    margin: 12px auto;
+    box-sizing: border-box;
+  }
+
+
+  .floating-filters.show {
+    display: block;
+  }
+
+ .top-controls {
+  position: static;
+  background: white;
+  border-radius: 0;
+  padding: 10px 16px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+}
+
+
+  .filter-tabs {
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+
+  .filter-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .metric-card {
+    flex: none;
+    width: fit-content;
+    min-width: 220px;
+    margin: 0 auto;
+  }
+
+  .sticky {
+    position: relative;
+    top: 0;
+  }
+  .stock-header.sticky {
+    position: relative;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

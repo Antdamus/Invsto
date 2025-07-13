@@ -2945,6 +2945,8 @@ populateDropdowns({
   //#endregion
 
   //#region step 5 set up the event listernes 
+
+    
     
     //event listeners for the form, pagination control, updating url, etc
     setupDynamicFilters("filter-form", ["sort-select", "cards-per-page"]);
