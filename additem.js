@@ -544,6 +544,28 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
 
   const newItem = insertedItems[0];
+
+  // Save a bulk registry row if the modal captured data
+  try {
+    // Create a bag-specific barcode (ephemeral; retired when bag is empty)
+    const bagBarcode =
+      window.addItemBulkModule?.generateBagBarcode?.() ||
+      `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+
+    const locationId = pendingStockAssignments[newItem.barcode]?.location_id || null;
+
+    const res = await window.addItemBulkModule.saveRegistryForItem(newItem.id, bagBarcode, locationId);
+    if (res?.error) {
+      showToast("⚠️ Item saved, but bulk registry failed.");
+      console.warn(res.error);
+    } else if (!res?.skipped) {
+      showToast(`✅ Bulk registry saved. Bag barcode: ${bagBarcode}`);
+    }
+  } catch (err) {
+    console.warn("Bulk registry insert error:", err);
+  }
+
+
   const stockInfo = pendingStockAssignments[newItem.barcode];
 
   if (stockInfo) {
@@ -614,6 +636,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   //addition of important event listeners
+  window.addItemBulkModule.setupBulkModalOpeners();
   setupCostAndPriceListeners();
   setupPhotoUploadPreview();
   setupBarcodeGeneration();

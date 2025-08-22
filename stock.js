@@ -3170,3 +3170,82 @@ window.fixPhotoFilenames = async function () {
   console.log(`🎉 Finished fixing photos. Processed ${processedCount} items. Fixed ${fixedCount} files.`);
 };
 */
+
+//macros that i need
+/**check which barcodes are already uploaded
+Sub CheckBarcodesAuto()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(1) ' You can change this to your actual sheet if needed
+
+    Dim lastBarcodeRow As Long
+    Dim lastCheckRow As Long
+    Dim barcodes As Range
+    Dim codesToCheck As Range
+    Dim cell As Range
+
+    ' Auto-detect last row in column A (main barcodes)
+    lastBarcodeRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
+    Set barcodes = ws.Range("B2:B" & lastBarcodeRow)
+
+    ' Auto-detect last row in column D (codes to check)
+    lastCheckRow = ws.Cells(ws.Rows.Count, "CM").End(xlUp).Row
+    Set codesToCheck = ws.Range("CM2:CM" & lastCheckRow)
+
+    ' Loop through each code to check
+    For Each cell In codesToCheck
+        If Application.WorksheetFunction.CountIf(barcodes, cell.Value) > 0 Then
+            cell.Offset(0, 1).Value = "? Found"
+        Else
+            cell.Offset(0, 1).Value = "? Not Found"
+        End If
+    Next cell
+End Sub
+
+
+
+Sub DeleteMatchingBarcodes()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(1) ' Adjust to your target sheet if needed
+
+    Dim lastMainRow As Long
+    Dim lastDeleteRow As Long
+    Dim barcodesToDelete As Collection
+    Dim i As Long
+    Dim cell As Range
+
+    ' Get last rows
+    lastMainRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
+    lastDeleteRow = ws.Cells(ws.Rows.Count, "CO").End(xlUp).Row
+
+    ' Load all barcodes to delete into a collection for fast lookup
+    Set barcodesToDelete = New Collection
+    On Error Resume Next ' Ignore errors for duplicates
+    For Each cell In ws.Range("CO2:CO" & lastDeleteRow)
+        If Trim(cell.Value) <> "" Then
+            barcodesToDelete.Add cell.Value, CStr(cell.Value)
+        End If
+    Next cell
+    On Error GoTo 0
+
+    ' Loop through main list from bottom to top
+    For i = lastMainRow To 2 Step -1
+        Dim currentCode As String
+        currentCode = Trim(ws.Cells(i, "B").Value)
+
+        If currentCode <> "" Then
+            On Error Resume Next
+            Dim test As Variant
+            test = barcodesToDelete(CStr(currentCode))
+            If Err.Number = 0 Then
+                ws.Rows(i).Delete
+            End If
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next i
+
+    MsgBox "? Matching barcodes deleted.", vbInformation
+End Sub
+
+
+ */

@@ -13,12 +13,19 @@
 
   <!-- Styles -->
   <link rel="stylesheet" href="add-item.css" />
+  <link rel="stylesheet" href="additembulk.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
 </head>
+
 <body class="add-body">
   <div class="page">
     <header class="header">
-      <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+      <div class="header-actions">
+        <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
+        <button type="button" id="open-bulk-modal" class="add-button-secondary">
+          ➕ Add Bulk Bag
+        </button>
+      </div>
     </header>
 
     <main class="add-main">
@@ -126,13 +133,77 @@
         </div>
       </div>
     </div>
-
     <div id="toast-container" class="toast-container"></div>
 
+  <!-- 🧪 Modal: Create Bulk Bag -->
+  <div id="modal-bulk-bag" class="modal hidden">
+    <div class="modal-content modal-content-bulk">
+      <div class="modal-header-bulk">
+        <h2>Create Bulk Bag</h2>
+        <button type="button" id="close-bulk-modal" class="bulk-close-btn" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modal-body-bulk">
+        <div class="bulk-field">
+          <label for="bulk-item-title">Item name</label>
+          <input id="bulk-item-title" type="text" class="bulk-input" placeholder="(auto-filled from Item Title)" />
+        </div>
+
+        <div class="bulk-row-2">
+          <div class="bulk-field">
+            <label for="bulk-tare">Tare (bag/plastic) – g</label>
+            <input id="bulk-tare" type="number" step="0.01" min="0" class="bulk-input" />
+          </div>
+          <div class="bulk-field">
+            <label for="bulk-gross">Gross (bag + contents) – g</label>
+            <input id="bulk-gross" type="number" step="0.01" min="0" class="bulk-input" />
+          </div>
+        </div>
+
+        <div class="bulk-samples">
+          <div class="bulk-field">
+            <label>Sample 5 items (g each)</label>
+            <div class="bulk-sample-grid">
+              <input id="bulk-s1" type="number" step="0.01" min="0" class="bulk-input" />
+              <input id="bulk-s2" type="number" step="0.01" min="0" class="bulk-input" />
+              <input id="bulk-s3" type="number" step="0.01" min="0" class="bulk-input" />
+              <input id="bulk-s4" type="number" step="0.01" min="0" class="bulk-input" />
+              <input id="bulk-s5" type="number" step="0.01" min="0" class="bulk-input" />
+            </div>
+          </div>
+          <div class="bulk-field">
+            <label for="bulk-unit-override">Override unit weight (g) — optional</label>
+            <input id="bulk-unit-override" type="number" step="0.01" min="0" class="bulk-input" />
+          </div>
+        </div>
+
+        <div class="bulk-computed">
+          <div>
+            <div class="bulk-kv"><span>Avg unit (from samples)</span><strong id="bulk-unit-avg">—</strong></div>
+            <div class="bulk-kv"><span>Unit in use</span><strong id="bulk-unit-used">—</strong></div>
+          </div>
+          <div>
+            <div class="bulk-kv"><span>Net = Gross − Tare</span><strong id="bulk-net">—</strong></div>
+            <div class="bulk-kv big"><span>Estimated Qty</span><strong id="bulk-estimated-qty">—</strong></div>
+            <div class="bulk-kv"><span>Residual (g)</span><strong id="bulk-residual">—</strong></div>
+          </div>
+        </div>
+
+        <p class="bulk-note">Tip: enter at least 3 samples, or provide an override. We’ll use floor(Net ÷ Unit).</p>
+      </div>
+
+      <div class="modal-footer-bulk">
+        <button type="button" id="bulk-save" class="btn-bulk-primary" disabled>Save Bulk Registry</button>
+        <button type="button" id="bulk-cancel" class="btn-bulk-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
 
 
   <script src="initSupabase.js"></script>
   <script src="additem-dymolabel.js"></script>
+  <script src="additembulk.js"></script>
   <script src="additem.js"></script>
+  
 </body>
 </html>
