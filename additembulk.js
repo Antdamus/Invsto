@@ -2,6 +2,7 @@
 window.addItemBulkModule = (function () {
   let lastFocusedEl = null;
 
+
   // local state for the modal
   const state = {
     touched: false,
@@ -137,8 +138,46 @@ window.addItemBulkModule = (function () {
     const { saveBtn } = els();
     saveBtn?.addEventListener("click", () => {
       if (!state.valid) return;
+
+      // Build + keep payload for DB
       state.payload = buildPayload();
-      window.showToast?.("✅ Bulk data captured — will be saved with the item.");
+
+      // Prefill the Admin Stock modal's quantity with the estimated qty
+      const qtyInput = document.getElementById("admin-stock-quantity");
+      if (qtyInput && Number.isFinite(state.estimated_qty)) {
+        qtyInput.value = String(state.estimated_qty);
+      }
+
+      // ✅ Update the on-page preview text right here
+      const previewQty = document.getElementById("assignment-quantity");
+      if (previewQty) previewQty.textContent = `📦 Quantity: ${state.estimated_qty}`;
+
+      // If no location chosen yet, open the "Assign Location & Quantity" modal
+      const hasLocation = (document.getElementById("admin-location-name")?.value || "").trim().length > 0;
+      if (!hasLocation) {
+        // NEW: open the admin modal and prefill the qty
+        if (typeof window.showAdminLocationStockModal === "function") {
+          window.showAdminLocationStockModal("-1", state.estimated_qty);
+        } else {
+          // fallback if the function isn't on window for any reason
+          document.getElementById("btn-open-admin-stock")?.click();
+          requestAnimationFrame(() => {
+            const qtyInput = document.getElementById("admin-stock-quantity");
+            if (qtyInput) qtyInput.value = String(state.estimated_qty);
+          });
+        }
+
+      }
+
+      // Notify any listeners (like Add Inventory) that a bulk payload is ready
+      window.dispatchEvent(new CustomEvent("bulkbag:captured", {
+        detail: {
+          estimated_qty: state.estimated_qty,
+          payload: buildPayload() // weights + unit used, etc.
+        }
+      }));
+
+      window.showToast?.(`📦 Prefilled stock qty: ${state.estimated_qty}. Choose location to confirm.`);
       closeModal();
     });
   }
@@ -147,11 +186,20 @@ window.addItemBulkModule = (function () {
   async function saveRegistryForItem(itemTypeId, bagBarcode, locationId = null) {
     if (!state.payload) return { skipped: true, data: null };
 
+    // ⬇️ NEW: create the label now and get its storage path
+    let bagLabelUrl = null;
+    try {
+      bagLabelUrl = await generateAndUploadBagLabel(bagBarcode);
+    } catch (e) {
+      console.warn("⚠️ Bag label upload failed; continuing without label URL.", e);
+    }
+
     const row = {
       ...state.payload,
       item_type_id: itemTypeId,
       bag_barcode: bagBarcode,
-      location_id: locationId
+      location_id: locationId,
+      bag_label_url: bagLabelUrl, // ⬅️ saved if we got it
     };
 
     const { data, error } = await supabase
@@ -162,9 +210,9 @@ window.addItemBulkModule = (function () {
 
     if (error) {
       console.error("❌ bulk_batches insert failed:", error);
-      return { error, data: null };
+      return { data: null, error };
     }
-    return { error: null, data };
+    return { data, error: null };
   }
 
   // ------- open/close & wiring -------
@@ -206,13 +254,12 @@ window.addItemBulkModule = (function () {
   }
 
   // Make a unique, bag-only barcode (ephemeral)
-    function generateBagBarcode() {
-        // Example: BAG-<base36 timestamp>-<4 random>
-        const ts = Date.now().toString(36).toUpperCase();
-        const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
-        return `BAG-${ts}-${rnd}`;
-    }
-
+  function generateBagBarcode() {
+      // Example: BAG-<base36 timestamp>-<4 random>
+      const ts = Date.now().toString(36).toUpperCase();
+      const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
+      return `BAG-${ts}-${rnd}`;
+  }
 
   function setupBulkModalOpeners() {
     const { openBtn, modal, closeBtn, cancelBtn } = els();
@@ -229,6 +276,39 @@ window.addItemBulkModule = (function () {
     wireInputs();
     handleSaveClick();
   }
+
+  // Build a QR payload for bags (distinct from item-type)
+  function buildBagQr(bagBarcode) {
+    // keep it simple; if you later want a deep link, replace this
+    return `bag:${bagBarcode}`;
+  }
+
+  // Generate XML using your existing DYMO template, then upload it
+  async function generateAndUploadBagLabel(bagBarcode) {
+    // 1) get XML using the existing generator (we'll ignore its returned path)
+    const qr = buildBagQr(bagBarcode);
+    const typeqr = "bag"; // lets your template know it's a bag if you want
+    const price = "";     // not used for bags
+
+    const { templateXml } = await dymoModule.generateAndUploadDymoLabel({
+      barcode: bagBarcode, qr, price, typeqr
+    });
+
+    // 2) choose a deterministic path per bag
+    const bagPath = `bag-labels/${bagBarcode}.dymo`;
+
+    // 3) upload XML to the same "dymo-labels" bucket you already use
+    const blob = new Blob([templateXml], { type: "application/octet-stream" });
+    const { error: uploadError } = await supabase
+      .storage
+      .from("dymo-labels")
+      .upload(bagPath, blob, { upsert: true, contentType: "application/octet-stream" });
+
+    if (uploadError) throw uploadError;
+
+    return bagPath; // e.g., "bag-labels/BAG-…​.dymo"
+  }
+
 
   return {
     setupBulkModalOpeners,

@@ -3,6 +3,7 @@ let pendingItem = null; // Store the scanned item awaiting confirmation
 let currentBatch = {}; 
 let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
+let pendingBulkItem = null; // item selected for a bulk bag
 
 //update the inventory after adding items
 async function bumpInventoryVersion(changedIds = null) {
@@ -899,6 +900,35 @@ async function bumpInventoryVersion(changedIds = null) {
             showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
           }
 
+          // ⬇️ If this item came from the Bulk Bag flow, save one bulk_batches row
+          const bagInfo = batchItem.bag_info;
+          if (bagInfo && bagInfo.bulkPayload) {
+            try {
+              // Prefer the bulk module helper if available (it will also handle label upload, if wired)
+              if (window.addItemBulkModule?.saveRegistryForItem) {
+                await window.addItemBulkModule.saveRegistryForItem(
+                  batchItem.item.id,   // item_type_id
+                  bagInfo.bagBarcode,  // bag barcode
+                  location_id          // where you just stocked it
+                );
+              } else {
+                // Fallback: write directly
+                const row = {
+                  ...bagInfo.bulkPayload,           // weights, unit_used_g, estimated_qty, etc.
+                  item_type_id: batchItem.item.id,
+                  bag_barcode: bagInfo.bagBarcode,
+                  location_id
+                };
+                const { error: bulkErr } = await supabase.from("bulk_batches").insert(row);
+                if (bulkErr) console.warn("⚠️ Bulk registry insert failed:", bulkErr);
+              }
+              showToast(`📝 Bulk bag recorded: ${bagInfo.bagBarcode}`);
+            } catch (e) {
+              console.warn("⚠️ Could not save bulk registry:", e);
+            }
+          }
+
+
           modal.classList.add("hidden");
           document.getElementById("modal-assign-location").classList.add("hidden");
           updateBarcodeInputStateBasedOnModals();
@@ -1346,6 +1376,15 @@ async function bumpInventoryVersion(changedIds = null) {
         cancelButton.addEventListener("click", () => {
         hideModalToConfirmItem();
         });
+
+        const bulkBtn = document.getElementById("btn-add-bulk-bag");
+        bulkBtn.addEventListener("click", () => {
+          if (!pendingItem) return;
+          pendingBulkItem = pendingItem;      // remember which item
+          document.getElementById("modalToConfirmItem").classList.add("hidden");
+          window.addItemBulkModule?.openModal(); // open the bulk modal
+        });
+
     
         // Optional: Press "Enter" to confirm automatically
         document.addEventListener("keydown", (e) => {
@@ -1631,6 +1670,50 @@ document.addEventListener("DOMContentLoaded", async () => {
         input.focus();
       }
     });
+
+    window.addEventListener("bulkbag:captured", async (e) => {
+  const detail = e.detail;
+  const item = pendingBulkItem;
+  if (!item || !detail) return;
+
+  // Ensure the item has a card in the batch list
+  if (!currentBatch[item.barcode]) {
+    const card = createCardForItem(item);
+    currentBatch[item.barcode] = {
+      item,
+      count: 0,
+      maxCount: item.stock_batch_size_update || 10,
+      cardEl: card
+    };
+  }
+
+  // Increase the scanned count by the estimated qty from the bulk modal
+  currentBatch[item.barcode].count += Number(detail.estimated_qty || 0);
+
+  const unitDisplay = currentBatch[item.barcode].cardEl.querySelector(".units-scanned");
+  if (unitDisplay) {
+    unitDisplay.textContent = `Units Scanned: ${currentBatch[item.barcode].count}`;
+  }
+
+  // Generate a bag barcode + stash bulk payload so we can log the registry after location confirm
+  const bagBarcode =
+    window.addItemBulkModule?.generateBagBarcode?.() ||
+    `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+
+  currentBatch[item.barcode].bag_info = {
+    bagBarcode,
+    bulkPayload: detail.payload
+  };
+
+  showToast(`👜 Bulk bag captured: ${detail.estimated_qty} units`);
+  // Go straight to location selection
+  showAssignLocationModal(currentBatch[item.barcode]);
+
+  // clear pointer until next time
+  pendingBulkItem = null;
+    });
+
+ window.addItemBulkModule.setupBulkModalOpeners();
 
 
 });

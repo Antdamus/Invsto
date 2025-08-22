@@ -321,9 +321,17 @@ let uploadedImages = [];
 
 //#region functions needed for the add stock modal
   // === modal to add stock and location ===
-  function showAdminLocationStockModal(itemId) {
+  function showAdminLocationStockModal(itemId, defaultQty = null) {
     const modal = document.getElementById("modal-admin-assign-location");
-    document.getElementById("admin-stock-quantity").value = "";
+
+    const qtyEl = document.getElementById("admin-stock-quantity");
+    // Only set/clear when explicitly given a default; otherwise keep whatever is there
+    if (defaultQty !== null && Number.isFinite(defaultQty)) {
+      qtyEl.value = String(defaultQty);
+    } else if (!qtyEl.value) {
+      qtyEl.value = ""; // keep empty if nothing set yet
+    }
+
     document.getElementById("admin-location-name").value = "";
     document.getElementById("admin-location-dropdown-toggle").innerText = "Select Location";
     modal.dataset.itemId = itemId;
@@ -331,6 +339,7 @@ let uploadedImages = [];
 
     populateAdminLocationDropdown();
   }
+
 
   // === utility to get the unique location ===
   async function fetchUniqueLocationNames() {
