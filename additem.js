@@ -554,60 +554,65 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
 
   const newItem = insertedItems[0];
 
-  // Save a bulk registry row if the modal captured data
-  try {
-    // Create a bag-specific barcode (ephemeral; retired when bag is empty)
-    const bagBarcode =
-      window.addItemBulkModule?.generateBagBarcode?.() ||
-      `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
+// Hoisted so we can check it later (outside the try)
+let bulkRes = null;
 
-    const locationId = pendingStockAssignments[newItem.barcode]?.location_id || null;
+// Save a bulk registry row if the modal captured data
+try {
+  // Create a bag-specific barcode (ephemeral; retired when bag is empty)
+  const bagBarcode =
+    window.addItemBulkModule?.generateBagBarcode?.() ||
+    `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
 
-    const res = await window.addItemBulkModule.saveRegistryForItem(newItem.id, bagBarcode, locationId);
-    if (res?.error) {
-      showToast("⚠️ Item saved, but bulk registry failed.");
-      console.warn(res.error);
-    } else if (!res?.skipped) {
-      showToast(`✅ Bulk registry saved. Bag barcode: ${bagBarcode}`);
-    }
-  } catch (err) {
-    console.warn("Bulk registry insert error:", err);
+  const locationId = pendingStockAssignments[newItem.barcode]?.location_id || null;
+
+  // ⬅️ assign into the hoisted variable
+  bulkRes = await window.addItemBulkModule.saveRegistryForItem(newItem.id, bagBarcode, locationId);
+
+  if (bulkRes?.error) {
+    showToast("⚠️ Item saved, but bulk registry failed.");
+    console.warn(bulkRes.error);
+  } else if (!bulkRes?.skipped) {
+    showToast(`✅ Bulk registry saved. Bag barcode: ${bagBarcode}`);
+  }
+} catch (err) {
+  console.warn("Bulk registry insert error:", err);
+}
+
+const stockInfo = pendingStockAssignments[newItem.barcode];
+
+// Only do the generic stock write if we did NOT do a per-bag save
+if (stockInfo && (bulkRes?.skipped === true))  {
+  const stockInsert = await supabase.from("item_stock_locations").insert({
+    item_id: newItem.id,
+    location_id: stockInfo.location_id,
+    quantity: stockInfo.quantity,
+    added_by: currentUser.id,
+    confirmation_email: currentUser.email,
+    confirmed_at: new Date().toISOString()
+  });
+
+  const stockLog = await supabase.from("stock_transactions").insert({
+    item_id: newItem.id,
+    location_id: stockInfo.location_id,
+    quantity: stockInfo.quantity,
+    action_type: "checkin",
+    method: "unverified",  // ✅ new: set the method
+    email: window.currentUser?.email,  // ✅ new: log who did it
+    user_id: currentUser.id,
+    timestamp: new Date().toISOString()
+  });
+
+  if (stockInsert.error || stockLog.error) {
+    console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
+    showToast("⚠️ Stock saved, but transaction log might be missing.");
+  } else {
+    showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
   }
 
-
-  const stockInfo = pendingStockAssignments[newItem.barcode];
-
-  if (stockInfo) {
-    const stockInsert = await supabase.from("item_stock_locations").insert({
-      item_id: newItem.id,
-      location_id: stockInfo.location_id,
-      quantity: stockInfo.quantity,
-      added_by: currentUser.id,
-      confirmation_email: currentUser.email,
-      confirmed_at: new Date().toISOString()
-    });
-
-    const stockLog = await supabase.from("stock_transactions").insert({
-      item_id: newItem.id,
-      location_id: stockInfo.location_id,
-      quantity: stockInfo.quantity,
-      action_type: "checkin",
-      method: "unverified",  // ✅ new: set the method
-      email: window.currentUser?.email,  // ✅ new: log who did it
-      user_id: currentUser.id,
-      timestamp: new Date().toISOString()
-    });
-
-    if (stockInsert.error || stockLog.error) {
-      console.warn("⚠️ Stock added but not logged properly:", stockInsert.error, stockLog.error);
-      showToast("⚠️ Stock saved, but transaction log might be missing.");
-    } else {
-      showToast(`✅ Saved ${stockInfo.quantity} units to ${stockInfo.location_name}`);
-    }
-
-    // Clean up
-    delete pendingStockAssignments[newItem.barcode];
-  }
+  // Clean up
+  delete pendingStockAssignments[newItem.barcode];
+}
 
   alert("✅ Item successfully added!");
 
@@ -619,7 +624,6 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   autoCostCheckbox.checked = true;
   await bumpInventoryVersion();
 });
-
 
 // === DOM Loader ===
 document.addEventListener("DOMContentLoaded", async () => {

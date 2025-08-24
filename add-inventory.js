@@ -24,7 +24,6 @@ async function bumpInventoryVersion(changedIds = null) {
   }
 }
 
-
 //#region full logic to what will be done once the item reaches its limit
   //function to turn on and off the autofocus and the input of adding items by barcode
   function updateBarcodeInputStateBasedOnModals() {
@@ -823,127 +822,148 @@ async function bumpInventoryVersion(changedIds = null) {
         }
 
         const { batchItem, location_id, location_name } = pendingAssignment;
+        const isBulkFlow = !!batchItem?.bag_info?.bulkPayload; 
 
         try {
-          // ✅ Check if stock already exists at this location
-          const { data: existingStock, error: fetchError } = await supabase
-            .from("item_stock_locations")
-            .select("id, quantity")
-            .eq("item_id", batchItem.item.id)
-            .eq("location_id", location_id)
-            .maybeSingle();
+          const { batchItem, location_id, location_name } = pendingAssignment;
+          const bagInfo = batchItem?.bag_info;
+          const isBulkFlow = !!(bagInfo && bagInfo.bulkPayload);
 
-          if (fetchError) {
-            console.error("❌ Failed to check existing stock:", fetchError);
-            showToast("❌ Could not check existing stock.");
-            return;
-          }
-
-          if (existingStock) {
-            // ✅ Update existing stock
-            const { error: updateError } = await supabase
+          if (!isBulkFlow) {
+            // ── NON-BULK: generic stock write ───────────────────────────────
+            // Check if stock already exists at this location
+            const { data: existingStock, error: fetchError } = await supabase
               .from("item_stock_locations")
-              .update({
-                quantity: existingStock.quantity + batchItem.count,
-                last_updated: new Date().toISOString(),
-                added_by: currentUser.id,
-                confirmation_email: currentUser.email,
-                confirmation_method: "manual_password",
-                confirmed_at: new Date().toISOString(),
-              })
-              .eq("id", existingStock.id);
+              .select("id, quantity")
+              .eq("item_id", batchItem.item.id)
+              .eq("location_id", location_id)
+              .maybeSingle();
 
-            if (updateError) {
-              console.error("❌ Failed to update existing stock:", updateError);
-              showToast("❌ Failed to update existing stock.");
+            if (fetchError) {
+              console.error("❌ Failed to check existing stock:", fetchError);
+              showToast("❌ Could not check existing stock.");
               return;
             }
-          } else {
-            // ✅ Insert new stock
-            const { error: insertError } = await supabase
-              .from("item_stock_locations")
-              .insert({
-                item_id: batchItem.item.id,
-                location_id,
-                quantity: batchItem.count,
-                added_by: currentUser.id,
-                confirmation_email: currentUser.email,
-                confirmation_method: "manual_password",
-                confirmed_at: new Date().toISOString(),
-              });
 
-            if (insertError) {
-              console.error("❌ Failed to insert new stock:", insertError);
-              showToast("❌ Failed to save stock assignment.");
-              return;
-            }
-          }
+            if (existingStock) {
+              // Update existing stock
+              const { error: updateError } = await supabase
+                .from("item_stock_locations")
+                .update({
+                  quantity: existingStock.quantity + batchItem.count,
+                  last_updated: new Date().toISOString(),
+                  added_by: currentUser.id,
+                  confirmation_email: currentUser.email,
+                  confirmation_method: "manual_password",
+                  confirmed_at: new Date().toISOString(),
+                })
+                .eq("id", existingStock.id);
 
-          // ✅ Log transaction for audit trail
-          const { error: txError } = await supabase.from("stock_transactions").insert({
-            item_id: batchItem.item.id,
-            location_id,
-            quantity: batchItem.count,
-            action_type: "checkin",
-            method: "manual_password",
-            user_id: currentUser.id,
-            email: currentUser.email,
-            timestamp: new Date().toISOString(),
-            confirmed_at: new Date().toISOString(),
-            notes: `Added via Add Inventory Module`,
-          });
-
-          if (txError) {
-            console.error("❌ Failed to log transaction:", txError);
-            showToast("⚠️ Stock saved, but audit log failed.");
-          } else {
-            showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
-          }
-
-          // ⬇️ If this item came from the Bulk Bag flow, save one bulk_batches row
-          const bagInfo = batchItem.bag_info;
-          if (bagInfo && bagInfo.bulkPayload) {
-            try {
-              // Prefer the bulk module helper if available (it will also handle label upload, if wired)
-              if (window.addItemBulkModule?.saveRegistryForItem) {
-                await window.addItemBulkModule.saveRegistryForItem(
-                  batchItem.item.id,   // item_type_id
-                  bagInfo.bagBarcode,  // bag barcode
-                  location_id          // where you just stocked it
-                );
-              } else {
-                // Fallback: write directly
-                const row = {
-                  ...bagInfo.bulkPayload,           // weights, unit_used_g, estimated_qty, etc.
-                  item_type_id: batchItem.item.id,
-                  bag_barcode: bagInfo.bagBarcode,
-                  location_id
-                };
-                const { error: bulkErr } = await supabase.from("bulk_batches").insert(row);
-                if (bulkErr) console.warn("⚠️ Bulk registry insert failed:", bulkErr);
+              if (updateError) {
+                console.error("❌ Failed to update existing stock:", updateError);
+                showToast("❌ Failed to update existing stock.");
+                return;
               }
-              showToast(`📝 Bulk bag recorded: ${bagInfo.bagBarcode}`);
-            } catch (e) {
-              console.warn("⚠️ Could not save bulk registry:", e);
+            } else {
+              // Insert new stock
+              const { error: insertError } = await supabase
+                .from("item_stock_locations")
+                .insert({
+                  item_id: batchItem.item.id,
+                  location_id,
+                  quantity: batchItem.count,
+                  added_by: currentUser.id,
+                  confirmation_email: currentUser.email,
+                  confirmation_method: "manual_password",
+                  confirmed_at: new Date().toISOString(),
+                });
+
+              if (insertError) {
+                console.error("❌ Failed to insert new stock:", insertError);
+                showToast("❌ Failed to save stock assignment.");
+                return;
+              }
+            }
+
+            // Audit (non-bulk only)
+            const { error: txError } = await supabase.from("stock_transactions").insert({
+              item_id: batchItem.item.id,
+              location_id,
+              quantity: batchItem.count,
+              action_type: "checkin",
+              method: "manual_password",
+              user_id: currentUser.id,
+              email: currentUser.email,
+              timestamp: new Date().toISOString(),
+              confirmed_at: new Date().toISOString(),
+              notes: `Added via Add Inventory Module`,
+            });
+
+            if (txError) {
+              console.error("❌ Failed to log transaction:", txError);
+              showToast("⚠️ Stock saved, but audit log failed.");
+            } else {
+              showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
+            }
+          } else {
+            // ── BULK BAG: per-bag stock only (no generic item stock write) ──
+            const { bagBarcode, bulkPayload } = bagInfo || {};
+            if (!bagBarcode || !bulkPayload) {
+              showToast("❌ Missing bag info.");
+              return;
+            }
+
+            // Create the bag registry row AND the per-bag stock row (batch_id)
+            const res = await window.addItemBulkModule.saveRegistryForItem(
+              batchItem.item.id,
+              bagBarcode,
+              location_id
+            );
+
+            if (res?.error) {
+              console.error("❌ Failed to save bulk bag:", res.error);
+              showToast("❌ Failed to save bulk bag.");
+              return;
+            }
+
+            // Audit (bulk)
+            const { error: bulkTxErr } = await supabase.from("stock_transactions").insert({
+              item_id: batchItem.item.id,
+              location_id,
+              quantity: batchItem.count,            // estimated qty added from this bag
+              action_type: "checkin",
+              method: "bulk_bag",
+              user_id: currentUser.id,
+              email: currentUser.email,
+              timestamp: new Date().toISOString(),
+              confirmed_at: new Date().toISOString(),
+              notes: `Added via Bulk Bag ${bagBarcode}`,
+            });
+
+            if (bulkTxErr) {
+              console.warn("⚠️ Bulk saved, but audit log failed:", bulkTxErr);
+              showToast("⚠️ Bulk saved, but audit log failed.");
+            } else {
+              showToast(`✅ Saved ${batchItem.count} to ${location_name} (Bag ${bagBarcode})`);
             }
           }
 
-
+          // ── Close modals & cleanup (shared) ───────────────────────────────
           modal.classList.add("hidden");
           document.getElementById("modal-assign-location").classList.add("hidden");
           updateBarcodeInputStateBasedOnModals();
           document.getElementById("input-to-search-inventory-item").focus();
 
-          // ✅ Clean up UI and memory for this item
+          // Clean up UI and memory for this item
           batchItem.cardEl.remove();
           delete currentBatch[batchItem.item.barcode];
 
           await bumpInventoryVersion([batchItem.item.id]);
-
         } catch (err) {
           console.error("❌ Unexpected error during stock confirmation:", err);
           showToast(`❌ Failed to confirm stock: ${err.message || err}`);
         }
+
       };
 
       cancelBtn.onclick = () => {
@@ -1380,11 +1400,12 @@ async function bumpInventoryVersion(changedIds = null) {
         const bulkBtn = document.getElementById("btn-add-bulk-bag");
         bulkBtn.addEventListener("click", () => {
           if (!pendingItem) return;
-          pendingBulkItem = pendingItem;      // remember which item
+          pendingBulkItem = pendingItem; // remember which item
           document.getElementById("modalToConfirmItem").classList.add("hidden");
-          window.addItemBulkModule?.openModal(); // open the bulk modal
-        });
 
+          // ✅ Pass the item title so Save can enable once weights are valid
+          window.addItemBulkModule?.openModal(pendingItem.title || "");
+        });
     
         // Optional: Press "Enter" to confirm automatically
         document.addEventListener("keydown", (e) => {
@@ -1505,7 +1526,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
     //event listeners
-
     document.addEventListener("click", (e) => {
         const id = e.target.dataset.id; // Common data-id used for most card actions
 
@@ -1713,7 +1733,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   pendingBulkItem = null;
     });
 
- window.addItemBulkModule.setupBulkModalOpeners();
+    if (window.addItemBulkModule?.setupBulkModalOpeners) {
+      window.addItemBulkModule.setupBulkModalOpeners();
+    } else {
+      console.warn("Bulk module not loaded.");
+    }
 
 
 });

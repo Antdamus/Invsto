@@ -18,11 +18,14 @@ window.addItemBulkModule = (function () {
     estimated_qty: null,
     residual_g: null,
     payload: null, // what we'll insert after item creation
+    bagPhotoFile : null,
   };
 
   // ------- dom helpers -------
   function els() {
     const modal = document.getElementById("modal-bulk-bag");
+    const bagPhoto = document.getElementById("bulk-bag-photo");
+    const bagPhotoPreview = document.getElementById("bulk-bag-photo-preview");
     return {
       openBtn: document.getElementById("open-bulk-modal"),
       modal,
@@ -47,6 +50,8 @@ window.addItemBulkModule = (function () {
       net: document.getElementById("bulk-net"),
       estQty: document.getElementById("bulk-estimated-qty"),
       residual: document.getElementById("bulk-residual"),
+      bagPhoto,
+      bagPhotoPreview,
     };
   }
 
@@ -136,48 +141,30 @@ window.addItemBulkModule = (function () {
   // save button in the modal only captures values (no DB insert yet)
   function handleSaveClick() {
     const { saveBtn } = els();
-    saveBtn?.addEventListener("click", () => {
+    saveBtn?.addEventListener("click", async () => {
       if (!state.valid) return;
 
-      // Build + keep payload for DB
+      // Build payload and keep in memory
       state.payload = buildPayload();
 
-      // Prefill the Admin Stock modal's quantity with the estimated qty
-      const qtyInput = document.getElementById("admin-stock-quantity");
-      if (qtyInput && Number.isFinite(state.estimated_qty)) {
-        qtyInput.value = String(state.estimated_qty);
-      }
+      // Create a bag barcode now so the label matches this bag
+      const bagBarcode =
+        window.addItemBulkModule?.generateBagBarcode?.() ||
+        `BAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
 
-      // ✅ Update the on-page preview text right here
-      const previewQty = document.getElementById("assignment-quantity");
-      if (previewQty) previewQty.textContent = `📦 Quantity: ${state.estimated_qty}`;
+      // ⚡ Generate & DOWNLOAD the label immediately (user gesture-safe)
+      await generateAndDownloadBagLabel(bagBarcode);
 
-      // If no location chosen yet, open the "Assign Location & Quantity" modal
-      const hasLocation = (document.getElementById("admin-location-name")?.value || "").trim().length > 0;
-      if (!hasLocation) {
-        // NEW: open the admin modal and prefill the qty
-        if (typeof window.showAdminLocationStockModal === "function") {
-          window.showAdminLocationStockModal("-1", state.estimated_qty);
-        } else {
-          // fallback if the function isn't on window for any reason
-          document.getElementById("btn-open-admin-stock")?.click();
-          requestAnimationFrame(() => {
-            const qtyInput = document.getElementById("admin-stock-quantity");
-            if (qtyInput) qtyInput.value = String(state.estimated_qty);
-          });
-        }
-
-      }
-
-      // Notify any listeners (like Add Inventory) that a bulk payload is ready
+      // Notify Add-Inventory (or whoever listens)
       window.dispatchEvent(new CustomEvent("bulkbag:captured", {
         detail: {
+          bag_barcode: bagBarcode,
           estimated_qty: state.estimated_qty,
-          payload: buildPayload() // weights + unit used, etc.
+          payload: state.payload
         }
       }));
 
-      window.showToast?.(`📦 Prefilled stock qty: ${state.estimated_qty}. Choose location to confirm.`);
+      window.showToast?.(`👜 Bulk bag captured (${state.estimated_qty}). Label generated.`);
       closeModal();
     });
   }
@@ -186,44 +173,81 @@ window.addItemBulkModule = (function () {
   async function saveRegistryForItem(itemTypeId, bagBarcode, locationId = null) {
     if (!state.payload) return { skipped: true, data: null };
 
-    // ⬇️ NEW: create the label now and get its storage path
+    // 1) Upload the DYMO label (if one was generated during Save click)
     let bagLabelUrl = null;
     try {
-      bagLabelUrl = await generateAndUploadBagLabel(bagBarcode);
+      if (window.dymoModule?.uploadFinalDymoLabel && window.latestDymoXml && window.latestDymoUrl) {
+        bagLabelUrl = await dymoModule.uploadFinalDymoLabel(); // uses latestDymoXml/Url
+      }
     } catch (e) {
-      console.warn("⚠️ Bag label upload failed; continuing without label URL.", e);
+      console.warn("⚠️ Bag label upload failed:", e);
     }
 
-    const row = {
-      ...state.payload,
-      item_type_id: itemTypeId,
-      bag_barcode: bagBarcode,
-      location_id: locationId,
-      bag_label_url: bagLabelUrl, // ⬅️ saved if we got it
-    };
+    // 2) (optional) upload the bag photo
+    let bagPhotoUrl = null;
+    try {
+      if (state.bagPhotoFile) {
+        const safeName = state.bagPhotoFile.name.replace(/[^\w.\-]+/g, "_");
+        const path = `bag_photos/${bagBarcode}-${Date.now()}-${safeName}`;
+        const { error: upErr } = await supabase
+          .storage
+          .from("photos")
+          .upload(path, state.bagPhotoFile, { upsert: true });
+        if (upErr) throw upErr;
+        bagPhotoUrl = path; // store raw path; sign on read
+      }
+    } catch (e) {
+      console.warn("⚠️ Bag photo upload failed:", e);
+    }
 
-    const { data, error } = await supabase
+    // 3) insert the bulk batch row with label+photo
+    const { data: bag, error: bagErr } = await supabase
       .from("bulk_batches")
-      .insert(row)
+      .insert({
+        ...state.payload,               // weights, unit_used_g, estimated_qty, etc.
+        item_type_id: itemTypeId,       // (keep item_id if your column is named that)
+        bag_barcode: bagBarcode,
+        location_id: locationId,
+        bag_label_url: bagLabelUrl,
+        bag_photo_url: bagPhotoUrl
+      })
       .select()
       .single();
+    if (bagErr) return { data: null, error: bagErr };
 
-    if (error) {
-      console.error("❌ bulk_batches insert failed:", error);
-      return { data: null, error };
+    // 4) per-bag STOCK row (only if you already collect a location here)
+    if (locationId) {
+      const { error: stockErr } = await supabase
+        .from("item_stock_locations")
+        .insert({
+          item_id: itemTypeId,          // ← matches your table FK
+          location_id: locationId,
+          batch_id: bag.id,             // tie this stock to THIS bag
+          quantity: state.estimated_qty
+        });
+      if (stockErr) {
+        console.warn("⚠️ bag stock insert failed:", stockErr);
+        // we still return the bag so the caller can decide what to do
+      }
     }
-    return { data, error: null };
+
+    return { data: bag, error: null };
   }
 
   // ------- open/close & wiring -------
-  function openModal() {
-    const { modal } = els();
+  function openModal(defaultTitle = "") {
+    const { modal, itemTitle } = els();
     if (!modal) return;
     lastFocusedEl = document.activeElement;
     modal.classList.remove("hidden");
     document.body.classList.add("modal-open");
-    prefillFromMainTitle();
-    recompute();
+
+    // Prefill title when provided (Add Inventory flow)
+    if (defaultTitle && itemTitle && !itemTitle.value) {
+      itemTitle.value = defaultTitle;
+    }
+
+    recompute(); // will enable Save if title/weights are valid
     modal.querySelector("input.bulk-input")?.focus();
   }
 
@@ -263,17 +287,18 @@ window.addItemBulkModule = (function () {
 
   function setupBulkModalOpeners() {
     const { openBtn, modal, closeBtn, cancelBtn } = els();
-    if (!openBtn || !modal) {
-      console.warn("Bulk modal elements not found; skipping init.");
+    if (!modal) {
+      console.warn("Bulk modal element not found; skipping init.");
       return;
     }
-    openBtn.addEventListener("click", openModal);
+    if (openBtn) openBtn.addEventListener("click", openModal);
     closeBtn?.addEventListener("click", closeModal);
     cancelBtn?.addEventListener("click", closeModal);
     modal.addEventListener("click", handleBackdropClick);
     document.addEventListener("keydown", handleEsc);
 
     wireInputs();
+    wirePhotoInput();    // ← add this line
     handleSaveClick();
   }
 
@@ -283,32 +308,108 @@ window.addItemBulkModule = (function () {
     return `bag:${bagBarcode}`;
   }
 
-  // Generate XML using your existing DYMO template, then upload it
+  // Generate and upload the DYMO label for a BAG barcode
   async function generateAndUploadBagLabel(bagBarcode) {
-    // 1) get XML using the existing generator (we'll ignore its returned path)
-    const qr = buildBagQr(bagBarcode);
-    const typeqr = "bag"; // lets your template know it's a bag if you want
-    const price = "";     // not used for bags
+    // If DYMO isn't available on this page, skip gracefully
+    if (!window.dymoModule?.generateAndUploadDymoLabel) return null;
 
-    const { templateXml } = await dymoModule.generateAndUploadDymoLabel({
+    const qr = `bag:${bagBarcode}`;
+    const typeqr = "bag";
+    const price = ""; // not used for bags
+
+    // Reuse the exact same template generator you use for items
+    const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
       barcode: bagBarcode, qr, price, typeqr
     });
 
-    // 2) choose a deterministic path per bag
-    const bagPath = `bag-labels/${bagBarcode}.dymo`;
-
-    // 3) upload XML to the same "dymo-labels" bucket you already use
+    // Upload to storage (same bucket you use for labels)
     const blob = new Blob([templateXml], { type: "application/octet-stream" });
     const { error: uploadError } = await supabase
       .storage
       .from("dymo-labels")
-      .upload(bagPath, blob, { upsert: true, contentType: "application/octet-stream" });
-
+      .upload(labelPath, blob, { upsert: true, contentType: "application/octet-stream" });
     if (uploadError) throw uploadError;
 
-    return bagPath; // e.g., "bag-labels/BAG-…​.dymo"
+    // Optional: auto-download so you can print immediately
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "OGJewelry-BagLabel.dymo";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+
+    return labelPath; // save this into bulk_batches.bag_label_url
   }
 
+  function wirePhotoInput() {
+    const { bagPhoto, bagPhotoPreview } = els();
+    if (!bagPhoto || !bagPhotoPreview) return;
+
+    bagPhoto.addEventListener("change", () => {
+      bagPhotoPreview.innerHTML = "";
+      state.bagPhotoFile = null;
+
+      const file = bagPhoto.files?.[0];
+      if (!file) return;
+
+      state.bagPhotoFile = file;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const div = document.createElement("div");
+        div.className = "thumb";
+        div.innerHTML = `<img src="${e.target.result}" alt="Bag photo preview" />`;
+        bagPhotoPreview.appendChild(div);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Generate and DOWNLOAD a DYMO label for a bag barcode (uses your existing module)
+  // This mirrors your Add-Item flow: download now, upload later.
+  async function generateAndDownloadBagLabel(bagBarcode) {
+    const statusEl = document.getElementById("bulk-dymo-status");
+    if (!window.dymoModule?.generateAndUploadDymoLabel) {
+      statusEl && (statusEl.textContent = "ℹ️ DYMO module not loaded; skipping label generation.");
+      return { labelPath: null, downloaded: false };
+    }
+
+    const qr = `bag:${bagBarcode}`;
+    const typeqr = "bag";
+    const price = ""; // not used for bags
+
+    // Reuse the same generator
+    const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
+      barcode: bagBarcode, qr, price, typeqr
+    });
+
+    // Auto-download (same as your Add-Item flow)
+    try {
+      const blob = new Blob([templateXml], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "OGJewelry-BagLabel.dymo";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Store in globals so we can upload later with the SAME helper
+      window.latestDymoXml = templateXml;
+      window.latestDymoUrl = labelPath;
+
+      statusEl && (statusEl.textContent = "✅ DYMO label generated & downloaded. It will be saved on submit.");
+      return { labelPath, downloaded: true };
+    } catch (e) {
+      statusEl && (statusEl.textContent = "⚠️ DYMO label generated, but download failed.");
+      return { labelPath, downloaded: false };
+    }
+  }
 
   return {
     setupBulkModalOpeners,
