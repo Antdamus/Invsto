@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry — Time Clock</title>
+
+  <link rel="stylesheet" href="timeclock.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>⏰ Employee Time Clock</h1>
+    <nav>
+      <a href="dashboard.html" class="btn">Back to Dashboard</a>
+      <button id="signOutBtn" class="btn ghost">Sign out</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <!-- Clock UI only; no auth form -->
+    <section id="clockSection" class="card hidden">
+      <h2>Welcome, <span id="displayName">—</span></h2>
+
+      <div class="status-row">
+        <div id="shiftStatus" class="status-pill">Not clocked in</div>
+        <div id="nowTime" class="now">—</div>
+      </div>
+
+      <div class="actions">
+        <button id="clockBtn" class="btn primary">Clock In</button>
+      </div>
+
+      <div class="geo-row">Location: <span id="geoText">—</span></div>
+
+      <h3>Today</h3>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Clock In</th>
+            <th>Clock Out</th>
+            <th>Duration</th>
+            <th>Photo In</th>
+            <th>Photo Out</th>
+          </tr>
+        </thead>
+        <tbody id="todayBody"></tbody>
+      </table>
+    </section>
+
+    <!-- Camera Modal -->
+    <div id="camModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+        <h3 id="camTitle">Take photo</h3>
+
+        <div class="cam-stage">
+        <video id="camVideo" autoplay playsinline class="cam-view"></video>
+        <canvas id="camCanvas" class="cam-view hidden"></canvas>
+        </div>
+
+        <div class="cam-actions">
+        <button id="camCaptureBtn" class="btn primary">Capture</button>
+        <button id="camRetakeBtn" class="btn hidden">Retake</button>
+        <button id="camUseBtn" class="btn hidden">Use Photo</button>
+        <button id="camCancelBtn" class="btn ghost">Cancel</button>
+        </div>
+    </div>
+    </div>
+
+  </main>
+
+  <!-- Supabase + scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="timeclock.js"></script>
+</body>
+</html>
