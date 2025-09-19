@@ -282,3 +282,25 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
 .modal{ display:grid; grid-template-rows:auto 1fr auto; max-height:85vh; overflow:hidden; }
 .modal-body{ overflow:auto; max-height:100%; }
 @media (max-height: 640px){ .modal{ max-height:92vh; } }
+
+
+/* Drawer controls */
+.drawer-controls{
+  display:flex; align-items:center; justify-content:flex-end;
+  gap:12px; margin:8px 0 10px;
+}
+.switch { display:flex; align-items:center; gap:8px; font-size: 13px; color:#c7ccd5; }
+
+/* Chips */
+.chips{ display:flex; gap:6px; flex-wrap:wrap; }
+.chip{
+  display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
+  border:1px solid var(--border); background:#12151a; color:#d9dee6;
+}
+.chip.pending{ background:#20222a; color:#cbd1db; }
+.chip.approved{ background:#122217; border-color:#254a31; color:#d8ffe7; }
+.chip.waived{ background:#2b240f; border-color:#5d4b17; color:#ffe9b4; }
+.chip.anom{ background:#2a1616; border-color:#5a2a2a; color:#ffd9d9; }
+
+/* Buttons row inside a shift card */
+.shift-actions .btn.small{ padding:4px 8px; font-size:12px; }

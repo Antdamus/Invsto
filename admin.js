@@ -1,5 +1,7 @@
 // admin.js — Overview + Drawer/Edit/Audit + Payroll Weekly + Period Lock/Unlock (Phase 3.3)
 let supabaseClient = null;
+let drawerOnlyAnoms = false;
+let lastDrawerShifts = []; // keep latest list to re-render on toggle
 
 function qs(id){ return document.getElementById(id); }
 function show(el, v){ el.classList.toggle('hidden', !v); }
@@ -24,6 +26,13 @@ async function ensureAdmin() {
 function wireHeaderActions() {
   qs('signOutBtn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.href = 'index.html'; });
   qs('printBtn').addEventListener('click', () => window.print());
+}
+
+function dateStrAddDays(yyyyMmDd, days){
+  const d = new Date(yyyyMmDd + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 }
 
 /* ============== Overview (monthly) ============== */
@@ -107,57 +116,152 @@ async function fetchPeriodSummary(periodId){
 
 
 let currentShiftsById=new Map(), drawerContext={ employeeId:null, displayName:null, monthStart:null }, auditCache=new Map();
+
 async function fetchWorkerShifts(employeeId, monthStartStr){
-  const start=new Date(`${monthStartStr}T00:00:00`), end=new Date(start); end.setMonth(start.getMonth()+1);
+  const start = new Date(`${monthStartStr}T00:00:00`);
+  const end   = new Date(start); end.setMonth(start.getMonth()+1);
+
+  // Base closed shifts
   const { data, error } = await supabaseClient.from('time_entries')
     .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
-    .eq('employee_id', employeeId).gte('clock_in', start.toISOString()).lt('clock_in', end.toISOString())
-    .not('clock_out','is',null).order('clock_in',{ascending:true});
+    .eq('employee_id', employeeId)
+    .gte('clock_in', start.toISOString())
+    .lt('clock_in', end.toISOString())
+    .not('clock_out','is',null)
+    .order('clock_in',{ascending:true});
   if (error) throw error;
-  const rows=data||[]; const map=new Map(), out=[];
-  for(const r of rows){
-    const dur=new Date(r.clock_out)-new Date(r.clock_in);
+  const rows = data || [];
+
+  // Pull anomalies + approval status for this employee/time range
+  const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
+    .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
+    .eq('employee_id', employeeId)
+    .gte('clock_in', start.toISOString())
+    .lt('clock_in', end.toISOString());
+
+  const byId = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
+
+  // Build records + sign photo URLs
+  const map = new Map(), out = [];
+  for (const r of rows){
+    const durMs = new Date(r.clock_out) - new Date(r.clock_in);
     let inUrl=null,outUrl=null;
     try{
-      if (r.photo_in_path){ const { data:s } = await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_in_path,180); inUrl=s?.signedUrl||null; }
-      if (r.photo_out_path){ const { data:s2}= await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_out_path,180); outUrl=s2?.signedUrl||null; }
+      if (r.photo_in_path){
+        const { data:s } = await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_in_path,180);
+        inUrl = s?.signedUrl || null;
+      }
+      if (r.photo_out_path){
+        const { data:s2 } = await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_out_path,180);
+        outUrl = s2?.signedUrl || null;
+      }
     }catch(_e){}
-    const rec={ id:r.id, clock_in:r.clock_in, clock_out:r.clock_out, duration_ms:dur, store_id:r.store_id||null, photo_in_url:inUrl, photo_out_url:outUrl };
-    map.set(r.id,rec); out.push(rec);
+
+    const a = byId.get(r.id) || {};
+    const rec = {
+      id: r.id,
+      clock_in: r.clock_in,
+      clock_out: r.clock_out,
+      duration_ms: durMs,
+      store_id: r.store_id || null,
+      photo_in_url: inUrl,
+      photo_out_url: outUrl,
+      // NEW: anomalies + approvals
+      anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
+      has_anomaly: !!a.has_anomaly,
+      approval_status: a.approval_status || null,   // 'approved' | 'waived' | null (pending)
+      approval_note: a.approval_note || null,
+      approved_at: a.approved_at || null,
+    };
+    map.set(r.id, rec); out.push(rec);
   }
-  currentShiftsById=map; return out;
+  currentShiftsById = map;
+  lastDrawerShifts = out;
+  return out;
 }
+
+
 function openDrawer(){ qs('drawer').classList.add('open'); qs('drawer').classList.remove('hidden'); qs('drawerBackdrop').classList.add('show'); qs('drawerBackdrop').classList.remove('hidden'); }
 function closeDrawer(){ qs('drawer').classList.remove('open'); qs('drawerBackdrop').classList.remove('show'); setTimeout(()=>{ qs('drawer').classList.add('hidden'); qs('drawerBackdrop').classList.add('hidden'); },250); }
 function renderDrawerHeader(name,monthStartStr){ qs('drawerTitle').textContent=name||'—'; qs('drawerSubtitle').textContent=monthLabel(monthStartStr); }
 function renderDrawerSummary(shifts){ const n=shifts.length, tot=shifts.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000, avg=n?tot/n:0; qs('dsShifts').textContent=String(n); qs('dsHours').textContent=fmtHours(tot); qs('dsAvg').textContent=fmtHours(avg); }
+
 function renderDrawerList(shifts){
-  const host=qs('drawerList'); host.innerHTML='';
-  if(!shifts.length){ host.innerHTML=`<div class="drawer-empty">No closed shifts in this month.</div>`; return; }
-  for(const s of shifts){
-    const inStr=fmtLocal(s.clock_in), outStr=fmtLocal(s.clock_out), durStr=fmtDurationHM(s.duration_ms);
-    const div=document.createElement('div'); div.className='shift';
-    div.innerHTML=`
-      <div class="shift-row">
+  const host = qs('drawerList'); host.innerHTML = '';
+
+  const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
+  if (!src.length){
+    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No closed shifts in this month.'}</div>`;
+    return;
+  }
+
+  for (const s of src){
+    const inStr  = fmtLocal(s.clock_in);
+    const outStr = fmtLocal(s.clock_out);
+    const durStr = fmtDurationHM(s.duration_ms);
+
+    // Status chip
+    const st = s.approval_status || 'pending';
+    const stClass = st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending';
+    const statusChip = `<span class="chip ${stClass}">${st.toUpperCase()}</span>`;
+
+    // Anomaly chips
+    const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
+
+    // Action buttons (depends on status)
+    let actions = '';
+    if (st === 'approved'){
+      actions = `
+        <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+        <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+      `;
+    } else if (st === 'waived'){
+      actions = `
+        <button class="btn small" data-approve-id="${s.id}">Approve</button>
+        <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+      `;
+    } else {
+      actions = `
+        <button class="btn small" data-approve-id="${s.id}">Approve</button>
+        <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+      `;
+    }
+
+    const noteLine = s.approval_note ? `<div class="shift-meta">Note: ${s.approval_note}</div>` : '';
+
+    const div = document.createElement('div');
+    div.className = 'shift';
+    div.innerHTML = `
+      <div class="shift-row" style="justify-content:space-between;">
         <div class="shift-time"><strong>In:</strong> ${inStr}</div>
         <div class="shift-time"><strong>Out:</strong> ${outStr}</div>
         <div class="shift-meta">${durStr}</div>
       </div>
+
       <div class="shift-row" style="margin-top:6px; justify-content:space-between;">
-        <div class="shift-meta">${s.store_id ? `Store: ${s.store_id}` : ''}</div>
+        <div class="chips">
+          ${statusChip}
+          ${anomChips}
+        </div>
         <div class="shift-actions">
           ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
           ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
           <button class="btn small" data-edit-id="${s.id}">Edit</button>
           <button class="btn small" data-audit-id="${s.id}">Audit</button>
+          ${actions}
         </div>
       </div>
+
+      ${noteLine}
+
       <div class="audit hidden" id="audit-${s.id}">
         <div class="drawer-empty">Loading…</div>
       </div>`;
     host.appendChild(div);
   }
 }
+
+
 async function fetchAuditsForShift(shiftId){
   const { data, error } = await supabaseClient.from('v_shift_adjustments')
     .select('id, time_entry_id, editor_name, editor_user_id, edited_at, reason, fields_changed, old_value, new_value')
@@ -247,15 +351,75 @@ async function onRowClick(e){
   try{ const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); }
   catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
 }
+
+
 function wireDrawer(){
-  qs('drawerCloseBtn').addEventListener('click', closeDrawer);
-  qs('drawerBackdrop').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeDrawer(); });
-  qs('summaryTbody').addEventListener('click', onRowClick);
-  qs('drawerList').addEventListener('click',(e)=>{
-    const editBtn=e.target.closest('button[data-edit-id]'); if(editBtn){ const s=currentShiftsById.get(editBtn.getAttribute('data-edit-id')); if(s) openEditModal(s); return; }
-    const auditBtn=e.target.closest('button[data-audit-id]'); if(auditBtn){ toggleAudit(auditBtn.getAttribute('data-audit-id')); return; }
+  // Close actions
+  const closeBtn = qs('drawerCloseBtn');
+  if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+
+  const backdrop = qs('drawerBackdrop');
+  if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawer();
   });
+
+  // Click a summary row to open drawer
+  const tbody = qs('summaryTbody');
+  if (tbody) tbody.addEventListener('click', onRowClick);
+
+  // Delegated actions inside the drawer list
+  const list = qs('drawerList');
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const t = e.target;
+
+      // Edit shift
+      const editBtn = t.closest('button[data-edit-id]');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-edit-id');
+        const shift = currentShiftsById.get(id);
+        if (shift) openEditModal(shift);
+        return;
+      }
+
+      // Audit toggle
+      const auditBtn = t.closest('button[data-audit-id]');
+      if (auditBtn) {
+        toggleAudit(auditBtn.getAttribute('data-audit-id'));
+        return;
+      }
+
+      // Approvals
+      const approveBtn = t.closest('button[data-approve-id]');
+      if (approveBtn) {
+        onApproveClick(approveBtn.getAttribute('data-approve-id'));
+        return;
+      }
+
+      const waiveBtn = t.closest('button[data-waive-id]');
+      if (waiveBtn) {
+        onWaiveClick(waiveBtn.getAttribute('data-waive-id'));
+        return;
+      }
+
+      const unapproveBtn = t.closest('button[data-unapprove-id]');
+      if (unapproveBtn) {
+        onUnapproveClick(unapproveBtn.getAttribute('data-unapprove-id'));
+        return;
+      }
+    });
+  }
+
+  // Toggle: only anomalies
+  const toggle = qs('toggleAnoms');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      drawerOnlyAnoms = !!toggle.checked;
+      renderDrawerList(lastDrawerShifts); // re-render with current cache
+    });
+  }
 }
 
 /* ============== Payroll (weekly) ============== */
@@ -479,6 +643,62 @@ async function onCreateThisWeek(){
     console.error(err); showToast(err?.message || 'Failed to create period','err');
   }
 }
+
+async function approveShift(shiftId, note){
+  const { error } = await supabaseClient.rpc('approve_shift', {
+    _time_entry_id: shiftId, _status: 'approved', _note: note || null
+  });
+  if (error) throw error;
+}
+async function waiveShift(shiftId, note){
+  const n = (note || '').trim();
+  if (n.length < 3) throw new Error('Waive requires a brief note (min 3 chars).');
+  const { error } = await supabaseClient.rpc('approve_shift', {
+    _time_entry_id: shiftId, _status: 'waived', _note: n
+  });
+  if (error) throw error;
+}
+async function unapproveShift(shiftId){
+  const { error } = await supabaseClient.rpc('unapprove_shift', { _time_entry_id: shiftId });
+  if (error) throw error;
+}
+
+// Click handlers
+async function onApproveClick(shiftId){
+  try{
+    const note = window.prompt('Optional note for approval:', '');
+    await approveShift(shiftId, note);
+    showToast('Shift approved','ok');
+    // refresh drawer list
+    const { employeeId, monthStart } = drawerContext;
+    const shifts = await fetchWorkerShifts(employeeId, monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+  }catch(err){ console.error(err); showToast(err?.message || 'Failed to approve','err'); }
+}
+async function onWaiveClick(shiftId){
+  try{
+    const note = window.prompt('Reason for waiver (required):', '');
+    await waiveShift(shiftId, note);
+    showToast('Shift waived','ok');
+    const { employeeId, monthStart } = drawerContext;
+    const shifts = await fetchWorkerShifts(employeeId, monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+  }catch(err){ console.error(err); showToast(err?.message || 'Failed to waive','err'); }
+}
+async function onUnapproveClick(shiftId){
+  try{
+    if (!window.confirm('Remove approval/waiver for this shift?')) return;
+    await unapproveShift(shiftId);
+    showToast('Approval removed','ok');
+    const { employeeId, monthStart } = drawerContext;
+    const shifts = await fetchWorkerShifts(employeeId, monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+  }catch(err){ console.error(err); showToast(err?.message || 'Failed to unapprove','err'); }
+}
+
 
 function openCreateModal(){
   const start = paySelected || (payWeeks[0] || new Date().toISOString().slice(0,10));
