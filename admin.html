@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>OG Jewelry — Admin Dashboard</title>
+
+  <!-- Fonts (optional, matches your vibe) -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+
+  <!-- Page CSS -->
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header class="admin-header">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="title">OG Jewelry — Admin</span>
+    </div>
+    <nav class="actions">
+      <button id="printBtn" class="btn ghost" title="Print">🖨 Print</button>
+      <button id="signOutBtn" class="btn ghost">Sign out</button>
+    </nav>
+  </header>
+
+  <!-- Guarded content wrapper -->
+  <main id="guardHost" class="guard-host">
+    <!-- Guard states -->
+    <div id="guardLoading" class="guard guard-loading">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Checking admin permissions…</p>
+    </div>
+
+    <div id="guardDenied" class="guard guard-denied hidden" role="alert">
+      <h2>Admin only</h2>
+      <p>You don’t have access to this page.</p>
+      <a class="btn" href="index.html">Go to login</a>
+    </div>
+
+    <!-- Admin app shell (visible when guard passes) -->
+    <section id="adminApp" class="admin-app hidden">
+      <!-- Filters -->
+      <div class="filters">
+        <label class="filter">
+          <span>Month</span>
+          <input id="monthInput" type="month" />
+        </label>
+        <label class="filter grow">
+          <span>Search worker</span>
+          <input id="searchInput" type="search" placeholder="Type a name…" />
+        </label>
+      </div>
+
+      <!-- KPI strip -->
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpi-label">Total Hours</div>
+          <div id="kpiTotalHours" class="kpi-value">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Total Shifts</div>
+          <div id="kpiTotalShifts" class="kpi-value">—</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Avg Hours / Shift</div>
+          <div id="kpiAvgHrs" class="kpi-value">—</div>
+        </div>
+      </div>
+
+      <!-- Summary table shell (we’ll populate in Step 2) -->
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Worker</th>
+              <th>Shifts</th>
+              <th>Total Hours</th>
+            </tr>
+          </thead>
+          <tbody id="summaryTbody">
+            <tr><td colspan="3" class="muted">No data yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Supabase + init -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+
+  <!-- Admin logic -->
+  <script src="admin.js"></script>
+
+    <!-- ... keep everything above ... -->
+
+  <!-- Drawer Backdrop -->
+  <div id="drawerBackdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+
+  <!-- Right Drawer -->
+  <aside id="drawer" class="drawer hidden" aria-labelledby="drawerTitle" aria-modal="true" role="dialog">
+    <header class="drawer-header">
+      <div>
+        <h2 id="drawerTitle">—</h2>
+        <div id="drawerSubtitle" class="drawer-subtitle">—</div>
+      </div>
+      <button id="drawerCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
+
+    <section class="drawer-summary">
+      <div class="ds-card">
+        <div class="ds-label">Shifts</div>
+        <div id="dsShifts" class="ds-value">—</div>
+      </div>
+      <div class="ds-card">
+        <div class="ds-label">Total Hours</div>
+        <div id="dsHours" class="ds-value">—</div>
+      </div>
+      <div class="ds-card">
+        <div class="ds-label">Avg / Shift</div>
+        <div id="dsAvg" class="ds-value">—</div>
+      </div>
+    </section>
+
+    <section class="drawer-list" id="drawerList">
+      <!-- Populated by admin.js -->
+    </section>
+  </aside>
+
+  <!-- Supabase + init -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+
+  <!-- Admin logic -->
+  <script src="admin.js"></script>
+</body>
+</html>
+
+</body>
+</html>
