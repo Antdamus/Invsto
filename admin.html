@@ -2,15 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>OG Jewelry — Admin Dashboard</title>
 
-  <!-- Typography (optional) -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
-
-  <!-- Page CSS -->
   <link rel="stylesheet" href="admin.css" />
 </head>
 <body>
@@ -43,67 +38,144 @@
 
     <!-- Admin app shell (visible when guard passes) -->
     <section id="adminApp" class="admin-app hidden" aria-labelledby="pageTitle">
-      <!-- Filters -->
-      <div class="filters" role="region" aria-label="Filters">
-        <label class="filter">
-          <span>Month</span>
-          <input id="monthInput" type="month" />
-        </label>
-        <label class="filter grow">
-          <span>Search worker</span>
-          <input id="searchInput" type="search" placeholder="Type a name…" />
-        </label>
+      <!-- Tabs -->
+      <div class="tabs" role="tablist" aria-label="Admin sections">
+        <button id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
+        <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (weekly)</button>
       </div>
 
-      <!-- KPI strip -->
-      <div class="kpis" role="region" aria-label="Summary KPIs">
-        <div class="kpi">
-          <div class="kpi-label">Total Hours</div>
-          <div id="kpiTotalHours" class="kpi-value">—</div>
+      <!-- ===== Overview panel ===== -->
+      <section id="panelOverview" class="panel" role="tabpanel" aria-labelledby="tabOverview">
+        <!-- Filters -->
+        <div class="filters" role="region" aria-label="Filters">
+          <label class="filter">
+            <span>Month</span>
+            <input id="monthInput" type="month" />
+          </label>
+          <label class="filter grow">
+            <span>Search worker</span>
+            <input id="searchInput" type="search" placeholder="Type a name…" />
+          </label>
         </div>
-        <div class="kpi">
-          <div class="kpi-label">Total Shifts</div>
-          <div id="kpiTotalShifts" class="kpi-value">—</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-label">Avg Hours / Shift</div>
-          <div id="kpiAvgHrs" class="kpi-value">—</div>
-        </div>
-      </div>
 
-      <!-- Print-only heading -->
-      <div class="print-header" aria-hidden="true">
-        <h1 id="pageTitle">OG Jewelry — Monthly Hours Summary</h1>
-        <div id="printMonthLabel">—</div>
-      </div>
+        <!-- KPI strip -->
+        <div class="kpis" role="region" aria-label="Summary KPIs">
+          <div class="kpi">
+            <div class="kpi-label">Total Hours</div>
+            <div id="kpiTotalHours" class="kpi-value">—</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Total Shifts</div>
+            <div id="kpiTotalShifts" class="kpi-value">—</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Avg Hours / Shift</div>
+            <div id="kpiAvgHrs" class="kpi-value">—</div>
+          </div>
+        </div>
 
-      <!-- Summary table -->
-      <div class="table-wrapper">
-        <table class="table" aria-describedby="printMonthLabel">
-          <thead>
-            <tr>
-              <th scope="col">
-                <button id="thWorker" class="th-btn" data-key="display_name" aria-sort="ascending">
-                  Worker <span class="sort-indicator">▲</span>
-                </button>
-              </th>
-              <th scope="col">
-                <button id="thShifts" class="th-btn" data-key="shifts_count" aria-sort="none">
-                  Shifts <span class="sort-indicator">↕</span>
-                </button>
-              </th>
-              <th scope="col">
-                <button id="thHours" class="th-btn" data-key="total_hours" aria-sort="none">
-                  Total Hours <span class="sort-indicator">↕</span>
-                </button>
-              </th>
-            </tr>
-          </thead>
-          <tbody id="summaryTbody">
-            <tr><td colspan="3" class="muted">No data yet.</td></tr>
-          </tbody>
-        </table>
-      </div>
+        <!-- Print-only heading -->
+        <div class="print-header" aria-hidden="true">
+          <h1 id="pageTitle">OG Jewelry — Monthly Hours Summary</h1>
+          <div id="printMonthLabel">—</div>
+        </div>
+
+        <!-- Summary table -->
+        <div class="table-wrapper">
+          <table class="table" aria-describedby="printMonthLabel">
+            <thead>
+              <tr>
+                <th scope="col">
+                  <button id="thWorker" class="th-btn" data-key="display_name" aria-sort="ascending">
+                    Worker <span class="sort-indicator">▲</span>
+                  </button>
+                </th>
+                <th scope="col">
+                  <button id="thShifts" class="th-btn" data-key="shifts_count" aria-sort="none">
+                    Shifts <span class="sort-indicator">↕</span>
+                  </button>
+                </th>
+                <th scope="col">
+                  <button id="thHours" class="th-btn" data-key="total_hours" aria-sort="none">
+                    Total Hours <span class="sort-indicator">↕</span>
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="summaryTbody">
+              <tr><td colspan="3" class="muted">No data yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== Payroll panel ===== -->
+      <section id="panelPayroll" class="panel hidden" role="tabpanel" aria-labelledby="tabPayroll">
+        <div class="filters" role="region" aria-label="Payroll filters">
+          <div class="filter">
+            <span>Week</span>
+            <select id="payWeekSelect"></select>
+          </div>
+          <div class="filter-row">
+            <button id="payPrevBtn" class="btn ghost" title="Previous week">← Prev</button>
+            <div id="payWeekLabel" class="weeklabel">—</div>
+            <button id="payNextBtn" class="btn ghost" title="Next week">Next →</button>
+          </div>
+        </div>
+
+        <!-- Period controls -->
+        <div class="period-controls" role="region" aria-label="Period controls">
+          <div class="pc-row">
+            <div class="pc-info">
+              <div class="pc-label">Matching pay period</div>
+              <div class="pc-line">
+                <span id="periodName" class="pc-name">—</span>
+                <span id="periodBadge" class="badge">—</span>
+              </div>
+              <div id="periodHint" class="pc-hint muted">—</div>
+            </div>
+            <div class="pc-actions">
+              <button id="lockBtn" class="btn" disabled>Lock period</button>
+              <button id="unlockBtn" class="btn ghost" disabled>Unlock</button>
+              <button id="exportBtn" class="btn ghost" disabled>Export CSV</button>
+              <button id="createWeekBtn" class="btn">Create period for this week</button>
+              <button id="newPeriodBtn" class="btn ghost">New custom period…</button>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="kpis" role="region" aria-label="Payroll KPIs">
+          <div class="kpi">
+            <div class="kpi-label">Regular Hours</div>
+            <div id="payTotalReg" class="kpi-value">—</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Overtime Hours</div>
+            <div id="payTotalOT" class="kpi-value">—</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Total Hours</div>
+            <div id="payTotalAll" class="kpi-value">—</div>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" aria-describedby="payWeekLabel">
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Regular</th>
+                <th>OT</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody id="payTbody">
+              <tr><td colspan="4" class="muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -177,6 +249,38 @@
       <button id="editSaveBtn" class="btn">Save</button>
     </footer>
   </div>
+
+  <!-- Create Pay Period Modal -->
+<div id="createModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+<div id="createModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+  <header class="modal-header">
+    <h3 id="createTitle">New pay period</h3>
+    <button id="createCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+  </header>
+
+  <section class="modal-body">
+    <div class="form-row">
+      <label>
+        <span>Start date</span>
+        <input id="createStart" type="date" required />
+      </label>
+      <label>
+        <span>End date</span>
+        <input id="createEnd" type="date" required />
+      </label>
+    </div>
+    <label>
+      <span>Note (optional)</span>
+      <input id="createNote" type="text" placeholder="e.g., Biweekly Sep 1–14" />
+    </label>
+    <div id="createError" class="error hidden" role="alert"></div>
+  </section>
+
+  <footer class="modal-footer">
+    <button id="createCancelBtn" class="btn ghost">Cancel</button>
+    <button id="createSaveBtn" class="btn">Create</button>
+  </footer>
+</div>
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
