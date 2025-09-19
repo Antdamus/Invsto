@@ -7,7 +7,7 @@
     content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>OG Jewelry — Admin Dashboard</title>
 
-  <!-- Fonts (optional, matches your vibe) -->
+  <!-- Typography (optional) -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
 
   <!-- Page CSS -->
@@ -17,10 +17,10 @@
   <!-- Top bar -->
   <header class="admin-header">
     <div class="brand">
-      <span class="dot"></span>
+      <span class="dot" aria-hidden="true"></span>
       <span class="title">OG Jewelry — Admin</span>
     </div>
-    <nav class="actions">
+    <nav class="actions" aria-label="Page actions">
       <button id="printBtn" class="btn ghost" title="Print">🖨 Print</button>
       <button id="signOutBtn" class="btn ghost">Sign out</button>
     </nav>
@@ -28,22 +28,23 @@
 
   <!-- Guarded content wrapper -->
   <main id="guardHost" class="guard-host">
-    <!-- Guard states -->
+    <!-- Guard: loading -->
     <div id="guardLoading" class="guard guard-loading">
       <div class="spinner" aria-hidden="true"></div>
       <p>Checking admin permissions…</p>
     </div>
 
-    <div id="guardDenied" class="guard guard-denied hidden" role="alert">
+    <!-- Guard: denied -->
+    <div id="guardDenied" class="guard guard-denied hidden" role="alert" aria-live="assertive">
       <h2>Admin only</h2>
       <p>You don’t have access to this page.</p>
       <a class="btn" href="index.html">Go to login</a>
     </div>
 
     <!-- Admin app shell (visible when guard passes) -->
-    <section id="adminApp" class="admin-app hidden">
+    <section id="adminApp" class="admin-app hidden" aria-labelledby="pageTitle">
       <!-- Filters -->
-      <div class="filters">
+      <div class="filters" role="region" aria-label="Filters">
         <label class="filter">
           <span>Month</span>
           <input id="monthInput" type="month" />
@@ -55,7 +56,7 @@
       </div>
 
       <!-- KPI strip -->
-      <div class="kpis">
+      <div class="kpis" role="region" aria-label="Summary KPIs">
         <div class="kpi">
           <div class="kpi-label">Total Hours</div>
           <div id="kpiTotalHours" class="kpi-value">—</div>
@@ -70,14 +71,32 @@
         </div>
       </div>
 
-      <!-- Summary table shell (we’ll populate in Step 2) -->
+      <!-- Print-only heading -->
+      <div class="print-header" aria-hidden="true">
+        <h1 id="pageTitle">OG Jewelry — Monthly Hours Summary</h1>
+        <div id="printMonthLabel">—</div>
+      </div>
+
+      <!-- Summary table -->
       <div class="table-wrapper">
-        <table class="table">
+        <table class="table" aria-describedby="printMonthLabel">
           <thead>
             <tr>
-              <th>Worker</th>
-              <th>Shifts</th>
-              <th>Total Hours</th>
+              <th scope="col">
+                <button id="thWorker" class="th-btn" data-key="display_name" aria-sort="ascending">
+                  Worker <span class="sort-indicator">▲</span>
+                </button>
+              </th>
+              <th scope="col">
+                <button id="thShifts" class="th-btn" data-key="shifts_count" aria-sort="none">
+                  Shifts <span class="sort-indicator">↕</span>
+                </button>
+              </th>
+              <th scope="col">
+                <button id="thHours" class="th-btn" data-key="total_hours" aria-sort="none">
+                  Total Hours <span class="sort-indicator">↕</span>
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody id="summaryTbody">
@@ -87,15 +106,6 @@
       </div>
     </section>
   </main>
-
-  <!-- Supabase + init -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="initSupabase.js"></script>
-
-  <!-- Admin logic -->
-  <script src="admin.js"></script>
-
-    <!-- ... keep everything above ... -->
 
   <!-- Drawer Backdrop -->
   <div id="drawerBackdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
@@ -110,7 +120,7 @@
       <button id="drawerCloseBtn" class="btn ghost" aria-label="Close">✕</button>
     </header>
 
-    <section class="drawer-summary">
+    <section class="drawer-summary" aria-label="Worker monthly summary">
       <div class="ds-card">
         <div class="ds-label">Shifts</div>
         <div id="dsShifts" class="ds-value">—</div>
@@ -125,10 +135,48 @@
       </div>
     </section>
 
-    <section class="drawer-list" id="drawerList">
+    <section class="drawer-list" id="drawerList" aria-label="Shift list">
       <!-- Populated by admin.js -->
     </section>
   </aside>
+
+  <!-- Edit Shift Modal Backdrop -->
+  <div id="editModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+
+  <!-- Edit Shift Modal -->
+  <div id="editModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <header class="modal-header">
+      <h3 id="editTitle">Edit shift</h3>
+      <button id="editCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
+
+    <section class="modal-body">
+      <div class="form-row">
+        <label>
+          <span>Clock-in</span>
+          <input id="editIn" type="datetime-local" required />
+        </label>
+        <label>
+          <span>Clock-out</span>
+          <input id="editOut" type="datetime-local" required />
+        </label>
+      </div>
+
+      <div class="hint">Duration: <strong id="editDuration">—</strong></div>
+
+      <label class="reason">
+        <span>Reason (required)</span>
+        <textarea id="editReason" rows="3" placeholder="Brief explanation (e.g., fixed missed punch)"></textarea>
+      </label>
+
+      <div id="editError" class="error hidden" role="alert"></div>
+    </section>
+
+    <footer class="modal-footer">
+      <button id="editCancelBtn" class="btn ghost">Cancel</button>
+      <button id="editSaveBtn" class="btn">Save</button>
+    </footer>
+  </div>
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
@@ -136,8 +184,5 @@
 
   <!-- Admin logic -->
   <script src="admin.js"></script>
-</body>
-</html>
-
 </body>
 </html>
