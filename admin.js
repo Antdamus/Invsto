@@ -1,4 +1,4 @@
-// admin.js — Phase 1 (Steps 1–4) + Phase 2.1 (Edit shift modal)
+// admin.js — Phase 1 (Steps 1–4) + Phase 2.1 (Edit) + Phase 2.2 (Audit timeline + Revert)
 let supabaseClient = null;
 
 function qs(id){ return document.getElementById(id); }
@@ -29,7 +29,6 @@ function monthLabel(yyyyMm01){
   return d.toLocaleString(undefined, { month:'long', year:'numeric' });
 }
 function toDatetimeLocalValue(iso){
-  // -> "YYYY-MM-DDTHH:MM" in local time
   if (!iso) return '';
   const d = new Date(iso);
   const y = d.getFullYear();
@@ -40,16 +39,20 @@ function toDatetimeLocalValue(iso){
   return `${y}-${m}-${day}T${hh}:${mm}`;
 }
 function localInputToOffsetISO(localStr){
-  // local "YYYY-MM-DDTHH:MM" -> "YYYY-MM-DDTHH:MM:00±HH:MM"
   const d = new Date(localStr);
   if (Number.isNaN(d.getTime())) return null;
   const pad = (n)=>String(n).padStart(2,'0');
   const y=d.getFullYear(), m=pad(d.getMonth()+1), day=pad(d.getDate()), hh=pad(d.getHours()), mm=pad(d.getMinutes());
-  const tzMin = -d.getTimezoneOffset(); // minutes east of UTC
+  const tzMin = -d.getTimezoneOffset();
   const sign = tzMin >= 0 ? '+' : '-';
   const offH = pad(Math.floor(Math.abs(tzMin)/60));
   const offM = pad(Math.abs(tzMin)%60);
   return `${y}-${m}-${day}T${hh}:${mm}:00${sign}${offH}:${offM}`;
+}
+function fmtLocal(iso){
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString();
 }
 
 /* ==================== ADMIN GUARD ==================== */
@@ -145,6 +148,16 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
   return out;
 }
 
+async function fetchAuditsForShift(shiftId){
+  const { data, error } = await supabaseClient
+    .from('v_shift_adjustments')
+    .select('id, time_entry_id, editor_name, editor_user_id, edited_at, reason, fields_changed, old_value, new_value')
+    .eq('time_entry_id', shiftId)
+    .order('edited_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 /* ==================== Rendering & Sorting ==================== */
 function renderKPIs(rows){
   const totalHours = rows.reduce((a, r) => a + (Number(r.total_hours)||0), 0);
@@ -156,9 +169,10 @@ function renderKPIs(rows){
 }
 
 let currentRows = [];
-let sortState = { key: 'display_name', dir: 'asc' }; // default A→Z
+let sortState = { key: 'display_name', dir: 'asc' };
 let currentShiftsById = new Map();
 let drawerContext = { employeeId: null, displayName: null, monthStart: null };
+const auditCache = new Map(); // shiftId -> audits array
 
 function sortRows(rows){
   const arr = rows.slice();
@@ -303,8 +317,8 @@ function renderDrawerList(shifts){
     return;
   }
   for (const s of shifts){
-    const inStr  = new Date(s.clock_in).toLocaleString();
-    const outStr = new Date(s.clock_out).toLocaleString();
+    const inStr  = fmtLocal(s.clock_in);
+    const outStr = fmtLocal(s.clock_out);
     const durStr = fmtDurationHM(s.duration_ms);
     const div = document.createElement('div');
     div.className = 'shift';
@@ -320,53 +334,139 @@ function renderDrawerList(shifts){
           ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
           ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
           <button class="btn small" data-edit-id="${s.id}">Edit</button>
+          <button class="btn small" data-audit-id="${s.id}">Audit</button>
         </div>
+      </div>
+      <div class="audit hidden" id="audit-${s.id}">
+        <div class="drawer-empty">Loading…</div>
       </div>
     `;
     host.appendChild(div);
   }
 }
-async function onRowClick(e){
-  const tr = e.target.closest('tr.summary-row');
-  if (!tr) return;
-  const employeeId = tr.dataset.employeeId;
-  const monthStart = tr.dataset.monthStart;
-  const displayName = tr.dataset.displayName || '—';
-  drawerContext = { employeeId, monthStart, displayName };
 
-  renderDrawerHeader(displayName, monthStart);
-  qs('dsShifts').textContent = '…';
-  qs('dsHours').textContent = '…';
-  qs('dsAvg').textContent = '…';
-  qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
-  openDrawer();
+/* ==================== Audit timeline (Step 2.2) ==================== */
+async function toggleAudit(shiftId){
+  const container = document.getElementById(`audit-${shiftId}`);
+  if (!container) return;
 
+  // Toggle open/closed
+  const isHidden = container.classList.contains('hidden');
+  if (!isHidden){
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+
+  // If cached, render immediately
+  if (auditCache.has(shiftId)){
+    renderAuditList(container, auditCache.get(shiftId), shiftId);
+    return;
+  }
+
+  // Fetch
+  container.innerHTML = `<div class="drawer-empty">Loading…</div>`;
   try{
-    const shifts = await fetchWorkerShifts(employeeId, monthStart);
-    renderDrawerSummary(shifts);
-    renderDrawerList(shifts);
+    const audits = await fetchAuditsForShift(shiftId);
+    auditCache.set(shiftId, audits);
+    renderAuditList(container, audits, shiftId);
   }catch(err){
-    console.error('Failed to load worker shifts:', err);
-    qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+    console.error('Failed to load audits', err);
+    container.innerHTML = `<div class="drawer-empty">Error loading audit trail.</div>`;
   }
 }
-function wireDrawer(){
-  qs('drawerCloseBtn').addEventListener('click', closeDrawer);
-  qs('drawerBackdrop').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
-  qs('summaryTbody').addEventListener('click', onRowClick);
 
-  // Delegate edit clicks inside drawer
-  qs('drawerList').addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-edit-id]');
-    if (!btn) return;
-    const shiftId = btn.getAttribute('data-edit-id');
-    const shift = currentShiftsById.get(shiftId);
-    if (shift) openEditModal(shift);
+function renderAuditList(container, audits, shiftId){
+  if (!audits.length){
+    container.innerHTML = `<div class="drawer-empty">No adjustments yet.</div>`;
+    return;
+  }
+
+  const parts = [];
+  for (const a of audits){
+    const who = a.editor_name || '(unknown)';
+    const when = fmtLocal(a.edited_at);
+    const why = a.reason || '';
+    const fields = Array.isArray(a.fields_changed) ? a.fields_changed : [];
+    const oldIn  = a.old_value?.clock_in  || null;
+    const oldOut = a.old_value?.clock_out || null;
+    const newIn  = a.new_value?.clock_in  || null;
+    const newOut = a.new_value?.clock_out || null;
+
+    const diffs = [];
+    if (fields.includes('clock_in'))  diffs.push(`<div>clock_in: <code>${fmtLocal(oldIn)}</code> → <code>${fmtLocal(newIn)}</code></div>`);
+    if (fields.includes('clock_out')) diffs.push(`<div>clock_out: <code>${fmtLocal(oldOut)}</code> → <code>${fmtLocal(newOut)}</code></div>`);
+
+    parts.push(`
+      <div class="ai" data-adjustment-id="${a.id}">
+        <div class="row ai-hd">
+          <div class="who">${who}</div>
+          <div class="when">• ${when}</div>
+          <div class="acts" style="margin-left:auto;">
+            <button class="btn small" data-revert="${a.id}" title="Revert to OLD values">Revert</button>
+          </div>
+        </div>
+        <div class="why">${why}</div>
+        ${diffs.length ? `<div class="chg">${diffs.join('')}</div>` : ''}
+      </div>
+    `);
+  }
+  container.innerHTML = `<div class="ai-list">${parts.join('')}</div>`;
+
+  // Wire Revert buttons inside this container
+  container.querySelectorAll('button[data-revert]').forEach(btn => {
+    btn.addEventListener('click', () => onRevertClick(shiftId, btn.getAttribute('data-revert')));
   });
 }
 
-/* ==================== Edit Modal (Step 2.1) ==================== */
+async function onRevertClick(shiftId, adjustmentId){
+  const audits = auditCache.get(shiftId) || [];
+  const a = audits.find(x => x.id === adjustmentId);
+  if (!a) return;
+
+  const oldIn  = a.old_value?.clock_in  || null;
+  const oldOut = a.old_value?.clock_out || null;
+  if (!oldIn || !oldOut){
+    showToast('Cannot revert: missing old values', 'err');
+    return;
+  }
+
+  const reason = window.prompt('Reason for revert (required):', `Revert to ${fmtLocal(oldIn)} – ${fmtLocal(oldOut)}`);
+  if (!reason || reason.trim().length < 3){
+    showToast('Revert cancelled (reason required)', 'err');
+    return;
+  }
+
+  try{
+    // Call the same RPC with the OLD values
+    const { error } = await supabaseClient.rpc('admin_update_shift_time', {
+      _time_entry_id: shiftId,
+      _new_clock_in:  oldIn,
+      _new_clock_out: oldOut,
+      _reason:        reason.trim()
+    });
+    if (error) throw error;
+
+    showToast('Shift reverted', 'ok');
+
+    // Clear caches and refresh drawer + summary
+    auditCache.delete(shiftId);
+    const { employeeId, monthStart } = drawerContext;
+    const shifts = await fetchWorkerShifts(employeeId, monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+
+    // Re-open audit panel for this shift
+    await toggleAudit(shiftId);
+
+    await loadSummary();
+  }catch(err){
+    console.error('Revert failed', err);
+    showToast(err?.message || 'Failed to revert', 'err');
+  }
+}
+
+/* ==================== Edit Modal (Phase 2.1) ==================== */
 let editingShiftId = null;
 let saving = false;
 
@@ -378,7 +478,6 @@ function openEditModal(shift){
   qs('editError').textContent = ''; show(qs('editError'), false);
   updateEditDuration();
 
-  // show
   qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden');
   qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden');
   qs('editIn').focus();
@@ -391,7 +490,6 @@ function closeEditModal(){
 function updateEditDuration(){
   const a = qs('editIn').value; const b = qs('editOut').value;
   if (!a || !b){ qs('editDuration').textContent = '—'; return; }
-  const ms = new Date(a) - new Date(a); // trick to force parse; real diff below
   const start = new Date(a); const end = new Date(b);
   const diff = end - start;
   qs('editDuration').textContent = diff > 0 ? fmtDurationHM(diff) : '—';
@@ -419,7 +517,6 @@ async function saveEdit(){
   const outVal = qs('editOut').value;
   const reason = (qs('editReason').value || '').trim();
 
-  // client-side validations
   if (!inVal || !outVal){ setEditError('Both times are required.'); return; }
   const start = new Date(inVal), end = new Date(outVal);
   if (!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)){
@@ -437,19 +534,20 @@ async function saveEdit(){
     const inISO  = localInputToOffsetISO(inVal);
     const outISO = localInputToOffsetISO(outVal);
 
-    const { data, error } = await supabaseClient.rpc('admin_update_shift_time', {
+    const { error } = await supabaseClient.rpc('admin_update_shift_time', {
       _time_entry_id: editingShiftId,
       _new_clock_in:  inISO,
       _new_clock_out: outISO,
       _reason:        reason
     });
-
     if (error) throw error;
 
     showToast('Shift updated', 'ok');
     closeEditModal();
 
-    // Refresh drawer + summary
+    // Refresh drawer + summary and clear audit cache for this shift
+    auditCache.delete(editingShiftId);
+
     const { employeeId, monthStart } = drawerContext;
     const shifts = await fetchWorkerShifts(employeeId, monthStart);
     renderDrawerSummary(shifts);
@@ -457,8 +555,7 @@ async function saveEdit(){
     await loadSummary();
   }catch(err){
     console.error('Edit failed', err);
-    const msg = err?.message || 'Failed to save changes';
-    setEditError(msg);
+    setEditError(err?.message || 'Failed to save changes');
   }finally{
     saving = false;
     qs('editSaveBtn').disabled = false;
@@ -473,8 +570,66 @@ function wireEditModal(){
   qs('editIn').addEventListener('input', updateEditDuration);
   qs('editOut').addEventListener('input', updateEditDuration);
   qs('editSaveBtn').addEventListener('click', saveEdit);
+
+  // Save on Cmd/Ctrl+Enter while modal is open
   document.addEventListener('keydown', (e) => {
-    if (!qs('editModal').classList.contains('hidden') && e.key === 'Escape') closeEditModal();
+    const modalOpen = !qs('editModal').classList.contains('hidden');
+    if (!modalOpen) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const btn = qs('editSaveBtn');
+      if (btn && !btn.disabled) btn.click();
+    }
+  });
+}
+
+/* ==================== Wire Drawer / Events ==================== */
+async function onRowClick(e){
+  const tr = e.target.closest('tr.summary-row');
+  if (!tr) return;
+  const employeeId = tr.dataset.employeeId;
+  const monthStart = tr.dataset.monthStart;
+  const displayName = tr.dataset.displayName || '—';
+  drawerContext = { employeeId, monthStart, displayName };
+
+  renderDrawerHeader(displayName, monthStart);
+  qs('dsShifts').textContent = '…';
+  qs('dsHours').textContent = '…';
+  qs('dsAvg').textContent = '…';
+  qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+  openDrawer();
+
+  try{
+    const shifts = await fetchWorkerShifts(employeeId, monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+  }catch(err){
+    console.error('Failed to load worker shifts:', err);
+    qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+  }
+}
+
+function wireDrawer(){
+  qs('drawerCloseBtn').addEventListener('click', closeDrawer);
+  qs('drawerBackdrop').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+  qs('summaryTbody').addEventListener('click', onRowClick);
+
+  // Delegate inside drawer
+  qs('drawerList').addEventListener('click', (e) => {
+    const editBtn = e.target.closest('button[data-edit-id]');
+    if (editBtn){
+      const shiftId = editBtn.getAttribute('data-edit-id');
+      const shift = currentShiftsById.get(shiftId);
+      if (shift) openEditModal(shift);
+      return;
+    }
+    const auditBtn = e.target.closest('button[data-audit-id]');
+    if (auditBtn){
+      const shiftId = auditBtn.getAttribute('data-audit-id');
+      toggleAudit(shiftId);
+      return;
+    }
   });
 }
 
@@ -497,7 +652,6 @@ document.addEventListener('supabase-ready', async () => {
 
   wireHeaderActions();
 
-  // Prefill month with current month (YYYY-MM)
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   qs('monthInput').value = ym;
@@ -507,7 +661,6 @@ document.addEventListener('supabase-ready', async () => {
   wireDrawer();
   wireEditModal();
 
-  // Initial load
   loadSummary();
 });
 
