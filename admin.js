@@ -35,15 +35,54 @@ function dateStrAddDays(yyyyMmDd, days){
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 }
 
-/* ============== Overview (monthly) ============== */
-async function fetchMonthlySummary(monthStart, searchTerm){
-  const apply = q => { q = q.eq('month_start', monthStart); if (searchTerm?.trim()) q = q.ilike('display_name', `%${searchTerm.trim()}%`); return q.order('display_name', { ascending: true }); };
-  let { data, error } = await apply(supabaseClient.from('mv_monthly_hours').select('employee_id, display_name, month_start, shifts_count, total_hours'));
-  if (!error && data?.length) return { rows: data, source: 'mv' };
-  const res = await apply(supabaseClient.from('v_monthly_hours').select('employee_id, display_name, month_start, shifts_count, total_hours'));
-  if (res.error) throw res.error;
-  return { rows: res.data||[], source: 'view' };
+async function signPath(path, expiresSec = 180){
+  if (!path) return null;
+  try {
+    const { data } = await supabaseClient
+      .storage.from('timeclock-photos')
+      .createSignedUrl(path, expiresSec);
+    return data?.signedUrl || null;
+  } catch { return null; }
 }
+
+// Cache active employees for joins in Overview/Payroll
+let _activeEmployees = null;
+async function getActiveEmployees(){
+  if (_activeEmployees) return _activeEmployees;
+  const { data, error } = await supabaseClient
+    .from('employees')
+    .select('id, display_name')
+    .eq('active', true)
+    .order('display_name', { ascending: true });
+  if (error) throw error;
+  _activeEmployees = data || [];
+  return _activeEmployees;
+}
+
+/* ============== Overview (monthly) ============== */
+// Return ALL active employees for the month, filling zeros when no rows exist
+async function fetchMonthlySummary(monthStart){
+  const [emps, viewResp] = await Promise.all([
+    getActiveEmployees(),
+    supabaseClient.from('v_monthly_hours')
+      .select('employee_id, month_start, shifts_count, total_hours')
+      .eq('month_start', monthStart)
+  ]);
+  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
+  const rows = emps.map(e => {
+    const v = byId.get(e.id) || {};
+    return {
+      employee_id: e.id,
+      display_name: e.display_name,
+      month_start: monthStart,
+      shifts_count: v.shifts_count || 0,
+      total_hours: v.total_hours || 0
+    };
+  });
+  return { rows, source: 'view' };
+}
+
+
 function renderKPIs(rows){
   const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
   const shf = rows.reduce((a,r)=>a+(+r.shifts_count||0),0);
@@ -83,58 +122,78 @@ function renderTable(rows){
   }
   applySortIndicators();
 }
-let isLoading=false;
+let isLoading = false;
 async function loadSummary(){
-  if (isLoading) return; isLoading=true; qs('summaryTbody').style.opacity='0.6';
+  if (isLoading) return; isLoading = true; qs('summaryTbody').style.opacity = '0.6';
   try{
-    const monthStart=monthInputToStart(); const search=qs('searchInput').value||'';
+    const monthStart = monthInputToStart();
+    const search = (qs('searchInput').value || '').trim().toLowerCase();
     qs('printMonthLabel').textContent = monthLabel(monthStart);
-    const { rows } = await fetchMonthlySummary(monthStart, search);
-    currentRows=rows; renderKPIs(rows); renderTable(rows);
+
+    const { rows } = await fetchMonthlySummary(monthStart); // all employees
+    const filtered = search
+      ? rows.filter(r => (r.display_name || '').toLowerCase().includes(search))
+      : rows;
+
+    currentRows = filtered;
+    renderKPIs(filtered);
+    renderTable(filtered);
   }catch(err){
     console.error(err);
-    qs('summaryTbody').innerHTML=`<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
-    qs('kpiTotalHours').textContent=qs('kpiTotalShifts').textContent=qs('kpiAvgHrs').textContent='—';
-  }finally{ qs('summaryTbody').style.opacity='1'; isLoading=false; }
+    qs('summaryTbody').innerHTML = `<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
+    qs('kpiTotalHours').textContent = qs('kpiTotalShifts').textContent = qs('kpiAvgHrs').textContent = '—';
+  }finally{
+    qs('summaryTbody').style.opacity = '1';
+    isLoading = false;
+  }
 }
+
+
 function wireFilters(){ qs('monthInput').addEventListener('change', loadSummary); qs('searchInput').addEventListener('input', debounce(loadSummary,300)); }
 function toggleSort(key){ if (sortState.key===key) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else sortState={key,dir:'asc'}; renderTable(currentRows); }
 function wireSorting(){ qs('thWorker').addEventListener('click',()=>toggleSort('display_name')); qs('thShifts').addEventListener('click',()=>toggleSort('shifts_count')); qs('thHours').addEventListener('click',()=>toggleSort('total_hours')); }
 
 /* ============== Drawer + Edit/Audit ============== */
 async function fetchPeriodSummary(periodId){
-  const cols = 'employee_id, display_name, regular_hours, overtime_hours, total_hours, shifts_count';
-  // Use the live view so exports are always up to date
-  const { data, error } = await supabaseClient
-    .from('v_payroll_period_hours')
-    .select(cols)
-    .eq('period_id', periodId)
-    .order('display_name', { ascending: true });
-  if (error) throw error;
-  return data || [];
+  const [emps, viewResp] = await Promise.all([
+    getActiveEmployees(),
+    supabaseClient.from('v_payroll_period_hours')
+      .select('employee_id, regular_hours, overtime_hours, total_hours, shifts_count')
+      .eq('period_id', periodId)
+  ]);
+  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
+  return emps.map(e => {
+    const v = byId.get(e.id) || {};
+    return {
+      employee_id: e.id,
+      display_name: e.display_name,
+      regular_hours: v.regular_hours || 0,
+      overtime_hours: v.overtime_hours || 0,
+      total_hours: v.total_hours || 0,
+      shifts_count: v.shifts_count || 0
+    };
+  });
 }
 
-
-let currentShiftsById=new Map(), drawerContext={ employeeId:null, displayName:null, monthStart:null }, auditCache=new Map();
+let currentShiftsById = new Map(), drawerContext = { employeeId:null, displayName:null, monthStart:null }, auditCache = new Map();
 
 async function fetchWorkerShifts(employeeId, monthStartStr){
   const start = new Date(`${monthStartStr}T00:00:00`);
   const end   = new Date(start); end.setMonth(start.getMonth()+1);
 
-  // 1) Base closed shifts
+  // 1) Fetch ALL shifts (closed + OPEN)
   const { data: entries, error } = await supabaseClient.from('time_entries')
     .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
     .eq('employee_id', employeeId)
     .gte('clock_in', start.toISOString())
     .lt('clock_in', end.toISOString())
-    .not('clock_out','is',null)
-    .order('clock_in',{ascending:true});
+    .order('clock_in', { ascending: true });
   if (error) throw error;
 
   const rows = entries || [];
   const ids = rows.map(r => r.id);
 
-  // 2) Anomalies + approvals for these shifts
+  // 2) Anomalies + approvals
   let anomalyById = new Map();
   if (ids.length){
     const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
@@ -143,43 +202,40 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
     anomalyById = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
   }
 
-  // 3) Breaks for these shifts
+  // 3) Breaks (with photo paths)
   let breaksByEntry = new Map();
   if (ids.length){
     const { data: breaks } = await supabaseClient.from('time_breaks')
-      .select('time_entry_id, started_at, ended_at')
+      .select('id, time_entry_id, started_at, ended_at, photo_start_path, photo_end_path')
       .in('time_entry_id', ids)
       .order('started_at', { ascending: true });
+
     for (const b of (breaks||[])){
+      // prepare signed URLs now (thumbnails + links)
+      const photo_start_url = await signPath(b.photo_start_path);
+      const photo_end_url   = await signPath(b.photo_end_path);
       const list = breaksByEntry.get(b.time_entry_id) || [];
-      list.push(b);
+      list.push({ ...b, photo_start_url, photo_end_url });
       breaksByEntry.set(b.time_entry_id, list);
     }
   }
 
-  // 4) Build final records (+signed photo URLs)
+  // 4) Build final records (+ signed shift photos)
   const map = new Map(), out = [];
   for (const r of rows){
-    const durMs = new Date(r.clock_out) - new Date(r.clock_in);
+    const isOpen = !r.clock_out;
+    const durMs  = (isOpen ? Date.now() : new Date(r.clock_out).getTime()) - new Date(r.clock_in).getTime();
 
     // Break summary
     const bks = breaksByEntry.get(r.id) || [];
     const breakMs = bks.reduce((sum, b) => {
-      if (!b.ended_at) return sum;
-      return sum + (new Date(b.ended_at) - new Date(b.started_at));
+      const done = b.ended_at ? (new Date(b.ended_at) - new Date(b.started_at)) : 0;
+      return sum + Math.max(0, done);
     }, 0);
 
-    let inUrl=null,outUrl=null;
-    try{
-      if (r.photo_in_path){
-        const { data:s } = await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_in_path,180);
-        inUrl = s?.signedUrl || null;
-      }
-      if (r.photo_out_path){
-        const { data:s2 } = await supabaseClient.storage.from('timeclock-photos').createSignedUrl(r.photo_out_path,180);
-        outUrl = s2?.signedUrl || null;
-      }
-    }catch(_e){}
+    let inUrl=null, outUrl=null;
+    if (r.photo_in_path)  inUrl  = await signPath(r.photo_in_path);
+    if (r.photo_out_path) outUrl = await signPath(r.photo_out_path);
 
     const a = anomalyById.get(r.id) || {};
     const rec = {
@@ -196,10 +252,11 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
       approval_status: a.approval_status || null,
       approval_note: a.approval_note || null,
       approved_at: a.approved_at || null,
-      // NEW: breaks
-      breaks: bks,                 // [{started_at, ended_at}, ...]
+      // breaks (with signed URLs)
+      breaks: bks,                 // [{ id, started_at, ended_at, photo_start_url, photo_end_url, ... }]
       break_count: bks.length,
-      break_ms: breakMs
+      break_ms: breakMs,
+      is_open: isOpen
     };
     map.set(r.id, rec); out.push(rec);
   }
@@ -207,6 +264,7 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
   lastDrawerShifts = out;
   return out;
 }
+
 
 
 function openDrawer(){ qs('drawer').classList.add('open'); qs('drawer').classList.remove('hidden'); qs('drawerBackdrop').classList.add('show'); qs('drawerBackdrop').classList.remove('hidden'); }
@@ -219,43 +277,63 @@ function renderDrawerList(shifts){
 
   const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
   if (!src.length){
-    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No closed shifts in this month.'}</div>`;
+    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No shifts in this month.'}</div>`;
     return;
   }
 
   for (const s of src){
     const inStr  = fmtLocal(s.clock_in);
-    const outStr = fmtLocal(s.clock_out);
+    const outStr = s.is_open ? 'OPEN' : fmtLocal(s.clock_out);
     const durStr = fmtDurationHM(s.duration_ms);
 
-    // Status chip
-    const st = s.approval_status || 'pending';
-    const stClass = st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending';
-    const statusChip = `<span class="chip ${stClass}">${st.toUpperCase()}</span>`;
+    // Status chip (don't show approve buttons for an OPEN shift)
+    const st = s.approval_status || (s.is_open ? 'open' : 'pending');
+    const stClass = s.is_open ? 'pending' : (st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending');
+    const statusChip = `<span class="chip ${stClass}">${(s.is_open?'OPEN':st.toUpperCase())}</span>`;
 
     // Anomaly chips
     const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
 
-    // Break summary
+    // Break summary + block
     const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
 
-    // Actions per status
+    let breaksBlock = '';
+    if (s.break_count){
+      const parts = s.breaks.map(b => {
+        const open = !b.ended_at;
+        const dur = open ? 0 : (new Date(b.ended_at) - new Date(b.started_at));
+        const durStrB = open ? '—' : fmtDurationHM(dur);
+        const startImg = b.photo_start_url ? `<a href="${b.photo_start_url}" target="_blank" rel="noopener"><img class="thumb" src="${b.photo_start_url}" alt="Break start photo"></a>` : `<span class="muted">No start photo</span>`;
+        const endImg   = b.photo_end_url   ? `<a href="${b.photo_end_url}"   target="_blank" rel="noopener"><img class="thumb" src="${b.photo_end_url}"   alt="Break end photo"></a>`   : `<span class="muted">No end photo</span>`;
+        return `
+          <div class="break">
+            <div class="br-times"><strong>${new Date(b.started_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</strong> → ${open ? 'OPEN' : new Date(b.ended_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+            <div class="br-dur">${open ? '<span class="muted">(active)</span>' : durStrB}</div>
+            <div class="br-photos">${startImg} ${endImg}</div>
+          </div>`;
+      }).join('');
+      breaksBlock = `<div class="breaks">${parts}</div>`;
+    }
+
+    // Actions per status (disable for OPEN shifts)
     let actions = '';
-    if (st === 'approved'){
-      actions = `
-        <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-        <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-      `;
-    } else if (st === 'waived'){
-      actions = `
-        <button class="btn small" data-approve-id="${s.id}">Approve</button>
-        <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-      `;
-    } else {
-      actions = `
-        <button class="btn small" data-approve-id="${s.id}">Approve</button>
-        <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-      `;
+    if (!s.is_open){
+      if (st === 'approved'){
+        actions = `
+          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+        `;
+      } else if (st === 'waived'){
+        actions = `
+          <button class="btn small" data-approve-id="${s.id}">Approve</button>
+          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+        `;
+      } else {
+        actions = `
+          <button class="btn small" data-approve-id="${s.id}">Approve</button>
+          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+        `;
+      }
     }
 
     const noteLine = s.approval_note ? `<div class="shift-meta">Note: ${s.approval_note}</div>` : '';
@@ -278,13 +356,14 @@ function renderDrawerList(shifts){
         <div class="shift-actions">
           ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
           ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
-          <button class="btn small" data-edit-id="${s.id}">Edit</button>
+          <button class="btn small" data-edit-id="${s.id}" ${s.is_open?'disabled':''}>Edit</button>
           <button class="btn small" data-audit-id="${s.id}">Audit</button>
           ${actions}
         </div>
       </div>
 
       ${noteLine}
+      ${breaksBlock}
 
       <div class="audit hidden" id="audit-${s.id}">
         <div class="drawer-empty">Loading…</div>
@@ -463,12 +542,30 @@ async function fetchWeekList(){
   if(!weeks.length){ const {data}=await supabaseClient.from('v_weekly_hours').select('week_start').order('week_start',{descending:true}).limit(2000); weeks=(data||[]).map(r=>r.week_start); }
   const set=new Set(), out=[]; for(const w of weeks){ if(!set.has(w)){ set.add(w); out.push(w); } } return out;
 }
+
+// Weekly payroll: include ALL active employees with zeros if absent
 async function fetchWeeklyHours(weekStartStr){
-  const cols='employee_id, display_name, week_start, regular_hours, overtime_hours, total_hours';
-  const get = async t => { const {data,error}=await supabaseClient.from(t).select(cols).eq('week_start',weekStartStr).order('display_name',{ascending:true}); if(error) throw error; return data||[]; };
-  try{ const mv=await get('mv_weekly_hours'); if(mv.length) return {rows:mv,source:'mv'}; }catch(_e){}
-  const v=await get('v_weekly_hours'); return {rows:v,source:'view'};
+  const [emps, viewResp] = await Promise.all([
+    getActiveEmployees(),
+    supabaseClient.from('v_weekly_hours')
+      .select('employee_id, regular_hours, overtime_hours, total_hours, week_start')
+      .eq('week_start', weekStartStr)
+  ]);
+  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
+  const rows = emps.map(e => {
+    const v = byId.get(e.id) || {};
+    return {
+      employee_id: e.id,
+      display_name: e.display_name,
+      week_start: weekStartStr,
+      regular_hours: v.regular_hours || 0,
+      overtime_hours: v.overtime_hours || 0,
+      total_hours: v.total_hours || 0
+    };
+  });
+  return { rows, source: 'view' };
 }
+
 function renderPayWeekOptions(){
   const sel=qs('payWeekSelect'); sel.innerHTML=''; for(const w of payWeeks){ const o=document.createElement('option'); o.value=w; o.textContent=formatWeekRange(w); sel.appendChild(o); }
   if (paySelected) sel.value=paySelected;
@@ -791,6 +888,36 @@ function wireTabs(){
   qs('tabPayroll').addEventListener('click',  ()=> switchTab('payroll'));
 }
 
+
+let rtChannel = null;
+const onRealtimeChange = debounce(async () => {
+  try {
+    // Refresh Overview
+    await loadSummary();
+
+    // If drawer is open for a worker/month, refresh it too
+    const isOpen = !qs('drawer').classList.contains('hidden') && qs('drawer').classList.contains('open');
+    if (isOpen && drawerContext?.employeeId && drawerContext?.monthStart){
+      const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+      renderDrawerSummary(shifts);
+      renderDrawerList(shifts);
+    }
+  } catch {}
+}, 400);
+
+function bootRealtime(){
+  try{
+    rtChannel = supabaseClient.channel('admin-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, onRealtimeChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_breaks'  }, onRealtimeChange)
+      .subscribe();
+  }catch(err){ console.error('Realtime subscribe failed', err); }
+}
+
+window.addEventListener('beforeunload', () => {
+  try { if (rtChannel) supabaseClient.removeChannel(rtChannel); } catch {}
+});
+
 //* ============== Boot ============== */
 document.addEventListener('supabase-ready', async () => {
   supabaseClient = window.supabase;
@@ -837,6 +964,8 @@ document.addEventListener('supabase-ready', async () => {
   // Initial data loads
   await loadSummary();
   await bootPayroll(); // loadPayroll() inside will call updatePeriodForSelectedWeek()
+  bootRealtime();
+
 });
 
 // Kickoff if init already ran

@@ -304,3 +304,18 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
 
 /* Buttons row inside a shift card */
 .shift-actions .btn.small{ padding:4px 8px; font-size:12px; }
+
+.breaks{
+  margin-top:8px; padding-top:8px; border-top:1px solid var(--border);
+  display: grid; gap:8px;
+}
+.break{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  font-size:13px;
+}
+.break .br-times{ font-variant-numeric: tabular-nums; }
+.break .br-dur{ color: var(--muted); font-size:12px; }
+.br-photos img.thumb{
+  height: 46px; border-radius:8px; border:1px solid var(--border);
+}
+.br-photos a{ margin-right:6px; }
