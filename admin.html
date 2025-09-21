@@ -43,8 +43,7 @@
         <button id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
         <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (weekly)</button>
         <!-- Tab button -->
-        <button id="tabSchedule" class="tab-btn">Schedule</button>
-
+        <button id="tabSchedule" class="tab">Schedule</button>
       </div>
 
       <!-- ===== Overview panel ===== -->
@@ -60,6 +59,7 @@
             <input id="searchInput" type="search" placeholder="Type a name…" />
           </label>
         </div>
+
         <!-- LIVE NOW -->
         <section class="live" aria-label="Live now">
           <div class="live-header">
@@ -69,8 +69,8 @@
           <div id="liveList" class="live-list">
             <div class="muted">Loading…</div>
           </div>
-        </section> 
-      
+        </section>
+
         <!-- KPI strip -->
         <div class="kpis" role="region" aria-label="Summary KPIs">
           <div class="kpi">
@@ -153,7 +153,6 @@
               <button id="exportBtn" class="btn ghost" disabled>Export CSV</button>
               <button id="createWeekBtn" class="btn">Create period for this week</button>
               <button id="newPeriodBtn" class="btn ghost">New custom period…</button>
-
             </div>
           </div>
         </div>
@@ -190,50 +189,78 @@
         </div>
       </section>
 
-      <!-- schedule -->
-    <section id="panelSchedule" class="panel hidden">
-      <header class="panel-head">
-        <h2>Schedules</h2>
-      </header>
-
-      <div class="sched-controls">
-        <div class="row">
-          <label>Employee</label>
-          <select id="schedEmpSelect"></select>
-        </div>
-
-        <div class="row gap">
-          <button id="schedPrev" class="btn small">← Prev week</button>
-          <div class="row">
-            <label for="schedWeekDate">Week of</label>
-            <input id="schedWeekDate" type="date"/>
+      <!-- ===== Schedule panel ===== -->
+      <section id="panelSchedule" class="panel hidden">
+        <header class="panel-head">
+          <h2>Schedules</h2>
+          <div class="seg">
+            <button id="modeEmp" class="seg-btn active">Per-employee</button>
+            <button id="modeGlobal" class="seg-btn">Global calendar</button>
           </div>
-          <button id="schedNext" class="btn small">Next week →</button>
-          <div id="schedWeekLabel" class="muted"></div>
+        </header>
+
+        <!-- Per-employee editor (wrapped) -->
+        <div id="schedEmpSection">
+          <div class="sched-controls">
+            <div class="row">
+              <label>Employee</label>
+              <select id="schedEmpSelect"></select>
+            </div>
+
+            <div class="row gap">
+              <button id="schedPrev" class="btn small">← Prev week</button>
+              <div class="row">
+                <label for="schedWeekDate">Week of</label>
+                <input id="schedWeekDate" type="date"/>
+              </div>
+              <button id="schedNext" class="btn small">Next week →</button>
+              <div id="schedWeekLabel" class="muted"></div>
+            </div>
+
+            <div class="row">
+              <label for="schedEffFrom">“Recurring” effective from</label>
+              <input id="schedEffFrom" type="date"/>
+              <span class="muted">Used only when saving a new recurring slot.</span>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="table schedule-table">
+              <thead>
+                <tr>
+                  <th style="width:140px;">Day</th>
+                  <th style="width:300px;">Recurring (weekly)</th>
+                  <th style="width:360px;">Override (this week)</th>
+                  <th>Resolved (this week)</th>
+                </tr>
+              </thead>
+              <tbody id="schedBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+            </table>
+          </div>
         </div>
 
-        <div class="row">
-          <label for="schedEffFrom">“Recurring” effective from</label>
-          <input id="schedEffFrom" type="date"/>
-          <span class="muted">Used only when saving a new recurring slot.</span>
-        </div>
-      </div>
+        <!-- Global calendar section -->
+        <section id="schedGlobalSection" class="hidden">
+          <div class="sched-controls">
+            <div class="row gap">
+              <button id="gcPrev" class="btn small">← Prev month</button>
+              <input id="gcMonth" type="month">
+              <button id="gcNext" class="btn small">Next month →</button>
+              <button id="gcToday" class="btn small ghost">Today</button>
+              <input id="gcSearch" type="text" placeholder="Filter by name…" style="margin-left:auto; max-width:260px;">
+            </div>
+          </div>
 
-      <div class="table-wrapper">
-        <table class="table schedule-table">
-          <thead>
-            <tr>
-              <th style="width:140px;">Day</th>
-              <th style="width:300px;">Recurring (weekly)</th>
-              <th style="width:360px;">Override (this week)</th>
-              <th>Resolved (this week)</th>
-            </tr>
-          </thead>
-          <tbody id="schedBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
+          <div class="cal-wrapper">
+            <div class="cal-head">
+              <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+            </div>
+            <div id="globalCalGrid" class="cal-grid">
+              <!-- filled by JS -->
+            </div>
+          </div>
+        </section>
+      </section>
     </section>
   </main>
 
@@ -266,12 +293,12 @@
     </section>
 
     <!-- Approvals / Filters -->
-<section class="drawer-controls" aria-label="Approvals & filters">
-  <label class="switch">
-    <input id="toggleAnoms" type="checkbox" />
-    <span>Only anomalies</span>
-  </label>
-</section>
+    <section class="drawer-controls" aria-label="Approvals & filters">
+      <label class="switch">
+        <input id="toggleAnoms" type="checkbox" />
+        <span>Only anomalies</span>
+      </label>
+    </section>
 
     <section class="drawer-list" id="drawerList" aria-label="Shift list">
       <!-- Populated by admin.js -->
@@ -317,36 +344,36 @@
   </div>
 
   <!-- Create Pay Period Modal -->
-<div id="createModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
-<div id="createModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="createTitle">
-  <header class="modal-header">
-    <h3 id="createTitle">New pay period</h3>
-    <button id="createCloseBtn" class="btn ghost" aria-label="Close">✕</button>
-  </header>
+  <div id="createModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="createModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="createTitle">
+    <header class="modal-header">
+      <h3 id="createTitle">New pay period</h3>
+      <button id="createCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
 
-  <section class="modal-body">
-    <div class="form-row">
+    <section class="modal-body">
+      <div class="form-row">
+        <label>
+          <span>Start date</span>
+          <input id="createStart" type="date" required />
+        </label>
+        <label>
+          <span>End date</span>
+          <input id="createEnd" type="date" required />
+        </label>
+      </div>
       <label>
-        <span>Start date</span>
-        <input id="createStart" type="date" required />
+        <span>Note (optional)</span>
+        <input id="createNote" type="text" placeholder="e.g., Biweekly Sep 1–14" />
       </label>
-      <label>
-        <span>End date</span>
-        <input id="createEnd" type="date" required />
-      </label>
-    </div>
-    <label>
-      <span>Note (optional)</span>
-      <input id="createNote" type="text" placeholder="e.g., Biweekly Sep 1–14" />
-    </label>
-    <div id="createError" class="error hidden" role="alert"></div>
-  </section>
+      <div id="createError" class="error hidden" role="alert"></div>
+    </section>
 
-  <footer class="modal-footer">
-    <button id="createCancelBtn" class="btn ghost">Cancel</button>
-    <button id="createSaveBtn" class="btn">Create</button>
-  </footer>
-</div>
+    <footer class="modal-footer">
+      <button id="createCancelBtn" class="btn ghost">Cancel</button>
+      <button id="createSaveBtn" class="btn">Create</button>
+    </footer>
+  </div>
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>

@@ -3,6 +3,27 @@ let supabaseClient = null;
 let drawerOnlyAnoms = false;
 let lastDrawerShifts = []; // keep latest list to re-render on toggle
 
+// ===== Global calendar state =====
+let gcMonthStart = null; // first day of the month being shown (Date)
+
+// helpers
+const pad2 = n => String(n).padStart(2,'0');
+const toISODate = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const yyyymm = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
+function getMonthStart(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+function nextMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 1); }
+function prevMonth(d){ return new Date(d.getFullYear(), d.getMonth()-1, 1); }
+
+// First visible cell in a month-view calendar (the Sunday before/at the 1st)
+function startOfMonthGrid(d){
+  const x = new Date(d.getFullYear(), d.getMonth(), 1);
+  const dow = x.getDay(); // 0=Sun
+  return new Date(x.getFullYear(), x.getMonth(), 1 - dow);
+}
+
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function fmtHM(ts){ if(!ts) return ''; const dd=new Date(ts); return dd.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+
 function qs(id){ return document.getElementById(id); }
 function show(el, v){ el.classList.toggle('hidden', !v); }
 function fmtHours(n){ if (n == null || Number.isNaN(n)) return '—'; const s = Number(n).toFixed(2); return s.replace(/\.00$/, ''); }
@@ -14,6 +35,138 @@ function toDatetimeLocalValue(iso){ if(!iso) return ''; const d=new Date(iso); c
 function localInputToOffsetISO(localStr){ const d=new Date(localStr); if(Number.isNaN(d.getTime())) return null; const p=n=>String(n).padStart(2,'0'); const tzMin=-d.getTimezoneOffset(); const sign=tzMin>=0?'+':'-'; const offH=p(Math.floor(Math.abs(tzMin)/60)); const offM=p(Math.abs(tzMin)%60); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00${sign}${offH}:${offM}`; }
 function fmtLocal(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString(); }
 function showToast(msg, type='ok'){ let t=document.querySelector('.toast'); if(!t){ t=document.createElement('div'); t.className='toast'; document.body.appendChild(t); } t.textContent=msg; t.classList.remove('ok','err'); t.classList.add(type); t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+
+async function fetchGlobalScheduleRange(gridStart, gridEnd){
+  const { data, error } = await supabaseClient.rpc('get_schedule_range_all', {
+    _start: toISODate(gridStart),
+    _end: toISODate(gridEnd)
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+function renderGlobalCalendar(rows, gridStart, monthStart){
+  const grid = qs('globalCalGrid'); if (!grid) return;
+  grid.innerHTML = '';
+
+  // group rows by work_date (YYYY-MM-DD)
+  const byDate = new Map();
+  for (const r of rows){
+    const key = toISODate(new Date(r.work_date));
+    const list = byDate.get(key) || [];
+    list.push(r);
+    byDate.set(key, list);
+  }
+
+  // 6 weeks view (42 cells)
+  for (let i=0; i<42; i++){
+    const day = addDays(gridStart, i);
+    const iso = toISODate(day);
+    const outOfMonth = day.getMonth() !== monthStart.getMonth();
+
+    const cell = document.createElement('div');
+    cell.className = `cal-day${outOfMonth ? ' out':''}`;
+
+    cell.innerHTML = `
+      <div class="cal-day-header">
+        <span class="cal-date">${day.getDate()}</span>
+      </div>
+      <div class="cal-slots"></div>
+    `;
+
+    const slotsEl = cell.querySelector('.cal-slots');
+    const items = (byDate.get(iso) || []).sort((a,b)=> (a.display_name||'').localeCompare(b.display_name||''));
+
+    // name filter (client-side)
+    const q = (qs('gcSearch').value || '').trim().toLowerCase();
+    const filtered = q ? items.filter(x => (x.display_name||'').toLowerCase().includes(q)) : items;
+
+    for (const r of filtered){
+      const slot = document.createElement('div');
+      slot.className = 'cal-slot';
+      slot.dataset.employeeId = r.employee_id;
+      slot.dataset.monthStart = toISODate(monthStart);
+
+      slot.innerHTML = `
+        <span class="name">${r.display_name}</span>
+        <span class="time">${fmtHM(r.start_ts)}–${fmtHM(r.end_ts)}</span>
+      `;
+      slotsEl.appendChild(slot);
+    }
+
+    grid.appendChild(cell);
+  }
+}
+
+async function loadGlobalCalendar(){
+  try {
+    // month controls
+    qs('gcMonth').value = yyyymm(gcMonthStart);
+
+    // calendar grid range (from the Sunday before the 1st to cover 6 weeks)
+    const gridStart = startOfMonthGrid(gcMonthStart);
+
+    const gridEnd = addDays(gridStart, 41);
+
+    const rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+    renderGlobalCalendar(rows, gridStart, gcMonthStart);
+  } catch (err){
+    console.error(err);
+    const grid = qs('globalCalGrid'); if (grid) grid.innerHTML = `<div class="muted" style="grid-column:1/-1; padding:10px;">Failed to load global calendar.</div>`;
+  }
+}
+
+function wireGlobalCalendar(){
+  // toggle sections
+  const emBtn = qs('modeEmp'), glBtn = qs('modeGlobal');
+  const empSec = qs('schedEmpSection'), glbSec = qs('schedGlobalSection');
+  emBtn?.addEventListener('click', () => {
+    emBtn.classList.add('active'); glBtn.classList.remove('active');
+    empSec.classList.remove('hidden'); glbSec.classList.add('hidden');
+  });
+  glBtn?.addEventListener('click', async () => {
+    glBtn.classList.add('active'); emBtn.classList.remove('active');
+    glbSec.classList.remove('hidden'); empSec.classList.add('hidden');
+    if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
+    await loadGlobalCalendar();
+  });
+
+  // controls
+  qs('gcPrev')?.addEventListener('click', async () => { gcMonthStart = prevMonth(gcMonthStart); await loadGlobalCalendar(); });
+  qs('gcNext')?.addEventListener('click', async () => { gcMonthStart = nextMonth(gcMonthStart); await loadGlobalCalendar(); });
+  qs('gcToday')?.addEventListener('click', async () => { gcMonthStart = getMonthStart(new Date()); await loadGlobalCalendar(); });
+  qs('gcMonth')?.addEventListener('change', async () => {
+    const v = qs('gcMonth').value; // "YYYY-MM"
+    if (!v) return;
+    const [y,m] = v.split('-').map(Number);
+    gcMonthStart = new Date(y, m-1, 1);
+    await loadGlobalCalendar();
+  });
+  qs('gcSearch')?.addEventListener('input', async () => { await loadGlobalCalendar(); });
+
+  // click a slot → open that worker's drawer on the selected month
+  qs('globalCalGrid')?.addEventListener('click', async (e) => {
+    const slot = e.target.closest('.cal-slot'); if (!slot) return;
+    const employeeId = slot.dataset.employeeId;
+    const monthStartISO = slot.dataset.monthStart;
+
+    const emps = await getActiveEmployees();
+    const displayName = (emps.find(x => x.id === employeeId)?.display_name) || '—';
+
+    drawerContext = { employeeId, monthStart: monthStartISO, displayName };
+    renderDrawerHeader(displayName, monthStartISO);
+    qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+    openDrawer();
+    try{
+      const shifts = await fetchWorkerShifts(employeeId, monthStartISO);
+      renderDrawerSummary(shifts);
+      renderDrawerList(shifts);
+    }catch(err){
+      console.error(err);
+      qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+    }
+  });
+}
 
 /* ============== Admin Guard ============== */
 async function ensureAdmin() {
@@ -981,8 +1134,7 @@ async function fetchWeekList(){
 
 // ===== Schedule: utilities & state =====
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const pad2 = n => String(n).padStart(2,'0');
-const toISODate = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+
 const fromISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
 
 function startOfWeekSun(d){
@@ -991,7 +1143,6 @@ function startOfWeekSun(d){
   x.setDate(x.getDate() - dow);
   return x;
 }
-function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
 function weekLabel(weekStart){
   const a = weekStart, b = addDays(weekStart, 6);
   const sameMonth = a.getMonth() === b.getMonth();
@@ -1434,6 +1585,9 @@ startLiveTicker(1000); // change to 1000 if you want a per-second tick
   await bootPayroll(); // loadPayroll() inside will call updatePeriodForSelectedWeek()
   bootRealtime();
   wireScheduleTab();
+  wireGlobalCalendar();
+if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
+
 // Optional: auto-open schedule tab for admins the first time
 // qs('tabSchedule').click();
 
