@@ -42,6 +42,9 @@
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
         <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (weekly)</button>
+        <!-- Tab button -->
+        <button id="tabSchedule" class="tab-btn">Schedule</button>
+
       </div>
 
       <!-- ===== Overview panel ===== -->
@@ -186,6 +189,51 @@
           </table>
         </div>
       </section>
+
+      <!-- schedule -->
+    <section id="panelSchedule" class="panel hidden">
+      <header class="panel-head">
+        <h2>Schedules</h2>
+      </header>
+
+      <div class="sched-controls">
+        <div class="row">
+          <label>Employee</label>
+          <select id="schedEmpSelect"></select>
+        </div>
+
+        <div class="row gap">
+          <button id="schedPrev" class="btn small">← Prev week</button>
+          <div class="row">
+            <label for="schedWeekDate">Week of</label>
+            <input id="schedWeekDate" type="date"/>
+          </div>
+          <button id="schedNext" class="btn small">Next week →</button>
+          <div id="schedWeekLabel" class="muted"></div>
+        </div>
+
+        <div class="row">
+          <label for="schedEffFrom">“Recurring” effective from</label>
+          <input id="schedEffFrom" type="date"/>
+          <span class="muted">Used only when saving a new recurring slot.</span>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="table schedule-table">
+          <thead>
+            <tr>
+              <th style="width:140px;">Day</th>
+              <th style="width:300px;">Recurring (weekly)</th>
+              <th style="width:360px;">Override (this week)</th>
+              <th>Resolved (this week)</th>
+            </tr>
+          </thead>
+          <tbody id="schedBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
     </section>
   </main>
 

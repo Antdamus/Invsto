@@ -349,3 +349,19 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
 .pill.break{ background:#2b240f; border-color:#5d4b17; color:#ffe9b4; }
 .live-actions{ margin-left:auto; display:flex; gap:8px; align-items:center; }
 .live-actions a{ font-size:12px; }
+
+/* ---- Schedule editor ---- */
+.sched-controls { 
+  display: grid; gap: 10px; 
+  background: var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:10px;
+}
+.sched-controls .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sched-controls .row.gap { gap:12px; }
+.schedule-table td, .schedule-table th { vertical-align: middle; }
+.sched-row { white-space: nowrap; }
+.sched-row .time { width: 110px; }
+.sched-row .day { font-weight: 600; }
+.sched-resolved { color: #cbd5e1; font-variant-numeric: tabular-nums; }
+.sched-note { color: var(--muted); font-size: 12px; }
+.sched-buttons { display:flex; gap:6px; flex-wrap:wrap; }
+

@@ -82,6 +82,266 @@ async function fetchMonthlySummary(monthStart){
   return { rows, source: 'view' };
 }
 
+// Fetch resolved schedule for the week (recurring+overrides → concrete slots)
+async function fetchResolvedWeek(empId, weekStart){
+  const start = toISODate(weekStart);
+  const end   = toISODate(addDays(weekStart, 6));
+  const { data, error } = await supabaseClient.rpc('get_employee_schedule', {
+    _employee_id: empId, _start: start, _end: end
+  });
+  if (error) throw error;
+  // Map by work_date (ISO) → { start_ts, end_ts, source, store_id }
+  const byDate = new Map();
+  for (const r of (data||[])){
+    byDate.set(r.work_date, r);
+  }
+  return byDate;
+}
+
+// Fetch overrides for the week so we can prefill that column
+async function fetchWeekOverrides(empId, weekStart){
+  const start = toISODate(weekStart);
+  const end   = toISODate(addDays(weekStart, 6));
+  const { data, error } = await supabaseClient
+    .from('work_schedule_overrides')
+    .select('work_date, off, start_local, end_local, note')
+    .eq('employee_id', empId)
+    .gte('work_date', start)
+    .lte('work_date', end);
+  if (error) throw error;
+  const byDate = new Map();
+  for (const r of (data||[])) byDate.set(r.work_date, r);
+  return byDate;
+}
+
+function fmtTimeHM(ts){
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+}
+
+function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
+  const tbody = qs('schedBody');
+  tbody.innerHTML = '';
+
+  for (let i=0;i<7;i++){
+    const day = addDays(weekStart, i);
+    const iso = toISODate(day);
+    const resolved = resolvedByDate.get(iso) || null;
+    const ov = overridesByDate.get(iso) || null;
+
+    const resolvedStr = resolved
+      ? `${fmtTimeHM(resolved.start_ts)}–${fmtTimeHM(resolved.end_ts)}`
+      : '—';
+    const srcStr = resolved ? (resolved.source === 'override' ? 'override' : 'recurring') : '';
+    const resolvedHtml = `
+      <div class="sched-resolved">${resolvedStr} ${srcStr ? `<span class="sched-note">(${srcStr})</span>`:''}</div>
+    `;
+
+    // Prefill recurring fields from resolved only when it came from recurring (no override)
+    const recStartPrefill = (resolved && resolved.source === 'recurring')
+      ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
+      : '';
+    const recEndPrefill = (resolved && resolved.source === 'recurring')
+      ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
+      : '';
+
+    // Prefill override inputs from existing override row
+    const ovOff   = ov?.off ? 'checked' : '';
+    const ovStart = ov?.start_local ? String(ov.start_local).slice(0,5) : '';
+    const ovEnd   = ov?.end_local   ? String(ov.end_local).slice(0,5)   : '';
+
+    const tr = document.createElement('tr');
+    tr.className = 'sched-row';
+    tr.innerHTML = `
+      <td class="day">${DOW[i]} ${day.getMonth()+1}/${day.getDate()}</td>
+
+      <td>
+        <div class="row">
+          <input class="time" type="time" id="recStart-${i}" value="${recStartPrefill}">
+          <span>–</span>
+          <input class="time" type="time" id="recEnd-${i}" value="${recEndPrefill}">
+        </div>
+        <div class="sched-buttons" style="margin-top:6px;">
+          <button class="btn small" data-save-recurring="${i}">Save recurring</button>
+        </div>
+      </td>
+
+      <td>
+        <div class="row">
+          <label><input type="checkbox" id="ovOff-${iso}" ${ovOff}> Off</label>
+          <input class="time" type="time" id="ovStart-${iso}" value="${ovStart}" ${ovOff ? 'disabled':''}>
+          <span>–</span>
+          <input class="time" type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
+        </div>
+        <div class="sched-buttons" style="margin-top:6px;">
+          <button class="btn small" data-save-override="${iso}">Save override</button>
+          <button class="btn small ghost" data-clear-override="${iso}">Clear override</button>
+        </div>
+      </td>
+
+      <td>${resolvedHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function saveRecurring(weekday){
+  const empId = schedEmpId;
+  const start = qs(`recStart-${weekday}`).value || '';
+  const end   = qs(`recEnd-${weekday}`).value || '';
+  const effFrom = qs('schedEffFrom').value || toISODate(new Date());
+
+  if (!start || !end) return alert('Enter start and end time for recurring.');
+  if (end <= start) return alert('End must be after start.');
+
+  const { error } = await supabaseClient.rpc('admin_set_weekday_slot', {
+    _employee_id: empId,
+    _weekday: weekday,
+    _start_local: start,
+    _end_local: end,
+    _effective_from: effFrom,
+    _effective_to: null,
+    _store_id: null,
+    _note: null
+  });
+  if (error) return alert('Save failed: ' + error.message);
+  await loadScheduleWeek(); // refresh
+}
+
+async function saveOverride(workISO){
+  const empId = schedEmpId;
+  const off = qs(`ovOff-${workISO}`).checked;
+  const s = qs(`ovStart-${workISO}`);
+  const e = qs(`ovEnd-${workISO}`);
+  const start = s.value || null;
+  const end   = e.value || null;
+
+  if (!off){
+    if (!start || !end) return alert('Enter start and end time, or mark Off.');
+    if (end <= start) return alert('End must be after start.');
+  }
+
+  const { error } = await supabaseClient.rpc('admin_set_override', {
+    _employee_id: empId,
+    _work_date: workISO,
+    _off: off,
+    _start_local: start,
+    _end_local: end,
+    _store_id: null,
+    _note: null
+  });
+  if (error) return alert('Override failed: ' + error.message);
+  await loadScheduleWeek();
+}
+
+async function clearOverride(workISO){
+  // Just delete the row; RLS allows admin writes
+  const { error } = await supabaseClient
+    .from('work_schedule_overrides')
+    .delete()
+    .eq('employee_id', schedEmpId)
+    .eq('work_date', workISO);
+  if (error) return alert('Clear failed: ' + error.message);
+  await loadScheduleWeek();
+}
+
+async function loadScheduleWeek(){
+  try {
+    // UI labels
+    qs('schedWeekLabel').textContent = weekLabel(schedWeekStart);
+    qs('schedWeekDate').value = toISODate(schedWeekStart);
+
+    // data
+    const [resolvedByDate, overridesByDate] = await Promise.all([
+      fetchResolvedWeek(schedEmpId, schedWeekStart),
+      fetchWeekOverrides(schedEmpId, schedWeekStart)
+    ]);
+
+    renderScheduleGrid(schedWeekStart, resolvedByDate, overridesByDate);
+  } catch (err){
+    console.error(err);
+    qs('schedBody').innerHTML = `<tr><td colspan="4" class="muted">Failed to load schedule.</td></tr>`;
+  }
+}
+
+async function initSchedulePanel(){
+  // employees
+  const emps = await getActiveEmployees();
+  const sel = qs('schedEmpSelect');
+  sel.innerHTML = emps.map(e => `<option value="${e.id}">${e.display_name}</option>`).join('');
+  schedEmpId = emps[0]?.id || null;
+
+  // defaults
+  qs('schedEffFrom').value = toISODate(new Date());
+  qs('schedWeekDate').value = toISODate(schedWeekStart);
+
+  // event delegation for table buttons
+  qs('schedBody').addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.hasAttribute('data-save-recurring')){
+      const weekday = Number(btn.getAttribute('data-save-recurring'));
+      saveRecurring(weekday);
+    } else if (btn.hasAttribute('data-save-override')){
+      const iso = btn.getAttribute('data-save-override');
+      saveOverride(iso);
+    } else if (btn.hasAttribute('data-clear-override')){
+      const iso = btn.getAttribute('data-clear-override');
+      clearOverride(iso);
+    }
+  });
+
+  // enable/disable override time inputs when Off toggled
+  qs('schedBody').addEventListener('change', (e) => {
+    if (e.target.id && e.target.id.startsWith('ovOff-')){
+      const iso = e.target.id.slice('ovOff-'.length);
+      const on = e.target.checked;
+      qs(`ovStart-${iso}`).disabled = on;
+      qs(`ovEnd-${iso}`).disabled = on;
+    }
+  });
+
+  // selectors
+  sel.addEventListener('change', async () => {
+    schedEmpId = sel.value;
+    await loadScheduleWeek();
+  });
+  qs('schedPrev').addEventListener('click', async () => {
+    schedWeekStart = addDays(schedWeekStart, -7);
+    await loadScheduleWeek();
+  });
+  qs('schedNext').addEventListener('click', async () => {
+    schedWeekStart = addDays(schedWeekStart, 7);
+    await loadScheduleWeek();
+  });
+  qs('schedWeekDate').addEventListener('change', async () => {
+    const d = fromISO(qs('schedWeekDate').value);
+    schedWeekStart = startOfWeekSun(d);
+    await loadScheduleWeek();
+  });
+
+  await loadScheduleWeek();
+}
+
+function showPanel(id){
+  // Hide all panels you have; list the known ones
+  ['panelOverview','panelPayroll','panelSchedule'].forEach(pid => {
+    const el = qs(pid); if (el) el.classList.add('hidden');
+  });
+  const p = qs(id); if (p) p.classList.remove('hidden');
+}
+
+function wireScheduleTab(){
+  qs('tabSchedule')?.addEventListener('click', async () => {
+    showPanel('panelSchedule');
+    // lazy init once
+    if (!qs('schedEmpSelect').options.length){
+      try { await initSchedulePanel(); } catch (e){ console.error(e); }
+    }
+  });
+}
+
 
 function renderKPIs(rows){
   const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
@@ -719,6 +979,32 @@ async function fetchWeekList(){
   const set=new Set(), out=[]; for(const w of weeks){ if(!set.has(w)){ set.add(w); out.push(w); } } return out;
 }
 
+// ===== Schedule: utilities & state =====
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const pad2 = n => String(n).padStart(2,'0');
+const toISODate = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const fromISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+
+function startOfWeekSun(d){
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = x.getDay(); // 0=Sun
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+function weekLabel(weekStart){
+  const a = weekStart, b = addDays(weekStart, 6);
+  const sameMonth = a.getMonth() === b.getMonth();
+  const aStr = `${DOW[a.getDay()]} ${a.getMonth()+1}/${a.getDate()}`;
+  const bStr = `${DOW[b.getDay()]} ${b.getMonth()+1}/${b.getDate()}/${b.getFullYear()}`;
+  return sameMonth ? `${aStr}–${b.getDate()}/${b.getFullYear()}` : `${aStr} – ${bStr}`;
+}
+
+// local state
+let schedEmpId = null;
+let schedWeekStart = startOfWeekSun(new Date());
+
+
 // Weekly payroll: include ALL active employees with zeros if absent
 async function fetchWeeklyHours(weekStartStr){
   const [emps, viewResp] = await Promise.all([
@@ -1147,6 +1433,10 @@ startLiveTicker(1000); // change to 1000 if you want a per-second tick
   await loadSummary();
   await bootPayroll(); // loadPayroll() inside will call updatePeriodForSelectedWeek()
   bootRealtime();
+  wireScheduleTab();
+// Optional: auto-open schedule tab for admins the first time
+// qs('tabSchedule').click();
+
 
 });
 
