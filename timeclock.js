@@ -350,6 +350,27 @@ async function refreshBreakStatus(){
   breakBtn.textContent = openBreak ? 'End Break' : 'Start Break';
 }
 
+// Warn the worker if this punch was outside their scheduled window
+async function maybeWarnSchedule(entryId){
+  try{
+    const { data, error } = await supabaseClient
+      .from('v_shift_anomalies')
+      .select('time_entry_id, anomalies')
+      .eq('time_entry_id', entryId)
+      .maybeSingle();
+
+    if (error || !data) return;
+    const codes = Array.isArray(data.anomalies) ? data.anomalies : [];
+    if (!codes.length) return;
+
+    const msg = codes.map(c => c.replace(/_/g,' ').toLowerCase())
+                     .map(s => s[0].toUpperCase()+s.slice(1))
+                     .join(', ');
+    alert(`Heads up: this punch is outside the scheduled window (${msg}). It was recorded and flagged for admin review.`);
+  }catch(_e){}
+}
+
+
 async function onClockAction(){
   if (isPunching) return;
   isPunching = true;
@@ -369,7 +390,7 @@ async function onClockAction(){
     const kind = (openRows && openRows.length) ? 'out' : 'in';
 
     // 3) Require photo BEFORE calling RPC
-    const blob = await awaitPhoto(kind);                // user can retake; cancel aborts
+    const blob = await awaitPhoto(kind);                 // user can retake; cancel aborts
     const photoPath = await uploadPhotoBlob(kind, blob); // store PATH (not URL)
 
     // 4) Call RPC with required _photo_path
@@ -387,7 +408,17 @@ async function onClockAction(){
         _photo_path: photoPath, _store_id: null
       }));
     }
-    if (err){ alert(err.message); return; }
+
+    // 5) Handle enforcement errors clearly
+    if (err){
+      // If store is in "hard enforce" the RPC throws with a readable message
+      const m = err.message || 'Clock action blocked by schedule.';
+      alert(m);
+      return;
+    }
+
+    // 6) Soft-mode tags: inform the worker if flagged (outside window, unscheduled, etc.)
+    if (entry?.id) await maybeWarnSchedule(entry.id);
 
     await refreshShiftStatus();
     await refreshBreakStatus();

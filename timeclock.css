@@ -228,3 +228,6 @@ html, body {
   background:#121722; color:#dfe6f2; display:flex; justify-content:space-between; gap:8px;
 }
 
+.row-anom { outline: 1px solid #5d3b3b; background: #130f12; }
+.badge.anom { display:inline-block; padding:2px 6px; border-radius:999px; font-size:12px;
+  background:#3a1e1e; color:#ffd0d0; border:1px solid #5c3333; margin-right:4px; }

@@ -922,14 +922,14 @@ async function fetchLiveNow(){
   // 1) all open shifts (clock_out IS NULL)
   const { data: entries, error } = await supabaseClient
     .from('time_entries')
-    .select('id, employee_id, clock_in, photo_in_path, photo_out_path')
+    .select('id, employee_id, clock_in, photo_in_path')
     .is('clock_out', null)
     .order('clock_in', { ascending: true });
   if (error) throw error;
   const rows = entries || [];
+  const ids = rows.map(r => r.id);
 
   // 2) open breaks for those shifts
-  const ids = rows.map(r => r.id);
   let openBreaks = [];
   if (ids.length){
     const { data: b, error: bErr } = await supabaseClient
@@ -942,15 +942,26 @@ async function fetchLiveNow(){
   }
   const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
 
-  // 3) names
+  // 3) anomalies for those open shifts (schedule flags, etc.)
+  let anomById = new Map();
+  if (ids.length){
+    const { data: anoms } = await supabaseClient
+      .from('v_shift_anomalies')
+      .select('time_entry_id, has_anomaly, anomalies')
+      .in('time_entry_id', ids);
+    anomById = new Map((anoms || []).map(a => [a.time_entry_id, a]));
+  }
+
+  // 4) names
   const emps = await getActiveEmployees();
   const nameById = new Map(emps.map(e => [e.id, e.display_name]));
 
-  // 4) shape + sign photo links
+  // 5) shape + sign photo links
   const out = [];
   for (const r of rows){
     const now = Date.now();
     const bk = breakByEntry.get(r.id) || null;
+    const a  = anomById.get(r.id) || {};
     out.push({
       entry_id: r.id,
       employee_id: r.employee_id,
@@ -961,7 +972,9 @@ async function fetchLiveNow(){
       break_started_at: bk?.started_at || null,
       break_ms: bk ? (now - new Date(bk.started_at).getTime()) : 0,
       photo_in_url: r.photo_in_path ? await signPath(r.photo_in_path) : null,
-      break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null
+      break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null,
+      has_anomaly: !!a.has_anomaly,
+      anomalies: Array.isArray(a.anomalies) ? a.anomalies : []
     });
   }
   return out;
@@ -970,10 +983,14 @@ async function fetchLiveNow(){
 function renderLiveNow(rows){
   const list = qs('liveList'); if (!list) return;
   const updated = qs('liveUpdated');
-  if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+  // header stamp + anomaly count
+  const flagged = rows.filter(r => r.has_anomaly).length;
+  if (updated){
+    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` • ⚠︎ ${flagged} flagged` : ''}`;
+  }
 
   list.innerHTML = '';
-
   if (!rows.length){
     list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
     if (typeof tickLiveNow === 'function') tickLiveNow();
@@ -998,10 +1015,15 @@ function renderLiveNow(rows){
       ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
       : `<span class="pill work">Working</span>`;
 
+    const anomHtml = r.has_anomaly && r.anomalies?.length
+      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">⚠︎ ${a}</span>`).join(' ')}</div>`
+      : '';
+
     div.innerHTML = `
       <div class="live-name">${r.display_name}</div>
       <div class="live-times">since ${sinceStr} • ${durStr}</div>
       <div class="live-status">${pill}</div>
+      ${anomHtml}
       <div class="live-actions">
         ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
         ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
