@@ -463,6 +463,47 @@ async function onRowClick(e){
   catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
 }
 
+let liveTickTimer = null;
+
+// recompute durations from data-* timestamps (no network)
+function tickLiveNow(){
+  const cards = document.querySelectorAll('.live-card');
+  const now = Date.now();
+
+  for (const card of cards){
+    const clockInMs = Number(card.dataset.clockInMs || 0);
+    if (!clockInMs) continue;
+
+    // update "since … • HHh MMm"
+    const timesEl = card.querySelector('.live-times');
+    if (timesEl){
+      const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      const durStr = fmtDurationHM(now - clockInMs);
+      timesEl.textContent = `since ${sinceStr} • ${durStr}`;
+    }
+
+    // if on break, update pill to show current break duration
+    if (card.dataset.status === 'break'){
+      const bs = Number(card.dataset.breakStartMs || 0);
+      const pill = card.querySelector('.pill.break');
+      if (bs && pill){
+        pill.textContent = `On break ${fmtDurationHM(now - bs)}`;
+      }
+    }
+  }
+}
+
+function startLiveTicker(intervalMs = 30000){ // 30s default; use 1000 for every second
+  if (liveTickTimer) clearInterval(liveTickTimer);
+  liveTickTimer = setInterval(tickLiveNow, intervalMs);
+  // also do an immediate tick so UI updates right away
+  tickLiveNow();
+}
+
+function stopLiveTicker(){
+  if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
+}
+
 // ---- Live now helpers ----
 async function fetchLiveNow(){
   // 1) all open shifts (clock_out IS NULL)
@@ -515,32 +556,52 @@ async function fetchLiveNow(){
 
 function renderLiveNow(rows){
   const list = qs('liveList'); if (!list) return;
-  const updated = qs('liveUpdated'); if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  const updated = qs('liveUpdated');
+  if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 
   list.innerHTML = '';
+
   if (!rows.length){
     list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
+    if (typeof tickLiveNow === 'function') tickLiveNow();
     return;
   }
+
   for (const r of rows){
+    const clockInMs = new Date(r.clock_in).getTime();
+    const breakStartMs = r.break_started_at ? new Date(r.break_started_at).getTime() : 0;
+
+    const div = document.createElement('div');
+    div.className = 'live-card';
+    div.dataset.employeeId   = r.employee_id;
+    div.dataset.clockInMs    = String(clockInMs);
+    div.dataset.status       = r.status; // 'work' | 'break'
+    div.dataset.breakStartMs = breakStartMs ? String(breakStartMs) : '';
+
+    const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const durStr   = fmtDurationHM(Date.now() - clockInMs);
+
     const pill = r.status === 'break'
       ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
       : `<span class="pill work">Working</span>`;
-    const div = document.createElement('div');
-    div.className = 'live-card';
-    div.dataset.employeeId = r.employee_id;
+
     div.innerHTML = `
       <div class="live-name">${r.display_name}</div>
-      <div class="live-times">since ${new Date(r.clock_in).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} • ${fmtDurationHM(r.duration_ms)}</div>
+      <div class="live-times">since ${sinceStr} • ${durStr}</div>
       <div class="live-status">${pill}</div>
       <div class="live-actions">
         ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
         ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
         <button class="btn small ghost">Details →</button>
-      </div>`;
+      </div>
+    `;
     list.appendChild(div);
   }
+
+  // immediately recompute durations so labels are fresh after render
+  if (typeof tickLiveNow === 'function') tickLiveNow();
 }
+
 
 async function loadLiveNow(){
   try{
@@ -1072,6 +1133,8 @@ document.addEventListener('supabase-ready', async () => {
   wireCreatePeriodUI();
   wireLiveList();
 await loadLiveNow();
+startLiveTicker(1000); // change to 1000 if you want a per-second tick
+
 
 
 
