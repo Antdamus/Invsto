@@ -370,7 +370,6 @@ async function maybeWarnSchedule(entryId){
   }catch(_e){}
 }
 
-
 async function onClockAction(){
   if (isPunching) return;
   isPunching = true;
@@ -378,22 +377,21 @@ async function onClockAction(){
   btn.disabled = true;
 
   try {
-    // 1) Geo first
     const geo = await getGeo();
     if (!geo.ok){ alert(geo.msg || 'Unable to get location.'); return; }
 
-    // 2) Determine kind (in/out) based on open shift
+    // Are we clocking in or out?
     const { data: openRows } = await supabaseClient
       .from('time_entries').select('id')
       .eq('employee_id', currentEmployee.id)
       .is('clock_out', null).limit(1);
     const kind = (openRows && openRows.length) ? 'out' : 'in';
 
-    // 3) Require photo BEFORE calling RPC
-    const blob = await awaitPhoto(kind);                 // user can retake; cancel aborts
-    const photoPath = await uploadPhotoBlob(kind, blob); // store PATH (not URL)
+    // Require photo first
+    const blob = await awaitPhoto(kind);
+    const photoPath = await uploadPhotoBlob(kind, blob);
 
-    // 4) Call RPC with required _photo_path
+    // RPC
     let entry, err;
     if (kind === 'in') {
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', {
@@ -408,16 +406,9 @@ async function onClockAction(){
         _photo_path: photoPath, _store_id: null
       }));
     }
+    if (err){ alert(err.message || 'Clock action blocked.'); return; }
 
-    // 5) Handle enforcement errors clearly
-    if (err){
-      // If store is in "hard enforce" the RPC throws with a readable message
-      const m = err.message || 'Clock action blocked by schedule.';
-      alert(m);
-      return;
-    }
-
-    // 6) Soft-mode tags: inform the worker if flagged (outside window, unscheduled, etc.)
+    // 🔔 NEW: ask the DB view if this shift is outside the window and warn
     if (entry?.id) await maybeWarnSchedule(entry.id);
 
     await refreshShiftStatus();
@@ -430,6 +421,7 @@ async function onClockAction(){
     btn.disabled = false;
   }
 }
+
 
 // ===== Worker schedule (weekly) =====
 const pad2 = (n)=>String(n).padStart(2,'0');

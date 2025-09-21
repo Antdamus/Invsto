@@ -917,12 +917,11 @@ function stopLiveTicker(){
   if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
 }
 
-// ---- Live now helpers ----
 async function fetchLiveNow(){
-  // 1) all open shifts (clock_out IS NULL)
+  // 1) open shifts
   const { data: entries, error } = await supabaseClient
     .from('time_entries')
-    .select('id, employee_id, clock_in, photo_in_path')
+    .select('id, employee_id, clock_in, photo_in_path, schedule_codes')
     .is('clock_out', null)
     .order('clock_in', { ascending: true });
   if (error) throw error;
@@ -942,26 +941,16 @@ async function fetchLiveNow(){
   }
   const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
 
-  // 3) anomalies for those open shifts (schedule flags, etc.)
-  let anomById = new Map();
-  if (ids.length){
-    const { data: anoms } = await supabaseClient
-      .from('v_shift_anomalies')
-      .select('time_entry_id, has_anomaly, anomalies')
-      .in('time_entry_id', ids);
-    anomById = new Map((anoms || []).map(a => [a.time_entry_id, a]));
-  }
-
-  // 4) names
+  // 3) names
   const emps = await getActiveEmployees();
   const nameById = new Map(emps.map(e => [e.id, e.display_name]));
 
-  // 5) shape + sign photo links
+  // 4) shape + sign photo links + anomaly flags
   const out = [];
   for (const r of rows){
     const now = Date.now();
     const bk = breakByEntry.get(r.id) || null;
-    const a  = anomById.get(r.id) || {};
+    const codes = Array.isArray(r.schedule_codes) ? r.schedule_codes : [];
     out.push({
       entry_id: r.id,
       employee_id: r.employee_id,
@@ -973,8 +962,8 @@ async function fetchLiveNow(){
       break_ms: bk ? (now - new Date(bk.started_at).getTime()) : 0,
       photo_in_url: r.photo_in_path ? await signPath(r.photo_in_path) : null,
       break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null,
-      has_anomaly: !!a.has_anomaly,
-      anomalies: Array.isArray(a.anomalies) ? a.anomalies : []
+      has_anomaly: codes.length > 0,
+      anomalies: codes
     });
   }
   return out;
