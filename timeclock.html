@@ -30,6 +30,7 @@
         <button id="clockBtn" class="btn primary">Clock In</button>
         <button id="breakBtn" class="btn">Start Break</button>
       </div>
+      <div class="hint" id="breakBudgetHint">Paid break remaining today: —</div>
 
       <div class="geo-row">Location: <span id="geoText">—</span></div>
 
@@ -44,30 +45,51 @@
             <th>Photo Out</th>
           </tr>
         </thead>
-        <tbody id="todayBody"></tbody>
+        <tbody id="todayBody">
+          <!-- filled by JS -->
+        </tbody>
       </table>
+
+      <!-- NEW: Breaks Today -->
+     <!-- Breaks Today -->
+<h3 style="margin-top:16px;">Breaks Today</h3>
+<table class="table">
+  <thead>
+    <tr>
+      <th>Start</th>
+      <th>End</th>
+      <th>Duration</th>
+      <th>Photo Start</th>
+      <th>Photo End</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="breaksBody">
+    <tr><td colspan="6" class="muted">No breaks yet.</td></tr>
+  </tbody>
+</table>
+
     </section>
 
-    <!-- Camera Modal -->
+    <!-- Camera Modal (matches your CSS/JS names) -->
     <div id="camModal" class="modal hidden">
-    <div class="modal-backdrop"></div>
-    <div class="modal-card">
+      <div class="modal-backdrop"></div>
+      <div class="modal-card">
         <h3 id="camTitle">Take photo</h3>
 
         <div class="cam-stage">
-        <video id="camVideo" autoplay playsinline class="cam-view"></video>
-        <canvas id="camCanvas" class="cam-view hidden"></canvas>
+          <video id="camVideo" autoplay playsinline class="cam-view"></video>
+          <canvas id="camCanvas" class="cam-view hidden"></canvas>
         </div>
 
         <div class="cam-actions">
-        <button id="camCaptureBtn" class="btn primary">Capture</button>
-        <button id="camRetakeBtn" class="btn hidden">Retake</button>
-        <button id="camUseBtn" class="btn hidden">Use Photo</button>
-        <button id="camCancelBtn" class="btn ghost">Cancel</button>
+          <button id="camCaptureBtn" class="btn primary">Capture</button>
+          <button id="camRetakeBtn" class="btn hidden">Retake</button>
+          <button id="camUseBtn" class="btn hidden">Use Photo</button>
+          <button id="camCancelBtn" class="btn ghost">Cancel</button>
         </div>
+      </div>
     </div>
-    </div>
-
   </main>
 
   <!-- Supabase + scripts -->

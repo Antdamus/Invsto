@@ -143,3 +143,69 @@ html, body {
 .cam-stage { display: grid; place-items: center; background: #0f1013; border:1px dashed var(--border); border-radius: 10px; aspect-ratio: 3/4; overflow: hidden; }
 .cam-view { width: 100%; height: 100%; object-fit: cover; }
 .cam-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+/* === Match final timeclock.html structure === */
+
+/* Panels (your HTML uses .panel, CSS only had .card) */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+
+/* Simple flex utilities used in the HTML */
+.row { display: flex; gap: 12px; }
+.between { justify-content: space-between; }
+.center { align-items: center; }
+.muted { color: var(--muted); }
+
+/* Current time element */
+.nowtime { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Status pill (HTML uses .pill, CSS had .status-pill) */
+.pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #191b20;
+  font-size: 14px;
+}
+
+/* Ensure tables look like cards (works with the existing .table styles) */
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+/* Modal styling compatible with HTML that has .modal-header/body/footer but no .modal-card */
+.modal.hidden { display: none; }
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.6); backdrop-filter: blur(2px);
+}
+.modal .modal-header,
+.modal .modal-body,
+.modal .modal-footer {
+  width: 96%; max-width: 520px;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+}
+.modal .modal-header {
+  border-top: 1px solid var(--border);
+  border-top-left-radius: 12px; border-top-right-radius: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal .modal-body { border-top: 1px solid var(--border); }
+.modal .modal-footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
+  display: flex; gap: 8px; justify-content: flex-end;
+}

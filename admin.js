@@ -121,8 +121,8 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
   const start = new Date(`${monthStartStr}T00:00:00`);
   const end   = new Date(start); end.setMonth(start.getMonth()+1);
 
-  // Base closed shifts
-  const { data, error } = await supabaseClient.from('time_entries')
+  // 1) Base closed shifts
+  const { data: entries, error } = await supabaseClient.from('time_entries')
     .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
     .eq('employee_id', employeeId)
     .gte('clock_in', start.toISOString())
@@ -130,21 +130,45 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
     .not('clock_out','is',null)
     .order('clock_in',{ascending:true});
   if (error) throw error;
-  const rows = data || [];
 
-  // Pull anomalies + approval status for this employee/time range
-  const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
-    .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
-    .eq('employee_id', employeeId)
-    .gte('clock_in', start.toISOString())
-    .lt('clock_in', end.toISOString());
+  const rows = entries || [];
+  const ids = rows.map(r => r.id);
 
-  const byId = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
+  // 2) Anomalies + approvals for these shifts
+  let anomalyById = new Map();
+  if (ids.length){
+    const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
+      .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
+      .in('time_entry_id', ids);
+    anomalyById = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
+  }
 
-  // Build records + sign photo URLs
+  // 3) Breaks for these shifts
+  let breaksByEntry = new Map();
+  if (ids.length){
+    const { data: breaks } = await supabaseClient.from('time_breaks')
+      .select('time_entry_id, started_at, ended_at')
+      .in('time_entry_id', ids)
+      .order('started_at', { ascending: true });
+    for (const b of (breaks||[])){
+      const list = breaksByEntry.get(b.time_entry_id) || [];
+      list.push(b);
+      breaksByEntry.set(b.time_entry_id, list);
+    }
+  }
+
+  // 4) Build final records (+signed photo URLs)
   const map = new Map(), out = [];
   for (const r of rows){
     const durMs = new Date(r.clock_out) - new Date(r.clock_in);
+
+    // Break summary
+    const bks = breaksByEntry.get(r.id) || [];
+    const breakMs = bks.reduce((sum, b) => {
+      if (!b.ended_at) return sum;
+      return sum + (new Date(b.ended_at) - new Date(b.started_at));
+    }, 0);
+
     let inUrl=null,outUrl=null;
     try{
       if (r.photo_in_path){
@@ -157,7 +181,7 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
       }
     }catch(_e){}
 
-    const a = byId.get(r.id) || {};
+    const a = anomalyById.get(r.id) || {};
     const rec = {
       id: r.id,
       clock_in: r.clock_in,
@@ -166,12 +190,16 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
       store_id: r.store_id || null,
       photo_in_url: inUrl,
       photo_out_url: outUrl,
-      // NEW: anomalies + approvals
+      // anomalies + approvals
       anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
       has_anomaly: !!a.has_anomaly,
-      approval_status: a.approval_status || null,   // 'approved' | 'waived' | null (pending)
+      approval_status: a.approval_status || null,
       approval_note: a.approval_note || null,
       approved_at: a.approved_at || null,
+      // NEW: breaks
+      breaks: bks,                 // [{started_at, ended_at}, ...]
+      break_count: bks.length,
+      break_ms: breakMs
     };
     map.set(r.id, rec); out.push(rec);
   }
@@ -208,7 +236,10 @@ function renderDrawerList(shifts){
     // Anomaly chips
     const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
 
-    // Action buttons (depends on status)
+    // Break summary
+    const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
+
+    // Actions per status
     let actions = '';
     if (st === 'approved'){
       actions = `
@@ -242,6 +273,7 @@ function renderDrawerList(shifts){
         <div class="chips">
           ${statusChip}
           ${anomChips}
+          <span class="chip">${breaksText}</span>
         </div>
         <div class="shift-actions">
           ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
