@@ -17,7 +17,7 @@
   </header>
 
   <main class="container">
-    <!-- Clock UI only; no auth form -->
+    <!-- Clock UI -->
     <section id="clockSection" class="card hidden">
       <h2>Welcome, <span id="displayName">—</span></h2>
 
@@ -45,33 +45,33 @@
             <th>Photo Out</th>
           </tr>
         </thead>
-        <tbody id="todayBody">
-          <!-- filled by JS -->
-        </tbody>
+        <tbody id="todayBody"></tbody>
       </table>
-
-      <!-- NEW: Breaks Today -->
-     <!-- Breaks Today -->
-<h3 style="margin-top:16px;">Breaks Today</h3>
-<table class="table">
-  <thead>
-    <tr>
-      <th>Start</th>
-      <th>End</th>
-      <th>Duration</th>
-      <th>Photo Start</th>
-      <th>Photo End</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="breaksBody">
-    <tr><td colspan="6" class="muted">No breaks yet.</td></tr>
-  </tbody>
-</table>
-
     </section>
 
-    <!-- Camera Modal (matches your CSS/JS names) -->
+    <!-- Your Schedule (weekly calendar) -->
+    <section id="schedSection" class="card hidden">
+      <div class="status-row">
+        <h2 style="margin:0;">Your schedule</h2>
+        <div id="wsWeekLabel" class="now">—</div>
+      </div>
+
+      <div class="actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="wsPrev" class="btn">← Prev week</button>
+        <input id="wsWeekDate" type="date" />
+        <button id="wsNext" class="btn">Next week →</button>
+        <span class="hint" style="margin-left:auto;">Times shown in your device’s timezone</span>
+      </div>
+
+      <div class="cal-head">
+        <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+      </div>
+      <div id="wsGrid" class="cal-grid">
+        <!-- filled by JS -->
+      </div>
+    </section>
+
+    <!-- Camera Modal -->
     <div id="camModal" class="modal hidden">
       <div class="modal-backdrop"></div>
       <div class="modal-card">

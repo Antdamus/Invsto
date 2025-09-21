@@ -209,3 +209,22 @@ html, body {
   border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
   display: flex; gap: 8px; justify-content: flex-end;
 }
+
+/* Worker weekly schedule (calendar-like) */
+.cal-head { 
+  display:grid; grid-template-columns:repeat(7,1fr); gap:6px; 
+  color:#b7bcc5; font-weight:600; text-align:center; margin-top:10px; margin-bottom:6px;
+}
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.cal-day {
+  min-height:120px; background:#0f1116; border:1px solid var(--border); border-radius:10px;
+  display:flex; flex-direction:column; padding:6px; gap:6px;
+}
+.cal-day-header { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#c7ccd5; }
+.cal-date { font-weight:700; }
+.cal-slots { display:grid; gap:4px; }
+.cal-slot {
+  font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:8px;
+  background:#121722; color:#dfe6f2; display:flex; justify-content:space-between; gap:8px;
+}
+

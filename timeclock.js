@@ -288,6 +288,9 @@ async function hydrate(){
     await refreshShiftStatus();
     await refreshBreakStatus();
     await loadToday();
+    document.getElementById('wsWeekDate').value = toISODate(wsWeekStart);
+    await loadMySchedule();
+
     tryGeo();
   } finally {
     isHydrating = false;
@@ -396,6 +399,76 @@ async function onClockAction(){
     btn.disabled = false;
   }
 }
+
+// ===== Worker schedule (weekly) =====
+const pad2 = (n)=>String(n).padStart(2,'0');
+const toISODate = (d)=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+function startOfWeekSun(d){ const x=new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()-x.getDay()); return x; }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function weekLabel(a){
+  const b = addDays(a,6);
+  const aStr = `${a.getMonth()+1}/${a.getDate()}`;
+  const bStr = `${b.getMonth()+1}/${b.getDate()}/${b.getFullYear()}`;
+  return `${aStr} — ${bStr}`;
+}
+let wsWeekStart = startOfWeekSun(new Date());
+
+async function fetchMyScheduleWeek(){
+  if (!currentEmployee?.id) return new Map();
+  const start = toISODate(wsWeekStart);
+  const end   = toISODate(addDays(wsWeekStart, 6));
+  const { data, error } = await supabaseClient.rpc('get_employee_schedule', {
+    _employee_id: currentEmployee.id,
+    _start: start,
+    _end: end
+  });
+  if (error) { console.error(error); return new Map(); }
+  const byDate = new Map();
+  for (const r of (data||[])) byDate.set(r.work_date, r);
+  return byDate;
+}
+
+function fmtHM(ts){ if(!ts) return '—'; const d=new Date(ts); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+
+function renderMySchedule(byDate){
+  const grid = document.getElementById('wsGrid');
+  const label = document.getElementById('wsWeekLabel');
+  if (label) label.textContent = weekLabel(wsWeekStart);
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  for (let i=0;i<7;i++){
+    const day = addDays(wsWeekStart, i);
+    const iso = toISODate(day);
+    const r = byDate.get(iso) || null;
+
+    const cell = document.createElement('div');
+    cell.className = 'cal-day';
+    cell.innerHTML = `
+      <div class="cal-day-header">
+        <span class="cal-date">${day.getMonth()+1}/${day.getDate()}</span>
+      </div>
+      <div class="cal-slots">
+        ${r ? `<div class="cal-slot">
+                 <span class="time">${fmtHM(r.start_ts)}–${fmtHM(r.end_ts)}</span>
+                 <span class="note">${r.source === 'override' ? '(override)' : ''}</span>
+               </div>` : `<div class="muted" style="font-size:12px;">—</div>`}
+      </div>
+    `;
+    grid.appendChild(cell);
+  }
+}
+
+async function loadMySchedule(){
+  try{
+    const map = await fetchMyScheduleWeek();
+    renderMySchedule(map);
+    document.getElementById('schedSection')?.classList.remove('hidden');
+  }catch(err){
+    console.error('loadMySchedule failed', err);
+  }
+}
+
 
 async function onBreakAction(){
   if (isPunching) return;
@@ -670,6 +743,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setInterval(() => { qs('nowTime').textContent = new Date().toLocaleString(); }, 1000);
   qs('nowTime').textContent = new Date().toLocaleString();
+
+
+  // Schedule controls
+document.getElementById('wsPrev')?.addEventListener('click', async ()=>{
+  wsWeekStart = addDays(wsWeekStart, -7);
+  document.getElementById('wsWeekDate').value = toISODate(wsWeekStart);
+  await loadMySchedule();
+});
+document.getElementById('wsNext')?.addEventListener('click', async ()=>{
+  wsWeekStart = addDays(wsWeekStart, 7);
+  document.getElementById('wsWeekDate').value = toISODate(wsWeekStart);
+  await loadMySchedule();
+});
+document.getElementById('wsWeekDate')?.addEventListener('change', async ()=>{
+  const s = document.getElementById('wsWeekDate').value;
+  if (!s) return;
+  const [y,m,d] = s.split('-').map(Number);
+  wsWeekStart = startOfWeekSun(new Date(y,m-1,d));
+  await loadMySchedule();
+});
 
   // Initial session check (also fetch cap before first hydrate)
   const { data: { session } } = await supabaseClient.auth.getSession();
