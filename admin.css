@@ -319,3 +319,33 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
   height: 46px; border-radius:8px; border:1px solid var(--border);
 }
 .br-photos a{ margin-right:6px; }
+
+/* --- Live Now --- */
+.live{
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.live-header{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom: 8px;
+}
+.live-list{ display:grid; gap:8px; }
+.live-card{
+  display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+  border:1px solid var(--border); border-radius:10px; padding:10px;
+  background:#101115;
+}
+.live-name{ font-weight:600; }
+.live-times{ font-variant-numeric:tabular-nums; color:#c7ccd5; font-size:13px; }
+.live-status{ margin-left: 6px; }
+.pill{
+  display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
+  border:1px solid var(--border); background:#12151a; color:#d9dee6;
+}
+.pill.work{ background:#16281b; border-color:#2a5b3b; color:#d6ffea; }
+.pill.break{ background:#2b240f; border-color:#5d4b17; color:#ffe9b4; }
+.live-actions{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+.live-actions a{ font-size:12px; }

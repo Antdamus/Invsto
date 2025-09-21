@@ -463,6 +463,121 @@ async function onRowClick(e){
   catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
 }
 
+// ---- Live now helpers ----
+async function fetchLiveNow(){
+  // 1) all open shifts (clock_out IS NULL)
+  const { data: entries, error } = await supabaseClient
+    .from('time_entries')
+    .select('id, employee_id, clock_in, photo_in_path, photo_out_path')
+    .is('clock_out', null)
+    .order('clock_in', { ascending: true });
+  if (error) throw error;
+  const rows = entries || [];
+
+  // 2) open breaks for those shifts
+  const ids = rows.map(r => r.id);
+  let openBreaks = [];
+  if (ids.length){
+    const { data: b, error: bErr } = await supabaseClient
+      .from('time_breaks')
+      .select('id, time_entry_id, started_at, photo_start_path')
+      .in('time_entry_id', ids)
+      .is('ended_at', null);
+    if (bErr) throw bErr;
+    openBreaks = b || [];
+  }
+  const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
+
+  // 3) names
+  const emps = await getActiveEmployees();
+  const nameById = new Map(emps.map(e => [e.id, e.display_name]));
+
+  // 4) shape + sign photo links
+  const out = [];
+  for (const r of rows){
+    const now = Date.now();
+    const bk = breakByEntry.get(r.id) || null;
+    out.push({
+      entry_id: r.id,
+      employee_id: r.employee_id,
+      display_name: nameById.get(r.employee_id) || '(unknown)',
+      clock_in: r.clock_in,
+      duration_ms: now - new Date(r.clock_in).getTime(),
+      status: bk ? 'break' : 'work',
+      break_started_at: bk?.started_at || null,
+      break_ms: bk ? (now - new Date(bk.started_at).getTime()) : 0,
+      photo_in_url: r.photo_in_path ? await signPath(r.photo_in_path) : null,
+      break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null
+    });
+  }
+  return out;
+}
+
+function renderLiveNow(rows){
+  const list = qs('liveList'); if (!list) return;
+  const updated = qs('liveUpdated'); if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+  list.innerHTML = '';
+  if (!rows.length){
+    list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
+    return;
+  }
+  for (const r of rows){
+    const pill = r.status === 'break'
+      ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
+      : `<span class="pill work">Working</span>`;
+    const div = document.createElement('div');
+    div.className = 'live-card';
+    div.dataset.employeeId = r.employee_id;
+    div.innerHTML = `
+      <div class="live-name">${r.display_name}</div>
+      <div class="live-times">since ${new Date(r.clock_in).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} • ${fmtDurationHM(r.duration_ms)}</div>
+      <div class="live-status">${pill}</div>
+      <div class="live-actions">
+        ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
+        ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
+        <button class="btn small ghost">Details →</button>
+      </div>`;
+    list.appendChild(div);
+  }
+}
+
+async function loadLiveNow(){
+  try{
+    const rows = await fetchLiveNow();
+    renderLiveNow(rows);
+  }catch(err){
+    console.error(err);
+    const list = qs('liveList');
+    if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
+  }
+}
+
+// Click a live card → open drawer for that worker (current month)
+function wireLiveList(){
+  const list = qs('liveList'); if (!list) return;
+  list.addEventListener('click', async (e) => {
+    const card = e.target.closest('.live-card'); if (!card) return;
+    const employeeId = card.dataset.employeeId;
+    const emps = await getActiveEmployees();
+    const displayName = (emps.find(x => x.id === employeeId)?.display_name) || '—';
+    const monthStart = monthInputToStart();
+
+    drawerContext = { employeeId, monthStart, displayName };
+    renderDrawerHeader(displayName, monthStart);
+    qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+    openDrawer();
+    try{
+      const shifts = await fetchWorkerShifts(employeeId, monthStart);
+      renderDrawerSummary(shifts);
+      renderDrawerList(shifts);
+    }catch(err){
+      console.error(err);
+      qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+    }
+  });
+}
+
 
 function wireDrawer(){
   // Close actions
@@ -902,6 +1017,7 @@ const onRealtimeChange = debounce(async () => {
       renderDrawerSummary(shifts);
       renderDrawerList(shifts);
     }
+    await loadLiveNow(); // <— add this
   } catch {}
 }, 400);
 
@@ -954,6 +1070,9 @@ document.addEventListener('supabase-ready', async () => {
   // Payroll wiring
   wirePayroll();
   wireCreatePeriodUI();
+  wireLiveList();
+await loadLiveNow();
+
 
 
   // Period actions
