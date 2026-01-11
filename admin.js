@@ -255,17 +255,21 @@ async function fetchResolvedWeek(empId, weekStart){
 async function fetchWeekOverrides(empId, weekStart){
   const start = toISODate(weekStart);
   const end   = toISODate(addDays(weekStart, 6));
+
   const { data, error } = await supabaseClient
     .from('work_schedule_overrides')
-    .select('work_date, off, start_local, end_local, note')
+    .select('work_date, off, start_local, end_local, store_id, note')
     .eq('employee_id', empId)
     .gte('work_date', start)
     .lte('work_date', end);
+
   if (error) throw error;
+
   const byDate = new Map();
-  for (const r of (data||[])) byDate.set(r.work_date, r);
+  for (const r of (data || [])) byDate.set(r.work_date, r);
   return byDate;
 }
+
 
 function fmtTimeHM(ts){
   if (!ts) return '—';
@@ -280,18 +284,30 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
   for (let i=0;i<7;i++){
     const day = addDays(weekStart, i);
     const iso = toISODate(day);
-    const resolved = resolvedByDate.get(iso) || null;
-    const ov = overridesByDate.get(iso) || null;
 
+    const resolved = resolvedByDate.get(iso) || null; // { start_ts, end_ts, source, store_id }
+    const ov = overridesByDate.get(iso) || null;      // { off, start_local, end_local, store_id }
+
+    // Resolved slot (what will actually apply that day)
     const resolvedStr = resolved
       ? `${fmtTimeHM(resolved.start_ts)}–${fmtTimeHM(resolved.end_ts)}`
       : '—';
     const srcStr = resolved ? (resolved.source === 'override' ? 'override' : 'recurring') : '';
+    const resolvedStoreLabel = resolved?.store_id ? storeName(resolved.store_id) : '—';
+
+    const resolvedDirHref = resolved?.store_id ? storeDirectionsHref(resolved.store_id) : null;
+
     const resolvedHtml = `
-      <div class="sched-resolved">${resolvedStr} ${srcStr ? `<span class="sched-note">(${srcStr})</span>`:''}</div>
+      <div class="sched-resolved">
+        ${resolvedStr} ${srcStr ? `<span class="sched-note">(${srcStr})</span>` : ''}
+        <div class="sched-sub">
+          <span class="sched-store">${resolvedStoreLabel}</span>
+          ${resolvedDirHref ? `<a class="mini-link" href="${resolvedDirHref}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+        </div>
+      </div>
     `;
 
-    // Prefill recurring fields from resolved only when it came from recurring (no override)
+    // Prefill recurring only when resolved came from recurring (so overrides don't overwrite it)
     const recStartPrefill = (resolved && resolved.source === 'recurring')
       ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
       : '';
@@ -299,13 +315,21 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
       ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
       : '';
 
-    // Prefill override inputs from existing override row
+    // Prefill recurring store only when resolved came from recurring
+    const recStorePrefill = (resolved && resolved.source === 'recurring') ? (resolved.store_id || '') : '';
+
+    // Override prefill
     const ovOff   = ov?.off ? 'checked' : '';
     const ovStart = ov?.start_local ? String(ov.start_local).slice(0,5) : '';
     const ovEnd   = ov?.end_local   ? String(ov.end_local).slice(0,5)   : '';
+    const ovStore = ov?.store_id ? String(ov.store_id) : '';
 
     const tr = document.createElement('tr');
     tr.className = 'sched-row';
+
+    const recDir = storeDirectionsHref(recStorePrefill);
+    const ovDir  = storeDirectionsHref(ovStore);
+
     tr.innerHTML = `
       <td class="day">${DOW[i]} ${day.getMonth()+1}/${day.getDate()}</td>
 
@@ -315,9 +339,18 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
           <span>–</span>
           <input class="time" type="time" id="recEnd-${i}" value="${recEndPrefill}">
         </div>
+
+        <div class="row" style="margin-top:6px;">
+          <select class="store" id="recStore-${i}">
+            ${storeOptionsHTML(recStorePrefill)}
+          </select>
+          <a class="mini-link" id="recDir-${i}" href="${recDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+        </div>
+
         <div class="sched-buttons" style="margin-top:6px;">
           <button class="btn small" data-save-recurring="${i}">Save recurring</button>
-        </div>
+          <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
+          </div>
       </td>
 
       <td>
@@ -327,6 +360,14 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
           <span>–</span>
           <input class="time" type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
         </div>
+
+        <div class="row" style="margin-top:6px;">
+          <select class="store" id="ovStore-${iso}" ${ovOff ? 'disabled':''}>
+            ${storeOptionsHTML(ovStore)}
+          </select>
+          <a class="mini-link" id="ovDir-${iso}" href="${ovDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+        </div>
+
         <div class="sched-buttons" style="margin-top:6px;">
           <button class="btn small" data-save-override="${iso}">Save override</button>
           <button class="btn small ghost" data-clear-override="${iso}">Clear override</button>
@@ -335,18 +376,26 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
 
       <td>${resolvedHtml}</td>
     `;
+
     tbody.appendChild(tr);
+
+    // Disable directions when no valid store is selected
+    applyDirectionsLinkFromStoreId(recStorePrefill, qs(`recDir-${i}`));
+    applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
   }
 }
+
 
 async function saveRecurring(weekday){
   const empId = schedEmpId;
   const start = qs(`recStart-${weekday}`).value || '';
   const end   = qs(`recEnd-${weekday}`).value || '';
+  const storeId = qs(`recStore-${weekday}`)?.value || null;
   const effFrom = qs('schedEffFrom').value || toISODate(new Date());
 
   if (!start || !end) return alert('Enter start and end time for recurring.');
   if (end <= start) return alert('End must be after start.');
+  if (!storeId) return alert('Pick a store for this recurring schedule.');
 
   const { error } = await supabaseClient.rpc('admin_set_weekday_slot', {
     _employee_id: empId,
@@ -355,24 +404,118 @@ async function saveRecurring(weekday){
     _end_local: end,
     _effective_from: effFrom,
     _effective_to: null,
-    _store_id: null,
+    _store_id: storeId,
     _note: null
   });
+
   if (error) return alert('Save failed: ' + error.message);
-  await loadScheduleWeek(); // refresh
+  await loadScheduleWeek();
 }
+
+async function clearRecurring(weekday){
+  const empId = schedEmpId;
+  const effFrom = qs('schedEffFrom')?.value || toISODate(new Date());
+
+  if (!empId) return alert('Pick an employee first.');
+  if (!effFrom) return alert('Pick an effective-from date.');
+
+  const dayName = (typeof DOW !== 'undefined' && DOW[weekday]) ? DOW[weekday] : `weekday ${weekday}`;
+  const ok = window.confirm(
+    `Remove recurring schedule for ${dayName} starting ${effFrom} and forward?\n\n` +
+    `This removes future recurring slots, but keeps history.`
+  );
+  if (!ok) return;
+
+  // dayBefore = effFrom - 1 day (YYYY-MM-DD)
+  const dayBefore = (() => {
+    const d = new Date(`${effFrom}T00:00:00`);
+    d.setDate(d.getDate() - 1);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  })();
+
+  try {
+    // Grab all schedule rows that could apply on/after effFrom
+    // (active rows where effective_to is null OR effective_to >= effFrom)
+    const { data: rows, error: selErr } = await supabaseClient
+      .from('work_schedules')
+      .select('id, effective_from, effective_to')
+      .eq('employee_id', empId)
+      .eq('weekday', weekday)
+      .eq('active', true)
+      .or(`effective_to.is.null,effective_to.gte.${effFrom}`);
+
+    if (selErr) throw selErr;
+
+    if (!rows || rows.length === 0){
+      showToast?.('No recurring schedule to remove', 'ok');
+      await loadScheduleWeek();
+      return;
+    }
+
+    const toDelete = [];
+    const toCap = [];
+
+    for (const r of rows){
+      const ef = String(r.effective_from);
+      if (ef >= effFrom) toDelete.push(r.id);
+      else toCap.push(r.id);
+    }
+
+    // Cap older rows so they end the day before effFrom.
+    // If capping would make effective_to < effective_from, delete instead.
+    const capIds = [];
+    for (const r of rows){
+      if (!toCap.includes(r.id)) continue;
+      const ef = String(r.effective_from);
+      if (dayBefore < ef) toDelete.push(r.id);
+      else capIds.push(r.id);
+    }
+
+    if (capIds.length){
+      const { error: upErr } = await supabaseClient
+        .from('work_schedules')
+        .update({ effective_to: dayBefore })
+        .in('id', capIds);
+      if (upErr) throw upErr;
+    }
+
+    if (toDelete.length){
+      const { error: delErr } = await supabaseClient
+        .from('work_schedules')
+        .delete()
+        .in('id', toDelete);
+      if (delErr) throw delErr;
+    }
+
+    showToast?.('Recurring schedule removed', 'ok');
+    await loadScheduleWeek();
+  } catch (err) {
+    console.error(err);
+    const msg =
+      err?.message ||
+      err?.error_description ||
+      (typeof err === 'string' ? err : JSON.stringify(err));
+    alert('Remove recurring failed: ' + msg);
+  }
+}
+
 
 async function saveOverride(workISO){
   const empId = schedEmpId;
+
   const off = qs(`ovOff-${workISO}`).checked;
   const s = qs(`ovStart-${workISO}`);
   const e = qs(`ovEnd-${workISO}`);
-  const start = s.value || null;
-  const end   = e.value || null;
+  const start = s?.value || null;
+  const end   = e?.value || null;
+
+  const storeId = qs(`ovStore-${workISO}`)?.value || null;
 
   if (!off){
     if (!start || !end) return alert('Enter start and end time, or mark Off.');
     if (end <= start) return alert('End must be after start.');
+    if (!storeId) return alert('Pick a store for this override.');
   }
 
   const { error } = await supabaseClient.rpc('admin_set_override', {
@@ -381,12 +524,14 @@ async function saveOverride(workISO){
     _off: off,
     _start_local: start,
     _end_local: end,
-    _store_id: null,
+    _store_id: off ? null : storeId,
     _note: null
   });
+
   if (error) return alert('Override failed: ' + error.message);
   await loadScheduleWeek();
 }
+
 
 async function clearOverride(workISO){
   // Just delete the row; RLS allows admin writes
@@ -419,6 +564,9 @@ async function loadScheduleWeek(){
 }
 
 async function initSchedulePanel(){
+  // Ensure stores are loaded for dropdowns
+  await ensureStoresCache();
+
   // employees
   const emps = await getActiveEmployees();
   const sel = qs('schedEmpSelect');
@@ -433,25 +581,59 @@ async function initSchedulePanel(){
   qs('schedBody').addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
-    if (btn.hasAttribute('data-save-recurring')){
-      const weekday = Number(btn.getAttribute('data-save-recurring'));
-      saveRecurring(weekday);
-    } else if (btn.hasAttribute('data-save-override')){
-      const iso = btn.getAttribute('data-save-override');
-      saveOverride(iso);
-    } else if (btn.hasAttribute('data-clear-override')){
-      const iso = btn.getAttribute('data-clear-override');
-      clearOverride(iso);
-    }
+
+  if (btn.hasAttribute('data-save-recurring')){
+  const weekday = Number(btn.getAttribute('data-save-recurring'));
+  saveRecurring(weekday);
+} else if (btn.hasAttribute('data-clear-recurring')){
+  const weekday = Number(btn.getAttribute('data-clear-recurring'));
+  clearRecurring(weekday);
+} else if (btn.hasAttribute('data-save-override')){
+  const iso = btn.getAttribute('data-save-override');
+  saveOverride(iso);
+} else if (btn.hasAttribute('data-clear-override')){
+  const iso = btn.getAttribute('data-clear-override');
+  clearOverride(iso);
+}
+
   });
 
-  // enable/disable override time inputs when Off toggled
+  // change handlers (Off toggle + store change → update directions)
   qs('schedBody').addEventListener('change', (e) => {
-    if (e.target.id && e.target.id.startsWith('ovOff-')){
-      const iso = e.target.id.slice('ovOff-'.length);
+    const id = e.target?.id || '';
+
+    // Off toggled → disable times + store select
+    if (id.startsWith('ovOff-')){
+      const iso = id.slice('ovOff-'.length);
       const on = e.target.checked;
-      qs(`ovStart-${iso}`).disabled = on;
-      qs(`ovEnd-${iso}`).disabled = on;
+
+      const s = qs(`ovStart-${iso}`);
+      const en = qs(`ovEnd-${iso}`);
+      const st = qs(`ovStore-${iso}`);
+
+      if (s) s.disabled = on;
+      if (en) en.disabled = on;
+      if (st) st.disabled = on;
+
+      // Also dim directions if disabled
+      if (st) applyDirectionsLinkFromStoreId(st.value, qs(`ovDir-${iso}`));
+      return;
+    }
+
+    // Recurring store changed → update directions
+    if (id.startsWith('recStore-')){
+      const weekday = id.slice('recStore-'.length);
+      const selEl = qs(`recStore-${weekday}`);
+      applyDirectionsLinkFromStoreId(selEl?.value, qs(`recDir-${weekday}`));
+      return;
+    }
+
+    // Override store changed → update directions
+    if (id.startsWith('ovStore-')){
+      const iso = id.slice('ovStore-'.length);
+      const selEl = qs(`ovStore-${iso}`);
+      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovDir-${iso}`));
+      return;
     }
   });
 
@@ -460,14 +642,17 @@ async function initSchedulePanel(){
     schedEmpId = sel.value;
     await loadScheduleWeek();
   });
+
   qs('schedPrev').addEventListener('click', async () => {
     schedWeekStart = addDays(schedWeekStart, -7);
     await loadScheduleWeek();
   });
+
   qs('schedNext').addEventListener('click', async () => {
     schedWeekStart = addDays(schedWeekStart, 7);
     await loadScheduleWeek();
   });
+
   qs('schedWeekDate').addEventListener('change', async () => {
     const d = fromISO(qs('schedWeekDate').value);
     schedWeekStart = startOfWeekSun(d);
@@ -476,6 +661,7 @@ async function initSchedulePanel(){
 
   await loadScheduleWeek();
 }
+
 
 function showPanel(id){
   // Back-compat wrapper (older code used showPanel). Prefer activateTab().
@@ -492,12 +678,22 @@ function showPanel(id){
 function wireScheduleTab(){
   qs('tabSchedule')?.addEventListener('click', async () => {
     activateTab('schedule');
+
     // lazy init once
     if (!qs('schedEmpSelect').options.length){
-      try { await initSchedulePanel(); } catch (e){ console.error(e); }
+      try {
+        await initSchedulePanel();
+      } catch (e){
+        console.error(e);
+        const body = qs('schedBody');
+        if (body){
+          body.innerHTML = `<tr><td colspan="4" class="muted">Failed to load schedule. Check console for details.</td></tr>`;
+        }
+      }
     }
   });
 }
+
 
 /* ============== Stores (Phase 1 — Store setup) ============== */
 let _storesInitialized = false;
@@ -1452,6 +1648,79 @@ async function fetchWeekList(){
 
 // ===== Schedule: utilities & state =====
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+// --- Stores cache (for schedule store assignment) ---
+let storesCache = [];
+let storesById = new Map();
+let _storesCacheLoaded = false;
+
+async function ensureStoresCache(force = false){
+  if (_storesCacheLoaded && !force) return;
+  await loadStoresCache();
+  _storesCacheLoaded = true;
+}
+
+async function loadStoresCache(){
+  const { data, error } = await supabaseClient
+    .from('store_locations')
+    .select('id, name, lat, lng, radius_m, active, timezone, schedule_enforce')
+    .order('active', { ascending: false })
+    .order('name', { ascending: true });
+
+  if (error) throw error;
+
+  storesCache = data || [];
+  storesById = new Map(storesCache.map(s => [s.id, s]));
+}
+
+function storeName(storeId){
+  if (!storeId) return '—';
+  const s = storesById.get(storeId);
+  return s ? s.name : 'Unknown store';
+}
+
+function storeDirectionsHref(storeId){
+  const s = storesById.get(storeId);
+  if (!s || s.lat == null || s.lng == null) return null;
+
+  // Directions link (works on desktop/mobile)
+  const dest = `${Number(s.lat)},${Number(s.lng)}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
+}
+
+function applyDirectionsLinkFromStoreId(storeId, linkEl){
+  if (!linkEl) return;
+
+  const href = storeDirectionsHref(storeId);
+  if (!href){
+    linkEl.href = '#';
+    linkEl.setAttribute('aria-disabled', 'true');
+    linkEl.style.pointerEvents = 'none';
+    linkEl.style.opacity = '0.55';
+    linkEl.textContent = 'Directions';
+    return;
+  }
+
+  linkEl.href = href;
+  linkEl.target = '_blank';
+  linkEl.rel = 'noopener';
+  linkEl.removeAttribute('aria-disabled');
+  linkEl.style.pointerEvents = '';
+  linkEl.style.opacity = '';
+  linkEl.textContent = 'Directions';
+}
+
+function storeOptionsHTML(selectedId){
+  const opts = [];
+  opts.push(`<option value="">Select store…</option>`);
+  for (const s of storesCache){
+    const sel = (s.id === selectedId) ? 'selected' : '';
+    const label = s.active ? s.name : `${s.name} (inactive)`;
+    opts.push(`<option value="${s.id}" ${sel}>${label}</option>`);
+  }
+  return opts.join('');
+}
+
 
 const fromISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
 

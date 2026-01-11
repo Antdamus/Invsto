@@ -395,3 +395,33 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
 .coords{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; color: rgba(255,255,255,0.75); }
 .store-pill{ min-width:72px; justify-content:center; }
 .store-dir-row{ display:flex; gap:10px; align-items:center; justify-content:flex-start; }
+
+
+.sched-row .store {
+  min-width: 220px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0f1116;
+  color: #e6ebf2;
+  padding: 0 10px;
+}
+
+.sched-sub {
+  margin-top: 4px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.sched-store {
+  color: #b9c4d3;
+  font-size: 12px;
+}
+
+.mini-link {
+  font-size: 12px;
+  color: #b9d6ff;
+  text-decoration: none;
+}
+.mini-link:hover { text-decoration: underline; }
