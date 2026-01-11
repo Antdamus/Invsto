@@ -317,6 +317,7 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
         </div>
         <div class="sched-buttons" style="margin-top:6px;">
           <button class="btn small" data-save-recurring="${i}">Save recurring</button>
+          <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
         </div>
       </td>
 
@@ -338,6 +339,80 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     tbody.appendChild(tr);
   }
 }
+
+async function clearRecurring(weekday){
+  // Removes recurring schedule(s) for this weekday starting at the selected effective date.
+  // Behavior:
+  // - Any recurring rows that start ON/AFTER the effective date are deleted.
+  // - Any recurring rows that started BEFORE the effective date are capped (effective_to = day before).
+  const empId = schedEmpId;
+  const effFrom = qs('schedEffFrom').value || toISODate(new Date());
+  const dayBefore = dateStrAddDays(effFrom, -1);
+
+  if (!empId) return;
+
+  const ok = window.confirm(
+    `Remove recurring schedule for ${DOW[weekday]} starting ${effFrom}?\n\n`+
+    `This will remove future recurring slots from that date forward.`
+  );
+  if (!ok) return;
+
+  // Find all active recurring rows that could apply on/after effFrom
+  const { data: rows, error: selErr } = await supabaseClient
+    .from('work_schedules')
+    .select('id, effective_from, effective_to')
+    .eq('employee_id', empId)
+    .eq('weekday', weekday)
+    .eq('active', true)
+    .or(`effective_to.is.null,effective_to.gte.${effFrom}`);
+  if (selErr) return alert('Remove failed: ' + selErr.message);
+
+  if (!rows || rows.length === 0){
+    showToast('No recurring schedule to remove','ok');
+    await loadScheduleWeek();
+    return;
+  }
+
+  // Split into: future rows (delete) vs past rows (cap)
+  const toDelete = [];
+  const toCap = [];
+  for (const r of rows){
+    if (r.effective_from >= effFrom) toDelete.push(r.id);
+    else toCap.push(r.id);
+  }
+
+  // Cap rows only when the cap is not before their own effective_from.
+  if (toCap.length){
+    // Ensure we don't set effective_to < effective_from; if so, delete instead.
+    const capRows = rows.filter(r => toCap.includes(r.id));
+    const capIds = [];
+    const capToDelete = [];
+    for (const r of capRows){
+      if (dayBefore < r.effective_from) capToDelete.push(r.id);
+      else capIds.push(r.id);
+    }
+    if (capIds.length){
+      const { error: upErr } = await supabaseClient
+        .from('work_schedules')
+        .update({ effective_to: dayBefore })
+        .in('id', capIds);
+      if (upErr) return alert('Remove failed: ' + upErr.message);
+    }
+    if (capToDelete.length) toDelete.push(...capToDelete);
+  }
+
+  if (toDelete.length){
+    const { error: delErr } = await supabaseClient
+      .from('work_schedules')
+      .delete()
+      .in('id', toDelete);
+    if (delErr) return alert('Remove failed: ' + delErr.message);
+  }
+
+  showToast('Recurring schedule removed','ok');
+  await loadScheduleWeek();
+}
+
 
 async function saveRecurring(weekday){
   const empId = schedEmpId;
@@ -434,15 +509,19 @@ async function initSchedulePanel(){
     const btn = e.target.closest('button');
     if (!btn) return;
     if (btn.hasAttribute('data-save-recurring')){
-      const weekday = Number(btn.getAttribute('data-save-recurring'));
-      saveRecurring(weekday);
-    } else if (btn.hasAttribute('data-save-override')){
-      const iso = btn.getAttribute('data-save-override');
-      saveOverride(iso);
-    } else if (btn.hasAttribute('data-clear-override')){
-      const iso = btn.getAttribute('data-clear-override');
-      clearOverride(iso);
-    }
+  const weekday = Number(btn.getAttribute('data-save-recurring'));
+  saveRecurring(weekday);
+} else if (btn.hasAttribute('data-clear-recurring')){
+  const weekday = Number(btn.getAttribute('data-clear-recurring'));
+  clearRecurring(weekday);
+} else if (btn.hasAttribute('data-save-override')){
+  const iso = btn.getAttribute('data-save-override');
+  saveOverride(iso);
+} else if (btn.hasAttribute('data-clear-override')){
+  const iso = btn.getAttribute('data-clear-override');
+  clearOverride(iso);
+}
+
   });
 
   // enable/disable override time inputs when Off toggled
