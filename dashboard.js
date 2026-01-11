@@ -1,11 +1,59 @@
-/** =================== Auth =================== */
+/** =================== Auth (Admin Only) =================== */
 async function checkAuth() {
-  const { data: { session }, error } = await supabase.auth.getSession();
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+  // Not logged in -> go to login
+  if (sessionError) console.error("❌ Session error:", sessionError);
   if (!session) {
     window.location.href = "index.html";
-  } else {
-    document.getElementById("admin-greeting").textContent = `Welcome, Admin`;
+    return false;
   }
+
+  const userId = session.user.id;
+
+  // Fetch the employee record for the current user (RLS allows self-select)
+  const { data: employee, error: employeeError } = await supabase
+    .from("employees")
+    .select("role, active, display_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (employeeError) {
+    console.error("❌ Failed to fetch employee record:", employeeError);
+    window.location.href = "index.html";
+    return false;
+  }
+
+  // If no employee record exists, treat as unauthorized
+  if (!employee) {
+    console.warn("⚠️ No employee record found for user:", userId);
+    window.location.href = "index.html";
+    return false;
+  }
+
+  // Optional: if employee is inactive, block access
+  if (employee.active === false) {
+    console.warn("⚠️ Employee is inactive:", userId);
+    window.location.href = "index.html";
+    return false;
+  }
+
+  const role = String(employee.role || "").toLowerCase();
+
+  // Not admin -> redirect to worker dashboard (future page)
+  if (role !== "admin") {
+    window.location.href = "worker-dashboard.html";
+    return false;
+  }
+
+  // Admin -> allowed
+  const greeting = document.getElementById("admin-greeting");
+  if (greeting) {
+    const name = employee.display_name ? `, ${employee.display_name}` : "";
+    greeting.textContent = `Welcome, Admin${name}`;
+  }
+
+  return true;
 }
 
 /** =================== Data Loading =================== */
@@ -192,7 +240,9 @@ function setupNavigation() {
 
 /** =================== Init =================== */
 document.addEventListener("DOMContentLoaded", async () => {
-  await checkAuth();
+  const allowed = await checkAuth();
+  if (!allowed) return;
+
   setupNavigation();
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);
