@@ -1137,11 +1137,94 @@ function wireDrawer(){
 let payWeeks=[], paySelected=null, payRows=[];
 function formatWeekRange(weekStartStr){ const s=new Date(weekStartStr+'T00:00:00'); const e=new Date(s); e.setDate(s.getDate()+6); const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return `${f(s)} — ${f(e)}`; }
 async function fetchWeekList(){
-  const get = async t => { const {data,error}=await supabaseClient.from(t).select('week_start').order('week_start',{descending:true}).limit(2000); if(error) throw error; return (data||[]).map(r=>r.week_start); };
-  let weeks=[]; try{ weeks=await get('mv_weekly_hours'); }catch(_e){}
-  if(!weeks.length){ const {data}=await supabaseClient.from('v_weekly_hours').select('week_start').order('week_start',{descending:true}).limit(2000); weeks=(data||[]).map(r=>r.week_start); }
-  const set=new Set(), out=[]; for(const w of weeks){ if(!set.has(w)){ set.add(w); out.push(w); } } return out;
+  // Helpers local to payroll so we don't rely on other module state.
+  const isoDate = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const parseISODate = (s) => {
+    const [y, m, d] = String(s).split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  };
+
+  const startOfWeekSundayISO = (d = new Date()) => {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    x.setDate(x.getDate() - x.getDay()); // 0=Sun
+    return isoDate(x);
+  };
+
+  const get = async (t) => {
+    const { data, error } = await supabaseClient
+      .from(t)
+      .select('week_start')
+      .order('week_start', { descending: true })
+      .limit(2000);
+    if (error) throw error;
+    return (data || []).map(r => r.week_start);
+  };
+
+  let weeks = [];
+  try {
+    // ✅ Always prefer the view for freshness
+    weeks = await get('v_weekly_hours');
+  } catch (_e) {
+    weeks = [];
+  }
+
+  if (!weeks.length) {
+    try {
+      // fallback only if view is unavailable
+      weeks = await get('mv_weekly_hours');
+    } catch (_e) {
+      weeks = [];
+    }
+  }
+
+  // de-dupe (keep order)
+  const set = new Set();
+  const out = [];
+  for (const w of weeks) {
+    if (!set.has(w)) { set.add(w); out.push(w); }
+  }
+
+  // If the weekly-hours view is stale (or missing), the dropdown can get
+  // "stuck" on the newest week present in the view. To keep the UI usable,
+  // always synthesize weeks up to the current week (Sun–Sat) even if the view
+  // hasn't been refreshed yet.
+  const currentWeek = startOfWeekSundayISO(new Date());
+
+  // No weeks at all? Provide a sensible default history (2 years) so the UI works.
+  if (!out.length) {
+    const res = [];
+    let d = parseISODate(currentWeek);
+    for (let i = 0; i < 104; i++) { // ~2 years
+      res.push(isoDate(d));
+      d.setDate(d.getDate() - 7);
+    }
+    return res;
+  }
+
+  const latest = out[0];
+  if (parseISODate(latest) < parseISODate(currentWeek)) {
+    const existing = new Set(out);
+    const prepend = [];
+    let d = parseISODate(currentWeek);
+    const stop = parseISODate(latest);
+    while (d > stop) {
+      const w = isoDate(d);
+      if (!existing.has(w)) prepend.push(w);
+      d.setDate(d.getDate() - 7);
+    }
+    return [...prepend, ...out]; // keep descending
+  }
+
+  return out;
 }
+
+
 
 // ===== Schedule: utilities & state =====
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];

@@ -1,12 +1,8 @@
 /* =========================================
-   Worker Dashboard (v0)
-   - Authenticated users only
-   - Pull employee via employees.user_id = auth.uid()
-   - Pull time_entries via time_entries.employee_id = employees.id
-   - Pull time_breaks for those entries
-   - Compute worked + break totals for:
-       today / week (Sun-Sat) / month
-   - Show status card + paid break cap + recent shifts
+   Worker Dashboard (v1)
+   - Real-time Today/Week (current period)
+   - Selectable Month for Month totals + Recent Shifts
+   - Efficient: fetch only the month you need + cache previous months
 ========================================= */
 
 function $(id) { return document.getElementById(id); }
@@ -38,6 +34,24 @@ function startOfMonthLocal(d = new Date()) {
   x.setDate(1);
   x.setHours(0, 0, 0, 0);
   return x;
+}
+
+function nextMonthStartLocal(monthStart) {
+  const x = new Date(monthStart);
+  x.setMonth(x.getMonth() + 1);
+  x.setDate(1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function monthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function monthLabel(d) {
+  return d.toLocaleDateString([], { month: "long", year: "numeric" });
 }
 
 function overlapMs(aStart, aEnd, bStart, bEnd) {
@@ -110,7 +124,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
             </tr>
           </thead>
           <tbody>
-            <tr><td colspan="6" style="opacity:0.75;">No shifts yet.</td></tr>
+            <tr><td colspan="6" style="opacity:0.75;">No shifts in this month.</td></tr>
           </tbody>
         </table>
       </div>
@@ -209,7 +223,7 @@ async function getSessionOrRedirect() {
 async function loadEmployeeByUserId(userId) {
   const { data, error } = await window.supabase
     .from("employees")
-    .select("id, display_name, role, active")
+    .select("id, display_name, role, active, created_at")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -222,17 +236,20 @@ async function fetchBreakCapMinutes() {
     const { data, error } = await window.supabase.rpc("org_paid_break_minutes_per_day");
     if (!error && typeof data === "number") return data;
   } catch {}
-  return 30; // safe default
+  return 30;
 }
 
-async function loadEntriesSince(employeeId, earliestIso) {
+async function loadEntriesOverlapping(employeeId, windowStartIso, windowEndIso) {
+  // Include shifts that overlap window:
+  // clock_in < windowEnd AND (clock_out IS NULL OR clock_out >= windowStart)
   const { data, error } = await window.supabase
     .from("time_entries")
     .select("id, clock_in, clock_out, geo_ok_in, geo_ok_out, schedule_codes, store_id")
     .eq("employee_id", employeeId)
-    .gte("clock_in", earliestIso)
+    .lt("clock_in", windowEndIso)
+    .or(`clock_out.is.null,clock_out.gte.${windowStartIso}`)
     .order("clock_in", { ascending: false })
-    .limit(500);
+    .limit(800);
 
   if (error) throw error;
   return data || [];
@@ -250,30 +267,14 @@ async function loadBreaksForEntryIds(entryIds) {
   return data || [];
 }
 
-/** ---------- Core computation ---------- */
-function computeTotals(entries, breaks) {
-  const now = new Date();
-  const wToday = startOfTodayLocal(now);
-  const wWeek = startOfWeekSunLocal(now);
-  const wMonth = startOfMonthLocal(now);
-
-  const windows = {
-    today: { start: wToday, end: now },
-    week:  { start: wWeek,  end: now },
-    month: { start: wMonth, end: now },
-  };
-
+/** ---------- Computation ---------- */
+function computePerEntryMaps(entries, breaks, now = new Date()) {
   const breaksByEntry = {};
   for (const b of breaks) {
     const id = b.time_entry_id;
     if (!breaksByEntry[id]) breaksByEntry[id] = [];
     breaksByEntry[id].push(b);
   }
-
-  const totals = {
-    worked: { today: 0, week: 0, month: 0 },
-    break:  { today: 0, week: 0, month: 0 },
-  };
 
   const perEntryBreakMs = {};
   const perEntryNetMs = {};
@@ -282,9 +283,7 @@ function computeTotals(entries, breaks) {
     const s = new Date(e.clock_in);
     const eEnd = e.clock_out ? new Date(e.clock_out) : now;
 
-    // total break for entire shift (used for recent list)
     let shiftBreakTotal = 0;
-
     const blist = breaksByEntry[e.id] || [];
     for (const b of blist) {
       const bs = new Date(b.started_at);
@@ -294,47 +293,105 @@ function computeTotals(entries, breaks) {
 
     perEntryBreakMs[e.id] = shiftBreakTotal;
     perEntryNetMs[e.id] = Math.max(0, (eEnd - s) - shiftBreakTotal);
-
-    // windowed totals
-    for (const key of ["today", "week", "month"]) {
-      const w = windows[key];
-      const gross = overlapMs(s, eEnd, w.start, w.end);
-
-      let bms = 0;
-      for (const b of blist) {
-        const bs = new Date(b.started_at);
-        const be = b.ended_at ? new Date(b.ended_at) : now;
-        bms += overlapMs(bs, be, w.start, w.end);
-      }
-
-      totals.break[key] += bms;
-      totals.worked[key] += Math.max(0, gross - bms);
-    }
   }
 
-  // Find current open shift and open break (for status card)
+  return { breaksByEntry, perEntryBreakMs, perEntryNetMs };
+}
+
+function computeWindowTotals(entries, breaksByEntry, windowStart, windowEnd, now = new Date()) {
+  let worked = 0;
+  let brk = 0;
+
+  for (const e of entries) {
+    const s = new Date(e.clock_in);
+    const eEnd = e.clock_out ? new Date(e.clock_out) : now;
+
+    const gross = overlapMs(s, eEnd, windowStart, windowEnd);
+
+    let bms = 0;
+    const blist = breaksByEntry[e.id] || [];
+    for (const b of blist) {
+      const bs = new Date(b.started_at);
+      const be = b.ended_at ? new Date(b.ended_at) : now;
+      bms += overlapMs(bs, be, windowStart, windowEnd);
+    }
+
+    brk += bms;
+    worked += Math.max(0, gross - bms);
+  }
+
+  return { workedMs: worked, breakMs: brk };
+}
+
+function findOpenShiftAndBreak(entries, breaksByEntry) {
   const openShift = entries.find(x => !x.clock_out) || null;
 
   let openBreak = null;
+  let openShiftClosedBreakMs = 0;
+
   if (openShift) {
     const blist = breaksByEntry[openShift.id] || [];
     openBreak = blist.find(b => !b.ended_at) || null;
+
+    // Closed break sum (exclude the open break for accurate live tick)
+    for (const b of blist) {
+      if (!b.ended_at) continue;
+      openShiftClosedBreakMs += Math.max(0, new Date(b.ended_at) - new Date(b.started_at));
+    }
   }
 
-  return { totals, perEntryBreakMs, perEntryNetMs, openShift, openBreak };
+  return { openShift, openBreak, openShiftClosedBreakMs };
 }
 
+/** ---------- Month Picker ---------- */
+function buildMonthOptions(employeeCreatedAtIso) {
+  const start = startOfMonthLocal(new Date(employeeCreatedAtIso));
+  const now = new Date();
+  const end = startOfMonthLocal(now);
+
+  const months = [];
+  let cursor = new Date(start);
+
+  while (cursor <= end) {
+    months.push(new Date(cursor));
+    cursor = nextMonthStartLocal(cursor);
+  }
+  return months;
+}
+
+function renderMonthPicker(months, selectedStart) {
+  const select = $("month-select");
+  if (!select) return;
+
+  const selKey = monthKey(selectedStart);
+
+  select.innerHTML = months.map(m => {
+    const key = monthKey(m);
+    const label = monthLabel(m);
+    const selected = (key === selKey) ? "selected" : "";
+    return `<option value="${key}" ${selected}>${label}</option>`;
+  }).join("");
+
+  $("month-label").textContent = monthLabel(selectedStart);
+
+  // Disable next if selected is current month
+  const curKey = monthKey(startOfMonthLocal(new Date()));
+  $("month-next").disabled = (selKey === curKey);
+}
+
+/** ---------- Status card ---------- */
 function updateStatusCard({
   employeeName,
   role,
   openShift,
   openBreak,
+  openShiftClosedBreakMs,
   breakCapMin,
-  totalsBreakTodayMs,
-  shiftSoFarMs,
-  breakSoFarMs
+  closedBreakTodayMs,
+  todayStart
 }) {
-  $("status-now").textContent = new Date().toLocaleString();
+  const now = new Date();
+  $("status-now").textContent = now.toLocaleString();
 
   const greeting = $("worker-greeting");
   if (greeting) {
@@ -344,74 +401,49 @@ function updateStatusCard({
   }
 
   // Shift pill
-  if (openShift) {
-    setPill("pill-shift", "Shift: Clocked in", "good");
-  } else {
-    setPill("pill-shift", "Shift: Clocked out", "warn");
-  }
+  if (openShift) setPill("pill-shift", "Shift: Clocked in", "good");
+  else setPill("pill-shift", "Shift: Clocked out", "warn");
 
   // Break pill
-  if (openBreak) {
-    setPill("pill-break", "Break: On break", "warn");
-  } else {
-    setPill("pill-break", "Break: Not on break", "good");
+  if (openBreak) setPill("pill-break", "Break: On break", "warn");
+  else setPill("pill-break", "Break: Not on break", "good");
+
+  // Live so-far math
+  let shiftSoFarMs = 0;
+  let breakSoFarMs = 0;
+  let breakTodayMs = closedBreakTodayMs;
+
+  if (openShift) {
+    const shiftStart = new Date(openShift.clock_in);
+
+    const openBreakMs = openBreak ? Math.max(0, now - new Date(openBreak.started_at)) : 0;
+    const shiftBreakSoFar = openShiftClosedBreakMs + openBreakMs;
+
+    shiftSoFarMs = Math.max(0, (now - shiftStart) - shiftBreakSoFar);
+    breakSoFarMs = openBreak ? openBreakMs : 0;
+
+    // If open break overlaps today window, add it to today's break used
+    if (openBreak) {
+      const bs = new Date(openBreak.started_at);
+      const be = now;
+      breakTodayMs += overlapMs(bs, be, todayStart, now);
+    }
   }
 
-  // So-far values
   $("shift-sofar").textContent = openShift ? fmtHM(shiftSoFarMs) : "—";
   $("break-sofar").textContent = openBreak ? fmtHM(breakSoFarMs) : "—";
 
-  // Break cap
-  const usedMin = Math.floor(totalsBreakTodayMs / 60000);
-  const remainingMin = Math.max(0, Math.floor((breakCapMin || 30) - usedMin));
+  const usedMin = Math.floor(breakTodayMs / 60000);
+  const cap = breakCapMin || 30;
+  const remainingMin = Math.max(0, cap - usedMin);
 
-  $("break-cap-today").textContent = `${breakCapMin || 30}m`;
+  $("break-cap-today").textContent = `${cap}m`;
   $("break-remaining-today").textContent = `${remainingMin}m`;
 
   const note = $("status-note");
   if (note) {
-    note.textContent = "Tip: Worked hours are net (breaks removed). Check your full timesheet for details.";
+    note.textContent = "Tip: Worked hours are net (breaks removed). Use the month selector to review history.";
   }
-}
-
-/** ---------- Live timers ---------- */
-function computeLiveSoFar(openShift, openBreak, perEntryBreakMs) {
-  const now = new Date();
-
-  if (!openShift) {
-    return { shiftSoFarMs: 0, breakSoFarMs: 0 };
-  }
-
-  const shiftStart = new Date(openShift.clock_in);
-  const shiftEndNow = now;
-
-  // total break within open shift so far (includes open break)
-  const shiftBreakSoFar = perEntryBreakMs[openShift.id] ?? 0;
-
-  // If open break exists, perEntryBreakMs already includes it via computeTotals(now),
-  // but as time advances we need to add extra delta since last compute.
-  // We'll handle this by re-evaluating open break delta here if needed.
-  let openBreakExtra = 0;
-  if (openBreak) {
-    const bs = new Date(openBreak.started_at);
-    openBreakExtra = Math.max(0, now - bs); // full open break duration right now
-    // But perEntryBreakMs might already include it; live calc should be:
-    // shiftBreakSoFar computed at last refresh could be stale.
-    // We will ignore perEntryBreakMs for open breaks and recompute:
-    // (closed breaks sum) + open break duration.
-    // To keep it simple, computeTotals is re-run occasionally; the live tick handles so-far directly:
-  }
-
-  // We’ll compute breakSoFarMs from open break only (status wants “break so far” for the active break).
-  const breakSoFarMs = openBreak ? openBreakExtra : 0;
-
-  // Shift so far should be net:
-  // (now - shiftStart) - (total breaks within shift so far)
-  // We can’t perfectly know closed-break sum from here alone, so we’ll do a small compromise:
-  // shiftSoFarMs = (now - shiftStart) - (shiftBreakSoFar updated by periodic refresh)
-  const shiftSoFarMs = Math.max(0, (shiftEndNow - shiftStart) - shiftBreakSoFar);
-
-  return { shiftSoFarMs, breakSoFarMs };
 }
 
 /** ---------- Main ---------- */
@@ -422,112 +454,111 @@ document.addEventListener("DOMContentLoaded", async () => {
   const session = await getSessionOrRedirect();
   if (!session) return;
 
+  const state = {
+    employee: null,
+    breakCapMin: 30,
+    months: [],
+    selectedMonthStart: startOfMonthLocal(new Date()),
+    monthCache: new Map(), // key -> { entries, breaks, breaksByEntry, perEntryBreakMs, perEntryNetMs, totals }
+    currentCache: null,    // { entries, breaks, breaksByEntry, todayTotals, weekTotals, openShift..., closedBreakTodayMs }
+    timers: { tick: null, refresh: null }
+  };
+
   try {
+    // 1) Employee
     const userId = session.user.id;
-
     const employee = await loadEmployeeByUserId(userId);
-    if (!employee) {
+
+    if (!employee || employee.active === false) {
       window.location.href = "index.html";
       return;
     }
 
-    if (employee.active === false) {
-      window.location.href = "index.html";
-      return;
-    }
+    state.employee = employee;
 
-    // Pull time entries from (start of month - 2 days) to capture boundary overlaps
-    const now = new Date();
-    const earliest = startOfMonthLocal(now);
-    earliest.setDate(earliest.getDate() - 2);
-    const entries = await loadEntriesSince(employee.id, earliest.toISOString());
+    // 2) Break cap
+    state.breakCapMin = await fetchBreakCapMinutes();
 
-    const entryIds = entries.map(e => e.id);
-    const breaks = await loadBreaksForEntryIds(entryIds);
+    // 3) Month options from employee.created_at -> current month
+    state.months = buildMonthOptions(employee.created_at);
+    state.selectedMonthStart = startOfMonthLocal(new Date()); // default current month
+    renderMonthPicker(state.months, state.selectedMonthStart);
 
-    const breakCapMin = await fetchBreakCapMinutes();
+    // 4) Hook month controls
+    $("month-prev")?.addEventListener("click", async () => {
+      const prev = new Date(state.selectedMonthStart);
+      prev.setMonth(prev.getMonth() - 1);
+      prev.setDate(1);
+      prev.setHours(0,0,0,0);
 
-    // Compute totals + status
-    let computed = computeTotals(entries, breaks);
+      // Don't go earlier than first month
+      if (prev < state.months[0]) return;
 
-    // Metrics
-    renderMetricGrid("worked-metrics", [
-      { label: "Worked today", value: fmtHM(computed.totals.worked.today) },
-      { label: "Worked this week (Sun–Sat)", value: fmtHM(computed.totals.worked.week) },
-      { label: "Worked this month", value: fmtHM(computed.totals.worked.month) },
-    ]);
-
-    renderMetricGrid("break-metrics", [
-      { label: "Break today", value: fmtHM(computed.totals.break.today) },
-      { label: "Break this week (Sun–Sat)", value: fmtHM(computed.totals.break.week) },
-      { label: "Break this month", value: fmtHM(computed.totals.break.month) },
-    ]);
-
-    // Recent shifts (last 10)
-    renderRecentShifts(
-      entries.slice(0, 10),
-      computed.perEntryNetMs,
-      computed.perEntryBreakMs
-    );
-
-    // Status card initial
-    const live0 = computeLiveSoFar(computed.openShift, computed.openBreak, computed.perEntryBreakMs);
-    updateStatusCard({
-      employeeName: employee.display_name,
-      role: employee.role,
-      openShift: computed.openShift,
-      openBreak: computed.openBreak,
-      breakCapMin,
-      totalsBreakTodayMs: computed.totals.break.today,
-      shiftSoFarMs: live0.shiftSoFarMs,
-      breakSoFarMs: live0.breakSoFarMs
+      state.selectedMonthStart = prev;
+      await refreshMonthView(state);
     });
 
-    // Live ticking for the “now” and so-far fields
-    // (We also do a periodic refresh to keep break sums accurate.)
-    let tickTimer = null;
-    let refreshTimer = null;
+    $("month-next")?.addEventListener("click", async () => {
+      const next = new Date(state.selectedMonthStart);
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(1);
+      next.setHours(0,0,0,0);
 
-    tickTimer = setInterval(() => {
-      const live = computeLiveSoFar(computed.openShift, computed.openBreak, computed.perEntryBreakMs);
+      const cur = startOfMonthLocal(new Date());
+      if (next > cur) return;
+
+      state.selectedMonthStart = next;
+      await refreshMonthView(state);
+    });
+
+    $("month-select")?.addEventListener("change", async (e) => {
+      const key = e.target.value; // YYYY-MM
+      const [y, m] = key.split("-").map(Number);
+      const d = new Date();
+      d.setFullYear(y);
+      d.setMonth(m - 1);
+      d.setDate(1);
+      d.setHours(0,0,0,0);
+
+      state.selectedMonthStart = d;
+      await refreshMonthView(state);
+    });
+
+    // 5) Load current (Today/Week) and initial month (current month)
+    await refreshCurrentView(state);
+    await refreshMonthView(state);
+
+    // 6) Live tick for status card + “now”
+    state.timers.tick = setInterval(() => {
+      if (!state.currentCache) return;
+      const now = new Date();
+      const todayStart = startOfTodayLocal(now);
+
       updateStatusCard({
-        employeeName: employee.display_name,
-        role: employee.role,
-        openShift: computed.openShift,
-        openBreak: computed.openBreak,
-        breakCapMin,
-        totalsBreakTodayMs: computed.totals.break.today,
-        shiftSoFarMs: live.shiftSoFarMs,
-        breakSoFarMs: live.breakSoFarMs
+        employeeName: state.employee.display_name,
+        role: state.employee.role,
+        openShift: state.currentCache.openShift,
+        openBreak: state.currentCache.openBreak,
+        openShiftClosedBreakMs: state.currentCache.openShiftClosedBreakMs,
+        breakCapMin: state.breakCapMin,
+        closedBreakTodayMs: state.currentCache.closedBreakTodayMs,
+        todayStart
       });
     }, 1000);
 
-    // Refresh totals every 30s to ensure open-break math stays correct and tables stay fresh
-    refreshTimer = setInterval(async () => {
+    // 7) Refresh current every 30s, and refresh selected month only if it’s the current month
+    state.timers.refresh = setInterval(async () => {
       try {
-        const freshEntries = await loadEntriesSince(employee.id, earliest.toISOString());
-        const freshIds = freshEntries.map(e => e.id);
-        const freshBreaks = await loadBreaksForEntryIds(freshIds);
+        await refreshCurrentView(state);
 
-        computed = computeTotals(freshEntries, freshBreaks);
+        const curKey = monthKey(startOfMonthLocal(new Date()));
+        const selKey = monthKey(state.selectedMonthStart);
 
-        renderMetricGrid("worked-metrics", [
-          { label: "Worked today", value: fmtHM(computed.totals.worked.today) },
-          { label: "Worked this week (Sun–Sat)", value: fmtHM(computed.totals.worked.week) },
-          { label: "Worked this month", value: fmtHM(computed.totals.worked.month) },
-        ]);
-
-        renderMetricGrid("break-metrics", [
-          { label: "Break today", value: fmtHM(computed.totals.break.today) },
-          { label: "Break this week (Sun–Sat)", value: fmtHM(computed.totals.break.week) },
-          { label: "Break this month", value: fmtHM(computed.totals.break.month) },
-        ]);
-
-        renderRecentShifts(
-          freshEntries.slice(0, 10),
-          computed.perEntryNetMs,
-          computed.perEntryBreakMs
-        );
+        if (selKey === curKey) {
+          // current month can change as shifts/breaks happen
+          state.monthCache.delete(selKey);
+          await refreshMonthView(state);
+        }
 
         setSoftError(null);
       } catch (e) {
@@ -535,10 +566,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }, 30000);
 
-    // Cleanup if needed
     window.addEventListener("beforeunload", () => {
-      if (tickTimer) clearInterval(tickTimer);
-      if (refreshTimer) clearInterval(refreshTimer);
+      if (state.timers.tick) clearInterval(state.timers.tick);
+      if (state.timers.refresh) clearInterval(state.timers.refresh);
     });
 
   } catch (err) {
@@ -546,3 +576,167 @@ document.addEventListener("DOMContentLoaded", async () => {
     setSoftError("Could not load your work summary. If this keeps happening, contact an admin.");
   }
 });
+
+/** ---------- Refresh functions ---------- */
+async function refreshCurrentView(state) {
+  const now = new Date();
+  const todayStart = startOfTodayLocal(now);
+  const weekStart = startOfWeekSunLocal(now);
+
+  // Query a window that covers week overlaps (end = now)
+  const windowStart = new Date(weekStart);
+  windowStart.setDate(windowStart.getDate() - 1); // small overlap buffer
+  const windowEnd = now;
+
+  const entries = await loadEntriesOverlapping(
+    state.employee.id,
+    windowStart.toISOString(),
+    windowEnd.toISOString()
+  );
+
+  const entryIds = entries.map(e => e.id);
+  const breaks = await loadBreaksForEntryIds(entryIds);
+
+  const { breaksByEntry, perEntryBreakMs, perEntryNetMs } = computePerEntryMaps(entries, breaks, now);
+
+  const todayTotals = computeWindowTotals(entries, breaksByEntry, todayStart, now, now);
+  const weekTotals = computeWindowTotals(entries, breaksByEntry, weekStart, now, now);
+
+  // Closed breaks today (exclude any open break duration; we add live in tick)
+  let closedBreakTodayMs = 0;
+  for (const e of entries) {
+    const blist = breaksByEntry[e.id] || [];
+    for (const b of blist) {
+      if (!b.ended_at) continue;
+      const bs = new Date(b.started_at);
+      const be = new Date(b.ended_at);
+      closedBreakTodayMs += overlapMs(bs, be, todayStart, now);
+    }
+  }
+
+  const { openShift, openBreak, openShiftClosedBreakMs } = findOpenShiftAndBreak(entries, breaksByEntry);
+
+  state.currentCache = {
+    entries,
+    breaks,
+    breaksByEntry,
+    perEntryBreakMs,
+    perEntryNetMs,
+    todayTotals,
+    weekTotals,
+    openShift,
+    openBreak,
+    openShiftClosedBreakMs,
+    closedBreakTodayMs
+  };
+
+  // Render today/week metrics (month comes from selected month)
+  renderMetricGrid("worked-metrics", [
+    { label: "Worked today", value: fmtHM(todayTotals.workedMs) },
+    { label: "Worked this week (Sun–Sat)", value: fmtHM(weekTotals.workedMs) },
+    { label: "Worked (selected month)", value: "—" }
+  ]);
+
+  renderMetricGrid("break-metrics", [
+    { label: "Break today", value: fmtHM(todayTotals.breakMs) },
+    { label: "Break this week (Sun–Sat)", value: fmtHM(weekTotals.breakMs) },
+    { label: "Break (selected month)", value: "—" }
+  ]);
+
+  // Status (initial paint; live tick will maintain)
+  updateStatusCard({
+    employeeName: state.employee.display_name,
+    role: state.employee.role,
+    openShift,
+    openBreak,
+    openShiftClosedBreakMs,
+    breakCapMin: state.breakCapMin,
+    closedBreakTodayMs,
+    todayStart
+  });
+}
+
+async function refreshMonthView(state) {
+  const selStart = state.selectedMonthStart;
+  const selKey = monthKey(selStart);
+  const selEnd = nextMonthStartLocal(selStart);
+
+  // Update UI controls
+  renderMonthPicker(state.months, selStart);
+
+  // Check cache first (fast back/forward)
+  let cached = state.monthCache.get(selKey);
+
+  if (!cached) {
+    // Efficient: fetch only selected month window (include overlap shifts)
+    const entries = await loadEntriesOverlapping(
+      state.employee.id,
+      selStart.toISOString(),
+      selEnd.toISOString()
+    );
+
+    const entryIds = entries.map(e => e.id);
+    const breaks = await loadBreaksForEntryIds(entryIds);
+
+    const now = new Date();
+    const { breaksByEntry, perEntryBreakMs, perEntryNetMs } = computePerEntryMaps(entries, breaks, now);
+
+    // For month totals:
+    // - If selected month is current month, end at now
+    // - If past month, end at month end
+    const isCurrentMonth = (monthKey(startOfMonthLocal(new Date())) === selKey);
+    const monthWindowEnd = isCurrentMonth ? now : selEnd;
+
+    const monthTotals = computeWindowTotals(entries, breaksByEntry, selStart, monthWindowEnd, now);
+
+    // Keep entries sorted newest first (query already does)
+    const monthEntries = entries
+      .filter(e => {
+        // Ensure recent list aligns to selected month (by clock_in date in local time)
+        const cin = new Date(e.clock_in);
+        return cin >= selStart && cin < selEnd;
+      });
+
+    cached = {
+      entries: monthEntries,
+      breaks,
+      breaksByEntry,
+      perEntryBreakMs,
+      perEntryNetMs,
+      monthTotals
+    };
+
+    state.monthCache.set(selKey, cached);
+  }
+
+  // Patch the “selected month” cards into existing grids (keep today/week as-is)
+  const workedGrid = $("worked-metrics");
+  const breakGrid = $("break-metrics");
+
+  if (workedGrid) {
+    const cards = workedGrid.querySelectorAll(".metric-card");
+    if (cards[2]) {
+      const valueEl = cards[2].querySelector("div:last-child");
+      const labelEl = cards[2].querySelector("div:first-child");
+      if (labelEl) labelEl.textContent = `Worked (${monthLabel(selStart)})`;
+      if (valueEl) valueEl.textContent = fmtHM(cached.monthTotals.workedMs);
+    }
+  }
+
+  if (breakGrid) {
+    const cards = breakGrid.querySelectorAll(".metric-card");
+    if (cards[2]) {
+      const valueEl = cards[2].querySelector("div:last-child");
+      const labelEl = cards[2].querySelector("div:first-child");
+      if (labelEl) labelEl.textContent = `Break (${monthLabel(selStart)})`;
+      if (valueEl) valueEl.textContent = fmtHM(cached.monthTotals.breakMs);
+    }
+  }
+
+  // Recent Shifts for selected month (A)
+  renderRecentShifts(
+    cached.entries.slice(0, 10),
+    cached.perEntryNetMs,
+    cached.perEntryBreakMs
+  );
+}

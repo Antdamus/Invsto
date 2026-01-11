@@ -107,6 +107,22 @@
           <div class="status-note" id="status-note"></div>
         </section>
 
+        <!-- History Month Picker -->
+        <section class="history-bar" id="history-bar">
+          <div class="history-left">
+            <div class="history-title">History Month</div>
+            <div class="history-sub" id="history-sub">This changes Month totals + Recent Shifts.</div>
+          </div>
+
+          <div class="history-controls">
+            <button class="history-btn" id="month-prev" type="button" aria-label="Previous month">◀</button>
+            <div class="history-label" id="month-label">—</div>
+            <button class="history-btn" id="month-next" type="button" aria-label="Next month">▶</button>
+
+            <select class="history-select" id="month-select" aria-label="Jump to month"></select>
+          </div>
+        </section>
+
         <!-- Worked Hours -->
         <section class="table-section">
           <h3 class="section-title">✅ Worked (Net)</h3>
@@ -123,7 +139,7 @@
         <!-- Recent Shifts -->
         <section class="table-section">
           <div class="recent-header">
-            <h3 class="section-title" style="margin:0;">Recent Shifts</h3>
+            <h3 class="section-title" style="margin:0;">Recent Shifts (Selected Month)</h3>
             <a class="btn-like subtle" href="timeclock.html">View full time sheet</a>
           </div>
 

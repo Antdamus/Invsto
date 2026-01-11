@@ -165,6 +165,72 @@
   border-radius: 12px;
 }
 
+/* ================================
+   History Month Picker
+================================ */
+.history-bar {
+  margin-top: 1.2rem;
+  background: white;
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
+  border: 1px solid #eee;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.history-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.history-sub {
+  font-size: 0.95rem;
+  opacity: 0.7;
+  margin-top: 0.15rem;
+}
+
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.history-btn {
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.history-btn:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.history-label {
+  min-width: 170px;
+  text-align: center;
+  font-weight: 800;
+}
+
+.history-select {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* Responsive tweaks */
 @media (max-width: 1100px) {
   .status-metrics {
@@ -175,5 +241,8 @@
 @media (max-width: 768px) {
   .status-metrics {
     grid-template-columns: 1fr;
+  }
+  .history-label {
+    min-width: auto;
   }
 }

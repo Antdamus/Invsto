@@ -1,79 +1,192 @@
-// === SHOW PASSWORD TOGGLE ===
-document.getElementById("toggle-password")?.addEventListener("click", () => {
-  const passwordInput = document.getElementById("password");
-  const isPassword = passwordInput.type === "password";
-  passwordInput.type = isPassword ? "text" : "password";
-  document.getElementById("toggle-password").textContent = isPassword ? "🙈" : "👁";
-});
+// auth.js
+// Login + automatic role routing using the employees table (admin -> dashboard, employee -> worker dashboard)
 
-// === LOGIN HANDLER ===
-document.getElementById("login-form")?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const email = document.getElementById("email").value.trim();
-  const password = document.getElementById("password").value.trim();
-  const feedback = document.getElementById("login-feedback");
+function waitForSupabaseReady() {
+  return new Promise((resolve) => {
+    if (window.supabase) return resolve(window.supabase);
+    document.addEventListener("supabase-ready", () => resolve(window.supabase), { once: true });
+  });
+}
 
-  feedback.style.color = "#333";
-  feedback.textContent = "⏳ Logging in...";
+async function getEmployeeRoleByUserId(userId) {
+  const sb = await waitForSupabaseReady();
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  // Pull role from employees table (source of truth)
+  const { data: emp, error } = await sb
+    .from("employees")
+    .select("role, active")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  if (error) {
-    feedback.style.color = "crimson";
-    feedback.textContent = `❌ Login failed: ${error.message}`;
+  if (error) throw error;
+  return emp; // { role, active } or null
+}
+
+async function routeUser(session) {
+  const sb = await waitForSupabaseReady();
+
+  if (!session?.user?.id) return;
+
+  let emp = null;
+  try {
+    emp = await getEmployeeRoleByUserId(session.user.id);
+  } catch (err) {
+    console.error("❌ Role lookup failed:", err);
     return;
   }
 
-  const user = data?.user;
-
-  if (!user) {
-    feedback.style.color = "crimson";
-    feedback.textContent = "❌ Unexpected error. No user returned.";
+  // If user has no employee row or is inactive, sign out and stay on login
+  if (!emp || emp.active === false) {
+    await sb.auth.signOut();
     return;
   }
 
-  const role = user.user_metadata?.role;
+  const role = String(emp.role || "").toLowerCase();
 
   if (role === "admin") {
-    feedback.style.color = "green";
-    feedback.textContent = "✅ Login successful. Redirecting...";
-    setTimeout(() => {
-      window.location.href = "dashboard.html";
-    }, 1000);
+    window.location.href = "dashboard.html";
+  } else if (role === "employee") {
+    window.location.href = "worker-dashboard.html";
   } else {
-    feedback.style.color = "darkorange";
-    feedback.textContent = "⚠️ You do not have admin access.";
-    await supabase.auth.signOut();
+    // Unknown role -> safest behavior
+    await sb.auth.signOut();
+  }
+}
+
+/* =========================
+   SHOW PASSWORD TOGGLE
+========================= */
+document.getElementById("toggle-password")?.addEventListener("click", () => {
+  const passwordInput = document.getElementById("password");
+  if (!passwordInput) return;
+
+  const isPassword = passwordInput.type === "password";
+  passwordInput.type = isPassword ? "text" : "password";
+
+  const btn = document.getElementById("toggle-password");
+  if (btn) btn.textContent = isPassword ? "🙈" : "👁";
+});
+
+/* =========================
+   AUTO-ROUTE IF ALREADY LOGGED IN
+   (Makes it automatic on refresh too)
+========================= */
+(async () => {
+  const sb = await waitForSupabaseReady();
+  const { data: { session }, error } = await sb.auth.getSession();
+  if (error) console.error("❌ Session error:", error);
+
+  if (session) {
+    // If already logged in, send them to the correct dashboard automatically
+    await routeUser(session);
+  }
+})();
+
+/* =========================
+   LOGIN HANDLER
+========================= */
+document.getElementById("login-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const sb = await waitForSupabaseReady();
+
+  const email = document.getElementById("email")?.value.trim();
+  const password = document.getElementById("password")?.value.trim();
+  const feedback = document.getElementById("login-feedback");
+
+  if (!email || !password) return;
+
+  if (feedback) {
+    feedback.style.color = "#333";
+    feedback.textContent = "⏳ Logging in...";
+  }
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    if (feedback) {
+      feedback.style.color = "crimson";
+      feedback.textContent = `❌ Login failed: ${error.message}`;
+    }
+    return;
+  }
+
+  const session = data?.session;
+  if (!session) {
+    if (feedback) {
+      feedback.style.color = "crimson";
+      feedback.textContent = "❌ Unexpected error. No session returned.";
+    }
+    return;
+  }
+
+  // Route based on employees.role (admin/employee)
+  try {
+    const emp = await getEmployeeRoleByUserId(session.user.id);
+
+    if (!emp || emp.active === false) {
+      if (feedback) {
+        feedback.style.color = "crimson";
+        feedback.textContent = "⚠️ Your account is not active. Contact an admin.";
+      }
+      await sb.auth.signOut();
+      return;
+    }
+
+    const role = String(emp.role || "").toLowerCase();
+
+    if (feedback) {
+      feedback.style.color = "green";
+      feedback.textContent = "✅ Login successful. Redirecting...";
+    }
+
+    setTimeout(() => {
+      if (role === "admin") window.location.href = "dashboard.html";
+      else window.location.href = "worker-dashboard.html";
+    }, 500);
+
+  } catch (err) {
+    console.error("❌ Role lookup failed after login:", err);
+    if (feedback) {
+      feedback.style.color = "crimson";
+      feedback.textContent = "❌ Could not verify your role. Please try again.";
+    }
+    await sb.auth.signOut();
   }
 });
 
-// === RESET PASSWORD LINK ===
+/* =========================
+   RESET PASSWORD LINK
+========================= */
 document.getElementById("reset-link")?.addEventListener("click", async (e) => {
   e.preventDefault();
-  const email = document.getElementById("email").value.trim();
+
+  const sb = await waitForSupabaseReady();
+
+  const email = document.getElementById("email")?.value.trim();
   const feedback = document.getElementById("login-feedback");
 
   if (!email) {
-    feedback.style.color = "crimson";
-    feedback.textContent = "📧 Please enter your email to reset password.";
+    if (feedback) {
+      feedback.style.color = "crimson";
+      feedback.textContent = "📧 Please enter your email to reset password.";
+    }
     return;
   }
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin + "/reset.html"
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + "/reset.html",
   });
 
   if (error) {
-    feedback.style.color = "crimson";
-    feedback.textContent = `❌ Reset failed: ${error.message}`;
+    if (feedback) {
+      feedback.style.color = "crimson";
+      feedback.textContent = `❌ Reset failed: ${error.message}`;
+    }
   } else {
-    feedback.style.color = "green";
-    feedback.textContent = "✅ Check your inbox for reset instructions.";
+    if (feedback) {
+      feedback.style.color = "green";
+      feedback.textContent = "✅ Check your inbox for reset instructions.";
+    }
   }
-});
-
-// === OPTIONAL: Logout handler (for use elsewhere) ===
-document.getElementById("logout")?.addEventListener("click", async () => {
-  await supabase.auth.signOut();
-  window.location.href = "login.html";
 });
