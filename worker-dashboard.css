@@ -1,0 +1,179 @@
+/* ================================
+   Worker Dashboard Enhancements
+   Uses dashboard.css as base
+================================ */
+
+.status-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.status-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.status-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.status-now {
+  font-size: 0.95rem;
+  opacity: 0.75;
+}
+
+.status-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  background: #f1f3f5;
+  border: 1px solid #e5e7eb;
+}
+
+.pill.good {
+  background: #ecfdf3;
+  border-color: #bbf7d0;
+}
+
+.pill.warn {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.pill.bad {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.status-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.status-metric {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+}
+
+.status-metric-label {
+  font-size: 0.9rem;
+  opacity: 0.75;
+}
+
+.status-metric-value {
+  margin-top: 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.status-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn-like {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 600;
+  background: #1c1c1e;
+  color: white;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-like:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+}
+
+.btn-like.subtle {
+  background: #2c2c2e;
+  font-weight: 600;
+}
+
+.mini-note {
+  margin-top: 0.65rem;
+  font-size: 0.95rem;
+  opacity: 0.75;
+}
+
+.status-note {
+  font-size: 0.95rem;
+  opacity: 0.75;
+}
+
+.recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+
+.badge.warn {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.badge.bad {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.soft-error {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #7c2d12;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+}
+
+/* Responsive tweaks */
+@media (max-width: 1100px) {
+  .status-metrics {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .status-metrics {
+    grid-template-columns: 1fr;
+  }
+}
