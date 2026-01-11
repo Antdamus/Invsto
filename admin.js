@@ -317,7 +317,6 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
         </div>
         <div class="sched-buttons" style="margin-top:6px;">
           <button class="btn small" data-save-recurring="${i}">Save recurring</button>
-          <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
         </div>
       </td>
 
@@ -339,80 +338,6 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     tbody.appendChild(tr);
   }
 }
-
-async function clearRecurring(weekday){
-  // Removes recurring schedule(s) for this weekday starting at the selected effective date.
-  // Behavior:
-  // - Any recurring rows that start ON/AFTER the effective date are deleted.
-  // - Any recurring rows that started BEFORE the effective date are capped (effective_to = day before).
-  const empId = schedEmpId;
-  const effFrom = qs('schedEffFrom').value || toISODate(new Date());
-  const dayBefore = dateStrAddDays(effFrom, -1);
-
-  if (!empId) return;
-
-  const ok = window.confirm(
-    `Remove recurring schedule for ${DOW[weekday]} starting ${effFrom}?\n\n`+
-    `This will remove future recurring slots from that date forward.`
-  );
-  if (!ok) return;
-
-  // Find all active recurring rows that could apply on/after effFrom
-  const { data: rows, error: selErr } = await supabaseClient
-    .from('work_schedules')
-    .select('id, effective_from, effective_to')
-    .eq('employee_id', empId)
-    .eq('weekday', weekday)
-    .eq('active', true)
-    .or(`effective_to.is.null,effective_to.gte.${effFrom}`);
-  if (selErr) return alert('Remove failed: ' + selErr.message);
-
-  if (!rows || rows.length === 0){
-    showToast('No recurring schedule to remove','ok');
-    await loadScheduleWeek();
-    return;
-  }
-
-  // Split into: future rows (delete) vs past rows (cap)
-  const toDelete = [];
-  const toCap = [];
-  for (const r of rows){
-    if (r.effective_from >= effFrom) toDelete.push(r.id);
-    else toCap.push(r.id);
-  }
-
-  // Cap rows only when the cap is not before their own effective_from.
-  if (toCap.length){
-    // Ensure we don't set effective_to < effective_from; if so, delete instead.
-    const capRows = rows.filter(r => toCap.includes(r.id));
-    const capIds = [];
-    const capToDelete = [];
-    for (const r of capRows){
-      if (dayBefore < r.effective_from) capToDelete.push(r.id);
-      else capIds.push(r.id);
-    }
-    if (capIds.length){
-      const { error: upErr } = await supabaseClient
-        .from('work_schedules')
-        .update({ effective_to: dayBefore })
-        .in('id', capIds);
-      if (upErr) return alert('Remove failed: ' + upErr.message);
-    }
-    if (capToDelete.length) toDelete.push(...capToDelete);
-  }
-
-  if (toDelete.length){
-    const { error: delErr } = await supabaseClient
-      .from('work_schedules')
-      .delete()
-      .in('id', toDelete);
-    if (delErr) return alert('Remove failed: ' + delErr.message);
-  }
-
-  showToast('Recurring schedule removed','ok');
-  await loadScheduleWeek();
-}
-
 
 async function saveRecurring(weekday){
   const empId = schedEmpId;
@@ -509,19 +434,15 @@ async function initSchedulePanel(){
     const btn = e.target.closest('button');
     if (!btn) return;
     if (btn.hasAttribute('data-save-recurring')){
-  const weekday = Number(btn.getAttribute('data-save-recurring'));
-  saveRecurring(weekday);
-} else if (btn.hasAttribute('data-clear-recurring')){
-  const weekday = Number(btn.getAttribute('data-clear-recurring'));
-  clearRecurring(weekday);
-} else if (btn.hasAttribute('data-save-override')){
-  const iso = btn.getAttribute('data-save-override');
-  saveOverride(iso);
-} else if (btn.hasAttribute('data-clear-override')){
-  const iso = btn.getAttribute('data-clear-override');
-  clearOverride(iso);
-}
-
+      const weekday = Number(btn.getAttribute('data-save-recurring'));
+      saveRecurring(weekday);
+    } else if (btn.hasAttribute('data-save-override')){
+      const iso = btn.getAttribute('data-save-override');
+      saveOverride(iso);
+    } else if (btn.hasAttribute('data-clear-override')){
+      const iso = btn.getAttribute('data-clear-override');
+      clearOverride(iso);
+    }
   });
 
   // enable/disable override time inputs when Off toggled
@@ -557,16 +478,20 @@ async function initSchedulePanel(){
 }
 
 function showPanel(id){
-  // Hide all panels you have; list the known ones
-  ['panelOverview','panelPayroll','panelSchedule'].forEach(pid => {
-    const el = qs(pid); if (el) el.classList.add('hidden');
-  });
-  const p = qs(id); if (p) p.classList.remove('hidden');
+  // Back-compat wrapper (older code used showPanel). Prefer activateTab().
+  const map = {
+    panelOverview: 'overview',
+    panelPayroll: 'payroll',
+    panelSchedule: 'schedule',
+    panelStores: 'stores'
+  };
+  const key = map[id];
+  if (key) activateTab(key);
 }
 
 function wireScheduleTab(){
   qs('tabSchedule')?.addEventListener('click', async () => {
-    showPanel('panelSchedule');
+    activateTab('schedule');
     // lazy init once
     if (!qs('schedEmpSelect').options.length){
       try { await initSchedulePanel(); } catch (e){ console.error(e); }
@@ -574,6 +499,309 @@ function wireScheduleTab(){
   });
 }
 
+/* ============== Stores (Phase 1 — Store setup) ============== */
+let _storesInitialized = false;
+let _allStores = []; // cached list
+
+const STORE_DEFAULTS = {
+  radius_m: 50,
+  timezone: 'America/New_York',
+  schedule_enforce: false,
+  schedule_grace_in_m: 5,
+  schedule_grace_out_m: 5,
+  paid_break_cap_min: 30,
+  active: true
+};
+
+function directionsUrl(lat, lng){
+  if (lat == null || lng == null) return '#';
+  const q = `${Number(lat)},${Number(lng)}`;
+  // Works in desktop + mobile (Google Maps web). If user has the app, browser will often deep-link.
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`;
+}
+
+function setStoreError(msg){
+  const el = qs('storeError');
+  if (!el) return;
+  el.textContent = msg || '';
+  show(el, !!msg);
+}
+
+function openStoreModal(store=null){
+  setStoreError('');
+
+  // Defaults
+  const s = {
+    id: store?.id || '',
+    name: store?.name ?? '',
+    lat: store?.lat ?? '',
+    lng: store?.lng ?? '',
+    radius_m: store?.radius_m ?? STORE_DEFAULTS.radius_m,
+    timezone: store?.timezone ?? STORE_DEFAULTS.timezone,
+    schedule_enforce: store?.schedule_enforce ?? STORE_DEFAULTS.schedule_enforce,
+    schedule_grace_in_m: store?.schedule_grace_in_m ?? STORE_DEFAULTS.schedule_grace_in_m,
+    schedule_grace_out_m: store?.schedule_grace_out_m ?? STORE_DEFAULTS.schedule_grace_out_m,
+    paid_break_cap_min: store?.paid_break_cap_min ?? STORE_DEFAULTS.paid_break_cap_min,
+    active: store?.active ?? STORE_DEFAULTS.active
+  };
+
+  qs('storeTitle').textContent = store?.id ? 'Edit store' : 'Add store';
+  qs('storeId').value = s.id;
+  qs('storeName').value = s.name;
+  qs('storeLat').value = s.lat;
+  qs('storeLng').value = s.lng;
+  qs('storeRadius').value = s.radius_m;
+  qs('storeTz').value = s.timezone;
+  qs('storeGraceIn').value = s.schedule_grace_in_m;
+  qs('storeGraceOut').value = s.schedule_grace_out_m;
+  qs('storePaidBreakCap').value = s.paid_break_cap_min;
+  qs('storeScheduleEnforce').checked = !!s.schedule_enforce;
+  qs('storeActive').checked = !!s.active;
+
+  updateDirectionsPreview();
+
+  qs('storeModal').classList.add('open');
+  qs('storeModal').classList.remove('hidden');
+  qs('storeModalBackdrop').classList.add('show');
+  qs('storeModalBackdrop').classList.remove('hidden');
+}
+
+function closeStoreModal(){
+  qs('storeModal').classList.remove('open');
+  qs('storeModalBackdrop').classList.remove('show');
+  setTimeout(() => {
+    qs('storeModal').classList.add('hidden');
+    qs('storeModalBackdrop').classList.add('hidden');
+  }, 180);
+}
+
+function updateDirectionsPreview(){
+  const lat = qs('storeLat')?.value;
+  const lng = qs('storeLng')?.value;
+  const link = qs('storeDirLink');
+  const hint = qs('storeDirHint');
+  if (!link || !hint) return;
+
+  const ok = lat !== '' && lng !== '' && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+  if (!ok){
+    link.href = '#';
+    link.setAttribute('aria-disabled', 'true');
+    link.style.pointerEvents = 'none';
+    link.style.opacity = '0.55';
+    hint.textContent = 'Enter lat/lng to enable Directions';
+    return;
+  }
+  link.href = directionsUrl(lat, lng);
+  link.removeAttribute('aria-disabled');
+  link.style.pointerEvents = '';
+  link.style.opacity = '';
+  hint.textContent = `Directions to ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+}
+
+function readStoreForm(){
+  const id = (qs('storeId').value || '').trim() || null;
+  const name = (qs('storeName').value || '').trim();
+  const lat = Number(qs('storeLat').value);
+  const lng = Number(qs('storeLng').value);
+  const radius_m = Number(qs('storeRadius').value);
+  const timezone = (qs('storeTz').value || STORE_DEFAULTS.timezone).trim() || STORE_DEFAULTS.timezone;
+  const schedule_enforce = !!qs('storeScheduleEnforce').checked;
+  const schedule_grace_in_m = Number(qs('storeGraceIn').value || STORE_DEFAULTS.schedule_grace_in_m);
+  const schedule_grace_out_m = Number(qs('storeGraceOut').value || STORE_DEFAULTS.schedule_grace_out_m);
+  const paid_break_cap_min = Number(qs('storePaidBreakCap').value || STORE_DEFAULTS.paid_break_cap_min);
+  const active = !!qs('storeActive').checked;
+
+  if (!name) return { ok:false, msg:'Store name is required.' };
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { ok:false, msg:'Latitude and longitude must be valid numbers.' };
+  if (!Number.isFinite(radius_m) || radius_m <= 0) return { ok:false, msg:'Radius must be a positive number.' };
+  if (!Number.isFinite(schedule_grace_in_m) || schedule_grace_in_m < 0) return { ok:false, msg:'Grace in must be 0 or more.' };
+  if (!Number.isFinite(schedule_grace_out_m) || schedule_grace_out_m < 0) return { ok:false, msg:'Grace out must be 0 or more.' };
+  if (!Number.isFinite(paid_break_cap_min) || paid_break_cap_min < 0) return { ok:false, msg:'Paid break cap must be 0 or more.' };
+
+  return {
+    ok:true,
+    data: {
+      ...(id ? { id } : {}),
+      name,
+      lat,
+      lng,
+      radius_m,
+      timezone,
+      schedule_enforce,
+      schedule_grace_in_m,
+      schedule_grace_out_m,
+      paid_break_cap_min,
+      active
+    }
+  };
+}
+
+async function upsertStore(){
+  const parsed = readStoreForm();
+  if (!parsed.ok) return setStoreError(parsed.msg);
+  setStoreError('');
+
+  const payload = parsed.data;
+
+  try {
+    let resp;
+    if (payload.id){
+      resp = await supabaseClient
+        .from('store_locations')
+        .update(payload)
+        .eq('id', payload.id)
+        .select()
+        .single();
+    } else {
+      resp = await supabaseClient
+        .from('store_locations')
+        .insert(payload)
+        .select()
+        .single();
+    }
+    if (resp.error) throw resp.error;
+
+    closeStoreModal();
+    showToast('Store saved', 'ok');
+    await loadStores();
+  } catch (err){
+    console.error(err);
+    setStoreError(err?.message || 'Failed to save store');
+  }
+}
+
+function storeStatusPill(active){
+  return `<span class="pill ${active ? 'work' : ''} store-pill">${active ? 'Active' : 'Inactive'}</span>`;
+}
+
+function renderStoresTable(){
+  const tb = qs('storesTbody');
+  if (!tb) return;
+
+  const q = (qs('storeSearchInput')?.value || '').trim().toLowerCase();
+  const showInactive = !!qs('storeShowInactive')?.checked;
+
+  const rows = _allStores
+    .filter(s => showInactive ? true : !!s.active)
+    .filter(s => q ? (s.name || '').toLowerCase().includes(q) : true)
+    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
+
+  tb.innerHTML = '';
+  if (!rows.length){
+    tb.innerHTML = `<tr><td colspan="9" class="muted">No stores found.</td></tr>`;
+    return;
+  }
+
+  for (const s of rows){
+    const lat = (s.lat == null) ? '—' : Number(s.lat).toFixed(5);
+    const lng = (s.lng == null) ? '—' : Number(s.lng).toFixed(5);
+    const dir = directionsUrl(s.lat, s.lng);
+    const tr = document.createElement('tr');
+    tr.dataset.storeId = s.id;
+    tr.innerHTML = `
+      <td>
+        <div style="font-weight:600;">${s.name || '—'}</div>
+      </td>
+      <td>${storeStatusPill(!!s.active)}</td>
+      <td><span class="coords">${lat}, ${lng}</span></td>
+      <td>${s.radius_m ?? '—'}</td>
+      <td>${s.timezone || '—'}</td>
+      <td>${s.schedule_enforce ? 'Yes' : 'No'}</td>
+      <td>${(s.schedule_grace_in_m ?? '—')}/${(s.schedule_grace_out_m ?? '—')}</td>
+      <td>${s.paid_break_cap_min ?? '—'} min</td>
+      <td>
+        <div class="store-actions">
+          <button class="btn small" data-store-edit="${s.id}">Edit</button>
+          <a class="btn small ghost" href="${dir}" target="_blank" rel="noopener">Directions</a>
+          <button class="btn small ghost" data-store-toggle="${s.id}">${s.active ? 'Deactivate' : 'Activate'}</button>
+        </div>
+      </td>
+    `;
+    tb.appendChild(tr);
+  }
+}
+
+async function loadStores(){
+  const tb = qs('storesTbody');
+  if (tb) tb.innerHTML = `<tr><td colspan="9" class="muted">Loading…</td></tr>`;
+
+  const { data, error } = await supabaseClient
+    .from('store_locations')
+    .select('id,name,lat,lng,radius_m,timezone,schedule_enforce,schedule_grace_in_m,schedule_grace_out_m,paid_break_cap_min,active,created_at')
+    .order('name', { ascending: true });
+  if (error) throw error;
+
+  _allStores = data || [];
+  renderStoresTable();
+}
+
+async function toggleStoreActive(storeId){
+  const s = _allStores.find(x => x.id === storeId);
+  if (!s) return;
+  const next = !s.active;
+  const verb = next ? 'activate' : 'deactivate';
+  if (!confirm(`Are you sure you want to ${verb} “${s.name}”?`)) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from('store_locations')
+      .update({ active: next })
+      .eq('id', storeId);
+    if (error) throw error;
+    showToast(`Store ${next ? 'activated' : 'deactivated'}`, 'ok');
+    await loadStores();
+  } catch (err){
+    console.error(err);
+    showToast(err?.message || 'Failed to update store', 'err');
+  }
+}
+
+async function initStoresPanel(){
+  if (_storesInitialized) return;
+  _storesInitialized = true;
+
+  // Filters
+  qs('storeSearchInput')?.addEventListener('input', () => renderStoresTable());
+  qs('storeShowInactive')?.addEventListener('change', () => renderStoresTable());
+
+  // Add button
+  qs('storeAddBtn')?.addEventListener('click', () => openStoreModal(null));
+
+  // Table actions
+  qs('storesTbody')?.addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-store-edit]');
+    if (edit){
+      const id = edit.getAttribute('data-store-edit');
+      const s = _allStores.find(x => x.id === id);
+      openStoreModal(s || null);
+      return;
+    }
+    const tog = e.target.closest('[data-store-toggle]');
+    if (tog){
+      toggleStoreActive(tog.getAttribute('data-store-toggle'));
+      return;
+    }
+  });
+
+  // Modal close + save
+  qs('storeCloseBtn')?.addEventListener('click', closeStoreModal);
+  qs('storeCancelBtn')?.addEventListener('click', closeStoreModal);
+  qs('storeModalBackdrop')?.addEventListener('click', closeStoreModal);
+  qs('storeSaveBtn')?.addEventListener('click', upsertStore);
+
+  // Directions preview
+  ['storeLat','storeLng'].forEach(id => qs(id)?.addEventListener('input', updateDirectionsPreview));
+
+  await loadStores();
+}
+
+function wireStoresTab(){
+  qs('tabStores')?.addEventListener('click', async () => {
+    activateTab('stores');
+    try { await initStoresPanel(); }
+    catch (e){ console.error(e); showToast('Failed to load stores','err'); }
+  });
+}
 
 function renderKPIs(rows){
   const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
@@ -1216,94 +1444,11 @@ function wireDrawer(){
 let payWeeks=[], paySelected=null, payRows=[];
 function formatWeekRange(weekStartStr){ const s=new Date(weekStartStr+'T00:00:00'); const e=new Date(s); e.setDate(s.getDate()+6); const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return `${f(s)} — ${f(e)}`; }
 async function fetchWeekList(){
-  // Helpers local to payroll so we don't rely on other module state.
-  const isoDate = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
-  const parseISODate = (s) => {
-    const [y, m, d] = String(s).split('-').map(Number);
-    return new Date(y, (m || 1) - 1, d || 1);
-  };
-
-  const startOfWeekSundayISO = (d = new Date()) => {
-    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    x.setDate(x.getDate() - x.getDay()); // 0=Sun
-    return isoDate(x);
-  };
-
-  const get = async (t) => {
-    const { data, error } = await supabaseClient
-      .from(t)
-      .select('week_start')
-      .order('week_start', { descending: true })
-      .limit(2000);
-    if (error) throw error;
-    return (data || []).map(r => r.week_start);
-  };
-
-  let weeks = [];
-  try {
-    // ✅ Always prefer the view for freshness
-    weeks = await get('v_weekly_hours');
-  } catch (_e) {
-    weeks = [];
-  }
-
-  if (!weeks.length) {
-    try {
-      // fallback only if view is unavailable
-      weeks = await get('mv_weekly_hours');
-    } catch (_e) {
-      weeks = [];
-    }
-  }
-
-  // de-dupe (keep order)
-  const set = new Set();
-  const out = [];
-  for (const w of weeks) {
-    if (!set.has(w)) { set.add(w); out.push(w); }
-  }
-
-  // If the weekly-hours view is stale (or missing), the dropdown can get
-  // "stuck" on the newest week present in the view. To keep the UI usable,
-  // always synthesize weeks up to the current week (Sun–Sat) even if the view
-  // hasn't been refreshed yet.
-  const currentWeek = startOfWeekSundayISO(new Date());
-
-  // No weeks at all? Provide a sensible default history (2 years) so the UI works.
-  if (!out.length) {
-    const res = [];
-    let d = parseISODate(currentWeek);
-    for (let i = 0; i < 104; i++) { // ~2 years
-      res.push(isoDate(d));
-      d.setDate(d.getDate() - 7);
-    }
-    return res;
-  }
-
-  const latest = out[0];
-  if (parseISODate(latest) < parseISODate(currentWeek)) {
-    const existing = new Set(out);
-    const prepend = [];
-    let d = parseISODate(currentWeek);
-    const stop = parseISODate(latest);
-    while (d > stop) {
-      const w = isoDate(d);
-      if (!existing.has(w)) prepend.push(w);
-      d.setDate(d.getDate() - 7);
-    }
-    return [...prepend, ...out]; // keep descending
-  }
-
-  return out;
+  const get = async t => { const {data,error}=await supabaseClient.from(t).select('week_start').order('week_start',{descending:true}).limit(2000); if(error) throw error; return (data||[]).map(r=>r.week_start); };
+  let weeks=[]; try{ weeks=await get('mv_weekly_hours'); }catch(_e){}
+  if(!weeks.length){ const {data}=await supabaseClient.from('v_weekly_hours').select('week_start').order('week_start',{descending:true}).limit(2000); weeks=(data||[]).map(r=>r.week_start); }
+  const set=new Set(), out=[]; for(const w of weeks){ if(!set.has(w)){ set.add(w); out.push(w); } } return out;
 }
-
-
 
 // ===== Schedule: utilities & state =====
 const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -1662,16 +1807,29 @@ function wireCreatePeriodUI(){
 }
 
 /* ============== Tabs ============== */
-function switchTab(which){
-  const ovBtn=qs('tabOverview'), pyBtn=qs('tabPayroll');
-  const ov=qs('panelOverview'),  py=qs('panelPayroll');
-  const set=(btn,panel,active)=>{ btn.classList.toggle('active',active); btn.setAttribute('aria-selected', String(active)); show(panel, active); };
-  if (which==='payroll'){ set(pyBtn,py,true); set(ovBtn,ov,false); }
-  else { set(ovBtn,ov,true); set(pyBtn,py,false); }
+function activateTab(which){
+  const tabs = [
+    { key:'overview', btn:'tabOverview', panel:'panelOverview' },
+    { key:'payroll',  btn:'tabPayroll',  panel:'panelPayroll' },
+    { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
+    { key:'stores',   btn:'tabStores',   panel:'panelStores' },
+  ];
+
+  for (const t of tabs){
+    const b = qs(t.btn);
+    const p = qs(t.panel);
+    const active = t.key === which;
+    if (b){
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', String(active));
+    }
+    if (p) show(p, active);
+  }
 }
+
 function wireTabs(){
-  qs('tabOverview').addEventListener('click', ()=> switchTab('overview'));
-  qs('tabPayroll').addEventListener('click',  ()=> switchTab('payroll'));
+  qs('tabOverview')?.addEventListener('click', ()=> activateTab('overview'));
+  qs('tabPayroll')?.addEventListener('click',  ()=> activateTab('payroll'));
 }
 
 
@@ -1725,6 +1883,7 @@ document.addEventListener('supabase-ready', async () => {
   // Header + tabs
   wireHeaderActions();
   wireTabs();
+  activateTab('overview');
 
   // Prefill month for Overview
   const now = new Date();
@@ -1758,6 +1917,7 @@ startLiveTicker(1000); // change to 1000 if you want a per-second tick
   await bootPayroll(); // loadPayroll() inside will call updatePeriodForSelectedWeek()
   bootRealtime();
   wireScheduleTab();
+  wireStoresTab();
   wireGlobalCalendar();
 if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
 

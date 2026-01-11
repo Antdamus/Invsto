@@ -42,8 +42,8 @@
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
         <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (weekly)</button>
-        <!-- Tab button -->
-        <button id="tabSchedule" class="tab">Schedule</button>
+        <button id="tabSchedule" class="tab" role="tab" aria-selected="false" aria-controls="panelSchedule">Schedule</button>
+        <button id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
       </div>
 
       <!-- ===== Overview panel ===== -->
@@ -261,6 +261,52 @@
           </div>
         </section>
       </section>
+
+      <!-- ===== Stores panel ===== -->
+      <section id="panelStores" class="panel hidden" role="tabpanel" aria-labelledby="tabStores">
+        <header class="panel-head">
+          <h2>Stores</h2>
+          <div class="panel-actions">
+            <button id="storeAddBtn" class="btn">Add store</button>
+          </div>
+        </header>
+
+        <div class="filters" role="region" aria-label="Store filters">
+          <label class="filter grow">
+            <span>Search store</span>
+            <input id="storeSearchInput" type="search" placeholder="Type a store name…" />
+          </label>
+          <label class="switch" style="margin-left:auto;">
+            <input id="storeShowInactive" type="checkbox" />
+            <span>Show inactive</span>
+          </label>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" aria-label="Stores table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Status</th>
+                <th>Coordinates</th>
+                <th>Radius (m)</th>
+                <th>Timezone</th>
+                <th>Schedule enforce</th>
+                <th>Grace (in/out)</th>
+                <th>Paid break cap</th>
+                <th style="width:220px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="storesTbody">
+              <tr><td colspan="9" class="muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="muted" style="text-align:left; margin:10px 2px 0;">
+          Stores control geofencing, schedule enforcement, and paid break caps. Employee assignments are set on schedules (recurring + overrides).
+        </p>
+      </section>
     </section>
   </main>
 
@@ -372,6 +418,165 @@
     <footer class="modal-footer">
       <button id="createCancelBtn" class="btn ghost">Cancel</button>
       <button id="createSaveBtn" class="btn">Create</button>
+    </footer>
+  </div>
+
+  <!-- Store Modal -->
+  <div id="storeModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="storeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
+    <header class="modal-header">
+      <h3 id="storeTitle">Store</h3>
+      <button id="storeCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
+
+    <section class="modal-body">
+      <input id="storeId" type="hidden" />
+
+      <label>
+        <span>Store name</span>
+        <input id="storeName" type="text" placeholder="e.g., OG Jewelry — Wynwood" required />
+      </label>
+
+      <div class="form-row">
+        <label>
+          <span>Latitude</span>
+          <input id="storeLat" type="number" step="any" placeholder="25.7617" required />
+        </label>
+        <label>
+          <span>Longitude</span>
+          <input id="storeLng" type="number" step="any" placeholder="-80.1918" required />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Radius (meters)</span>
+          <input id="storeRadius" type="number" min="1" step="1" placeholder="50" required />
+        </label>
+        <label>
+          <span>Timezone</span>
+          <input id="storeTimezone" type="text" placeholder="America/New_York" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Grace in (minutes)</span>
+          <input id="storeGraceIn" type="number" min="0" step="1" placeholder="5" />
+        </label>
+        <label>
+          <span>Grace out (minutes)</span>
+          <input id="storeGraceOut" type="number" min="0" step="1" placeholder="5" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Paid break cap (minutes)</span>
+          <input id="storePaidBreakCap" type="number" min="0" step="1" placeholder="30" />
+        </label>
+        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
+          <input id="storeScheduleEnforce" type="checkbox" />
+          <span>Enforce schedule rules</span>
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
+          <input id="storeActive" type="checkbox" checked />
+          <span>Active</span>
+        </label>
+
+        <div style="display:flex; align-items:flex-end; justify-content:flex-end;">
+          <a id="storeDirLink" class="btn ghost" href="#" target="_blank" rel="noopener">Directions</a>
+        </div>
+      </div>
+
+      <div id="storeError" class="error hidden" role="alert"></div>
+    </section>
+
+    <footer class="modal-footer">
+      <button id="storeCancelBtn" class="btn ghost">Cancel</button>
+      <button id="storeSaveBtn" class="btn">Save</button>
+    </footer>
+  </div>
+
+  <!-- Store Editor Modal -->
+  <div id="storeModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="storeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
+    <header class="modal-header">
+      <h3 id="storeTitle">Store</h3>
+      <button id="storeCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
+
+    <section class="modal-body">
+      <input id="storeId" type="hidden" />
+
+      <label>
+        <span>Store name</span>
+        <input id="storeName" type="text" placeholder="e.g., OG Jewelry — Downtown" required />
+      </label>
+
+      <div class="form-row">
+        <label>
+          <span>Latitude</span>
+          <input id="storeLat" type="number" step="0.000001" placeholder="25.761681" required />
+        </label>
+        <label>
+          <span>Longitude</span>
+          <input id="storeLng" type="number" step="0.000001" placeholder="-80.191788" required />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Radius (meters)</span>
+          <input id="storeRadius" type="number" min="1" step="1" placeholder="50" required />
+        </label>
+        <label>
+          <span>Timezone</span>
+          <input id="storeTz" type="text" placeholder="America/New_York" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Grace in (min)</span>
+          <input id="storeGraceIn" type="number" min="0" step="1" placeholder="5" />
+        </label>
+        <label>
+          <span>Grace out (min)</span>
+          <input id="storeGraceOut" type="number" min="0" step="1" placeholder="5" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Paid break cap (min)</span>
+          <input id="storePaidBreakCap" type="number" min="0" step="1" placeholder="30" />
+        </label>
+        <label class="switch" style="align-items:center; margin-top:22px;">
+          <input id="storeScheduleEnforce" type="checkbox" />
+          <span>Schedule enforce</span>
+        </label>
+      </div>
+
+      <label class="switch">
+        <input id="storeActive" type="checkbox" />
+        <span>Active</span>
+      </label>
+
+      <div class="store-dir-row">
+        <a id="storeDirLink" class="btn small ghost" href="#" target="_blank" rel="noopener">Directions</a>
+        <div id="storeDirHint" class="muted" style="text-align:left; margin:0;">—</div>
+      </div>
+
+      <div id="storeError" class="error hidden" role="alert"></div>
+    </section>
+
+    <footer class="modal-footer">
+      <button id="storeCancelBtn" class="btn ghost">Cancel</button>
+      <button id="storeSaveBtn" class="btn">Save</button>
     </footer>
   </div>
 
