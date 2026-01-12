@@ -256,12 +256,23 @@ async function fetchWeekOverrides(empId, weekStart){
   const start = toISODate(weekStart);
   const end   = toISODate(addDays(weekStart, 6));
 
-  const { data, error } = await supabaseClient
+  // Try extended columns first (Phase 3)
+  let { data, error } = await supabaseClient
     .from('work_schedule_overrides')
-    .select('work_date, off, start_local, end_local, store_id, note')
+    .select('work_date, off, start_local, end_local, store_id, note, allow_any_store_in, allow_any_store_out, clock_in_store_id, clock_out_store_id')
     .eq('employee_id', empId)
     .gte('work_date', start)
     .lte('work_date', end);
+
+  // Backward-compatible fallback if your DB doesn’t have the new columns
+  if (error && /column .* does not exist/i.test(error.message || '')){
+    ({ data, error } = await supabaseClient
+      .from('work_schedule_overrides')
+      .select('work_date, off, start_local, end_local, store_id, note')
+      .eq('employee_id', empId)
+      .gte('work_date', start)
+      .lte('work_date', end));
+  }
 
   if (error) throw error;
 
@@ -269,7 +280,6 @@ async function fetchWeekOverrides(empId, weekStart){
   for (const r of (data || [])) byDate.set(r.work_date, r);
   return byDate;
 }
-
 
 function fmtTimeHM(ts){
   if (!ts) return '—';
@@ -286,15 +296,13 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     const iso = toISODate(day);
 
     const resolved = resolvedByDate.get(iso) || null; // { start_ts, end_ts, source, store_id }
-    const ov = overridesByDate.get(iso) || null;      // { off, start_local, end_local, store_id }
+    const ov = overridesByDate.get(iso) || null;      // { off, start_local, end_local, store_id, ...exceptions }
 
-    // Resolved slot (what will actually apply that day)
     const resolvedStr = resolved
       ? `${fmtTimeHM(resolved.start_ts)}–${fmtTimeHM(resolved.end_ts)}`
       : '—';
     const srcStr = resolved ? (resolved.source === 'override' ? 'override' : 'recurring') : '';
     const resolvedStoreLabel = resolved?.store_id ? storeName(resolved.store_id) : '—';
-
     const resolvedDirHref = resolved?.store_id ? storeDirectionsHref(resolved.store_id) : null;
 
     const resolvedHtml = `
@@ -307,28 +315,33 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
       </div>
     `;
 
-    // Prefill recurring only when resolved came from recurring (so overrides don't overwrite it)
     const recStartPrefill = (resolved && resolved.source === 'recurring')
       ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
       : '';
     const recEndPrefill = (resolved && resolved.source === 'recurring')
       ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
       : '';
-
-    // Prefill recurring store only when resolved came from recurring
     const recStorePrefill = (resolved && resolved.source === 'recurring') ? (resolved.store_id || '') : '';
 
-    // Override prefill
-    const ovOff   = ov?.off ? 'checked' : '';
+    const ovOff   = ov?.off ? true : false;
     const ovStart = ov?.start_local ? String(ov.start_local).slice(0,5) : '';
     const ovEnd   = ov?.end_local   ? String(ov.end_local).slice(0,5)   : '';
     const ovStore = ov?.store_id ? String(ov.store_id) : '';
+
+    // Phase 3 exception prefill (safe if columns missing)
+    const ovAnyIn  = !!ov?.allow_any_store_in;
+    const ovAnyOut = !!ov?.allow_any_store_out;
+    const ovInStore  = ov?.clock_in_store_id ? String(ov.clock_in_store_id) : '';
+    const ovOutStore = ov?.clock_out_store_id ? String(ov.clock_out_store_id) : '';
 
     const tr = document.createElement('tr');
     tr.className = 'sched-row';
 
     const recDir = storeDirectionsHref(recStorePrefill);
     const ovDir  = storeDirectionsHref(ovStore);
+
+    const inDir  = storeDirectionsHref(ovAnyIn ? '' : ovInStore);
+    const outDir = storeDirectionsHref(ovAnyOut ? '' : ovOutStore);
 
     tr.innerHTML = `
       <td class="day">${DOW[i]} ${day.getMonth()+1}/${day.getDate()}</td>
@@ -350,12 +363,12 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
         <div class="sched-buttons" style="margin-top:6px;">
           <button class="btn small" data-save-recurring="${i}">Save recurring</button>
           <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
-          </div>
+        </div>
       </td>
 
       <td>
         <div class="row">
-          <label><input type="checkbox" id="ovOff-${iso}" ${ovOff}> Off</label>
+          <label><input type="checkbox" id="ovOff-${iso}" ${ovOff ? 'checked' : ''}> Off</label>
           <input class="time" type="time" id="ovStart-${iso}" value="${ovStart}" ${ovOff ? 'disabled':''}>
           <span>–</span>
           <input class="time" type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
@@ -368,7 +381,38 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
           <a class="mini-link" id="ovDir-${iso}" href="${ovDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
         </div>
 
-        <div class="sched-buttons" style="margin-top:6px;">
+        <!-- Phase 3: per-day exceptions -->
+        <div class="ex-grid">
+          <div class="ex-block">
+            <div class="ex-title">Clock-in exception</div>
+            <div class="ex-row">
+              <label class="switch mini" style="margin:0;">
+                <input id="ovAnyIn-${iso}" type="checkbox" ${ovAnyIn ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                <span>Any store</span>
+              </label>
+              <select class="store" id="ovInStore-${iso}" ${ovOff || ovAnyIn ? 'disabled':''}>
+                ${storeOptionsHTML(ovInStore)}
+              </select>
+              <a class="mini-link" id="ovInDir-${iso}" href="${inDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+            </div>
+          </div>
+
+          <div class="ex-block">
+            <div class="ex-title">Clock-out exception</div>
+            <div class="ex-row">
+              <label class="switch mini" style="margin:0;">
+                <input id="ovAnyOut-${iso}" type="checkbox" ${ovAnyOut ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                <span>Any store</span>
+              </label>
+              <select class="store" id="ovOutStore-${iso}" ${ovOff || ovAnyOut ? 'disabled':''}>
+                ${storeOptionsHTML(ovOutStore)}
+              </select>
+              <a class="mini-link" id="ovOutDir-${iso}" href="${outDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="sched-buttons" style="margin-top:8px;">
           <button class="btn small" data-save-override="${iso}">Save override</button>
           <button class="btn small ghost" data-clear-override="${iso}">Clear override</button>
         </div>
@@ -379,9 +423,10 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
 
     tbody.appendChild(tr);
 
-    // Disable directions when no valid store is selected
     applyDirectionsLinkFromStoreId(recStorePrefill, qs(`recDir-${i}`));
     applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
+    applyDirectionsLinkFromStoreId(ovAnyIn ? '' : ovInStore, qs(`ovInDir-${iso}`));
+    applyDirectionsLinkFromStoreId(ovAnyOut ? '' : ovOutStore, qs(`ovOutDir-${iso}`));
   }
 }
 
@@ -500,6 +545,32 @@ async function clearRecurring(weekday){
   }
 }
 
+async function patchOverrideExceptionExtras(empId, workISO, extras){
+  // This tries to update the override row after your existing RPC runs.
+  // If the DB columns don’t exist yet, we fail silently (so you don’t brick the page).
+  const patch = {
+    allow_any_store_in: !!extras.allow_any_store_in,
+    allow_any_store_out: !!extras.allow_any_store_out,
+    clock_in_store_id: extras.clock_in_store_id || null,
+    clock_out_store_id: extras.clock_out_store_id || null
+  };
+
+  try {
+    const { error } = await supabaseClient
+      .from('work_schedule_overrides')
+      .update(patch)
+      .eq('employee_id', empId)
+      .eq('work_date', workISO);
+
+    // If the row doesn’t exist (or columns missing), don’t hard-fail
+    if (error && !/column .* does not exist/i.test(error.message || '')){
+      console.warn('patchOverrideExceptionExtras update error:', error);
+    }
+  } catch (e){
+    console.warn('patchOverrideExceptionExtras failed:', e);
+  }
+}
+
 
 async function saveOverride(workISO){
   const empId = schedEmpId;
@@ -512,13 +583,21 @@ async function saveOverride(workISO){
 
   const storeId = qs(`ovStore-${workISO}`)?.value || null;
 
+  // Phase 3 exception UI reads
+  const anyIn  = !!qs(`ovAnyIn-${workISO}`)?.checked;
+  const anyOut = !!qs(`ovAnyOut-${workISO}`)?.checked;
+
+  const inStore  = anyIn  ? null : (qs(`ovInStore-${workISO}`)?.value || null);
+  const outStore = anyOut ? null : (qs(`ovOutStore-${workISO}`)?.value || null);
+
   if (!off){
     if (!start || !end) return alert('Enter start and end time, or mark Off.');
     if (end <= start) return alert('End must be after start.');
     if (!storeId) return alert('Pick a store for this override.');
   }
 
-  const { error } = await supabaseClient.rpc('admin_set_override', {
+  // Base payload (existing RPC)
+  const base = {
     _employee_id: empId,
     _work_date: workISO,
     _off: off,
@@ -526,11 +605,44 @@ async function saveOverride(workISO){
     _end_local: end,
     _store_id: off ? null : storeId,
     _note: null
-  });
+  };
 
-  if (error) return alert('Override failed: ' + error.message);
+  // Try a v2 RPC first (if you created it in Supabase)
+  // If not available, fall back to old RPC + patch DB columns directly.
+  let usedV2 = false;
+
+  try {
+    const { error: v2Err } = await supabaseClient.rpc('admin_set_override_v2', {
+      ...base,
+      _allow_any_store_in: anyIn,
+      _allow_any_store_out: anyOut,
+      _clock_in_store_id: inStore,
+      _clock_out_store_id: outStore
+    });
+
+    if (!v2Err){
+      usedV2 = true;
+    }
+  } catch (e){
+    // ignore
+  }
+
+  if (!usedV2){
+    const { error } = await supabaseClient.rpc('admin_set_override', base);
+    if (error) return alert('Override failed: ' + error.message);
+
+    // Patch exception columns (if present)
+    await patchOverrideExceptionExtras(empId, workISO, {
+      allow_any_store_in: anyIn,
+      allow_any_store_out: anyOut,
+      clock_in_store_id: inStore,
+      clock_out_store_id: outStore
+    });
+  }
+
   await loadScheduleWeek();
 }
+
 
 
 async function clearOverride(workISO){
@@ -596,6 +708,7 @@ async function initSchedulePanel(){
   clearOverride(iso);
 }
 
+
   });
 
   // change handlers (Off toggle + store change → update directions)
@@ -614,6 +727,21 @@ async function initSchedulePanel(){
       if (s) s.disabled = on;
       if (en) en.disabled = on;
       if (st) st.disabled = on;
+
+
+      const anyIn = qs(`ovAnyIn-${iso}`);
+      const anyOut = qs(`ovAnyOut-${iso}`);
+      const inSel = qs(`ovInStore-${iso}`);
+      const outSel = qs(`ovOutStore-${iso}`);
+
+      if (anyIn) anyIn.disabled = on;
+      if (anyOut) anyOut.disabled = on;
+
+      if (inSel) inSel.disabled = on || !!anyIn?.checked;
+      if (outSel) outSel.disabled = on || !!anyOut?.checked;
+
+      applyDirectionsLinkFromStoreId(anyIn?.checked ? '' : inSel?.value, qs(`ovInDir-${iso}`));
+      applyDirectionsLinkFromStoreId(anyOut?.checked ? '' : outSel?.value, qs(`ovOutDir-${iso}`));
 
       // Also dim directions if disabled
       if (st) applyDirectionsLinkFromStoreId(st.value, qs(`ovDir-${iso}`));
@@ -635,6 +763,41 @@ async function initSchedulePanel(){
       applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovDir-${iso}`));
       return;
     }
+
+        // Phase 3: Any-store toggles → disable/enable specific store dropdowns + directions
+    if (id.startsWith('ovAnyIn-')){
+      const iso = id.slice('ovAnyIn-'.length);
+      const any = !!qs(`ovAnyIn-${iso}`)?.checked;
+      const selEl = qs(`ovInStore-${iso}`);
+      if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
+      applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovInDir-${iso}`));
+      return;
+    }
+
+    if (id.startsWith('ovAnyOut-')){
+      const iso = id.slice('ovAnyOut-'.length);
+      const any = !!qs(`ovAnyOut-${iso}`)?.checked;
+      const selEl = qs(`ovOutStore-${iso}`);
+      if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
+      applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovOutDir-${iso}`));
+      return;
+    }
+
+    // Phase 3: In/Out store changed → update directions
+    if (id.startsWith('ovInStore-')){
+      const iso = id.slice('ovInStore-'.length);
+      const selEl = qs(`ovInStore-${iso}`);
+      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovInDir-${iso}`));
+      return;
+    }
+
+    if (id.startsWith('ovOutStore-')){
+      const iso = id.slice('ovOutStore-'.length);
+      const selEl = qs(`ovOutStore-${iso}`);
+      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovOutDir-${iso}`));
+      return;
+    }
+
   });
 
   // selectors
@@ -892,12 +1055,11 @@ function renderStoresTable(){
     const lat = (s.lat == null) ? '—' : Number(s.lat).toFixed(5);
     const lng = (s.lng == null) ? '—' : Number(s.lng).toFixed(5);
     const dir = directionsUrl(s.lat, s.lng);
+
     const tr = document.createElement('tr');
     tr.dataset.storeId = s.id;
     tr.innerHTML = `
-      <td>
-        <div style="font-weight:600;">${s.name || '—'}</div>
-      </td>
+      <td><div style="font-weight:600;">${s.name || '—'}</div></td>
       <td>${storeStatusPill(!!s.active)}</td>
       <td><span class="coords">${lat}, ${lng}</span></td>
       <td>${s.radius_m ?? '—'}</td>
@@ -909,6 +1071,7 @@ function renderStoresTable(){
         <div class="store-actions">
           <button class="btn small" data-store-edit="${s.id}">Edit</button>
           <a class="btn small ghost" href="${dir}" target="_blank" rel="noopener">Directions</a>
+          <button class="btn small ghost" data-store-emerg="${s.id}">Emergency</button>
           <button class="btn small ghost" data-store-toggle="${s.id}">${s.active ? 'Deactivate' : 'Activate'}</button>
         </div>
       </td>
@@ -952,6 +1115,146 @@ async function toggleStoreActive(storeId){
   }
 }
 
+function setEmergError(msg){
+  const el = qs('emergError');
+  if (!el) return;
+  el.textContent = msg || '';
+  show(el, !!msg);
+}
+
+function openEmergModal(storeId){
+  setEmergError('');
+  const s = _allStores.find(x => x.id === storeId);
+  if (!s) return;
+
+  qs('emergStoreId').value = s.id;
+  qs('emergStoreName').textContent = s.name || '—';
+
+  const today = toISODate(new Date());
+  qs('emergStart').value = today;
+  qs('emergEnd').value = today;
+
+  // Populate store dropdowns
+  const opt = storeOptionsHTML('');
+  qs('emergInStore').innerHTML = opt;
+  qs('emergOutStore').innerHTML = opt;
+
+  qs('emergAnyIn').checked = false;
+  qs('emergAnyOut').checked = false;
+
+  qs('emergInStore').disabled = false;
+  qs('emergOutStore').disabled = false;
+
+  // Initial directions disabled until store chosen
+  applyDirectionsLinkFromStoreId('', qs('emergInDir'));
+  applyDirectionsLinkFromStoreId('', qs('emergOutDir'));
+
+  qs('emergReason').value = '';
+
+  qs('emergModal').classList.add('open');
+  qs('emergModal').classList.remove('hidden');
+  qs('emergModalBackdrop').classList.add('show');
+  qs('emergModalBackdrop').classList.remove('hidden');
+}
+
+function closeEmergModal(){
+  qs('emergModal').classList.remove('open');
+  qs('emergModalBackdrop').classList.remove('show');
+  setTimeout(() => {
+    qs('emergModal').classList.add('hidden');
+    qs('emergModalBackdrop').classList.add('hidden');
+  }, 180);
+}
+
+async function saveEmergException(){
+  setEmergError('');
+
+  const storeId = (qs('emergStoreId').value || '').trim();
+  const start = qs('emergStart').value; // YYYY-MM-DD
+  const end = qs('emergEnd').value;     // YYYY-MM-DD
+  if (!storeId) return setEmergError('Missing store id.');
+  if (!start || !end) return setEmergError('Start and end date are required.');
+  if (end < start) return setEmergError('End date must be on/after start date.');
+
+  const allowAnyIn = !!qs('emergAnyIn').checked;
+  const allowAnyOut = !!qs('emergAnyOut').checked;
+
+  const inStoreId = allowAnyIn ? null : (qs('emergInStore').value || null);
+  const outStoreId = allowAnyOut ? null : (qs('emergOutStore').value || null);
+
+  const note = (qs('emergReason').value || '').trim() || null;
+
+  // Build one row per day (Option A)
+  const rows = [];
+  for (const d of enumerateIsoDates(start, end)){
+    rows.push({
+      store_id: storeId,
+      work_date: d,
+      allow_clock_in_any_store: allowAnyIn,
+      clock_in_store_id: inStoreId,
+      allow_clock_out_any_store: allowAnyOut,
+      clock_out_store_id: outStoreId,
+      note
+    });
+  }
+
+  try{
+    const { error } = await supabaseClient
+      .from('timeclock_store_exceptions')
+      .upsert(rows, { onConflict: 'store_id,work_date' });
+
+    if (error) throw error;
+
+    showToast?.('Emergency exception saved', 'ok');
+    closeEmergModal();
+  }catch(e){
+    console.error(e);
+    setEmergError(e?.message || 'Failed to save emergency exception');
+  }
+}
+
+function enumerateIsoDates(startIso, endIso){
+  // inputs: 'YYYY-MM-DD' -> yields each day inclusive
+  const out = [];
+  const start = new Date(startIso + 'T00:00:00');
+  const end = new Date(endIso + 'T00:00:00');
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)){
+    out.push(d.toISOString().slice(0,10));
+  }
+  return out;
+}
+
+async function clearEmergException(){
+  setEmergError('');
+
+  const storeId = (qs('emergStoreId').value || '').trim();
+  const start = qs('emergStart').value;
+  const end = qs('emergEnd').value;
+
+  if (!storeId) return setEmergError('Missing store id.');
+  if (!start || !end) return setEmergError('Start and end date are required.');
+  if (end < start) return setEmergError('End date must be on/after start date.');
+
+  try{
+    const { error } = await supabaseClient
+      .from('timeclock_store_exceptions')
+      .delete()
+      .eq('store_id', storeId)
+      .gte('work_date', start)
+      .lte('work_date', end);
+
+    if (error) throw error;
+
+    showToast?.('Emergency exception cleared', 'ok');
+    closeEmergModal();
+  }catch(e){
+    console.error(e);
+    setEmergError(e?.message || 'Failed to clear emergency exception');
+  }
+}
+
+
+
 async function initStoresPanel(){
   if (_storesInitialized) return;
   _storesInitialized = true;
@@ -977,6 +1280,12 @@ async function initStoresPanel(){
       toggleStoreActive(tog.getAttribute('data-store-toggle'));
       return;
     }
+        const em = e.target.closest('[data-store-emerg]');
+    if (em){
+      openEmergModal(em.getAttribute('data-store-emerg'));
+      return;
+    }
+
   });
 
   // Modal close + save
@@ -984,6 +1293,34 @@ async function initStoresPanel(){
   qs('storeCancelBtn')?.addEventListener('click', closeStoreModal);
   qs('storeModalBackdrop')?.addEventListener('click', closeStoreModal);
   qs('storeSaveBtn')?.addEventListener('click', upsertStore);
+
+    // Emergency modal close + save
+  qs('emergCloseBtn')?.addEventListener('click', closeEmergModal);
+  qs('emergCancelBtn')?.addEventListener('click', closeEmergModal);
+  qs('emergModalBackdrop')?.addEventListener('click', closeEmergModal);
+  qs('emergSaveBtn')?.addEventListener('click', saveEmergException);
+
+  // Emergency modal live enable/disable + directions
+  qs('emergAnyIn')?.addEventListener('change', () => {
+    const any = !!qs('emergAnyIn').checked;
+    qs('emergInStore').disabled = any;
+    applyDirectionsLinkFromStoreId(any ? '' : qs('emergInStore').value, qs('emergInDir'));
+  });
+
+  qs('emergAnyOut')?.addEventListener('change', () => {
+    const any = !!qs('emergAnyOut').checked;
+    qs('emergOutStore').disabled = any;
+    applyDirectionsLinkFromStoreId(any ? '' : qs('emergOutStore').value, qs('emergOutDir'));
+  });
+
+  qs('emergInStore')?.addEventListener('change', () => {
+    applyDirectionsLinkFromStoreId(qs('emergInStore').value, qs('emergInDir'));
+  });
+
+  qs('emergOutStore')?.addEventListener('change', () => {
+    applyDirectionsLinkFromStoreId(qs('emergOutStore').value, qs('emergOutDir'));
+  });
+
 
   // Directions preview
   ['storeLat','storeLng'].forEach(id => qs(id)?.addEventListener('input', updateDirectionsPreview));

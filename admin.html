@@ -421,86 +421,6 @@
     </footer>
   </div>
 
-  <!-- Store Modal -->
-  <div id="storeModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
-  <div id="storeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
-    <header class="modal-header">
-      <h3 id="storeTitle">Store</h3>
-      <button id="storeCloseBtn" class="btn ghost" aria-label="Close">✕</button>
-    </header>
-
-    <section class="modal-body">
-      <input id="storeId" type="hidden" />
-
-      <label>
-        <span>Store name</span>
-        <input id="storeName" type="text" placeholder="e.g., OG Jewelry — Wynwood" required />
-      </label>
-
-      <div class="form-row">
-        <label>
-          <span>Latitude</span>
-          <input id="storeLat" type="number" step="any" placeholder="25.7617" required />
-        </label>
-        <label>
-          <span>Longitude</span>
-          <input id="storeLng" type="number" step="any" placeholder="-80.1918" required />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>
-          <span>Radius (meters)</span>
-          <input id="storeRadius" type="number" min="1" step="1" placeholder="50" required />
-        </label>
-        <label>
-          <span>Timezone</span>
-          <input id="storeTimezone" type="text" placeholder="America/New_York" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>
-          <span>Grace in (minutes)</span>
-          <input id="storeGraceIn" type="number" min="0" step="1" placeholder="5" />
-        </label>
-        <label>
-          <span>Grace out (minutes)</span>
-          <input id="storeGraceOut" type="number" min="0" step="1" placeholder="5" />
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label>
-          <span>Paid break cap (minutes)</span>
-          <input id="storePaidBreakCap" type="number" min="0" step="1" placeholder="30" />
-        </label>
-        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
-          <input id="storeScheduleEnforce" type="checkbox" />
-          <span>Enforce schedule rules</span>
-        </label>
-      </div>
-
-      <div class="form-row">
-        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
-          <input id="storeActive" type="checkbox" checked />
-          <span>Active</span>
-        </label>
-
-        <div style="display:flex; align-items:flex-end; justify-content:flex-end;">
-          <a id="storeDirLink" class="btn ghost" href="#" target="_blank" rel="noopener">Directions</a>
-        </div>
-      </div>
-
-      <div id="storeError" class="error hidden" role="alert"></div>
-    </section>
-
-    <footer class="modal-footer">
-      <button id="storeCancelBtn" class="btn ghost">Cancel</button>
-      <button id="storeSaveBtn" class="btn">Save</button>
-    </footer>
-  </div>
-
   <!-- Store Editor Modal -->
   <div id="storeModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
   <div id="storeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
@@ -579,6 +499,76 @@
       <button id="storeSaveBtn" class="btn">Save</button>
     </footer>
   </div>
+
+    <!-- Store Emergency Exception Modal -->
+  <div id="emergModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="emergModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="emergTitle">
+    <header class="modal-header">
+      <h3 id="emergTitle">Store emergency exception</h3>
+      <button id="emergCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+    </header>
+
+    <section class="modal-body">
+      <input id="emergStoreId" type="hidden" />
+      <div class="hint">
+        Store: <strong id="emergStoreName">—</strong>
+      </div>
+
+      <div class="form-row">
+        <label>
+          <span>Start date</span>
+          <input id="emergStart" type="date" required />
+        </label>
+        <label>
+          <span>End date</span>
+          <input id="emergEnd" type="date" required />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
+          <input id="emergAnyIn" type="checkbox" />
+          <span>Allow clock-in at ANY store</span>
+        </label>
+        <label class="switch" style="justify-content:flex-start; margin-top:18px;">
+          <input id="emergAnyOut" type="checkbox" />
+          <span>Allow clock-out at ANY store</span>
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="grow">
+          <span>Allow clock-in at this specific store (optional)</span>
+          <select id="emergInStore"></select>
+        </label>
+        <a id="emergInDir" class="btn ghost" href="#" target="_blank" rel="noopener">Directions</a>
+      </div>
+
+      <div class="form-row">
+        <label class="grow">
+          <span>Allow clock-out at this specific store (optional)</span>
+          <select id="emergOutStore"></select>
+        </label>
+        <a id="emergOutDir" class="btn ghost" href="#" target="_blank" rel="noopener">Directions</a>
+      </div>
+
+      <label>
+        <span>Reason (optional)</span>
+        <input id="emergReason" type="text" placeholder="e.g., Flooding at Wynwood, redirect to Downtown" />
+      </label>
+
+      <div id="emergError" class="error hidden" role="alert"></div>
+      <div class="hint muted">
+        Tip: For a one-day emergency, set Start date = End date.
+      </div>
+    </section>
+
+    <footer class="modal-footer">
+      <button id="emergCancelBtn" class="btn ghost">Cancel</button>
+      <button id="emergSaveBtn" class="btn">Save</button>
+    </footer>
+  </div>
+
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
