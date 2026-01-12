@@ -1977,10 +1977,79 @@ function wireDrawer(){
 let payWeeks=[], paySelected=null, payRows=[];
 function formatWeekRange(weekStartStr){ const s=new Date(weekStartStr+'T00:00:00'); const e=new Date(s); e.setDate(s.getDate()+6); const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return `${f(s)} — ${f(e)}`; }
 async function fetchWeekList(){
-  const get = async t => { const {data,error}=await supabaseClient.from(t).select('week_start').order('week_start',{descending:true}).limit(2000); if(error) throw error; return (data||[]).map(r=>r.week_start); };
-  let weeks=[]; try{ weeks=await get('mv_weekly_hours'); }catch(_e){}
-  if(!weeks.length){ const {data}=await supabaseClient.from('v_weekly_hours').select('week_start').order('week_start',{descending:true}).limit(2000); weeks=(data||[]).map(r=>r.week_start); }
-  const set=new Set(), out=[]; for(const w of weeks){ if(!set.has(w)){ set.add(w); out.push(w); } } return out;
+  // Build a week list that:
+  //  - ALWAYS includes the current week (even if no pay period exists yet)
+  //  - Includes weeks from pay_periods (so locked/open historical periods are navigable)
+  //  - Includes weeks from time_entries (so brand-new shifts show up immediately)
+  //  - Includes weeks from v_weekly_hours if present (legacy / compatibility)
+  const weeks = new Set();
+
+  // Always: current week
+  try{
+    weeks.add(toISODate(startOfWeekSun(new Date())));
+  }catch{}
+
+  // From pay periods (historical navigation)
+  try{
+    const { data, error } = await supabaseClient
+      .from('pay_periods')
+      .select('start_date,end_date')
+      .order('start_date', { ascending:false })
+      .limit(500);
+
+    if (!error && Array.isArray(data)){
+      for (const p of data){
+        if (!p?.start_date) continue;
+        const sd = new Date(p.start_date + 'T00:00:00');
+        const ed = new Date((p.end_date || p.start_date) + 'T00:00:00');
+        let ws = startOfWeekSun(sd);
+        while (ws <= ed){
+          weeks.add(toISODate(ws));
+          ws = addDays(ws, 7);
+        }
+      }
+    }
+  }catch{}
+
+  // From actual time entries (new shifts should appear immediately)
+  try{
+    const { data, error } = await supabaseClient
+      .from('time_entries')
+      .select('clock_in,clock_out')
+      .order('clock_in', { ascending:false })
+      .limit(2000);
+
+    if (!error && Array.isArray(data)){
+      for (const r of data){
+        if (r?.clock_in){
+          weeks.add(toISODate(startOfWeekSun(new Date(r.clock_in))));
+        }
+        if (r?.clock_out){
+          weeks.add(toISODate(startOfWeekSun(new Date(r.clock_out))));
+        }
+      }
+    }
+  }catch{}
+
+  // From weekly hours view (if it exists)
+  try{
+    const { data, error } = await supabaseClient
+      .from('v_weekly_hours')
+      .select('week_start')
+      .order('week_start', { ascending:false })
+      .limit(500);
+
+    if (!error && Array.isArray(data)){
+      for (const r of data){
+        if (r?.week_start) weeks.add(r.week_start);
+      }
+    }
+  }catch{}
+
+  // Final sort: newest first
+  const out = Array.from(weeks).filter(Boolean);
+  out.sort((a,b) => (a < b ? 1 : a > b ? -1 : 0));
+  return out;
 }
 
 // ===== Schedule: utilities & state =====
@@ -2082,52 +2151,183 @@ let schedWeekStart = startOfWeekSun(new Date());
 
 // Weekly payroll: include ALL active employees with zeros if absent
 async function fetchWeeklyHours(weekStartStr){
-  const [emps, viewResp] = await Promise.all([
-    getActiveEmployees(),
-    supabaseClient.from('v_weekly_hours')
-      .select('employee_id, regular_hours, overtime_hours, total_hours, week_start')
-      .eq('week_start', weekStartStr)
-  ]);
-  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
-  const rows = emps.map(e => {
-    const v = byId.get(e.id) || {};
-    return {
-      employee_id: e.id,
-      display_name: e.display_name,
-      week_start: weekStartStr,
-      regular_hours: v.regular_hours || 0,
-      overtime_hours: v.overtime_hours || 0,
-      total_hours: v.total_hours || 0
-    };
-  });
-  return { rows, source: 'view' };
+  // Try the view first; if it returns nothing (common when no pay_period exists yet),
+  // fallback to computing totals directly from time_entries + time_breaks.
+
+  // 1) View path
+  try{
+    const { data, error } = await supabaseClient
+      .from('v_weekly_hours')
+      .select('*')
+      .eq('week_start', weekStartStr);
+
+    if (!error && Array.isArray(data) && data.length){
+      return data;
+    }
+  }catch{}
+
+  // 2) Fallback: compute from time_entries + time_breaks
+  try{
+    const ws = new Date(weekStartStr + 'T00:00:00');
+    const we = addDays(ws, 7);
+    const wsIso = ws.toISOString();
+    const weIso = we.toISOString();
+
+    // Pull closed shifts that overlap [ws, we)
+    const { data: entries, error: eErr } = await supabaseClient
+      .from('time_entries')
+      .select('id, employee_id, clock_in, clock_out')
+      .not('clock_out', 'is', null)
+      .lt('clock_in', weIso)
+      .gt('clock_out', wsIso)
+      .order('clock_in', { ascending:true });
+
+    if (eErr) throw eErr;
+
+    if (!Array.isArray(entries) || entries.length === 0){
+      return []; // nothing to compute
+    }
+
+    const ids = entries.map(x => x.id);
+
+    const { data: breaks, error: bErr } = await supabaseClient
+      .from('time_breaks')
+      .select('time_entry_id, started_at, ended_at')
+      .in('time_entry_id', ids)
+      .not('ended_at', 'is', null);
+
+    if (bErr) throw bErr;
+
+    const breaksByEntry = new Map();
+    for (const b of (breaks || [])){
+      if (!breaksByEntry.has(b.time_entry_id)) breaksByEntry.set(b.time_entry_id, []);
+      breaksByEntry.get(b.time_entry_id).push(b);
+    }
+
+    const totals = new Map(); // employee_id -> hours
+    const clampMs = (t, lo, hi) => Math.max(lo, Math.min(hi, t));
+
+    for (const t of entries){
+      const ci = new Date(t.clock_in).getTime();
+      const co = new Date(t.clock_out).getTime();
+      const w0 = ws.getTime();
+      const w1 = we.getTime();
+
+      // Clamp shift to week window
+      const s0 = clampMs(ci, w0, w1);
+      const s1 = clampMs(co, w0, w1);
+      let ms = Math.max(0, s1 - s0);
+
+      // Subtract breaks (clamped to same window)
+      const bs = breaksByEntry.get(t.id) || [];
+      for (const br of bs){
+        const bi = new Date(br.started_at).getTime();
+        const bo = new Date(br.ended_at).getTime();
+        const b0 = clampMs(bi, s0, s1);
+        const b1 = clampMs(bo, s0, s1);
+        ms -= Math.max(0, b1 - b0);
+      }
+
+      const hrs = Math.max(0, ms / 3600000);
+      totals.set(t.employee_id, (totals.get(t.employee_id) || 0) + hrs);
+    }
+
+    // Shape rows like the view (enough fields for your renderer)
+    const rows = [];
+    for (const [employee_id, total_hours] of totals.entries()){
+      const regular_hours = Math.min(total_hours, 40);
+      const overtime_hours = Math.max(0, total_hours - 40);
+
+      rows.push({
+        week_start: weekStartStr,
+        employee_id,
+        regular_hours,
+        overtime_hours,
+        total_hours,
+      });
+    }
+
+    return rows;
+  }catch(err){
+    console.error('fetchWeeklyHours fallback failed', err);
+    return [];
+  }
 }
 
 function renderPayWeekOptions(){
   const sel=qs('payWeekSelect'); sel.innerHTML=''; for(const w of payWeeks){ const o=document.createElement('option'); o.value=w; o.textContent=formatWeekRange(w); sel.appendChild(o); }
   if (paySelected) sel.value=paySelected;
 }
-function renderPayKPIs(rows){
-  const reg=rows.reduce((a,r)=>a+(+r.regular_hours||0),0), ot=rows.reduce((a,r)=>a+(+r.overtime_hours||0),0), tot=rows.reduce((a,r)=>a+(+r.total_hours||0),0);
-  qs('payTotalReg').textContent=fmtHours(reg); qs('payTotalOT').textContent=fmtHours(ot); qs('payTotalAll').textContent=fmtHours(tot);
+function renderPayKPIs(rows) {
+  const regEl = qs('payTotalReg');
+  const otEl  = qs('payTotalOT');
+  const allEl = qs('payTotalAll');
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    regEl.textContent = '—';
+    otEl.textContent  = '—';
+    allEl.textContent = '—';
+    return;
+  }
+
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.reg += Number(r.regular_hours) || 0;
+      acc.ot  += Number(r.overtime_hours) || 0;
+      return acc;
+    },
+    { reg: 0, ot: 0 }
+  );
+
+  regEl.textContent = totals.reg.toFixed(2);
+  otEl.textContent  = totals.ot.toFixed(2);
+  allEl.textContent = (totals.reg + totals.ot).toFixed(2);
 }
+
+
 function renderPayTable(rows){
   const tb=qs('payTbody'); tb.innerHTML=''; if(!rows.length){ tb.innerHTML=`<tr><td colspan="4" class="muted">No data for this week.</td></tr>`; return; }
   for(const r of rows){ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.display_name||'—'}</td><td>${fmtHours(r.regular_hours)}</td><td>${fmtHours(r.overtime_hours)}</td><td>${fmtHours(r.total_hours)}</td>`; tb.appendChild(tr); }
 }
-async function loadPayroll(){
-  if(!paySelected){ qs('payTbody').innerHTML=`<tr><td colspan="4" class="muted">Pick a week.</td></tr>`; return; }
-  qs('payWeekLabel').textContent = formatWeekRange(paySelected); qs('payTbody').style.opacity='0.6';
-  try{
-    const { rows } = await fetchWeeklyHours(paySelected); payRows=rows;
-    renderPayKPIs(rows); renderPayTable(rows);
-    await updatePeriodForSelectedWeek(); // NEW: sync period UI
-  }catch(err){
-    console.error(err);
-    qs('payTbody').innerHTML = `<tr><td colspan="4" class="muted">Error loading payroll.</td></tr>`;
-    qs('payTotalReg').textContent=qs('payTotalOT').textContent=qs('payTotalAll').textContent='—';
-  }finally{ qs('payTbody').style.opacity='1'; }
+
+async function loadPayroll() {
+  if (!paySelected) {
+    qs('payTbody').innerHTML =
+      `<tr><td colspan="4" class="muted">Pick a week.</td></tr>`;
+    return;
+  }
+
+  qs('payWeekLabel').textContent = formatWeekRange(paySelected);
+  qs('payTbody').style.opacity = '0.6';
+
+  try {
+    const result = await fetchWeeklyHours(paySelected);
+
+    // ✅ HARD GUARANTEE: rows is always an array
+    const rows = Array.isArray(result) ? result : [];
+    payRows = rows;
+
+    renderPayKPIs(rows);
+    renderPayTable(rows);
+
+    // ✅ Period UI must update even if rows = []
+    await updatePeriodForSelectedWeek();
+
+  } catch (err) {
+    console.error('loadPayroll failed:', err);
+
+    qs('payTbody').innerHTML =
+      `<tr><td colspan="4" class="muted">Error loading payroll.</td></tr>`;
+
+    qs('payTotalReg').textContent =
+      qs('payTotalOT').textContent =
+      qs('payTotalAll').textContent = '—';
+  } finally {
+    qs('payTbody').style.opacity = '1';
+  }
 }
+
+
 async function bootPayroll(){
   payWeeks = await fetchWeekList();
   if (payWeeks.length){ paySelected = payWeeks[0]; renderPayWeekOptions(); qs('payWeekLabel').textContent = formatWeekRange(paySelected); await loadPayroll(); }
