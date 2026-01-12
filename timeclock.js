@@ -24,6 +24,180 @@ let breakActiveMs = 0;             // ticking while a break is open
 let breakTickTimer = null;         // setInterval handle
 let todayBreaks = [];              // rows for the Breaks Today table
 
+// ===== Phase 4: Store context + auto store selection =====
+let activeStores = [];
+let storeById = new Map();
+
+let todayScheduleRow = null;   // get_employee_schedule row for today (if any)
+let todayExceptionRow = null;  // timeclock_day_exceptions row for today (if any)
+
+function haversineMeters(lat1, lon1, lat2, lon2){
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+async function fetchActiveStores(){
+  const { data, error } = await supabaseClient
+    .from('store_locations')
+    .select('id, name, lat, lng, radius_m, active, paid_break_cap_min')
+    .eq('active', true)
+    .order('created_at', { ascending: true });
+  if (error) { console.error('fetchActiveStores', error); return; }
+  activeStores = data || [];
+  storeById = new Map(activeStores.map(s => [s.id, s]));
+}
+
+function directionsUrlForStore(store){
+  if (!store) return '';
+  const lat = Number(store.lat);
+  const lng = Number(store.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lat + ',' + lng)}`;
+}
+
+function fmtStoreLabel(store){
+  if (!store) return '—';
+  return store.name || 'Store';
+}
+
+async function fetchTodayScheduleAndExceptions(){
+  if (!currentEmployee?.id) return;
+  const now = new Date();
+  const todayISO = toISODate(now);
+
+  // Schedule (today)
+  try{
+    const { data, error } = await supabaseClient.rpc('get_employee_schedule', {
+      _employee_id: currentEmployee.id,
+      _start: todayISO,
+      _end: todayISO
+    });
+    if (error) throw error;
+    todayScheduleRow = (data && data.length) ? data[0] : null;
+  }catch(e){
+    console.warn('fetch today schedule failed', e);
+    todayScheduleRow = null;
+  }
+
+  // Day exception (today)
+  try{
+    const { data, error } = await supabaseClient
+      .from('timeclock_day_exceptions')
+      .select('allow_clock_in_any_store, clock_in_store_id, allow_clock_out_any_store, clock_out_store_id, note')
+      .eq('employee_id', currentEmployee.id)
+      .eq('work_date', todayISO)
+      .maybeSingle();
+    if (error) throw error;
+    todayExceptionRow = data || null;
+  }catch(e){
+    // If table isn't readable due to RLS, we still work (server enforces).
+    todayExceptionRow = null;
+  }
+}
+
+function pickNearestStoreWithinRadius(lat, lng){
+  if (!activeStores.length) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const s of activeStores){
+    const d = haversineMeters(lat, lng, Number(s.lat), Number(s.lng));
+    if (d < bestD){ bestD = d; best = s; }
+  }
+  if (!best) return null;
+  const r = Number(best.radius_m ?? 0);
+  if (Number.isFinite(r) && r > 0 && bestD <= r) return { store: best, distance_m: bestD };
+  return { store: best, distance_m: bestD };
+}
+
+async function getOpenShiftRow(){
+  const { data, error } = await supabaseClient
+    .from('time_entries')
+    .select('id, store_id')
+    .eq('employee_id', currentEmployee.id)
+    .is('clock_out', null)
+    .order('clock_in', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+/**
+ * Decide what store_id to pass to Supabase for this action.
+ * The database remains the source of truth (it can still reject / override).
+ */
+async function resolveStoreForAction(kind, geo){
+  // kind: 'in' | 'out'
+  const exc = todayExceptionRow || null;
+
+  // If we're clocking OUT, prefer the open shift store unless an out-exception exists.
+  if (kind === 'out'){
+    if (exc?.allow_clock_out_any_store){
+      const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
+      return {
+        store_id: picked?.store?.id || null,
+        store: picked?.store || null,
+        hint: 'Clock-out exception: any store allowed',
+        distance_m: picked?.distance_m ?? null
+      };
+    }
+    if (exc?.clock_out_store_id){
+      const s = storeById.get(exc.clock_out_store_id) || null;
+      return { store_id: exc.clock_out_store_id, store: s, hint: 'Clock-out exception: specific store', distance_m: null };
+    }
+    const open = await getOpenShiftRow();
+    const sid = open?.store_id || todayScheduleRow?.store_id || null;
+    const s = sid ? (storeById.get(sid) || null) : null;
+    return { store_id: sid, store: s, hint: sid ? 'Clock-out at your shift store' : 'Clock-out store unknown', distance_m: null };
+  }
+
+  // Clocking IN
+  if (exc?.allow_clock_in_any_store){
+    const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
+    return {
+      store_id: picked?.store?.id || null,
+      store: picked?.store || null,
+      hint: 'Clock-in exception: any store allowed',
+      distance_m: picked?.distance_m ?? null
+    };
+  }
+  if (exc?.clock_in_store_id){
+    const s = storeById.get(exc.clock_in_store_id) || null;
+    return { store_id: exc.clock_in_store_id, store: s, hint: 'Clock-in exception: specific store', distance_m: null };
+  }
+
+  // Default: must be assigned by schedule
+  const sid = todayScheduleRow?.store_id || null;
+  const s = sid ? (storeById.get(sid) || null) : null;
+  return { store_id: sid, store: s, hint: sid ? 'Assigned store (schedule)' : 'No store assigned today', distance_m: null };
+}
+
+function renderStoreContextLine(store, hint){
+  const textEl = qs('storeContextText');
+  const hintEl = qs('storeContextHint');
+  const linkEl = qs('storeDirectionsLink');
+
+  if (textEl) textEl.textContent = fmtStoreLabel(store);
+  if (hintEl) hintEl.textContent = hint || '';
+
+  const url = directionsUrlForStore(store);
+  if (linkEl){
+    if (url){
+      linkEl.href = url;
+      linkEl.classList.remove('hidden');
+    } else {
+      linkEl.removeAttribute('href');
+      linkEl.classList.add('hidden');
+    }
+  }
+}
+
 
 async function fetchBreakCap(){
   try {
@@ -285,6 +459,13 @@ async function hydrate(){
     qs('displayName').textContent = emp.display_name;
     show(qs('clockSection'), true);
 
+    // Phase 4: preload stores + today's schedule/exception so we can show store context
+    await fetchActiveStores();
+    await fetchTodayScheduleAndExceptions();
+    // Default display: assigned store from schedule (if any)
+    const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
+    renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
+
     await refreshShiftStatus();
     await refreshBreakStatus();
     await loadToday();
@@ -300,7 +481,7 @@ async function hydrate(){
 async function refreshShiftStatus(){
   const { data, error } = await supabaseClient
     .from('time_entries')
-    .select('id, clock_in, clock_out')
+    .select('id, clock_in, clock_out, store_id')
     .eq('employee_id', currentEmployee.id)
     .is('clock_out', null)
     .order('clock_in', { ascending: false })
@@ -315,10 +496,18 @@ async function refreshShiftStatus(){
     pill.textContent = `Clocked in since ${fmt(open.clock_in)}`;
     pill.style.borderColor = 'var(--ok)';
     btn.textContent = 'Clock Out';
+
+    // Phase 4: show store for active shift
+    const s = open.store_id ? (storeById.get(open.store_id) || null) : (todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null);
+    renderStoreContextLine(s, s ? 'Active shift store' : 'Active shift (store unknown)');
   } else {
     pill.textContent = 'Not clocked in';
     pill.style.borderColor = 'var(--border)';
     btn.textContent = 'Clock In';
+
+    // Phase 4: fall back to schedule assignment for today
+    const assigned = todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null;
+    renderStoreContextLine(assigned, assigned ? 'Assigned store (schedule)' : 'No store assigned today');
   }
 }
 
@@ -387,6 +576,23 @@ async function onClockAction(){
       .is('clock_out', null).limit(1);
     const kind = (openRows && openRows.length) ? 'out' : 'in';
 
+    // Refresh today's schedule/exception (in case admin changed it)
+    await fetchTodayScheduleAndExceptions();
+
+    // Decide store_id to pass to DB
+    const storeRes = await resolveStoreForAction(kind, geo);
+    if (kind === 'in' && !storeRes.store_id){
+      renderStoreContextLine(null, 'No store assigned today — contact a manager');
+      alert('You are not assigned to any store today. Ask a manager to assign you (or add a day exception).');
+      return;
+    }
+
+    // Show the resolved store in the UI (nice feedback)
+    const distTxt = (storeRes?.distance_m != null)
+      ? ` (distance ~${Math.round(storeRes.distance_m)}m)`
+      : '';
+    renderStoreContextLine(storeRes.store || (storeRes.store_id ? (storeById.get(storeRes.store_id) || null) : null), (storeRes.hint || '') + distTxt);
+
     // Require photo first
     const blob = await awaitPhoto(kind);
     const photoPath = await uploadPhotoBlob(kind, blob);
@@ -397,13 +603,13 @@ async function onClockAction(){
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
-        _photo_path: photoPath, _store_id: null
+        _photo_path: photoPath, _store_id: storeRes.store_id
       }));
     } else {
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_out_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
-        _photo_path: photoPath, _store_id: null
+        _photo_path: photoPath, _store_id: storeRes.store_id
       }));
     }
     if (err){ alert(err.message || 'Clock action blocked.'); return; }
@@ -453,6 +659,12 @@ async function fetchMyScheduleWeek(){
 
 function fmtHM(ts){ if(!ts) return '—'; const d=new Date(ts); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
 
+function escHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[ch]));
+}
+
 function renderMySchedule(byDate){
   const grid = document.getElementById('wsGrid');
   const label = document.getElementById('wsWeekLabel');
@@ -467,6 +679,13 @@ function renderMySchedule(byDate){
 
     const cell = document.createElement('div');
     cell.className = 'cal-day';
+    const storeObj = r?.store_id ? (storeById.get(r.store_id) || null) : null;
+    const storeName = storeObj?.name ? escHtml(storeObj.name) : (r?.store_id ? 'Store' : '');
+    const dirUrl = directionsUrlForStore(storeObj);
+    const storeLine = r ? (r.store_id ? `<div class="muted" style="font-size:12px;margin-top:4px;">
+        Store: ${storeName}${dirUrl ? ` · <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}
+      </div>` : '') : '';
+
     cell.innerHTML = `
       <div class="cal-day-header">
         <span class="cal-date">${day.getMonth()+1}/${day.getDate()}</span>
@@ -475,6 +694,7 @@ function renderMySchedule(byDate){
         ${r ? `<div class="cal-slot">
                  <span class="time">${fmtHM(r.start_ts)}–${fmtHM(r.end_ts)}</span>
                  <span class="note">${r.source === 'override' ? '(override)' : ''}</span>
+                 ${storeLine}
                </div>` : `<div class="muted" style="font-size:12px;">—</div>`}
       </div>
     `;
@@ -507,6 +727,19 @@ async function onBreakAction(){
     if (openErr) throw openErr;
     if (!openShiftId) { alert('No open shift to take a break. Clock in first.'); return; }
 
+    // Phase 4: determine store_id for break validation (prefer the shift's store)
+    await fetchActiveStores();
+    await fetchTodayScheduleAndExceptions();
+    let shiftStoreId = null;
+    try{
+      const { data: openShiftRow } = await supabaseClient
+        .from('time_entries')
+        .select('id, store_id')
+        .eq('id', openShiftId)
+        .maybeSingle();
+      shiftStoreId = openShiftRow?.store_id || null;
+    }catch(_){ /* ignore */ }
+
     // 2) Geo
     const pos = await new Promise((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -514,6 +747,18 @@ async function onBreakAction(){
       });
     });
     const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+
+    // If we still don't know the shift store, fall back to today's assigned store, then nearest store.
+    if (!shiftStoreId) shiftStoreId = todayScheduleRow?.store_id || null;
+    if (!shiftStoreId) {
+      const nearest = pickNearestActiveStore(lat, lng);
+      if (nearest?.store && (nearest.distance_m <= (nearest.store.radius_m ?? 0))) {
+        shiftStoreId = nearest.store.id;
+      }
+    }
+
+    const shiftStoreObj = shiftStoreId ? (storeById.get(shiftStoreId) || null) : null;
+    if (shiftStoreObj) renderStoreContextLine(shiftStoreObj, 'Breaks use active shift store');
 
     // 3) Determine phase and require photo BEFORE RPC
     const { data: openBreakList } = await supabaseClient
@@ -537,12 +782,12 @@ async function onBreakAction(){
     if (!hasOpenBreak) {
       ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('start_break_now_geo', {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
-        _photo_path: photoPath, _store_id: null
+        _photo_path: photoPath, _store_id: shiftStoreId
       }));
     } else {
       ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('end_break_now_geo', {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
-        _photo_path: photoPath, _store_id: null
+        _photo_path: photoPath, _store_id: shiftStoreId
       }));
     }
     if (rpcErr){ alert(rpcErr.message); return; }
@@ -580,7 +825,7 @@ async function loadToday(){
     // A) Today’s shifts (include photo paths)
     const { data: entries, error: eErr } = await supabaseClient
       .from('time_entries')
-      .select('id, clock_in, clock_out, photo_in_path, photo_out_path')
+      .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
       .eq('employee_id', currentEmployee.id)
       .gte('clock_in', dayStart.toISOString())
       .lt('clock_in', dayEnd.toISOString())
@@ -633,11 +878,18 @@ async function loadToday(){
     // E) Render today's shifts table
     if (tbody){
       tbody.innerHTML = '';
+      if (!rows.length){
+        tbody.innerHTML = `<tr><td colspan="6" class="muted">No shifts yet today.</td></tr>`;
+      }
       for (const r of rows){
         const tr = document.createElement('tr');
         const endTs = r.clock_out ? new Date(r.clock_out) : new Date();
         const durMs = endTs - new Date(r.clock_in);
+        const storeObj = r.store_id ? (storeById.get(r.store_id) || null) : null;
+        const storeName = storeObj?.name ? escHtml(storeObj.name) : '—';
+        const dirUrl = directionsUrlForStore(storeObj);
         tr.innerHTML = `
+          <td class="store-cell">${storeObj ? `${storeName}${dirUrl ? ` <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</td>
           <td>${new Date(r.clock_in).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</td>
           <td>${r.clock_out ? new Date(r.clock_out).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—'}</td>
           <td>${fmtDur(durMs)}</td>

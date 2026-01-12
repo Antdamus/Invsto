@@ -14,6 +14,28 @@ function waitForSupabaseReady() {
   });
 }
 
+/* ---------- Phase 4: Store lookup (name + directions) ---------- */
+let activeStores = [];
+let storeById = new Map();
+
+function directionsUrlForStore(store) {
+  if (!store || store.lat == null || store.lng == null) return null;
+  const lat = encodeURIComponent(String(store.lat));
+  const lng = encodeURIComponent(String(store.lng));
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat}%2C${lng}`;
+}
+
+async function fetchActiveStores() {
+  const { data, error } = await window.supabase
+    .from("store_locations")
+    .select("id, name, lat, lng, radius_m, paid_break_cap_min, active")
+    .eq("active", true)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  activeStores = Array.isArray(data) ? data : [];
+  storeById = new Map(activeStores.map(s => [s.id, s]));
+}
+
 /** ---------- Time helpers (local timezone, consistent with existing UI defaults) ---------- */
 function startOfTodayLocal(d = new Date()) {
   const x = new Date(d);
@@ -116,6 +138,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
           <thead>
             <tr>
               <th>Date</th>
+              <th>Store</th>
               <th>Clock In</th>
               <th>Clock Out</th>
               <th>Worked (Net)</th>
@@ -124,7 +147,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
             </tr>
           </thead>
           <tbody>
-            <tr><td colspan="6" style="opacity:0.75;">No shifts in this month.</td></tr>
+            <tr><td colspan="7" style="opacity:0.75;">No shifts in this month.</td></tr>
           </tbody>
         </table>
       </div>
@@ -135,6 +158,13 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
   const rows = entries.map(e => {
     const net = fmtHM(perEntryNetMs[e.id] ?? 0);
     const brk = fmtHM(perEntryBreakMs[e.id] ?? 0);
+
+    const store = e.store_id ? storeById.get(e.store_id) : null;
+    const storeName = store?.name ? String(store.name) : "—";
+    const dirUrl = directionsUrlForStore(store);
+    const storeCell = dirUrl
+      ? `${storeName} <a href="${dirUrl}" target="_blank" rel="noopener" style="margin-left:6px; opacity:0.85;">Directions</a>`
+      : storeName;
 
     const outText = e.clock_out ? fmtTime(e.clock_out) : "In progress";
     const flags = [];
@@ -149,6 +179,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
     return `
       <tr>
         <td>${fmtDate(e.clock_in)}</td>
+        <td>${storeCell}</td>
         <td>${fmtTime(e.clock_in)}</td>
         <td>${outText}</td>
         <td>${net}</td>
@@ -164,6 +195,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
         <thead>
           <tr>
             <th>Date</th>
+            <th>Store</th>
             <th>Clock In</th>
             <th>Clock Out</th>
             <th>Worked (Net)</th>
@@ -434,7 +466,8 @@ function updateStatusCard({
   $("break-sofar").textContent = openBreak ? fmtHM(breakSoFarMs) : "—";
 
   const usedMin = Math.floor(breakTodayMs / 60000);
-  const cap = breakCapMin || 30;
+  const shiftStore = openShift?.store_id ? storeById.get(openShift.store_id) : null;
+  const cap = (shiftStore?.paid_break_cap_min ?? breakCapMin ?? 30);
   const remainingMin = Math.max(0, cap - usedMin);
 
   $("break-cap-today").textContent = `${cap}m`;
@@ -442,7 +475,14 @@ function updateStatusCard({
 
   const note = $("status-note");
   if (note) {
-    note.textContent = "Tip: Worked hours are net (breaks removed). Use the month selector to review history.";
+    const storeName = shiftStore?.name ? String(shiftStore.name) : null;
+    const dirUrl = directionsUrlForStore(shiftStore);
+
+    const storeHtml = storeName
+      ? `Current store: <strong>${storeName}</strong>${dirUrl ? ` · <a href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ""}<br>`
+      : "";
+
+    note.innerHTML = `${storeHtml}Tip: Worked hours are net (breaks removed). Use the month selector to review history.`;
   }
 }
 
@@ -478,6 +518,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();
+
+    // Phase 4: store lookup for labels + per-store break cap/directions
+    await fetchActiveStores();
 
     // 3) Month options from employee.created_at -> current month
     state.months = buildMonthOptions(employee.created_at);

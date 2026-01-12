@@ -34,10 +34,21 @@
 
       <div class="geo-row">Location: <span id="geoText">—</span></div>
 
+      <!-- Phase 4: store assignment + directions -->
+      <div class="store-row" id="storeRow">
+        <div class="store-left">
+          <div class="muted" style="font-size:13px;">Store for this shift</div>
+          <div id="storeContextText" class="store-line">—</div>
+          <div id="storeContextHint" class="muted" style="font-size:12px; margin-top:4px;"></div>
+        </div>
+        <a id="storeDirectionsLink" class="btn ghost hidden" target="_blank" rel="noopener">Directions</a>
+      </div>
+
       <h3>Today</h3>
       <table class="table">
         <thead>
           <tr>
+            <th>Store</th>
             <th>Clock In</th>
             <th>Clock Out</th>
             <th>Duration</th>
