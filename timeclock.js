@@ -31,6 +31,99 @@ let storeById = new Map();
 let todayScheduleRow = null;   // get_employee_schedule row for today (if any)
 let todayExceptionRow = null;  // timeclock_day_exceptions row for today (if any)
 
+const ANOMALY_LABEL = {
+  UNSCHEDULED_DAY: "Unscheduled",
+  EARLY_CLOCK_IN: "Early In",
+  LATE_CLOCK_IN: "Late In",
+  EARLY_CLOCK_OUT: "Early Out",
+  LATE_CLOCK_OUT: "Late Out",
+};
+
+async function fetchMyTimeEntriesWeek(){
+  if (!currentEmployee?.id) return { entries: [], anomalyMap: {} };
+
+  const start = new Date(wsWeekStart);
+  start.setHours(0,0,0,0);
+  const end = addDays(wsWeekStart, 7);
+  end.setHours(0,0,0,0);
+
+  const { data, error } = await supabaseClient
+    .from("time_entries")
+    .select("id, clock_in, clock_out")
+    .eq("employee_id", currentEmployee.id)
+    .gte("clock_in", start.toISOString())
+    .lt("clock_in", end.toISOString())
+    .order("clock_in", { ascending: true });
+
+  if (error){
+    console.warn("fetchMyTimeEntriesWeek failed:", error);
+    return { entries: [], anomalyMap: {} };
+  }
+
+  const entries = data || [];
+  const ids = entries.map(e => e.id);
+  const anomalyMap = await loadAnomaliesForEntryIds(ids);
+
+  return { entries, anomalyMap };
+}
+
+function isoDateLocalFromTs(ts){
+  const d = new Date(ts);
+  return toISODate(d); // uses your existing toISODate()
+}
+
+
+function anomalyTone(code){
+  if (code === "LATE_CLOCK_IN" || code === "EARLY_CLOCK_OUT") return "bad";
+  if (code === "EARLY_CLOCK_IN" || code === "LATE_CLOCK_OUT") return "warn";
+  if (code === "UNSCHEDULED_DAY") return "warn";
+  return "warn";
+}
+
+function renderAnomalyBadges(anomalies){
+  if (!Array.isArray(anomalies) || anomalies.length === 0) return "";
+  return anomalies.map(code => {
+    const label = ANOMALY_LABEL[code] || code;
+    const tone = anomalyTone(code);
+    return `<span class="badge ${tone}" title="${code}">${label}</span>`;
+  }).join(" ");
+}
+
+function chunkIds(arr, size = 75){
+  const out = [];
+  for (let i=0;i<arr.length;i+=size) out.push(arr.slice(i, i+size));
+  return out;
+}
+
+async function loadAnomaliesForEntryIds(entryIds){
+  // returns object map: { [time_entry_id]: { anomalies:[], has_anomaly:true/false } }
+  const out = {};
+  const ids = (entryIds || []).filter(Boolean);
+  if (!ids.length) return out;
+
+  for (const batch of chunkIds(ids, 75)){
+    const { data, error } = await supabaseClient
+      .from("v_shift_anomalies")
+      .select("time_entry_id, anomalies, has_anomaly")
+      .in("time_entry_id", batch);
+
+    if (error){
+      console.warn("loadAnomaliesForEntryIds failed:", error);
+      continue;
+    }
+
+    (data || []).forEach(r => {
+      out[r.time_entry_id] = {
+        anomalies: Array.isArray(r.anomalies) ? r.anomalies : [],
+        has_anomaly: !!r.has_anomaly
+      };
+    });
+  }
+
+  return out;
+}
+
+
 function haversineMeters(lat1, lon1, lat2, lon2){
   const toRad = (d) => (d * Math.PI) / 180;
   const R = 6371000;
@@ -665,7 +758,8 @@ function escHtml(s){
   }[ch]));
 }
 
-function renderMySchedule(byDate){
+function renderMySchedule(byDate, weekEntries = [], anomalyMap = {}){
+
   const grid = document.getElementById('wsGrid');
   const label = document.getElementById('wsWeekLabel');
   if (label) label.textContent = weekLabel(wsWeekStart);
@@ -675,6 +769,20 @@ function renderMySchedule(byDate){
   for (let i=0;i<7;i++){
     const day = addDays(wsWeekStart, i);
     const iso = toISODate(day);
+    const dayEntryIds = (weekEntries || [])
+  .filter(te => isoDateLocalFromTs(te.clock_in) === iso)
+  .map(te => te.id);
+
+const dayAnoms = [];
+for (const id of dayEntryIds){
+  const a = anomalyMap?.[id];
+  if (a?.anomalies?.length) dayAnoms.push(...a.anomalies);
+}
+
+// de-dupe
+const uniq = [...new Set(dayAnoms)];
+const flagsHtml = uniq.length ? `<div class="cal-flags" style="margin-top:6px;">${renderAnomalyBadges(uniq)}</div>` : "";
+
     const r = byDate.get(iso) || null;
 
     const cell = document.createElement('div');
@@ -695,6 +803,7 @@ function renderMySchedule(byDate){
                  <span class="time">${fmtHM(r.start_ts)}–${fmtHM(r.end_ts)}</span>
                  <span class="note">${r.source === 'override' ? '(override)' : ''}</span>
                  ${storeLine}
+                 ${flagsHtml}
                </div>` : `<div class="muted" style="font-size:12px;">—</div>`}
       </div>
     `;
@@ -704,13 +813,15 @@ function renderMySchedule(byDate){
 
 async function loadMySchedule(){
   try{
-    const map = await fetchMyScheduleWeek();
-    renderMySchedule(map);
+    const schedMap = await fetchMyScheduleWeek();
+    const { entries, anomalyMap } = await fetchMyTimeEntriesWeek();
+    renderMySchedule(schedMap, entries, anomalyMap);
     document.getElementById('schedSection')?.classList.remove('hidden');
   }catch(err){
     console.error('loadMySchedule failed', err);
   }
 }
+
 
 
 async function onBreakAction(){
@@ -825,7 +936,7 @@ async function loadToday(){
     // A) Today’s shifts (include photo paths)
     const { data: entries, error: eErr } = await supabaseClient
       .from('time_entries')
-      .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
+      .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path, geo_ok_in, geo_ok_out, schedule_codes')
       .eq('employee_id', currentEmployee.id)
       .gte('clock_in', dayStart.toISOString())
       .lt('clock_in', dayEnd.toISOString())
@@ -833,6 +944,7 @@ async function loadToday(){
     if (eErr) throw eErr;
     const rows = entries || [];
     const ids = rows.map(r => r.id);
+    const anomalyMap = await loadAnomaliesForEntryIds(ids);
 
     // B) Today’s breaks for those shifts (open and closed) + PHOTO PATHS
     todayBreaks = [];
@@ -888,6 +1000,21 @@ async function loadToday(){
         const storeObj = r.store_id ? (storeById.get(r.store_id) || null) : null;
         const storeName = storeObj?.name ? escHtml(storeObj.name) : '—';
         const dirUrl = directionsUrlForStore(storeObj);
+        const a = anomalyMap?.[r.id] || { anomalies: [], has_anomaly: false };
+        const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
+
+        const flags = [];
+        if (anomalies.length) flags.push(renderAnomalyBadges(anomalies));
+
+        if (r.geo_ok_in === false || r.geo_ok_out === false) {
+          flags.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
+        }
+        if (Array.isArray(r.schedule_codes) && r.schedule_codes.length) {
+          flags.push(`<span class="badge warn" title="${r.schedule_codes.join(", ")}">Schedule</span>`);
+        }
+
+        const flagsCell = flags.length ? flags.join(" ") : `<span style="opacity:0.6;">—</span>`;
+
         tr.innerHTML = `
           <td class="store-cell">${storeObj ? `${storeName}${dirUrl ? ` <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</td>
           <td>${new Date(r.clock_in).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</td>
@@ -895,7 +1022,10 @@ async function loadToday(){
           <td>${fmtDur(durMs)}</td>
           <td class="photo-in"></td>
           <td class="photo-out"></td>
+          <td class="flags-cell">${flagsCell}</td>
         `;
+
+        
         // Signed photo links (we store PATH, sign on demand)
         const inCell = tr.querySelector('.photo-in');
         const outCell = tr.querySelector('.photo-out');

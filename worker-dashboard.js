@@ -127,23 +127,51 @@ function renderMetricGrid(containerId, cards) {
   `).join("");
 }
 
-function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
+function chunk(arr, size = 100) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+const ANOMALY_LABEL = {
+  UNSCHEDULED_DAY: "Unscheduled",
+  EARLY_CLOCK_IN: "Early In",
+  LATE_CLOCK_IN: "Late In",
+  EARLY_CLOCK_OUT: "Early Out",
+  LATE_CLOCK_OUT: "Late Out",
+};
+
+function anomalyTone(code) {
+  // “bad” for tardy/early-out style problems, “warn” for unscheduled/other
+  if (code === "LATE_CLOCK_IN" || code === "EARLY_CLOCK_OUT") return "bad";
+  if (code === "EARLY_CLOCK_IN" || code === "LATE_CLOCK_OUT") return "warn";
+  if (code === "UNSCHEDULED_DAY") return "warn";
+  return "warn";
+}
+
+function renderAnomalyBadges(anomalies) {
+  if (!Array.isArray(anomalies) || anomalies.length === 0) return "";
+  return anomalies.map(code => {
+    const label = ANOMALY_LABEL[code] || code;
+    const tone = anomalyTone(code);
+    return `<span class="badge ${tone}" title="${code}">${label}</span>`;
+  }).join("");
+}
+
+
+
+function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs, anomalyMap = {}) {
   const container = $("recent-shifts-container");
   if (!container) return;
 
-  if (!entries.length) {
+  if (!Array.isArray(entries) || entries.length === 0) {
     container.innerHTML = `
       <div class="table-wrapper">
         <table class="summary-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Store</th>
-              <th>Clock In</th>
-              <th>Clock Out</th>
-              <th>Worked (Net)</th>
-              <th>Break</th>
-              <th>Flags</th>
+              <th>Date</th><th>Store</th><th>Clock In</th><th>Clock Out</th>
+              <th>Worked (Net)</th><th>Break</th><th>Flags</th>
             </tr>
           </thead>
           <tbody>
@@ -156,8 +184,11 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
   }
 
   const rows = entries.map(e => {
-    const net = fmtHM(perEntryNetMs[e.id] ?? 0);
-    const brk = fmtHM(perEntryBreakMs[e.id] ?? 0);
+    const a = anomalyMap?.[e.id] || { anomalies: [], has_anomaly: false };
+    const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
+
+    const net = fmtHM(perEntryNetMs?.[e.id] ?? 0);
+    const brk = fmtHM(perEntryBreakMs?.[e.id] ?? 0);
 
     const store = e.store_id ? storeById.get(e.store_id) : null;
     const storeName = store?.name ? String(store.name) : "—";
@@ -167,14 +198,23 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
       : storeName;
 
     const outText = e.clock_out ? fmtTime(e.clock_out) : "In progress";
-    const flags = [];
 
+    const flagsHtml = [];
+
+    // anomalies (late/early/etc.)
+    if (anomalies.length) flagsHtml.push(renderAnomalyBadges(anomalies));
+
+    // geo flags
     if (e.geo_ok_in === false || e.geo_ok_out === false) {
-      flags.push(`<span class="badge bad">Geo</span>`);
+      flagsHtml.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
     }
+
+    // schedule flags (if you store schedule codes)
     if (Array.isArray(e.schedule_codes) && e.schedule_codes.length > 0) {
-      flags.push(`<span class="badge warn">Schedule</span>`);
+      flagsHtml.push(`<span class="badge warn" title="${e.schedule_codes.join(", ")}">Schedule</span>`);
     }
+
+    const flagsCell = flagsHtml.length ? flagsHtml.join(" ") : `<span style="opacity:0.6;">—</span>`;
 
     return `
       <tr>
@@ -184,7 +224,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
         <td>${outText}</td>
         <td>${net}</td>
         <td>${brk}</td>
-        <td>${flags.join("") || "<span style='opacity:0.6;'>—</span>"}</td>
+        <td>${flagsCell}</td>
       </tr>
     `;
   }).join("");
@@ -194,13 +234,8 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs) {
       <table class="summary-table">
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Store</th>
-            <th>Clock In</th>
-            <th>Clock Out</th>
-            <th>Worked (Net)</th>
-            <th>Break</th>
-            <th>Flags</th>
+            <th>Date</th><th>Store</th><th>Clock In</th><th>Clock Out</th>
+            <th>Worked (Net)</th><th>Break</th><th>Flags</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -298,6 +333,35 @@ async function loadBreaksForEntryIds(entryIds) {
   if (error) throw error;
   return data || [];
 }
+
+async function loadAnomaliesForEntryIds(entryIds) {
+  // Returns: { [time_entry_id]: { anomalies: string[], has_anomaly: boolean } }
+  const out = {};
+  const ids = (entryIds || []).filter(Boolean);
+  if (!ids.length) return out;
+
+  for (const batch of chunk(ids, 75)) {
+    const { data, error } = await window.supabase
+      .from("v_shift_anomalies")
+      .select("time_entry_id, anomalies, has_anomaly")
+      .in("time_entry_id", batch);
+
+    if (error) {
+      console.warn("loadAnomaliesForEntryIds failed:", error);
+      continue; // fail open
+    }
+
+    (data || []).forEach(row => {
+      out[row.time_entry_id] = {
+        anomalies: Array.isArray(row.anomalies) ? row.anomalies : [],
+        has_anomaly: !!row.has_anomaly
+      };
+    });
+  }
+
+  return out;
+}
+
 
 /** ---------- Computation ---------- */
 function computePerEntryMaps(entries, breaks, now = new Date()) {
@@ -720,6 +784,7 @@ async function refreshMonthView(state) {
 
     const entryIds = entries.map(e => e.id);
     const breaks = await loadBreaksForEntryIds(entryIds);
+    const anomalyMap = await loadAnomaliesForEntryIds(entryIds);
 
     const now = new Date();
     const { breaksByEntry, perEntryBreakMs, perEntryNetMs } = computePerEntryMaps(entries, breaks, now);
@@ -746,7 +811,8 @@ async function refreshMonthView(state) {
       breaksByEntry,
       perEntryBreakMs,
       perEntryNetMs,
-      monthTotals
+      monthTotals,
+       anomalyMap // ✅ ADD THIS
     };
 
     state.monthCache.set(selKey, cached);
@@ -776,10 +842,17 @@ async function refreshMonthView(state) {
     }
   }
 
-  // Recent Shifts for selected month (A)
-  renderRecentShifts(
-    cached.entries.slice(0, 10),
-    cached.perEntryNetMs,
-    cached.perEntryBreakMs
-  );
+// Recent Shifts for selected month
+const recent = cached.entries.slice(0, 10);
+
+// If you cached full-month anomalies already, use them.
+// (This is correct because recent entries are a subset of month entries.)
+renderRecentShifts(
+  recent,
+  cached.perEntryNetMs,
+  cached.perEntryBreakMs,
+  cached.anomalyMap || {}
+);
+
+
 }
