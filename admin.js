@@ -98,6 +98,56 @@ function renderGlobalCalendar(rows, gridStart, monthStart){
   }
 }
 
+// ✅ REPLACE the whole inviteWorkerByEmail(email) with this:
+// Uses Edge Function "admin-user" which runs with service role on the server.
+async function inviteWorkerByEmail(email) {
+  try {
+    email = (email || '').trim().toLowerCase();
+    if (!email) throw new Error('Email is required.');
+
+    // Minimal defaults for quick testing (you can upgrade UI later)
+    const display_name = email.split('@')[0] || 'New Worker';
+    const role = 'employee';
+
+    const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+      body: { action: 'invite', email, display_name, role }
+    });
+
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Invite failed.');
+
+    showToast(`Invite sent to ${email}`, 'ok');
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || 'Failed to invite worker', 'err');
+  }
+}
+
+function escapeHtml(s){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
+function openInviteUserPrompt() {
+  const email = prompt("Enter worker email to invite:");
+  if (!email) return;
+
+  inviteWorkerByEmail(email);
+}
+
+
+function wireUsersPanel() {
+  const btn = document.getElementById('userAddBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', openInviteUserPrompt);
+}
+
+
 async function loadGlobalCalendar(){
   try {
     // month controls
@@ -2619,6 +2669,7 @@ function activateTab(which){
     { key:'payroll',  btn:'tabPayroll',  panel:'panelPayroll' },
     { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
     { key:'stores',   btn:'tabStores',   panel:'panelStores' },
+    { key:'users',    btn:'tabUsers',    panel:'panelUsers' }, // ✅ NEW
   ];
 
   for (const t of tabs){
@@ -2636,7 +2687,11 @@ function activateTab(which){
 function wireTabs(){
   qs('tabOverview')?.addEventListener('click', ()=> activateTab('overview'));
   qs('tabPayroll')?.addEventListener('click',  ()=> activateTab('payroll'));
+  qs('tabSchedule')?.addEventListener('click', ()=> activateTab('schedule'));
+  qs('tabStores')?.addEventListener('click',   ()=> activateTab('stores'));
+  qs('tabUsers')?.addEventListener('click',    ()=> activateTab('users')); // ✅ NEW
 }
+
 
 
 let rtChannel = null;
@@ -2668,6 +2723,202 @@ function bootRealtime(){
 window.addEventListener('beforeunload', () => {
   try { if (rtChannel) supabaseClient.removeChannel(rtChannel); } catch {}
 });
+
+
+/* ============== Users (Invite + Roles) ============== */
+let _usersInitialized = false;
+let _usersRows = []; // cached for filtering
+
+function setUserError(msg){
+  const el = qs('userError');
+  if (!el) return;
+  el.textContent = msg || '';
+  show(el, !!msg);
+}
+
+function openUserModal(){
+  setUserError('');
+  qs('userEmail').value = '';
+  qs('userDisplayName').value = '';
+  qs('userRole').value = 'employee';
+  show(qs('userModalBackdrop'), true);
+  show(qs('userModal'), true);
+}
+
+function closeUserModal(){
+  show(qs('userModalBackdrop'), false);
+  show(qs('userModal'), false);
+}
+
+function getUsersFilters(){
+  const q = (qs('userSearchInput')?.value || '').trim().toLowerCase();
+  const showInactive = !!qs('userShowInactive')?.checked;
+  return { q, showInactive };
+}
+
+function applyUsersFilterAndRender(){
+  const { q, showInactive } = getUsersFilters();
+
+  let rows = _usersRows.slice();
+  if (!showInactive) rows = rows.filter(r => !!r.active);
+
+  if (q){
+    rows = rows.filter(r => {
+      const name = (r.display_name || '').toLowerCase();
+      const email = (r.email || '').toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }
+
+  renderUsersTable(rows);
+}
+
+function renderUsersTable(rows){
+  const tbody = qs('usersTbody');
+  if (!tbody) return;
+
+  if (!rows.length){
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No users match your filter.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => `
+    <tr data-employee-id="${r.id}">
+      <td>${escapeHtml(r.display_name || '—')}</td>
+      <td>${escapeHtml(r.email || '—')}</td>
+      <td>
+        <select class="user-role">
+          <option value="employee" ${r.role==='employee'?'selected':''}>employee</option>
+          <option value="manager"  ${r.role==='manager'?'selected':''}>manager</option>
+          <option value="admin"    ${r.role==='admin'?'selected':''}>admin</option>
+        </select>
+      </td>
+      <td>
+        <label class="switch mini" style="justify-content:flex-start;">
+          <input class="user-active" type="checkbox" ${r.active ? 'checked' : ''} />
+          <span>${r.active ? 'Yes' : 'No'}</span>
+        </label>
+      </td>
+      <td class="user-actions">
+        <button class="btn small user-save">Save</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function loadUsers(){
+  const tbody = qs('usersTbody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+
+  const { data, error } = await supabaseClient
+    .from('employees')
+    .select('id, user_id, display_name, email, role, active, created_at')
+    .order('display_name', { ascending: true });
+
+  if (error) throw error;
+
+  _usersRows = (data || []).map(r => ({
+    ...r,
+    role: (r.role || 'employee').toLowerCase(),
+    active: !!r.active,
+    email: r.email || ''
+  }));
+
+  applyUsersFilterAndRender();
+}
+
+async function inviteUser(){
+  const email = (qs('userEmail').value || '').trim().toLowerCase();
+  const display_name = (qs('userDisplayName').value || '').trim();
+  const role = (qs('userRole').value || 'employee').trim().toLowerCase();
+
+  if (!email) return setUserError('Email is required.');
+  if (!display_name) return setUserError('Display name is required.');
+  if (!['employee','manager','admin'].includes(role)) return setUserError('Invalid role.');
+
+  setUserError('');
+
+  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+    body: { action: 'invite', email, display_name, role }
+  });
+
+  if (error) throw error;
+  if (!data?.ok) throw new Error('Invite failed.');
+
+  closeUserModal();
+  showToast('Invite sent ✅', 'ok');
+  await loadUsers();
+}
+
+async function saveUserRow(tr){
+  const employee_id = tr.dataset.employeeId;
+  const role = (tr.querySelector('.user-role')?.value || 'employee').toLowerCase();
+  const active = !!tr.querySelector('.user-active')?.checked;
+
+  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+    body: { action: 'update', employee_id, role, active }
+  });
+
+  if (error) throw error;
+  if (!data?.ok) throw new Error('Update failed.');
+
+  showToast('Saved ✅', 'ok');
+  await loadUsers();
+}
+
+function wireUsersTab(){
+  // tab click: activate + lazy init
+  qs('tabUsers')?.addEventListener('click', async () => {
+    activateTab('users');
+
+    if (_usersInitialized) return;
+    _usersInitialized = true;
+
+    // modal controls
+    qs('userAddBtn')?.addEventListener('click', openUserModal);
+    qs('userCloseBtn')?.addEventListener('click', closeUserModal);
+    qs('userCancelBtn')?.addEventListener('click', closeUserModal);
+    qs('userModalBackdrop')?.addEventListener('click', closeUserModal);
+
+    // invite
+    qs('userInviteBtn')?.addEventListener('click', () => {
+      inviteUser().catch(err => {
+        console.error(err);
+        setUserError(err?.message || 'Invite failed');
+      });
+    });
+
+    // filters
+    qs('userSearchInput')?.addEventListener('input', debounce(() => {
+      applyUsersFilterAndRender();
+    }, 150));
+
+    qs('userShowInactive')?.addEventListener('change', () => {
+      applyUsersFilterAndRender();
+    });
+
+    // save button per row
+    qs('usersTbody')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.user-save');
+      if (!btn) return;
+      const row = btn.closest('tr');
+      if (!row) return;
+
+      saveUserRow(row).catch(err => {
+        console.error(err);
+        showToast(err?.message || 'Save failed', 'err');
+      });
+    });
+
+    // initial load
+    loadUsers().catch(err => {
+      console.error(err);
+      const tbody = qs('usersTbody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load users.</td></tr>`;
+    });
+  });
+}
+
 
 //* ============== Boot ============== */
 document.addEventListener('supabase-ready', async () => {
@@ -2724,6 +2975,8 @@ startLiveTicker(1000); // change to 1000 if you want a per-second tick
   bootRealtime();
   wireScheduleTab();
   wireStoresTab();
+  wireUsersTab();
+  wireUsersPanel();
   wireGlobalCalendar();
 if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
 
