@@ -1,151 +1,139 @@
+// set-password.js
 (function () {
-  const banner = document.getElementById('banner');
-  const btn = document.getElementById('btn');
+  const msg = document.getElementById("msg");
+  const btn = document.getElementById("btn");
+  const pwEl = document.getElementById("pw");
+  const pw2El = document.getElementById("pw2");
 
-  const LOGIN_URL = 'https://antdamus.github.io/Invsto/';
+  const LOGIN_URL = "https://antdamus.github.io/Invsto/"; // ✅ your login page
 
-  function setBanner(text, kind = 'warn') {
-    banner.className = `banner ${kind}`;
-    banner.textContent = text || '';
+  function setMsg(text, kind = "") {
+    msg.textContent = text || "";
+    msg.style.color =
+      kind === "error" ? "crimson" :
+      kind === "success" ? "limegreen" :
+      "";
   }
 
-  function disableForm(disabled) {
-    btn.disabled = !!disabled;
-    document.getElementById('pw').disabled = !!disabled;
-    document.getElementById('pw2').disabled = !!disabled;
-  }
-
-  async function ensureSessionFromUrl() {
-  const url = new URL(window.location.href);
-
-  const code = url.searchParams.get('code');                 // PKCE flow
-  const type = url.searchParams.get('type');                 // invite / recovery / magiclink
-  const token_hash =
-    url.searchParams.get('token_hash') ||                    // common
-    url.searchParams.get('token') ||                         // sometimes present
-    null;
-
-  const hasHashTokens =
-    /access_token=/.test(url.hash) || /refresh_token=/.test(url.hash);
-
-  try {
-    // 1) PKCE code exchange (newer email links)
-    if (code) {
-      const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
-      if (error) throw error;
-
-      // clean URL
-      url.searchParams.delete('code');
-      window.history.replaceState({}, document.title, url.toString());
-      return data?.session || null;
-    }
-
-    // 2) Implicit hash tokens (older style, or if verify redirected with tokens)
-    if (hasHashTokens) {
-      const { data } = await supabaseClient.auth.getSession();
-      return data?.session || null;
-    }
-
-    // 3) OTP verify flow (invite/recovery links sometimes land with token_hash)
-    if (type && token_hash) {
-      const { data, error } = await supabaseClient.auth.verifyOtp({
-        type,
-        token_hash,
-      });
-      if (error) throw error;
-
-      // clean URL
-      url.searchParams.delete('type');
-      url.searchParams.delete('token_hash');
-      url.searchParams.delete('token');
-      window.history.replaceState({}, document.title, url.toString());
-
-      return data?.session || null;
-    }
-
-    return null;
-  } catch (e) {
-    console.error("ensureSessionFromUrl error:", e);
-    return null;
-  }
-}
-
-
-  function validatePasswords(pw, pw2) {
-    if (!pw || pw.length < 8) return 'Password must be at least 8 characters.';
-    if (pw !== pw2) return 'Passwords do not match.';
-    return null;
-  }
-
-  async function main() {
-    setBanner('Checking invite link…', 'warn');
-    disableForm(true);
-
-    const session = await ensureSessionFromUrl();
-    if (!session) {
-      setBanner(
-        'This link is invalid or expired.\nAsk an admin to resend the invite.',
-        'err'
+  function waitForSupabaseReady() {
+    return new Promise((resolve) => {
+      if (window.supabaseClient) return resolve(window.supabaseClient);
+      if (window.supabase) return resolve(window.supabase);
+      document.addEventListener(
+        "supabase-ready",
+        () => resolve(window.supabaseClient || window.supabase),
+        { once: true }
       );
-      return;
-    }
-
-    disableForm(false);
-    setBanner('Create a password to finish setup.', 'warn');
-
-    btn.addEventListener('click', async () => {
-      const pw = document.getElementById('pw').value.trim();
-      const pw2 = document.getElementById('pw2').value.trim();
-
-      const err = validatePasswords(pw, pw2);
-      if (err) {
-        setBanner(err, 'err');
-        return;
-      }
-
-      disableForm(true);
-      setBanner('Saving password…', 'warn');
-
-      // 1) set password
-      const { error } = await supabaseClient.auth.updateUser({ password: pw });
-      if (error) {
-        console.error(error);
-        disableForm(false);
-        setBanner(error.message || 'Failed to set password.', 'err');
-        return;
-      }
-
-      // 2) optional: confirm we still have a valid user session
-      const { data: uData, error: uErr } = await supabaseClient.auth.getUser();
-      if (uErr || !uData?.user) {
-        console.error(uErr);
-        // Password may still be set, but session state is weird—send them to login anyway
-        setBanner(
-          'Password saved ✅\nPlease log in to continue.\nRedirecting…',
-          'ok'
-        );
-        setTimeout(() => (window.location.href = LOGIN_URL), 1200);
-        return;
-      }
-
-      // 3) mark accepted (your RPC)
-      try { await supabaseClient.rpc('mark_invite_accepted'); } catch {}
-
-      // 4) success UI + redirect
-      let s = 3;
-      setBanner(`Password saved ✅\nRedirecting to login in ${s}…`, 'ok');
-
-      const timer = setInterval(() => {
-        s -= 1;
-        if (s <= 0) {
-          clearInterval(timer);
-          window.location.href = LOGIN_URL;
-          return;
-        }
-        setBanner(`Password saved ✅\nRedirecting to login in ${s}…`, 'ok');
-      }, 1000);
     });
   }
 
-  window.addEventListener('DOMContentLoaded', main);
+  function parseHashTokens() {
+    const h = (window.location.hash || "").replace(/^#/, "");
+    if (!h) return null;
+    const p = new URLSearchParams(h);
+    const access_token = p.get("access_token");
+    const refresh_token = p.get("refresh_token");
+    const type = p.get("type");
+    if (!access_token || !refresh_token) return null;
+    return { access_token, refresh_token, type };
+  }
+
+  async function ensureInviteSession(sb) {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("code");
+    const hashTokens = parseHashTokens();
+
+    try {
+      // ✅ New-style links: ?code=...
+      if (code) {
+        const { data, error } = await sb.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+
+        // Clean URL
+        url.searchParams.delete("code");
+        window.history.replaceState({}, document.title, url.toString());
+        return data?.session || null;
+      }
+
+      // ✅ Old-style links: #access_token=...&refresh_token=...
+      if (hashTokens) {
+        const { data, error } = await sb.auth.setSession({
+          access_token: hashTokens.access_token,
+          refresh_token: hashTokens.refresh_token,
+        });
+        if (error) throw error;
+
+        // Clean hash so refresh doesn't re-run
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname + window.location.search
+        );
+
+        return data?.session || null;
+      }
+
+      // Fallback: maybe detectSessionInUrl already handled it
+      const { data } = await sb.auth.getSession();
+      return data?.session || null;
+    } catch (e) {
+      console.error("ensureInviteSession error:", e);
+      return null;
+    }
+  }
+
+  async function main() {
+    btn.disabled = true;
+    setMsg("Checking invite link…");
+
+    const sb = await waitForSupabaseReady();
+
+    const session = await ensureInviteSession(sb);
+    if (!session) {
+      setMsg("This link is invalid or expired. Ask an admin to resend the invite.", "error");
+      btn.disabled = true;
+      return;
+    }
+
+    setMsg("Create a password to finish setup.");
+    btn.disabled = false;
+
+    btn.addEventListener("click", async () => {
+      const pw = (pwEl.value || "").trim();
+      const pw2 = (pw2El.value || "").trim();
+
+      if (!pw || pw.length < 8) return setMsg("Password must be at least 8 characters.", "error");
+      if (pw !== pw2) return setMsg("Passwords do not match.", "error");
+
+      btn.disabled = true;
+      setMsg("Saving password…");
+
+      const { error } = await sb.auth.updateUser({ password: pw });
+
+      if (error) {
+        console.error("updateUser error:", error);
+        btn.disabled = false;
+        return setMsg(error.message || "Failed to set password.", "error");
+      }
+
+      // Optional: mark accepted (ignore if you don't have this RPC)
+      try {
+        await sb.rpc("mark_invite_accepted");
+      } catch (e) {
+        // not fatal
+        console.warn("mark_invite_accepted skipped:", e);
+      }
+
+      setMsg("✅ Password saved! Redirecting to login…", "success");
+
+      // For clarity: sign out so login is clean (optional but recommended)
+      try { await sb.auth.signOut(); } catch {}
+
+      setTimeout(() => {
+        window.location.href = LOGIN_URL;
+      }, 900);
+    });
+  }
+
+  window.addEventListener("DOMContentLoaded", main);
 })();
