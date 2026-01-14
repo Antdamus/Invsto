@@ -16,32 +16,60 @@
   }
 
   async function ensureSessionFromUrl() {
-    const url = new URL(window.location.href);
-    const code = url.searchParams.get('code');
-    const hasHashTokens = /access_token=/.test(url.hash);
+  const url = new URL(window.location.href);
 
-    try {
-      if (code) {
-        const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
-        if (error) throw error;
+  const code = url.searchParams.get('code');                 // PKCE flow
+  const type = url.searchParams.get('type');                 // invite / recovery / magiclink
+  const token_hash =
+    url.searchParams.get('token_hash') ||                    // common
+    url.searchParams.get('token') ||                         // sometimes present
+    null;
 
-        // Clean URL (remove code)
-        url.searchParams.delete('code');
-        window.history.replaceState({}, document.title, url.toString());
-        return data?.session || null;
-      }
+  const hasHashTokens =
+    /access_token=/.test(url.hash) || /refresh_token=/.test(url.hash);
 
-      if (hasHashTokens) {
-        const { data } = await supabaseClient.auth.getSession();
-        return data?.session || null;
-      }
+  try {
+    // 1) PKCE code exchange (newer email links)
+    if (code) {
+      const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
+      if (error) throw error;
 
-      return null;
-    } catch (e) {
-      console.error(e);
-      return null;
+      // clean URL
+      url.searchParams.delete('code');
+      window.history.replaceState({}, document.title, url.toString());
+      return data?.session || null;
     }
+
+    // 2) Implicit hash tokens (older style, or if verify redirected with tokens)
+    if (hasHashTokens) {
+      const { data } = await supabaseClient.auth.getSession();
+      return data?.session || null;
+    }
+
+    // 3) OTP verify flow (invite/recovery links sometimes land with token_hash)
+    if (type && token_hash) {
+      const { data, error } = await supabaseClient.auth.verifyOtp({
+        type,
+        token_hash,
+      });
+      if (error) throw error;
+
+      // clean URL
+      url.searchParams.delete('type');
+      url.searchParams.delete('token_hash');
+      url.searchParams.delete('token');
+      window.history.replaceState({}, document.title, url.toString());
+
+      return data?.session || null;
+    }
+
+    return null;
+  } catch (e) {
+    console.error("ensureSessionFromUrl error:", e);
+    return null;
   }
+}
+
 
   function validatePasswords(pw, pw2) {
     if (!pw || pw.length < 8) return 'Password must be at least 8 characters.';
