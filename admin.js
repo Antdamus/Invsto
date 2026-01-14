@@ -123,6 +123,27 @@ async function inviteWorkerByEmail(email) {
   }
 }
 
+async function resendInviteForRow(tr){
+  const email = (tr.dataset.email || '').trim().toLowerCase();
+  const display_name = (tr.querySelector('.user-name')?.value || tr.dataset.displayName || '').trim();
+  const role = (tr.querySelector('.user-role')?.value || tr.dataset.role || 'employee').trim().toLowerCase();
+
+  if (!email) throw new Error('Missing email for this user.');
+  if (!display_name) throw new Error('Display name is required.');
+  if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+
+  // Reuse the SAME edge function path + action
+  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+    body: { action: 'invite', email, display_name, role }
+  });
+
+  if (error) throw error;
+  if (!data?.ok) throw new Error(data?.error || 'Resend failed.');
+
+  showToast('Invite re-sent ✅', 'ok');
+  await loadUsers();
+}
+
 function escapeHtml(s){
   return (s ?? '').toString()
     .replaceAll('&','&amp;')
@@ -137,6 +158,16 @@ function openInviteUserPrompt() {
   if (!email) return;
 
   inviteWorkerByEmail(email);
+}
+
+async function markAcceptedIfNeeded() {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+    await supabaseClient.rpc('mark_invite_accepted');
+  } catch (e) {
+    console.warn('mark_invite_accepted failed:', e);
+  }
 }
 
 
@@ -2713,10 +2744,18 @@ const onRealtimeChange = debounce(async () => {
 
 function bootRealtime(){
   try{
-    rtChannel = supabaseClient.channel('admin-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, onRealtimeChange)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'time_breaks'  }, onRealtimeChange)
-      .subscribe();
+rtChannel = supabaseClient.channel('admin-live')
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'time_entries' }, onRealtimeChange)
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'time_breaks'  }, onRealtimeChange)
+  .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'employees' }, async (payload) => {
+    // Only refresh Users if the users panel is initialized (and optionally if visible)
+    try {
+      if (typeof loadUsers === 'function') {
+        await loadUsers();
+      }
+    } catch {}
+  })
+  .subscribe();
   }catch(err){ console.error('Realtime subscribe failed', err); }
 }
 
@@ -2777,42 +2816,81 @@ function renderUsersTable(rows){
   const tbody = qs('usersTbody');
   if (!tbody) return;
 
+  // tiny helper for safe HTML attrs
+  const escAttr = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const statusBadge = (r) => {
+    if (r.accepted_at) return `<span class="badge ok">Accepted</span>`;
+    if (r.invited_at)  return `<span class="badge warn">Invited</span>`;
+    return `<span class="badge muted">Not invited</span>`;
+  };
+
+  const statusDetail = (r) => {
+    if (r.accepted_at) return `Accepted • ${new Date(r.accepted_at).toLocaleString()}`;
+    if (r.invited_at)  return `Invited • ${new Date(r.invited_at).toLocaleString()}`;
+    return '—';
+  };
+
   if (!rows.length){
-    tbody.innerHTML = `<tr><td colspan="5" class="muted">No users match your filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No users match your filter.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = rows.map(r => `
-    <tr data-employee-id="${r.id}">
-      <td>${escapeHtml(r.display_name || '—')}</td>
-      <td>${escapeHtml(r.email || '—')}</td>
-      <td>
-        <select class="user-role">
-          <option value="employee" ${r.role==='employee'?'selected':''}>employee</option>
-          <option value="manager"  ${r.role==='manager'?'selected':''}>manager</option>
-          <option value="admin"    ${r.role==='admin'?'selected':''}>admin</option>
-        </select>
-      </td>
-      <td>
-        <label class="switch mini" style="justify-content:flex-start;">
-          <input class="user-active" type="checkbox" ${r.active ? 'checked' : ''} />
-          <span>${r.active ? 'Yes' : 'No'}</span>
-        </label>
-      </td>
-      <td class="user-actions">
-        <button class="btn small user-save">Save</button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = rows.map(r => {
+    const pendingInvite = !!r.invited_at && !r.accepted_at;
+
+    return `
+      <tr
+        data-employee-id="${escAttr(r.id)}"
+        data-email="${escAttr(r.email || '')}"
+        data-display-name="${escAttr(r.display_name || '')}"
+        data-role="${escAttr((r.role || 'employee').toLowerCase())}"
+      >
+        <td>
+          <input class="input user-name" value="${escAttr(r.display_name || '')}" />
+        </td>
+
+        <td>${escapeHtml(r.email || '—')}</td>
+
+        <td>
+          <select class="user-role">
+            <option value="employee" ${r.role==='employee'?'selected':''}>employee</option>
+            <option value="manager"  ${r.role==='manager'?'selected':''}>manager</option>
+            <option value="admin"    ${r.role==='admin'?'selected':''}>admin</option>
+          </select>
+        </td>
+
+        <td>
+          <label class="switch mini" style="justify-content:flex-start;">
+            <input class="user-active" type="checkbox" ${r.active ? 'checked' : ''} />
+            <span>${r.active ? 'Yes' : 'No'}</span>
+          </label>
+        </td>
+
+        <td>
+          <div class="status-stack">
+            ${statusBadge(r)}
+            <div class="muted tiny">${escapeHtml(statusDetail(r))}</div>
+          </div>
+        </td>
+
+        <td class="user-actions">
+          ${pendingInvite ? `<button class="btn small ghost user-resend" title="Resend invite email">Resend</button>` : ``}
+          <button class="btn small user-save">Save</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
 }
+
 
 async function loadUsers(){
   const tbody = qs('usersTbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
 
   const { data, error } = await supabaseClient
     .from('employees')
-    .select('id, user_id, display_name, email, role, active, created_at')
+    .select('id, user_id, display_name, email, role, active, created_at, invited_at, accepted_at')
     .order('display_name', { ascending: true });
 
   if (error) throw error;
@@ -2821,11 +2899,16 @@ async function loadUsers(){
     ...r,
     role: (r.role || 'employee').toLowerCase(),
     active: !!r.active,
-    email: r.email || ''
+    email: r.email || '',
+    display_name: r.display_name || '',
+    invited_at: r.invited_at || null,
+    accepted_at: r.accepted_at || null,
   }));
 
   applyUsersFilterAndRender();
 }
+
+
 
 async function inviteUser(){
   const email = (qs('userEmail').value || '').trim().toLowerCase();
@@ -2852,11 +2935,17 @@ async function inviteUser(){
 
 async function saveUserRow(tr){
   const employee_id = tr.dataset.employeeId;
+
+  const display_name = (tr.querySelector('.user-name')?.value || '').trim();
   const role = (tr.querySelector('.user-role')?.value || 'employee').toLowerCase();
   const active = !!tr.querySelector('.user-active')?.checked;
 
+  if (!employee_id) throw new Error('Missing employee id.');
+  if (!display_name) throw new Error('Display name is required.');
+  if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'update', employee_id, role, active }
+    body: { action: 'update', employee_id, role, active, display_name }
   });
 
   if (error) throw error;
@@ -2865,6 +2954,7 @@ async function saveUserRow(tr){
   showToast('Saved ✅', 'ok');
   await loadUsers();
 }
+
 
 function wireUsersTab(){
   // tab click: activate + lazy init
@@ -2897,18 +2987,33 @@ function wireUsersTab(){
       applyUsersFilterAndRender();
     });
 
-    // save button per row
-    qs('usersTbody')?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.user-save');
-      if (!btn) return;
-      const row = btn.closest('tr');
-      if (!row) return;
+    // actions per row (save + resend)
+qs('usersTbody')?.addEventListener('click', (e) => {
+  const tr = e.target.closest('tr');
+  if (!tr) return;
 
-      saveUserRow(row).catch(err => {
-        console.error(err);
-        showToast(err?.message || 'Save failed', 'err');
-      });
+  const saveBtn = e.target.closest('.user-save');
+  if (saveBtn){
+    saveUserRow(tr).catch(err => {
+      console.error(err);
+      showToast(err?.message || 'Save failed', 'err');
     });
+    return;
+  }
+
+  const resendBtn = e.target.closest('.user-resend');
+  if (resendBtn){
+    resendBtn.disabled = true;
+    resendInviteForRow(tr)
+      .catch(err => {
+        console.error(err);
+        showToast(err?.message || 'Resend failed', 'err');
+      })
+      .finally(() => { resendBtn.disabled = false; });
+    return;
+  }
+});
+
 
     // initial load
     loadUsers().catch(err => {
