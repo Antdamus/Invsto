@@ -172,7 +172,7 @@ async function resendInviteForRow(tr){
 
   // Reuse the SAME edge function path + action
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'invite', email, display_name, role }
+    body: { action: "resend", employee_id: emp.id }
   });
 
   if (error) throw error;
