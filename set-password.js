@@ -1,77 +1,121 @@
-(function(){
-  const msg = document.getElementById('msg');
+(function () {
+  const banner = document.getElementById('banner');
   const btn = document.getElementById('btn');
 
-  function setMsg(t){ msg.textContent = t || ''; }
+  const LOGIN_URL = 'https://antdamus.github.io/Invsto/';
 
-  // Important: if your initSupabase.js exposes supabaseClient, wait for it
-  async function ensureSessionFromUrl(){
-    // Newer Supabase email links often use ?code=... and need exchange
+  function setBanner(text, kind = 'warn') {
+    banner.className = `banner ${kind}`;
+    banner.textContent = text || '';
+  }
+
+  function disableForm(disabled) {
+    btn.disabled = !!disabled;
+    document.getElementById('pw').disabled = !!disabled;
+    document.getElementById('pw2').disabled = !!disabled;
+  }
+
+  async function ensureSessionFromUrl() {
     const url = new URL(window.location.href);
     const code = url.searchParams.get('code');
-
-    // Older style uses #access_token=... in hash
     const hasHashTokens = /access_token=/.test(url.hash);
 
     try {
       if (code) {
-        // Exchange the code for a session
         const { data, error } = await supabaseClient.auth.exchangeCodeForSession(code);
         if (error) throw error;
 
-        // Clean URL
+        // Clean URL (remove code)
         url.searchParams.delete('code');
         window.history.replaceState({}, document.title, url.toString());
-        return data?.session;
+        return data?.session || null;
       }
 
       if (hasHashTokens) {
-        // supabase-js will pick this up on load, but we can just check session
         const { data } = await supabaseClient.auth.getSession();
-        return data?.session;
+        return data?.session || null;
       }
 
-      // No invite tokens
       return null;
     } catch (e) {
       console.error(e);
-      setMsg('This link is invalid or expired. Ask an admin to resend the invite.');
       return null;
     }
   }
 
-  async function main(){
-    setMsg('Checking invite link…');
+  function validatePasswords(pw, pw2) {
+    if (!pw || pw.length < 8) return 'Password must be at least 8 characters.';
+    if (pw !== pw2) return 'Passwords do not match.';
+    return null;
+  }
+
+  async function main() {
+    setBanner('Checking invite link…', 'warn');
+    disableForm(true);
+
     const session = await ensureSessionFromUrl();
     if (!session) {
-      setMsg('No invite session found. Ask an admin to resend the invite.');
-      btn.disabled = true;
+      setBanner(
+        'This link is invalid or expired.\nAsk an admin to resend the invite.',
+        'err'
+      );
       return;
     }
 
-    setMsg('Create a password to finish setup.');
+    disableForm(false);
+    setBanner('Create a password to finish setup.', 'warn');
 
     btn.addEventListener('click', async () => {
       const pw = document.getElementById('pw').value.trim();
       const pw2 = document.getElementById('pw2').value.trim();
-      if (!pw || pw.length < 8) return setMsg('Password must be at least 8 characters.');
-      if (pw !== pw2) return setMsg('Passwords do not match.');
 
-      btn.disabled = true;
-      setMsg('Saving password…');
+      const err = validatePasswords(pw, pw2);
+      if (err) {
+        setBanner(err, 'err');
+        return;
+      }
 
+      disableForm(true);
+      setBanner('Saving password…', 'warn');
+
+      // 1) set password
       const { error } = await supabaseClient.auth.updateUser({ password: pw });
       if (error) {
         console.error(error);
-        btn.disabled = false;
-        return setMsg(error.message || 'Failed to set password.');
+        disableForm(false);
+        setBanner(error.message || 'Failed to set password.', 'err');
+        return;
       }
 
-      // Mark accepted (your RPC)
+      // 2) optional: confirm we still have a valid user session
+      const { data: uData, error: uErr } = await supabaseClient.auth.getUser();
+      if (uErr || !uData?.user) {
+        console.error(uErr);
+        // Password may still be set, but session state is weird—send them to login anyway
+        setBanner(
+          'Password saved ✅\nPlease log in to continue.\nRedirecting…',
+          'ok'
+        );
+        setTimeout(() => (window.location.href = LOGIN_URL), 1200);
+        return;
+      }
+
+      // 3) mark accepted (your RPC)
       try { await supabaseClient.rpc('mark_invite_accepted'); } catch {}
 
-      setMsg('Password saved. Redirecting…');
-      window.location.href = 'timeclock.html'; // or wherever workers should go
+      // 4) success UI + redirect
+      let s = 3;
+      setBanner(`Password saved ✅\nRedirecting to login in ${s}…`, 'ok');
+
+      const timer = setInterval(() => {
+        s -= 1;
+        if (s <= 0) {
+          clearInterval(timer);
+          window.location.href = LOGIN_URL;
+          return;
+        }
+        setBanner(`Password saved ✅\nRedirecting to login in ${s}…`, 'ok');
+      }, 1000);
     });
   }
 

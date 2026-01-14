@@ -123,6 +123,44 @@ async function inviteWorkerByEmail(email) {
   }
 }
 
+// --- RAW invoke so we can read JSON even on 400/403/etc ---
+async function invokeEdgeJson(functionName, payload) {
+  const { data: sessionData, error: sessErr } = await supabaseClient.auth.getSession();
+  if (sessErr) throw sessErr;
+
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) throw new Error("Missing session access token.");
+
+  // These should already exist in your initSupabase.js setup.
+  // If not, define them there and keep them global.
+  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY globals.");
+  }
+
+  const url = `${window.SUPABASE_URL}/functions/v1/${functionName}`;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": window.SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  let json;
+  try { json = await resp.json(); } catch { json = null; }
+
+  if (!resp.ok) {
+    const msg = json?.error || json?.message || `Edge Function error (${resp.status})`;
+    const detail = json?.detail ? ` — ${json.detail}` : "";
+    throw new Error(msg + detail);
+  }
+
+  return json;
+}
+
 async function resendInviteForRow(tr){
   const email = (tr.dataset.email || '').trim().toLowerCase();
   const display_name = (tr.querySelector('.user-name')?.value || tr.dataset.displayName || '').trim();
