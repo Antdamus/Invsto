@@ -293,12 +293,16 @@
                 <th>Email</th>
                 <th style="width:160px;">Status</th>
                 <th style="width:160px;">Role</th>
+
+                 <!-- ✅ NEW -->
+                <th style="width:160px;">Hourly Rate</th>
+
                 <th style="width:120px;">Active</th>
                 <th style="width:220px;">Actions</th>
               </tr>
             </thead>
             <tbody id="usersTbody">
-              <tr><td colspan="6" class="muted">Open Users tab to load…</td></tr>
+              <tr><td colspan="7" class="muted">Open Users tab to load…</td></tr>
             </tbody>
           </table>
         </div>
@@ -644,6 +648,13 @@
         <input id="userDisplayName" type="text" autocomplete="name" placeholder="First Last" required />
         <div class="field-hint">Shows in dashboards, payroll, and audit logs.</div>
       </label>
+
+      <div class="field">
+        <span>Hourly Rate (USD)</span>
+        <input id="userHourlyRate" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. 18.50" />
+        <div class="field-hint">Optional now — but payroll will use this automatically later.</div>
+      </div>
+
     </div>
 
     <!-- Role (nice UI) -->
