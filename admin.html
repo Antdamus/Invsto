@@ -615,44 +615,83 @@
     </footer>
   </div>
 
-  <!-- ✅ NEW: Invite User Modal -->
-  <div id="userModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+<!-- ✅ Invite Worker Modal (Upgraded) -->
+<div id="userModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
 
-  <div id="userModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="userTitle">
-    <header class="modal-header">
-      <h3 id="userTitle">Invite worker</h3>
-      <button id="userCloseBtn" class="btn ghost" aria-label="Close">✕</button>
-    </header>
+<div id="userModal" class="modal invite-modal hidden" role="dialog" aria-modal="true" aria-labelledby="userTitle" aria-describedby="userSubtitle">
+  <header class="modal-header invite-header">
+    <div class="invite-header-left">
+      <div class="invite-icon" aria-hidden="true">✉️</div>
+      <div class="invite-header-text">
+        <h3 id="userTitle">Invite worker</h3>
+        <div id="userSubtitle" class="invite-subtitle">Send a secure Supabase email invite and assign their role.</div>
+      </div>
+    </div>
 
-    <section class="modal-body">
-      <label>
+    <button id="userCloseBtn" class="btn ghost" aria-label="Close">✕</button>
+  </header>
+
+  <section class="modal-body invite-body">
+    <div class="invite-grid">
+      <label class="field">
         <span>Email</span>
-        <input id="userEmail" type="email" placeholder="worker@email.com" required />
+        <input id="userEmail" type="email" inputmode="email" autocomplete="email" placeholder="worker@email.com" required />
+        <div class="field-hint">This is where Supabase will send the invite link.</div>
       </label>
 
-      <label>
+      <label class="field">
         <span>Display name</span>
-        <input id="userDisplayName" type="text" placeholder="First Last" required />
+        <input id="userDisplayName" type="text" autocomplete="name" placeholder="First Last" required />
+        <div class="field-hint">Shows in dashboards, payroll, and audit logs.</div>
       </label>
+    </div>
 
-      <label>
-        <span>Role</span>
-        <select id="userRole">
-          <option value="employee" selected>employee</option>
-          <option value="manager">manager</option>
-          <option value="admin">admin</option>
-        </select>
-      </label>
+    <!-- Role (nice UI) -->
+    <div class="role-block" role="group" aria-label="Role selection">
+      <div class="role-title">Role</div>
 
-      <div id="userError" class="error hidden" role="alert"></div>
+      <!-- Keep the select for your existing JS; we’ll style + drive it via the pills -->
+      <select id="userRole" class="role-native">
+        <option value="employee" selected>employee</option>
+        <option value="manager">manager</option>
+        <option value="admin">admin</option>
+      </select>
+
+      <div class="role-cards">
+        <button type="button" class="role-card active" data-role="employee">
+          <div class="role-name">Employee</div>
+          <div class="role-desc">Clock in/out, view own history.</div>
+          <div class="role-tag">Default</div>
+        </button>
+
+        <button type="button" class="role-card" data-role="manager">
+          <div class="role-name">Manager</div>
+          <div class="role-desc">Manage staff, review time, approve items.</div>
+          <div class="role-tag">Store-level</div>
+        </button>
+
+        <button type="button" class="role-card" data-role="admin">
+          <div class="role-name">Admin</div>
+          <div class="role-desc">Full access (users, stores, payroll).</div>
+          <div class="role-tag warn">High power</div>
+        </button>
+      </div>
+
       <div class="hint muted">They’ll receive an email invite link from Supabase.</div>
-    </section>
+    </div>
 
-    <footer class="modal-footer">
-      <button id="userCancelBtn" class="btn ghost">Cancel</button>
-      <button id="userInviteBtn" class="btn">Send invite</button>
-    </footer>
-  </div>
+    <div id="userError" class="error hidden" role="alert"></div>
+  </section>
+
+  <footer class="modal-footer invite-footer">
+    <button id="userCancelBtn" class="btn ghost">Cancel</button>
+
+    <button id="userInviteBtn" class="btn invite-primary">
+      <span class="btn-label">Send invite</span>
+      <span class="btn-spinner hidden" aria-hidden="true"></span>
+    </button>
+  </footer>
+</div>
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>

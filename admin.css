@@ -472,3 +472,185 @@ html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
 .ex-row .mini-link{
   white-space:nowrap;
 }
+
+/* ===== Invite Worker Modal (Premium UI) ===== */
+.invite-modal .invite-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  background: linear-gradient(180deg, rgba(157,123,255,0.10), rgba(0,0,0,0));
+}
+
+.invite-header-left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-width: 0;
+}
+
+.invite-icon{
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  display:grid;
+  place-items:center;
+  background: rgba(157,123,255,0.12);
+  border:1px solid rgba(157,123,255,0.25);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+.invite-header-text h3{
+  margin:0;
+  font-size:18px;
+  letter-spacing: .2px;
+}
+
+.invite-subtitle{
+  margin-top:2px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow:hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.invite-body{ gap:14px; }
+
+.invite-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+@media (max-width: 640px){
+  .invite-grid{ grid-template-columns: 1fr; }
+  .invite-subtitle{ max-width: 250px; }
+}
+
+.field span{
+  color:#b7bcc5;
+  font-size:12px;
+  display:block;
+  margin-bottom:6px;
+}
+.field input{
+  width:100%;
+  height: 38px;
+  background:#15161a;
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding: 0 12px;
+  outline:none;
+  transition: box-shadow .15s ease, transform .08s ease, border-color .15s ease;
+}
+.field input:focus{
+  border-color: rgba(157,123,255,0.45);
+  box-shadow: 0 0 0 4px rgba(157,123,255,0.12);
+}
+.field-hint{
+  margin-top:6px;
+  color:#b7bcc5;
+  font-size:12px;
+}
+
+.role-block{
+  border:1px solid var(--border);
+  border-radius:14px;
+  background: #0f1116;
+  padding:12px;
+  display:grid;
+  gap:10px;
+}
+
+.role-title{
+  font-weight:600;
+  font-size:13px;
+  letter-spacing:.2px;
+}
+
+.role-native{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+  width:1px;
+  height:1px;
+}
+
+.role-cards{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap:10px;
+}
+@media (max-width: 640px){
+  .role-cards{ grid-template-columns: 1fr; }
+}
+
+.role-card{
+  text-align:left;
+  border:1px solid var(--border);
+  background:#101115;
+  border-radius:14px;
+  padding:12px;
+  cursor:pointer;
+  transition: transform .08s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+  position:relative;
+  min-height: 74px;
+}
+.role-card:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.25);
+}
+.role-card.active{
+  border-color: rgba(157,123,255,0.55);
+  background: rgba(157,123,255,0.08);
+  box-shadow: 0 0 0 4px rgba(157,123,255,0.10);
+}
+.role-name{ font-weight:700; }
+.role-desc{ margin-top:4px; color:#b7bcc5; font-size:12px; }
+.role-tag{
+  position:absolute;
+  top:10px;
+  right:10px;
+  font-size:11px;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:#12151a;
+  color:#d9dee6;
+}
+.role-tag.warn{
+  border-color: rgba(224,169,0,.35);
+  background: rgba(224,169,0,.10);
+  color: #ffe9b8;
+}
+
+.invite-footer{
+  align-items:center;
+}
+
+.invite-primary{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+}
+
+.btn-spinner{
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,.18);
+  border-top-color: rgba(157,123,255,0.95);
+  animation: spin .9s linear infinite;
+}
+
+/* Disabled state feels “iOS-like” */
+.invite-modal.is-busy .btn,
+.invite-modal.is-busy input{
+  opacity: .75;
+}
+.invite-modal.is-busy input{
+  cursor: not-allowed;
+}
+

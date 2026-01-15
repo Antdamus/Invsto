@@ -162,17 +162,15 @@ async function invokeEdgeJson(functionName, payload) {
 }
 
 async function resendInviteForRow(tr){
-  const email = (tr.dataset.email || '').trim().toLowerCase();
-  const display_name = (tr.querySelector('.user-name')?.value || tr.dataset.displayName || '').trim();
-  const role = (tr.querySelector('.user-role')?.value || tr.dataset.role || 'employee').trim().toLowerCase();
+  const employee_id = (tr.dataset.employeeId || '').trim();
+  if (!employee_id) throw new Error('Missing employee id for this user.');
 
-  if (!email) throw new Error('Missing email for this user.');
-  if (!display_name) throw new Error('Display name is required.');
-  if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+  // (Optional) you can still read these if your edge function wants them,
+  // but for "resend" you usually only need employee_id.
+  // const email = (tr.dataset.email || '').trim().toLowerCase();
 
-  // Reuse the SAME edge function path + action
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: "resend", employee_id: emp.id }
+    body: { action: "resend", employee_id }
   });
 
   if (error) throw error;
@@ -191,12 +189,6 @@ function escapeHtml(s){
     .replaceAll("'","&#039;");
 }
 
-function openInviteUserPrompt() {
-  const email = prompt("Enter worker email to invite:");
-  if (!email) return;
-
-  inviteWorkerByEmail(email);
-}
 
 async function markAcceptedIfNeeded() {
   try {
@@ -206,14 +198,6 @@ async function markAcceptedIfNeeded() {
   } catch (e) {
     console.warn('mark_invite_accepted failed:', e);
   }
-}
-
-
-function wireUsersPanel() {
-  const btn = document.getElementById('userAddBtn');
-  if (!btn) return;
-
-  btn.addEventListener('click', openInviteUserPrompt);
 }
 
 
@@ -2813,19 +2797,94 @@ function setUserError(msg){
   show(el, !!msg);
 }
 
-function openUserModal(){
-  setUserError('');
-  qs('userEmail').value = '';
-  qs('userDisplayName').value = '';
-  qs('userRole').value = 'employee';
-  show(qs('userModalBackdrop'), true);
-  show(qs('userModal'), true);
+let _userModalKeyHandler = null;
+
+function setInviteBusy(isBusy){
+  const modal = qs('userModal');
+  const btn = qs('userInviteBtn');
+  const spinner = modal?.querySelector('.btn-spinner');
+  const label = modal?.querySelector('.btn-label');
+
+  if (!modal || !btn || !spinner || !label) return;
+
+  modal.classList.toggle('is-busy', !!isBusy);
+  btn.disabled = !!isBusy;
+
+  // disable inputs too
+  qs('userEmail').disabled = !!isBusy;
+  qs('userDisplayName').disabled = !!isBusy;
+
+  // spinner toggle
+  show(spinner, !!isBusy);
+  label.textContent = isBusy ? 'Sending…' : 'Send invite';
 }
 
-function closeUserModal(){
-  show(qs('userModalBackdrop'), false);
-  show(qs('userModal'), false);
+function setRoleUI(role){
+  // Update hidden select (keeps your existing inviteUser() logic intact)
+  const sel = qs('userRole');
+  if (sel) sel.value = role;
+
+  // Update card UI
+  document.querySelectorAll('#userModal .role-card').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.role === role);
+  });
 }
+
+function guessNameFromEmail(email){
+  const local = String(email || '').split('@')[0] || '';
+  if (!local) return '';
+  const cleaned = local.replace(/[._-]+/g, ' ').trim();
+  if (!cleaned) return '';
+  return cleaned.split(' ').map(w => w ? (w[0].toUpperCase() + w.slice(1)) : '').join(' ');
+}
+
+function openUserModal() {
+  const modal = qs('userModal');
+  const backdrop = qs('userModalBackdrop');
+  if (!modal || !backdrop) {
+    console.warn('[users] modal/backdrop not found', { modal, backdrop });
+    return;
+  }
+
+  // IMPORTANT: hidden overrides everything (display:none !important)
+  modal.classList.remove('hidden');
+  backdrop.classList.remove('hidden');
+
+  // CSS expects these exact classes:
+  backdrop.classList.add('show');
+  modal.classList.add('open');
+
+  // optional: prevent page scroll behind modal
+  document.body.style.overflow = 'hidden';
+
+  // optional: clear errors + prep default UI
+  try { setUserError(''); } catch {}
+  try { setInviteBusy(false); } catch {}
+
+  // optional: focus first field
+  const email = qs('userEmail');
+  if (email) setTimeout(() => email.focus(), 0);
+}
+
+function closeUserModal() {
+  const modal = qs('userModal');
+  const backdrop = qs('userModalBackdrop');
+  if (!modal || !backdrop) return;
+
+  backdrop.classList.remove('show');
+  modal.classList.remove('open');
+
+  // restore page scroll
+  document.body.style.overflow = '';
+
+  // optional: if you want it fully removed from layout after anim:
+  // (wait for the fade/scale transition so it doesn't "pop")
+  setTimeout(() => {
+    backdrop.classList.add('hidden');
+    modal.classList.add('hidden');
+  }, 200); // match your CSS transition ~0.18–0.2s
+}
+
 
 function getUsersFilters(){
   const q = (qs('userSearchInput')?.value || '').trim().toLowerCase();
@@ -2994,7 +3053,7 @@ async function saveUserRow(tr){
 }
 
 
-function wireUsersTab(){
+function wireUsersTab() {
   // tab click: activate + lazy init
   qs('tabUsers')?.addEventListener('click', async () => {
     activateTab('users');
@@ -3002,65 +3061,153 @@ function wireUsersTab(){
     if (_usersInitialized) return;
     _usersInitialized = true;
 
-    // modal controls
-    qs('userAddBtn')?.addEventListener('click', openUserModal);
-    qs('userCloseBtn')?.addEventListener('click', closeUserModal);
-    qs('userCancelBtn')?.addEventListener('click', closeUserModal);
-    qs('userModalBackdrop')?.addEventListener('click', closeUserModal);
+    // -----------------------------
+    // Modal controls
+    // -----------------------------
+    const onOpen = (e) => { e?.preventDefault?.(); openUserModal(); };
+    const onClose = (e) => { e?.preventDefault?.(); closeUserModal(); };
 
-    // invite
-    qs('userInviteBtn')?.addEventListener('click', () => {
-      inviteUser().catch(err => {
+    qs('userAddBtn')?.addEventListener('click', onOpen);
+    qs('userCloseBtn')?.addEventListener('click', onClose);
+    qs('userCancelBtn')?.addEventListener('click', onClose);
+    qs('userModalBackdrop')?.addEventListener('click', onClose);
+
+    // Role card clicks (delegated, so it works even if modal content re-renders)
+    qs('userModal')?.addEventListener('click', (e) => {
+      const card = e.target.closest('.role-card');
+      if (!card) return;
+      setRoleUI(card.dataset.role);
+    });
+
+    // Auto-fill display name suggestion from email (only if empty)
+    qs('userEmail')?.addEventListener('blur', () => {
+      const emailEl = qs('userEmail');
+      const dnEl = qs('userDisplayName');
+      if (!emailEl || !dnEl) return;
+
+      const email = (emailEl.value || '').trim();
+      const dn = (dnEl.value || '').trim();
+      if (!dn && email.includes('@')) {
+        dnEl.value = guessNameFromEmail(email);
+      }
+    });
+
+    // -----------------------------
+    // Invite (with concurrency guard)
+    // -----------------------------
+    let inviteInFlight = false;
+
+    const runInvite = async () => {
+      if (inviteInFlight) return;
+      inviteInFlight = true;
+
+      try {
+        setUserError('');          // clear any prior message
+        setInviteBusy(true);
+        await inviteUser();
+      } catch (err) {
         console.error(err);
         setUserError(err?.message || 'Invite failed');
-      });
+      } finally {
+        setInviteBusy(false);
+        inviteInFlight = false;
+      }
+    };
+
+    qs('userInviteBtn')?.addEventListener('click', (e) => {
+      e?.preventDefault?.();
+      runInvite();
     });
 
-    // filters
-    qs('userSearchInput')?.addEventListener('input', debounce(() => {
-      applyUsersFilterAndRender();
-    }, 150));
+    // Optional: allow Enter to trigger invite while inside the modal
+    qs('userModal')?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const isTextArea = (e.target?.tagName || '').toLowerCase() === 'textarea';
+      if (isTextArea) return;
 
-    qs('userShowInactive')?.addEventListener('change', () => {
-      applyUsersFilterAndRender();
+      // If focus is inside modal and invite button exists, run invite
+      const modal = qs('userModal');
+      if (!modal || !modal.contains(document.activeElement)) return;
+
+      const inviteBtn = qs('userInviteBtn');
+      if (!inviteBtn || inviteBtn.disabled) return;
+
+      e.preventDefault();
+      runInvite();
     });
 
-    // actions per row (save + resend)
-qs('usersTbody')?.addEventListener('click', (e) => {
-  const tr = e.target.closest('tr');
-  if (!tr) return;
-
-  const saveBtn = e.target.closest('.user-save');
-  if (saveBtn){
-    saveUserRow(tr).catch(err => {
-      console.error(err);
-      showToast(err?.message || 'Save failed', 'err');
-    });
-    return;
-  }
-
-  const resendBtn = e.target.closest('.user-resend');
-  if (resendBtn){
-    resendBtn.disabled = true;
-    resendInviteForRow(tr)
-      .catch(err => {
+    // -----------------------------
+    // Filters
+    // -----------------------------
+    const debouncedFilter = debounce(() => {
+      try {
+        applyUsersFilterAndRender();
+      } catch (err) {
         console.error(err);
-        showToast(err?.message || 'Resend failed', 'err');
-      })
-      .finally(() => { resendBtn.disabled = false; });
-    return;
-  }
-});
+      }
+    }, 150);
 
+    qs('userSearchInput')?.addEventListener('input', debouncedFilter);
+    qs('userShowInactive')?.addEventListener('change', () => {
+      try {
+        applyUsersFilterAndRender();
+      } catch (err) {
+        console.error(err);
+      }
+    });
 
-    // initial load
-    loadUsers().catch(err => {
+    // -----------------------------
+    // Per-row actions (delegated)
+    // -----------------------------
+    qs('usersTbody')?.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+
+      const saveBtn = e.target.closest('.user-save');
+      if (saveBtn) {
+        // disable only this save button while saving
+        saveBtn.disabled = true;
+        saveUserRow(tr)
+          .catch((err) => {
+            console.error(err);
+            showToast(err?.message || 'Save failed', 'err');
+          })
+          .finally(() => {
+            saveBtn.disabled = false;
+          });
+        return;
+      }
+
+      const resendBtn = e.target.closest('.user-resend');
+      if (resendBtn) {
+        resendBtn.disabled = true;
+        resendInviteForRow(tr)
+          .catch((err) => {
+            console.error(err);
+            showToast(err?.message || 'Resend failed', 'err');
+          })
+          .finally(() => {
+            resendBtn.disabled = false;
+          });
+        return;
+      }
+    });
+
+    // -----------------------------
+    // Initial load (with nice empty state)
+    // -----------------------------
+    try {
+      await loadUsers();
+    } catch (err) {
       console.error(err);
       const tbody = qs('usersTbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load users.</td></tr>`;
-    });
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" class="muted">Failed to load users.</td></tr>`;
+      }
+    }
   });
 }
+
 
 
 //* ============== Boot ============== */
@@ -3119,7 +3266,6 @@ startLiveTicker(1000); // change to 1000 if you want a per-second tick
   wireScheduleTab();
   wireStoresTab();
   wireUsersTab();
-  wireUsersPanel();
   wireGlobalCalendar();
 if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
 
