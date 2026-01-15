@@ -788,3 +788,260 @@ html,body{
   .table tbody tr{ page-break-inside:avoid; }
   .modal, .modal-backdrop, .toast, .drawer, .drawer-backdrop{ display:none !important; }
 }
+
+/* =========================================================
+   INVITE WORKER MODAL — Restore Premium UI (Gorgeous)
+   Paste at the VERY BOTTOM of admin.css
+   ========================================================= */
+
+/* Make sure the invite modal inherits the base modal, but with premium polish */
+.invite-modal.modal{
+  width: 640px;
+  max-width: 94vw;
+}
+
+/* Header: gradient + icon row */
+.invite-modal .invite-header{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background:
+    radial-gradient(900px 220px at 15% 0%, rgba(157,123,255,.18), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,0));
+}
+
+.invite-header-left{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  min-width:0;
+}
+
+.invite-icon{
+  width:42px;
+  height:42px;
+  border-radius:14px;
+  display:grid;
+  place-items:center;
+  background: rgba(157,123,255,.12);
+  border:1px solid rgba(157,123,255,.25);
+  box-shadow: 0 14px 34px rgba(0,0,0,.35);
+  flex: 0 0 auto;
+}
+
+.invite-header-text{
+  min-width:0;
+}
+
+.invite-header-text h3{
+  margin:0;
+  font-size: 22px;
+  letter-spacing: .2px;
+}
+
+.invite-subtitle{
+  margin-top:6px;
+  color: rgba(154,160,166,.92);
+  font-size: 13px;
+  line-height: 1.35;
+  max-width: 520px;
+}
+
+/* Close button inside header */
+.invite-modal .invite-close{
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.03);
+  color: rgba(231,233,234,.92);
+  cursor: pointer;
+  display:grid;
+  place-items:center;
+  transition: transform .08s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.invite-modal .invite-close:hover{
+  transform: translateY(-1px);
+  border-color: rgba(157,123,255,.25);
+  box-shadow: 0 16px 34px rgba(0,0,0,.35);
+}
+.invite-modal .invite-close:active{ transform: translateY(0) scale(.99); }
+
+/* Body spacing */
+.invite-modal .invite-body{
+  padding: 16px 18px 18px;
+  gap: 14px;
+}
+
+/* Grid for Email / Name / Hourly */
+.invite-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 700px){
+  .invite-grid{ grid-template-columns: 1fr; }
+}
+
+/* Field wrappers */
+.field span{
+  color: rgba(183,188,197,.95);
+  font-size: 12px;
+  display:block;
+  margin-bottom: 6px;
+}
+.field .field-hint{
+  margin-top: 7px;
+  color: rgba(183,188,197,.92);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Premium inputs inside invite modal */
+.invite-modal input,
+.invite-modal .input{
+  height: 40px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(900px 240px at 15% 0%, rgba(157,123,255,.10), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.38),
+    0 0 0 1px rgba(0,0,0,.22) inset;
+  padding: 0 12px;
+  color: var(--text);
+  outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .12s ease;
+}
+.invite-modal input:focus,
+.invite-modal .input:focus{
+  border-color: rgba(157,123,255,.45);
+  box-shadow:
+    0 18px 44px rgba(0,0,0,.46),
+    0 0 0 4px rgba(157,123,255,.14);
+}
+
+/* Role block: hide native select + show cards */
+.role-block{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 16px;
+  background:
+    radial-gradient(900px 260px at 15% 0%, rgba(157,123,255,.08), transparent 60%),
+    rgba(15,17,22,.75);
+  padding: 14px;
+  display:grid;
+  gap: 10px;
+}
+
+.role-title{
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .2px;
+  color: rgba(231,233,234,.95);
+}
+
+/* Hide the native select completely (but keep it accessible/usable by JS) */
+.role-native{
+  position:absolute !important;
+  opacity:0 !important;
+  pointer-events:none !important;
+  width:1px !important;
+  height:1px !important;
+  left:-9999px !important;
+}
+
+/* Role cards layout */
+.role-cards{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 10px;
+}
+@media (max-width: 760px){
+  .role-cards{ grid-template-columns: 1fr; }
+}
+
+.role-card{
+  text-align:left;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(900px 220px at 20% 0%, rgba(157,123,255,.10), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  border-radius: 16px;
+  padding: 12px;
+  cursor:pointer;
+  transition: transform .08s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+  position:relative;
+  min-height: 84px;
+  color: rgba(231,233,234,.95);
+}
+.role-card:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 18px 46px rgba(0,0,0,.45);
+  border-color: rgba(157,123,255,.22);
+}
+
+.role-card.active{
+  border-color: rgba(157,123,255,.58);
+  background:
+    radial-gradient(900px 260px at 15% 0%, rgba(157,123,255,.18), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  box-shadow:
+    0 0 0 4px rgba(157,123,255,.12),
+    0 18px 46px rgba(0,0,0,.48);
+}
+
+.role-name{ font-weight: 800; letter-spacing: .15px; }
+.role-desc{
+  margin-top: 6px;
+  color: rgba(183,188,197,.92);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.role-tag{
+  position:absolute;
+  top:10px;
+  right:10px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.03);
+  color: rgba(231,233,234,.92);
+}
+.role-tag.warn{
+  border-color: rgba(224,169,0,.35);
+  background: rgba(224,169,0,.12);
+  color: rgba(255,233,184,.95);
+}
+
+/* Footer */
+.invite-modal .invite-footer{
+  padding: 14px 18px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  align-items:center;
+}
+
+/* Busy spinner */
+.btn-spinner{
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,.18);
+  border-top-color: rgba(157,123,255,.95);
+  animation: spin .9s linear infinite;
+}
+
+/* Disabled state “iOS-like” */
+.invite-modal.is-busy .btn,
+.invite-modal.is-busy input{
+  opacity:.78;
+}
+.invite-modal.is-busy input{ cursor:not-allowed; }

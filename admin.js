@@ -187,13 +187,6 @@ function escapeHtml(s){
     .replaceAll("'","&#039;");
 }
 
-function openInviteUserPrompt() {
-  const email = prompt("Enter worker email to invite:");
-  if (!email) return;
-
-  inviteWorkerByEmail(email);
-}
-
 async function markAcceptedIfNeeded() {
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
@@ -209,8 +202,13 @@ function wireUsersPanel() {
   const btn = document.getElementById('userAddBtn');
   if (!btn) return;
 
-  btn.addEventListener('click', openInviteUserPrompt);
+  // Open the premium invite modal (not the old prompt)
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openUserModal();
+  });
 }
+
 
 
 async function loadGlobalCalendar(){
@@ -2809,19 +2807,48 @@ function setUserError(msg){
   show(el, !!msg);
 }
 
-function openUserModal(){
-  setUserError('');
-  qs('userEmail').value = '';
-  qs('userDisplayName').value = '';
-  qs('userRole').value = 'employee';
-  show(qs('userModalBackdrop'), true);
-  show(qs('userModal'), true);
+function openUserModal() {
+  const bd = qs('userModalBackdrop');
+  const md = qs('userModal');
+
+  // Reset fields
+  const email = qs('userEmail');
+  const name = qs('userName');
+  if (email) email.value = '';
+  if (name) name.value = '';
+
+  // Default role = employee (if present)
+  const role = qs('userRole');
+  if (role) role.value = 'employee';
+
+  // Make visible with the classes your CSS expects
+  bd?.classList.remove('hidden');
+  md?.classList.remove('hidden');
+
+  // Force a frame so transitions apply nicely
+  requestAnimationFrame(() => {
+    bd?.classList.add('show');
+    md?.classList.add('open');
+  });
+
+  // Optional: focus email for a premium feel
+  setTimeout(() => email?.focus(), 50);
 }
 
-function closeUserModal(){
-  show(qs('userModalBackdrop'), false);
-  show(qs('userModal'), false);
+function closeUserModal() {
+  const bd = qs('userModalBackdrop');
+  const md = qs('userModal');
+
+  bd?.classList.remove('show');
+  md?.classList.remove('open');
+
+  // Wait for transition before hiding (matches your CSS ~180-200ms)
+  setTimeout(() => {
+    bd?.classList.add('hidden');
+    md?.classList.add('hidden');
+  }, 220);
 }
+
 
 function getUsersFilters(){
   const q = (qs('userSearchInput')?.value || '').trim().toLowerCase();
