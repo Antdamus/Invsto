@@ -110,7 +110,7 @@ async function inviteWorkerByEmail(email) {
     const role = 'employee';
 
     const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-      body: { action: 'invite', email, display_name, role }
+      body: { action: 'invite', email, display_name, role, hourly_rate }
     });
 
     if (error) throw error;
@@ -2929,7 +2929,7 @@ function renderUsersTable(rows){
   };
 
   if (!rows.length){
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">No users match your filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">No users match your filter.</td></tr>`;
     return;
   }
 
@@ -2942,6 +2942,7 @@ function renderUsersTable(rows){
         data-email="${escAttr(r.email || '')}"
         data-display-name="${escAttr(r.display_name || '')}"
         data-role="${escAttr((r.role || 'employee').toLowerCase())}"
+        data-hourly-rate="${escAttr(String(r.hourly_rate ?? ''))}"
       >
         <td>
           <input class="input user-name" value="${escAttr(r.display_name || '')}" />
@@ -2955,6 +2956,10 @@ function renderUsersTable(rows){
             <option value="manager"  ${r.role==='manager'?'selected':''}>manager</option>
             <option value="admin"    ${r.role==='admin'?'selected':''}>admin</option>
           </select>
+        </td>
+
+        <td>
+          <input class="input user-hourly-rate" type="number" min="0" step="0.01" placeholder="e.g., 18.50" value="${escapeHtml(String(r.hourly_rate ?? ''))}" />
         </td>
 
         <td>
@@ -2983,7 +2988,7 @@ function renderUsersTable(rows){
 
 async function loadUsers(){
   const tbody = qs('usersTbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="muted">Loading…</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
 
   const { data, error } = await supabaseClient
     .from('employees')
@@ -3011,6 +3016,11 @@ async function inviteUser(){
   const email = (qs('userEmail').value || '').trim().toLowerCase();
   const display_name = (qs('userDisplayName').value || '').trim();
   const role = (qs('userRole').value || 'employee').trim().toLowerCase();
+  // Optional hourly rate
+  const hourlyRateEl = document.getElementById('userHourlyRate');
+  const hourly_rate_raw = (hourlyRateEl?.value || '').trim();
+  const hourly_rate = hourly_rate_raw === '' ? null : Number(hourly_rate_raw);
+  if (hourly_rate !== null && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) return setUserError('Hourly rate must be a non-negative number.');
 
   if (!email) return setUserError('Email is required.');
   if (!display_name) return setUserError('Display name is required.');
@@ -3019,7 +3029,7 @@ async function inviteUser(){
   setUserError('');
 
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'invite', email, display_name, role }
+    body: { action: 'invite', email, display_name, role, hourly_rate }
   });
 
   if (error) throw error;
@@ -3036,13 +3046,16 @@ async function saveUserRow(tr){
   const display_name = (tr.querySelector('.user-name')?.value || '').trim();
   const role = (tr.querySelector('.user-role')?.value || 'employee').toLowerCase();
   const active = !!tr.querySelector('.user-active')?.checked;
+  const hourly_rate_raw = (tr.querySelector('.user-hourly-rate')?.value || '').trim();
+  const hourly_rate = hourly_rate_raw === '' ? null : Number(hourly_rate_raw);
+  if (hourly_rate !== null && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) throw new Error('Hourly rate must be a non-negative number.');
 
   if (!employee_id) throw new Error('Missing employee id.');
   if (!display_name) throw new Error('Display name is required.');
   if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
 
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'update', employee_id, role, active, display_name }
+    body: { action: 'update', employee_id, role, active, display_name, hourly_rate }
   });
 
   if (error) throw error;
