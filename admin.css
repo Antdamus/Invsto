@@ -3,6 +3,30 @@
    FULL REPLACEMENT admin.css
    ========================================================= */
 
+/* =========================
+   Overview — Pending Review Flag
+========================= */
+.worker-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.worker-name{ display:inline-block; }
+.review-flag{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  line-height:1;
+  font-weight:700;
+  color: var(--warn);
+  background: rgba(224, 169, 0, 0.14);
+  border: 1px solid rgba(224, 169, 0, 0.30);
+  white-space: nowrap;
+}
+
 /* -------------------------
    Theme
 ------------------------- */
