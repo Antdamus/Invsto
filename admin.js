@@ -36,6 +36,748 @@ function localInputToOffsetISO(localStr){ const d=new Date(localStr); if(Number.
 function fmtLocal(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString(); }
 function showToast(msg, type='ok'){ let t=document.querySelector('.toast'); if(!t){ t=document.createElement('div'); t.className='toast'; document.body.appendChild(t); } t.textContent=msg; t.classList.remove('ok','err'); t.classList.add(type); t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
 
+// --- RAW invoke so we can read JSON even on 400/403/etc ---
+async function invokeEdgeJson(functionName, payload) {
+  const { data: sessionData, error: sessErr } = await supabaseClient.auth.getSession();
+  if (sessErr) throw sessErr;
+
+  const accessToken = sessionData?.session?.access_token;
+  if (!accessToken) throw new Error("Missing session access token.");
+
+  // These should already exist in your initSupabase.js setup.
+  // If not, define them there and keep them global.
+  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY globals.");
+  }
+
+  const url = `${window.SUPABASE_URL}/functions/v1/${functionName}`;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": window.SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  let json;
+  try { json = await resp.json(); } catch { json = null; }
+
+  if (!resp.ok) {
+    const msg = json?.error || json?.message || `Edge Function error (${resp.status})`;
+    const detail = json?.detail ? ` — ${json.detail}` : "";
+    throw new Error(msg + detail);
+  }
+
+  return json;
+}
+function escapeHtml(s){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+function wireHeaderActions() {
+  qs('signOutBtn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.href = 'index.html'; });
+  qs('printBtn').addEventListener('click', () => window.print());
+}
+
+function dateStrAddDays(yyyyMmDd, days){
+  const d = new Date(yyyyMmDd + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+
+async function signPath(path, expiresSec = 180){
+  if (!path) return null;
+  try {
+    const { data } = await supabaseClient
+      .storage.from('timeclock-photos')
+      .createSignedUrl(path, expiresSec);
+    return data?.signedUrl || null;
+  } catch { return null; }
+}
+
+// Cache active employees for joins in Overview/Payroll
+let _activeEmployees = null;
+async function getActiveEmployees(){
+  if (_activeEmployees) return _activeEmployees;
+  const { data, error } = await supabaseClient
+    .from('employees')
+    .select('id, display_name')
+    .eq('active', true)
+    .order('display_name', { ascending: true });
+  if (error) throw error;
+  _activeEmployees = data || [];
+  return _activeEmployees;
+}
+
+/* ============== Overview (monthly) ============== */
+// Return ALL active employees for the month, filling zeros when no rows exist
+async function fetchMonthlySummary(monthStart){
+  const [emps, viewResp] = await Promise.all([
+    getActiveEmployees(),
+    supabaseClient.from('v_monthly_hours')
+      .select('employee_id, month_start, shifts_count, total_hours')
+      .eq('month_start', monthStart)
+  ]);
+  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
+  const rows = emps.map(e => {
+    const v = byId.get(e.id) || {};
+    return {
+      employee_id: e.id,
+      display_name: e.display_name,
+      month_start: monthStart,
+      shifts_count: v.shifts_count || 0,
+      total_hours: v.total_hours || 0
+    };
+  });
+  return { rows, source: 'view' };
+}
+
+// Fetch resolved schedule for the week (recurring+overrides → concrete slots)
+function renderKPIs(rows){
+  const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
+  const shf = rows.reduce((a,r)=>a+(+r.shifts_count||0),0);
+  const avg = shf>0? tot/shf : 0;
+  qs('kpiTotalHours').textContent = fmtHours(tot);
+  qs('kpiTotalShifts').textContent = String(shf);
+  qs('kpiAvgHrs').textContent = fmtHours(avg);
+}
+let currentRows=[], sortState={ key:'display_name', dir:'asc' };
+function sortRows(rows){
+  const a=rows.slice(), {key,dir}=sortState, m = dir==='asc'?1:-1;
+  a.sort((x,y)=>{
+    let xv=x[key], yv=y[key];
+    if (key==='shifts_count' || key==='total_hours'){ xv=+xv||0; yv=+yv||0; return (xv-yv)*m; }
+    const xs=(xv||'').toString().toLowerCase(), ys=(yv||'').toString().toLowerCase();
+    return xs<ys?-1*m: xs>ys?1*m: 0;
+  });
+  return a;
+}
+function applySortIndicators(){
+  [{el:qs('thWorker'),key:'display_name'},{el:qs('thShifts'),key:'shifts_count'},{el:qs('thHours'),key:'total_hours'}].forEach(({el,key})=>{
+    const s = sortState.key===key? sortState.dir : 'none';
+    el.setAttribute('aria-sort', s==='asc'?'ascending':s==='desc'?'descending':'none');
+    el.querySelector('.sort-indicator').textContent = s==='asc'?'▲':s==='desc'?'▼':'↕';
+  });
+}
+function renderTable(rows){
+  const tb=qs('summaryTbody'); tb.innerHTML='';
+  const data = sortRows(rows);
+  if (!data.length){ tb.innerHTML=`<tr><td colspan="3" class="muted">No results for this month/search.</td></tr>`; return; }
+  for(const r of data){
+    const tr=document.createElement('tr');
+    tr.dataset.employeeId=r.employee_id; tr.dataset.monthStart=r.month_start; tr.dataset.displayName=r.display_name||'';
+    tr.className='summary-row';
+    tr.innerHTML=`<td>${r.display_name||'—'}</td><td>${r.shifts_count??'—'}</td><td>${fmtHours(r.total_hours)}</td>`;
+    tb.appendChild(tr);
+  }
+  applySortIndicators();
+}
+let isLoading = false;
+async function loadSummary(){
+  if (isLoading) return; isLoading = true; qs('summaryTbody').style.opacity = '0.6';
+  try{
+    const monthStart = monthInputToStart();
+    const search = (qs('searchInput').value || '').trim().toLowerCase();
+    qs('printMonthLabel').textContent = monthLabel(monthStart);
+
+    const { rows } = await fetchMonthlySummary(monthStart); // all employees
+    const filtered = search
+      ? rows.filter(r => (r.display_name || '').toLowerCase().includes(search))
+      : rows;
+
+    currentRows = filtered;
+    renderKPIs(filtered);
+    renderTable(filtered);
+  }catch(err){
+    console.error(err);
+    qs('summaryTbody').innerHTML = `<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
+    qs('kpiTotalHours').textContent = qs('kpiTotalShifts').textContent = qs('kpiAvgHrs').textContent = '—';
+  }finally{
+    qs('summaryTbody').style.opacity = '1';
+    isLoading = false;
+  }
+}
+
+
+function wireFilters(){ qs('monthInput').addEventListener('change', loadSummary); qs('searchInput').addEventListener('input', debounce(loadSummary,300)); }
+function toggleSort(key){ if (sortState.key===key) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else sortState={key,dir:'asc'}; renderTable(currentRows); }
+function wireSorting(){ qs('thWorker').addEventListener('click',()=>toggleSort('display_name')); qs('thShifts').addEventListener('click',()=>toggleSort('shifts_count')); qs('thHours').addEventListener('click',()=>toggleSort('total_hours')); }
+
+/* ============== Drawer + Edit/Audit ============== */
+async function fetchPeriodSummary(periodId){
+  const [emps, viewResp] = await Promise.all([
+    getActiveEmployees(),
+    supabaseClient.from('v_payroll_period_hours')
+      .select('employee_id, regular_hours, overtime_hours, total_hours, shifts_count')
+      .eq('period_id', periodId)
+  ]);
+  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
+  return emps.map(e => {
+    const v = byId.get(e.id) || {};
+    return {
+      employee_id: e.id,
+      display_name: e.display_name,
+      regular_hours: v.regular_hours || 0,
+      overtime_hours: v.overtime_hours || 0,
+      total_hours: v.total_hours || 0,
+      shifts_count: v.shifts_count || 0
+    };
+  });
+}
+
+let currentShiftsById = new Map(), drawerContext = { employeeId:null, displayName:null, monthStart:null }, auditCache = new Map();
+
+async function fetchWorkerShifts(employeeId, monthStartStr){
+  const start = new Date(`${monthStartStr}T00:00:00`);
+  const end   = new Date(start); end.setMonth(start.getMonth()+1);
+
+  // 1) Fetch ALL shifts (closed + OPEN)
+  const { data: entries, error } = await supabaseClient.from('time_entries')
+    .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
+    .eq('employee_id', employeeId)
+    .gte('clock_in', start.toISOString())
+    .lt('clock_in', end.toISOString())
+    .order('clock_in', { ascending: true });
+  if (error) throw error;
+
+  const rows = entries || [];
+  const ids = rows.map(r => r.id);
+
+  // 2) Anomalies + approvals
+  let anomalyById = new Map();
+  if (ids.length){
+    const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
+      .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
+      .in('time_entry_id', ids);
+    anomalyById = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
+  }
+
+  // 3) Breaks (with photo paths)
+  let breaksByEntry = new Map();
+  if (ids.length){
+    const { data: breaks } = await supabaseClient.from('time_breaks')
+      .select('id, time_entry_id, started_at, ended_at, photo_start_path, photo_end_path')
+      .in('time_entry_id', ids)
+      .order('started_at', { ascending: true });
+
+    for (const b of (breaks||[])){
+      // prepare signed URLs now (thumbnails + links)
+      const photo_start_url = await signPath(b.photo_start_path);
+      const photo_end_url   = await signPath(b.photo_end_path);
+      const list = breaksByEntry.get(b.time_entry_id) || [];
+      list.push({ ...b, photo_start_url, photo_end_url });
+      breaksByEntry.set(b.time_entry_id, list);
+    }
+  }
+
+  // 4) Build final records (+ signed shift photos)
+  const map = new Map(), out = [];
+  for (const r of rows){
+    const isOpen = !r.clock_out;
+    const durMs  = (isOpen ? Date.now() : new Date(r.clock_out).getTime()) - new Date(r.clock_in).getTime();
+
+    // Break summary
+    const bks = breaksByEntry.get(r.id) || [];
+    const breakMs = bks.reduce((sum, b) => {
+      const done = b.ended_at ? (new Date(b.ended_at) - new Date(b.started_at)) : 0;
+      return sum + Math.max(0, done);
+    }, 0);
+
+    let inUrl=null, outUrl=null;
+    if (r.photo_in_path)  inUrl  = await signPath(r.photo_in_path);
+    if (r.photo_out_path) outUrl = await signPath(r.photo_out_path);
+
+    const a = anomalyById.get(r.id) || {};
+    const rec = {
+      id: r.id,
+      clock_in: r.clock_in,
+      clock_out: r.clock_out,
+      duration_ms: durMs,
+      store_id: r.store_id || null,
+      photo_in_url: inUrl,
+      photo_out_url: outUrl,
+      // anomalies + approvals
+      anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
+      has_anomaly: !!a.has_anomaly,
+      approval_status: a.approval_status || null,
+      approval_note: a.approval_note || null,
+      approved_at: a.approved_at || null,
+      // breaks (with signed URLs)
+      breaks: bks,                 // [{ id, started_at, ended_at, photo_start_url, photo_end_url, ... }]
+      break_count: bks.length,
+      break_ms: breakMs,
+      is_open: isOpen
+    };
+    map.set(r.id, rec); out.push(rec);
+  }
+  currentShiftsById = map;
+  lastDrawerShifts = out;
+  return out;
+}
+
+
+
+function openDrawer(){ qs('drawer').classList.add('open'); qs('drawer').classList.remove('hidden'); qs('drawerBackdrop').classList.add('show'); qs('drawerBackdrop').classList.remove('hidden'); }
+function closeDrawer(){ qs('drawer').classList.remove('open'); qs('drawerBackdrop').classList.remove('show'); setTimeout(()=>{ qs('drawer').classList.add('hidden'); qs('drawerBackdrop').classList.add('hidden'); },250); }
+function renderDrawerHeader(name,monthStartStr){ qs('drawerTitle').textContent=name||'—'; qs('drawerSubtitle').textContent=monthLabel(monthStartStr); }
+function renderDrawerSummary(shifts){ const n=shifts.length, tot=shifts.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000, avg=n?tot/n:0; qs('dsShifts').textContent=String(n); qs('dsHours').textContent=fmtHours(tot); qs('dsAvg').textContent=fmtHours(avg); }
+
+function renderDrawerList(shifts){
+  const host = qs('drawerList'); host.innerHTML = '';
+
+  const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
+  if (!src.length){
+    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No shifts in this month.'}</div>`;
+    return;
+  }
+
+  for (const s of src){
+    const inStr  = fmtLocal(s.clock_in);
+    const outStr = s.is_open ? 'OPEN' : fmtLocal(s.clock_out);
+    const durStr = fmtDurationHM(s.duration_ms);
+
+    // Status chip (don't show approve buttons for an OPEN shift)
+    const st = s.approval_status || (s.is_open ? 'open' : 'pending');
+    const stClass = s.is_open ? 'pending' : (st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending');
+    const statusChip = `<span class="chip ${stClass}">${(s.is_open?'OPEN':st.toUpperCase())}</span>`;
+
+    // Anomaly chips
+    const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
+
+    // Break summary + block
+    const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
+
+    let breaksBlock = '';
+    if (s.break_count){
+      const parts = s.breaks.map(b => {
+        const open = !b.ended_at;
+        const dur = open ? 0 : (new Date(b.ended_at) - new Date(b.started_at));
+        const durStrB = open ? '—' : fmtDurationHM(dur);
+        const startImg = b.photo_start_url ? `<a href="${b.photo_start_url}" target="_blank" rel="noopener"><img class="thumb" src="${b.photo_start_url}" alt="Break start photo"></a>` : `<span class="muted">No start photo</span>`;
+        const endImg   = b.photo_end_url   ? `<a href="${b.photo_end_url}"   target="_blank" rel="noopener"><img class="thumb" src="${b.photo_end_url}"   alt="Break end photo"></a>`   : `<span class="muted">No end photo</span>`;
+        return `
+          <div class="break">
+            <div class="br-times"><strong>${new Date(b.started_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</strong> → ${open ? 'OPEN' : new Date(b.ended_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
+            <div class="br-dur">${open ? '<span class="muted">(active)</span>' : durStrB}</div>
+            <div class="br-photos">${startImg} ${endImg}</div>
+          </div>`;
+      }).join('');
+      breaksBlock = `<div class="breaks">${parts}</div>`;
+    }
+
+    // Actions per status (disable for OPEN shifts)
+    let actions = '';
+    if (!s.is_open){
+      if (st === 'approved'){
+        actions = `
+          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+        `;
+      } else if (st === 'waived'){
+        actions = `
+          <button class="btn small" data-approve-id="${s.id}">Approve</button>
+          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
+        `;
+      } else {
+        actions = `
+          <button class="btn small" data-approve-id="${s.id}">Approve</button>
+          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
+        `;
+      }
+    }
+
+    const noteLine = s.approval_note ? `<div class="shift-meta">Note: ${s.approval_note}</div>` : '';
+
+    const div = document.createElement('div');
+    div.className = 'shift';
+    div.innerHTML = `
+      <div class="shift-row" style="justify-content:space-between;">
+        <div class="shift-time"><strong>In:</strong> ${inStr}</div>
+        <div class="shift-time"><strong>Out:</strong> ${outStr}</div>
+        <div class="shift-meta">${durStr}</div>
+      </div>
+
+      <div class="shift-row" style="margin-top:6px; justify-content:space-between;">
+        <div class="chips">
+          ${statusChip}
+          ${anomChips}
+          <span class="chip">${breaksText}</span>
+        </div>
+        <div class="shift-actions">
+          ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
+          ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
+          <button class="btn small" data-edit-id="${s.id}" ${s.is_open?'disabled':''}>Edit</button>
+          <button class="btn small" data-audit-id="${s.id}">Audit</button>
+          ${actions}
+        </div>
+      </div>
+
+      ${noteLine}
+      ${breaksBlock}
+
+      <div class="audit hidden" id="audit-${s.id}">
+        <div class="drawer-empty">Loading…</div>
+      </div>`;
+    host.appendChild(div);
+  }
+}
+
+
+async function fetchAuditsForShift(shiftId){
+  const { data, error } = await supabaseClient.from('v_shift_adjustments')
+    .select('id, time_entry_id, editor_name, editor_user_id, edited_at, reason, fields_changed, old_value, new_value')
+    .eq('time_entry_id', shiftId).order('edited_at',{ascending:false});
+  if (error) throw error; return data||[];
+}
+async function toggleAudit(shiftId){
+  const c=document.getElementById(`audit-${shiftId}`); if(!c) return;
+  if (!c.classList.contains('hidden')){ c.classList.add('hidden'); return; }
+  c.classList.remove('hidden'); c.innerHTML=`<div class="drawer-empty">Loading…</div>`;
+  try{ const audits = auditCache.get(shiftId) || await fetchAuditsForShift(shiftId); auditCache.set(shiftId,audits); renderAuditList(c,audits,shiftId); }
+  catch(err){ console.error(err); c.innerHTML=`<div class="drawer-empty">Error loading audit trail.</div>`; }
+}
+function renderAuditList(container, audits, shiftId){
+  if (!audits.length){ container.innerHTML=`<div class="drawer-empty">No adjustments yet.</div>`; return; }
+  const parts=audits.map(a=>{
+    const who=a.editor_name||'(unknown)', when=fmtLocal(a.edited_at), why=a.reason||'';
+    const fields=Array.isArray(a.fields_changed)?a.fields_changed:[]; const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out, newIn=a.new_value?.clock_in, newOut=a.new_value?.clock_out;
+    const diffs=[]; if(fields.includes('clock_in')) diffs.push(`<div>clock_in: <code>${fmtLocal(oldIn)}</code> → <code>${fmtLocal(newIn)}</code></div>`); if(fields.includes('clock_out')) diffs.push(`<div>clock_out: <code>${fmtLocal(oldOut)}</code> → <code>${fmtLocal(newOut)}</code></div>`);
+    return `
+      <div class="ai" data-adjustment-id="${a.id}">
+        <div class="row ai-hd">
+          <div class="who">${who}</div>
+          <div class="when">• ${when}</div>
+          <div class="acts" style="margin-left:auto;">
+            <button class="btn small" data-revert="${a.id}" title="Revert to OLD values">Revert</button>
+          </div>
+        </div>
+        <div class="why">${why}</div>
+        ${diffs.length?`<div class="chg">${diffs.join('')}</div>`:''}
+      </div>`;
+  });
+  container.innerHTML = `<div class="ai-list">${parts.join('')}</div>`;
+  container.querySelectorAll('button[data-revert]').forEach(btn=>btn.addEventListener('click',()=>onRevertClick(shiftId, btn.getAttribute('data-revert'))));
+}
+async function onRevertClick(shiftId, adjustmentId){
+  const audits=auditCache.get(shiftId)||[]; const a=audits.find(x=>x.id===adjustmentId); if(!a) return;
+  const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out; if(!oldIn||!oldOut){ showToast('Cannot revert: missing old values','err'); return; }
+  const reason=window.prompt('Reason for revert (required):', `Revert to ${fmtLocal(oldIn)} – ${fmtLocal(oldOut)}`); if(!reason||reason.trim().length<3){ showToast('Revert cancelled (reason required)','err'); return; }
+  try{
+    const { error } = await supabaseClient.rpc('admin_update_shift_time', { _time_entry_id: shiftId, _new_clock_in: oldIn, _new_clock_out: oldOut, _reason: reason.trim() });
+    if (error) throw error;
+    showToast('Shift reverted','ok'); auditCache.delete(shiftId);
+    const { employeeId, monthStart } = drawerContext;
+    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts);
+    await toggleAudit(shiftId); await loadSummary();
+  }catch(err){ console.error(err); showToast(err?.message||'Failed to revert','err'); }
+}
+let editingShiftId=null, saving=false;
+function openEditModal(shift){ editingShiftId=shift.id; qs('editIn').value=toDatetimeLocalValue(shift.clock_in); qs('editOut').value=toDatetimeLocalValue(shift.clock_out); qs('editReason').value=''; qs('editError').textContent=''; show(qs('editError'),false); updateEditDuration(); qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden'); qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden'); qs('editIn').focus(); }
+function closeEditModal(){ editingShiftId=null; saving=false; qs('editModal').classList.remove('open'); qs('editModalBackdrop').classList.remove('show'); setTimeout(()=>{ qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden'); },180); }
+function updateEditDuration(){ const a=qs('editIn').value, b=qs('editOut').value; if(!a||!b){ qs('editDuration').textContent='—'; return; } const diff=new Date(b)-new Date(a); qs('editDuration').textContent = diff>0? fmtDurationHM(diff):'—'; }
+function setEditError(msg){ const el=qs('editError'); el.textContent=msg||''; show(el,!!msg); }
+async function saveEdit(){
+  if(saving||!editingShiftId) return;
+  const iv=qs('editIn').value, ov=qs('editOut').value, reason=(qs('editReason').value||'').trim();
+  if(!iv||!ov) return setEditError('Both times are required.');
+  const s=new Date(iv), e=new Date(ov); if(isNaN(s)||isNaN(e)) return setEditError('Invalid date/time values.'); if(e<s) return setEditError('Clock-out must be after clock-in.'); if(reason.length<3) return setEditError('Reason is required (min 3 characters).');
+  setEditError(''); saving=true; qs('editSaveBtn').disabled=true; qs('editSaveBtn').textContent='Saving…';
+  try{
+    const inISO=localInputToOffsetISO(iv), outISO=localInputToOffsetISO(ov);
+    const { error } = await supabaseClient.rpc('admin_update_shift_time', { _time_entry_id: editingShiftId, _new_clock_in: inISO, _new_clock_out: outISO, _reason: reason });
+    if (error) throw error;
+    showToast('Shift updated','ok'); closeEditModal();
+    auditCache.delete(editingShiftId);
+    const { employeeId, monthStart } = drawerContext;
+    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); await loadSummary();
+  }catch(err){ console.error(err); setEditError(err?.message||'Failed to save changes'); }
+  finally{ saving=false; qs('editSaveBtn').disabled=false; qs('editSaveBtn').textContent='Save'; }
+}
+function wireEditModal(){
+  qs('editCloseBtn').addEventListener('click', closeEditModal);
+  qs('editCancelBtn').addEventListener('click', closeEditModal);
+  qs('editModalBackdrop').addEventListener('click', closeEditModal);
+  qs('editIn').addEventListener('input', updateEditDuration);
+  qs('editOut').addEventListener('input', updateEditDuration);
+  qs('editSaveBtn').addEventListener('click', saveEdit);
+  document.addEventListener('keydown',(e)=>{ const open=!qs('editModal').classList.contains('hidden'); if(!open) return; if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); const b=qs('editSaveBtn'); if(b&&!b.disabled) b.click(); }});
+}
+async function onRowClick(e){
+  const tr=e.target.closest('tr.summary-row'); if(!tr) return;
+  const employeeId=tr.dataset.employeeId, monthStart=tr.dataset.monthStart, displayName=tr.dataset.displayName||'—';
+  drawerContext={ employeeId, monthStart, displayName };
+  renderDrawerHeader(displayName, monthStart);
+  qs('dsShifts').textContent=qs('dsHours').textContent=qs('dsAvg').textContent='…';
+  qs('drawerList').innerHTML=`<div class="drawer-empty">Loading shifts…</div>`; openDrawer();
+  try{ const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); }
+  catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
+}
+
+let liveTickTimer = null;
+
+// recompute durations from data-* timestamps (no network)
+function tickLiveNow(){
+  const cards = document.querySelectorAll('.live-card');
+  const now = Date.now();
+
+  for (const card of cards){
+    const clockInMs = Number(card.dataset.clockInMs || 0);
+    if (!clockInMs) continue;
+
+    // update "since … • HHh MMm"
+    const timesEl = card.querySelector('.live-times');
+    if (timesEl){
+      const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      const durStr = fmtDurationHM(now - clockInMs);
+      timesEl.textContent = `since ${sinceStr} • ${durStr}`;
+    }
+
+    // if on break, update pill to show current break duration
+    if (card.dataset.status === 'break'){
+      const bs = Number(card.dataset.breakStartMs || 0);
+      const pill = card.querySelector('.pill.break');
+      if (bs && pill){
+        pill.textContent = `On break ${fmtDurationHM(now - bs)}`;
+      }
+    }
+  }
+}
+
+function startLiveTicker(intervalMs = 30000){ // 30s default; use 1000 for every second
+  if (liveTickTimer) clearInterval(liveTickTimer);
+  liveTickTimer = setInterval(tickLiveNow, intervalMs);
+  // also do an immediate tick so UI updates right away
+  tickLiveNow();
+}
+
+function stopLiveTicker(){
+  if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
+}
+
+async function fetchLiveNow(){
+  // 1) open shifts
+  const { data: entries, error } = await supabaseClient
+    .from('time_entries')
+    .select('id, employee_id, clock_in, photo_in_path, schedule_codes')
+    .is('clock_out', null)
+    .order('clock_in', { ascending: true });
+  if (error) throw error;
+  const rows = entries || [];
+  const ids = rows.map(r => r.id);
+
+  // 2) open breaks for those shifts
+  let openBreaks = [];
+  if (ids.length){
+    const { data: b, error: bErr } = await supabaseClient
+      .from('time_breaks')
+      .select('id, time_entry_id, started_at, photo_start_path')
+      .in('time_entry_id', ids)
+      .is('ended_at', null);
+    if (bErr) throw bErr;
+    openBreaks = b || [];
+  }
+  const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
+
+  // 3) names
+  const emps = await getActiveEmployees();
+  const nameById = new Map(emps.map(e => [e.id, e.display_name]));
+
+  // 4) shape + sign photo links + anomaly flags
+  const out = [];
+  for (const r of rows){
+    const now = Date.now();
+    const bk = breakByEntry.get(r.id) || null;
+    const codes = Array.isArray(r.schedule_codes) ? r.schedule_codes : [];
+    out.push({
+      entry_id: r.id,
+      employee_id: r.employee_id,
+      display_name: nameById.get(r.employee_id) || '(unknown)',
+      clock_in: r.clock_in,
+      duration_ms: now - new Date(r.clock_in).getTime(),
+      status: bk ? 'break' : 'work',
+      break_started_at: bk?.started_at || null,
+      break_ms: bk ? (now - new Date(bk.started_at).getTime()) : 0,
+      photo_in_url: r.photo_in_path ? await signPath(r.photo_in_path) : null,
+      break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null,
+      has_anomaly: codes.length > 0,
+      anomalies: codes
+    });
+  }
+  return out;
+}
+
+function renderLiveNow(rows){
+  const list = qs('liveList'); if (!list) return;
+  const updated = qs('liveUpdated');
+
+  // header stamp + anomaly count
+  const flagged = rows.filter(r => r.has_anomaly).length;
+  if (updated){
+    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` • ⚠︎ ${flagged} flagged` : ''}`;
+  }
+
+  list.innerHTML = '';
+  if (!rows.length){
+    list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
+    if (typeof tickLiveNow === 'function') tickLiveNow();
+    return;
+  }
+
+  for (const r of rows){
+    const clockInMs = new Date(r.clock_in).getTime();
+    const breakStartMs = r.break_started_at ? new Date(r.break_started_at).getTime() : 0;
+
+    const div = document.createElement('div');
+    div.className = 'live-card';
+    div.dataset.employeeId   = r.employee_id;
+    div.dataset.clockInMs    = String(clockInMs);
+    div.dataset.status       = r.status; // 'work' | 'break'
+    div.dataset.breakStartMs = breakStartMs ? String(breakStartMs) : '';
+
+    const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const durStr   = fmtDurationHM(Date.now() - clockInMs);
+
+    const pill = r.status === 'break'
+      ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
+      : `<span class="pill work">Working</span>`;
+
+    const anomHtml = r.has_anomaly && r.anomalies?.length
+      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">⚠︎ ${a}</span>`).join(' ')}</div>`
+      : '';
+
+    div.innerHTML = `
+      <div class="live-name">${r.display_name}</div>
+      <div class="live-times">since ${sinceStr} • ${durStr}</div>
+      <div class="live-status">${pill}</div>
+      ${anomHtml}
+      <div class="live-actions">
+        ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
+        ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
+        <button class="btn small ghost">Details →</button>
+      </div>
+    `;
+    list.appendChild(div);
+  }
+
+  // immediately recompute durations so labels are fresh after render
+  if (typeof tickLiveNow === 'function') tickLiveNow();
+}
+
+
+async function loadLiveNow(){
+  try{
+    const rows = await fetchLiveNow();
+    renderLiveNow(rows);
+  }catch(err){
+    console.error(err);
+    const list = qs('liveList');
+    if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
+  }
+}
+
+// Click a live card → open drawer for that worker (current month)
+function wireLiveList(){
+  const list = qs('liveList'); if (!list) return;
+  list.addEventListener('click', async (e) => {
+    const card = e.target.closest('.live-card'); if (!card) return;
+    const employeeId = card.dataset.employeeId;
+    const emps = await getActiveEmployees();
+    const displayName = (emps.find(x => x.id === employeeId)?.display_name) || '—';
+    const monthStart = monthInputToStart();
+
+    drawerContext = { employeeId, monthStart, displayName };
+    renderDrawerHeader(displayName, monthStart);
+    qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+    openDrawer();
+    try{
+      const shifts = await fetchWorkerShifts(employeeId, monthStart);
+      renderDrawerSummary(shifts);
+      renderDrawerList(shifts);
+    }catch(err){
+      console.error(err);
+      qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+    }
+  });
+}
+
+
+function wireDrawer(){
+  // Close actions
+  const closeBtn = qs('drawerCloseBtn');
+  if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+
+  const backdrop = qs('drawerBackdrop');
+  if (backdrop) backdrop.addEventListener('click', closeDrawer);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawer();
+  });
+
+  // Click a summary row to open drawer
+  const tbody = qs('summaryTbody');
+  if (tbody) tbody.addEventListener('click', onRowClick);
+
+  // Delegated actions inside the drawer list
+  const list = qs('drawerList');
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const t = e.target;
+
+      // Edit shift
+      const editBtn = t.closest('button[data-edit-id]');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-edit-id');
+        const shift = currentShiftsById.get(id);
+        if (shift) openEditModal(shift);
+        return;
+      }
+
+      // Audit toggle
+      const auditBtn = t.closest('button[data-audit-id]');
+      if (auditBtn) {
+        toggleAudit(auditBtn.getAttribute('data-audit-id'));
+        return;
+      }
+
+      // Approvals
+      const approveBtn = t.closest('button[data-approve-id]');
+      if (approveBtn) {
+        onApproveClick(approveBtn.getAttribute('data-approve-id'));
+        return;
+      }
+
+      const waiveBtn = t.closest('button[data-waive-id]');
+      if (waiveBtn) {
+        onWaiveClick(waiveBtn.getAttribute('data-waive-id'));
+        return;
+      }
+
+      const unapproveBtn = t.closest('button[data-unapprove-id]');
+      if (unapproveBtn) {
+        onUnapproveClick(unapproveBtn.getAttribute('data-unapprove-id'));
+        return;
+      }
+    });
+  }
+
+  // Toggle: only anomalies
+  const toggle = qs('toggleAnoms');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      drawerOnlyAnoms = !!toggle.checked;
+      renderDrawerList(lastDrawerShifts); // re-render with current cache
+    });
+  }
+}
+
 async function fetchGlobalScheduleRange(gridStart, gridEnd){
   const { data, error } = await supabaseClient.rpc('get_schedule_range_all', {
     _start: toISODate(gridStart),
@@ -97,119 +839,6 @@ function renderGlobalCalendar(rows, gridStart, monthStart){
     grid.appendChild(cell);
   }
 }
-
-// ✅ REPLACE the whole inviteWorkerByEmail(email) with this:
-// Uses Edge Function "admin-user" which runs with service role on the server.
-async function inviteWorkerByEmail(email) {
-  try {
-    email = (email || '').trim().toLowerCase();
-    if (!email) throw new Error('Email is required.');
-
-    // Minimal defaults for quick testing (you can upgrade UI later)
-    const display_name = email.split('@')[0] || 'New Worker';
-    const role = 'employee';
-
-    const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-      body: { action: 'invite', email, display_name, role }
-    });
-
-    if (error) throw error;
-    if (!data?.ok) throw new Error(data?.error || 'Invite failed.');
-
-    showToast(`Invite sent to ${email}`, 'ok');
-  } catch (err) {
-    console.error(err);
-    showToast(err.message || 'Failed to invite worker', 'err');
-  }
-}
-
-// --- RAW invoke so we can read JSON even on 400/403/etc ---
-async function invokeEdgeJson(functionName, payload) {
-  const { data: sessionData, error: sessErr } = await supabaseClient.auth.getSession();
-  if (sessErr) throw sessErr;
-
-  const accessToken = sessionData?.session?.access_token;
-  if (!accessToken) throw new Error("Missing session access token.");
-
-  // These should already exist in your initSupabase.js setup.
-  // If not, define them there and keep them global.
-  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY globals.");
-  }
-
-  const url = `${window.SUPABASE_URL}/functions/v1/${functionName}`;
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": window.SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  let json;
-  try { json = await resp.json(); } catch { json = null; }
-
-  if (!resp.ok) {
-    const msg = json?.error || json?.message || `Edge Function error (${resp.status})`;
-    const detail = json?.detail ? ` — ${json.detail}` : "";
-    throw new Error(msg + detail);
-  }
-
-  return json;
-}
-
-async function resendInvite(tr){
-  const employee_id = tr?.dataset?.employeeId;
-  const email = (tr?.querySelector('td.mono')?.textContent || '').trim();
-
-  if (!employee_id && !email) throw new Error('Missing employee reference.');
-
-  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'resend', employee_id: employee_id || undefined, email: email || undefined }
-  });
-
-  if (error) throw error;
-  if (!data?.ok) throw new Error('Resend failed.');
-
-  showToast('Invite resent ✉️', 'ok');
-  await loadUsers();
-}
-
-function escapeHtml(s){
-  return (s ?? '').toString()
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'","&#039;");
-}
-
-async function markAcceptedIfNeeded() {
-  try {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
-    await supabaseClient.rpc('mark_invite_accepted');
-  } catch (e) {
-    console.warn('mark_invite_accepted failed:', e);
-  }
-}
-
-
-function wireUsersPanel() {
-  const btn = document.getElementById('userAddBtn');
-  if (!btn) return;
-
-  // Open the premium invite modal (not the old prompt)
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    openUserModal();
-  });
-}
-
-
 
 async function loadGlobalCalendar(){
   try {
@@ -289,66 +918,6 @@ async function ensureAdmin() {
   if (error || !isAdmin) { window.location.href = `index.html?reason=${encodeURIComponent('Admin only')}`; return false; }
   return true;
 }
-function wireHeaderActions() {
-  qs('signOutBtn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.href = 'index.html'; });
-  qs('printBtn').addEventListener('click', () => window.print());
-}
-
-function dateStrAddDays(yyyyMmDd, days){
-  const d = new Date(yyyyMmDd + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  const p = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
-}
-
-async function signPath(path, expiresSec = 180){
-  if (!path) return null;
-  try {
-    const { data } = await supabaseClient
-      .storage.from('timeclock-photos')
-      .createSignedUrl(path, expiresSec);
-    return data?.signedUrl || null;
-  } catch { return null; }
-}
-
-// Cache active employees for joins in Overview/Payroll
-let _activeEmployees = null;
-async function getActiveEmployees(){
-  if (_activeEmployees) return _activeEmployees;
-  const { data, error } = await supabaseClient
-    .from('employees')
-    .select('id, display_name')
-    .eq('active', true)
-    .order('display_name', { ascending: true });
-  if (error) throw error;
-  _activeEmployees = data || [];
-  return _activeEmployees;
-}
-
-/* ============== Overview (monthly) ============== */
-// Return ALL active employees for the month, filling zeros when no rows exist
-async function fetchMonthlySummary(monthStart){
-  const [emps, viewResp] = await Promise.all([
-    getActiveEmployees(),
-    supabaseClient.from('v_monthly_hours')
-      .select('employee_id, month_start, shifts_count, total_hours')
-      .eq('month_start', monthStart)
-  ]);
-  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
-  const rows = emps.map(e => {
-    const v = byId.get(e.id) || {};
-    return {
-      employee_id: e.id,
-      display_name: e.display_name,
-      month_start: monthStart,
-      shifts_count: v.shifts_count || 0,
-      total_hours: v.total_hours || 0
-    };
-  });
-  return { rows, source: 'view' };
-}
-
-// Fetch resolved schedule for the week (recurring+overrides → concrete slots)
 async function fetchResolvedWeek(empId, weekStart){
   const start = toISODate(weekStart);
   const end   = toISODate(addDays(weekStart, 6));
@@ -1448,644 +2017,6 @@ function wireStoresTab(){
     catch (e){ console.error(e); showToast('Failed to load stores','err'); }
   });
 }
-
-function renderKPIs(rows){
-  const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
-  const shf = rows.reduce((a,r)=>a+(+r.shifts_count||0),0);
-  const avg = shf>0? tot/shf : 0;
-  qs('kpiTotalHours').textContent = fmtHours(tot);
-  qs('kpiTotalShifts').textContent = String(shf);
-  qs('kpiAvgHrs').textContent = fmtHours(avg);
-}
-let currentRows=[], sortState={ key:'display_name', dir:'asc' };
-function sortRows(rows){
-  const a=rows.slice(), {key,dir}=sortState, m = dir==='asc'?1:-1;
-  a.sort((x,y)=>{
-    let xv=x[key], yv=y[key];
-    if (key==='shifts_count' || key==='total_hours'){ xv=+xv||0; yv=+yv||0; return (xv-yv)*m; }
-    const xs=(xv||'').toString().toLowerCase(), ys=(yv||'').toString().toLowerCase();
-    return xs<ys?-1*m: xs>ys?1*m: 0;
-  });
-  return a;
-}
-function applySortIndicators(){
-  [{el:qs('thWorker'),key:'display_name'},{el:qs('thShifts'),key:'shifts_count'},{el:qs('thHours'),key:'total_hours'}].forEach(({el,key})=>{
-    const s = sortState.key===key? sortState.dir : 'none';
-    el.setAttribute('aria-sort', s==='asc'?'ascending':s==='desc'?'descending':'none');
-    el.querySelector('.sort-indicator').textContent = s==='asc'?'▲':s==='desc'?'▼':'↕';
-  });
-}
-function renderTable(rows){
-  const tb=qs('summaryTbody'); tb.innerHTML='';
-  const data = sortRows(rows);
-  if (!data.length){ tb.innerHTML=`<tr><td colspan="3" class="muted">No results for this month/search.</td></tr>`; return; }
-  for(const r of data){
-    const tr=document.createElement('tr');
-    tr.dataset.employeeId=r.employee_id; tr.dataset.monthStart=r.month_start; tr.dataset.displayName=r.display_name||'';
-    tr.className='summary-row';
-    tr.innerHTML=`<td>${r.display_name||'—'}</td><td>${r.shifts_count??'—'}</td><td>${fmtHours(r.total_hours)}</td>`;
-    tb.appendChild(tr);
-  }
-  applySortIndicators();
-}
-let isLoading = false;
-async function loadSummary(){
-  if (isLoading) return; isLoading = true; qs('summaryTbody').style.opacity = '0.6';
-  try{
-    const monthStart = monthInputToStart();
-    const search = (qs('searchInput').value || '').trim().toLowerCase();
-    qs('printMonthLabel').textContent = monthLabel(monthStart);
-
-    const { rows } = await fetchMonthlySummary(monthStart); // all employees
-    const filtered = search
-      ? rows.filter(r => (r.display_name || '').toLowerCase().includes(search))
-      : rows;
-
-    currentRows = filtered;
-    renderKPIs(filtered);
-    renderTable(filtered);
-  }catch(err){
-    console.error(err);
-    qs('summaryTbody').innerHTML = `<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
-    qs('kpiTotalHours').textContent = qs('kpiTotalShifts').textContent = qs('kpiAvgHrs').textContent = '—';
-  }finally{
-    qs('summaryTbody').style.opacity = '1';
-    isLoading = false;
-  }
-}
-
-
-function wireFilters(){ qs('monthInput').addEventListener('change', loadSummary); qs('searchInput').addEventListener('input', debounce(loadSummary,300)); }
-function toggleSort(key){ if (sortState.key===key) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else sortState={key,dir:'asc'}; renderTable(currentRows); }
-function wireSorting(){ qs('thWorker').addEventListener('click',()=>toggleSort('display_name')); qs('thShifts').addEventListener('click',()=>toggleSort('shifts_count')); qs('thHours').addEventListener('click',()=>toggleSort('total_hours')); }
-
-/* ============== Drawer + Edit/Audit ============== */
-async function fetchPeriodSummary(periodId){
-  const [emps, viewResp] = await Promise.all([
-    getActiveEmployees(),
-    supabaseClient.from('v_payroll_period_hours')
-      .select('employee_id, regular_hours, overtime_hours, total_hours, shifts_count')
-      .eq('period_id', periodId)
-  ]);
-  const byId = new Map((viewResp.data || []).map(r => [r.employee_id, r]));
-  return emps.map(e => {
-    const v = byId.get(e.id) || {};
-    return {
-      employee_id: e.id,
-      display_name: e.display_name,
-      regular_hours: v.regular_hours || 0,
-      overtime_hours: v.overtime_hours || 0,
-      total_hours: v.total_hours || 0,
-      shifts_count: v.shifts_count || 0
-    };
-  });
-}
-
-let currentShiftsById = new Map(), drawerContext = { employeeId:null, displayName:null, monthStart:null }, auditCache = new Map();
-
-async function fetchWorkerShifts(employeeId, monthStartStr){
-  const start = new Date(`${monthStartStr}T00:00:00`);
-  const end   = new Date(start); end.setMonth(start.getMonth()+1);
-
-  // 1) Fetch ALL shifts (closed + OPEN)
-  const { data: entries, error } = await supabaseClient.from('time_entries')
-    .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
-    .eq('employee_id', employeeId)
-    .gte('clock_in', start.toISOString())
-    .lt('clock_in', end.toISOString())
-    .order('clock_in', { ascending: true });
-  if (error) throw error;
-
-  const rows = entries || [];
-  const ids = rows.map(r => r.id);
-
-  // 2) Anomalies + approvals
-  let anomalyById = new Map();
-  if (ids.length){
-    const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
-      .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
-      .in('time_entry_id', ids);
-    anomalyById = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
-  }
-
-  // 3) Breaks (with photo paths)
-  let breaksByEntry = new Map();
-  if (ids.length){
-    const { data: breaks } = await supabaseClient.from('time_breaks')
-      .select('id, time_entry_id, started_at, ended_at, photo_start_path, photo_end_path')
-      .in('time_entry_id', ids)
-      .order('started_at', { ascending: true });
-
-    for (const b of (breaks||[])){
-      // prepare signed URLs now (thumbnails + links)
-      const photo_start_url = await signPath(b.photo_start_path);
-      const photo_end_url   = await signPath(b.photo_end_path);
-      const list = breaksByEntry.get(b.time_entry_id) || [];
-      list.push({ ...b, photo_start_url, photo_end_url });
-      breaksByEntry.set(b.time_entry_id, list);
-    }
-  }
-
-  // 4) Build final records (+ signed shift photos)
-  const map = new Map(), out = [];
-  for (const r of rows){
-    const isOpen = !r.clock_out;
-    const durMs  = (isOpen ? Date.now() : new Date(r.clock_out).getTime()) - new Date(r.clock_in).getTime();
-
-    // Break summary
-    const bks = breaksByEntry.get(r.id) || [];
-    const breakMs = bks.reduce((sum, b) => {
-      const done = b.ended_at ? (new Date(b.ended_at) - new Date(b.started_at)) : 0;
-      return sum + Math.max(0, done);
-    }, 0);
-
-    let inUrl=null, outUrl=null;
-    if (r.photo_in_path)  inUrl  = await signPath(r.photo_in_path);
-    if (r.photo_out_path) outUrl = await signPath(r.photo_out_path);
-
-    const a = anomalyById.get(r.id) || {};
-    const rec = {
-      id: r.id,
-      clock_in: r.clock_in,
-      clock_out: r.clock_out,
-      duration_ms: durMs,
-      store_id: r.store_id || null,
-      photo_in_url: inUrl,
-      photo_out_url: outUrl,
-      // anomalies + approvals
-      anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
-      has_anomaly: !!a.has_anomaly,
-      approval_status: a.approval_status || null,
-      approval_note: a.approval_note || null,
-      approved_at: a.approved_at || null,
-      // breaks (with signed URLs)
-      breaks: bks,                 // [{ id, started_at, ended_at, photo_start_url, photo_end_url, ... }]
-      break_count: bks.length,
-      break_ms: breakMs,
-      is_open: isOpen
-    };
-    map.set(r.id, rec); out.push(rec);
-  }
-  currentShiftsById = map;
-  lastDrawerShifts = out;
-  return out;
-}
-
-
-
-function openDrawer(){ qs('drawer').classList.add('open'); qs('drawer').classList.remove('hidden'); qs('drawerBackdrop').classList.add('show'); qs('drawerBackdrop').classList.remove('hidden'); }
-function closeDrawer(){ qs('drawer').classList.remove('open'); qs('drawerBackdrop').classList.remove('show'); setTimeout(()=>{ qs('drawer').classList.add('hidden'); qs('drawerBackdrop').classList.add('hidden'); },250); }
-function renderDrawerHeader(name,monthStartStr){ qs('drawerTitle').textContent=name||'—'; qs('drawerSubtitle').textContent=monthLabel(monthStartStr); }
-function renderDrawerSummary(shifts){ const n=shifts.length, tot=shifts.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000, avg=n?tot/n:0; qs('dsShifts').textContent=String(n); qs('dsHours').textContent=fmtHours(tot); qs('dsAvg').textContent=fmtHours(avg); }
-
-function renderDrawerList(shifts){
-  const host = qs('drawerList'); host.innerHTML = '';
-
-  const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
-  if (!src.length){
-    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No shifts in this month.'}</div>`;
-    return;
-  }
-
-  for (const s of src){
-    const inStr  = fmtLocal(s.clock_in);
-    const outStr = s.is_open ? 'OPEN' : fmtLocal(s.clock_out);
-    const durStr = fmtDurationHM(s.duration_ms);
-
-    // Status chip (don't show approve buttons for an OPEN shift)
-    const st = s.approval_status || (s.is_open ? 'open' : 'pending');
-    const stClass = s.is_open ? 'pending' : (st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending');
-    const statusChip = `<span class="chip ${stClass}">${(s.is_open?'OPEN':st.toUpperCase())}</span>`;
-
-    // Anomaly chips
-    const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
-
-    // Break summary + block
-    const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
-
-    let breaksBlock = '';
-    if (s.break_count){
-      const parts = s.breaks.map(b => {
-        const open = !b.ended_at;
-        const dur = open ? 0 : (new Date(b.ended_at) - new Date(b.started_at));
-        const durStrB = open ? '—' : fmtDurationHM(dur);
-        const startImg = b.photo_start_url ? `<a href="${b.photo_start_url}" target="_blank" rel="noopener"><img class="thumb" src="${b.photo_start_url}" alt="Break start photo"></a>` : `<span class="muted">No start photo</span>`;
-        const endImg   = b.photo_end_url   ? `<a href="${b.photo_end_url}"   target="_blank" rel="noopener"><img class="thumb" src="${b.photo_end_url}"   alt="Break end photo"></a>`   : `<span class="muted">No end photo</span>`;
-        return `
-          <div class="break">
-            <div class="br-times"><strong>${new Date(b.started_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</strong> → ${open ? 'OPEN' : new Date(b.ended_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-            <div class="br-dur">${open ? '<span class="muted">(active)</span>' : durStrB}</div>
-            <div class="br-photos">${startImg} ${endImg}</div>
-          </div>`;
-      }).join('');
-      breaksBlock = `<div class="breaks">${parts}</div>`;
-    }
-
-    // Actions per status (disable for OPEN shifts)
-    let actions = '';
-    if (!s.is_open){
-      if (st === 'approved'){
-        actions = `
-          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-        `;
-      } else if (st === 'waived'){
-        actions = `
-          <button class="btn small" data-approve-id="${s.id}">Approve</button>
-          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-        `;
-      } else {
-        actions = `
-          <button class="btn small" data-approve-id="${s.id}">Approve</button>
-          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-        `;
-      }
-    }
-
-    const noteLine = s.approval_note ? `<div class="shift-meta">Note: ${s.approval_note}</div>` : '';
-
-    const div = document.createElement('div');
-    div.className = 'shift';
-    div.innerHTML = `
-      <div class="shift-row" style="justify-content:space-between;">
-        <div class="shift-time"><strong>In:</strong> ${inStr}</div>
-        <div class="shift-time"><strong>Out:</strong> ${outStr}</div>
-        <div class="shift-meta">${durStr}</div>
-      </div>
-
-      <div class="shift-row" style="margin-top:6px; justify-content:space-between;">
-        <div class="chips">
-          ${statusChip}
-          ${anomChips}
-          <span class="chip">${breaksText}</span>
-        </div>
-        <div class="shift-actions">
-          ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
-          ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
-          <button class="btn small" data-edit-id="${s.id}" ${s.is_open?'disabled':''}>Edit</button>
-          <button class="btn small" data-audit-id="${s.id}">Audit</button>
-          ${actions}
-        </div>
-      </div>
-
-      ${noteLine}
-      ${breaksBlock}
-
-      <div class="audit hidden" id="audit-${s.id}">
-        <div class="drawer-empty">Loading…</div>
-      </div>`;
-    host.appendChild(div);
-  }
-}
-
-
-async function fetchAuditsForShift(shiftId){
-  const { data, error } = await supabaseClient.from('v_shift_adjustments')
-    .select('id, time_entry_id, editor_name, editor_user_id, edited_at, reason, fields_changed, old_value, new_value')
-    .eq('time_entry_id', shiftId).order('edited_at',{ascending:false});
-  if (error) throw error; return data||[];
-}
-async function toggleAudit(shiftId){
-  const c=document.getElementById(`audit-${shiftId}`); if(!c) return;
-  if (!c.classList.contains('hidden')){ c.classList.add('hidden'); return; }
-  c.classList.remove('hidden'); c.innerHTML=`<div class="drawer-empty">Loading…</div>`;
-  try{ const audits = auditCache.get(shiftId) || await fetchAuditsForShift(shiftId); auditCache.set(shiftId,audits); renderAuditList(c,audits,shiftId); }
-  catch(err){ console.error(err); c.innerHTML=`<div class="drawer-empty">Error loading audit trail.</div>`; }
-}
-function renderAuditList(container, audits, shiftId){
-  if (!audits.length){ container.innerHTML=`<div class="drawer-empty">No adjustments yet.</div>`; return; }
-  const parts=audits.map(a=>{
-    const who=a.editor_name||'(unknown)', when=fmtLocal(a.edited_at), why=a.reason||'';
-    const fields=Array.isArray(a.fields_changed)?a.fields_changed:[]; const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out, newIn=a.new_value?.clock_in, newOut=a.new_value?.clock_out;
-    const diffs=[]; if(fields.includes('clock_in')) diffs.push(`<div>clock_in: <code>${fmtLocal(oldIn)}</code> → <code>${fmtLocal(newIn)}</code></div>`); if(fields.includes('clock_out')) diffs.push(`<div>clock_out: <code>${fmtLocal(oldOut)}</code> → <code>${fmtLocal(newOut)}</code></div>`);
-    return `
-      <div class="ai" data-adjustment-id="${a.id}">
-        <div class="row ai-hd">
-          <div class="who">${who}</div>
-          <div class="when">• ${when}</div>
-          <div class="acts" style="margin-left:auto;">
-            <button class="btn small" data-revert="${a.id}" title="Revert to OLD values">Revert</button>
-          </div>
-        </div>
-        <div class="why">${why}</div>
-        ${diffs.length?`<div class="chg">${diffs.join('')}</div>`:''}
-      </div>`;
-  });
-  container.innerHTML = `<div class="ai-list">${parts.join('')}</div>`;
-  container.querySelectorAll('button[data-revert]').forEach(btn=>btn.addEventListener('click',()=>onRevertClick(shiftId, btn.getAttribute('data-revert'))));
-}
-async function onRevertClick(shiftId, adjustmentId){
-  const audits=auditCache.get(shiftId)||[]; const a=audits.find(x=>x.id===adjustmentId); if(!a) return;
-  const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out; if(!oldIn||!oldOut){ showToast('Cannot revert: missing old values','err'); return; }
-  const reason=window.prompt('Reason for revert (required):', `Revert to ${fmtLocal(oldIn)} – ${fmtLocal(oldOut)}`); if(!reason||reason.trim().length<3){ showToast('Revert cancelled (reason required)','err'); return; }
-  try{
-    const { error } = await supabaseClient.rpc('admin_update_shift_time', { _time_entry_id: shiftId, _new_clock_in: oldIn, _new_clock_out: oldOut, _reason: reason.trim() });
-    if (error) throw error;
-    showToast('Shift reverted','ok'); auditCache.delete(shiftId);
-    const { employeeId, monthStart } = drawerContext;
-    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts);
-    await toggleAudit(shiftId); await loadSummary();
-  }catch(err){ console.error(err); showToast(err?.message||'Failed to revert','err'); }
-}
-let editingShiftId=null, saving=false;
-function openEditModal(shift){ editingShiftId=shift.id; qs('editIn').value=toDatetimeLocalValue(shift.clock_in); qs('editOut').value=toDatetimeLocalValue(shift.clock_out); qs('editReason').value=''; qs('editError').textContent=''; show(qs('editError'),false); updateEditDuration(); qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden'); qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden'); qs('editIn').focus(); }
-function closeEditModal(){ editingShiftId=null; saving=false; qs('editModal').classList.remove('open'); qs('editModalBackdrop').classList.remove('show'); setTimeout(()=>{ qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden'); },180); }
-function updateEditDuration(){ const a=qs('editIn').value, b=qs('editOut').value; if(!a||!b){ qs('editDuration').textContent='—'; return; } const diff=new Date(b)-new Date(a); qs('editDuration').textContent = diff>0? fmtDurationHM(diff):'—'; }
-function setEditError(msg){ const el=qs('editError'); el.textContent=msg||''; show(el,!!msg); }
-async function saveEdit(){
-  if(saving||!editingShiftId) return;
-  const iv=qs('editIn').value, ov=qs('editOut').value, reason=(qs('editReason').value||'').trim();
-  if(!iv||!ov) return setEditError('Both times are required.');
-  const s=new Date(iv), e=new Date(ov); if(isNaN(s)||isNaN(e)) return setEditError('Invalid date/time values.'); if(e<s) return setEditError('Clock-out must be after clock-in.'); if(reason.length<3) return setEditError('Reason is required (min 3 characters).');
-  setEditError(''); saving=true; qs('editSaveBtn').disabled=true; qs('editSaveBtn').textContent='Saving…';
-  try{
-    const inISO=localInputToOffsetISO(iv), outISO=localInputToOffsetISO(ov);
-    const { error } = await supabaseClient.rpc('admin_update_shift_time', { _time_entry_id: editingShiftId, _new_clock_in: inISO, _new_clock_out: outISO, _reason: reason });
-    if (error) throw error;
-    showToast('Shift updated','ok'); closeEditModal();
-    auditCache.delete(editingShiftId);
-    const { employeeId, monthStart } = drawerContext;
-    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); await loadSummary();
-  }catch(err){ console.error(err); setEditError(err?.message||'Failed to save changes'); }
-  finally{ saving=false; qs('editSaveBtn').disabled=false; qs('editSaveBtn').textContent='Save'; }
-}
-function wireEditModal(){
-  qs('editCloseBtn').addEventListener('click', closeEditModal);
-  qs('editCancelBtn').addEventListener('click', closeEditModal);
-  qs('editModalBackdrop').addEventListener('click', closeEditModal);
-  qs('editIn').addEventListener('input', updateEditDuration);
-  qs('editOut').addEventListener('input', updateEditDuration);
-  qs('editSaveBtn').addEventListener('click', saveEdit);
-  document.addEventListener('keydown',(e)=>{ const open=!qs('editModal').classList.contains('hidden'); if(!open) return; if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); const b=qs('editSaveBtn'); if(b&&!b.disabled) b.click(); }});
-}
-async function onRowClick(e){
-  const tr=e.target.closest('tr.summary-row'); if(!tr) return;
-  const employeeId=tr.dataset.employeeId, monthStart=tr.dataset.monthStart, displayName=tr.dataset.displayName||'—';
-  drawerContext={ employeeId, monthStart, displayName };
-  renderDrawerHeader(displayName, monthStart);
-  qs('dsShifts').textContent=qs('dsHours').textContent=qs('dsAvg').textContent='…';
-  qs('drawerList').innerHTML=`<div class="drawer-empty">Loading shifts…</div>`; openDrawer();
-  try{ const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); }
-  catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
-}
-
-let liveTickTimer = null;
-
-// recompute durations from data-* timestamps (no network)
-function tickLiveNow(){
-  const cards = document.querySelectorAll('.live-card');
-  const now = Date.now();
-
-  for (const card of cards){
-    const clockInMs = Number(card.dataset.clockInMs || 0);
-    if (!clockInMs) continue;
-
-    // update "since … • HHh MMm"
-    const timesEl = card.querySelector('.live-times');
-    if (timesEl){
-      const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-      const durStr = fmtDurationHM(now - clockInMs);
-      timesEl.textContent = `since ${sinceStr} • ${durStr}`;
-    }
-
-    // if on break, update pill to show current break duration
-    if (card.dataset.status === 'break'){
-      const bs = Number(card.dataset.breakStartMs || 0);
-      const pill = card.querySelector('.pill.break');
-      if (bs && pill){
-        pill.textContent = `On break ${fmtDurationHM(now - bs)}`;
-      }
-    }
-  }
-}
-
-function startLiveTicker(intervalMs = 30000){ // 30s default; use 1000 for every second
-  if (liveTickTimer) clearInterval(liveTickTimer);
-  liveTickTimer = setInterval(tickLiveNow, intervalMs);
-  // also do an immediate tick so UI updates right away
-  tickLiveNow();
-}
-
-function stopLiveTicker(){
-  if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
-}
-
-async function fetchLiveNow(){
-  // 1) open shifts
-  const { data: entries, error } = await supabaseClient
-    .from('time_entries')
-    .select('id, employee_id, clock_in, photo_in_path, schedule_codes')
-    .is('clock_out', null)
-    .order('clock_in', { ascending: true });
-  if (error) throw error;
-  const rows = entries || [];
-  const ids = rows.map(r => r.id);
-
-  // 2) open breaks for those shifts
-  let openBreaks = [];
-  if (ids.length){
-    const { data: b, error: bErr } = await supabaseClient
-      .from('time_breaks')
-      .select('id, time_entry_id, started_at, photo_start_path')
-      .in('time_entry_id', ids)
-      .is('ended_at', null);
-    if (bErr) throw bErr;
-    openBreaks = b || [];
-  }
-  const breakByEntry = new Map(openBreaks.map(b => [b.time_entry_id, b]));
-
-  // 3) names
-  const emps = await getActiveEmployees();
-  const nameById = new Map(emps.map(e => [e.id, e.display_name]));
-
-  // 4) shape + sign photo links + anomaly flags
-  const out = [];
-  for (const r of rows){
-    const now = Date.now();
-    const bk = breakByEntry.get(r.id) || null;
-    const codes = Array.isArray(r.schedule_codes) ? r.schedule_codes : [];
-    out.push({
-      entry_id: r.id,
-      employee_id: r.employee_id,
-      display_name: nameById.get(r.employee_id) || '(unknown)',
-      clock_in: r.clock_in,
-      duration_ms: now - new Date(r.clock_in).getTime(),
-      status: bk ? 'break' : 'work',
-      break_started_at: bk?.started_at || null,
-      break_ms: bk ? (now - new Date(bk.started_at).getTime()) : 0,
-      photo_in_url: r.photo_in_path ? await signPath(r.photo_in_path) : null,
-      break_photo_url: bk?.photo_start_path ? await signPath(bk.photo_start_path) : null,
-      has_anomaly: codes.length > 0,
-      anomalies: codes
-    });
-  }
-  return out;
-}
-
-function renderLiveNow(rows){
-  const list = qs('liveList'); if (!list) return;
-  const updated = qs('liveUpdated');
-
-  // header stamp + anomaly count
-  const flagged = rows.filter(r => r.has_anomaly).length;
-  if (updated){
-    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` • ⚠︎ ${flagged} flagged` : ''}`;
-  }
-
-  list.innerHTML = '';
-  if (!rows.length){
-    list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
-    if (typeof tickLiveNow === 'function') tickLiveNow();
-    return;
-  }
-
-  for (const r of rows){
-    const clockInMs = new Date(r.clock_in).getTime();
-    const breakStartMs = r.break_started_at ? new Date(r.break_started_at).getTime() : 0;
-
-    const div = document.createElement('div');
-    div.className = 'live-card';
-    div.dataset.employeeId   = r.employee_id;
-    div.dataset.clockInMs    = String(clockInMs);
-    div.dataset.status       = r.status; // 'work' | 'break'
-    div.dataset.breakStartMs = breakStartMs ? String(breakStartMs) : '';
-
-    const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    const durStr   = fmtDurationHM(Date.now() - clockInMs);
-
-    const pill = r.status === 'break'
-      ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
-      : `<span class="pill work">Working</span>`;
-
-    const anomHtml = r.has_anomaly && r.anomalies?.length
-      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">⚠︎ ${a}</span>`).join(' ')}</div>`
-      : '';
-
-    div.innerHTML = `
-      <div class="live-name">${r.display_name}</div>
-      <div class="live-times">since ${sinceStr} • ${durStr}</div>
-      <div class="live-status">${pill}</div>
-      ${anomHtml}
-      <div class="live-actions">
-        ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
-        ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
-        <button class="btn small ghost">Details →</button>
-      </div>
-    `;
-    list.appendChild(div);
-  }
-
-  // immediately recompute durations so labels are fresh after render
-  if (typeof tickLiveNow === 'function') tickLiveNow();
-}
-
-
-async function loadLiveNow(){
-  try{
-    const rows = await fetchLiveNow();
-    renderLiveNow(rows);
-  }catch(err){
-    console.error(err);
-    const list = qs('liveList');
-    if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
-  }
-}
-
-// Click a live card → open drawer for that worker (current month)
-function wireLiveList(){
-  const list = qs('liveList'); if (!list) return;
-  list.addEventListener('click', async (e) => {
-    const card = e.target.closest('.live-card'); if (!card) return;
-    const employeeId = card.dataset.employeeId;
-    const emps = await getActiveEmployees();
-    const displayName = (emps.find(x => x.id === employeeId)?.display_name) || '—';
-    const monthStart = monthInputToStart();
-
-    drawerContext = { employeeId, monthStart, displayName };
-    renderDrawerHeader(displayName, monthStart);
-    qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
-    openDrawer();
-    try{
-      const shifts = await fetchWorkerShifts(employeeId, monthStart);
-      renderDrawerSummary(shifts);
-      renderDrawerList(shifts);
-    }catch(err){
-      console.error(err);
-      qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
-    }
-  });
-}
-
-
-function wireDrawer(){
-  // Close actions
-  const closeBtn = qs('drawerCloseBtn');
-  if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
-
-  const backdrop = qs('drawerBackdrop');
-  if (backdrop) backdrop.addEventListener('click', closeDrawer);
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeDrawer();
-  });
-
-  // Click a summary row to open drawer
-  const tbody = qs('summaryTbody');
-  if (tbody) tbody.addEventListener('click', onRowClick);
-
-  // Delegated actions inside the drawer list
-  const list = qs('drawerList');
-  if (list) {
-    list.addEventListener('click', (e) => {
-      const t = e.target;
-
-      // Edit shift
-      const editBtn = t.closest('button[data-edit-id]');
-      if (editBtn) {
-        const id = editBtn.getAttribute('data-edit-id');
-        const shift = currentShiftsById.get(id);
-        if (shift) openEditModal(shift);
-        return;
-      }
-
-      // Audit toggle
-      const auditBtn = t.closest('button[data-audit-id]');
-      if (auditBtn) {
-        toggleAudit(auditBtn.getAttribute('data-audit-id'));
-        return;
-      }
-
-      // Approvals
-      const approveBtn = t.closest('button[data-approve-id]');
-      if (approveBtn) {
-        onApproveClick(approveBtn.getAttribute('data-approve-id'));
-        return;
-      }
-
-      const waiveBtn = t.closest('button[data-waive-id]');
-      if (waiveBtn) {
-        onWaiveClick(waiveBtn.getAttribute('data-waive-id'));
-        return;
-      }
-
-      const unapproveBtn = t.closest('button[data-unapprove-id]');
-      if (unapproveBtn) {
-        onUnapproveClick(unapproveBtn.getAttribute('data-unapprove-id'));
-        return;
-      }
-    });
-  }
-
-  // Toggle: only anomalies
-  const toggle = qs('toggleAnoms');
-  if (toggle) {
-    toggle.addEventListener('change', () => {
-      drawerOnlyAnoms = !!toggle.checked;
-      renderDrawerList(lastDrawerShifts); // re-render with current cache
-    });
-  }
-}
-
 /* ============== Payroll (weekly) ============== */
 let payWeeks=[], paySelected=null, payRows=[];
 function formatWeekRange(weekStartStr){ const s=new Date(weekStartStr+'T00:00:00'); const e=new Date(s); e.setDate(s.getDate()+6); const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return `${f(s)} — ${f(e)}`; }
@@ -3206,4 +3137,76 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
       if (window.supabase) document.dispatchEvent(new Event('supabase-ready'));
     }, 0);
   }
+}
+// ✅ REPLACE the whole inviteWorkerByEmail(email) with this:
+// Uses Edge Function "admin-user" which runs with service role on the server.
+async function inviteWorkerByEmail(email) {
+  try {
+    email = (email || '').trim().toLowerCase();
+    if (!email) throw new Error('Email is required.');
+
+    // Minimal defaults for quick testing (you can upgrade UI later)
+    const display_name = email.split('@')[0] || 'New Worker';
+    const role = 'employee';
+
+    const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+      body: { action: 'invite', email, display_name, role }
+    });
+
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || 'Invite failed.');
+
+    showToast(`Invite sent to ${email}`, 'ok');
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || 'Failed to invite worker', 'err');
+  }
+}
+
+async function resendInvite(tr){
+  const employee_id = tr?.dataset?.employeeId;
+  const email = (tr?.querySelector('td.mono')?.textContent || '').trim();
+
+  if (!employee_id && !email) throw new Error('Missing employee reference.');
+
+  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
+    body: { action: 'resend', employee_id: employee_id || undefined, email: email || undefined }
+  });
+
+  if (error) throw error;
+  if (!data?.ok) throw new Error('Resend failed.');
+
+  showToast('Invite resent ✉️', 'ok');
+  await loadUsers();
+}
+
+function escapeHtml(s){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
+async function markAcceptedIfNeeded() {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return;
+    await supabaseClient.rpc('mark_invite_accepted');
+  } catch (e) {
+    console.warn('mark_invite_accepted failed:', e);
+  }
+}
+
+
+function wireUsersPanel() {
+  const btn = document.getElementById('userAddBtn');
+  if (!btn) return;
+
+  // Open the premium invite modal (not the old prompt)
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openUserModal();
+  });
 }
