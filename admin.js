@@ -2813,7 +2813,7 @@ function openUserModal() {
 
   // Reset fields
   const email = qs('userEmail');
-  const name = qs('userName');
+  const name = qs('userDisplayName');
   if (email) email.value = '';
   if (name) name.value = '';
 
