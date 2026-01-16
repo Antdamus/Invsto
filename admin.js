@@ -15,6 +15,13 @@ function getMonthStart(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
 function nextMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 1); }
 function prevMonth(d){ return new Date(d.getFullYear(), d.getMonth()-1, 1); }
 
+function showAdminError(title, message) {
+  const modal = document.getElementById("genericErrorModal");
+  modal.querySelector(".modal-title").textContent = title;
+  modal.querySelector(".modal-message").textContent = message;
+  modal.classList.add("open");
+}
+
 // First visible cell in a month-view calendar (the Sunday before/at the 1st)
 function startOfMonthGrid(d){
   const x = new Date(d.getFullYear(), d.getMonth(), 1);

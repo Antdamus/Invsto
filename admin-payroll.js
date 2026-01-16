@@ -36,6 +36,14 @@
 
   // ----- Local helpers (keep payroll independent of admin.js)
   const pad2 = (n) => String(n).padStart(2, "0");
+  
+  function showPayrollError(title, message) {
+  if (typeof window.showAdminError === "function") {
+    window.showAdminError(title, message);
+  } else {
+    alert(`${title}\n\n${message}`);
+  }
+}
 
   function toISODate(d){
     const dt = (d instanceof Date) ? d : new Date(d);
@@ -599,10 +607,13 @@
       });
 
     if (error) {
-      console.error(error);
-      showToast("Could not lock period.", "error");
-      return;
-    }
+  console.error(error);
+  showPayrollError(
+    "Payroll Cannot Be Locked",
+    error.message || "One or more shifts are still pending approval."
+  );
+  return;
+}
 
     showToast("Period locked.", "ok");
     await loadPayPeriods();

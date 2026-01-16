@@ -43,7 +43,7 @@
       <!-- Tabs -->
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button id="tabOverview" class="tab active" role="tab" aria-selected="true" aria-controls="panelOverview">Overview</button>
-        <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (weekly)</button>
+        <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (biweekly)</button>
         <button id="tabSchedule" class="tab" role="tab" aria-selected="false" aria-controls="panelSchedule">Schedule</button>
         <button id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
 
@@ -405,6 +405,22 @@
 
   <!-- Edit Shift Modal Backdrop -->
   <div id="editModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+
+  <div id="genericErrorModal" class="modal">
+  <div class="modal-header">
+    <h3 class="modal-title">Error</h3>
+  </div>
+  <div class="modal-body">
+    <div class="error modal-message"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn primary" onclick="this.closest('.modal').classList.remove('open')">
+      OK
+    </button>
+  </div>
+</div>
+<div class="modal-backdrop"></div>
+
 
   <!-- Edit Shift Modal -->
   <div id="editModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="editTitle">
