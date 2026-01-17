@@ -2,18 +2,12 @@
    OG Jewelry — Admin Payroll (Contractors)
    admin-payroll.js  (FULL REPLACEMENT)
 
+   Adds: "Pending review shifts" banner + mini list so admins know
+   why payroll lines may be empty (no logic change to payroll rules).
+
    Requires:
    - window.supabaseClient (from initSupabase.js)
    - admin.html contains a container with id="panelPayroll"
-
-   Uses Supabase RPC signatures exactly as created:
-   - create_payroll_run(_pay_period_id, _rounding_mode, _note)
-   - build_payroll_run_lines(_payroll_run_id)
-   - finalize_payroll_run(_payroll_run_id, _note)
-   - record_contractor_payment(_payroll_run_id, _employee_id, _amount, _method, _reference, _note, _paid_at)
-   - payroll_lock_period(_period_id, _note, _force)
-   - payroll_unlock_period(_period_id, _note)
-   - create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
 
    ========================================================= */
 
@@ -31,7 +25,6 @@
   const $ = (sel, root = document) => root.querySelector(sel);
 
   function toast(msg, type = "ok") {
-    // Uses global toast if you have one; otherwise fallback
     if (typeof window.toast === "function") return window.toast(msg, type);
     console[type === "err" ? "error" : "log"](msg);
     if (type === "err") alert(msg);
@@ -47,11 +40,6 @@
     return v.toLocaleString("en-US", { style: "currency", currency: "USD" });
   }
 
-  function fmtHoursFromMinutes(min) {
-    const m = Number(min || 0);
-    return (m / 60).toFixed(2);
-  }
-
   function isoDate(d) {
     const dt = d instanceof Date ? d : new Date(d);
     const y = dt.getFullYear();
@@ -64,14 +52,43 @@
     return e?.message || e?.error_description || e?.details || String(e);
   }
 
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function escapeAttr(s) {
+    return escapeHtml(s).replaceAll("\n", " ");
+  }
+
+  function fmtShortDate(d) {
+    try {
+      const dt = new Date(d);
+      return dt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+    } catch {
+      return String(d ?? "");
+    }
+  }
+
+  function minutesBetween(a, b) {
+    try {
+      const ms = new Date(b).getTime() - new Date(a).getTime();
+      return Math.max(0, Math.round(ms / 60000));
+    } catch {
+      return 0;
+    }
+  }
+
   // ----------------------------
   // UI injection
   // ----------------------------
   function ensureUI() {
     const panel = document.getElementById("panelPayroll");
     if (!panel) return null;
-
-    // Only inject once
     if (panel.dataset.payrollReady === "1") return panel;
 
     panel.dataset.payrollReady = "1";
@@ -108,6 +125,24 @@
         <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <div id="prPeriodMeta" style="font-size:13px; opacity:.85;"></div>
           <div id="prRunMeta" style="font-size:13px; opacity:.85;"></div>
+        </div>
+
+        <!-- Pending review banner (NEW) -->
+        <div id="prPendingBox" style="display:none; margin-top:12px; border:1px solid rgba(255,210,110,.25); background:rgba(255,210,110,.08); border-radius:14px; padding:12px 12px;">
+          <div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap;">
+            <div style="min-width:260px;">
+              <div style="font-weight:800; letter-spacing:.2px;">⚠️ Shifts need review before payroll can populate</div>
+              <div id="prPendingMsg" style="margin-top:4px; font-size:13px; opacity:.9; line-height:1.35;"></div>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <button id="prGoOverviewBtn" class="og-btn" type="button">Go to Overview</button>
+            </div>
+          </div>
+
+          <div id="prPendingListWrap" style="margin-top:10px; display:none;">
+            <div style="font-size:12px; opacity:.8; margin-bottom:6px;">Showing a few pending shifts:</div>
+            <div id="prPendingList" style="display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
         </div>
 
         <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -162,10 +197,11 @@
   // ----------------------------
   // State
   // ----------------------------
-  let currentPeriod = null;   // pay_periods row
-  let currentRun = null;      // payroll_runs row
-  let currentLines = [];      // payroll_run_lines rows
-  let currentPayments = [];   // contractor_payments rows
+  let currentPeriod = null;
+  let currentRun = null;
+  let currentLines = [];
+  let currentPayments = [];
+  let pendingReview = []; // NEW: list of shifts requiring review/approval (missing shift_approvals row)
 
   // ----------------------------
   // Data loaders
@@ -187,7 +223,6 @@
       selectEl.appendChild(opt);
     }
 
-    // pick first
     if (data && data.length) {
       selectEl.value = data[0].id;
       return data[0];
@@ -196,7 +231,6 @@
   }
 
   async function loadRunsForPeriod(periodId) {
-    // If you have multiple runs per period, we pick newest draft/final.
     const { data, error } = await sb()
       .from("payroll_runs")
       .select("*")
@@ -209,7 +243,6 @@
   }
 
   async function loadLines(runId) {
-    // Try to pull employee display names via relationship; fallback to manual.
     const { data, error } = await sb()
       .from("payroll_run_lines")
       .select("*, employees(display_name)")
@@ -218,7 +251,6 @@
 
     if (!error) return data || [];
 
-    // fallback (if relationship not configured)
     const { data: d2, error: e2 } = await sb()
       .from("payroll_run_lines")
       .select("*")
@@ -238,6 +270,138 @@
 
     if (error) throw error;
     return data || [];
+  }
+
+  // ----------------------------
+  // NEW: Pending review detector
+  // ----------------------------
+  function periodBoundsUtc(period) {
+    // We only need “informational correctness” for the banner.
+    // Using UTC midnights on the date boundaries is good enough to explain why payroll is empty.
+    const startIso = `${period.start_date}T00:00:00.000Z`;
+    const endPlus1 = new Date(`${period.end_date}T00:00:00.000Z`);
+    endPlus1.setUTCDate(endPlus1.getUTCDate() + 1);
+    const endIsoExclusive = endPlus1.toISOString();
+    return { startIso, endIsoExclusive };
+  }
+
+  async function fetchPendingReviewForPeriod(period) {
+    if (!period) return [];
+
+    const { startIso, endIsoExclusive } = periodBoundsUtc(period);
+
+    // 1) Closed shifts in the period (clock_out not null)
+    // NOTE: the payroll builder itself uses ts_local_date() in SQL, but this is a UI hint.
+    const { data: entries, error: teErr } = await sb()
+      .from("time_entries")
+      .select("id, employee_id, clock_in, clock_out")
+      .gte("clock_in", startIso)
+      .lt("clock_in", endIsoExclusive)
+      .not("clock_out", "is", null);
+
+    if (teErr) throw teErr;
+
+    const ids = (entries || []).map((r) => r.id);
+    if (!ids.length) return [];
+
+    // 2) Which of these have approvals already?
+    const { data: approvals, error: apErr } = await sb()
+      .from("shift_approvals")
+      .select("time_entry_id")
+      .in("time_entry_id", ids);
+
+    if (apErr) throw apErr;
+
+    const approvedSet = new Set((approvals || []).map((a) => a.time_entry_id));
+
+    // 3) Pending = closed shift with NO shift_approvals row yet
+    const pending = (entries || []).filter((e) => !approvedSet.has(e.id));
+
+    if (!pending.length) return [];
+
+    // 4) Attach display names (quick lookup)
+    const empIds = [...new Set(pending.map((p) => p.employee_id).filter(Boolean))];
+    let empMap = new Map();
+    if (empIds.length) {
+      const { data: emps, error: empErr } = await sb()
+        .from("employees")
+        .select("id, display_name")
+        .in("id", empIds);
+
+      if (empErr) throw empErr;
+      empMap = new Map((emps || []).map((e) => [e.id, e.display_name]));
+    }
+
+    return pending
+      .map((p) => ({
+        time_entry_id: p.id,
+        employee_id: p.employee_id,
+        display_name: empMap.get(p.employee_id) || p.employee_id,
+        clock_in: p.clock_in,
+        clock_out: p.clock_out,
+        minutes: minutesBetween(p.clock_in, p.clock_out),
+      }))
+      .sort((a, b) => new Date(b.clock_in).getTime() - new Date(a.clock_in).getTime());
+  }
+
+  function renderPendingBox() {
+    const box = $("#prPendingBox");
+    const msg = $("#prPendingMsg");
+    const listWrap = $("#prPendingListWrap");
+    const list = $("#prPendingList");
+    const finalizeBtn = $("#prFinalizeBtn");
+
+    if (!box || !msg || !listWrap || !list) return;
+
+    const count = pendingReview.length;
+
+    if (!count) {
+      box.style.display = "none";
+      if (finalizeBtn) finalizeBtn.disabled = false;
+      return;
+    }
+
+    box.style.display = "block";
+    msg.innerHTML = `
+      This pay period has <b>${count}</b> shift${count === 1 ? "" : "s"} that are <b>closed</b> but still <b>pending review</b>.
+      Payroll lines only include shifts that are <b>approved/waived</b>. Review them in <b>Overview</b>, then come back and click <b>Build Lines</b>.
+    `;
+
+    // Show a short list (max 5)
+    const show = pendingReview.slice(0, 5);
+    if (show.length) {
+      listWrap.style.display = "block";
+      list.innerHTML = show
+        .map((s) => {
+          return `
+            <div style="display:flex; gap:10px; align-items:center; justify-content:space-between; padding:8px 10px; border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(0,0,0,.12);">
+              <div style="min-width:220px; font-weight:700;">${escapeHtml(s.display_name)}</div>
+              <div style="opacity:.85;">${escapeHtml(fmtShortDate(s.clock_in))}</div>
+              <div style="opacity:.85;">${s.minutes} min</div>
+              <div style="opacity:.65; font-size:12px;">id: ${escapeHtml(String(s.time_entry_id).slice(0, 8))}…</div>
+            </div>
+          `;
+        })
+        .join("");
+    } else {
+      listWrap.style.display = "none";
+      list.innerHTML = "";
+    }
+
+    // Safety: disable finalize until approvals exist (informational UX guard)
+    if (finalizeBtn) finalizeBtn.disabled = true;
+  }
+
+  function tryGoToOverviewTab() {
+    // Best-effort: click a tab/button/link with text "Overview"
+    const candidates = Array.from(document.querySelectorAll("button, a, [role='tab']"));
+    const el = candidates.find((n) => (n.textContent || "").trim().toLowerCase() === "overview");
+    if (el) {
+      el.click();
+      return true;
+    }
+    toast("Could not locate an Overview tab button automatically.", "err");
+    return false;
   }
 
   // ----------------------------
@@ -263,7 +427,9 @@
     }
 
     if (run) {
-      runEl.textContent = `Run: ${run.status} • Rounding: ${run.rounding_mode || "(unknown)"} • Created: ${run.created_at ? new Date(run.created_at).toLocaleString() : ""}`;
+      runEl.textContent = `Run: ${run.status} • Rounding: ${run.rounding_mode || "(unknown)"} • Created: ${
+        run.created_at ? new Date(run.created_at).toLocaleString() : ""
+      }`;
     } else {
       runEl.textContent = `Run: (none for this period yet)`;
     }
@@ -292,7 +458,19 @@
     const paidMap = computePaidByEmployee(payments);
 
     if (!lines || !lines.length) {
-      tbody.innerHTML = `<tr><td colspan="12" style="padding:14px; opacity:.75;">No lines yet. Click “Build Lines”.</td></tr>`;
+      // If there are pending shifts, explain it right in the empty state.
+      const pendingCount = pendingReview.length;
+      const hint = pendingCount
+        ? `<div style="margin-top:6px; font-size:12px; opacity:.75;">${pendingCount} shift${pendingCount === 1 ? "" : "s"} are pending review. Approve them in Overview, then rebuild.</div>`
+        : "";
+
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="12" style="padding:14px; opacity:.75;">
+            No lines yet. Click “Build Lines”.
+            ${hint}
+          </td>
+        </tr>`;
       renderKPIs([], payments);
       return;
     }
@@ -311,7 +489,6 @@
         const hours = roundedMin / 60;
 
         const rate = Number(l.hourly_rate || 0);
-
         const shiftCount = Number(l.shift_count || 0);
 
         const canPay = currentRun && currentRun.status === "final";
@@ -346,43 +523,41 @@
     renderKPIs(lines, payments);
   }
 
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function escapeAttr(s) {
-    return escapeHtml(s).replaceAll("\n", " ");
-  }
-
   // ----------------------------
   // Actions (RPC wrappers)
   // ----------------------------
   function uiRoundingMode() {
     const v = $("#prRoundingMode")?.value || "nearest_15";
-    // Must match DB function expectation.
     if (v !== "nearest_15" && v !== "nearest_5") return "nearest_15";
     return v;
   }
 
   async function refreshAll(periodId) {
     // period row
-    const { data: p, error: pe } = await sb()
-      .from("pay_periods")
-      .select("*")
-      .eq("id", periodId)
-      .single();
-
+    const { data: p, error: pe } = await sb().from("pay_periods").select("*").eq("id", periodId).single();
     if (pe) throw pe;
     currentPeriod = p;
 
+    // pending review banner (NEW)
+    try {
+      pendingReview = await fetchPendingReviewForPeriod(currentPeriod);
+    } catch (e) {
+      // Don’t block payroll UI if this informational query fails.
+      console.warn("Pending review detector failed:", safeErrMsg(e));
+      pendingReview = [];
+    }
+    renderPendingBox();
+
     // runs
-    const runs = await loadRunsForPeriod(periodId);
-    currentRun = runs[0] || null;
+    const runs = await sb()
+      .from("payroll_runs")
+      .select("*")
+      .eq("pay_period_id", periodId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (runs.error) throw runs.error;
+    currentRun = (runs.data || [])[0] || null;
 
     setMeta(currentPeriod, currentRun);
 
@@ -395,7 +570,6 @@
 
     currentLines = await loadLines(currentRun.id);
     currentPayments = await loadPayments(currentRun.id);
-
     await renderLines(currentLines, currentPayments);
   }
 
@@ -403,7 +577,6 @@
     if (!currentPeriod) return;
     const roundingMode = uiRoundingMode();
 
-    // Correct RPC signature: create_payroll_run(_pay_period_id, _rounding_mode, _note)
     try {
       const { data, error } = await sb().rpc("create_payroll_run", {
         _pay_period_id: currentPeriod.id,
@@ -413,8 +586,8 @@
       if (error) throw error;
 
       toast("Draft payroll run created", "ok");
-      // data may be a row or null depending on PostgREST; refresh from table either way
       await refreshAll(currentPeriod.id);
+      return data;
     } catch (e) {
       showAdminError("Create run failed", safeErrMsg(e));
       throw e;
@@ -427,7 +600,6 @@
       return;
     }
 
-    // Correct signature: build_payroll_run_lines(_payroll_run_id)
     try {
       const { data, error } = await sb().rpc("build_payroll_run_lines", {
         _payroll_run_id: currentRun.id,
@@ -435,7 +607,15 @@
       if (error) throw error;
 
       toast("Payroll lines built", "ok");
+
+      // Refresh pending banner + lines after build
       await refreshAll(currentPeriod.id);
+
+      // If still empty AND pending exists, call it out clearly
+      if ((!currentLines || !currentLines.length) && pendingReview.length) {
+        toast(`No lines yet: ${pendingReview.length} shift(s) still pending review in Overview`, "err");
+      }
+
       return data;
     } catch (e) {
       showAdminError("Build lines failed", safeErrMsg(e));
@@ -446,7 +626,12 @@
   async function finalizeRun() {
     if (!currentRun) return;
 
-    // Correct signature: finalize_payroll_run(_payroll_run_id, _note)
+    // If we have pending review shifts, prevent finalize (UX guard)
+    if (pendingReview.length) {
+      toast(`Cannot finalize: ${pendingReview.length} shift(s) still pending review`, "err");
+      return;
+    }
+
     try {
       const { data, error } = await sb().rpc("finalize_payroll_run", {
         _payroll_run_id: currentRun.id,
@@ -466,7 +651,6 @@
   async function lockPeriod() {
     if (!currentPeriod) return;
 
-    // payroll_lock_period(_period_id, _note, _force)
     try {
       const { data, error } = await sb().rpc("payroll_lock_period", {
         _period_id: currentPeriod.id,
@@ -487,7 +671,6 @@
   async function unlockPeriod() {
     if (!currentPeriod) return;
 
-    // payroll_unlock_period(_period_id, _note)
     try {
       const { data, error } = await sb().rpc("payroll_unlock_period", {
         _period_id: currentPeriod.id,
@@ -505,11 +688,9 @@
   }
 
   async function createWeeklyPeriod() {
-    // Create a 7-day period starting on a chosen date (default: today)
     const start = prompt(`Enter week start date (YYYY-MM-DD)`, isoDate(new Date()));
     if (!start) return;
 
-    // create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
     try {
       const { data, error } = await sb().rpc("create_weekly_pay_period", {
         week_start: start,
@@ -521,7 +702,6 @@
 
       toast("Weekly pay period created", "ok");
 
-      // reload periods list and select new one
       const sel = $("#prPeriodSelect");
       const newest = await loadPeriodsIntoSelect(sel);
       currentPeriod = newest;
@@ -540,7 +720,6 @@
       return;
     }
 
-    // record_contractor_payment(_payroll_run_id, _employee_id, _amount, _method, _reference, _note, _paid_at)
     try {
       const { data, error } = await sb().rpc("record_contractor_payment", {
         _payroll_run_id: currentRun.id,
@@ -717,6 +896,10 @@
       } catch {}
     });
 
+    $("#prGoOverviewBtn")?.addEventListener("click", () => {
+      tryGoToOverviewTab();
+    });
+
     // delegated pay button
     $("#prTbody")?.addEventListener("click", async (e) => {
       const btn = e.target.closest(".prPayBtn");
@@ -758,7 +941,6 @@
     }
   }
 
-  // Initialize after DOM ready
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

@@ -5,6 +5,62 @@ let lastDrawerShifts = []; // keep latest list to re-render on toggle
 
 // ===== Global calendar state =====
 let gcMonthStart = null; // first day of the month being shown (Date)
+// =========================================================
+// Minimal Toast Helper (admin.js needs this)
+// =========================================================
+function toast(message, kind = "ok") {
+  try {
+    // Create container once
+    let wrap = document.getElementById("og-toast-wrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = "og-toast-wrap";
+      wrap.style.position = "fixed";
+      wrap.style.right = "18px";
+      wrap.style.bottom = "18px";
+      wrap.style.zIndex = "99999";
+      wrap.style.display = "flex";
+      wrap.style.flexDirection = "column";
+      wrap.style.gap = "10px";
+      document.body.appendChild(wrap);
+    }
+
+    const t = document.createElement("div");
+    t.textContent = message || "";
+    t.style.padding = "10px 12px";
+    t.style.borderRadius = "12px";
+    t.style.fontSize = "13px";
+    t.style.maxWidth = "360px";
+    t.style.backdropFilter = "blur(14px)";
+    t.style.webkitBackdropFilter = "blur(14px)";
+    t.style.border = "1px solid rgba(255,255,255,0.08)";
+    t.style.boxShadow = "0 18px 50px rgba(0,0,0,0.45)";
+    t.style.background =
+      kind === "err" || kind === "warn"
+        ? "rgba(140, 60, 60, 0.55)"
+        : "rgba(25, 25, 28, 0.70)";
+    t.style.color = "rgba(255,255,255,0.92)";
+    t.style.transform = "translateY(8px)";
+    t.style.opacity = "0";
+    t.style.transition = "all 220ms ease";
+
+    wrap.appendChild(t);
+
+    requestAnimationFrame(() => {
+      t.style.transform = "translateY(0)";
+      t.style.opacity = "1";
+    });
+
+    setTimeout(() => {
+      t.style.opacity = "0";
+      t.style.transform = "translateY(8px)";
+      setTimeout(() => t.remove(), 220);
+    }, 2600);
+  } catch {
+    // fallback
+    alert(message);
+  }
+}
 
 function applyDirectionsLinkFromStoreId(linkEl, storeId){
   if (!linkEl) return;
@@ -2399,6 +2455,87 @@ function closeUserModal() {
     md?.classList.add('hidden');
   }, 220);
 }
+
+// =========================================================
+// Shift Approval Handlers (restore missing functions)
+// Uses Supabase function: public.approve_shift(_time_entry_id, _status, _note)
+// =========================================================
+
+async function onApproveClick(timeEntryId) {
+  try {
+    if (!timeEntryId) return;
+
+    const { error } = await supabaseClient.rpc("approve_shift", {
+      _time_entry_id: timeEntryId,
+      _status: "approved",
+      _note: null,
+    });
+    if (error) throw error;
+
+    toast("Shift approved", "ok");
+    await refreshDrawerAfterApprovalChange();
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || "Approve failed", "warn");
+  }
+}
+
+async function onWaiveClick(timeEntryId) {
+  try {
+    if (!timeEntryId) return;
+
+    const note = prompt("Waive reason / note (optional):", "") ?? "";
+    // If user hit cancel, do nothing
+    if (note === null) return;
+
+    const { error } = await supabaseClient.rpc("approve_shift", {
+      _time_entry_id: timeEntryId,
+      _status: "waived",
+      _note: note.trim() || null,
+    });
+    if (error) throw error;
+
+    toast("Shift waived", "ok");
+    await refreshDrawerAfterApprovalChange();
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || "Waive failed", "warn");
+  }
+}
+
+async function onUnapproveClick(timeEntryId) {
+  try {
+    if (!timeEntryId) return;
+
+    const ok = confirm("Unapprove this shift? This will remove the approval/waiver.");
+    if (!ok) return;
+
+    // No RPC exists in your functions list for "unapprove",
+    // so we remove the shift_approvals row directly.
+    const { error } = await supabaseClient
+      .from("shift_approvals")
+      .delete()
+      .eq("time_entry_id", timeEntryId);
+
+    if (error) throw error;
+
+    toast("Approval removed", "ok");
+    await refreshDrawerAfterApprovalChange();
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || "Unapprove failed", "warn");
+  }
+}
+
+// Re-fetch and re-render the drawer so chips/buttons update
+async function refreshDrawerAfterApprovalChange() {
+  if (!drawerContext?.employeeId || !drawerContext?.monthStart) return;
+
+  const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+  renderDrawerSummary(shifts);
+  renderDrawerList(shifts);
+}
+
 
 
 function getUsersFilters(){
