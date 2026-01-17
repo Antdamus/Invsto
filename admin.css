@@ -1069,3 +1069,91 @@ html,body{
   opacity:.78;
 }
 .invite-modal.is-busy input{ cursor:not-allowed; }
+
+/* =========================================================
+   Payroll — Pay Period + Run Controls (Step 4)
+   ========================================================= */
+
+.period-controls{
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(18, 19, 22, 0.65);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+
+.pc-row{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pc-info{
+  min-width: 260px;
+  flex: 1;
+}
+
+.pc-label{
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.pc-line{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pc-name{
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.pc-hint{
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.pc-actions{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Expandable details row inside payroll table */
+.table tr.is-open{
+  outline: 1px solid rgba(157,123,255,0.35);
+  outline-offset: -1px;
+}
+
+.mini-table-wrap{
+  padding: 10px 2px;
+}
+
+.mini-table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mini-table th,
+.mini-table td{
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mini-table th{
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

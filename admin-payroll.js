@@ -1,717 +1,767 @@
 /* =========================================================
-   OG Jewelry — Admin Payroll (Biweekly periods, weekly OT)
-   admin-payroll.js
-   ---------------------------------------------------------
-   This file is intentionally self-contained.
+   OG Jewelry — Admin Payroll (Contractors)
+   admin-payroll.js  (FULL REPLACEMENT)
 
-   It expects only:
-   - supabaseClient (created by initSupabase.js)
+   Requires:
+   - window.supabaseClient (from initSupabase.js)
+   - admin.html contains a container with id="panelPayroll"
 
-   Everything else (date helpers, formatting, UI toasts) is defined locally
-   so you can load this before/after admin.js without dependency loops.
+   Uses Supabase RPC signatures exactly as created:
+   - create_payroll_run(_pay_period_id, _rounding_mode, _note)
+   - build_payroll_run_lines(_payroll_run_id)
+   - finalize_payroll_run(_payroll_run_id, _note)
+   - record_contractor_payment(_payroll_run_id, _employee_id, _amount, _method, _reference, _note, _paid_at)
+   - payroll_lock_period(_period_id, _note, _force)
+   - payroll_unlock_period(_period_id, _note)
+   - create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
+
    ========================================================= */
 
 (function () {
-  // ----- DOM
-  const weekSelect = () => document.getElementById("payWeekSelect");
-  const weekLabel  = () => document.getElementById("payWeekLabel");
-  const prevBtn    = () => document.getElementById("payPrevBtn");
-  const nextBtn    = () => document.getElementById("payNextBtn");
+  const ORG_TZ = "America/New_York";
 
-  const periodName = () => document.getElementById("periodName");
-  const periodBadge = () => document.getElementById("periodBadge");
-  const periodHint = () => document.getElementById("periodHint");
+  // ----------------------------
+  // Supabase + basic helpers
+  // ----------------------------
+  function sb() {
+    if (!window.supabaseClient) throw new Error("supabaseClient not found on window");
+    return window.supabaseClient;
+  }
 
-  const lockBtn    = () => document.getElementById("lockBtn");
-  const unlockBtn  = () => document.getElementById("unlockBtn");
-  const exportBtn  = () => document.getElementById("exportBtn");
-  const createWeekBtn = () => document.getElementById("createWeekBtn");
-  const newPeriodBtn  = () => document.getElementById("newPeriodBtn");
+  const $ = (sel, root = document) => root.querySelector(sel);
 
-  const tbody      = () => document.getElementById("payTbody");
+  function toast(msg, type = "ok") {
+    // Uses global toast if you have one; otherwise fallback
+    if (typeof window.toast === "function") return window.toast(msg, type);
+    console[type === "err" ? "error" : "log"](msg);
+    if (type === "err") alert(msg);
+  }
 
-  const kReg = () => document.getElementById("payTotalReg");
-  const kOt  = () => document.getElementById("payTotalOT");
-  const kAll = () => document.getElementById("payTotalAll");
-
-  // ----- Local helpers (keep payroll independent of admin.js)
-  const pad2 = (n) => String(n).padStart(2, "0");
-  
-  function showPayrollError(title, message) {
-  if (typeof window.showAdminError === "function") {
-    window.showAdminError(title, message);
-  } else {
+  function showAdminError(title, message) {
+    if (typeof window.showAdminError === "function") return window.showAdminError(title, message);
     alert(`${title}\n\n${message}`);
   }
-}
 
-  function toISODate(d){
-    const dt = (d instanceof Date) ? d : new Date(d);
-    return `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`;
+  function fmtMoney(n) {
+    const v = Number(n || 0);
+    return v.toLocaleString("en-US", { style: "currency", currency: "USD" });
   }
 
-  function addDays(date, n){
-    const d = new Date(date);
-    d.setDate(d.getDate() + Number(n || 0));
-    return d;
+  function fmtHoursFromMinutes(min) {
+    const m = Number(min || 0);
+    return (m / 60).toFixed(2);
   }
 
-  function startOfWeekSun(date){
-    const d = new Date(date);
-    d.setHours(0,0,0,0);
-    // JS: Sun=0..Sat=6
-    const delta = d.getDay();
-    d.setDate(d.getDate() - delta);
-    return d;
+  function isoDate(d) {
+    const dt = d instanceof Date ? d : new Date(d);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const da = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
   }
 
-  // ---- Timezone helpers (to keep payroll boundaries consistent with org timezone)
-  const ORG_TZ = 'America/New_York';
-
-  function getTzOffsetStr(dateISO, tz = ORG_TZ) {
-    // Get a stable UTC offset for the given local date.
-    // We sample at 12:00Z to avoid DST transition hour edge cases.
-    // Returns like "+05:00" or "-04:00".
-    try {
-      const d = new Date(`${dateISO}T12:00:00Z`);
-      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' });
-      const part = fmt.formatToParts(d).find(p => p.type === 'timeZoneName')?.value || 'GMT';
-      // Examples: "GMT-5", "GMT-05:00", "GMT+1"
-      const m = part.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
-      if (!m) return '-05:00';
-      const sign = m[1] === '+' ? '+' : '-';
-      const hh = String(m[2]).padStart(2, '0');
-      const mm = String(m[3] || '00').padStart(2, '0');
-      return `${sign}${hh}:${mm}`;
-    } catch {
-      return '-05:00';
-    }
+  function safeErrMsg(e) {
+    return e?.message || e?.error_description || e?.details || String(e);
   }
 
-  function tzMidnightISO(dateISO, tz = ORG_TZ) {
-    // Build an ISO timestamp string that represents local midnight in tz.
-    const off = getTzOffsetStr(dateISO, tz);
-    return `${dateISO}T00:00:00${off}`;
+  // ----------------------------
+  // UI injection
+  // ----------------------------
+  function ensureUI() {
+    const panel = document.getElementById("panelPayroll");
+    if (!panel) return null;
+
+    // Only inject once
+    if (panel.dataset.payrollReady === "1") return panel;
+
+    panel.dataset.payrollReady = "1";
+    panel.innerHTML = `
+      <div class="og-payroll-shell" style="padding:14px;">
+        <div class="og-payroll-top" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <div>
+              <div style="font-size:12px; opacity:.75; margin-bottom:4px;">Pay Period</div>
+              <select id="prPeriodSelect" style="min-width:260px;"></select>
+            </div>
+
+            <div>
+              <div style="font-size:12px; opacity:.75; margin-bottom:4px;">Rounding</div>
+              <select id="prRoundingMode" style="min-width:180px;">
+                <option value="nearest_15">Nearest 15 minutes</option>
+                <option value="nearest_5">Nearest 5 minutes</option>
+              </select>
+            </div>
+
+            <button id="prCreateRunBtn" class="og-btn" type="button">Create Draft Run</button>
+            <button id="prBuildLinesBtn" class="og-btn" type="button">Build Lines</button>
+            <button id="prFinalizeBtn" class="og-btn" type="button">Finalize Run</button>
+            <button id="prExportBtn" class="og-btn" type="button">Export CSV</button>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button id="prCreateWeeklyPeriodBtn" class="og-btn" type="button">Create Weekly Period</button>
+            <button id="prLockBtn" class="og-btn" type="button">Lock Period</button>
+            <button id="prUnlockBtn" class="og-btn" type="button">Unlock Period</button>
+          </div>
+        </div>
+
+        <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div id="prPeriodMeta" style="font-size:13px; opacity:.85;"></div>
+          <div id="prRunMeta" style="font-size:13px; opacity:.85;"></div>
+        </div>
+
+        <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div style="padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px;">
+            <div style="font-size:12px; opacity:.7;">Total Gross</div>
+            <div id="prKpiGross" style="font-size:18px; font-weight:700;">$0.00</div>
+          </div>
+          <div style="padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px;">
+            <div style="font-size:12px; opacity:.7;">Total Paid</div>
+            <div id="prKpiPaid" style="font-size:18px; font-weight:700;">$0.00</div>
+          </div>
+          <div style="padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px;">
+            <div style="font-size:12px; opacity:.7;">Total Due</div>
+            <div id="prKpiDue" style="font-size:18px; font-weight:700;">$0.00</div>
+          </div>
+        </div>
+
+        <div style="margin-top:14px; overflow:auto; border:1px solid rgba(255,255,255,.08); border-radius:14px;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+              <tr style="text-align:left; border-bottom:1px solid rgba(255,255,255,.08);">
+                <th style="padding:10px 12px;">Contractor</th>
+                <th style="padding:10px 12px;">Shifts</th>
+                <th style="padding:10px 12px;">Minutes</th>
+                <th style="padding:10px 12px;">Paid Break</th>
+                <th style="padding:10px 12px;">Unpaid Break</th>
+                <th style="padding:10px 12px;">Rounded (min)</th>
+                <th style="padding:10px 12px;">Hours</th>
+                <th style="padding:10px 12px;">Rate</th>
+                <th style="padding:10px 12px;">Gross</th>
+                <th style="padding:10px 12px;">Paid</th>
+                <th style="padding:10px 12px;">Due</th>
+                <th style="padding:10px 12px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="prTbody">
+              <tr><td colspan="12" style="padding:14px; opacity:.75;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top:12px; font-size:12px; opacity:.7; line-height:1.35;">
+          Break policy: pays up to <b>store_locations.paid_break_cap_min</b> per day; any break time beyond that is unpaid (subtracted).<br/>
+          Rates: uses historical rate resolution function (rate changes mid-period are documented and applied).
+        </div>
+      </div>
+    `;
+
+    return panel;
   }
 
-  function localYMD(ts, tz = ORG_TZ) {
-    const d = new Date(ts);
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).formatToParts(d);
-    const get = (t) => parts.find(p => p.type === t)?.value;
-    return `${get('year')}-${get('month')}-${get('day')}`;
-  }
+  // ----------------------------
+  // State
+  // ----------------------------
+  let currentPeriod = null;   // pay_periods row
+  let currentRun = null;      // payroll_runs row
+  let currentLines = [];      // payroll_run_lines rows
+  let currentPayments = [];   // contractor_payments rows
 
-  function weekStartKeyFromLocalYMD(ymd) {
-    // Treat the ymd as a calendar date, compute Sunday start using UTC math.
-    const [y, m, d] = ymd.split('-').map(n => parseInt(n, 10));
-    const utc = Date.UTC(y, (m - 1), d);
-    const dow = new Date(utc).getUTCDay(); // 0=Sun
-    const sunUtc = utc - dow * 86400000;
-    const sun = new Date(sunUtc);
-    return `${sun.getUTCFullYear()}-${pad2(sun.getUTCMonth() + 1)}-${pad2(sun.getUTCDate())}`;
-  }
-
-  function addDaysISO(ymd, n) {
-    // Date math in UTC so it’s not affected by the browser’s local timezone.
-    const [y, m, d] = String(ymd).split('-').map(v => parseInt(v, 10));
-    const utc = Date.UTC(y, (m - 1), d);
-    const out = new Date(utc + (Number(n || 0) * 86400000));
-    return `${out.getUTCFullYear()}-${pad2(out.getUTCMonth() + 1)}-${pad2(out.getUTCDate())}`;
-  }
-
-  function splitHoursByWeek(clockInIso, clockOutIso, tz = ORG_TZ) {
-    // Industry-standard handling for weekly OT: allocate hours to the week(s)
-    // where the work actually occurred. Shifts that cross midnight/week boundaries
-    // are split at Sunday 00:00 (org week start) in the org/store timezone.
-    //
-    // Returns Map(weekStartISO -> hours)
-    const start = new Date(clockInIso);
-    const end = new Date(clockOutIso);
-    const out = new Map();
-    if (!(start instanceof Date) || !(end instanceof Date)) return out;
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return out;
-    if (end <= start) return out;
-
-    let cursor = start;
-    while (cursor < end) {
-      const ymd = localYMD(cursor.toISOString(), tz);
-      const wkStartISO = weekStartKeyFromLocalYMD(ymd);
-      const wkEndISO = addDaysISO(wkStartISO, 7);
-
-      const wkEndTs = new Date(tzMidnightISO(wkEndISO, tz));
-      const segEnd = (wkEndTs < end) ? wkEndTs : end;
-
-      const hrs = (segEnd.getTime() - cursor.getTime()) / 3600000;
-      out.set(wkStartISO, safeHours(out.get(wkStartISO)) + safeHours(hrs));
-
-      cursor = segEnd;
-    }
-
-    return out;
-  }
-
-  function fmtHours(hours){
-    const h = Number(hours || 0);
-    return (Math.round(h * 100) / 100).toFixed(2);
-  }
-
-  function showToast(msg, type){
-    // If admin.js defines a fancy toast, use it. Otherwise fall back.
-    if (typeof window.showToast === 'function') return window.showToast(msg, type);
-    console[(type === 'error') ? 'error' : 'log']('[toast]', msg);
-  }
-
-  // ----- State
-  let weekAnchor = startOfWeekSun(new Date()); // Sunday (org_week_start_dow() = 0)
-  let payPeriodsCache = []; // for quick matching
-  let currentPeriod = null; // matched to week
-
-  // ----- Helpers
-  function safeHours(n) {
-    const x = Number(n);
-    return Number.isFinite(x) ? x : 0;
-  }
-
-  function weekRangeLabel(sunDate) {
-    const start = new Date(sunDate);
-    const end = addDays(start, 6);
-    return `${start.toLocaleDateString()} — ${end.toLocaleDateString()}`;
-  }
-
-  function weekKey(sunDate) {
-    // "YYYY-MM-DD" for Sunday
-    return toISODate(sunDate);
-  }
-
-  function setKpis(reg, ot) {
-    const total = reg + ot;
-    if (kReg()) kReg().textContent = fmtHours(reg);
-    if (kOt())  kOt().textContent  = fmtHours(ot);
-    if (kAll()) kAll().textContent = fmtHours(total);
-  }
-
-  function setPeriodUI(period) {
-    currentPeriod = period || null;
-
-    // DOM may not exist yet if the Payroll tab panel hasn't been rendered.
-    // Fail safely instead of throwing and killing the whole boot sequence.
-    if (!periodName() || !periodBadge() || !periodHint() || !lockBtn() || !unlockBtn() || !exportBtn() || !createWeekBtn()) {
-      return;
-    }
-
-    if (!period) {
-      periodName().textContent = "—";
-      periodBadge().textContent = "—";
-      periodBadge().className = "badge";
-      periodHint().textContent = "No matching pay period. Create a biweekly period starting this week.";
-      lockBtn().disabled = true;
-      unlockBtn().disabled = true;
-      exportBtn().disabled = true;
-      createWeekBtn().disabled = false;
-      return;
-    }
-
-    const status = period.status || "open";
-    const nm = period.note?.trim() ? period.note.trim() : "Pay period";
-    periodName().textContent = `${nm} (${period.start_date} → ${period.end_date})`;
-
-    periodBadge().textContent = status.toUpperCase();
-    periodBadge().className = `badge ${status === "locked" ? "badgedark" : ""}`;
-
-    if (status === "locked") {
-      periodHint().textContent = `Locked${period.locked_at ? ` at ${new Date(period.locked_at).toLocaleString()}` : ""}.`;
-      lockBtn().disabled = true;
-      unlockBtn().disabled = false;
-      exportBtn().disabled = false;
-      createWeekBtn().disabled = true;
-    } else {
-      periodHint().textContent = "Open period. Lock when payroll is finalized.";
-      lockBtn().disabled = false;
-      unlockBtn().disabled = true;
-      exportBtn().disabled = false;
-      createWeekBtn().disabled = true;
-    }
-  }
-
-  function matchPeriodForWeek(sunDate) {
-    // Week is Sun..Sat. Pay periods are date (no time), so compare by ISO date.
-    const startISO = toISODate(sunDate);
-    const endISO = toISODate(addDays(sunDate, 6));
-
-    // Find a pay period that fully covers the week
-    return payPeriodsCache.find(p =>
-      p.start_date <= startISO && p.end_date >= endISO
-    ) || null;
-  }
-
-  function periodLabel(period) {
-    if (!period) return '—';
-    const nm = period.note?.trim() ? period.note.trim() : 'Pay period';
-    return `${nm} (${period.start_date} → ${period.end_date})`;
-  }
-
-  async function loadPayPeriods() {
-    const { data, error } = await supabaseClient
+  // ----------------------------
+  // Data loaders
+  // ----------------------------
+  async function loadPeriodsIntoSelect(selectEl) {
+    const { data, error } = await sb()
       .from("pay_periods")
       .select("*")
-      .order("start_date", { ascending: false });
+      .order("start_date", { ascending: false })
+      .limit(200);
 
-    if (error) {
-      console.error(error);
-      showToast("Could not load pay periods.", "error");
-      payPeriodsCache = [];
-      return;
-    }
+    if (error) throw error;
 
-    payPeriodsCache = data || [];
-  }
-
-  function buildWeekSelectAround(anchorSun) {
-    // Build 16 weeks: 8 back, anchor, 7 forward
-    const sel = weekSelect();
-    if (!sel) return;
-
-    sel.innerHTML = "";
-    const items = [];
-
-    for (let i = -8; i <= 7; i++) {
-      const d = startOfWeekSun(addDays(anchorSun, i * 7));
-      items.push(d);
-    }
-
-    for (const d of items) {
+    selectEl.innerHTML = "";
+    for (const p of data || []) {
       const opt = document.createElement("option");
-      opt.value = weekKey(d);
-      opt.textContent = weekRangeLabel(d);
-      sel.appendChild(opt);
+      opt.value = p.id;
+      opt.textContent = `${p.start_date} → ${p.end_date}  (${p.status})`;
+      selectEl.appendChild(opt);
     }
 
-    sel.value = weekKey(anchorSun);
+    // pick first
+    if (data && data.length) {
+      selectEl.value = data[0].id;
+      return data[0];
+    }
+    return null;
   }
 
-  function setWeekUI(sunDate) {
-    weekAnchor = startOfWeekSun(sunDate);
-    if (weekLabel()) weekLabel().textContent = weekRangeLabel(weekAnchor);
-    buildWeekSelectAround(weekAnchor);
+  async function loadRunsForPeriod(periodId) {
+    // If you have multiple runs per period, we pick newest draft/final.
+    const { data, error } = await sb()
+      .from("payroll_runs")
+      .select("*")
+      .eq("pay_period_id", periodId)
+      .order("created_at", { ascending: false })
+      .limit(20);
 
-    // match period based on cached periods
-    const matched = matchPeriodForWeek(weekAnchor);
-    setPeriodUI(matched);
+    if (error) throw error;
+    return data || [];
   }
 
-  // ----- Core query: weekly payroll totals per employee
-  async function loadPayrollForSelection(sunDate) {
-    // If a pay period covers this week, load the entire pay period,
-    // but compute OT weekly (sum over the weeks inside the period).
-    const matched = matchPeriodForWeek(sunDate);
+  async function loadLines(runId) {
+    // Try to pull employee display names via relationship; fallback to manual.
+    const { data, error } = await sb()
+      .from("payroll_run_lines")
+      .select("*, employees(display_name)")
+      .eq("payroll_run_id", runId)
+      .order("gross_pay", { ascending: false });
 
-    if (matched) {
-      return loadPayPeriodPayroll(matched);
+    if (!error) return data || [];
+
+    // fallback (if relationship not configured)
+    const { data: d2, error: e2 } = await sb()
+      .from("payroll_run_lines")
+      .select("*")
+      .eq("payroll_run_id", runId)
+      .order("gross_pay", { ascending: false });
+
+    if (e2) throw e2;
+    return d2 || [];
+  }
+
+  async function loadPayments(runId) {
+    const { data, error } = await sb()
+      .from("contractor_payments")
+      .select("*")
+      .eq("payroll_run_id", runId)
+      .order("paid_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  }
+
+  // ----------------------------
+  // Render
+  // ----------------------------
+  function computePaidByEmployee(payments) {
+    const map = new Map();
+    for (const p of payments || []) {
+      const k = p.employee_id;
+      map.set(k, (map.get(k) || 0) + Number(p.amount || 0));
+    }
+    return map;
+  }
+
+  function setMeta(period, run) {
+    const metaEl = $("#prPeriodMeta");
+    const runEl = $("#prRunMeta");
+
+    if (period) {
+      metaEl.textContent = `Period: ${period.start_date} → ${period.end_date} • Status: ${period.status}`;
+    } else {
+      metaEl.textContent = `Period: (none)`;
     }
 
-    // Fallback: show a single week totals (still OT weekly) even if no period exists.
-    return loadSingleWeekPayroll(sunDate);
+    if (run) {
+      runEl.textContent = `Run: ${run.status} • Rounding: ${run.rounding_mode || "(unknown)"} • Created: ${run.created_at ? new Date(run.created_at).toLocaleString() : ""}`;
+    } else {
+      runEl.textContent = `Run: (none for this period yet)`;
+    }
   }
 
-  async function loadSingleWeekPayroll(sunDate) {
-    const startDateISO = toISODate(startOfWeekSun(sunDate));
-    const endDateISO = toISODate(addDays(startOfWeekSun(sunDate), 7)); // exclusive by date
+  function renderKPIs(lines, payments) {
+    const paidMap = computePaidByEmployee(payments);
+    let gross = 0;
+    let paid = 0;
+    for (const l of lines || []) {
+      const g = Number(l.gross_pay || 0);
+      gross += g;
+      paid += Math.min(g, Number(paidMap.get(l.employee_id) || 0));
+    }
+    const due = gross - paid;
 
-    const startTS = tzMidnightISO(startDateISO);
-    const endTS = tzMidnightISO(endDateISO);
+    $("#prKpiGross").textContent = fmtMoney(gross);
+    $("#prKpiPaid").textContent = fmtMoney(paid);
+    $("#prKpiDue").textContent = fmtMoney(due);
+  }
 
-    if (tbody()) tbody().innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+  async function renderLines(lines, payments) {
+    const tbody = $("#prTbody");
+    if (!tbody) return;
 
-    // Pull time_entries for the week with employee info
-    // NOTE: this assumes clock_in is always set and clock_out may be null.
-    // Pull CLOSED shifts that overlap the week window.
-    // IMPORTANT: we cannot just filter by clock_in because shifts can cross midnight/week.
-    const { data, error } = await supabaseClient
-      .from("time_entries")
-      .select(`
-        id,
-        employee_id,
-        clock_in,
-        clock_out,
-        employees:employee_id (
-          id,
-          display_name,
-          hourly_rate,
-          active
-        )
-      `)
-      .lt("clock_in", endTS)
-      .not("clock_out", "is", null)
-      .gte("clock_out", startTS);
+    const paidMap = computePaidByEmployee(payments);
 
-    if (error) {
-      console.error(error);
-      showToast("Could not load payroll week.", "error");
-      if (tbody()) tbody().innerHTML = `<tr><td colspan="4" class="muted">Error loading payroll.</td></tr>`;
-      setKpis(0, 0);
+    if (!lines || !lines.length) {
+      tbody.innerHTML = `<tr><td colspan="12" style="padding:14px; opacity:.75;">No lines yet. Click “Build Lines”.</td></tr>`;
+      renderKPIs([], payments);
       return;
     }
 
-    const rows = data || [];
+    tbody.innerHTML = lines
+      .map((l) => {
+        const name = l.employees?.display_name || l.display_name || l.employee_id;
+        const paid = Number(paidMap.get(l.employee_id) || 0);
+        const gross = Number(l.gross_pay || 0);
+        const due = Math.max(0, gross - paid);
 
-    // Aggregate hours per employee, splitting shifts at week boundary (Sun 00:00 local).
-    const byEmp = new Map();
+        const minutesWorked = Number(l.minutes_worked || 0);
+        const paidBreak = Number(l.paid_break_minutes || 0);
+        const unpaidBreak = Number(l.unpaid_break_minutes || 0);
+        const roundedMin = Number(l.rounded_minutes || 0);
+        const hours = roundedMin / 60;
 
-    for (const r of rows) {
-      const emp = r.employees;
-      if (!emp) continue;
+        const rate = Number(l.hourly_rate || 0);
 
-      const inTs = new Date(r.clock_in).getTime();
-      const outTs = new Date(r.clock_out).getTime();
-      if (outTs <= inTs) continue;
+        const shiftCount = Number(l.shift_count || 0);
 
-      // Split shift across weeks and only take the portion that belongs to THIS selected week.
-      const segs = splitHoursByWeek(r.clock_in, r.clock_out, ORG_TZ);
-      const weekISO = startDateISO; // Sunday start
-      const hours = safeHours(segs.get(weekISO));
-      if (hours <= 0) continue;
+        const canPay = currentRun && currentRun.status === "final";
 
-      const key = emp.id;
-      const prev = byEmp.get(key) || {
-        employee_id: emp.id,
-        display_name: emp.display_name || "—",
-        hourly_rate: emp.hourly_rate,
-        active: emp.active,
-        total_hours: 0
-      };
+        return `
+          <tr style="border-bottom:1px solid rgba(255,255,255,.06);">
+            <td style="padding:10px 12px; font-weight:650;">${escapeHtml(name)}</td>
+            <td style="padding:10px 12px;">${shiftCount}</td>
+            <td style="padding:10px 12px;">${minutesWorked}</td>
+            <td style="padding:10px 12px;">${paidBreak}</td>
+            <td style="padding:10px 12px;">${unpaidBreak}</td>
+            <td style="padding:10px 12px;">${roundedMin}</td>
+            <td style="padding:10px 12px;">${hours.toFixed(2)}</td>
+            <td style="padding:10px 12px;">${fmtMoney(rate)}/hr</td>
+            <td style="padding:10px 12px; font-weight:700;">${fmtMoney(gross)}</td>
+            <td style="padding:10px 12px;">${fmtMoney(paid)}</td>
+            <td style="padding:10px 12px; font-weight:700;">${fmtMoney(due)}</td>
+            <td style="padding:10px 12px;">
+              <button class="og-btn prPayBtn" type="button"
+                data-emp="${l.employee_id}"
+                data-name="${escapeAttr(name)}"
+                data-due="${due}"
+                ${canPay ? "" : "disabled"}
+                title="${canPay ? "Record payment" : "Finalize run to record payments"}"
+              >Pay</button>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
 
-      prev.total_hours += hours;
-      byEmp.set(key, prev);
-    }
-
-    // Split and sum
-    const list = Array.from(byEmp.values())
-      .sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-
-    let totalReg = 0;
-    let totalOt = 0;
-
-    const out = [];
-
-    for (const e of list) {
-      const total = safeHours(e.total_hours);
-      const reg = Math.min(total, 40);
-      const ot = Math.max(0, total - 40);
-
-      totalReg += reg;
-      totalOt += ot;
-
-      out.push({ ...e, reg_hours: reg, ot_hours: ot });
-    }
-
-    setKpis(totalReg, totalOt);
-
-    // Render
-    if (!tbody()) return;
-
-    if (!out.length) {
-      tbody().innerHTML = `<tr><td colspan="4" class="muted">No shifts in this week.</td></tr>`;
-      return;
-    }
-
-    tbody().innerHTML = out.map(e => `
-      <tr>
-        <td>${e.display_name}</td>
-        <td>${fmtHours(e.reg_hours)}</td>
-        <td>${fmtHours(e.ot_hours)}</td>
-        <td><strong>${fmtHours(e.total_hours)}</strong></td>
-      </tr>
-    `).join("");
+    renderKPIs(lines, payments);
   }
 
-  async function loadPayPeriodPayroll(period) {
-    const startDateISO = period.start_date;
-    const endExclusiveISO = toISODate(addDays(new Date(`${period.end_date}T00:00:00`), 1));
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
-    const startTS = tzMidnightISO(startDateISO, period.timezone || ORG_TZ);
-    const endTS = tzMidnightISO(endExclusiveISO, period.timezone || ORG_TZ);
+  function escapeAttr(s) {
+    return escapeHtml(s).replaceAll("\n", " ");
+  }
 
-    if (tbody()) tbody().innerHTML = `<tr><td colspan="4" class="muted">Loading…</td></tr>`;
+  // ----------------------------
+  // Actions (RPC wrappers)
+  // ----------------------------
+  function uiRoundingMode() {
+    const v = $("#prRoundingMode")?.value || "nearest_15";
+    // Must match DB function expectation.
+    if (v !== "nearest_15" && v !== "nearest_5") return "nearest_15";
+    return v;
+  }
 
-    // Pull CLOSED shifts that overlap the pay period window.
-    // (Shifts can start before the period and end inside, or start inside and end after.)
-    const { data, error } = await supabaseClient
-      .from("time_entries")
-      .select(`
-        id,
-        employee_id,
-        clock_in,
-        clock_out,
-        employees:employee_id (
-          id,
-          display_name,
-          hourly_rate,
-          active
-        )
-      `)
-      .lt("clock_in", endTS)
-      .not("clock_out", "is", null)
-      .gte("clock_out", startTS);
+  async function refreshAll(periodId) {
+    // period row
+    const { data: p, error: pe } = await sb()
+      .from("pay_periods")
+      .select("*")
+      .eq("id", periodId)
+      .single();
 
-    if (error) {
-      console.error(error);
-      showToast("Could not load payroll period.", "error");
-      if (tbody()) tbody().innerHTML = `<tr><td colspan="4" class="muted">Error loading payroll.</td></tr>`;
-      setKpis(0, 0);
+    if (pe) throw pe;
+    currentPeriod = p;
+
+    // runs
+    const runs = await loadRunsForPeriod(periodId);
+    currentRun = runs[0] || null;
+
+    setMeta(currentPeriod, currentRun);
+
+    if (!currentRun) {
+      currentLines = [];
+      currentPayments = [];
+      await renderLines([], []);
       return;
     }
 
-    const rows = data || [];
+    currentLines = await loadLines(currentRun.id);
+    currentPayments = await loadPayments(currentRun.id);
 
-    // 1) Sum hours per employee per week (week defined in org/store timezone)
-    // 2) Apply OT split for EACH week (40h cap), then sum across the period.
-    const byEmp = new Map();
+    await renderLines(currentLines, currentPayments);
+  }
 
-    for (const r of rows) {
-      const emp = r.employees;
-      if (!emp) continue;
+  async function createDraftRun() {
+    if (!currentPeriod) return;
+    const roundingMode = uiRoundingMode();
 
-      const inTs = new Date(r.clock_in).getTime();
-      const outTs = new Date(r.clock_out).getTime();
-      if (!Number.isFinite(inTs) || !Number.isFinite(outTs) || outTs <= inTs) continue;
-
-      const tz = period.timezone || ORG_TZ;
-
-      // Split shift hours across week boundaries (Sun 00:00 local) so weekly OT is correct,
-      // even when a shift crosses midnight or a pay period spans multiple weeks.
-      const wkMap = splitHoursByWeek(r.clock_in, r.clock_out, tz);
-
-      const key = emp.id;
-      const prev = byEmp.get(key) || {
-        employee_id: emp.id,
-        display_name: emp.display_name || "—",
-        hourly_rate: emp.hourly_rate,
-        active: emp.active,
-        weeks: new Map() // wkKey -> hours
-      };
-
-      for (const [wk, hrs] of wkMap.entries()) {
-        // Only count hours that fall within the pay-period window.
-        // The overlap query already constrains rows, but a shift can extend beyond the period.
-        // We clamp by splitting again at period bounds.
-        const wkStartTs = new Date(tzMidnightISO(wk, tz));
-        const wkEndTs = new Date(tzMidnightISO(addDaysISO(wk, 7), tz));
-
-        const segStart = (wkStartTs < new Date(startTS)) ? new Date(startTS) : wkStartTs;
-        const segEnd = (wkEndTs > new Date(endTS)) ? new Date(endTS) : wkEndTs;
-
-        // If the week segment fully outside period, skip.
-        if (segEnd <= segStart) continue;
-
-        // hrs is the week-split for the whole shift; for shifts that cross the period edges,
-        // we recompute the exact overlap for this week+period intersection.
-        // (This avoids subtle off-by-1-hour issues around DST and boundaries.)
-        const overlapStart = Math.max(new Date(r.clock_in).getTime(), segStart.getTime());
-        const overlapEnd = Math.min(new Date(r.clock_out).getTime(), segEnd.getTime());
-        const overlapHours = (overlapEnd - overlapStart) / 3600000;
-        if (overlapHours <= 0) continue;
-
-        prev.weeks.set(wk, safeHours(prev.weeks.get(wk)) + overlapHours);
-      }
-      byEmp.set(key, prev);
-    }
-
-    const list = Array.from(byEmp.values()).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-
-    let totalReg = 0;
-    let totalOt = 0;
-    const out = [];
-
-    for (const e of list) {
-      let regSum = 0;
-      let otSum = 0;
-      let total = 0;
-
-      for (const hrs of e.weeks.values()) {
-        const wkTotal = safeHours(hrs);
-        const wkReg = Math.min(wkTotal, 40);
-        const wkOt = Math.max(0, wkTotal - 40);
-        regSum += wkReg;
-        otSum += wkOt;
-        total += wkTotal;
-      }
-
-      totalReg += regSum;
-      totalOt += otSum;
-      out.push({
-        employee_id: e.employee_id,
-        display_name: e.display_name,
-        hourly_rate: e.hourly_rate,
-        active: e.active,
-        reg_hours: regSum,
-        ot_hours: otSum,
-        total_hours: total
+    // Correct RPC signature: create_payroll_run(_pay_period_id, _rounding_mode, _note)
+    try {
+      const { data, error } = await sb().rpc("create_payroll_run", {
+        _pay_period_id: currentPeriod.id,
+        _rounding_mode: roundingMode,
+        _note: null,
       });
+      if (error) throw error;
+
+      toast("Draft payroll run created", "ok");
+      // data may be a row or null depending on PostgREST; refresh from table either way
+      await refreshAll(currentPeriod.id);
+    } catch (e) {
+      showAdminError("Create run failed", safeErrMsg(e));
+      throw e;
     }
+  }
 
-    setKpis(totalReg, totalOt);
-
-    if (!tbody()) return;
-    if (!out.length) {
-      tbody().innerHTML = `<tr><td colspan="4" class="muted">No shifts in this pay period.</td></tr>`;
+  async function buildLines() {
+    if (!currentRun) {
+      toast("Create a run first", "err");
       return;
     }
 
-    tbody().innerHTML = out.map(e => `
-      <tr>
-        <td>${e.display_name}</td>
-        <td>${fmtHours(e.reg_hours)}</td>
-        <td>${fmtHours(e.ot_hours)}</td>
-        <td><strong>${fmtHours(e.total_hours)}</strong></td>
-      </tr>
-    `).join("");
+    // Correct signature: build_payroll_run_lines(_payroll_run_id)
+    try {
+      const { data, error } = await sb().rpc("build_payroll_run_lines", {
+        _payroll_run_id: currentRun.id,
+      });
+      if (error) throw error;
+
+      toast("Payroll lines built", "ok");
+      await refreshAll(currentPeriod.id);
+      return data;
+    } catch (e) {
+      showAdminError("Build lines failed", safeErrMsg(e));
+      throw e;
+    }
   }
 
-  // ----- Actions: create, lock, unlock, export
-  async function createPeriodForCurrentWeek() {
-    // Create a BIWEEKLY pay period starting at the selected week start.
-    const startISO = toISODate(weekAnchor);
+  async function finalizeRun() {
+    if (!currentRun) return;
 
-    const { data, error } = await supabaseClient
-      .rpc('create_weekly_pay_period', {
-        week_start: startISO,
-        weeks: 2,
+    // Correct signature: finalize_payroll_run(_payroll_run_id, _note)
+    try {
+      const { data, error } = await sb().rpc("finalize_payroll_run", {
+        _payroll_run_id: currentRun.id,
+        _note: null,
+      });
+      if (error) throw error;
+
+      toast("Payroll run finalized", "ok");
+      await refreshAll(currentPeriod.id);
+      return data;
+    } catch (e) {
+      showAdminError("Finalize failed", safeErrMsg(e));
+      throw e;
+    }
+  }
+
+  async function lockPeriod() {
+    if (!currentPeriod) return;
+
+    // payroll_lock_period(_period_id, _note, _force)
+    try {
+      const { data, error } = await sb().rpc("payroll_lock_period", {
+        _period_id: currentPeriod.id,
+        _note: null,
+        _force: false,
+      });
+      if (error) throw error;
+
+      toast("Pay period locked", "ok");
+      await refreshAll(currentPeriod.id);
+      return data;
+    } catch (e) {
+      showAdminError("Lock failed", safeErrMsg(e));
+      throw e;
+    }
+  }
+
+  async function unlockPeriod() {
+    if (!currentPeriod) return;
+
+    // payroll_unlock_period(_period_id, _note)
+    try {
+      const { data, error } = await sb().rpc("payroll_unlock_period", {
+        _period_id: currentPeriod.id,
+        _note: null,
+      });
+      if (error) throw error;
+
+      toast("Pay period unlocked", "ok");
+      await refreshAll(currentPeriod.id);
+      return data;
+    } catch (e) {
+      showAdminError("Unlock failed", safeErrMsg(e));
+      throw e;
+    }
+  }
+
+  async function createWeeklyPeriod() {
+    // Create a 7-day period starting on a chosen date (default: today)
+    const start = prompt(`Enter week start date (YYYY-MM-DD)`, isoDate(new Date()));
+    if (!start) return;
+
+    // create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
+    try {
+      const { data, error } = await sb().rpc("create_weekly_pay_period", {
+        week_start: start,
+        weeks: 1,
         p_timezone: ORG_TZ,
-        p_note: 'Biweekly'
+        p_note: null,
       });
+      if (error) throw error;
 
-    if (error) {
-      console.error(error);
-      showToast("Could not create period.", "error");
+      toast("Weekly pay period created", "ok");
+
+      // reload periods list and select new one
+      const sel = $("#prPeriodSelect");
+      const newest = await loadPeriodsIntoSelect(sel);
+      currentPeriod = newest;
+      await refreshAll(sel.value);
+      return data;
+    } catch (e) {
+      showAdminError("Create period failed", safeErrMsg(e));
+      throw e;
+    }
+  }
+
+  async function recordPayment(employeeId, amount, method, reference, note) {
+    if (!currentRun) return;
+    if (currentRun.status !== "final") {
+      toast("Finalize the run before recording payments", "err");
       return;
     }
 
-    showToast("Biweekly pay period created.", "ok");
-    await loadPayPeriods();
-    setWeekUI(weekAnchor);
-  }
-
-  async function lockCurrentPeriod() {
-    if (!currentPeriod) return;
-
-    const { data, error } = await supabaseClient
-      .rpc('payroll_lock_period', {
-        _period_id: currentPeriod.id,
-        _note: 'Locked from Admin UI',
-        _force: false
+    // record_contractor_payment(_payroll_run_id, _employee_id, _amount, _method, _reference, _note, _paid_at)
+    try {
+      const { data, error } = await sb().rpc("record_contractor_payment", {
+        _payroll_run_id: currentRun.id,
+        _employee_id: employeeId,
+        _amount: Number(amount),
+        _method: method || "other",
+        _reference: reference || null,
+        _note: note || null,
+        _paid_at: new Date().toISOString(),
       });
+      if (error) throw error;
 
-    if (error) {
-  console.error(error);
-  showPayrollError(
-    "Payroll Cannot Be Locked",
-    error.message || "One or more shifts are still pending approval."
-  );
-  return;
-}
-
-    showToast("Period locked.", "ok");
-    await loadPayPeriods();
-    setWeekUI(weekAnchor);
+      toast("Payment recorded", "ok");
+      await refreshAll(currentPeriod.id);
+      return data;
+    } catch (e) {
+      showAdminError("Record payment failed", safeErrMsg(e));
+      throw e;
+    }
   }
 
-  async function unlockCurrentPeriod() {
-    if (!currentPeriod) return;
+  // ----------------------------
+  // Export CSV
+  // ----------------------------
+  function buildCsv(lines, payments) {
+    const paidMap = computePaidByEmployee(payments);
 
-    const { data, error } = await supabaseClient
-      .rpc('payroll_unlock_period', {
-        _period_id: currentPeriod.id,
-        _note: 'Unlocked from Admin UI'
-      });
+    const headers = [
+      "employee_id",
+      "display_name",
+      "shift_count",
+      "minutes_worked",
+      "paid_break_minutes",
+      "unpaid_break_minutes",
+      "rounded_minutes",
+      "hours_rounded",
+      "hourly_rate",
+      "gross_pay",
+      "paid_amount",
+      "due_amount",
+    ];
 
-    if (error) {
-      console.error(error);
-      showToast("Could not unlock period.", "error");
-      return;
-    }
+    const rows = (lines || []).map((l) => {
+      const name = l.employees?.display_name || l.display_name || "";
+      const gross = Number(l.gross_pay || 0);
+      const paid = Number(paidMap.get(l.employee_id) || 0);
+      const due = Math.max(0, gross - paid);
 
-    showToast("Period unlocked.", "ok");
-    await loadPayPeriods();
-    setWeekUI(weekAnchor);
-  }
+      const roundedMin = Number(l.rounded_minutes || 0);
+      const hours = roundedMin / 60;
 
-  function exportCurrentWeekCsv() {
-    // Export what’s currently rendered in the payroll table
-    const tb = tbody();
-    if (!tb) return;
+      const cols = [
+        l.employee_id,
+        name,
+        Number(l.shift_count || 0),
+        Number(l.minutes_worked || 0),
+        Number(l.paid_break_minutes || 0),
+        Number(l.unpaid_break_minutes || 0),
+        roundedMin,
+        hours.toFixed(2),
+        Number(l.hourly_rate || 0).toFixed(2),
+        gross.toFixed(2),
+        paid.toFixed(2),
+        due.toFixed(2),
+      ];
 
-    const rows = Array.from(tb.querySelectorAll("tr"));
-    const csv = [["Worker", "Regular", "OT", "Total"]];
-
-    for (const tr of rows) {
-      const tds = Array.from(tr.querySelectorAll("td"));
-      if (tds.length !== 4) continue;
-      csv.push(tds.map(td => (td.textContent || "").trim()));
-    }
-
-    const blob = new Blob([csv.map(r => r.map(v => `"${v.replaceAll('"', '""')}"`).join(",")).join("\n")], {
-      type: "text/csv;charset=utf-8"
+      return cols.map(csvCell).join(",");
     });
 
+    return [headers.join(","), ...rows].join("\n");
+
+    function csvCell(v) {
+      const s = String(v ?? "");
+      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+        return `"${s.replaceAll('"', '""')}"`;
+      }
+      return s;
+    }
+  }
+
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    const periodPart = currentPeriod ? `${currentPeriod.start_date}_to_${currentPeriod.end_date}` : weekKey(weekAnchor);
-    a.download = `payroll_${periodPart}.csv`;
-    document.body.appendChild(a);
+    a.href = url;
+    a.download = filename;
     a.click();
-    a.remove();
+    URL.revokeObjectURL(url);
   }
 
-  // ----- Wiring
-  let _wired = false;
-  function wire() {
-    // week nav
-    if (prevBtn()) prevBtn().addEventListener("click", async () => {
-      setWeekUI(addDays(weekAnchor, -7));
-      await loadPayrollForSelection(weekAnchor);
-    });
-
-    if (nextBtn()) nextBtn().addEventListener("click", async () => {
-      setWeekUI(addDays(weekAnchor, 7));
-      await loadPayrollForSelection(weekAnchor);
-    });
-
-    if (weekSelect()) weekSelect().addEventListener("change", async (e) => {
-      const iso = e.target.value; // Sunday ISO date
-      const d = new Date(`${iso}T00:00:00`);
-      setWeekUI(d);
-      await loadPayrollForSelection(weekAnchor);
-    });
-
-    // actions
-    if (createWeekBtn()) createWeekBtn().addEventListener("click", createPeriodForCurrentWeek);
-    if (lockBtn()) lockBtn().addEventListener("click", lockCurrentPeriod);
-    if (unlockBtn()) unlockBtn().addEventListener("click", unlockCurrentPeriod);
-    if (exportBtn()) exportBtn().addEventListener("click", exportCurrentWeekCsv);
+  async function exportCsv() {
+    if (!currentRun) return toast("No run to export", "err");
+    const csv = buildCsv(currentLines, currentPayments);
+    const fn = `payroll_${currentPeriod?.start_date || "period"}_${currentPeriod?.end_date || ""}_${currentRun.status}.csv`;
+    downloadText(fn, csv);
+    toast("CSV exported", "ok");
   }
 
-  // ----- Public entrypoint (called by admin.js when payroll tab is opened)
-  window.initPayrollTab = async function initPayrollTab() {
-    if (typeof supabaseClient === "undefined" || !supabaseClient) {
-      console.error("supabaseClient not ready");
-      showToast("Supabase not ready yet.", "error");
+  // ----------------------------
+  // Payment prompt UI
+  // ----------------------------
+  async function promptPayment(empId, empName, due) {
+    if (!currentRun || currentRun.status !== "final") return;
+
+    const amtDefault = (Number(due || 0) || 0).toFixed(2);
+    const amountStr = prompt(`Record payment for ${empName}\n\nAmount (default = due):`, amtDefault);
+    if (amountStr === null) return;
+
+    const amount = Number(amountStr);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast("Invalid amount", "err");
       return;
     }
 
-    await loadPayPeriods();
-    setWeekUI(weekAnchor);
-    if (!_wired) { wire(); _wired = true; }
-    await loadPayrollForSelection(weekAnchor);
-  };
-  window.refreshPayrollTab = async function refreshPayrollTab() {
-    if (typeof supabaseClient === "undefined" || !supabaseClient) return;
-    await loadPayPeriods();
-    await loadPayrollForSelection(weekAnchor);
-  };
+    const method = prompt(`Method (zelle, ach, wire, cash, check, other):`, "zelle") || "other";
+    const reference = prompt(`Reference (optional):`, "") || null;
+    const note = prompt(`Note (optional):`, "") || null;
 
+    await recordPayment(empId, amount, method, reference, note);
+  }
+
+  // ----------------------------
+  // Event wiring
+  // ----------------------------
+  function bindEvents() {
+    $("#prPeriodSelect")?.addEventListener("change", async (e) => {
+      const id = e.target.value;
+      try {
+        await refreshAll(id);
+      } catch (err) {
+        showAdminError("Load period failed", safeErrMsg(err));
+      }
+    });
+
+    $("#prCreateRunBtn")?.addEventListener("click", async () => {
+      try {
+        await createDraftRun();
+      } catch {}
+    });
+
+    $("#prBuildLinesBtn")?.addEventListener("click", async () => {
+      try {
+        await buildLines();
+      } catch {}
+    });
+
+    $("#prFinalizeBtn")?.addEventListener("click", async () => {
+      try {
+        await finalizeRun();
+      } catch {}
+    });
+
+    $("#prExportBtn")?.addEventListener("click", async () => {
+      try {
+        await exportCsv();
+      } catch {}
+    });
+
+    $("#prLockBtn")?.addEventListener("click", async () => {
+      try {
+        await lockPeriod();
+      } catch {}
+    });
+
+    $("#prUnlockBtn")?.addEventListener("click", async () => {
+      try {
+        await unlockPeriod();
+      } catch {}
+    });
+
+    $("#prCreateWeeklyPeriodBtn")?.addEventListener("click", async () => {
+      try {
+        await createWeeklyPeriod();
+      } catch {}
+    });
+
+    // delegated pay button
+    $("#prTbody")?.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".prPayBtn");
+      if (!btn) return;
+      const empId = btn.dataset.emp;
+      const empName = btn.dataset.name || empId;
+      const due = Number(btn.dataset.due || 0);
+      try {
+        await promptPayment(empId, empName, due);
+      } catch {}
+    });
+  }
+
+  // ----------------------------
+  // Boot
+  // ----------------------------
+  async function init() {
+    const panel = ensureUI();
+    if (!panel) return;
+
+    try {
+      const sel = $("#prPeriodSelect");
+      const firstPeriod = await loadPeriodsIntoSelect(sel);
+
+      if (!firstPeriod) {
+        $("#prTbody").innerHTML =
+          `<tr><td colspan="12" style="padding:14px; opacity:.75;">No pay periods yet. Click “Create Weekly Period”.</td></tr>`;
+        setMeta(null, null);
+        renderKPIs([], []);
+        bindEvents();
+        return;
+      }
+
+      currentPeriod = firstPeriod;
+      bindEvents();
+      await refreshAll(sel.value);
+    } catch (err) {
+      showAdminError("Payroll init failed", safeErrMsg(err));
+    }
+  }
+
+  // Initialize after DOM ready
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();

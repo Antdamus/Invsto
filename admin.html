@@ -127,72 +127,103 @@
         </div>
       </section>
 
-      <!-- ===== Payroll panel ===== -->
       <section id="panelPayroll" class="panel hidden" role="tabpanel" aria-labelledby="tabPayroll">
-        <div class="filters" role="region" aria-label="Payroll filters">
-          <div class="filter">
-            <span>Week</span>
-            <select id="payWeekSelect"></select>
-          </div>
-          <div class="filter-row">
-            <button id="payPrevBtn" class="btn ghost" title="Previous week">← Prev</button>
-            <div id="payWeekLabel" class="weeklabel">—</div>
-            <button id="payNextBtn" class="btn ghost" title="Next week">Next →</button>
-          </div>
-        </div>
+  <!-- Pay period + payroll run controls -->
+  <div class="filters" role="region" aria-label="Payroll filters">
+    <div class="filter">
+      <span>Pay Period</span>
+      <select id="payPeriodSelect"></select>
+    </div>
 
-        <!-- Period controls -->
-        <div class="period-controls" role="region" aria-label="Period controls">
-          <div class="pc-row">
-            <div class="pc-info">
-              <div class="pc-label">Matching pay period</div>
-              <div class="pc-line">
-                <span id="periodName" class="pc-name">—</span>
-                <span id="periodBadge" class="badge">—</span>
-              </div>
-              <div id="periodHint" class="pc-hint muted">—</div>
-            </div>
-            <div class="pc-actions">
-              <button id="lockBtn" class="btn" disabled>Lock period</button>
-              <button id="unlockBtn" class="btn ghost" disabled>Unlock</button>
-              <button id="exportBtn" class="btn ghost" disabled>Export CSV</button>
-              <button id="createWeekBtn" class="btn">Create period for this week</button>
-              <button id="newPeriodBtn" class="btn ghost">New custom period…</button>
-            </div>
-          </div>
-        </div>
+    <div class="filter">
+      <span>Run</span>
+      <select id="payRunSelect" disabled>
+        <option value="">No run selected</option>
+      </select>
+    </div>
 
-        <div class="kpis" role="region" aria-label="Payroll KPIs">
-          <div class="kpi">
-            <div class="kpi-label">Regular Hours</div>
-            <div id="payTotalReg" class="kpi-value">—</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Overtime Hours</div>
-            <div id="payTotalOT" class="kpi-value">—</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Total Hours</div>
-            <div id="payTotalAll" class="kpi-value">—</div>
-          </div>
-        </div>
+    <div class="filter">
+      <span>Rounding</span>
+      <select id="payRoundingSelect">
+        <option value="15">Nearest 15 minutes</option>
+        <option value="5">Nearest 5 minutes</option>
+      </select>
+    </div>
+  </div>
 
-        <div class="table-wrapper">
-          <table class="table" aria-describedby="payWeekLabel">
-            <thead>
-              <tr>
-                <th>Worker</th>
-                <th>Regular</th>
-                <th>OT</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody id="payTbody">
-              <tr><td colspan="4" class="muted">Loading…</td></tr>
-            </tbody>
-          </table>
+  <!-- Period controls -->
+  <div class="period-controls" role="region" aria-label="Period controls">
+    <div class="pc-row">
+      <div class="pc-info">
+        <div class="pc-label">Selected pay period</div>
+        <div class="pc-line">
+          <span id="periodName" class="pc-name">—</span>
+          <span id="periodBadge" class="badge">—</span>
         </div>
-      </section>
+        <div id="periodHint" class="pc-hint muted">—</div>
+      </div>
+
+      <div class="pc-actions">
+        <button id="lockBtn" class="btn" disabled>Lock period</button>
+        <button id="unlockBtn" class="btn ghost" disabled>Unlock</button>
+        <button id="exportBtn" class="btn ghost" disabled>Export CSV</button>
+        <button id="createWeekBtn" class="btn">Create biweekly starting this week</button>
+        <button id="newPeriodBtn" class="btn ghost">New custom period…</button>
+      </div>
+    </div>
+
+    <div class="pc-row" style="margin-top:10px">
+      <div class="pc-info">
+        <div class="pc-label">Payroll run</div>
+        <div class="pc-line">
+          <span id="payRunBadge" class="badge">—</span>
+        </div>
+        <div id="payRunHint" class="pc-hint muted">Select a run to preview contractor totals.</div>
+      </div>
+
+      <div class="pc-actions">
+        <button id="createRunBtn" class="btn" disabled>Create draft run</button>
+        <button id="buildRunBtn" class="btn ghost" disabled>Rebuild lines</button>
+        <button id="finalizeRunBtn" class="btn" disabled>Finalize run</button>
+        <button id="markPaidBtn" class="btn ghost" disabled>Mark paid</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="kpis" role="region" aria-label="Payroll KPIs">
+    <div class="kpi">
+      <div class="kpi-label">Contractors</div>
+      <div id="payKpiWorkers" class="kpi-value">—</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Paid Hours</div>
+      <div id="payKpiHours" class="kpi-value">—</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Gross Pay</div>
+      <div id="payKpiGross" class="kpi-value">—</div>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table class="table" aria-label="Payroll run lines">
+      <thead>
+        <tr>
+          <th>Contractor</th>
+          <th>Hours</th>
+          <th>Unpaid Breaks</th>
+          <th>Rate</th>
+          <th>Gross</th>
+          <th>Flags</th>
+        </tr>
+      </thead>
+      <tbody id="payRunTbody">
+        <tr><td colspan="6" class="muted">Select a pay period to begin…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 
       <!-- ===== Schedule panel ===== -->
       <section id="panelSchedule" class="panel hidden">
