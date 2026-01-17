@@ -2282,49 +2282,6 @@ function wireDrawer(){
   }
 }
 
-function openCreateModal(){
-  const start = (qs('payWeekSelect')?.value) || toISODate(startOfWeekSun(new Date()));
-  qs('createStart').value = start;
-  qs('createEnd').value = dateStrAddDays(start, 6);
-  qs('createNote').value = '';
-  qs('createError').textContent = ''; show(qs('createError'), false);
-  qs('createModal').classList.add('open'); qs('createModal').classList.remove('hidden');
-  qs('createModalBackdrop').classList.add('show'); qs('createModalBackdrop').classList.remove('hidden');
-}
-function closeCreateModal(){
-  qs('createModal').classList.remove('open'); qs('createModalBackdrop').classList.remove('show');
-  setTimeout(() => { qs('createModal').classList.add('hidden'); qs('createModalBackdrop').classList.add('hidden'); }, 180);
-}
-function setCreateError(msg){ const el=qs('createError'); el.textContent=msg||''; show(el, !!msg); }
-
-async function createCustomPeriod(){
-  const s = qs('createStart').value, e = qs('createEnd').value;
-  const note = (qs('createNote').value||'').trim();
-  if (!s || !e) return setCreateError('Start and end dates are required.');
-  if (new Date(s) > new Date(e)) return setCreateError('End date must be after start date.');
-  setCreateError('');
-  try {
-    const { error } = await supabaseClient.rpc('create_pay_period', {
-      p_start_date: s, p_end_date: e, p_note: note || null
-    });
-    if (error) throw error;
-    closeCreateModal(); showToast('Pay period created','ok');
-    if (typeof window.refreshPayrollTab === 'function') await window.refreshPayrollTab();
-  } catch (err) {
-    console.error(err); setCreateError(err?.message || 'Failed to create pay period');
-  }
-}
-
-function wireCreatePeriodUI(){  const np = qs('newPeriodBtn');
-  if (np){
-    np.addEventListener('click', openCreateModal);
-    qs('createCloseBtn').addEventListener('click', closeCreateModal);
-    qs('createCancelBtn').addEventListener('click', closeCreateModal);
-    qs('createModalBackdrop').addEventListener('click', closeCreateModal);
-    qs('createSaveBtn').addEventListener('click', createCustomPeriod);
-  }
-}
-
 /* ============== Tabs ============== */
 function activateTab(which){
   const tabs = [
