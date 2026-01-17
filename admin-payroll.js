@@ -668,6 +668,7 @@
   }
 
   // ----- Wiring
+  let _wired = false;
   function wire() {
     // week nav
     if (prevBtn()) prevBtn().addEventListener("click", async () => {
@@ -692,15 +693,6 @@
     if (lockBtn()) lockBtn().addEventListener("click", lockCurrentPeriod);
     if (unlockBtn()) unlockBtn().addEventListener("click", unlockCurrentPeriod);
     if (exportBtn()) exportBtn().addEventListener("click", exportCurrentWeekCsv);
-
-    // "New custom period…" uses your existing create modal in admin.js.
-    // We intentionally leave it to admin.js.
-    if (newPeriodBtn()) newPeriodBtn().addEventListener("click", () => {
-      // admin.js owns that modal; just trigger the button if it exists there
-      const btn = document.getElementById("newPeriodBtn");
-      if (btn) btn.blur();
-      showToast("Use the custom period modal below (admin.js).", "info");
-    });
   }
 
   // ----- Public entrypoint (called by admin.js when payroll tab is opened)
@@ -713,7 +705,13 @@
 
     await loadPayPeriods();
     setWeekUI(weekAnchor);
-    wire();
+    if (!_wired) { wire(); _wired = true; }
     await loadPayrollForSelection(weekAnchor);
   };
+  window.refreshPayrollTab = async function refreshPayrollTab() {
+    if (typeof supabaseClient === "undefined" || !supabaseClient) return;
+    await loadPayPeriods();
+    await loadPayrollForSelection(weekAnchor);
+  };
+
 })();

@@ -6,6 +6,41 @@ let lastDrawerShifts = []; // keep latest list to re-render on toggle
 // ===== Global calendar state =====
 let gcMonthStart = null; // first day of the month being shown (Date)
 
+function applyDirectionsLinkFromStoreId(linkEl, storeId){
+  if (!linkEl) return;
+  linkEl.href = storeDirectionsHref(storeId);
+  linkEl.target = "_blank";
+  linkEl.rel = "noopener noreferrer";
+}
+
+function storeDirectionsHref(storeId){
+  const s = storesById.get(storeId);
+  if (!s) return '#';
+
+  const lat = Number(s.lat);
+  const lng = Number(s.lng);
+
+  // Fallback: if coords missing, search by name
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)){
+    const q = encodeURIComponent(s.name || 'store');
+    return `https://www.google.com/maps/search/?api=1&query=${q}`;
+  }
+
+  // Pin to coordinates
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+}
+
+function storeOptionsHTML(selectedId = null){
+  let html = `<option value="">— Select store —</option>`;
+
+  for (const s of storesCache){
+    const sel = s.id === selectedId ? 'selected' : '';
+    html += `<option value="${s.id}" ${sel}>${s.name}</option>`;
+  }
+
+  return html;
+}
+
 // helpers
 const pad2 = n => String(n).padStart(2,'0');
 const toISODate = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
@@ -20,6 +55,29 @@ function startOfMonthGrid(d){
   const dow = x.getDay(); // 0=Sun
   return new Date(x.getFullYear(), x.getMonth(), 1 - dow);
 }
+
+// Week helpers (Schedule + Payroll)
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function startOfWeekSun(d){
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  x.setDate(x.getDate() - x.getDay()); // Sunday start
+  return x;
+}
+
+function fromISO(yyyyMmDd){
+  if (!yyyyMmDd) return new Date(NaN);
+  const [y,m,dd] = yyyyMmDd.split('-').map(Number);
+  return new Date(y, (m||1)-1, dd||1);
+}
+
+function weekLabel(weekStart){
+  const a = new Date(weekStart);
+  const b = addDays(a, 6);
+  return `${a.getMonth()+1}/${a.getDate()}–${b.getMonth()+1}/${b.getDate()}`;
+}
+
 
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 function fmtHM(ts){ if(!ts) return ''; const dd=new Date(ts); return dd.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
@@ -412,40 +470,39 @@ async function fetchResolvedWeek(empId, weekStart){
 }
 
 // Fetch overrides for the week so we can prefill that column
-async function fetchWeekOverrides(empId, weekStart){
-  const start = toISODate(weekStart);
-  const end   = toISODate(addDays(weekStart, 6));
+async function fetchWeekOverrides(employeeId, weekStart){
+  const startISO = toISODate(weekStart);
+  const endISO = toISODate(addDays(weekStart, 6));
 
-  // Try extended columns first (Phase 3)
-  let { data, error } = await supabaseClient
+  const { data, error } = await supabaseClient
     .from('work_schedule_overrides')
-    .select('work_date, off, start_local, end_local, store_id, note, allow_any_store_in, allow_any_store_out, clock_in_store_id, clock_out_store_id')
-    .eq('employee_id', empId)
-    .gte('work_date', start)
-    .lte('work_date', end);
-
-  // Backward-compatible fallback if your DB doesn’t have the new columns
-  if (error && /column .* does not exist/i.test(error.message || '')){
-    ({ data, error } = await supabaseClient
-      .from('work_schedule_overrides')
-      .select('work_date, off, start_local, end_local, store_id, note')
-      .eq('employee_id', empId)
-      .gte('work_date', start)
-      .lte('work_date', end));
-  }
+    .select('work_date, off, start_local, end_local, store_id, note')
+    .eq('employee_id', employeeId)
+    .gte('work_date', startISO)
+    .lte('work_date', endISO);
 
   if (error) throw error;
 
-  const byDate = new Map();
-  for (const r of (data || [])) byDate.set(r.work_date, r);
-  return byDate;
+  const map = new Map();
+  for (const r of (data || [])){
+    map.set(r.work_date, r);
+  }
+  return map;
 }
+
 
 function fmtTimeHM(ts){
   if (!ts) return '—';
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 }
+
+function storeNameById(storeId){
+  if (!storeId) return '';
+  const s = _allStores.find(x => x.id === storeId);
+  return s?.name || '';
+}
+
 
 function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
   const tbody = qs('schedBody');
@@ -462,7 +519,8 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
       ? `${fmtTimeHM(resolved.start_ts)}–${fmtTimeHM(resolved.end_ts)}`
       : '—';
     const srcStr = resolved ? (resolved.source === 'override' ? 'override' : 'recurring') : '';
-    const resolvedStoreLabel = resolved?.store_id ? storeName(resolved.store_id) : '—';
+    //const resolvedStoreLabel = resolved?.store_id ? storeName(resolved.store_id) : '—';
+    const resolvedStoreLabel = resolved?.store_id ? storeNameById(resolved.store_id) : '—';
     const resolvedDirHref = resolved?.store_id ? storeDirectionsHref(resolved.store_id) : null;
 
     const resolvedHtml = `
@@ -835,6 +893,34 @@ async function loadScheduleWeek(){
   }
 }
 
+// --- Stores cache (for schedule store assignment) ---
+let storesCache = [];
+let storesById = new Map();
+let _storesCacheLoaded = false;
+
+async function ensureStoresCache(force = false){
+  if (_storesCacheLoaded && !force) return;
+  await loadStoresCache();
+  _storesCacheLoaded = true;
+}
+
+async function loadStoresCache(){
+  const { data, error } = await supabaseClient
+    .from('store_locations')
+    .select('id, name, lat, lng, radius_m, active, timezone, schedule_enforce')
+    .order('active', { ascending: false })
+    .order('name', { ascending: true });
+
+  if (error) throw error;
+
+  storesCache = data || [];
+  storesById = new Map(storesCache.map(s => [s.id, s]));
+}
+
+// ---- Schedule state (required by initSchedulePanel / week nav)
+let schedEmpId = null;
+let schedWeekStart = startOfWeekSun(new Date()); // Sunday start
+
 async function initSchedulePanel(){
   // Ensure stores are loaded for dropdowns
   await ensureStoresCache();
@@ -984,7 +1070,6 @@ async function initSchedulePanel(){
 
   await loadScheduleWeek();
 }
-
 
 function showPanel(id){
   // Back-compat wrapper (older code used showPanel). Prefer activateTab().
@@ -2141,601 +2226,8 @@ function wireDrawer(){
   }
 }
 
-/* ============== Payroll (weekly) ============== */
-let payWeeks=[], paySelected=null, payRows=[];
-function formatWeekRange(weekStartStr){ const s=new Date(weekStartStr+'T00:00:00'); const e=new Date(s); e.setDate(s.getDate()+6); const f=d=>d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); return `${f(s)} — ${f(e)}`; }
-async function fetchWeekList(){
-  // Build a week list that:
-  //  - ALWAYS includes the current week (even if no pay period exists yet)
-  //  - Includes weeks from pay_periods (so locked/open historical periods are navigable)
-  //  - Includes weeks from time_entries (so brand-new shifts show up immediately)
-  //  - Includes weeks from v_weekly_hours if present (legacy / compatibility)
-  const weeks = new Set();
-
-  // Always: current week
-  try{
-    weeks.add(toISODate(startOfWeekSun(new Date())));
-  }catch{}
-
-  // From pay periods (historical navigation)
-  try{
-    const { data, error } = await supabaseClient
-      .from('pay_periods')
-      .select('start_date,end_date')
-      .order('start_date', { ascending:false })
-      .limit(500);
-
-    if (!error && Array.isArray(data)){
-      for (const p of data){
-        if (!p?.start_date) continue;
-        const sd = new Date(p.start_date + 'T00:00:00');
-        const ed = new Date((p.end_date || p.start_date) + 'T00:00:00');
-        let ws = startOfWeekSun(sd);
-        while (ws <= ed){
-          weeks.add(toISODate(ws));
-          ws = addDays(ws, 7);
-        }
-      }
-    }
-  }catch{}
-
-  // From actual time entries (new shifts should appear immediately)
-  try{
-    const { data, error } = await supabaseClient
-      .from('time_entries')
-      .select('clock_in,clock_out')
-      .order('clock_in', { ascending:false })
-      .limit(2000);
-
-    if (!error && Array.isArray(data)){
-      for (const r of data){
-        if (r?.clock_in){
-          weeks.add(toISODate(startOfWeekSun(new Date(r.clock_in))));
-        }
-        if (r?.clock_out){
-          weeks.add(toISODate(startOfWeekSun(new Date(r.clock_out))));
-        }
-      }
-    }
-  }catch{}
-
-  // From weekly hours view (if it exists)
-  try{
-    const { data, error } = await supabaseClient
-      .from('v_weekly_hours')
-      .select('week_start')
-      .order('week_start', { ascending:false })
-      .limit(500);
-
-    if (!error && Array.isArray(data)){
-      for (const r of data){
-        if (r?.week_start) weeks.add(r.week_start);
-      }
-    }
-  }catch{}
-
-  // Final sort: newest first
-  const out = Array.from(weeks).filter(Boolean);
-  out.sort((a,b) => (a < b ? 1 : a > b ? -1 : 0));
-  return out;
-}
-
-// ===== Schedule: utilities & state =====
-const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-// --- Stores cache (for schedule store assignment) ---
-let storesCache = [];
-let storesById = new Map();
-let _storesCacheLoaded = false;
-
-async function ensureStoresCache(force = false){
-  if (_storesCacheLoaded && !force) return;
-  await loadStoresCache();
-  _storesCacheLoaded = true;
-}
-
-async function loadStoresCache(){
-  const { data, error } = await supabaseClient
-    .from('store_locations')
-    .select('id, name, lat, lng, radius_m, active, timezone, schedule_enforce')
-    .order('active', { ascending: false })
-    .order('name', { ascending: true });
-
-  if (error) throw error;
-
-  storesCache = data || [];
-  storesById = new Map(storesCache.map(s => [s.id, s]));
-}
-
-function storeName(storeId){
-  if (!storeId) return '—';
-  const s = storesById.get(storeId);
-  return s ? s.name : 'Unknown store';
-}
-
-function storeDirectionsHref(storeId){
-  const s = storesById.get(storeId);
-  if (!s || s.lat == null || s.lng == null) return null;
-
-  // Directions link (works on desktop/mobile)
-  const dest = `${Number(s.lat)},${Number(s.lng)}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
-}
-
-function applyDirectionsLinkFromStoreId(storeId, linkEl){
-  if (!linkEl) return;
-
-  const href = storeDirectionsHref(storeId);
-  if (!href){
-    linkEl.href = '#';
-    linkEl.setAttribute('aria-disabled', 'true');
-    linkEl.style.pointerEvents = 'none';
-    linkEl.style.opacity = '0.55';
-    linkEl.textContent = 'Directions';
-    return;
-  }
-
-  linkEl.href = href;
-  linkEl.target = '_blank';
-  linkEl.rel = 'noopener';
-  linkEl.removeAttribute('aria-disabled');
-  linkEl.style.pointerEvents = '';
-  linkEl.style.opacity = '';
-  linkEl.textContent = 'Directions';
-}
-
-function storeOptionsHTML(selectedId){
-  const opts = [];
-  opts.push(`<option value="">Select store…</option>`);
-  for (const s of storesCache){
-    const sel = (s.id === selectedId) ? 'selected' : '';
-    const label = s.active ? s.name : `${s.name} (inactive)`;
-    opts.push(`<option value="${s.id}" ${sel}>${label}</option>`);
-  }
-  return opts.join('');
-}
-
-
-const fromISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
-
-function startOfWeekSun(d){
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = x.getDay(); // 0=Sun
-  x.setDate(x.getDate() - dow);
-  return x;
-}
-function weekLabel(weekStart){
-  const a = weekStart, b = addDays(weekStart, 6);
-  const sameMonth = a.getMonth() === b.getMonth();
-  const aStr = `${DOW[a.getDay()]} ${a.getMonth()+1}/${a.getDate()}`;
-  const bStr = `${DOW[b.getDay()]} ${b.getMonth()+1}/${b.getDate()}/${b.getFullYear()}`;
-  return sameMonth ? `${aStr}–${b.getDate()}/${b.getFullYear()}` : `${aStr} – ${bStr}`;
-}
-
-// local state
-let schedEmpId = null;
-let schedWeekStart = startOfWeekSun(new Date());
-
-
-// Weekly payroll: include ALL active employees with zeros if absent
-async function fetchWeeklyHours(weekStartStr){
-  // Try the view first; if it returns nothing (common when no pay_period exists yet),
-  // fallback to computing totals directly from time_entries + time_breaks.
-
-  // 1) View path
-  try{
-    const { data, error } = await supabaseClient
-      .from('v_weekly_hours')
-      .select('*')
-      .eq('week_start', weekStartStr);
-
-    if (!error && Array.isArray(data) && data.length){
-      return data;
-    }
-  }catch{}
-
-  // 2) Fallback: compute from time_entries + time_breaks
-  try{
-    const ws = new Date(weekStartStr + 'T00:00:00');
-    const we = addDays(ws, 7);
-    const wsIso = ws.toISOString();
-    const weIso = we.toISOString();
-
-    // Pull closed shifts that overlap [ws, we)
-    const { data: entries, error: eErr } = await supabaseClient
-      .from('time_entries')
-      .select('id, employee_id, clock_in, clock_out')
-      .not('clock_out', 'is', null)
-      .lt('clock_in', weIso)
-      .gt('clock_out', wsIso)
-      .order('clock_in', { ascending:true });
-
-    if (eErr) throw eErr;
-
-    if (!Array.isArray(entries) || entries.length === 0){
-      return []; // nothing to compute
-    }
-
-    const ids = entries.map(x => x.id);
-
-    const { data: breaks, error: bErr } = await supabaseClient
-      .from('time_breaks')
-      .select('time_entry_id, started_at, ended_at')
-      .in('time_entry_id', ids)
-      .not('ended_at', 'is', null);
-
-    if (bErr) throw bErr;
-
-    const breaksByEntry = new Map();
-    for (const b of (breaks || [])){
-      if (!breaksByEntry.has(b.time_entry_id)) breaksByEntry.set(b.time_entry_id, []);
-      breaksByEntry.get(b.time_entry_id).push(b);
-    }
-
-    const totals = new Map(); // employee_id -> hours
-    const clampMs = (t, lo, hi) => Math.max(lo, Math.min(hi, t));
-
-    for (const t of entries){
-      const ci = new Date(t.clock_in).getTime();
-      const co = new Date(t.clock_out).getTime();
-      const w0 = ws.getTime();
-      const w1 = we.getTime();
-
-      // Clamp shift to week window
-      const s0 = clampMs(ci, w0, w1);
-      const s1 = clampMs(co, w0, w1);
-      let ms = Math.max(0, s1 - s0);
-
-      // Subtract breaks (clamped to same window)
-      const bs = breaksByEntry.get(t.id) || [];
-      for (const br of bs){
-        const bi = new Date(br.started_at).getTime();
-        const bo = new Date(br.ended_at).getTime();
-        const b0 = clampMs(bi, s0, s1);
-        const b1 = clampMs(bo, s0, s1);
-        ms -= Math.max(0, b1 - b0);
-      }
-
-      const hrs = Math.max(0, ms / 3600000);
-      totals.set(t.employee_id, (totals.get(t.employee_id) || 0) + hrs);
-    }
-
-    // Shape rows like the view (enough fields for your renderer)
-    const rows = [];
-    for (const [employee_id, total_hours] of totals.entries()){
-      const regular_hours = Math.min(total_hours, 40);
-      const overtime_hours = Math.max(0, total_hours - 40);
-
-      rows.push({
-        week_start: weekStartStr,
-        employee_id,
-        regular_hours,
-        overtime_hours,
-        total_hours,
-      });
-    }
-
-    return rows;
-  }catch(err){
-    console.error('fetchWeeklyHours fallback failed', err);
-    return [];
-  }
-}
-
-function renderPayWeekOptions(){
-  const sel=qs('payWeekSelect'); sel.innerHTML=''; for(const w of payWeeks){ const o=document.createElement('option'); o.value=w; o.textContent=formatWeekRange(w); sel.appendChild(o); }
-  if (paySelected) sel.value=paySelected;
-}
-function renderPayKPIs(rows) {
-  const regEl = qs('payTotalReg');
-  const otEl  = qs('payTotalOT');
-  const allEl = qs('payTotalAll');
-
-  if (!Array.isArray(rows) || rows.length === 0) {
-    regEl.textContent = '—';
-    otEl.textContent  = '—';
-    allEl.textContent = '—';
-    return;
-  }
-
-  const totals = rows.reduce(
-    (acc, r) => {
-      acc.reg += Number(r.regular_hours) || 0;
-      acc.ot  += Number(r.overtime_hours) || 0;
-      return acc;
-    },
-    { reg: 0, ot: 0 }
-  );
-
-  regEl.textContent = totals.reg.toFixed(2);
-  otEl.textContent  = totals.ot.toFixed(2);
-  allEl.textContent = (totals.reg + totals.ot).toFixed(2);
-}
-
-
-function renderPayTable(rows){
-  const tb=qs('payTbody'); tb.innerHTML=''; if(!rows.length){ tb.innerHTML=`<tr><td colspan="4" class="muted">No data for this week.</td></tr>`; return; }
-  for(const r of rows){ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.display_name||'—'}</td><td>${fmtHours(r.regular_hours)}</td><td>${fmtHours(r.overtime_hours)}</td><td>${fmtHours(r.total_hours)}</td>`; tb.appendChild(tr); }
-}
-
-async function loadPayroll() {
-  if (!paySelected) {
-    qs('payTbody').innerHTML =
-      `<tr><td colspan="4" class="muted">Pick a week.</td></tr>`;
-    return;
-  }
-
-  qs('payWeekLabel').textContent = formatWeekRange(paySelected);
-  qs('payTbody').style.opacity = '0.6';
-
-  try {
-    const result = await fetchWeeklyHours(paySelected);
-
-    // ✅ HARD GUARANTEE: rows is always an array
-    const rows = Array.isArray(result) ? result : [];
-    payRows = rows;
-
-    renderPayKPIs(rows);
-    renderPayTable(rows);
-
-    // ✅ Period UI must update even if rows = []
-    await updatePeriodForSelectedWeek();
-
-  } catch (err) {
-    console.error('loadPayroll failed:', err);
-
-    qs('payTbody').innerHTML =
-      `<tr><td colspan="4" class="muted">Error loading payroll.</td></tr>`;
-
-    qs('payTotalReg').textContent =
-      qs('payTotalOT').textContent =
-      qs('payTotalAll').textContent = '—';
-  } finally {
-    qs('payTbody').style.opacity = '1';
-  }
-}
-
-
-async function bootPayroll(){
-  payWeeks = await fetchWeekList();
-  if (payWeeks.length){ paySelected = payWeeks[0]; renderPayWeekOptions(); qs('payWeekLabel').textContent = formatWeekRange(paySelected); await loadPayroll(); }
-  else { qs('payWeekSelect').innerHTML=`<option value="">No weeks found</option>`; qs('payTbody').innerHTML=`<tr><td colspan="4" class="muted">No weekly data yet.</td></tr>`; }
-}
-function wirePayroll(){
-  qs('payWeekSelect').addEventListener('change', async (e)=>{ paySelected=e.target.value||null; await loadPayroll(); });
-  qs('payPrevBtn').addEventListener('click', async ()=>{ if(!paySelected) return; const i=payWeeks.indexOf(paySelected); if(i<payWeeks.length-1){ paySelected=payWeeks[i+1]; qs('payWeekSelect').value=paySelected; await loadPayroll(); }});
-  qs('payNextBtn').addEventListener('click', async ()=>{ if(!paySelected) return; const i=payWeeks.indexOf(paySelected); if(i>0){ paySelected=payWeeks[i-1]; qs('payWeekSelect').value=paySelected; await loadPayroll(); }});
-}
-
-/* ============== Periods (lock/unlock) — NEW in 3.3 ============== */
-let payPeriods = [];     // rows from pay_periods
-let selectedPeriod = null;
-
-async function fetchPayPeriods(){
-  const { data, error } = await supabaseClient.from('pay_periods')
-    .select('id, start_date, end_date, timezone, status, locked_at, locked_by, note')
-    .order('start_date', { ascending: false });
-  if (error) throw error;
-  return data || [];
-}
-function dateOnly(str){ return new Date(str + 'T00:00:00'); }
-function rangesOverlap(aStart, aEnd, bStart, bEnd){ return aStart <= bEnd && aEnd >= bStart; }
-function findPeriodForWeek(weekStartStr){
-  const ws=dateOnly(weekStartStr), we=new Date(ws); we.setDate(ws.getDate()+6);
-  for (const p of payPeriods){
-    const ps=dateOnly(p.start_date), pe=dateOnly(p.end_date); // inclusive end
-    if (rangesOverlap(ws, we, ps, pe)) return p;
-  }
-  return null;
-}
-function setBadge(el, status){
-  el.classList.remove('locked','open','warn');
-  if (status==='locked'){ el.classList.add('locked'); el.textContent='LOCKED'; }
-  else if (status==='open'){ el.classList.add('open'); el.textContent='OPEN'; }
-  else { el.classList.add('warn'); el.textContent='NO PERIOD'; }
-}
-
-function renderPeriodUI(){
-  const nameEl    = qs('periodName');
-  const badgeEl   = qs('periodBadge');
-  const hintEl    = qs('periodHint');
-  const lockBtn   = qs('lockBtn');
-  const unlockBtn = qs('unlockBtn');
-  const exportBtn = qs('exportBtn');
-  const createWeekBtn = qs('createWeekBtn');
-  const newPeriodBtn  = qs('newPeriodBtn');
-
-  function setBadge(status){
-    badgeEl.classList.remove('locked','open','warn');
-    if (status === 'locked') { badgeEl.classList.add('locked'); badgeEl.textContent = 'LOCKED'; }
-    else if (status === 'open') { badgeEl.classList.add('open'); badgeEl.textContent = 'OPEN'; }
-    else { badgeEl.classList.add('warn'); badgeEl.textContent = 'NO PERIOD'; }
-  }
-
-  if (!selectedPeriod){
-    nameEl.textContent = 'No defined pay period covers this week';
-    setBadge(null);
-    hintEl.textContent = 'Tip: create a pay period that covers this week, then lock it for payroll.';
-    if (lockBtn)   lockBtn.disabled   = true;
-    if (unlockBtn) unlockBtn.disabled = true;
-    if (exportBtn) exportBtn.disabled = true;
-    if (createWeekBtn) createWeekBtn.disabled = false;   // enable quick-create
-    if (newPeriodBtn)  newPeriodBtn.disabled  = false;
-    return;
-  }
-
-  const p = selectedPeriod;
-  nameEl.textContent = `${p.start_date} → ${p.end_date} (${p.timezone})`;
-  setBadge(p.status);
-  hintEl.textContent = p.status === 'locked'
-    ? 'Edits inside this period are blocked.'
-    : 'Open period — you can still edit shifts.';
-
-  if (lockBtn)   lockBtn.disabled   = (p.status !== 'open');
-  if (unlockBtn) unlockBtn.disabled = (p.status !== 'locked');
-  if (exportBtn) exportBtn.disabled = false;
-  if (createWeekBtn) createWeekBtn.disabled = true;  // avoid creating an overlapping week
-  if (newPeriodBtn)  newPeriodBtn.disabled  = false; // allowed; RPC prevents overlaps anyway
-}
-
-
-async function updatePeriodForSelectedWeek(){
-  payPeriods = await fetchPayPeriods();
-  selectedPeriod = paySelected ? findPeriodForWeek(paySelected) : null;
-  renderPeriodUI();
-}
-async function onLock(){
-  if (!selectedPeriod) return;
-  const note = window.prompt('Optional note for this lock:', 'Locked for payroll');
-  try{
-    const { error } = await supabaseClient.rpc('payroll_lock_period', { _period_id: selectedPeriod.id, _note: note||null, _force: false });
-    if (error) throw error;
-    showToast('Period locked','ok');
-    await updatePeriodForSelectedWeek();
-  }catch(err){
-    console.error(err);
-    showToast(err?.message || 'Failed to lock period','err');
-  }
-}
-async function onUnlock(){
-  if (!selectedPeriod) return;
-  const note = window.prompt('Optional note for this unlock:', 'Re-opened for corrections');
-  try{
-    const { error } = await supabaseClient.rpc('payroll_unlock_period', { _period_id: selectedPeriod.id, _note: note||null });
-    if (error) throw error;
-    showToast('Period unlocked','ok');
-    await updatePeriodForSelectedWeek();
-  }catch(err){
-    console.error(err);
-    showToast(err?.message || 'Failed to unlock period','err');
-  }
-}
-function csvEscape(value){
-  if (value == null) return '';
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-function rowsToCSV(rows){
-  const header = ['Employee','Regular Hours','OT Hours','Total Hours','Shifts'];
-  const lines = [header.map(csvEscape).join(',')];
-
-  let totalReg=0, totalOT=0, totalAll=0, totalShifts=0;
-
-  for (const r of rows){
-    const reg = Number(r.regular_hours)||0, ot = Number(r.overtime_hours)||0, tot = Number(r.total_hours)||0, sh = Number(r.shifts_count)||0;
-    totalReg += reg; totalOT += ot; totalAll += tot; totalShifts += sh;
-    lines.push([
-      r.display_name || '',
-      reg.toFixed(2),
-      ot.toFixed(2),
-      tot.toFixed(2),
-      String(sh)
-    ].map(csvEscape).join(','));
-  }
-  // Totals row
-  lines.push(['TOTAL', totalReg.toFixed(2), totalOT.toFixed(2), totalAll.toFixed(2), String(totalShifts)].map(csvEscape).join(','));
-  return lines.join('\n');
-}
-function downloadText(filename, text, mime='text/csv;charset=utf-8;'){
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-}
-async function onExport(){
-  if (!selectedPeriod) return;
-  try{
-    const rows = await fetchPeriodSummary(selectedPeriod.id);
-    const csv = rowsToCSV(rows);
-    const fname = `payroll_${selectedPeriod.start_date}_to_${selectedPeriod.end_date}_${selectedPeriod.status}.csv`;
-    downloadText(fname, csv);
-    showToast('CSV exported','ok');
-  }catch(err){
-    console.error(err);
-    showToast(err?.message || 'Failed to export CSV','err');
-  }
-}
-
-function dateStrAddDays(yyyyMmDd, days){
-  const d = new Date(yyyyMmDd + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  const p = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
-}
-
-async function onCreateThisWeek(){
-  if (!paySelected) return;
-  try {
-    const { error } = await supabaseClient.rpc('create_weekly_pay_period', {
-      week_start: paySelected, weeks: 1, p_note: 'Created from Payroll UI'
-    });
-    if (error) throw error;
-    showToast('Pay period created','ok');
-    await updatePeriodForSelectedWeek();
-  } catch (err) {
-    console.error(err); showToast(err?.message || 'Failed to create period','err');
-  }
-}
-
-async function approveShift(shiftId, note){
-  const { error } = await supabaseClient.rpc('approve_shift', {
-    _time_entry_id: shiftId, _status: 'approved', _note: note || null
-  });
-  if (error) throw error;
-}
-async function waiveShift(shiftId, note){
-  const n = (note || '').trim();
-  if (n.length < 3) throw new Error('Waive requires a brief note (min 3 chars).');
-  const { error } = await supabaseClient.rpc('approve_shift', {
-    _time_entry_id: shiftId, _status: 'waived', _note: n
-  });
-  if (error) throw error;
-}
-async function unapproveShift(shiftId){
-  const { error } = await supabaseClient.rpc('unapprove_shift', { _time_entry_id: shiftId });
-  if (error) throw error;
-}
-
-// Click handlers
-async function onApproveClick(shiftId){
-  try{
-    const note = window.prompt('Optional note for approval:', '');
-    await approveShift(shiftId, note);
-    showToast('Shift approved','ok');
-    // refresh drawer list
-    const { employeeId, monthStart } = drawerContext;
-    const shifts = await fetchWorkerShifts(employeeId, monthStart);
-    renderDrawerSummary(shifts);
-    renderDrawerList(shifts);
-  }catch(err){ console.error(err); showToast(err?.message || 'Failed to approve','err'); }
-}
-async function onWaiveClick(shiftId){
-  try{
-    const note = window.prompt('Reason for waiver (required):', '');
-    await waiveShift(shiftId, note);
-    showToast('Shift waived','ok');
-    const { employeeId, monthStart } = drawerContext;
-    const shifts = await fetchWorkerShifts(employeeId, monthStart);
-    renderDrawerSummary(shifts);
-    renderDrawerList(shifts);
-  }catch(err){ console.error(err); showToast(err?.message || 'Failed to waive','err'); }
-}
-async function onUnapproveClick(shiftId){
-  try{
-    if (!window.confirm('Remove approval/waiver for this shift?')) return;
-    await unapproveShift(shiftId);
-    showToast('Approval removed','ok');
-    const { employeeId, monthStart } = drawerContext;
-    const shifts = await fetchWorkerShifts(employeeId, monthStart);
-    renderDrawerSummary(shifts);
-    renderDrawerList(shifts);
-  }catch(err){ console.error(err); showToast(err?.message || 'Failed to unapprove','err'); }
-}
-
-
 function openCreateModal(){
-  const start = paySelected || (payWeeks[0] || new Date().toISOString().slice(0,10));
+  const start = (qs('payWeekSelect')?.value) || toISODate(startOfWeekSun(new Date()));
   qs('createStart').value = start;
   qs('createEnd').value = dateStrAddDays(start, 6);
   qs('createNote').value = '';
@@ -2761,16 +2253,13 @@ async function createCustomPeriod(){
     });
     if (error) throw error;
     closeCreateModal(); showToast('Pay period created','ok');
-    await updatePeriodForSelectedWeek();
+    if (typeof window.refreshPayrollTab === 'function') await window.refreshPayrollTab();
   } catch (err) {
     console.error(err); setCreateError(err?.message || 'Failed to create pay period');
   }
 }
 
-function wireCreatePeriodUI(){
-  const cw = qs('createWeekBtn');
-  const np = qs('newPeriodBtn');
-  if (cw) cw.addEventListener('click', onCreateThisWeek);
+function wireCreatePeriodUI(){  const np = qs('newPeriodBtn');
   if (np){
     np.addEventListener('click', openCreateModal);
     qs('createCloseBtn').addEventListener('click', closeCreateModal);
@@ -2802,9 +2291,16 @@ function activateTab(which){
   }
 }
 
+let _payrollInitialized = false;
 function wireTabs(){
   qs('tabOverview')?.addEventListener('click', ()=> activateTab('overview'));
-  qs('tabPayroll')?.addEventListener('click',  ()=> activateTab('payroll'));
+  qs('tabPayroll')?.addEventListener('click', async ()=>{
+    activateTab('payroll');
+    if (!_payrollInitialized && typeof window.initPayrollTab === 'function') {
+      _payrollInitialized = true;
+      try { await window.initPayrollTab(); } catch (e) { console.error(e); }
+    }
+  });
   qs('tabSchedule')?.addEventListener('click', ()=> activateTab('schedule'));
   qs('tabStores')?.addEventListener('click',   ()=> activateTab('stores'));
   qs('tabUsers')?.addEventListener('click',    ()=> activateTab('users')); // ✅ NEW
@@ -3220,24 +2716,13 @@ document.addEventListener('supabase-ready', async () => {
   wireDrawer();
   wireEditModal();
 
-  // Payroll wiring
-  wirePayroll();
-  wireCreatePeriodUI();
+  // Live now wiring
   wireLiveList();
-await loadLiveNow();
-startLiveTicker(1000); // change to 1000 if you want a per-second tick
-
-
-
-
-  // Period actions
-  qs('lockBtn').addEventListener('click', onLock);
-  qs('unlockBtn').addEventListener('click', onUnlock);
-  qs('exportBtn').addEventListener('click', onExport);   // <- NEW: export CSV
+  await loadLiveNow();
+  startLiveTicker(1000);
 
   // Initial data loads
   await loadSummary();
-  await bootPayroll(); // loadPayroll() inside will call updatePeriodForSelectedWeek()
   bootRealtime();
   wireScheduleTab();
   wireStoresTab();
