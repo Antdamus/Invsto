@@ -113,6 +113,8 @@
             <button id="prBuildLinesBtn" class="og-btn" type="button">Build Lines</button>
             <button id="prFinalizeBtn" class="og-btn" type="button">Finalize Run</button>
             <button id="prExportBtn" class="og-btn" type="button">Export CSV</button>
+            <button id="prDeleteRunBtn" class="og-btn" type="button" disabled title="Delete the current draft run">Delete Draft Run</button>
+            <button id="prDeletePeriodBtn" class="og-btn" type="button" disabled title="Delete this open pay period (draft-only)">Delete Pay Period</button>
           </div>
 
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -433,6 +435,25 @@
     } else {
       runEl.textContent = `Run: (none for this period yet)`;
     }
+
+    // Enable delete only when there's a draft run
+    const delBtn = $("#prDeleteRunBtn");
+    if (delBtn) {
+      const canDelete = !!run && run.status === "draft";
+      delBtn.disabled = !canDelete;
+      delBtn.title = canDelete ? "Delete this draft run and its lines" : "Only draft runs can be deleted";
+    }
+
+    const delPeriodBtn = $("#prDeletePeriodBtn");
+    if (delPeriodBtn) {
+      const canDeletePeriod = !!period && period.status !== "locked";
+      delPeriodBtn.disabled = !canDeletePeriod;
+      delPeriodBtn.title = canDeletePeriod
+        ? "Delete this open pay period (optionally force-delete draft runs)"
+        : "Locked periods cannot be deleted";
+    }
+
+
   }
 
   function renderKPIs(lines, payments) {
@@ -573,6 +594,96 @@
     await renderLines(currentLines, currentPayments);
   }
 
+async function deleteSelectedPayPeriod() {
+  if (!currentPeriod) return toast("No pay period selected", "err");
+
+  // UX guard (DB also enforces)
+  if (currentPeriod.status === "locked") {
+    toast("Cannot delete a locked pay period", "err");
+    return;
+  }
+
+  const warn =
+    "Delete this pay period?\n\n" +
+    "This is only allowed while the period is OPEN.\n" +
+    "If the period has draft runs, you can optionally force-delete them too.\n\n" +
+    "This cannot be undone.";
+
+  const ok = confirm(warn);
+  if (!ok) return;
+
+  // Ask whether to force-delete draft runs (only draft runs are allowed by the RPC)
+  const force = confirm(
+    "Force delete?\n\n" +
+      "Press OK to delete the period even if it has draft runs (it will delete those draft runs and their lines too).\n" +
+      "Press Cancel to attempt a safe delete only (works only if there are no runs)."
+  );
+
+  try {
+    const { error } = await sb().rpc("delete_pay_period", {
+      _period_id: currentPeriod.id,
+      _force: force,
+    });
+    if (error) throw error;
+
+    toast("Pay period deleted", "ok");
+
+    // Reload periods list and refresh UI to the newest one (or empty state)
+    const sel = $("#prPeriodSelect");
+    const newest = await loadPeriodsIntoSelect(sel);
+
+    if (!newest) {
+      currentPeriod = null;
+      currentRun = null;
+      currentLines = [];
+      currentPayments = [];
+      pendingReview = [];
+      setMeta(null, null);
+      renderPendingBox();
+      await renderLines([], []);
+      return;
+    }
+
+    currentPeriod = newest;
+    await refreshAll(sel.value);
+  } catch (e) {
+    showAdminError("Delete pay period failed", safeErrMsg(e));
+    throw e;
+  }
+}
+
+  async function deleteDraftRun() {
+  if (!currentRun) {
+    toast("No run selected", "err");
+    return;
+  }
+
+  // Safety: only allow draft delete from UI (DB also enforces this)
+  if (currentRun.status !== "draft") {
+    toast("Only draft runs can be deleted", "err");
+    return;
+  }
+
+  const ok = confirm(
+    "Delete this draft payroll run?\n\nThis will delete ALL built lines for this run. This cannot be undone."
+  );
+  if (!ok) return;
+
+  try {
+    const { error } = await sb().rpc("delete_payroll_run", { _run_id: currentRun.id });
+    if (error) throw error;
+
+    toast("Draft run deleted", "ok");
+
+    // Refresh everything (run will disappear, lines will clear)
+    await refreshAll(currentPeriod.id);
+  } catch (e) {
+    showAdminError("Delete run failed", safeErrMsg(e));
+    throw e;
+  }
+}
+
+
   async function createDraftRun() {
     if (!currentPeriod) return;
     const roundingMode = uiRoundingMode();
@@ -688,30 +799,34 @@
   }
 
   async function createWeeklyPeriod() {
-    const start = prompt(`Enter week start date (YYYY-MM-DD)`, isoDate(new Date()));
-    if (!start) return;
+  // Create a BIWEEKLY (14-day) pay period starting on a chosen date (default: today)
+  const start = prompt(`Enter pay period start date (YYYY-MM-DD)`, isoDate(new Date()));
+  if (!start) return;
 
-    try {
-      const { data, error } = await sb().rpc("create_weekly_pay_period", {
-        week_start: start,
-        weeks: 1,
-        p_timezone: ORG_TZ,
-        p_note: null,
-      });
-      if (error) throw error;
+  // create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
+  try {
+    const { data, error } = await sb().rpc("create_weekly_pay_period", {
+      week_start: start,
+      weeks: 2,              // <-- BIWEEKLY
+      p_timezone: ORG_TZ,
+      p_note: "Biweekly",    // optional, but helpful for labeling
+    });
+    if (error) throw error;
 
-      toast("Weekly pay period created", "ok");
+    toast("Biweekly pay period created", "ok");
 
-      const sel = $("#prPeriodSelect");
-      const newest = await loadPeriodsIntoSelect(sel);
-      currentPeriod = newest;
-      await refreshAll(sel.value);
-      return data;
-    } catch (e) {
-      showAdminError("Create period failed", safeErrMsg(e));
-      throw e;
-    }
+    // reload periods list and select new one
+    const sel = $("#prPeriodSelect");
+    const newest = await loadPeriodsIntoSelect(sel);
+    currentPeriod = newest;
+    await refreshAll(sel.value);
+    return data;
+  } catch (e) {
+    showAdminError("Create period failed", safeErrMsg(e));
+    throw e;
   }
+}
+
 
   async function recordPayment(employeeId, amount, method, reference, note) {
     if (!currentRun) return;
@@ -911,35 +1026,45 @@
         await promptPayment(empId, empName, due);
       } catch {}
     });
+
+    $("#prDeleteRunBtn")?.addEventListener("click", deleteDraftRun);
+
+    $("#prDeletePeriodBtn")?.addEventListener("click", deleteSelectedPayPeriod);
+
   }
 
   // ----------------------------
   // Boot
   // ----------------------------
-  async function init() {
-    const panel = ensureUI();
-    if (!panel) return;
+async function init() {
+  const panel = ensureUI();
+  if (!panel) return;
 
-    try {
-      const sel = $("#prPeriodSelect");
-      const firstPeriod = await loadPeriodsIntoSelect(sel);
+  // UI text: make it reflect BIWEEKLY behavior (no logic change)
+  const createBtn = $("#prCreateWeeklyPeriodBtn");
+  if (createBtn) createBtn.textContent = "Create Biweekly Period";
 
-      if (!firstPeriod) {
-        $("#prTbody").innerHTML =
-          `<tr><td colspan="12" style="padding:14px; opacity:.75;">No pay periods yet. Click “Create Weekly Period”.</td></tr>`;
-        setMeta(null, null);
-        renderKPIs([], []);
-        bindEvents();
-        return;
-      }
+  try {
+    const sel = $("#prPeriodSelect");
+    const firstPeriod = await loadPeriodsIntoSelect(sel);
 
-      currentPeriod = firstPeriod;
+    if (!firstPeriod) {
+      $("#prTbody").innerHTML =
+        `<tr><td colspan="12" style="padding:14px; opacity:.75;">No pay periods yet. Click “Create Biweekly Period”.</td></tr>`;
+      setMeta(null, null);
+      renderKPIs([], []);
       bindEvents();
-      await refreshAll(sel.value);
-    } catch (err) {
-      showAdminError("Payroll init failed", safeErrMsg(err));
+      return;
     }
+
+    currentPeriod = firstPeriod;
+    bindEvents();
+    await refreshAll(sel.value);
+  } catch (err) {
+    showAdminError("Payroll init failed", safeErrMsg(err));
   }
+}
+
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
