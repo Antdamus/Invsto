@@ -155,8 +155,10 @@ function setAgreementMeta(text, kind = "") {
 }
 
 async function renderPdfSignedUrl(signedUrl) {
-  // If pdf.js not included, fallback: open the signed URL
-  if (!window.pdfjsLib || !pdfPages) {
+  // Prefer pdf.js if present; otherwise fallback link
+  const pdfjsLib = window.pdfjsLib || globalThis.pdfjsLib;
+
+  if (!pdfjsLib || !pdfPages) {
     const a = document.createElement("a");
     a.href = signedUrl;
     a.target = "_blank";
@@ -169,11 +171,11 @@ async function renderPdfSignedUrl(signedUrl) {
     return;
   }
 
-  // pdf.js render into canvases
-  const pdfjsLib = window.pdfjsLib;
+  // Worker
   pdfjsLib.GlobalWorkerOptions.workerSrc =
+    window.PDFJS_WORKER_SRC ||
     pdfjsLib.GlobalWorkerOptions.workerSrc ||
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
+    "https://unpkg.com/pdfjs-dist@3.3.122/legacy/build/pdf.worker.min.js"; // or your CDN if you insist
 
   pdfPages.innerHTML = "";
 
@@ -192,16 +194,26 @@ async function renderPdfSignedUrl(signedUrl) {
 
     const ctx = canvas.getContext("2d");
 
-    // scale to fit card width
-    const viewport = page.getViewport({ scale: 1.0 });
-    const targetWidth = Math.min(900, (pdfScroller?.clientWidth || 520) - 20);
-    const scale = targetWidth / viewport.width;
-    const scaledViewport = page.getViewport({ scale });
+    const dpr = Math.min(2, window.devicePixelRatio || 1); // cap at 2 to avoid huge memory
+const baseViewport = page.getViewport({ scale: 1.0 });
 
-    canvas.width = Math.floor(scaledViewport.width);
-    canvas.height = Math.floor(scaledViewport.height);
+const targetCssWidth = Math.min(900, (pdfScroller?.clientWidth || 520) - 20);
+const cssScale = targetCssWidth / baseViewport.width;
 
-    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+// Render at higher internal resolution
+const renderScale = cssScale * dpr;
+const renderViewport = page.getViewport({ scale: renderScale });
+
+// CSS size (what user sees)
+canvas.style.width = `${Math.floor(targetCssWidth)}px`;
+canvas.style.height = `${Math.floor(renderViewport.height / dpr)}px`;
+
+// Internal bitmap size (crisp)
+canvas.width = Math.floor(renderViewport.width);
+canvas.height = Math.floor(renderViewport.height);
+
+await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+
 
     container.appendChild(canvas);
     pdfPages.appendChild(container);
@@ -236,6 +248,7 @@ function wireAgreementUX(profileDisplayName) {
     }
   };
   pdfScroller.addEventListener("scroll", onScroll);
+  onScroll();
 
   const updateAcceptEnabled = () => {
     const legalOk = normName(legalNameEl.value) === normName(profileDisplayName);
