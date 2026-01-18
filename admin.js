@@ -8,6 +8,15 @@ let gcMonthStart = null; // first day of the month being shown (Date)
 // =========================================================
 // Minimal Toast Helper (admin.js needs this)
 // =========================================================
+
+import {
+  uploadW9ViaEdge,
+  listW9ViaEdge,
+  getW9SignedUrlViaEdge,
+  setW9StatusViaEdge
+} from './admin-taxdocs.js';
+
+
 function toast(message, kind = "ok") {
   try {
     // Create container once
@@ -407,15 +416,58 @@ function wireGlobalCalendar(){
     }
   });
 }
+async function waitForSupabaseReady(timeoutMs = 8000) {
+  const start = Date.now();
+  while (!window.supabase) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Supabase client not initialized (window.supabase is undefined)");
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return window.supabase;
+}
 
 /* ============== Admin Guard ============== */
+/* ============== Admin Guard (table-based, most reliable) ============== */
 async function ensureAdmin() {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { window.location.href = "index.html?next=" + encodeURIComponent("admin.html"); return false; }
-  const { data: isAdmin, error } = await supabaseClient.rpc('is_admin');
-  if (error || !isAdmin) { window.location.href = `index.html?reason=${encodeURIComponent('Admin only')}`; return false; }
+  // session guard
+  const { data: { session }, error: sessErr } = await supabaseClient.auth.getSession();
+  if (sessErr) console.warn(sessErr);
+  if (!session) {
+    window.location.href = "index.html?next=" + encodeURIComponent("admin.html");
+    return false;
+  }
+
+  // user -> employees row guard
+  const { data: { user }, error: userErr } = await supabaseClient.auth.getUser();
+  if (userErr || !user) {
+    window.location.href = "index.html?next=" + encodeURIComponent("admin.html");
+    return false;
+  }
+
+  const { data: emp, error: empErr } = await supabaseClient
+    .from("employees")
+    .select("role, active")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (empErr) {
+    console.error("Admin guard failed to read employees:", empErr);
+    window.location.href = `index.html?reason=${encodeURIComponent("Admin only")}`;
+    return false;
+  }
+
+  const ok = !!emp && emp.active === true && emp.role === "admin";
+  if (!ok) {
+    window.location.href = `index.html?reason=${encodeURIComponent("Admin only")}`;
+    return false;
+  }
+
   return true;
 }
+
+
+
 function wireHeaderActions() {
   qs('signOutBtn').addEventListener('click', async () => { await supabaseClient.auth.signOut(); window.location.href = 'index.html'; });
   qs('printBtn').addEventListener('click', () => window.print());
@@ -2303,6 +2355,7 @@ function activateTab(which){
     { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
     { key:'stores',   btn:'tabStores',   panel:'panelStores' },
     { key:'users',    btn:'tabUsers',    panel:'panelUsers' }, // ✅ NEW
+    { key:'taxdocs',  btn:'tabTaxDocs',  panel:'panelTaxDocs' },
     { key:'agreements', btn:'tabAgreements', panel:'panelAgreements' },
   ];
 
@@ -2332,6 +2385,15 @@ function wireTabs(){
   qs('tabStores')?.addEventListener('click',   ()=> activateTab('stores'));
   qs('tabAgreements')?.addEventListener('click', ()=> activateTab('agreements'));
   qs('tabUsers')?.addEventListener('click',    ()=> activateTab('users')); // ✅ NEW
+  let _taxDocsInitialized = false;
+  qs('tabTaxDocs')?.addEventListener('click', async () => {
+    activateTab('taxdocs');
+    if (_taxDocsInitialized) return;
+    _taxDocsInitialized = true;
+    try { await window.initTaxDocsTab(); }
+    catch (e) { console.error(e); showToast('Failed to load Tax Docs','err'); }
+  });
+
 }
 
 

@@ -8,6 +8,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
 <link rel="stylesheet" href="admin-schedule.css" />
+<link rel="stylesheet" href="admin-taxdocs.css" />
+
 
 </head>
 <body>
@@ -48,6 +50,9 @@
         <button id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
         <button id="tabAgreements" class="tab" role="tab" aria-selected="false" aria-controls="panelAgreements">
           Agreements
+        </button>
+        <button id="tabTaxDocs" class="tab" role="tab" aria-selected="false" aria-controls="panelTaxDocs">
+          Tax Docs
         </button>
 
         <!-- ✅ NEW: Users tab -->
@@ -302,6 +307,57 @@
           Activating a version automatically forces all contractors to accept again (via <code>employees.agreement_version_required</code>).
         </p>
       </section>
+
+      <section id="panelTaxDocs" class="panel hidden" role="tabpanel" aria-labelledby="tabTaxDocs">
+  <header class="panel-head">
+    <h2>Tax Docs (W-9 Vault)</h2>
+    <div class="panel-actions">
+      <button id="taxdocsRefreshBtn" class="btn ghost">Refresh</button>
+    </div>
+  </header>
+
+  <div class="filters" role="region" aria-label="W-9 uploader">
+    <label class="filter grow">
+      <span>Contractor</span>
+      <select id="taxdocsEmployeeSelect">
+        <option value="">Select a contractor…</option>
+      </select>
+    </label>
+
+    <label class="filter grow">
+      <span>W-9 PDF</span>
+      <input id="taxdocsPdfInput" type="file" accept="application/pdf" />
+    </label>
+
+    <button id="taxdocsUploadBtn" class="btn primary" style="margin-left:10px;">
+      Upload W-9
+    </button>
+  </div>
+
+  <div id="taxdocsMsg" class="muted" style="margin:10px 2px 0;">—</div>
+
+  <div class="table-wrapper" style="margin-top:12px;">
+    <table class="table" aria-label="W-9 history table">
+      <thead>
+        <tr>
+          <th style="width:160px;">Status</th>
+          <th>Doc ID</th>
+          <th style="width:220px;">Received</th>
+          <th style="width:220px;">Verified / Rejected</th>
+          <th style="width:240px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="taxdocsTbody">
+        <tr><td colspan="5" class="muted">Open Tax Docs tab to load…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="muted" style="text-align:left; margin:10px 2px 0;">
+    Security: PDFs live only in private bucket <code>tax-dots</code>. Viewing uses short-lived signed URLs (logged).
+  </p>
+      </section>
+
 
       <!-- ===== Stores panel ===== -->
       <section id="panelStores" class="panel hidden" role="tabpanel" aria-labelledby="tabStores">
@@ -688,12 +744,12 @@
 
   <!-- Supabase + init -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script src="initSupabase.js"></script>
+  <script type="module" src="./initSupabase.js"></script>
 
   <!-- Admin logic -->
   <script src="admin-payroll.js"></script>
   <script src="admin-agreements.js"></script>
-  <script src="admin.js"></script>
+  <script type="module" src="admin.js"></script>
 
 </body>
 </html>
