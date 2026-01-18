@@ -273,9 +273,18 @@ function wireAgreementUX(profileDisplayName) {
 }
 
 // Show agreement panel and run the flow if required
-// Show agreement panel and run the flow if required
 async function maybeRunAgreementGate(supabase, { forceMode, next }) {
-  // Always check status (fail-closed)
+  // Determine if this is an INVITE flow (password should be set after agreement)
+  // Invite links carry `type=invite` in the hash (Supabase).
+  const hashParams = parseHashParams();
+  const hashType = (hashParams.get("type") || "").toLowerCase();
+  const isInviteFlow = hashType === "invite"; // ONLY invite should ever lead to password creation
+
+  // If we're forcing agreement mode via query (?mode=agreement), that is NOT invite flow.
+  // This is the "existing user must accept updated agreement" mode.
+  const isAgreementOnlyMode = String(forceMode || "").toLowerCase() === "true" || getQueryParams().mode === "agreement";
+
+  // Fail-closed: always check status
   const status = await getAgreementStatus(supabase);
 
   // If not required OR already accepted: allow normal flow
@@ -283,7 +292,7 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
     return { gated: false };
   }
 
-  // If contractor requires agreement and hasn't accepted:
+  // Must show agreement UI
   if (!agreementPanel || !passwordPanel) {
     setBanner("Agreement required, but agreement UI is missing on this page.", "err");
     disablePasswordForm(true);
@@ -293,10 +302,14 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   // Update title/subtitle so it's clear what's happening
   const titleEl = document.getElementById("title");
   const subtitleEl = document.getElementById("subtitle");
+
   if (titleEl) titleEl.textContent = "Contractor agreement";
+
+  // If invite: tell them they'll set password after. If not invite: tell them they'll be returned to work.
   if (subtitleEl) {
-    subtitleEl.textContent =
-      "Please read and accept this agreement to continue. After accepting, you will set your password.";
+    subtitleEl.textContent = isInviteFlow
+      ? "Please read and accept this agreement to continue. After accepting, you will set your password."
+      : "Please read and accept this agreement to continue working. After accepting, you will be returned automatically.";
   }
 
   // Switch UI into agreement mode
@@ -309,8 +322,6 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   setBanner("Contractor agreement required before you can continue.", "warn");
   setAgreementMeta(`Required agreement: ${status.version}`, "warn");
 
-  enableAgreementControls({ canCheck: false });
-
   // Load PDF (signed URL is only returned when not accepted)
   const signedUrl = status.signed_url;
   if (!signedUrl) {
@@ -321,7 +332,9 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   await renderPdfSignedUrl(signedUrl);
   wireAgreementUX(status.display_name || "");
 
-  // Wire accept button (IMPORTANT: do NOT redirect away; show password panel next)
+  // Accept button behavior differs by flow:
+  // - Invite: after acceptance, show password panel
+  // - Existing user (agreement-only): after acceptance, redirect back to next (NO password)
   if (acceptBtn) {
     acceptBtn.onclick = async () => {
       try {
@@ -337,27 +350,30 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
         await acceptAgreement(supabase, legal);
 
-        // Accepted — now continue on-page to password setup
-        setAgreementMeta("Accepted. Now set your password below.", "ok");
-        setBanner("Agreement accepted. Set your password to finish setup.", "ok");
+        // Accepted
+        setAgreementMeta("Accepted.", "ok");
+        setBanner("Agreement accepted.", "ok");
 
-        // Switch back to password panel
+        // AGREEMENT-ONLY MODE (existing user) -> go back immediately
+        // We treat anything NOT invite as agreement-only, including explicit ?mode=agreement.
+        if (!isInviteFlow || isAgreementOnlyMode) {
+          // If next is present, go there; else go to app/login
+          redirectToNextOrLogin(next || getQueryParams().next || "");
+          return;
+        }
+
+        // INVITE MODE -> now allow password setup
         show(agreementPanel, false);
         show(passwordPanel, true);
 
-        // Update title/subtitle back to password flow
         if (titleEl) titleEl.textContent = "Set your password";
         if (subtitleEl) {
           subtitleEl.textContent =
             "This finishes your account setup. After saving, you’ll be sent to the login page.";
         }
 
-        // Enable password form now
         disablePasswordForm(false);
         pw1El?.focus();
-
-        // NOTE: do NOT redirect here.
-        // Password save handler will do the final redirect.
       } catch (e) {
         console.error(e);
         setAgreementMeta(String(e?.message || e), "err");
@@ -368,7 +384,6 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
   return { gated: true };
 }
-
 
 // ===== password flow =====
 async function wirePasswordSave(supabase, userId) {
