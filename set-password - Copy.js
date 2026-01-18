@@ -48,18 +48,6 @@ function show(el, on) {
   el.style.display = on ? "" : "none";
 }
 
-function rememberInviteContext() {
-  // Must run BEFORE ensureSessionFromUrl() clears the hash.
-  const p = parseHashParams();
-  const isInvite = (p.get("type") || "").toLowerCase() === "invite";
-  sessionStorage.setItem("og_invite_flow", isInvite ? "1" : "0");
-  return isInvite;
-}
-
-function readInviteContext() {
-  return sessionStorage.getItem("og_invite_flow") === "1";
-}
-
 function parseHashParams() {
   const h = window.location.hash || "";
   const raw = h.startsWith("#") ? h.slice(1) : h;
@@ -286,13 +274,15 @@ function wireAgreementUX(profileDisplayName) {
 
 // Show agreement panel and run the flow if required
 async function maybeRunAgreementGate(supabase, { forceMode, next }) {
-  // Invite flow must be remembered BEFORE hash is consumed.
-  const isInviteFlow = readInviteContext();
+  // Determine if this is an INVITE flow (password should be set after agreement)
+  // Invite links carry `type=invite` in the hash (Supabase).
+  const hashParams = parseHashParams();
+  const hashType = (hashParams.get("type") || "").toLowerCase();
+  const isInviteFlow = hashType === "invite"; // ONLY invite should ever lead to password creation
 
-  // Existing-user agreement enforcement mode (no password UI after accept)
-  const qp = getQueryParams();
-  const isAgreementOnlyMode =
-    qp.mode === "agreement" || String(forceMode || "").toLowerCase() === "true";
+  // If we're forcing agreement mode via query (?mode=agreement), that is NOT invite flow.
+  // This is the "existing user must accept updated agreement" mode.
+  const isAgreementOnlyMode = String(forceMode || "").toLowerCase() === "true" || getQueryParams().mode === "agreement";
 
   // Fail-closed: always check status
   const status = await getAgreementStatus(supabase);
@@ -309,15 +299,16 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
     return { gated: true };
   }
 
+  // Update title/subtitle so it's clear what's happening
   const titleEl = document.getElementById("title");
   const subtitleEl = document.getElementById("subtitle");
 
   if (titleEl) titleEl.textContent = "Contractor agreement";
 
-  // ✅ Copy requested wording
+  // If invite: tell them they'll set password after. If not invite: tell them they'll be returned to work.
   if (subtitleEl) {
     subtitleEl.textContent = isInviteFlow
-      ? "Please read and accept this agreement to start working. After accepting, you will set your password."
+      ? "Please read and accept this agreement to continue. After accepting, you will set your password."
       : "Please read and accept this agreement to continue working. After accepting, you will be returned automatically.";
   }
 
@@ -328,13 +319,7 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   // Lock password form while agreement is pending
   disablePasswordForm(true);
 
-  setBanner(
-    isInviteFlow
-      ? "Contractor agreement required to start working."
-      : "Contractor agreement required to continue working.",
-    "warn"
-  );
-
+  setBanner("Contractor agreement required before you can continue.", "warn");
   setAgreementMeta(`Required agreement: ${status.version}`, "warn");
 
   // Load PDF (signed URL is only returned when not accepted)
@@ -347,6 +332,9 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   await renderPdfSignedUrl(signedUrl);
   wireAgreementUX(status.display_name || "");
 
+  // Accept button behavior differs by flow:
+  // - Invite: after acceptance, show password panel
+  // - Existing user (agreement-only): after acceptance, redirect back to next (NO password)
   if (acceptBtn) {
     acceptBtn.onclick = async () => {
       try {
@@ -362,16 +350,19 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
         await acceptAgreement(supabase, legal);
 
+        // Accepted
         setAgreementMeta("Accepted.", "ok");
         setBanner("Agreement accepted.", "ok");
 
-        // ✅ Existing-user flow: return immediately (NO password)
+        // AGREEMENT-ONLY MODE (existing user) -> go back immediately
+        // We treat anything NOT invite as agreement-only, including explicit ?mode=agreement.
         if (!isInviteFlow || isAgreementOnlyMode) {
-          redirectToNextOrLogin(next || qp.next || "");
+          // If next is present, go there; else go to app/login
+          redirectToNextOrLogin(next || getQueryParams().next || "");
           return;
         }
 
-        // ✅ Invite flow: proceed to password setup (NO redirect yet)
+        // INVITE MODE -> now allow password setup
         show(agreementPanel, false);
         show(passwordPanel, true);
 
@@ -393,7 +384,6 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
   return { gated: true };
 }
-
 
 // ===== password flow =====
 async function wirePasswordSave(supabase, userId) {
@@ -431,7 +421,7 @@ async function wirePasswordSave(supabase, userId) {
 // ===== main =====
 async function main() {
   disablePasswordForm(true);
-  setBanner("Checking link…", "warn");
+  setBanner("Checking invite link…", "warn");
 
   const supabase = await waitForSupabase();
   if (!supabase) {
@@ -440,35 +430,30 @@ async function main() {
   }
 
   try {
-    // ✅ capture invite context BEFORE ensureSessionFromUrl() clears hash
-    rememberInviteContext();
-
     const session = await ensureSessionFromUrl(supabase);
 
+    // Always check agreement status and gate if needed.
     const { mode, next } = getQueryParams();
     const forceAgreementMode = mode === "agreement";
-
-    // Wire password handler once; it will be used only in invite flow
     await wirePasswordSave(supabase, session.user.id);
-
-    // Gate if needed
+    // If forced, show agreement UI immediately; otherwise status check still gates if required.
     const gate = await maybeRunAgreementGate(supabase, { forceMode: forceAgreementMode, next });
-    if (gate.gated) return;
 
-    // Normal password UI (invite/recovery cases)
+    if (gate.gated) return; // agreement UI takes over
+
+    // Normal password UI
     show(agreementPanel, false);
     show(passwordPanel, true);
 
     setBanner("Link verified. Set your password.", "ok");
     disablePasswordForm(false);
+
+
   } catch (e) {
     console.error(e);
     setBanner(String(e?.message || e), "err");
     disablePasswordForm(true);
   }
 }
-
-document.addEventListener("DOMContentLoaded", main);
-
 
 document.addEventListener("DOMContentLoaded", main);
