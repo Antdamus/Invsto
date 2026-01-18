@@ -420,7 +420,7 @@ async function main() {
     // Always check agreement status and gate if needed.
     const { mode, next } = getQueryParams();
     const forceAgreementMode = mode === "agreement";
-
+    await wirePasswordSave(supabase, session.user.id);
     // If forced, show agreement UI immediately; otherwise status check still gates if required.
     const gate = await maybeRunAgreementGate(supabase, { forceMode: forceAgreementMode, next });
 
@@ -432,7 +432,7 @@ async function main() {
 
     setBanner("Link verified. Set your password.", "ok");
     disablePasswordForm(false);
-    await wirePasswordSave(supabase, session.user.id);
+
 
   } catch (e) {
     console.error(e);
