@@ -296,6 +296,11 @@ async function invokeEdgeJson(functionName, payload) {
   return json;
 }
 
+// expose once (optional)
+if (!window.invokeEdgeJson) {
+  window.invokeEdgeJson = invokeEdgeJson;
+}
+
 
 async function resendInvite(tr){
   const employee_id = tr?.dataset?.employeeId;
@@ -762,7 +767,7 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
 
     tbody.appendChild(tr);
 
-    applyDirectionsLinkFromStoreId(recStorePrefill, qs(`recDir-${i}`));
+    applyDirectionsLinkFromStoreId(qs(`recDir-${i}`), recStorePrefill);
     applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
     applyDirectionsLinkFromStoreId(ovAnyIn ? '' : ovInStore, qs(`ovInDir-${iso}`));
     applyDirectionsLinkFromStoreId(ovAnyOut ? '' : ovOutStore, qs(`ovOutDir-${iso}`));
@@ -2749,6 +2754,7 @@ async function inviteUser(){
       worker_type,
       hourly_rate
     });
+
 
     if (!data?.ok) throw new Error(data?.error || 'Invite failed.');
 

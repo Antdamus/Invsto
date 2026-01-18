@@ -1,0 +1,54 @@
+/* =========================================================
+   OG Jewelry — Admin Tax Docs (W-9 Vault)
+   Minimal, clean, consistent with your existing admin UI
+   ========================================================= */
+
+#panelTaxDocs .filters { align-items: end; }
+
+.td-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  line-height:1;
+  font-weight:800;
+  text-transform:lowercase;
+  white-space:nowrap;
+  border:1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+}
+
+.td-badge.ok{
+  color: var(--ok);
+  background: rgba(47,191,113,0.12);
+  border-color: rgba(47,191,113,0.25);
+}
+
+.td-badge.warn{
+  color: var(--warn);
+  background: rgba(224,169,0,0.14);
+  border-color: rgba(224,169,0,0.30);
+}
+
+.td-badge.err{
+  color: #ff6b6b;
+  background: rgba(255,107,107,0.12);
+  border-color: rgba(255,107,107,0.25);
+}
+
+.td-badge.muted{
+  color: var(--muted);
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.10);
+}
+
+/* danger button (matches your theme vibe) */
+.btn.danger{
+  border-color: rgba(255,107,107,0.35);
+  color: #ff6b6b;
+}
+.btn.danger:hover{
+  background: rgba(255,107,107,0.10);
+}
