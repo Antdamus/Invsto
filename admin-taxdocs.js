@@ -6,7 +6,7 @@
 function $(id){ return document.getElementById(id); }
 
 // ===== Re-auth (required before viewing W-9) =====
-const TAXDOCS_REAUTH_WINDOW_MS = 3 * 60 * 1000; // 3 minutes. Set to 0 to require EVERY view.
+const TAXDOCS_REAUTH_WINDOW_MS = 0; // 3 minutes. Set to 0 to require EVERY view.
 
 function taxdocsLastReauthAt(){
   const v = Number(sessionStorage.getItem("taxdocs_last_reauth_at") || "0");
@@ -407,6 +407,7 @@ async function onTableClick(e, { invokeEdgeJson, showToast }){
   if (viewBtn){
     viewBtn.disabled = true;
     try{
+      await requireRecentReauth(supabase);
       const url = await getW9SignedUrlViaEdge({ invokeEdgeJson, docId, expiresSeconds: 120 });
       window.open(url, "_blank", "noopener,noreferrer");
       showToast?.("Signed URL opened (120s)", "ok");
@@ -483,7 +484,8 @@ export async function initTaxDocsTab(){
     onUpload({ supabase, invokeEdgeJson, showToast });
   });
 
-  $("taxdocsTbody")?.addEventListener("click", (e) => onTableClick(e, { invokeEdgeJson, showToast }));
+  $("taxdocsTbody")?.addEventListener("click", (e) => onTableClick(e, { supabase, invokeEdgeJson, showToast }));
+
 
   // allow internal refresh reuse
   window.__taxdocsRefresh = async () => {

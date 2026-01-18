@@ -52,3 +52,27 @@
 .btn.danger:hover{
   background: rgba(255,107,107,0.10);
 }
+
+/* ===== Tax Docs re-auth modal ===== */
+.taxdocs-reauth-backdrop{
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.taxdocs-reauth-backdrop.hidden{ display:none; }
+
+.taxdocs-reauth-card{
+  width: min(520px, calc(100vw - 28px));
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(18,19,22,0.92);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 24px 70px rgba(0,0,0,0.55);
+}
