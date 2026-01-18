@@ -46,6 +46,9 @@
         <button id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (biweekly)</button>
         <button id="tabSchedule" class="tab" role="tab" aria-selected="false" aria-controls="panelSchedule">Schedule</button>
         <button id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
+        <button id="tabAgreements" class="tab" role="tab" aria-selected="false" aria-controls="panelAgreements">
+          Agreements
+        </button>
 
         <!-- ✅ NEW: Users tab -->
         <button id="tabUsers" class="tab" role="tab" aria-selected="false" aria-controls="panelUsers">Users</button>
@@ -233,6 +236,7 @@
                 <th>Email</th>
                 <th style="width:160px;">Status</th>
                 <th style="width:160px;">Role</th>
+                <th style="width:160px;">Type</th> <!-- NEW: employee vs contractor -->
 
                  <!-- ✅ NEW -->
                 <th style="width:160px;">Hourly Rate</th>
@@ -242,13 +246,60 @@
               </tr>
             </thead>
             <tbody id="usersTbody">
-              <tr><td colspan="7" class="muted">Open Users tab to load…</td></tr>
+              <tr><td colspan="8" class="muted">Open Users tab to load…</td></tr>
             </tbody>
           </table>
         </div>
 
         <p class="muted" style="text-align:left; margin:10px 2px 0;">
           Invites are sent by email via Supabase Auth. Roles and Active status are stored in <code>employees</code>.
+        </p>
+      </section>
+
+      <section id="panelAgreements" class="panel hidden" role="tabpanel" aria-labelledby="tabAgreements">
+        <header class="panel-head">
+          <h2>Agreements</h2>
+          <div class="panel-actions">
+            <button id="agreementsRefreshBtn" class="btn ghost">Refresh</button>
+          </div>
+        </header>
+
+        <div class="filters" role="region" aria-label="Agreement uploader">
+          <label class="filter grow">
+            <span>Upload contractor agreement (PDF)</span>
+            <input id="agreementPdfInput" type="file" accept="application/pdf" />
+          </label>
+
+          <label class="switch" style="margin-left:auto;">
+            <input id="agreementActivateNow" type="checkbox" checked />
+            <span>Activate now + force re-sign</span>
+          </label>
+
+          <button id="agreementUploadBtn" class="btn primary" style="margin-left:10px;">
+            Upload & Publish
+          </button>
+        </div>
+
+        <div id="agreementUploadMsg" class="muted" style="margin:10px 2px 0;">—</div>
+
+        <div class="table-wrapper" style="margin-top:12px;">
+          <table class="table" aria-label="Agreement versions table">
+            <thead>
+              <tr>
+                <th style="width:240px;">Version</th>
+                <th>Path</th>
+                <th style="width:120px;">Active</th>
+                <th style="width:180px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agreementsTbody">
+              <tr><td colspan="4" class="muted">Open Agreements tab to load…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="muted" style="text-align:left; margin:10px 2px 0;">
+          Activating a version automatically forces all contractors to accept again (via <code>employees.agreement_version_required</code>).
         </p>
       </section>
 
@@ -577,6 +628,15 @@
         <div class="field-hint">Optional now — but payroll will use this automatically later.</div>
       </div>
 
+      <div class="field">
+        <span>Worker Type</span>
+        <select id="userWorkerType" class="select">
+          <option value="employee" selected>employee</option>
+          <option value="contractor">contractor</option>
+        </select>
+        <div class="field-hint">Use contractor for 1099 workers; employee for W-2 payroll workers.</div>
+      </div>
+
     </div>
 
     <!-- Role (nice UI) -->
@@ -632,7 +692,8 @@
 
   <!-- Admin logic -->
   <script src="admin-payroll.js"></script>
-<script src="admin.js"></script>
+  <script src="admin-agreements.js"></script>
+  <script src="admin.js"></script>
 
 </body>
 </html>

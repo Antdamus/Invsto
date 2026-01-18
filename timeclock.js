@@ -536,6 +536,27 @@ async function signOut(){
   redirectToLogin();
 }
 
+async function enforceContractorAgreementGate(supabase, pageName) {
+  const { data, error } = await supabase.functions.invoke("contractor-agreement", {
+    body: { action: "status" },
+  });
+
+  if (error || !data) {
+    const next = encodeURIComponent(pageName || "timeclock.html");
+    window.location.href = `set-password.html?mode=agreement&next=${next}`;
+    throw new Error("Agreement required");
+  }
+
+  if (!data.required) return;
+
+  if (!data.accepted) {
+    const next = encodeURIComponent(pageName || "timeclock.html");
+    window.location.href = `set-password.html?mode=agreement&next=${next}`;
+    throw new Error("Agreement required");
+  }
+}
+
+
 async function hydrate(){
   if (isHydrating) return;
   isHydrating = true;
@@ -550,6 +571,7 @@ async function hydrate(){
 
     currentEmployee = emp;
     qs('displayName').textContent = emp.display_name;
+    await enforceContractorAgreementGate(supabaseClient, "timeclock.html");
     show(qs('clockSection'), true);
 
     // Phase 4: preload stores + today's schedule/exception so we can show store context

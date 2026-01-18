@@ -11,13 +11,16 @@ function initSupabaseClient() {
       detectSessionInUrl: true, // important for invite/reset links
     },
   });
-
+window.SUPABASE_URL = SUPABASE_URL;
+window.SUPABASE_ANON_KEY = SUPABASE_KEY;
+  
   // ✅ Alias for older code that expects supabaseClient
   window.supabaseClient = window.supabase;
 
   // Signal ready
   document.dispatchEvent(new Event("supabase-ready"));
 }
+
 
 if (document.readyState === "complete" || document.readyState === "interactive") {
   initSupabaseClient();

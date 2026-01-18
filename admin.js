@@ -238,6 +238,8 @@ async function inviteWorkerByEmail(email) {
 }
 
 // --- RAW invoke so we can read JSON even on 400/403/etc ---
+// --- RAW invoke so we can read JSON even on 400/403/etc ---
+// Works WITHOUT window.SUPABASE_URL / window.SUPABASE_ANON_KEY
 async function invokeEdgeJson(functionName, payload) {
   const { data: sessionData, error: sessErr } = await supabaseClient.auth.getSession();
   if (sessErr) throw sessErr;
@@ -245,19 +247,29 @@ async function invokeEdgeJson(functionName, payload) {
   const accessToken = sessionData?.session?.access_token;
   if (!accessToken) throw new Error("Missing session access token.");
 
-  // These should already exist in your initSupabase.js setup.
-  // If not, define them there and keep them global.
-  if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_ANON_KEY globals.");
+  // Pull these from the already-initialized client (no globals needed)
+  const supaUrl =
+    supabaseClient?.supabaseUrl ||
+    supabaseClient?.rest?.url?.replace(/\/rest\/v1\/?$/, '') ||
+    "";
+
+  const anonKey =
+    supabaseClient?.supabaseKey ||
+    supabaseClient?.headers?.apikey ||
+    supabaseClient?.global?.headers?.apikey ||
+    "";
+
+  if (!supaUrl || !anonKey) {
+    throw new Error("Supabase client is missing URL/key (initSupabase.js didn’t expose them).");
   }
 
-  const url = `${window.SUPABASE_URL}/functions/v1/${functionName}`;
+  const url = `${supaUrl}/functions/v1/${functionName}`;
 
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "apikey": window.SUPABASE_ANON_KEY,
+      "apikey": anonKey,
       "Authorization": `Bearer ${accessToken}`,
     },
     body: JSON.stringify(payload),
@@ -274,6 +286,7 @@ async function invokeEdgeJson(functionName, payload) {
 
   return json;
 }
+
 
 async function resendInvite(tr){
   const employee_id = tr?.dataset?.employeeId;
@@ -2290,6 +2303,7 @@ function activateTab(which){
     { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
     { key:'stores',   btn:'tabStores',   panel:'panelStores' },
     { key:'users',    btn:'tabUsers',    panel:'panelUsers' }, // ✅ NEW
+    { key:'agreements', btn:'tabAgreements', panel:'panelAgreements' },
   ];
 
   for (const t of tabs){
@@ -2316,6 +2330,7 @@ function wireTabs(){
   });
   qs('tabSchedule')?.addEventListener('click', ()=> activateTab('schedule'));
   qs('tabStores')?.addEventListener('click',   ()=> activateTab('stores'));
+  qs('tabAgreements')?.addEventListener('click', ()=> activateTab('agreements'));
   qs('tabUsers')?.addEventListener('click',    ()=> activateTab('users')); // ✅ NEW
 }
 
@@ -2521,13 +2536,15 @@ function applyUsersFilterAndRender(){
 const esc = escapeHtml;
 
 function renderUsersTable(rows){
+  const usersTbody = qs('usersTbody');
   if (!usersTbody) return;
 
   if (!rows?.length){
-    // header has 7 columns
-    usersTbody.innerHTML = `<tr><td colspan="7" class="muted">No users found.</td></tr>`;
+    usersTbody.innerHTML = `<tr><td colspan="8" class="muted">No users found.</td></tr>`;
     return;
   }
+
+  const esc = escapeHtml;
 
   usersTbody.innerHTML = rows.map(emp=>{
     const created = emp.invited_at ? fmtLocal(emp.invited_at) : "—";
@@ -2538,6 +2555,8 @@ function renderUsersTable(rows){
     const hourlyVal = (emp.hourly_rate === null || emp.hourly_rate === undefined || emp.hourly_rate === "")
       ? ""
       : String(emp.hourly_rate);
+
+    const wt = (emp.worker_type || 'employee').toLowerCase();
 
     return `
       <tr data-employee-id="${emp.id}">
@@ -2557,14 +2576,21 @@ function renderUsersTable(rows){
           </div>
         </td>
 
-        <!-- 4) Role -->
+        <!-- 4) Role (permissions) -->
         <td>
           <select class="select user-role">
             ${["employee","manager","admin"].map(r=>`<option value="${r}" ${emp.role===r?"selected":""}>${r}</option>`).join("")}
           </select>
         </td>
 
-        <!-- 5) Hourly Rate -->
+        <!-- 5) Worker Type (pay classification) -->
+        <td>
+          <select class="select user-worker-type">
+            ${["employee","contractor"].map(t=>`<option value="${t}" ${wt===t?"selected":""}>${t}</option>`).join("")}
+          </select>
+        </td>
+
+        <!-- 6) Hourly Rate -->
         <td>
           <input
             class="input user-hourly-rate"
@@ -2577,7 +2603,7 @@ function renderUsersTable(rows){
           />
         </td>
 
-        <!-- 6) Active -->
+        <!-- 7) Active -->
         <td>
           <label class="switch">
             <input class="user-active" type="checkbox" ${emp.active ? "checked":""} />
@@ -2585,7 +2611,7 @@ function renderUsersTable(rows){
           </label>
         </td>
 
-        <!-- 7) Actions -->
+        <!-- 8) Actions -->
         <td>
           <div class="row-actions">
             ${accepted ? "" : `<button class="btn small ghost user-resend">Resend</button>`}
@@ -2594,93 +2620,98 @@ function renderUsersTable(rows){
         </td>
       </tr>`;
   }).join("");
-
-  // Wire actions
-  usersTbody.querySelectorAll(".user-save").forEach(btn=>{
-    btn.addEventListener("click", async (e)=>{
-      const tr = e.target.closest("tr");
-      await saveUserRow(tr);
-    });
-  });
-
-  usersTbody.querySelectorAll(".user-resend").forEach(btn=>{
-    btn.addEventListener("click", async (e)=>{
-      const tr = e.target.closest("tr");
-      await resendInvite(tr);
-    });
-  });
 }
-
-
 
 async function loadUsers(){
   const tbody = qs('usersTbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
 
   const { data, error } = await supabaseClient
     .from('employees')
-    .select('id, user_id, display_name, email, role, hourly_rate, active, created_at, invited_at, accepted_at')
+    .select('id, user_id, display_name, email, role, worker_type, hourly_rate, active, created_at, invited_at, accepted_at')
     .order('display_name', { ascending: true });
 
   if (error) throw error;
 
-  _usersRows = (data || []).map(r => ({
-    ...r,
-    role: (r.role || 'employee').toLowerCase(),
-    active: !!r.active,
-    email: r.email || '',
-    display_name: r.display_name || '',
-    invited_at: r.invited_at || null,
-    accepted_at: r.accepted_at || null,
-  }));
+  _usersRows = (data || []).map(r => {
+    const role = (r.role || 'employee').toLowerCase();
+    const worker_type = (r.worker_type || 'employee').toLowerCase();
+
+    return {
+      ...r,
+      role: ['employee','manager','admin'].includes(role) ? role : 'employee',
+      worker_type: ['employee','contractor'].includes(worker_type) ? worker_type : 'employee',
+      active: !!r.active,
+      email: r.email || '',
+      display_name: r.display_name || '',
+      invited_at: r.invited_at || null,
+      accepted_at: r.accepted_at || null,
+    };
+  });
 
   applyUsersFilterAndRender();
 }
 
-
-
 async function inviteUser(){
-  const email = (qs('userEmail').value || '').trim().toLowerCase();
-  const display_name = (qs('userDisplayName').value || '').trim();
-  const role = (qs('userRole').value || 'employee').toLowerCase();
-
-  const hrRaw = (qs('userHourlyRate')?.value || '').trim();
-  const hourly_rate = hrRaw === '' ? null : Number(hrRaw);
-
-  if (!email) throw new Error('Email is required.');
-  if (!display_name) throw new Error('Display name is required.');
-  if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
-  if (hrRaw !== '' && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) {
-    throw new Error('Hourly rate must be a non-negative number.');
-  }
-
-  const btn = qs('userInviteBtn');
-  btn.disabled = true;
-  btn.classList.add('loading');
-
   try{
-    const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-      body: { action: 'invite', email, display_name, role, hourly_rate }
+    const email = (qs('userEmail')?.value || '').trim().toLowerCase();
+    const display_name = (qs('userDisplayName')?.value || '').trim();
+    const role = (qs('userRole')?.value || 'employee').toLowerCase();
+
+    // NEW: worker_type (must exist in admin.html as <select id="userWorkerType">)
+    const worker_type = (qs('userWorkerType')?.value || 'employee').trim().toLowerCase();
+
+    const hrRaw = (qs('userHourlyRate')?.value || '').trim();
+    const hourly_rate = hrRaw === '' ? null : Number(hrRaw);
+
+    if (!email) throw new Error('Email is required.');
+    if (!display_name) throw new Error('Display name is required.');
+    if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+    if (!['employee','contractor'].includes(worker_type)) throw new Error('Invalid worker type.');
+    if (hrRaw !== '' && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) {
+      throw new Error('Hourly rate must be a non-negative number.');
+    }
+
+    const btn = qs('userInviteBtn');
+    if (btn){
+      btn.disabled = true;
+      btn.classList.add('loading');
+    }
+
+    // IMPORTANT: use raw invoke so 400 shows real message
+    const data = await invokeEdgeJson('admin-user', {
+      action: 'invite',
+      email,
+      display_name,
+      role,
+      worker_type,
+      hourly_rate
     });
 
-    if (error) throw error;
-    if (!data?.ok) throw new Error('Invite failed.');
+    if (!data?.ok) throw new Error(data?.error || 'Invite failed.');
 
     closeUserModal();
     await loadUsers();
     showToast('Invite sent ✉️', 'ok');
+  } catch (err) {
+    console.error(err);
+    setUserError(err?.message || 'Invite failed');
+    throw err;
   } finally {
-    btn.disabled = false;
-    btn.classList.remove('loading');
+    const btn = qs('userInviteBtn');
+    if (btn){
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
   }
 }
-
 
 async function saveUserRow(tr){
   const employee_id = tr?.dataset?.employeeId;
 
   const display_name = (tr.querySelector('.user-name')?.value || '').trim();
   const role = (tr.querySelector('.user-role')?.value || 'employee').toLowerCase();
+  const worker_type = (tr.querySelector('.user-worker-type')?.value || 'employee').toLowerCase();
   const active = !!tr.querySelector('.user-active')?.checked;
 
   // hourly_rate: blank -> null, number -> number
@@ -2690,16 +2721,17 @@ async function saveUserRow(tr){
   if (!employee_id) throw new Error('Missing employee id.');
   if (!display_name) throw new Error('Display name is required.');
   if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+  if (!['employee','contractor'].includes(worker_type)) throw new Error('Invalid worker type.');
   if (hrRaw !== '' && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) {
     throw new Error('Hourly rate must be a non-negative number.');
   }
 
   const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'update', employee_id, role, active, display_name, hourly_rate }
+    body: { action: 'update', employee_id, role, worker_type, active, display_name, hourly_rate }
   });
 
   if (error) throw error;
-  if (!data?.ok) throw new Error('Update failed.');
+  if (!data?.ok) throw new Error(data?.error || 'Update failed.');
 
   showToast('Saved ✅', 'ok');
   await loadUsers();

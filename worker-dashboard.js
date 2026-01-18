@@ -290,7 +290,7 @@ async function getSessionOrRedirect() {
 async function loadEmployeeByUserId(userId) {
   const { data, error } = await window.supabase
     .from("employees")
-    .select("id, display_name, role, active, created_at")
+    .select("id, display_name, role, active, created_at, worker_type, agreement_version_required")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -550,6 +550,29 @@ function updateStatusCard({
   }
 }
 
+async function enforceContractorAgreementGate(supabase) {
+  // Ask the server (Edge Function) what the truth is
+  const { data, error } = await supabase.functions.invoke("contractor-agreement", {
+    body: { action: "status" },
+  });
+
+  // Fail-closed: if we can't confirm, block contractors by sending them to agreement flow
+  if (error || !data) {
+    const next = encodeURIComponent("worker-dashboard.html");
+    window.location.href = `set-password.html?mode=agreement&next=${next}`;
+    return;
+  }
+
+  // If not a contractor (required:false) -> allow
+  if (!data.required) return;
+
+  // Contractor but not accepted -> block
+  if (!data.accepted) {
+    const next = encodeURIComponent("worker-dashboard.html");
+    window.location.href = `set-password.html?mode=agreement&next=${next}`;
+  }
+}
+
 /** ---------- Main ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
@@ -579,6 +602,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     state.employee = employee;
+    await enforceContractorAgreementGate(window.supabase);
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();
