@@ -172,10 +172,10 @@ async function renderPdfSignedUrl(signedUrl) {
   }
 
   // Worker
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    window.PDFJS_WORKER_SRC ||
-    pdfjsLib.GlobalWorkerOptions.workerSrc ||
-    "https://unpkg.com/pdfjs-dist@3.3.122/legacy/build/pdf.worker.min.js"; // or your CDN if you insist
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  window.PDFJS_WORKER_SRC ||
+  pdfjsLib.GlobalWorkerOptions.workerSrc ||
+  "pdf.worker.min.js";
 
   pdfPages.innerHTML = "";
 
@@ -273,24 +273,38 @@ function wireAgreementUX(profileDisplayName) {
 }
 
 // Show agreement panel and run the flow if required
+// Show agreement panel and run the flow if required
 async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   // Always check status (fail-closed)
   const status = await getAgreementStatus(supabase);
 
-  // If not required or already accepted, allow normal flow
-  if (!status?.required || status?.accepted) return { gated: false };
+  // If not required OR already accepted: allow normal flow
+  if (!status?.required || status?.accepted) {
+    return { gated: false };
+  }
 
-  // If we get here: contractor requires agreement and hasn't accepted
-  if (!agreementPanel) {
-    // If HTML isn't upgraded, we cannot proceed.
+  // If contractor requires agreement and hasn't accepted:
+  if (!agreementPanel || !passwordPanel) {
     setBanner("Agreement required, but agreement UI is missing on this page.", "err");
     disablePasswordForm(true);
     return { gated: true };
   }
 
+  // Update title/subtitle so it's clear what's happening
+  const titleEl = document.getElementById("title");
+  const subtitleEl = document.getElementById("subtitle");
+  if (titleEl) titleEl.textContent = "Contractor agreement";
+  if (subtitleEl) {
+    subtitleEl.textContent =
+      "Please read and accept this agreement to continue. After accepting, you will set your password.";
+  }
+
   // Switch UI into agreement mode
   show(passwordPanel, false);
   show(agreementPanel, true);
+
+  // Lock password form while agreement is pending
+  disablePasswordForm(true);
 
   setBanner("Contractor agreement required before you can continue.", "warn");
   setAgreementMeta(`Required agreement: ${status.version}`, "warn");
@@ -307,7 +321,7 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
   await renderPdfSignedUrl(signedUrl);
   wireAgreementUX(status.display_name || "");
 
-  // Wire accept button
+  // Wire accept button (IMPORTANT: do NOT redirect away; show password panel next)
   if (acceptBtn) {
     acceptBtn.onclick = async () => {
       try {
@@ -323,8 +337,27 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
         await acceptAgreement(supabase, legal);
 
-        setAgreementMeta("Accepted. Redirecting…", "ok");
-        redirectToNextOrLogin(next);
+        // Accepted — now continue on-page to password setup
+        setAgreementMeta("Accepted. Now set your password below.", "ok");
+        setBanner("Agreement accepted. Set your password to finish setup.", "ok");
+
+        // Switch back to password panel
+        show(agreementPanel, false);
+        show(passwordPanel, true);
+
+        // Update title/subtitle back to password flow
+        if (titleEl) titleEl.textContent = "Set your password";
+        if (subtitleEl) {
+          subtitleEl.textContent =
+            "This finishes your account setup. After saving, you’ll be sent to the login page.";
+        }
+
+        // Enable password form now
+        disablePasswordForm(false);
+        pw1El?.focus();
+
+        // NOTE: do NOT redirect here.
+        // Password save handler will do the final redirect.
       } catch (e) {
         console.error(e);
         setAgreementMeta(String(e?.message || e), "err");
@@ -335,6 +368,7 @@ async function maybeRunAgreementGate(supabase, { forceMode, next }) {
 
   return { gated: true };
 }
+
 
 // ===== password flow =====
 async function wirePasswordSave(supabase, userId) {
