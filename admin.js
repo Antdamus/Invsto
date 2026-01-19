@@ -1,3 +1,6 @@
+import { initOverview } from "./admin-overview.js";
+
+
 // admin.js — Overview + Drawer/Edit/Audit + Payroll Weekly + Period Lock/Unlock (Phase 3.3)
 let supabaseClient = null;
 let drawerOnlyAnoms = false;
@@ -1876,83 +1879,6 @@ function wireStoresTab(){
   });
 }
 
-function renderKPIs(rows){
-  const tot = rows.reduce((a,r)=>a+(+r.total_hours||0),0);
-  const shf = rows.reduce((a,r)=>a+(+r.shifts_count||0),0);
-  const avg = shf>0? tot/shf : 0;
-  qs('kpiTotalHours').textContent = fmtHours(tot);
-  qs('kpiTotalShifts').textContent = String(shf);
-  qs('kpiAvgHrs').textContent = fmtHours(avg);
-}
-let currentRows=[], sortState={ key:'display_name', dir:'asc' };
-let pendingReviewCounts = new Map();
-function sortRows(rows){
-  const a=rows.slice(), {key,dir}=sortState, m = dir==='asc'?1:-1;
-  a.sort((x,y)=>{
-    let xv=x[key], yv=y[key];
-    if (key==='shifts_count' || key==='total_hours'){ xv=+xv||0; yv=+yv||0; return (xv-yv)*m; }
-    const xs=(xv||'').toString().toLowerCase(), ys=(yv||'').toString().toLowerCase();
-    return xs<ys?-1*m: xs>ys?1*m: 0;
-  });
-  return a;
-}
-function applySortIndicators(){
-  [{el:qs('thWorker'),key:'display_name'},{el:qs('thShifts'),key:'shifts_count'},{el:qs('thHours'),key:'total_hours'}].forEach(({el,key})=>{
-    const s = sortState.key===key? sortState.dir : 'none';
-    el.setAttribute('aria-sort', s==='asc'?'ascending':s==='desc'?'descending':'none');
-    el.querySelector('.sort-indicator').textContent = s==='asc'?'▲':s==='desc'?'▼':'↕';
-  });
-}
-function renderTable(rows){
-  const tb=qs('summaryTbody'); tb.innerHTML='';
-  const data = sortRows(rows);
-  if (!data.length){ tb.innerHTML=`<tr><td colspan="3" class="muted">No results for this month/search.</td></tr>`; return; }
-  for(const r of data){
-    const tr=document.createElement('tr');
-    tr.dataset.employeeId=r.employee_id; tr.dataset.monthStart=r.month_start; tr.dataset.displayName=r.display_name||'';
-    tr.className='summary-row';
-    const pendingN = pendingReviewCounts.get(r.employee_id) || 0;
-    const flag = pendingN > 0 ? `<span class="review-flag" title="Pending shifts for review">Pending review: ${pendingN}</span>` : '';
-    tr.innerHTML=`<td class="worker-cell"><span class="worker-name">${r.display_name||'—'}</span>${flag}</td><td>${r.shifts_count??'—'}</td><td>${fmtHours(r.total_hours)}</td>`;
-    tb.appendChild(tr);
-  }
-  applySortIndicators();
-}
-let isLoading = false;
-async function loadSummary(){
-  if (isLoading) return; isLoading = true; qs('summaryTbody').style.opacity = '0.6';
-  try{
-    const monthStart = monthInputToStart();
-    const search = (qs('searchInput').value || '').trim().toLowerCase();
-    qs('printMonthLabel').textContent = monthLabel(monthStart);
-
-    const [{ rows }, pendingMap] = await Promise.all([
-      fetchMonthlySummary(monthStart), // all employees
-      fetchMonthlyPendingReviewCounts(monthStart)
-    ]);
-
-    pendingReviewCounts = pendingMap || new Map();
-    const filtered = search
-      ? rows.filter(r => (r.display_name || '').toLowerCase().includes(search))
-      : rows;
-
-    currentRows = filtered;
-    renderKPIs(filtered);
-    renderTable(filtered);
-  }catch(err){
-    console.error(err);
-    qs('summaryTbody').innerHTML = `<tr><td colspan="3" class="muted">Error loading data. Check console.</td></tr>`;
-    qs('kpiTotalHours').textContent = qs('kpiTotalShifts').textContent = qs('kpiAvgHrs').textContent = '—';
-  }finally{
-    qs('summaryTbody').style.opacity = '1';
-    isLoading = false;
-  }
-}
-
-
-function wireFilters(){ qs('monthInput').addEventListener('change', loadSummary); qs('searchInput').addEventListener('input', debounce(loadSummary,300)); }
-function toggleSort(key){ if (sortState.key===key) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else sortState={key,dir:'asc'}; renderTable(currentRows); }
-function wireSorting(){ qs('thWorker').addEventListener('click',()=>toggleSort('display_name')); qs('thShifts').addEventListener('click',()=>toggleSort('shifts_count')); qs('thHours').addEventListener('click',()=>toggleSort('total_hours')); }
 
 /* ============== Drawer + Edit/Audit ============== */
 async function fetchPeriodSummary(periodId){
@@ -2946,6 +2872,40 @@ function wireUsersTab(){
   });
 }
 
+let overviewApi = null;
+
+function setupOverview() {
+  overviewApi = initOverview({
+    qs,
+    debounce,
+    fmtHours,
+    monthLabel,
+    monthInputToStart,
+    fetchMonthlySummary,
+    fetchMonthlyPendingReviewCounts,
+
+    // This is the bridge into your existing drawer system:
+    openWorkerDrawer: ({ employeeId, monthStart, displayName }) => {
+      // Reuse the exact drawer open flow you already have
+      drawerContext = { employeeId, monthStart, displayName };
+      renderDrawerHeader(displayName, monthStart);
+
+      qs("dsShifts").textContent = qs("dsHours").textContent = qs("dsAvg").textContent = "…";
+      qs("drawerList").innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+      openDrawer();
+
+      fetchWorkerShifts(employeeId, monthStart)
+        .then((shifts) => {
+          renderDrawerSummary(shifts);
+          renderDrawerList(shifts);
+        })
+        .catch((err) => {
+          console.error(err);
+          qs("drawerList").innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
+        });
+    },
+  });
+}
 
 //* ============== Boot ============== */
 document.addEventListener('supabase-ready', async () => {
@@ -2976,30 +2936,18 @@ document.addEventListener('supabase-ready', async () => {
   if (monthInput) monthInput.value = ym;
 
   // Overview + Drawer/Edit/Audit wiring
-  wireFilters();
-  wireSorting();
+  setupOverview();
   wireDrawer();
   wireEditModal();
+  await overviewApi.bootOverview();
 
-  // Live now wiring
-  wireLiveList();
-  await loadLiveNow();
-  startLiveTicker(1000);
-
-  // Initial data loads
-  await loadSummary();
   bootRealtime();
   wireScheduleTab();
   wireStoresTab();
   wireUsersTab();
   wireUsersPanel();
   wireGlobalCalendar();
-if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
-
-// Optional: auto-open schedule tab for admins the first time
-// qs('tabSchedule').click();
-
-
+  if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
 });
 
 // Kickoff if init already ran
