@@ -472,77 +472,123 @@
     $("#prKpiDue").textContent = fmtMoney(due);
   }
 
-  async function renderLines(lines, payments) {
-    const tbody = $("#prTbody");
-    if (!tbody) return;
+async function renderLines(lines, payments) {
+  const tbody = $("#prTbody");
+  if (!tbody) return;
 
-    const paidMap = computePaidByEmployee(payments);
+  const paidMap = computePaidByEmployee(payments);
 
-    if (!lines || !lines.length) {
-      // If there are pending shifts, explain it right in the empty state.
-      const pendingCount = pendingReview.length;
-      const hint = pendingCount
-        ? `<div style="margin-top:6px; font-size:12px; opacity:.75;">${pendingCount} shift${pendingCount === 1 ? "" : "s"} are pending review. Approve them in Overview, then rebuild.</div>`
-        : "";
-
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="12" style="padding:14px; opacity:.75;">
-            No lines yet. Click “Build Lines”.
-            ${hint}
-          </td>
-        </tr>`;
-      renderKPIs([], payments);
-      return;
+  function extractTotalsFromDetails(l) {
+    const breakdown = l?.details?.day_breakdown;
+    if (!Array.isArray(breakdown) || !breakdown.length) {
+      // fallback: we at least have paid_seconds / paid_hours
+      const paidSeconds = Number(l.paid_seconds || 0);
+      const roundedMin = Math.round(paidSeconds / 60);
+      return {
+        minutesWorked: roundedMin,     // best available fallback
+        paidBreak: 0,
+        unpaidBreak: 0,
+        roundedMin,
+        hoursRounded: roundedMin / 60
+      };
     }
 
-    tbody.innerHTML = lines
-      .map((l) => {
-        const name = l.employees?.display_name || l.display_name || l.employee_id;
-        const paid = Number(paidMap.get(l.employee_id) || 0);
-        const gross = Number(l.gross_pay || 0);
-        const due = Math.max(0, gross - paid);
+    let workedMin = 0;
+    let paidBreakMin = 0;
+    let unpaidBreakMin = 0;
+    let roundedMin = 0;
 
-        const minutesWorked = Number(l.minutes_worked || 0);
-        const paidBreak = Number(l.paid_break_minutes || 0);
-        const unpaidBreak = Number(l.unpaid_break_minutes || 0);
-        const roundedMin = Number(l.rounded_minutes || 0);
-        const hours = roundedMin / 60;
+    for (const d of breakdown) {
+      const wh = Number(d.worked_hours || 0);                 // hours worked that day (raw)
+      const breakMin = Number(d.break_minutes || 0);          // total break minutes that day
+      const unpaidMin = Number(d.unpaid_break_minutes || 0);  // beyond cap
+      const paidRoundedHrs = Number(d.paid_hours_rounded || 0);
 
-        const rate = Number(l.hourly_rate || 0);
-        const shiftCount = Number(l.shift_count || 0);
+      workedMin += Math.round(wh * 60);
+      unpaidBreakMin += Math.round(unpaidMin);
+      paidBreakMin += Math.max(0, Math.round(breakMin - unpaidMin));
+      roundedMin += Math.round(paidRoundedHrs * 60);
+    }
 
-        const canPay = currentRun && currentRun.status === "final";
+    // "Minutes" column should represent paid minutes BEFORE rounding (worked - unpaid break)
+    const minutesWorked = Math.max(0, workedMin - unpaidBreakMin);
 
-        return `
-          <tr style="border-bottom:1px solid rgba(255,255,255,.06);">
-            <td style="padding:10px 12px; font-weight:650;">${escapeHtml(name)}</td>
-            <td style="padding:10px 12px;">${shiftCount}</td>
-            <td style="padding:10px 12px;">${minutesWorked}</td>
-            <td style="padding:10px 12px;">${paidBreak}</td>
-            <td style="padding:10px 12px;">${unpaidBreak}</td>
-            <td style="padding:10px 12px;">${roundedMin}</td>
-            <td style="padding:10px 12px;">${hours.toFixed(2)}</td>
-            <td style="padding:10px 12px;">${fmtMoney(rate)}/hr</td>
-            <td style="padding:10px 12px; font-weight:700;">${fmtMoney(gross)}</td>
-            <td style="padding:10px 12px;">${fmtMoney(paid)}</td>
-            <td style="padding:10px 12px; font-weight:700;">${fmtMoney(due)}</td>
-            <td style="padding:10px 12px;">
-              <button class="og-btn prPayBtn" type="button"
-                data-emp="${l.employee_id}"
-                data-name="${escapeAttr(name)}"
-                data-due="${due}"
-                ${canPay ? "" : "disabled"}
-                title="${canPay ? "Record payment" : "Finalize run to record payments"}"
-              >Pay</button>
-            </td>
-          </tr>
-        `;
-      })
-      .join("");
-
-    renderKPIs(lines, payments);
+    return {
+      minutesWorked,
+      paidBreak: paidBreakMin,
+      unpaidBreak: unpaidBreakMin,
+      roundedMin,
+      hoursRounded: roundedMin / 60
+    };
   }
+
+  if (!lines || !lines.length) {
+    const pendingCount = pendingReview.length;
+    const hint = pendingCount
+      ? `<div style="margin-top:6px; font-size:12px; opacity:.75;">${pendingCount} shift${pendingCount === 1 ? "" : "s"} are pending review. Approve them in Overview, then rebuild.</div>`
+      : "";
+
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="12" style="padding:14px; opacity:.75;">
+          No lines yet. Click “Build Lines”.
+          ${hint}
+        </td>
+      </tr>`;
+    renderKPIs([], payments);
+    return;
+  }
+
+  tbody.innerHTML = lines
+    .map((l) => {
+      const name = l.employees?.display_name || l.display_name || l.employee_id;
+
+      const paid = Number(paidMap.get(l.employee_id) || 0);
+      const gross = Number(l.gross_pay || 0);
+      const due = Math.max(0, gross - paid);
+
+      const t = extractTotalsFromDetails(l);
+
+      const rate = Number(l.hourly_rate || 0);
+      const shiftCount = Number(l.shift_count || 0);
+
+      const canPay = currentRun && currentRun.status === "final";
+
+      return `
+        <tr style="border-bottom:1px solid rgba(255,255,255,.06);">
+          <td style="padding:10px 12px; font-weight:650;">${escapeHtml(name)}</td>
+          <td style="padding:10px 12px;">${shiftCount}</td>
+          <td style="padding:10px 12px;">${t.minutesWorked}</td>
+          <td style="padding:10px 12px;">${t.paidBreak}</td>
+          <td style="padding:10px 12px;">${t.unpaidBreak}</td>
+          <td style="padding:10px 12px;">${t.roundedMin}</td>
+          <td style="padding:10px 12px;">${t.hoursRounded.toFixed(2)}</td>
+          <td style="padding:10px 12px;">${fmtMoney(rate)}/hr</td>
+          <td style="padding:10px 12px; font-weight:700;">${fmtMoney(gross)}</td>
+          <td style="padding:10px 12px;">${fmtMoney(paid)}</td>
+          <td style="padding:10px 12px; font-weight:700;">${fmtMoney(due)}</td>
+          <td style="padding:10px 12px;">
+            <button class="og-btn prPayBtn" type="button"
+              data-emp="${l.employee_id}"
+              data-name="${escapeAttr(name)}"
+              data-due="${due}"
+              ${canPay ? "" : "disabled"}
+              title="${canPay ? "Record payment" : "Finalize run to record payments"}"
+            >Pay</button>
+            <button class="og-btn previewPdfBtn"
+              data-run="${currentRun.id}"
+              data-emp="${l.employee_id}">
+              PDF
+            </button>
+
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  renderKPIs(lines, payments);
+}
 
   // ----------------------------
   // Actions (RPC wrappers)
@@ -859,61 +905,97 @@ async function deleteSelectedPayPeriod() {
   // ----------------------------
   // Export CSV
   // ----------------------------
-  function buildCsv(lines, payments) {
-    const paidMap = computePaidByEmployee(payments);
+function buildCsv(lines, payments) {
+  const paidMap = computePaidByEmployee(payments);
 
-    const headers = [
-      "employee_id",
-      "display_name",
-      "shift_count",
-      "minutes_worked",
-      "paid_break_minutes",
-      "unpaid_break_minutes",
-      "rounded_minutes",
-      "hours_rounded",
-      "hourly_rate",
-      "gross_pay",
-      "paid_amount",
-      "due_amount",
+  function extractTotalsFromDetails(l) {
+    const breakdown = l?.details?.day_breakdown;
+    if (!Array.isArray(breakdown) || !breakdown.length) {
+      const paidSeconds = Number(l.paid_seconds || 0);
+      const roundedMin = Math.round(paidSeconds / 60);
+      return {
+        minutesWorked: roundedMin,
+        paidBreak: 0,
+        unpaidBreak: 0,
+        roundedMin,
+        hoursRounded: roundedMin / 60
+      };
+    }
+
+    let workedMin = 0, paidBreakMin = 0, unpaidBreakMin = 0, roundedMin = 0;
+
+    for (const d of breakdown) {
+      const wh = Number(d.worked_hours || 0);
+      const breakMin = Number(d.break_minutes || 0);
+      const unpaidMin = Number(d.unpaid_break_minutes || 0);
+      const paidRoundedHrs = Number(d.paid_hours_rounded || 0);
+
+      workedMin += Math.round(wh * 60);
+      unpaidBreakMin += Math.round(unpaidMin);
+      paidBreakMin += Math.max(0, Math.round(breakMin - unpaidMin));
+      roundedMin += Math.round(paidRoundedHrs * 60);
+    }
+
+    const minutesWorked = Math.max(0, workedMin - unpaidBreakMin);
+
+    return {
+      minutesWorked,
+      paidBreak: paidBreakMin,
+      unpaidBreak: unpaidBreakMin,
+      roundedMin,
+      hoursRounded: roundedMin / 60
+    };
+  }
+
+  const headers = [
+    "employee_id",
+    "display_name",
+    "shift_count",
+    "minutes_worked",
+    "paid_break_minutes",
+    "unpaid_break_minutes",
+    "rounded_minutes",
+    "hours_rounded",
+    "hourly_rate",
+    "gross_pay",
+    "paid_amount",
+    "due_amount",
+  ];
+
+  const rows = (lines || []).map((l) => {
+    const name = l.employees?.display_name || l.display_name || "";
+    const gross = Number(l.gross_pay || 0);
+    const paid = Number(paidMap.get(l.employee_id) || 0);
+    const due = Math.max(0, gross - paid);
+
+    const t = extractTotalsFromDetails(l);
+
+    const cols = [
+      l.employee_id,
+      name,
+      Number(l.shift_count || 0),
+      t.minutesWorked,
+      t.paidBreak,
+      t.unpaidBreak,
+      t.roundedMin,
+      t.hoursRounded.toFixed(2),
+      Number(l.hourly_rate || 0).toFixed(2),
+      gross.toFixed(2),
+      paid.toFixed(2),
+      due.toFixed(2),
     ];
 
-    const rows = (lines || []).map((l) => {
-      const name = l.employees?.display_name || l.display_name || "";
-      const gross = Number(l.gross_pay || 0);
-      const paid = Number(paidMap.get(l.employee_id) || 0);
-      const due = Math.max(0, gross - paid);
+    return cols.map(csvCell).join(",");
+  });
 
-      const roundedMin = Number(l.rounded_minutes || 0);
-      const hours = roundedMin / 60;
+  return [headers.join(","), ...rows].join("\n");
 
-      const cols = [
-        l.employee_id,
-        name,
-        Number(l.shift_count || 0),
-        Number(l.minutes_worked || 0),
-        Number(l.paid_break_minutes || 0),
-        Number(l.unpaid_break_minutes || 0),
-        roundedMin,
-        hours.toFixed(2),
-        Number(l.hourly_rate || 0).toFixed(2),
-        gross.toFixed(2),
-        paid.toFixed(2),
-        due.toFixed(2),
-      ];
-
-      return cols.map(csvCell).join(",");
-    });
-
-    return [headers.join(","), ...rows].join("\n");
-
-    function csvCell(v) {
-      const s = String(v ?? "");
-      if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-        return `"${s.replaceAll('"', '""')}"`;
-      }
-      return s;
-    }
+  function csvCell(v) {
+    const s = String(v ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replaceAll('"', '""')}"`;
+    return s;
   }
+}
 
   function downloadText(filename, text) {
     const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
@@ -1026,6 +1108,53 @@ async function deleteSelectedPayPeriod() {
         await promptPayment(empId, empName, due);
       } catch {}
     });
+
+// delegated PDF preview button
+$("#prTbody")?.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".previewPdfBtn");
+  if (!btn) return;
+
+  const runId = btn.dataset.run;
+  const empId = btn.dataset.emp;
+
+  try {
+    const session = (await sb().auth.getSession()).data.session;
+    if (!session) {
+      toast("Not authenticated", "err");
+      return;
+    }
+
+    const res = await fetch(
+      `${sb().supabaseUrl}/functions/v1/payroll-statement-pdf`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          run_id: runId,
+          employee_id: empId,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+  const text = await res.text();
+  console.error("PDF function error:", text);
+  throw new Error(text || `PDF generation failed (${res.status})`);
+}
+
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showAdminError("PDF preview failed", safeErrMsg(err));
+  }
+});
+
 
     $("#prDeleteRunBtn")?.addEventListener("click", deleteDraftRun);
 
