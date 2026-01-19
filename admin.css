@@ -1004,3 +1004,406 @@ html,body{
   opacity:.78;
 }
 .invite-modal.is-busy input{ cursor:not-allowed; }
+
+/* ======================================================================
+   OG Jewelry — Admin Dashboard
+   MOBILE SHELL UPGRADE (Bottom Nav + Sheets + Overview Mobile Cards)
+   Paste this entire block at the VERY BOTTOM of admin.css
+   (Do not override elsewhere; keep this as the single source of truth.)
+   ====================================================================== */
+
+/* -------------------------
+   0) Safe-area + layout guardrails
+------------------------- */
+:root{
+  --nav-h: 74px;                 /* bottom nav height */
+  --sheet-radius: 18px;
+  --glass: rgba(18, 19, 22, 0.72);
+  --glass-2: rgba(18, 19, 22, 0.88);
+  --stroke: rgba(255, 255, 255, 0.08);
+  --stroke-2: rgba(255, 255, 255, 0.12);
+  --shadow-lg: 0 22px 55px rgba(0,0,0,.55);
+  --shadow-md: 0 14px 34px rgba(0,0,0,.40);
+  --tap: translateY(1px) scale(0.99);
+}
+
+/* Reserve space for bottom nav on small screens so content is never hidden */
+@media (max-width: 760px){
+  body{
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Make panels breathe better on mobile */
+@media (max-width: 760px){
+  .panel{
+    padding-bottom: 22px;
+  }
+}
+
+/* -------------------------
+   1) Mobile-only helpers
+------------------------- */
+.mobile-only{ display:none; }
+@media (max-width: 760px){
+  .mobile-only{ display:inline-flex; }
+}
+
+/* -------------------------
+   2) Premium mobile "quick bar" (Overview)
+------------------------- */
+.mobile-bar{
+  display:none;
+}
+@media (max-width: 760px){
+  .mobile-bar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin: 10px 0 14px;
+    padding: 10px 10px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--stroke);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .mobile-bar .btn.ghost{
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+  .mobile-search{
+    flex:1;
+    display:flex;
+    align-items:center;
+  }
+  .mobile-search input{
+    width:100%;
+    padding: 12px 12px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--stroke);
+    color: var(--text);
+    outline: none;
+  }
+  .mobile-search input:focus{
+    border-color: rgba(255,255,255,0.16);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.06);
+  }
+
+  /* On phones, the desktop filter row is too tall; keep it but make it optional.
+     If you prefer to hide it entirely on mobile, uncomment the next rule. */
+  /* .filters{ display:none; } */
+}
+
+/* -------------------------
+   3) Overview: table → cards on mobile
+------------------------- */
+.summary-cards{
+  display:none;
+}
+@media (max-width: 760px){
+  /* Hide table wrapper on mobile (cards take over) */
+  #panelOverview .table-wrapper{ display:none; }
+
+  .summary-cards{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-top: 12px;
+  }
+
+  .summary-card{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    padding: 14px 14px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--stroke);
+    box-shadow: 0 10px 26px rgba(0,0,0,.26);
+  }
+
+  .summary-card-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+  }
+
+  .summary-card-name{
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: var(--text);
+  }
+
+  .summary-card-sub{
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .summary-card-metrics{
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap:10px;
+    margin-top: 2px;
+  }
+
+  .summary-metric{
+    padding: 10px 10px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    text-align:left;
+    min-width: 0;
+  }
+
+  .summary-metric .lbl{
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .summary-metric .val{
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1.1;
+  }
+
+  .summary-card-actions{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    justify-content:flex-end;
+  }
+  .summary-card-actions .btn{
+    width: 100%;
+    justify-content:center;
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+}
+
+/* -------------------------
+   4) Bottom navigation (phone-only)
+------------------------- */
+.bottom-nav{
+  display:none;
+}
+
+@media (max-width: 760px){
+  .bottom-nav{
+    display:flex;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    height: var(--nav-h);
+    padding: 10px 10px;
+    border-radius: 22px;
+    background: var(--glass);
+    border: 1px solid var(--stroke-2);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    z-index: 950; /* below drawers/modals, above content */
+    gap: 8px;
+  }
+
+  .bottom-nav-btn{
+    appearance:none;
+    border:0;
+    background: transparent;
+    color: var(--muted);
+    flex:1;
+    border-radius: 16px;
+    padding: 10px 6px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap: 4px;
+    cursor:pointer;
+    transition: transform .12s ease, background .18s ease, color .18s ease;
+  }
+
+  .bottom-nav-btn:active{
+    transform: var(--tap);
+  }
+
+  .bn-ico{
+    font-size: 18px;
+    line-height: 1;
+    opacity: .92;
+  }
+
+  .bn-lbl{
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+
+  .bottom-nav-btn.active{
+    color: var(--text);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.10);
+  }
+}
+
+/* Hide top tabs on phones (we use bottom nav) */
+@media (max-width: 760px){
+  .tabs{ display:none; }
+}
+
+/* -------------------------
+   5) Sheets (Filters + More)
+------------------------- */
+.sheet-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 980;
+}
+
+.sheet{
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  border-radius: var(--sheet-radius);
+  background: var(--glass-2);
+  border: 1px solid var(--stroke-2);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 990;
+  transform: translateY(18px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .18s ease, opacity .18s ease;
+  max-height: min(70vh, 520px);
+  overflow: hidden;
+}
+
+.sheet.open{
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sheet-handle{
+  width: 48px;
+  height: 5px;
+  border-radius: 999px;
+  margin: 10px auto 8px;
+  background: rgba(255,255,255,0.18);
+}
+
+.sheet-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 10px 12px 10px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.sheet-head h3{
+  margin:0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+.icon-btn{
+  appearance:none;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  cursor:pointer;
+  transition: transform .12s ease, background .18s ease, border-color .18s ease;
+}
+.icon-btn:active{ transform: var(--tap); }
+.icon-btn:hover{
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+}
+
+.sheet-body{
+  padding: 12px;
+  display:flex;
+  flex-direction:column;
+  gap: 12px;
+}
+
+.sheet-foot{
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.sheet-link{
+  width:100%;
+  text-align:left;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  cursor:pointer;
+  font-weight: 700;
+  transition: transform .12s ease, background .18s ease, border-color .18s ease;
+}
+.sheet-link:active{ transform: var(--tap); }
+.sheet-link:hover{
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+}
+
+/* hidden helper should exist already, but just in case */
+.hidden{ display:none !important; }
+
+/* -------------------------
+   6) Ensure drawers/modals stay above sheets/nav
+------------------------- */
+/* Most of your modals already have high z-index.
+   These are safety rails only (won't hurt if already set). */
+.drawer{ z-index: 1200; }
+.drawer-backdrop{ z-index: 1100; }
+.modal{ z-index: 1400; }
+.modal-backdrop{ z-index: 1300; }
+
+/* -------------------------
+   7) Desktop premium polish (tabs row stays premium)
+------------------------- */
+@media (min-width: 761px){
+  .tabs{
+    position: sticky;
+    top: 64px; /* below header */
+    z-index: 50;
+    background: rgba(11,11,12,0.75);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 10px;
+    margin: 14px 0 14px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  }
+
+  .tab{
+    border-radius: 14px;
+    transition: transform .12s ease, background .18s ease, border-color .18s ease;
+  }
+  .tab:active{ transform: var(--tap); }
+  .tab.active{
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.12);
+  }
+}
