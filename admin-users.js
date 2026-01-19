@@ -22,8 +22,11 @@
       .replaceAll("'", "&#039;");
 
   // ---------- state ----------
-  let lastRows = [];
-  let lastDocMap = new Map(); // employee_id -> { status, doc_type }
+    let lastRows = [];
+    let lastDocMap = new Map(); // employee_id -> { status, doc_type }
+    let lastAddrMap = new Map(); // employee_id -> true (has current address)
+    let addrStatusLoaded = false;
+
   let drawerReady = false;
   let activeEmployeeId = null;
 
@@ -45,6 +48,60 @@
     } catch (_) {}
     return m;
   }
+
+    // ---------- address status (Phase 2 chip) ----------
+    let addrFetchTimer = null;
+    let lastAddrKey = "";
+
+    async function refreshAddressStatus(rows) {
+    // Lightweight: one query for current address existence for the visible employee ids.
+    // No history data pulled.
+    const supabase = window.supabase;
+    if (!supabase) return;
+
+    const ids = (Array.isArray(rows) ? rows : [])
+        .map((r) => getEmpId(r))
+        .filter((id) => !!id);
+
+    // De-dupe + keep query size sane
+    const uniq = Array.from(new Set(ids)).slice(0, 500);
+    if (!uniq.length) {
+        lastAddrMap = new Map();
+        addrStatusLoaded = true;
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from("employee_legal_addresses")
+        .select("employee_id")
+        .in("employee_id", uniq)
+        .eq("is_current", true);
+
+    if (error) {
+        console.error("Address status load failed", error);
+        return;
+    }
+
+    const m = new Map();
+    (data || []).forEach((r) => {
+        const eid = String(r.employee_id || "");
+        if (eid) m.set(eid, true);
+    });
+
+    lastAddrMap = m;
+    addrStatusLoaded = true;
+    }
+
+    function scheduleAddressStatusRefresh(rows) {
+    // debounce so typing in search / toggling doesn't spam queries
+    if (addrFetchTimer) clearTimeout(addrFetchTimer);
+    addrFetchTimer = setTimeout(async () => {
+        await refreshAddressStatus(rows);
+        // Re-render chips with updated info
+        renderUsersCards(lastRows, lastDocMap, true);
+    }, 180);
+    }
+
 
   // ---------- init ----------
   function initUsersCardsTab() {
@@ -140,14 +197,20 @@
       chips.push(chip("Tax docs: check tab", "neutral", "📄"));
     }
 
-    chips.push(chip("Address: (phase 2)", "neutral", "🏠"));
+    const hasAddr = lastAddrMap.get(getEmpId(row)) === true;
+    if (addrStatusLoaded) {
+    chips.push(hasAddr ? chip("Address: on file", "ok", "🏠") : chip("Address: missing", "warn", "🏠"));
+    } else {
+    chips.push(chip("Address: …", "neutral", "🏠"));
+    }
+
     chips.push(row.active ? chip("Active", "ok", "🟢") : chip("Inactive", "bad", "⚪"));
 
     return chips.join("");
   }
 
   // ---------- cards renderer ----------
-  function renderUsersCards(rows, docMap) {
+  function renderUsersCards(rows, docMap, skipAddrRefresh = false) {
     const container = qs("#usersCards");
     if (!container) return;
 
@@ -163,6 +226,16 @@
       const hay = `${r.display_name || ""} ${r.email || ""} ${r.role || ""} ${r.worker_type || ""}`.toLowerCase();
       return hay.includes(searchVal);
     });
+
+    // Address status chip refresh (debounced + only when needed)
+    if (!skipAddrRefresh) {
+    const key = filtered.map((r) => getEmpId(r)).filter(Boolean).sort().join("|");
+    if (key !== lastAddrKey) {
+        lastAddrKey = key;
+        addrStatusLoaded = false;
+        scheduleAddressStatusRefresh(filtered);
+    }
+    }
 
     if (!filtered.length) {
       container.innerHTML = `<div class="muted">No users match your filters.</div>`;
