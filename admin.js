@@ -6,6 +6,43 @@ let supabaseClient = null;
 let drawerOnlyAnoms = false;
 let lastDrawerShifts = []; // keep latest list to re-render on toggle
 
+/* =========================
+   Store name cache (for Overview drawer + anywhere)
+   ========================= */
+
+let _storeNameCache = null; // Map(store_id -> { id, name, lat, lng })
+
+async function ensureStoreNameCache(){
+  if (_storeNameCache) return;
+
+  const { data, error } = await supabaseClient
+    .from('store_locations')
+    .select('id,name,lat,lng')
+    .order('name', { ascending: true });
+
+  if (error) throw error;
+
+  _storeNameCache = new Map();
+  for (const s of (data || [])){
+    _storeNameCache.set(s.id, s);
+  }
+}
+
+function storeNameById(storeId){
+  if (!storeId) return '';
+  // Prefer cache (works even if Stores tab never opened)
+  if (_storeNameCache?.has(storeId)) return _storeNameCache.get(storeId)?.name || '';
+  // Fallback to Stores tab cache if present
+  const s = _allStores?.find?.(x => x.id === storeId);
+  return s?.name || '';
+}
+
+function storeDirectionsHref(storeId){
+  const s = _storeNameCache?.get(storeId) || _allStores?.find?.(x => x.id === storeId);
+  if (!s || s.lat == null || s.lng == null) return null;
+  return directionsUrl(s.lat, s.lng);
+}
+
 // ===== Global calendar state =====
 let gcMonthStart = null; // first day of the month being shown (Date)
 // =========================================================
@@ -89,22 +126,6 @@ function applyDirectionsLinkFromStoreId(linkEl, storeId) {
 }
 
 
-function storeDirectionsHref(storeId){
-  const s = storesById.get(storeId);
-  if (!s) return '#';
-
-  const lat = Number(s.lat);
-  const lng = Number(s.lng);
-
-  // Fallback: if coords missing, search by name
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)){
-    const q = encodeURIComponent(s.name || 'store');
-    return `https://www.google.com/maps/search/?api=1&query=${q}`;
-  }
-
-  // Pin to coordinates
-  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-}
 
 function storeOptionsHTML(selectedId = null){
   let html = `<option value="">— Select store —</option>`;
@@ -636,11 +657,7 @@ function fmtTimeHM(ts){
   return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 }
 
-function storeNameById(storeId){
-  if (!storeId) return '';
-  const s = _allStores.find(x => x.id === storeId);
-  return s?.name || '';
-}
+
 
 
 function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
@@ -2009,11 +2026,11 @@ function renderDrawerList(shifts){
     return;
   }
 
-  const storeName = (storeId) => {
-    if (!storeId) return '—';
-    const s = storesById?.get?.(storeId);
-    return (s?.name || s?.store_name || s?.label || '—');
-  };
+const storeName = (storeId) => {
+  const n = storeNameById(storeId);
+  return n ? n : '—';
+};
+
 
   const statusBadgeHTML = (s) => {
     if (s.is_open) return `<span class="badge warn">OPEN</span>`;
@@ -2140,7 +2157,11 @@ function renderDrawerList(shifts){
     `;
 
     host.appendChild(card);
+
+    
   }
+
+
 }
 
 
@@ -3042,6 +3063,11 @@ document.addEventListener("supabase-ready", async () => {
   show(qs("adminApp"), ok);
 
   if (!ok) return;
+
+    // ✅ Preload store names for Overview drawer + directions
+  try { await ensureStoreNameCache(); }
+  catch(e){ console.warn('ensureStoreNameCache failed:', e); }
+
 
   // Header + tabs
   wireHeaderActions();
