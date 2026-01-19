@@ -275,13 +275,81 @@
             </div>
           </section>
 
-          <!-- Compliance (status only) -->
-          <section class="ud-section">
-            <div class="ud-section-title">Compliance</div>
-            <div class="ud-hint muted">
-              Tax docs and address management live in their dedicated tabs (status shown above).
-            </div>
-          </section>
+          <!-- Address (Phase 2: history) -->
+<section class="ud-section">
+  <div class="ud-section-title">Legal Address</div>
+
+  <div class="ud-hint muted" style="margin-bottom:10px;">
+    Updates create a new history record. We never overwrite past addresses.
+  </div>
+
+  <!-- Current -->
+  <div class="ud-address-current" id="udAddrCurrent">
+    <div class="muted">Loading current address…</div>
+  </div>
+
+  <!-- Add new -->
+  <div class="ud-address-form" style="margin-top:12px;">
+    <div class="ud-subtitle" style="margin:6px 0 8px;">Add new address</div>
+
+    <div class="ud-grid">
+      <label class="ud-field ud-span2">
+        <span>Line 1</span>
+        <input id="udAddrLine1" type="text" autocomplete="off" placeholder="123 Main St" />
+      </label>
+
+      <label class="ud-field ud-span2">
+        <span>Line 2 (optional)</span>
+        <input id="udAddrLine2" type="text" autocomplete="off" placeholder="Apt, suite, unit" />
+      </label>
+
+      <label class="ud-field">
+        <span>City</span>
+        <input id="udAddrCity" type="text" autocomplete="off" />
+      </label>
+
+      <label class="ud-field">
+        <span>State</span>
+        <input id="udAddrState" type="text" autocomplete="off" placeholder="FL" />
+      </label>
+
+      <label class="ud-field">
+        <span>ZIP</span>
+        <input id="udAddrZip" type="text" autocomplete="off" placeholder="33101" />
+      </label>
+
+      <label class="ud-field">
+        <span>Country</span>
+        <input id="udAddrCountry" type="text" autocomplete="off" value="US" />
+      </label>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button id="udAddrAddBtn" class="btn" type="button">Add address</button>
+      <div id="udAddrMsg" class="muted" style="align-self:center;">—</div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div style="margin-top:14px;">
+    <div class="ud-subtitle" style="margin:6px 0 8px;">Address history</div>
+    <div class="table-wrapper">
+      <table class="table" aria-label="Address history">
+        <thead>
+          <tr>
+            <th style="width:110px;">Current</th>
+            <th>Address</th>
+            <th style="width:220px;">Created</th>
+          </tr>
+        </thead>
+        <tbody id="udAddrHistory">
+          <tr><td colspan="3" class="muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 
           <div class="ud-spacer"></div>
 
@@ -291,7 +359,7 @@
               <button class="btn ghost" id="udResendBtn" type="button">Resend invite</button>
             </div>
             <div class="ud-footer-right">
-              <button class="btn primary" id="udSaveBtn" type="button" disabled>Save changes</button>
+              <button class="btn primary" id="udSaveBtn" type="button" disabled>Save profile changes</button>
             </div>
           </div>
 
@@ -325,6 +393,27 @@
       el.addEventListener("input", watch);
       el.addEventListener("change", watch);
     });
+
+    // Address form button enable/disable
+    const updateAddrAddBtn = () => {
+    const line1 = (qs("#udAddrLine1")?.value || "").trim();
+    const city  = (qs("#udAddrCity")?.value || "").trim();
+    const state = (qs("#udAddrState")?.value || "").trim();
+    const zip   = (qs("#udAddrZip")?.value || "").trim();
+
+    const ok = !!(line1 && city && state && zip);
+    const btn = qs("#udAddrAddBtn");
+    if (btn) btn.disabled = !ok;
+    };
+
+    // run once on drawer creation
+    updateAddrAddBtn();
+
+    // listen to address inputs only
+    ["#udAddrLine1","#udAddrCity","#udAddrState","#udAddrZip","#udAddrLine2","#udAddrCountry"].forEach(sel => {
+    qs(sel)?.addEventListener("input", updateAddrAddBtn);
+    });
+
 
     // Save
     qs("#udSaveBtn")?.addEventListener("click", async () => {
@@ -391,6 +480,12 @@
       msg.textContent = "Resend handler missing in admin.js.";
     });
 
+    qs("#udAddrAddBtn")?.addEventListener("click", async () => {
+        if (!activeEmployeeId) return;
+        await addAddressForEmployee(activeEmployeeId);
+    });
+
+
     drawerReady = true;
   }
 
@@ -434,6 +529,149 @@
     setDirty(changed);
   }
 
+  // ---------- Phase 2: Addresses ----------
+function fmtTs(ts){
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    return Number.isNaN(+d) ? String(ts) : d.toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+function addressToOneLine(a){
+  const parts = [
+    a.line1,
+    a.line2,
+    `${a.city || ""}${a.city && a.state ? ", " : ""}${a.state || ""} ${a.postal_code || ""}`.trim(),
+    a.country || "US"
+  ].filter(Boolean);
+  return parts.join(" • ");
+}
+
+async function loadAddressesForEmployee(employeeId){
+  const supabase = window.supabase;
+  if (!supabase) throw new Error("supabase missing on window");
+  if (!employeeId) return [];
+
+  const { data, error } = await supabase
+    .from("employee_legal_addresses")
+    .select("id, employee_id, line1, line2, city, state, postal_code, country, is_current, created_at")
+    .eq("employee_id", employeeId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+function renderAddressUI(rows){
+  const curBox = qs("#udAddrCurrent");
+  const histBody = qs("#udAddrHistory");
+  if (!curBox || !histBody) return;
+
+  const current = (rows || []).find(r => r.is_current) || null;
+
+  if (!current){
+    curBox.innerHTML = `<div class="muted">No address on file.</div>`;
+  } else {
+    curBox.innerHTML = `
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+        <div>
+          <div style="font-weight:700;">Current</div>
+          <div class="muted" style="margin-top:4px;">${esc(addressToOneLine(current))}</div>
+        </div>
+        <div class="muted" style="white-space:nowrap;">${esc(fmtTs(current.created_at))}</div>
+      </div>
+    `;
+  }
+
+  if (!rows || !rows.length){
+    histBody.innerHTML = `<tr><td colspan="3" class="muted">No address history.</td></tr>`;
+    return;
+  }
+
+  histBody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.is_current ? `<span class="uc-chip uc-ok">✅ current</span>` : `<span class="muted">—</span>`}</td>
+      <td>${esc(addressToOneLine(r))}</td>
+      <td>${esc(fmtTs(r.created_at))}</td>
+    </tr>
+  `).join("");
+}
+
+async function refreshAddresses(employeeId){
+  const msg = qs("#udAddrMsg");
+  if (msg) msg.textContent = "Loading…";
+  try{
+    const rows = await loadAddressesForEmployee(employeeId);
+    renderAddressUI(rows);
+    if (msg) msg.textContent = "—";
+  }catch(err){
+    console.error(err);
+    if (msg) msg.textContent = `Failed: ${err?.message || err}`;
+    // keep prior UI if any
+  }
+}
+
+async function addAddressForEmployee(employeeId){
+  const supabase = window.supabase;
+  if (!supabase) throw new Error("supabase missing on window");
+  if (!employeeId) throw new Error("No employee selected");
+
+  const msg = qs("#udAddrMsg");
+  const btn = qs("#udAddrAddBtn");
+
+  const line1 = (qs("#udAddrLine1")?.value || "").trim();
+  const line2 = (qs("#udAddrLine2")?.value || "").trim();
+  const city  = (qs("#udAddrCity")?.value || "").trim();
+  const state = (qs("#udAddrState")?.value || "").trim();
+  const zip   = (qs("#udAddrZip")?.value || "").trim();
+  const country = (qs("#udAddrCountry")?.value || "US").trim() || "US";
+
+  if (!line1 || !city || !state || !zip){
+    if (msg) msg.textContent = "Please fill Line 1, City, State, ZIP.";
+    return;
+  }
+
+  btn && (btn.disabled = true);
+  if (msg) msg.textContent = "Saving…";
+
+  try{
+    // Insert as current. Trigger + unique index will flip prior currents off.
+    const { error } = await supabase
+      .from("employee_legal_addresses")
+      .insert([{
+        employee_id: employeeId,
+        line1,
+        line2: line2 || null,
+        city,
+        state,
+        postal_code: zip,
+        country,
+        is_current: true
+      }]);
+
+    if (error) throw error;
+
+    // clear inputs
+    ["udAddrLine1","udAddrLine2","udAddrCity","udAddrState","udAddrZip"].forEach(id => {
+      const el = qs("#" + id);
+      if (el) el.value = "";
+    });
+
+    if (msg) msg.textContent = "Saved ✅";
+    await refreshAddresses(employeeId);
+    setTimeout(() => { if (msg) msg.textContent = "—"; }, 1200);
+  }catch(err){
+    console.error(err);
+    if (msg) msg.textContent = `Save failed: ${err?.message || err}`;
+  }finally{
+    btn && (btn.disabled = false);
+  }
+}
+
+
   function openUserDrawer(row) {
     if (!row) return;
     ensureDrawer();
@@ -457,6 +695,9 @@
     qs("#udActive").checked = !!row.active;
 
     drawer.setAttribute("data-employee-id", activeEmployeeId);
+    // Phase 2: address section
+refreshAddresses(activeEmployeeId);
+
 
     // snapshot + clean state
     drawerSnapshot = readDrawerState();
