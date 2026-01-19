@@ -233,28 +233,11 @@
           </label>
         </div>
 
-        <div class="table-wrapper">
-          <table class="table" aria-label="Users table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th style="width:160px;">Status</th>
-                <th style="width:160px;">Role</th>
-                <th style="width:160px;">Type</th> <!-- NEW: employee vs contractor -->
-
-                 <!-- ✅ NEW -->
-                <th style="width:160px;">Hourly Rate</th>
-
-                <th style="width:120px;">Active</th>
-                <th style="width:220px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="usersTbody">
-              <tr><td colspan="8" class="muted">Open Users tab to load…</td></tr>
-            </tbody>
-          </table>
+        <!-- Cards-only users list -->
+        <div id="usersCards" class="users-cards" aria-label="Users list">
+          <div class="muted">Open Users tab to load…</div>
         </div>
+
 
         <p class="muted" style="text-align:left; margin:10px 2px 0;">
           Invites are sent by email via Supabase Auth. Roles and Active status are stored in <code>employees</code>.
@@ -749,7 +732,8 @@
   <!-- Admin logic -->
   <script src="admin-payroll.js"></script>
   <script src="admin-agreements.js"></script>
+  
   <script type="module" src="admin.js"></script>
-
+  <script src="admin-users.js" defer></script>
 </body>
 </html>

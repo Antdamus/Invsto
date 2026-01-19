@@ -2605,8 +2605,15 @@ function applyUsersFilterAndRender(){
     });
   }
 
-  renderUsersTable(rows);
+  // NEW: cards renderer can live in admin-users.js
+  if (typeof window.renderUsers === "function") {
+    window.renderUsers(rows);
+  } else {
+    // fallback (keeps old behavior if cards script isn't loaded)
+    renderUsersTable(rows);
+  }
 }
+
 
 const esc = escapeHtml;
 
@@ -2813,6 +2820,16 @@ async function saveUserRow(tr){
   await loadUsers();
 }
 
+// =========================================================
+// Expose Users helpers for non-module scripts (admin-users.js)
+// =========================================================
+window.loadUsers = loadUsers;
+window.saveUserRow = saveUserRow;
+window.resendInvite = resendInvite;
+window.showToast = showToast;
+
+// Optional (only if you want other scripts to hook your renderer)
+window.renderUsersTable = window.renderUsersTable || renderUsersTable;
 
 
 function wireUsersTab(){
@@ -2822,6 +2839,13 @@ function wireUsersTab(){
 
     if (_usersInitialized) return;
     _usersInitialized = true;
+  // NEW: initialize cards renderer (admin-users.js)
+  // (safe: does nothing if admin-users.js not loaded)
+  if (typeof window.initUsersCardsTab === 'function') {
+    await window.initUsersCardsTab();
+  }
+
+
 
     // modal controls
     qs('userAddBtn')?.addEventListener('click', openUserModal);
