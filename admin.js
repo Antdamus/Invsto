@@ -2908,39 +2908,40 @@ function setupOverview() {
 }
 
 //* ============== Boot ============== */
-document.addEventListener('supabase-ready', async () => {
+document.addEventListener("supabase-ready", async () => {
   supabaseClient = window.supabase;
 
   // Guard UI
-  show(qs('guardLoading'), true);
-  show(qs('guardDenied'), false);
-  show(qs('adminApp'), false);
+  show(qs("guardLoading"), true);
+  show(qs("guardDenied"), false);
+  show(qs("adminApp"), false);
 
   const ok = await ensureAdmin();
 
-  show(qs('guardLoading'), false);
-  show(qs('guardDenied'), !ok);
-  show(qs('adminApp'), ok);
+  show(qs("guardLoading"), false);
+  show(qs("guardDenied"), !ok);
+  show(qs("adminApp"), ok);
 
   if (!ok) return;
 
   // Header + tabs
   wireHeaderActions();
   wireTabs();
-  activateTab('overview');
+  activateTab("overview");
 
   // Prefill month for Overview
   const now = new Date();
-  const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const monthInput = qs('monthInput');
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthInput = qs("monthInput");
   if (monthInput) monthInput.value = ym;
 
-  // Overview + Drawer/Edit/Audit wiring
+  // ✅ Overview (desktop table + mobile cards)
   setupOverview();
   wireDrawer();
   wireEditModal();
   await overviewApi.bootOverview();
 
+  // The rest of the dashboard
   bootRealtime();
   wireScheduleTab();
   wireStoresTab();
@@ -2949,6 +2950,7 @@ document.addEventListener('supabase-ready', async () => {
   wireGlobalCalendar();
   if (!gcMonthStart) gcMonthStart = getMonthStart(new Date());
 });
+
 
 // Kickoff if init already ran
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
