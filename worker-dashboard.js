@@ -43,6 +43,20 @@ function startOfTodayLocal(d = new Date()) {
   return x;
 }
 
+async function markAcceptedIfNeeded(supabase) {
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    if (!user) return;
+
+    // This RPC sets employees.accepted_at = now() if null for auth.uid()
+    await supabase.rpc("mark_invite_accepted");
+  } catch (e) {
+    console.warn("mark_invite_accepted failed (worker dashboard):", e);
+  }
+}
+
+
 function startOfWeekSunLocal(d = new Date()) {
   const x = new Date(d);
   const day = x.getDay(); // Sun=0
@@ -580,6 +594,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const session = await getSessionOrRedirect();
   if (!session) return;
+
+  // ✅ mark this user as "accepted" the first time they successfully reach the dashboard
+  await markAcceptedIfNeeded(window.supabase);
 
   const state = {
     employee: null,

@@ -53,6 +53,61 @@
     let addrFetchTimer = null;
     let lastAddrKey = "";
 
+    // ---------- tax doc status (W-9 for contractors, W-4 for employees) ----------
+let lastTaxMap = new Map(); // employee_id -> { w9: "verified|received|rejected|...", w4: "..." }
+let taxStatusLoaded = false;
+let taxFetchTimer = null;
+let lastTaxKey = "";
+
+async function refreshTaxStatus(rows) {
+  const supabase = window.supabase;
+  if (!supabase) return;
+
+  const ids = (Array.isArray(rows) ? rows : [])
+    .map((r) => getEmpId(r))
+    .filter(Boolean);
+
+  const uniq = Array.from(new Set(ids)).slice(0, 500);
+  if (!uniq.length) {
+    lastTaxMap = new Map();
+    taxStatusLoaded = true;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("employee_tax_docs")
+    .select("employee_id, doc_type, status, is_active")
+    .in("employee_id", uniq)
+    .eq("is_active", true);
+
+  if (error) {
+    console.error("Tax status load failed", error);
+    return;
+  }
+
+  const m = new Map();
+  (data || []).forEach((r) => {
+    const eid = String(r.employee_id || "");
+    const dt = String(r.doc_type || "").toLowerCase(); // "w9" | "w4"
+    const st = String(r.status || "").toLowerCase();
+    if (!eid || !dt) return;
+    if (!m.has(eid)) m.set(eid, {});
+    m.get(eid)[dt] = st;
+  });
+
+  lastTaxMap = m;
+  taxStatusLoaded = true;
+}
+
+function scheduleTaxStatusRefresh(rows) {
+  if (taxFetchTimer) clearTimeout(taxFetchTimer);
+  taxFetchTimer = setTimeout(async () => {
+    await refreshTaxStatus(rows);
+    renderUsersCards(lastRows, lastDocMap, true); // reuse your existing render (skip addr refresh)
+  }, 180);
+}
+
+
     async function refreshAddressStatus(rows) {
     // Lightweight: one query for current address existence for the visible employee ids.
     // No history data pulled.
@@ -177,25 +232,32 @@
   function statusChips(row) {
     const chips = [];
 
-    const accepted = row.accepted === true || row.status === "accepted" || row.invite_status === "accepted";
+    const accepted = !!row.accepted_at || row.accepted === true || row.status === "accepted" || row.invite_status === "accepted";
     chips.push(accepted ? chip("Accepted", "ok", "✅") : chip("Invited", "warn", "✉️"));
 
-    const role = row.role || "—";
-    const workerType = row.worker_type || row.type || "—";
-    chips.push(chip(role, role === "admin" ? "accent" : "neutral", role === "admin" ? "🔑" : "👤"));
-    chips.push(chip(workerType, "neutral", workerType === "contractor" ? "🧰" : "🧾"));
+    const workerType = (row.worker_type || row.type || "employee").toLowerCase();
+const docNeed = workerType === "contractor" ? "w9" : "w4";
+const label = workerType === "contractor" ? "W-9" : "W-4";
 
-    const doc = lastDocMap.get(getEmpId(row));
-    if (doc?.status) {
-      const t = (doc.doc_type || "tax").toUpperCase();
-      const st = String(doc.status).toLowerCase();
-      if (st === "verified") chips.push(chip(`${t}: verified`, "ok", "📄"));
-      else if (st === "received") chips.push(chip(`${t}: received`, "neutral", "📄"));
-      else if (st === "rejected") chips.push(chip(`${t}: rejected`, "bad", "⛔"));
-      else chips.push(chip(`${t}: ${st}`, "neutral", "📄"));
-    } else {
-      chips.push(chip("Tax docs: check tab", "neutral", "📄"));
-    }
+if (!taxStatusLoaded) {
+  chips.push(chip(`${label}: …`, "neutral", "📄"));
+} else {
+  const st = (lastTaxMap.get(getEmpId(row)) || {})[docNeed];
+  if (!st) {
+    chips.push(chip(`${label}: missing`, "warn", "📄"));
+  } else if (st === "verified") {
+    chips.push(chip(`${label}: verified`, "ok", "📄"));
+  } else if (st === "rejected") {
+    chips.push(chip(`${label}: rejected`, "bad", "⛔"));
+  } else {
+    chips.push(chip(`${label}: ${st}`, "neutral", "📄"));
+  }
+}
+
+
+    const role = row.role || "—";
+    chips.push(chip(`Role: ${role}`, "accent", "🧑‍💼"));
+
 
     const hasAddr = lastAddrMap.get(getEmpId(row)) === true;
     if (addrStatusLoaded) {
@@ -236,6 +298,15 @@
         scheduleAddressStatusRefresh(filtered);
     }
     }
+
+    // Tax status refresh (debounced + only when needed)
+    const taxKey = filtered.map((r) => getEmpId(r)).filter(Boolean).sort().join("|");
+    if (taxKey !== lastTaxKey) {
+    lastTaxKey = taxKey;
+    taxStatusLoaded = false;
+    scheduleTaxStatusRefresh(filtered);
+    }
+
 
     if (!filtered.length) {
       container.innerHTML = `<div class="muted">No users match your filters.</div>`;

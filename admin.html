@@ -293,34 +293,41 @@
 
       <section id="panelTaxDocs" class="panel hidden" role="tabpanel" aria-labelledby="tabTaxDocs">
   <header class="panel-head">
-    <h2>Tax Docs (W-9 Vault)</h2>
+    <h2>Tax Docs Vault</h2>
     <div class="panel-actions">
       <button id="taxdocsRefreshBtn" class="btn ghost">Refresh</button>
     </div>
   </header>
 
-  <div class="filters" role="region" aria-label="W-9 uploader">
-    <label class="filter grow">
-      <span>Contractor</span>
-      <select id="taxdocsEmployeeSelect">
-        <option value="">Select a contractor…</option>
-      </select>
-    </label>
+<label class="filter">
+  <span>Doc type</span>
+  <select id="taxdocsDocType">
+    <option value="w9">W-9 (Contractors)</option>
+    <option value="w4">W-4 (Employees)</option>
+  </select>
+</label>
 
-    <label class="filter grow">
-      <span>W-9 PDF</span>
-      <input id="taxdocsPdfInput" type="file" accept="application/pdf" />
-    </label>
+<label class="filter grow">
+  <span id="taxdocsPersonLabel">Contractor</span>
+  <select id="taxdocsEmployeeSelect">
+    <option value="">Select…</option>
+  </select>
+</label>
 
-    <button id="taxdocsUploadBtn" class="btn primary" style="margin-left:10px;">
-      Upload W-9
-    </button>
-  </div>
+<label class="filter grow">
+  <span id="taxdocsFileLabel">PDF</span>
+  <input id="taxdocsPdfInput" type="file" accept="application/pdf" />
+</label>
+
+<button id="taxdocsUploadBtn" class="btn primary" style="margin-left:10px;">
+  Upload
+</button>
+
 
   <div id="taxdocsMsg" class="muted" style="margin:10px 2px 0;">—</div>
 
   <div class="table-wrapper" style="margin-top:12px;">
-    <table class="table" aria-label="W-9 history table">
+    <table class="table" aria-label="Tax document history table">
       <thead>
         <tr>
           <th style="width:160px;">Status</th>

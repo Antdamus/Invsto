@@ -823,6 +823,9 @@ async function clearRecurring(weekday){
   );
   if (!ok) return;
 
+  await markAcceptedIfNeeded();
+
+
   // dayBefore = effFrom - 1 day (YYYY-MM-DD)
   const dayBefore = (() => {
     const d = new Date(`${effFrom}T00:00:00`);
