@@ -7,9 +7,7 @@
 /* -------------------------
    Panel shell + heading
 ------------------------- */
-#panelSchedule{
-  width: 100%;
-}
+#panelSchedule{ width: 100%; }
 
 #panelSchedule .panel-head{
   width: min(var(--page-max, 1320px), calc(100vw - 36px));
@@ -33,7 +31,7 @@
 }
 
 /* -------------------------
-   Segmented control (Week / Month / etc)
+   Segmented control
 ------------------------- */
 #panelSchedule .seg{
   display:inline-flex;
@@ -64,10 +62,7 @@
   background: rgba(255,255,255,.04);
   transform: translateY(-1px);
 }
-
-#panelSchedule .seg-btn:active{
-  transform: translateY(0) scale(.99);
-}
+#panelSchedule .seg-btn:active{ transform: translateY(0) scale(.99); }
 
 #panelSchedule .seg-btn.active{
   border-color: rgba(157,123,255,.35);
@@ -107,15 +102,10 @@
   flex-wrap: wrap;
 }
 
-#panelSchedule .sched-controls .row.gap{
-  gap: 14px;
-}
+#panelSchedule .sched-controls .row.gap{ gap: 14px; }
+#panelSchedule .sched-controls .row > *{ min-width: 0; }
 
-#panelSchedule .sched-controls .row > *{
-  min-width: 0;
-}
-
-/* Make native inputs/selects inside schedule controls match your “premium” fields */
+/* Native inputs/selects match premium fields */
 #panelSchedule .sched-controls input[type="text"],
 #panelSchedule .sched-controls input[type="date"],
 #panelSchedule .sched-controls input[type="time"],
@@ -179,9 +169,9 @@
 }
 
 /* -------------------------
-   Schedule table wrapper (week view)
+   Desktop schedule table wrapper (week view)
 ------------------------- */
-#panelSchedule .table-wrapper{
+#panelSchedule .table-wrapper.sched-table-wrap{
   width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 14px auto;
 
@@ -199,22 +189,22 @@
 }
 
 /* Optional subtle scrollbar */
-#panelSchedule .table-wrapper::-webkit-scrollbar{ height: 10px; }
-#panelSchedule .table-wrapper::-webkit-scrollbar-track{
+#panelSchedule .table-wrapper.sched-table-wrap::-webkit-scrollbar{ height: 10px; }
+#panelSchedule .table-wrapper.sched-table-wrap::-webkit-scrollbar-track{
   background: rgba(255,255,255,.03);
   border-top: 1px solid rgba(255,255,255,.06);
 }
-#panelSchedule .table-wrapper::-webkit-scrollbar-thumb{
+#panelSchedule .table-wrapper.sched-table-wrap::-webkit-scrollbar-thumb{
   background: rgba(157,123,255,.25);
   border: 1px solid rgba(157,123,255,.25);
   border-radius: 999px;
 }
 
-/* Table becomes “card rows” like Users, but tuned for schedule */
+/* Table becomes “card rows” like Users, tuned for schedule */
 #panelSchedule .schedule-table{
   border-collapse: separate;
   border-spacing: 0 10px;
-  min-width: 980px; /* prevents the time/day controls from crushing */
+  min-width: 980px;
 }
 
 #panelSchedule .schedule-table thead th{
@@ -243,7 +233,6 @@
     0 0 0 1px rgba(255,255,255,.08) inset;
   transition: transform .12s ease, box-shadow .18s ease;
 }
-
 #panelSchedule .schedule-table tbody tr:hover{
   transform: translateY(-1px);
   box-shadow:
@@ -251,9 +240,7 @@
     0 0 0 1px rgba(157,123,255,.16) inset;
 }
 
-#panelSchedule .schedule-table tbody td{
-  padding: 12px 12px;
-}
+#panelSchedule .schedule-table tbody td{ padding: 12px 12px; }
 
 /* Rounded edges */
 #panelSchedule .schedule-table tbody tr td:first-child{
@@ -267,19 +254,237 @@
 
 /* Existing helper classes in your HTML */
 #panelSchedule .sched-row{ white-space: nowrap; }
-#panelSchedule .sched-row .day{ font-weight: 700; letter-spacing: .2px; }
+#panelSchedule .sched-row .day{ font-weight: 800; letter-spacing: .2px; }
 #panelSchedule .sched-row .time{ width: 116px; }
 
-/* Store select if present inside schedule rows */
-#panelSchedule .sched-row .store{
-  min-width: 240px;
-}
+#panelSchedule .sched-row .store{ min-width: 240px; }
 
 /* Resolved line text */
 #panelSchedule .sched-resolved{
   color: rgba(203,213,225,.92);
   font-variant-numeric: tabular-nums;
 }
+#panelSchedule .sched-sub{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+  margin-top: 4px;
+}
+#panelSchedule .sched-store{
+  color: rgba(183,192,204,.92);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------
+   ✅ Mobile-first per-employee “Day Cards” (premium editor)
+   --------------------------------------------------------- */
+
+#panelSchedule .sched-cards{
+  width: min(var(--page-max, 1320px), calc(100vw - 36px));
+  margin: 0 auto 14px auto;
+  display:none; /* becomes active on mobile breakpoint */
+  gap: 12px;
+}
+
+#panelSchedule .sched-card{
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.09);
+  background:
+    radial-gradient(900px 220px at 20% 0%, rgba(157,123,255,.10), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.012));
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.46),
+    0 0 0 1px rgba(0,0,0,.30) inset;
+  overflow:hidden;
+}
+
+#panelSchedule .sched-card details{
+  border: 0;
+}
+#panelSchedule .sched-card summary{
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+
+  padding: 12px 12px;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+#panelSchedule .sched-card summary::-webkit-details-marker{ display:none; }
+
+#panelSchedule .sched-card .head-left{
+  display:flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+#panelSchedule .sched-card .dayline{
+  display:flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+#panelSchedule .sched-card .dayname{
+  font-weight: 900;
+  letter-spacing: .2px;
+  color: rgba(231,233,234,.96);
+}
+#panelSchedule .sched-card .datechip{
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(203,213,225,.92);
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  font-variant-numeric: tabular-nums;
+}
+#panelSchedule .sched-card .preview{
+  font-size: 12px;
+  color: rgba(154,160,166,.95);
+  overflow:hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panelSchedule .sched-card .head-right{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+#panelSchedule .sched-pill{
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.03);
+  color: rgba(203,213,225,.92);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+#panelSchedule .sched-pill.ov{
+  border-color: rgba(224,169,0,.30);
+  background: rgba(224,169,0,.10);
+  color: rgba(255,227,145,.92);
+}
+#panelSchedule .sched-pill.rec{
+  border-color: rgba(157,123,255,.30);
+  background: rgba(157,123,255,.10);
+  color: rgba(213,201,255,.95);
+}
+
+#panelSchedule .sched-card .body{
+  padding: 12px;
+  display:grid;
+  gap: 10px;
+}
+
+#panelSchedule .sched-block{
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  box-shadow:
+    0 12px 30px rgba(0,0,0,.30),
+    0 0 0 1px rgba(0,0,0,.24) inset;
+  padding: 10px;
+}
+
+#panelSchedule .sched-block .block-title{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+#panelSchedule .sched-block .block-title .t{
+  font-weight: 900;
+  letter-spacing: .2px;
+  color: rgba(231,233,234,.94);
+}
+#panelSchedule .sched-block .block-title .hint{
+  font-size: 12px;
+  color: rgba(154,160,166,.95);
+}
+
+#panelSchedule .sched-formrow{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#panelSchedule .sched-formrow > *{ min-width: 0; }
+
+#panelSchedule .sched-card input[type="time"],
+#panelSchedule .sched-card input[type="date"],
+#panelSchedule .sched-card select{
+  height: 40px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  color: rgba(231,233,234,.95);
+  padding: 0 12px;
+  outline: none;
+  box-shadow:
+    0 12px 26px rgba(0,0,0,.22),
+    0 0 0 1px rgba(0,0,0,.22) inset;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .10s ease;
+}
+
+#panelSchedule .sched-card input:focus,
+#panelSchedule .sched-card select:focus{
+  border-color: rgba(157,123,255,.45);
+  box-shadow:
+    0 18px 44px rgba(0,0,0,.35),
+    0 0 0 4px rgba(157,123,255,.12);
+}
+
+#panelSchedule .sched-actions{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+#panelSchedule .sched-actions .btn{
+  flex: 1;
+  min-width: 155px;
+}
+
+/* Exceptions grid inside mobile too */
+#panelSchedule .ex-grid{
+  display:grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+#panelSchedule .ex-block{
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.02);
+  padding: 10px;
+}
+#panelSchedule .ex-title{
+  font-weight: 900;
+  color: rgba(231,233,234,.92);
+  margin-bottom: 8px;
+}
+#panelSchedule .ex-row{
+  display:flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items:center;
+}
+#panelSchedule .ex-row .store{ min-width: 220px; }
 
 /* -------------------------
    Calendar (month view)
@@ -316,7 +521,6 @@
   gap: 8px;
 }
 
-
 /* Day card */
 #panelSchedule .cal-day{
   min-height: 148px;
@@ -334,7 +538,6 @@
   gap: 8px;
   transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease;
 }
-
 #panelSchedule .cal-day:hover{
   transform: translateY(-1px);
   border-color: rgba(157,123,255,.20);
@@ -342,13 +545,10 @@
     0 22px 60px rgba(0,0,0,.48),
     0 0 0 1px rgba(157,123,255,.12) inset;
 }
-
 #panelSchedule .cal-day.out{
   opacity: .45;
   filter: saturate(.8);
 }
-
-/* Day header */
 #panelSchedule .cal-day-header{
   display:flex;
   align-items:center;
@@ -356,17 +556,11 @@
   font-size: 12px;
   color: rgba(199,204,213,.92);
 }
-
 #panelSchedule .cal-date{
   font-weight: 800;
   letter-spacing: .2px;
 }
-
-/* Slots */
-#panelSchedule .cal-slots{
-  display:grid;
-  gap: 6px;
-}
+#panelSchedule .cal-slots{ display:grid; gap: 6px; }
 
 #panelSchedule .cal-slot{
   font-size: 12px;
@@ -383,7 +577,6 @@
   justify-content: space-between;
   gap: 10px;
 }
-
 #panelSchedule .cal-slot .name{
   font-weight: 700;
   overflow:hidden;
@@ -391,12 +584,15 @@
   white-space: nowrap;
   max-width: 70%;
 }
-
 #panelSchedule .cal-slot .time{
   font-variant-numeric: tabular-nums;
   color: rgba(203,213,225,.92);
   white-space: nowrap;
 }
+
+#panelSchedule .cal-day{ min-width: 0; }
+#panelSchedule .cal-slot{ min-width: 0; }
+#panelSchedule .cal-slot .name{ min-width: 0; }
 
 /* -------------------------
    Responsive tightening
@@ -406,53 +602,40 @@
     align-items: flex-start;
     flex-direction: column;
   }
-
-  #panelSchedule .cal-day{
-    min-height: 132px;
-  }
+  #panelSchedule .cal-day{ min-height: 132px; }
 }
 
 @media (max-width: 640px){
-  #panelSchedule .sched-controls{
-    padding: 12px;
-  }
-
+  #panelSchedule .sched-controls{ padding: 12px; }
   #panelSchedule .seg{
     width: 100%;
     justify-content: space-between;
   }
-
   #panelSchedule .seg-btn{
     flex: 1;
     text-align: center;
   }
 }
 
-#panelSchedule .cal-day{ min-width: 0; }
-#panelSchedule .cal-slot{ min-width: 0; }
-#panelSchedule .cal-slot .name{ min-width: 0; }
+/* ✅ Switch per-employee desktop table → mobile cards */
+@media (max-width: 820px){
+  #panelSchedule .table-wrapper.sched-table-wrap{ display:none; }
+  #panelSchedule .sched-cards{
+    display:grid;
+  }
+}
 
 /* =========================
    Month view — mobile layout
 ========================= */
 @media (max-width: 900px){
-  #panelSchedule .cal-head{
-    display:none;
-  }
-  #panelSchedule .cal-grid{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  #panelSchedule .cal-day{
-    min-height: 160px;
-  }
+  #panelSchedule .cal-head{ display:none; }
+  #panelSchedule .cal-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #panelSchedule .cal-day{ min-height: 160px; }
 }
 
 @media (max-width: 520px){
-  #panelSchedule .cal-grid{
-    grid-template-columns: 1fr;
-  }
-  #panelSchedule .cal-day{
-    min-height: 150px;
-  }
+  #panelSchedule .cal-grid{ grid-template-columns: 1fr; }
+  #panelSchedule .cal-day{ min-height: 150px; }
+  #panelSchedule .sched-actions .btn{ min-width: 140px; }
 }
-

@@ -175,20 +175,27 @@
             </div>
           </div>
 
-          <div class="table-wrapper">
-            <table class="table schedule-table">
-              <thead>
-                <tr>
-                  <th style="width:140px;">Day</th>
-                  <th style="width:300px;">Recurring (weekly)</th>
-                  <th style="width:360px;">Override (this week)</th>
-                  <th>Resolved (this week)</th>
-                </tr>
-              </thead>
-              <tbody id="schedBody"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </div>
+ <!-- Mobile day-cards (JS renders into this on small screens) -->
+<div id="schedCards" class="sched-cards"></div>
+
+<!-- Desktop table (JS renders into tbody on larger screens) -->
+<div class="table-wrapper sched-table-wrap">
+  <table class="table schedule-table">
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>Recurring (weekly)</th>
+        <th>Override (this week)</th>
+        <th>Resolved (this week)</th>
+      </tr>
+    </thead>
+    <tbody id="schedBody">
+      <tr><td colspan="4" class="muted">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+</div>
+
 
         <!-- Global calendar section -->
         <section id="schedGlobalSection" class="hidden">

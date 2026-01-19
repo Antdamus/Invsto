@@ -642,7 +642,20 @@ function storeNameById(storeId){
 
 function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
   const tbody = qs('schedBody');
-  tbody.innerHTML = '';
+  const cards = qs('schedCards');
+
+  const isMobile = window.matchMedia && window.matchMedia('(max-width: 820px)').matches;
+
+  // IMPORTANT: render ONLY ONE view (prevents duplicate IDs)
+  if (isMobile){
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="muted">Use mobile cards below.</td></tr>`;
+    if (!cards) return;
+    cards.innerHTML = '';
+  } else {
+    if (cards) cards.innerHTML = '';
+    if (!tbody) return;
+    tbody.innerHTML = '';
+  }
 
   for (let i=0;i<7;i++){
     const day = addDays(weekStart, i);
@@ -655,19 +668,8 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
       ? `${fmtTimeHM(resolved.start_ts)}–${fmtTimeHM(resolved.end_ts)}`
       : '—';
     const srcStr = resolved ? (resolved.source === 'override' ? 'override' : 'recurring') : '';
-    //const resolvedStoreLabel = resolved?.store_id ? storeName(resolved.store_id) : '—';
     const resolvedStoreLabel = resolved?.store_id ? storeNameById(resolved.store_id) : '—';
     const resolvedDirHref = resolved?.store_id ? storeDirectionsHref(resolved.store_id) : null;
-
-    const resolvedHtml = `
-      <div class="sched-resolved">
-        ${resolvedStr} ${srcStr ? `<span class="sched-note">(${srcStr})</span>` : ''}
-        <div class="sched-sub">
-          <span class="sched-store">${resolvedStoreLabel}</span>
-          ${resolvedDirHref ? `<a class="mini-link" href="${resolvedDirHref}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
-        </div>
-      </div>
-    `;
 
     const recStartPrefill = (resolved && resolved.source === 'recurring')
       ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false})
@@ -682,107 +684,252 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     const ovEnd   = ov?.end_local   ? String(ov.end_local).slice(0,5)   : '';
     const ovStore = ov?.store_id ? String(ov.store_id) : '';
 
-    // Phase 3 exception prefill (safe if columns missing)
+    // Phase 3 exceptions
     const ovAnyIn  = !!ov?.allow_any_store_in;
     const ovAnyOut = !!ov?.allow_any_store_out;
     const ovInStore  = ov?.clock_in_store_id ? String(ov.clock_in_store_id) : '';
     const ovOutStore = ov?.clock_out_store_id ? String(ov.clock_out_store_id) : '';
 
-    const tr = document.createElement('tr');
-    tr.className = 'sched-row';
-
     const recDir = storeDirectionsHref(recStorePrefill);
     const ovDir  = storeDirectionsHref(ovStore);
-
     const inDir  = storeDirectionsHref(ovAnyIn ? '' : ovInStore);
     const outDir = storeDirectionsHref(ovAnyOut ? '' : ovOutStore);
 
-    tr.innerHTML = `
-      <td class="day">${DOW[i]} ${day.getMonth()+1}/${day.getDate()}</td>
+    const dayLabel = `${DOW[i]} ${day.getMonth()+1}/${day.getDate()}`;
+    const preview = `${resolvedStr}${srcStr ? ` (${srcStr})` : ''} • ${resolvedStoreLabel}`;
 
-      <td>
-        <div class="row">
-          <input class="time" type="time" id="recStart-${i}" value="${recStartPrefill}">
-          <span>–</span>
-          <input class="time" type="time" id="recEnd-${i}" value="${recEndPrefill}">
+    if (!isMobile){
+      // -------------------------
+      // Desktop table
+      // -------------------------
+      const resolvedHtml = `
+        <div class="sched-resolved">
+          ${resolvedStr} ${srcStr ? `<span class="sched-note">(${srcStr})</span>` : ''}
+          <div class="sched-sub">
+            <span class="sched-store">${resolvedStoreLabel}</span>
+            ${resolvedDirHref ? `<a class="mini-link" href="${resolvedDirHref}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+          </div>
         </div>
+      `;
 
-        <div class="row" style="margin-top:6px;">
-          <select class="store" id="recStore-${i}">
-            ${storeOptionsHTML(recStorePrefill)}
-          </select>
-          <a class="mini-link" id="recDir-${i}" href="${recDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
-        </div>
+      const tr = document.createElement('tr');
+      tr.className = 'sched-row';
+      tr.innerHTML = `
+        <td class="day">${dayLabel}</td>
 
-        <div class="sched-buttons" style="margin-top:6px;">
-          <button class="btn small" data-save-recurring="${i}">Save recurring</button>
-          <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
-        </div>
-      </td>
+        <td>
+          <div class="row">
+            <input class="time" type="time" id="recStart-${i}" value="${recStartPrefill}">
+            <span>–</span>
+            <input class="time" type="time" id="recEnd-${i}" value="${recEndPrefill}">
+          </div>
 
-      <td>
-        <div class="row">
-          <label><input type="checkbox" id="ovOff-${iso}" ${ovOff ? 'checked' : ''}> Off</label>
-          <input class="time" type="time" id="ovStart-${iso}" value="${ovStart}" ${ovOff ? 'disabled':''}>
-          <span>–</span>
-          <input class="time" type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
-        </div>
+          <div class="row" style="margin-top:6px;">
+            <select class="store" id="recStore-${i}">
+              ${storeOptionsHTML(recStorePrefill)}
+            </select>
+            <a class="mini-link" id="recDir-${i}" href="${recDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+          </div>
 
-        <div class="row" style="margin-top:6px;">
-          <select class="store" id="ovStore-${iso}" ${ovOff ? 'disabled':''}>
-            ${storeOptionsHTML(ovStore)}
-          </select>
-          <a class="mini-link" id="ovDir-${iso}" href="${ovDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
-        </div>
+          <div class="sched-buttons" style="margin-top:6px;">
+            <button class="btn small" data-save-recurring="${i}">Save recurring</button>
+            <button class="btn small ghost" data-clear-recurring="${i}">Remove recurring</button>
+          </div>
+        </td>
 
-        <!-- Phase 3: per-day exceptions -->
-        <div class="ex-grid">
-          <div class="ex-block">
-            <div class="ex-title">Clock-in exception</div>
-            <div class="ex-row">
-              <label class="switch mini" style="margin:0;">
-                <input id="ovAnyIn-${iso}" type="checkbox" ${ovAnyIn ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
-                <span>Any store</span>
-              </label>
-              <select class="store" id="ovInStore-${iso}" ${ovOff || ovAnyIn ? 'disabled':''}>
-                ${storeOptionsHTML(ovInStore)}
-              </select>
-              <a class="mini-link" id="ovInDir-${iso}" href="${inDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+        <td>
+          <div class="row">
+            <label><input type="checkbox" id="ovOff-${iso}" ${ovOff ? 'checked' : ''}> Off</label>
+            <input class="time" type="time" id="ovStart-${iso}" value="${ovStart}" ${ovOff ? 'disabled':''}>
+            <span>–</span>
+            <input class="time" type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
+          </div>
+
+          <div class="row" style="margin-top:6px;">
+            <select class="store" id="ovStore-${iso}" ${ovOff ? 'disabled':''}>
+              ${storeOptionsHTML(ovStore)}
+            </select>
+            <a class="mini-link" id="ovDir-${iso}" href="${ovDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+          </div>
+
+          <div class="ex-grid">
+            <div class="ex-block">
+              <div class="ex-title">Clock-in exception</div>
+              <div class="ex-row">
+                <label class="switch mini" style="margin:0;">
+                  <input id="ovAnyIn-${iso}" type="checkbox" ${ovAnyIn ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                  <span>Any store</span>
+                </label>
+                <select class="store" id="ovInStore-${iso}" ${ovOff || ovAnyIn ? 'disabled':''}>
+                  ${storeOptionsHTML(ovInStore)}
+                </select>
+                <a class="mini-link" id="ovInDir-${iso}" href="${inDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+              </div>
+            </div>
+
+            <div class="ex-block">
+              <div class="ex-title">Clock-out exception</div>
+              <div class="ex-row">
+                <label class="switch mini" style="margin:0;">
+                  <input id="ovAnyOut-${iso}" type="checkbox" ${ovAnyOut ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                  <span>Any store</span>
+                </label>
+                <select class="store" id="ovOutStore-${iso}" ${ovOff || ovAnyOut ? 'disabled':''}>
+                  ${storeOptionsHTML(ovOutStore)}
+                </select>
+                <a class="mini-link" id="ovOutDir-${iso}" href="${outDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
+              </div>
             </div>
           </div>
 
-          <div class="ex-block">
-            <div class="ex-title">Clock-out exception</div>
-            <div class="ex-row">
-              <label class="switch mini" style="margin:0;">
-                <input id="ovAnyOut-${iso}" type="checkbox" ${ovAnyOut ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
-                <span>Any store</span>
-              </label>
-              <select class="store" id="ovOutStore-${iso}" ${ovOff || ovAnyOut ? 'disabled':''}>
-                ${storeOptionsHTML(ovOutStore)}
-              </select>
-              <a class="mini-link" id="ovOutDir-${iso}" href="${outDir || '#'}" target="_blank" rel="noopener noreferrer">Directions</a>
-            </div>
+          <div class="sched-buttons" style="margin-top:8px;">
+            <button class="btn small" data-save-override="${iso}">Save override</button>
+            <button class="btn small ghost" data-clear-override="${iso}">Clear override</button>
           </div>
-        </div>
+        </td>
 
-        <div class="sched-buttons" style="margin-top:8px;">
-          <button class="btn small" data-save-override="${iso}">Save override</button>
-          <button class="btn small ghost" data-clear-override="${iso}">Clear override</button>
-        </div>
-      </td>
+        <td>${resolvedHtml}</td>
+      `;
 
-      <td>${resolvedHtml}</td>
-    `;
+      tbody.appendChild(tr);
 
-    tbody.appendChild(tr);
+      applyDirectionsLinkFromStoreId(qs(`recDir-${i}`), recStorePrefill);
+      applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
+      applyDirectionsLinkFromStoreId(ovAnyIn ? '' : ovInStore, qs(`ovInDir-${iso}`));
+      applyDirectionsLinkFromStoreId(ovAnyOut ? '' : ovOutStore, qs(`ovOutDir-${iso}`));
+    } else {
+      // -------------------------
+      // Mobile day-card (matches your CSS: .sched-card + details/summary)
+      // -------------------------
+      const card = document.createElement('div');
+      card.className = 'sched-card';
 
-    applyDirectionsLinkFromStoreId(qs(`recDir-${i}`), recStorePrefill);
-    applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
-    applyDirectionsLinkFromStoreId(ovAnyIn ? '' : ovInStore, qs(`ovInDir-${iso}`));
-    applyDirectionsLinkFromStoreId(ovAnyOut ? '' : ovOutStore, qs(`ovOutDir-${iso}`));
+      const recPill = (resolved && resolved.source === 'recurring') ? `<span class="sched-pill rec">REC</span>` : '';
+      const ovPill  = (ov ? `<span class="sched-pill ov">OV</span>` : '');
+
+      card.innerHTML = `
+        <details>
+          <summary>
+            <div class="head-left">
+              <div class="dayline">
+                <span class="dayname">${DOW[i]}</span>
+                <span class="datechip">${day.getMonth()+1}/${day.getDate()}</span>
+              </div>
+              <div class="preview">${preview}</div>
+            </div>
+            <div class="head-right">
+              ${recPill}${ovPill}
+            </div>
+          </summary>
+
+          <div class="body">
+
+            <div class="sched-block">
+              <div class="block-title">
+                <span class="t">Resolved (this week)</span>
+                <span class="hint">${srcStr || '—'}</span>
+              </div>
+              <div class="sched-resolved">
+                ${resolvedStr}
+                <div class="sched-sub">
+                  <span class="sched-store">${resolvedStoreLabel}</span>
+                  ${resolvedDirHref ? `<a class="btn ghost" style="text-decoration:none;" href="${resolvedDirHref}" target="_blank" rel="noopener noreferrer">Directions</a>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div class="sched-block">
+              <div class="block-title">
+                <span class="t">Recurring (weekly)</span>
+                <span class="hint">Sets the normal schedule</span>
+              </div>
+
+              <div class="sched-formrow">
+                <input type="time" id="recStart-${i}" value="${recStartPrefill}">
+                <span>–</span>
+                <input type="time" id="recEnd-${i}" value="${recEndPrefill}">
+                <select class="store" id="recStore-${i}">
+                  ${storeOptionsHTML(recStorePrefill)}
+                </select>
+              </div>
+
+              <div class="sched-actions">
+                <button class="btn primary" data-save-recurring="${i}">Save recurring</button>
+                <button class="btn ghost" data-clear-recurring="${i}">Remove recurring</button>
+                <a class="btn ghost" id="recDir-${i}" href="${recDir || '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Directions</a>
+              </div>
+            </div>
+
+            <div class="sched-block">
+              <div class="block-title">
+                <span class="t">Override (this week)</span>
+                <span class="hint">Only affects this week</span>
+              </div>
+
+              <div class="sched-formrow">
+                <label style="display:flex; align-items:center; gap:10px; font-weight:800;">
+                  <input type="checkbox" id="ovOff-${iso}" ${ovOff ? 'checked' : ''}>
+                  Off
+                </label>
+                <input type="time" id="ovStart-${iso}" value="${ovStart}" ${ovOff ? 'disabled':''}>
+                <span>–</span>
+                <input type="time" id="ovEnd-${iso}" value="${ovEnd}" ${ovOff ? 'disabled':''}>
+                <select class="store" id="ovStore-${iso}" ${ovOff ? 'disabled':''}>
+                  ${storeOptionsHTML(ovStore)}
+                </select>
+              </div>
+
+              <div class="sched-actions">
+                <button class="btn primary" data-save-override="${iso}">Save override</button>
+                <button class="btn ghost" data-clear-override="${iso}">Clear override</button>
+                <a class="btn ghost" id="ovDir-${iso}" href="${ovDir || '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Directions</a>
+              </div>
+
+              <div class="ex-grid">
+                <div class="ex-block">
+                  <div class="ex-title">Clock-in exception</div>
+                  <div class="ex-row">
+                    <label class="switch mini" style="margin:0;">
+                      <input id="ovAnyIn-${iso}" type="checkbox" ${ovAnyIn ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                      <span>Any store</span>
+                    </label>
+                    <select class="store" id="ovInStore-${iso}" ${ovOff || ovAnyIn ? 'disabled':''}>
+                      ${storeOptionsHTML(ovInStore)}
+                    </select>
+                    <a class="btn ghost" id="ovInDir-${iso}" href="${inDir || '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Directions</a>
+                  </div>
+                </div>
+
+                <div class="ex-block">
+                  <div class="ex-title">Clock-out exception</div>
+                  <div class="ex-row">
+                    <label class="switch mini" style="margin:0;">
+                      <input id="ovAnyOut-${iso}" type="checkbox" ${ovAnyOut ? 'checked' : ''} ${ovOff ? 'disabled':''}/>
+                      <span>Any store</span>
+                    </label>
+                    <select class="store" id="ovOutStore-${iso}" ${ovOff || ovAnyOut ? 'disabled':''}>
+                      ${storeOptionsHTML(ovOutStore)}
+                    </select>
+                    <a class="btn ghost" id="ovOutDir-${iso}" href="${outDir || '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Directions</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </details>
+      `;
+
+      cards.appendChild(card);
+
+      applyDirectionsLinkFromStoreId(qs(`recDir-${i}`), recStorePrefill);
+      applyDirectionsLinkFromStoreId(ovStore, qs(`ovDir-${iso}`));
+      applyDirectionsLinkFromStoreId(ovAnyIn ? '' : ovInStore, qs(`ovInDir-${iso}`));
+      applyDirectionsLinkFromStoreId(ovAnyOut ? '' : ovOutStore, qs(`ovOutDir-${iso}`));
+    }
   }
 }
+
 
 
 async function saveRecurring(weekday){
@@ -1028,7 +1175,13 @@ async function loadScheduleWeek(){
     renderScheduleGrid(schedWeekStart, resolvedByDate, overridesByDate);
   } catch (err){
     console.error(err);
-    qs('schedBody').innerHTML = `<tr><td colspan="4" class="muted">Failed to load schedule.</td></tr>`;
+if (qs('schedBody')){
+  qs('schedBody').innerHTML = `<tr><td colspan="4" class="muted">Failed to load schedule.</td></tr>`;
+}
+if (qs('schedCards')){
+  qs('schedCards').innerHTML = `<div class="muted" style="padding:12px;">Failed to load schedule.</div>`;
+}
+
   }
 }
 
@@ -1060,6 +1213,12 @@ async function loadStoresCache(){
 let schedEmpId = null;
 let schedWeekStart = startOfWeekSun(new Date()); // Sunday start
 
+// Re-render support (so resize doesn't refetch)
+let schedLastResolvedByDate = null;
+let schedLastOverridesByDate = null;
+let schedLastIsMobile = null;
+
+
 async function initSchedulePanel(){
   // Ensure stores are loaded for dropdowns
   await ensureStoresCache();
@@ -1074,116 +1233,103 @@ async function initSchedulePanel(){
   qs('schedEffFrom').value = toISODate(new Date());
   qs('schedWeekDate').value = toISODate(schedWeekStart);
 
-  // event delegation for table buttons
-  qs('schedBody').addEventListener('click', (e) => {
-    const btn = e.target.closest('button');
-    if (!btn) return;
+qs('schedEmpSection').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
 
   if (btn.hasAttribute('data-save-recurring')){
-  const weekday = Number(btn.getAttribute('data-save-recurring'));
-  saveRecurring(weekday);
-} else if (btn.hasAttribute('data-clear-recurring')){
-  const weekday = Number(btn.getAttribute('data-clear-recurring'));
-  clearRecurring(weekday);
-} else if (btn.hasAttribute('data-save-override')){
-  const iso = btn.getAttribute('data-save-override');
-  saveOverride(iso);
-} else if (btn.hasAttribute('data-clear-override')){
-  const iso = btn.getAttribute('data-clear-override');
-  clearOverride(iso);
-}
+    const weekday = Number(btn.getAttribute('data-save-recurring'));
+    saveRecurring(weekday);
+  } else if (btn.hasAttribute('data-clear-recurring')){
+    const weekday = Number(btn.getAttribute('data-clear-recurring'));
+    clearRecurring(weekday);
+  } else if (btn.hasAttribute('data-save-override')){
+    const iso = btn.getAttribute('data-save-override');
+    saveOverride(iso);
+  } else if (btn.hasAttribute('data-clear-override')){
+    const iso = btn.getAttribute('data-clear-override');
+    clearOverride(iso);
+  }
+});
 
+qs('schedEmpSection').addEventListener('change', (e) => {
+  const id = e.target?.id || '';
 
-  });
+  if (id.startsWith('ovOff-')){
+    const iso = id.slice('ovOff-'.length);
+    const on = e.target.checked;
 
-  // change handlers (Off toggle + store change → update directions)
-  qs('schedBody').addEventListener('change', (e) => {
-    const id = e.target?.id || '';
+    const s = qs(`ovStart-${iso}`);
+    const en = qs(`ovEnd-${iso}`);
+    const st = qs(`ovStore-${iso}`);
 
-    // Off toggled → disable times + store select
-    if (id.startsWith('ovOff-')){
-      const iso = id.slice('ovOff-'.length);
-      const on = e.target.checked;
+    if (s) s.disabled = on;
+    if (en) en.disabled = on;
+    if (st) st.disabled = on;
 
-      const s = qs(`ovStart-${iso}`);
-      const en = qs(`ovEnd-${iso}`);
-      const st = qs(`ovStore-${iso}`);
+    const anyIn = qs(`ovAnyIn-${iso}`);
+    const anyOut = qs(`ovAnyOut-${iso}`);
+    const inSel = qs(`ovInStore-${iso}`);
+    const outSel = qs(`ovOutStore-${iso}`);
 
-      if (s) s.disabled = on;
-      if (en) en.disabled = on;
-      if (st) st.disabled = on;
+    if (anyIn) anyIn.disabled = on;
+    if (anyOut) anyOut.disabled = on;
 
+    if (inSel) inSel.disabled = on || !!anyIn?.checked;
+    if (outSel) outSel.disabled = on || !!anyOut?.checked;
 
-      const anyIn = qs(`ovAnyIn-${iso}`);
-      const anyOut = qs(`ovAnyOut-${iso}`);
-      const inSel = qs(`ovInStore-${iso}`);
-      const outSel = qs(`ovOutStore-${iso}`);
+    applyDirectionsLinkFromStoreId(anyIn?.checked ? '' : inSel?.value, qs(`ovInDir-${iso}`));
+    applyDirectionsLinkFromStoreId(anyOut?.checked ? '' : outSel?.value, qs(`ovOutDir-${iso}`));
+    if (st) applyDirectionsLinkFromStoreId(st.value, qs(`ovDir-${iso}`));
+    return;
+  }
 
-      if (anyIn) anyIn.disabled = on;
-      if (anyOut) anyOut.disabled = on;
+  if (id.startsWith('recStore-')){
+    const weekday = id.slice('recStore-'.length);
+    const selEl = qs(`recStore-${weekday}`);
+    applyDirectionsLinkFromStoreId(selEl?.value, qs(`recDir-${weekday}`));
+    return;
+  }
 
-      if (inSel) inSel.disabled = on || !!anyIn?.checked;
-      if (outSel) outSel.disabled = on || !!anyOut?.checked;
+  if (id.startsWith('ovStore-')){
+    const iso = id.slice('ovStore-'.length);
+    const selEl = qs(`ovStore-${iso}`);
+    applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovDir-${iso}`));
+    return;
+  }
 
-      applyDirectionsLinkFromStoreId(anyIn?.checked ? '' : inSel?.value, qs(`ovInDir-${iso}`));
-      applyDirectionsLinkFromStoreId(anyOut?.checked ? '' : outSel?.value, qs(`ovOutDir-${iso}`));
+  if (id.startsWith('ovAnyIn-')){
+    const iso = id.slice('ovAnyIn-'.length);
+    const any = !!qs(`ovAnyIn-${iso}`)?.checked;
+    const selEl = qs(`ovInStore-${iso}`);
+    if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
+    applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovInDir-${iso}`));
+    return;
+  }
 
-      // Also dim directions if disabled
-      if (st) applyDirectionsLinkFromStoreId(st.value, qs(`ovDir-${iso}`));
-      return;
-    }
+  if (id.startsWith('ovAnyOut-')){
+    const iso = id.slice('ovAnyOut-'.length);
+    const any = !!qs(`ovAnyOut-${iso}`)?.checked;
+    const selEl = qs(`ovOutStore-${iso}`);
+    if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
+    applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovOutDir-${iso}`));
+    return;
+  }
 
-    // Recurring store changed → update directions
-    if (id.startsWith('recStore-')){
-      const weekday = id.slice('recStore-'.length);
-      const selEl = qs(`recStore-${weekday}`);
-      applyDirectionsLinkFromStoreId(selEl?.value, qs(`recDir-${weekday}`));
-      return;
-    }
+  if (id.startsWith('ovInStore-')){
+    const iso = id.slice('ovInStore-'.length);
+    const selEl = qs(`ovInStore-${iso}`);
+    applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovInDir-${iso}`));
+    return;
+  }
 
-    // Override store changed → update directions
-    if (id.startsWith('ovStore-')){
-      const iso = id.slice('ovStore-'.length);
-      const selEl = qs(`ovStore-${iso}`);
-      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovDir-${iso}`));
-      return;
-    }
-
-        // Phase 3: Any-store toggles → disable/enable specific store dropdowns + directions
-    if (id.startsWith('ovAnyIn-')){
-      const iso = id.slice('ovAnyIn-'.length);
-      const any = !!qs(`ovAnyIn-${iso}`)?.checked;
-      const selEl = qs(`ovInStore-${iso}`);
-      if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
-      applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovInDir-${iso}`));
-      return;
-    }
-
-    if (id.startsWith('ovAnyOut-')){
-      const iso = id.slice('ovAnyOut-'.length);
-      const any = !!qs(`ovAnyOut-${iso}`)?.checked;
-      const selEl = qs(`ovOutStore-${iso}`);
-      if (selEl) selEl.disabled = any || !!qs(`ovOff-${iso}`)?.checked;
-      applyDirectionsLinkFromStoreId(any ? '' : selEl?.value, qs(`ovOutDir-${iso}`));
-      return;
-    }
-
-    // Phase 3: In/Out store changed → update directions
-    if (id.startsWith('ovInStore-')){
-      const iso = id.slice('ovInStore-'.length);
-      const selEl = qs(`ovInStore-${iso}`);
-      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovInDir-${iso}`));
-      return;
-    }
-
-    if (id.startsWith('ovOutStore-')){
-      const iso = id.slice('ovOutStore-'.length);
-      const selEl = qs(`ovOutStore-${iso}`);
-      applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovOutDir-${iso}`));
-      return;
-    }
-
-  });
+  if (id.startsWith('ovOutStore-')){
+    const iso = id.slice('ovOutStore-'.length);
+    const selEl = qs(`ovOutStore-${iso}`);
+    applyDirectionsLinkFromStoreId(selEl?.value, qs(`ovOutDir-${iso}`));
+    return;
+  }
+});
 
   // selectors
   sel.addEventListener('change', async () => {
@@ -1208,6 +1354,16 @@ async function initSchedulePanel(){
   });
 
   await loadScheduleWeek();
+
+  let _schedLastMobile = window.matchMedia('(max-width: 820px)').matches;
+window.addEventListener('resize', () => {
+  const now = window.matchMedia('(max-width: 820px)').matches;
+  if (now !== _schedLastMobile){
+    _schedLastMobile = now;
+    loadScheduleWeek(); // re-render in the other layout
+  }
+});
+
 }
 
 function showPanel(id){
