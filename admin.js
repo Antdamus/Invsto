@@ -183,7 +183,9 @@ function renderGlobalCalendar(rows, gridStart, monthStart){
   // group rows by work_date (YYYY-MM-DD)
   const byDate = new Map();
   for (const r of rows){
-    const key = toISODate(new Date(r.work_date));
+    const ymd = String(r.work_date || '').slice(0, 10);   // handles 'YYYY-MM-DD' or 'YYYY-MM-DDTHH...'
+    const key = toISODate(fromISO(ymd));                  // local date, no UTC shift
+
     const list = byDate.get(key) || [];
     list.push(r);
     byDate.set(key, list);

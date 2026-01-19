@@ -299,10 +299,9 @@
   padding: 12px;
 }
 
-/* Days of week header */
 #panelSchedule .cal-head{
   display:grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   padding: 2px 2px 10px;
   color: rgba(183,192,204,.92);
@@ -311,12 +310,12 @@
   letter-spacing: .15px;
 }
 
-/* Grid */
 #panelSchedule .cal-grid{
   display:grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
 }
+
 
 /* Day card */
 #panelSchedule .cal-day{
@@ -428,3 +427,32 @@
     text-align: center;
   }
 }
+
+#panelSchedule .cal-day{ min-width: 0; }
+#panelSchedule .cal-slot{ min-width: 0; }
+#panelSchedule .cal-slot .name{ min-width: 0; }
+
+/* =========================
+   Month view — mobile layout
+========================= */
+@media (max-width: 900px){
+  #panelSchedule .cal-head{
+    display:none;
+  }
+  #panelSchedule .cal-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #panelSchedule .cal-day{
+    min-height: 160px;
+  }
+}
+
+@media (max-width: 520px){
+  #panelSchedule .cal-grid{
+    grid-template-columns: 1fr;
+  }
+  #panelSchedule .cal-day{
+    min-height: 150px;
+  }
+}
+
