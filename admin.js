@@ -2122,30 +2122,48 @@ const storeName = (storeId) => {
     const card = document.createElement('div');
     card.className = 'shift';
     card.innerHTML = `
-      <div class="shift-row">
-        <div class="shift-time"><strong>${dateLine}</strong> • ${inStr} → ${outStr}</div>
-        <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
+      <div class="shift-top">
+        <div class="shift-title">
+          <div class="shift-date"><strong>${dateLine}</strong></div>
+          <div class="shift-range">${inStr} → ${outStr}</div>
+        </div>
+
+        <div class="shift-status">
           ${statusBadgeHTML(s)}
           ${s.has_anomaly ? `<span class="badge warn">Needs review</span>` : `<span class="badge">OK</span>`}
         </div>
       </div>
 
-      <div class="shift-row" style="margin-top:8px;">
-        <div class="shift-meta">Duration: <strong>${durStr}</strong></div>
-        <div class="shift-meta" style="margin-left:auto;">${breaksText}</div>
+      <div class="shift-meta-grid">
+        <div class="shift-meta-line">
+          <span class="shift-meta-label">Duration</span>
+          <span class="shift-meta-value">${durStr}</span>
+        </div>
+
+        <div class="shift-meta-line">
+          <span class="shift-meta-label">Breaks</span>
+          <span class="shift-meta-value">${breaksText}</span>
+        </div>
+
+        <div class="shift-meta-line shift-meta-store">
+          <span class="shift-meta-label">Store</span>
+          <span class="shift-meta-value">${escapeHtml(storeLabel)}</span>
+        </div>
       </div>
 
-      <div class="shift-row" style="margin-top:8px; align-items:flex-start;">
-        <div class="shift-meta">Store: <strong>${escapeHtml(storeLabel)}</strong></div>
-        <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+      <div class="shift-chips-row">
+        <div class="shift-chips">
           ${anomBadgesHTML(s)}
+        </div>
+
+        <div class="shift-chip-actions">
           ${s.store_id ? `<a class="btn small ghost" href="${escapeHtml(dirHref)}" target="_blank" rel="noopener">Directions</a>` : ``}
         </div>
       </div>
 
-      ${shiftPhotos ? `<div style="margin-top:10px;">${shiftPhotos}</div>` : ``}
+      ${shiftPhotos ? `<div class="shift-photos">${shiftPhotos}</div>` : ``}
 
-      <div class="shift-actions" style="margin-top:10px;">
+      <div class="shift-actions">
         <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit</button>
         <button class="btn small ghost" type="button" data-edit-id="${s.id}">Edit</button>
         ${approvalBtns}
@@ -2158,10 +2176,7 @@ const storeName = (storeId) => {
 
     host.appendChild(card);
 
-    
   }
-
-
 }
 
 
