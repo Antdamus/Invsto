@@ -1,6 +1,9 @@
 /* =========================================================
-   Users — Cards + Manage Drawer (Phase 3A)
-   Paste near bottom of admin.css
+   Users — Cards + Manage Drawer (Phase 3B)
+   FULL REPLACEMENT admin-users.css
+   - Clickable cards + press feedback
+   - Drawer sections + sticky footer
+   - Subtle premium motion
    ========================================================= */
 
 .users-cards{
@@ -20,8 +23,11 @@
     0 22px 60px rgba(0,0,0,.45),
     0 0 0 1px rgba(0,0,0,.30) inset;
   padding:16px 16px 14px;
-  transition: transform .14s ease, box-shadow .18s ease, border-color .18s ease;
+  transition: transform .14s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease;
+  transform-origin: center;
 }
+
+.user-card.is-clickable{ cursor:pointer; }
 
 .user-card:hover{
   transform: translateY(-1px);
@@ -29,6 +35,12 @@
   box-shadow:
     0 28px 70px rgba(0,0,0,.55),
     0 0 0 1px rgba(157,123,255,.18) inset;
+}
+
+/* “Haptic” press */
+.user-card.uc-pressed{
+  transform: translateY(0) scale(.995);
+  filter: brightness(1.03);
 }
 
 .uc-top{
@@ -40,7 +52,7 @@
 
 .uc-identity{ min-width:0; }
 .uc-name{
-  font-weight:800;
+  font-weight:900;
   letter-spacing:.2px;
   font-size:20px;
   line-height:1.1;
@@ -79,7 +91,9 @@
   border:1px solid rgba(255,255,255,.10);
   background: rgba(255,255,255,.02);
   box-shadow: 0 8px 22px rgba(0,0,0,.25);
+  transition: transform .12s ease, border-color .16s ease, background .16s ease;
 }
+.user-card:hover .uc-chip{ transform: translateY(-.5px); }
 
 .uc-chip .uc-ic{ opacity:.95; }
 
@@ -111,14 +125,14 @@
 .uc-actions .btn{
   border-radius:12px;
   padding:10px 14px;
-  font-weight:800;
+  font-weight:900;
   letter-spacing:.2px;
 }
 .uc-actions .btn:hover{
   transform: translateY(-1px);
 }
 
-/* Drawer backdrop + drawer (reuses your aesthetic) */
+/* Drawer backdrop + drawer */
 .drawer-backdrop{
   position:fixed;
   inset:0;
@@ -165,7 +179,7 @@
 }
 .ud-title{
   font-size:16px;
-  font-weight:900;
+  font-weight:1000;
   letter-spacing:.2px;
 }
 .ud-sub{
@@ -173,6 +187,7 @@
   font-size:12px;
   opacity:.9;
 }
+.ud-x{ border-radius:12px; }
 
 .drawer-body{
   padding:14px 16px 16px;
@@ -180,22 +195,48 @@
   height: calc(100% - 64px);
 }
 
+/* Sections */
+.ud-section{
+  margin-top:12px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:18px;
+  background: rgba(255,255,255,.015);
+  box-shadow: 0 18px 44px rgba(0,0,0,.35);
+  padding:12px;
+}
+.ud-section-title{
+  font-weight:1000;
+  letter-spacing:.18px;
+  font-size:12px;
+  color: rgba(231,233,234,.92);
+  margin-bottom:10px;
+  text-transform: uppercase;
+  opacity:.9;
+}
+.ud-hint{
+  font-size:12px;
+  line-height:1.35;
+  color: rgba(154,160,166,.95);
+}
+
+/* Grid */
 .ud-grid{
   display:grid;
   grid-template-columns: 1fr 1fr;
   gap:12px;
-  margin-top:12px;
 }
 @media (max-width: 640px){
   .ud-grid{ grid-template-columns: 1fr; }
 }
+
+.ud-span2{ grid-column: 1 / -1; }
 
 .ud-field span{
   display:block;
   font-size:12px;
   color: rgba(154,160,166,.95);
   margin-bottom:7px;
-  font-weight:800;
+  font-weight:900;
   letter-spacing:.2px;
 }
 
@@ -231,17 +272,33 @@
   opacity:.85;
 }
 
-.ud-divider{
-  height:1px;
-  background: rgba(255,255,255,.08);
-  margin:14px 0 12px;
-}
+.ud-spacer{ height: 10px; }
 
-.ud-actions{
+/* Sticky footer actions */
+.ud-footer{
+  position: sticky;
+  bottom: 0;
+  margin-top: 14px;
+  padding-top: 12px;
+  padding-bottom: 10px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  background:
+    linear-gradient(180deg, rgba(12,12,13,0), rgba(12,12,13,.92) 30%, rgba(12,12,13,.98));
   display:flex;
+  align-items:center;
+  justify-content:space-between;
   gap:10px;
-  justify-content:flex-end;
-  flex-wrap:wrap;
+}
+.ud-footer .btn{
+  border-radius:14px;
+  padding:10px 14px;
+  font-weight:1000;
+}
+.ud-footer .btn[disabled]{
+  opacity:.55;
+  cursor:not-allowed;
+  transform:none !important;
+  box-shadow:none !important;
 }
 
 .ud-msg{
