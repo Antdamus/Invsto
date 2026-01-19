@@ -2502,7 +2502,9 @@ let rtChannel = null;
 const onRealtimeChange = debounce(async () => {
   try {
     // Refresh Overview
-    await loadSummary();
+    if (window.overviewApi?.loadSummary) await window.overviewApi.loadSummary();
+    else await loadSummary();
+
 
     // If drawer is open for a worker/month, refresh it too
     const isOpen = !qs('drawer').classList.contains('hidden') && qs('drawer').classList.contains('open');
@@ -2940,6 +2942,11 @@ document.addEventListener("supabase-ready", async () => {
   wireDrawer();
   wireEditModal();
   await overviewApi.bootOverview();
+    // ✅ Live Now (init + first load + ticking durations)
+  wireLiveList();
+  await loadLiveNow();
+  startLiveTicker(30000);
+
 
   // The rest of the dashboard
   bootRealtime();
