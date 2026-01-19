@@ -71,12 +71,20 @@ function toast(message, kind = "ok") {
   }
 }
 
-function applyDirectionsLinkFromStoreId(linkEl, storeId){
-  if (!linkEl) return;
-  linkEl.href = storeDirectionsHref(storeId);
-  linkEl.target = "_blank";
-  linkEl.rel = "noopener noreferrer";
+function applyDirectionsLinkFromStoreId(linkEl, storeId) {
+  if (!linkEl || typeof storeId !== "string") return;
+
+  const store = storesById[storeId]; // or however you map stores
+  if (!store || store.lat == null || store.lng == null) {
+    linkEl.href = "#";
+    linkEl.classList.add("disabled");
+    return;
+  }
+
+  linkEl.href = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}`;
+  linkEl.classList.remove("disabled");
 }
+
 
 function storeDirectionsHref(storeId){
   const s = storesById.get(storeId);
