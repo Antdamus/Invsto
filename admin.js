@@ -2000,7 +2000,8 @@ function renderDrawerHeader(name,monthStartStr){ qs('drawerTitle').textContent=n
 function renderDrawerSummary(shifts){ const n=shifts.length, tot=shifts.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000, avg=n?tot/n:0; qs('dsShifts').textContent=String(n); qs('dsHours').textContent=fmtHours(tot); qs('dsAvg').textContent=fmtHours(avg); }
 
 function renderDrawerList(shifts){
-  const host = qs('drawerList'); host.innerHTML = '';
+  const host = qs('drawerList');
+  host.innerHTML = '';
 
   const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
   if (!src.length){
@@ -2008,96 +2009,140 @@ function renderDrawerList(shifts){
     return;
   }
 
+  const storeName = (storeId) => {
+    if (!storeId) return '—';
+    const s = storesById?.get?.(storeId);
+    return (s?.name || s?.store_name || s?.label || '—');
+  };
+
+  const statusBadgeHTML = (s) => {
+    if (s.is_open) return `<span class="badge warn">OPEN</span>`;
+    const st = (s.approval_status || 'pending').toLowerCase();
+    if (st === 'approved') return `<span class="badge open">APPROVED</span>`;
+    if (st === 'waived')   return `<span class="badge warn">WAIVED</span>`;
+    return `<span class="badge">PENDING</span>`;
+  };
+
+  const anomBadgesHTML = (s) => {
+    const arr = Array.isArray(s.anomalies) ? s.anomalies : [];
+    if (!arr.length) return '';
+    return arr.map(code => `<span class="badge warn">⚠︎ ${escapeHtml(code)}</span>`).join('');
+  };
+
+  const photoThumb = (url, label) => {
+    if (!url) return '';
+    const safeUrl = escapeHtml(url);
+    const safeLabel = escapeHtml(label || 'Photo');
+    return `
+      <a href="${safeUrl}" data-photo-url="${safeUrl}" aria-label="${safeLabel}">
+        <img class="thumb" src="${safeUrl}" alt="${safeLabel}">
+      </a>
+    `;
+  };
+
+  const breakPhotosBlock = (b) => {
+    const start = b.photo_start_url ? photoThumb(b.photo_start_url, 'Break start photo') : `<span class="muted">No start photo</span>`;
+    const end   = b.photo_end_url   ? photoThumb(b.photo_end_url,   'Break end photo')   : `<span class="muted">No end photo</span>`;
+    return `<div class="br-photos">${start}${end}</div>`;
+  };
+
+  const fmtDateShort = (isoOrDate) => {
+    const d = new Date(isoOrDate);
+    return d.toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' });
+  };
+
   for (const s of src){
     const inStr  = fmtLocal(s.clock_in);
     const outStr = s.is_open ? 'OPEN' : fmtLocal(s.clock_out);
     const durStr = fmtDurationHM(s.duration_ms);
 
-    // Status chip (don't show approve buttons for an OPEN shift)
-    const st = s.approval_status || (s.is_open ? 'open' : 'pending');
-    const stClass = s.is_open ? 'pending' : (st === 'approved' ? 'approved' : st === 'waived' ? 'waived' : 'pending');
-    const statusChip = `<span class="chip ${stClass}">${(s.is_open?'OPEN':st.toUpperCase())}</span>`;
-
-    // Anomaly chips
-    const anomChips = (s.anomalies||[]).map(code => `<span class="chip anom">⚠︎ ${code}</span>`).join('');
-
-    // Break summary + block
     const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
+    const storeLabel = storeName(s.store_id);
+    const dirHref = s.store_id ? storeDirectionsHref(s.store_id) : '#';
 
+    // Actions: hide approve/waive for OPEN shifts (existing behavior)
+    const showApprovalBtns = !s.is_open;
+    const approvalBtns = showApprovalBtns ? `
+      <button class="btn small" type="button" data-approve-id="${s.id}">Approve</button>
+      <button class="btn small ghost" type="button" data-waive-id="${s.id}">Waive</button>
+      ${(s.approval_status && (s.approval_status === 'approved' || s.approval_status === 'waived')) ?
+        `<button class="btn small ghost" type="button" data-unapprove-id="${s.id}">Remove</button>` : ``}
+    ` : '';
+
+    // Shift-level photo strip (clock in/out)
+    const shiftPhotos = (s.photo_in_url || s.photo_out_url) ? `
+      <div class="br-photos" aria-label="Shift photos">
+        ${photoThumb(s.photo_in_url, 'Clock-in photo')}
+        ${photoThumb(s.photo_out_url, 'Clock-out photo')}
+      </div>
+    ` : '';
+
+    // Breaks block
     let breaksBlock = '';
     if (s.break_count){
-      const parts = s.breaks.map(b => {
+      const blocks = (s.breaks || []).map(b => {
         const open = !b.ended_at;
         const dur = open ? 0 : (new Date(b.ended_at) - new Date(b.started_at));
         const durStrB = open ? '—' : fmtDurationHM(dur);
-        const startImg = b.photo_start_url ? `<a href="${b.photo_start_url}" target="_blank" rel="noopener"><img class="thumb" src="${b.photo_start_url}" alt="Break start photo"></a>` : `<span class="muted">No start photo</span>`;
-        const endImg   = b.photo_end_url   ? `<a href="${b.photo_end_url}"   target="_blank" rel="noopener"><img class="thumb" src="${b.photo_end_url}"   alt="Break end photo"></a>`   : `<span class="muted">No end photo</span>`;
+
         return `
           <div class="break">
-            <div class="br-times"><strong>${new Date(b.started_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</strong> → ${open ? 'OPEN' : new Date(b.ended_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-            <div class="br-dur">${open ? '<span class="muted">(active)</span>' : durStrB}</div>
-            <div class="br-photos">${startImg} ${endImg}</div>
-          </div>`;
+            <div class="br-times">
+              <strong>${new Date(b.started_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</strong>
+              → ${open ? 'OPEN' : new Date(b.ended_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+            </div>
+            <div class="br-dur">${open ? 'Break is still open' : `Duration: ${durStrB}`}</div>
+            ${breakPhotosBlock(b)}
+          </div>
+        `;
       }).join('');
-      breaksBlock = `<div class="breaks">${parts}</div>`;
+
+      breaksBlock = `<div class="breaks">${blocks}</div>`;
     }
 
-    // Actions per status (disable for OPEN shifts)
-    let actions = '';
-    if (!s.is_open){
-      if (st === 'approved'){
-        actions = `
-          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-        `;
-      } else if (st === 'waived'){
-        actions = `
-          <button class="btn small" data-approve-id="${s.id}">Approve</button>
-          <button class="btn small ghost" data-unapprove-id="${s.id}">Unapprove</button>
-        `;
-      } else {
-        actions = `
-          <button class="btn small" data-approve-id="${s.id}">Approve</button>
-          <button class="btn small" data-waive-id="${s.id}">Waive…</button>
-        `;
-      }
-    }
+    const dateLine = fmtDateShort(s.clock_in);
 
-    const noteLine = s.approval_note ? `<div class="shift-meta">Note: ${s.approval_note}</div>` : '';
-
-    const div = document.createElement('div');
-    div.className = 'shift';
-    div.innerHTML = `
-      <div class="shift-row" style="justify-content:space-between;">
-        <div class="shift-time"><strong>In:</strong> ${inStr}</div>
-        <div class="shift-time"><strong>Out:</strong> ${outStr}</div>
-        <div class="shift-meta">${durStr}</div>
-      </div>
-
-      <div class="shift-row" style="margin-top:6px; justify-content:space-between;">
-        <div class="chips">
-          ${statusChip}
-          ${anomChips}
-          <span class="chip">${breaksText}</span>
-        </div>
-        <div class="shift-actions">
-          ${s.photo_in_url ? `<a href="${s.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
-          ${s.photo_out_url ? `<a href="${s.photo_out_url}" target="_blank" rel="noopener">Photo Out</a>` : ''}
-          <button class="btn small" data-edit-id="${s.id}" ${s.is_open?'disabled':''}>Edit</button>
-          <button class="btn small" data-audit-id="${s.id}">Audit</button>
-          ${actions}
+    const card = document.createElement('div');
+    card.className = 'shift';
+    card.innerHTML = `
+      <div class="shift-row">
+        <div class="shift-time"><strong>${dateLine}</strong> • ${inStr} → ${outStr}</div>
+        <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap;">
+          ${statusBadgeHTML(s)}
+          ${s.has_anomaly ? `<span class="badge warn">Needs review</span>` : `<span class="badge">OK</span>`}
         </div>
       </div>
 
-      ${noteLine}
+      <div class="shift-row" style="margin-top:8px;">
+        <div class="shift-meta">Duration: <strong>${durStr}</strong></div>
+        <div class="shift-meta" style="margin-left:auto;">${breaksText}</div>
+      </div>
+
+      <div class="shift-row" style="margin-top:8px; align-items:flex-start;">
+        <div class="shift-meta">Store: <strong>${escapeHtml(storeLabel)}</strong></div>
+        <div style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+          ${anomBadgesHTML(s)}
+          ${s.store_id ? `<a class="btn small ghost" href="${escapeHtml(dirHref)}" target="_blank" rel="noopener">Directions</a>` : ``}
+        </div>
+      </div>
+
+      ${shiftPhotos ? `<div style="margin-top:10px;">${shiftPhotos}</div>` : ``}
+
+      <div class="shift-actions" style="margin-top:10px;">
+        <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit</button>
+        <button class="btn small ghost" type="button" data-edit-id="${s.id}">Edit</button>
+        ${approvalBtns}
+      </div>
+
+      <div class="audit hidden" id="audit-${s.id}"></div>
+
       ${breaksBlock}
+    `;
 
-      <div class="audit hidden" id="audit-${s.id}">
-        <div class="drawer-empty">Loading…</div>
-      </div>`;
-    host.appendChild(div);
+    host.appendChild(card);
   }
 }
+
 
 
 async function fetchAuditsForShift(shiftId){
@@ -2377,8 +2422,70 @@ function wireLiveList(){
   });
 }
 
+function ensurePhotoViewer(){
+  if (document.getElementById('og-imgv')) return;
+
+  const bd = document.createElement('div');
+  bd.id = 'og-imgv-backdrop';
+  bd.className = 'og-imgv-backdrop';
+  bd.setAttribute('aria-hidden','true');
+
+  const wrap = document.createElement('div');
+  wrap.id = 'og-imgv';
+  wrap.className = 'og-imgv';
+  wrap.setAttribute('role','dialog');
+  wrap.setAttribute('aria-modal','true');
+
+  wrap.innerHTML = `
+    <div class="og-imgv-top">
+      <button type="button" class="og-imgv-close" id="og-imgv-close" aria-label="Close">✕</button>
+    </div>
+    <div class="og-imgv-stage">
+      <img id="og-imgv-img" alt="Photo preview" />
+    </div>
+  `;
+
+  document.body.appendChild(bd);
+  document.body.appendChild(wrap);
+
+  const close = () => closePhotoViewer();
+  bd.addEventListener('click', close);
+  wrap.querySelector('#og-imgv-close')?.addEventListener('click', close);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePhotoViewer();
+  });
+}
+
+function openPhotoViewer(url){
+  try{
+    ensurePhotoViewer();
+    const bd = document.getElementById('og-imgv-backdrop');
+    const wrap = document.getElementById('og-imgv');
+    const img = document.getElementById('og-imgv-img');
+    if (!bd || !wrap || !img) return;
+
+    img.src = url;
+    bd.classList.add('show');
+    wrap.classList.add('show');
+  }catch(e){
+    console.warn(e);
+    window.open(url, '_blank', 'noopener');
+  }
+}
+
+function closePhotoViewer(){
+  const bd = document.getElementById('og-imgv-backdrop');
+  const wrap = document.getElementById('og-imgv');
+  const img = document.getElementById('og-imgv-img');
+  if (img) img.src = '';
+  bd?.classList.remove('show');
+  wrap?.classList.remove('show');
+}
 
 function wireDrawer(){
+  ensurePhotoViewer();
+
   // Close actions
   const closeBtn = qs('drawerCloseBtn');
   if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
@@ -2399,6 +2506,15 @@ function wireDrawer(){
   if (list) {
     list.addEventListener('click', (e) => {
       const t = e.target;
+
+      // ✅ Photo viewer (thumbnails)
+      const photoLink = t.closest('a[data-photo-url]');
+      if (photoLink) {
+        e.preventDefault();
+        const url = photoLink.getAttribute('data-photo-url');
+        if (url) openPhotoViewer(url);
+        return;
+      }
 
       // Edit shift
       const editBtn = t.closest('button[data-edit-id]');
@@ -2446,6 +2562,7 @@ function wireDrawer(){
     });
   }
 }
+
 
 /* ============== Tabs ============== */
 function activateTab(which){

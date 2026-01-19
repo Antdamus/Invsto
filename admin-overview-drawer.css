@@ -373,3 +373,62 @@
 @media (min-width: 1100px){
   :root{ --drawer-w: 520px; }
 }
+
+/* =========================================================
+   Photo Viewer (Lightbox) — used by drawer thumbnails
+   ========================================================= */
+.og-imgv-backdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.70);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 99998;
+  display: none;
+}
+.og-imgv-backdrop.show{ display: block; }
+
+.og-imgv{
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: none;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+}
+.og-imgv.show{ display: grid; }
+
+.og-imgv .og-imgv-top{
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.og-imgv .og-imgv-close{
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(20,20,24,.55);
+  color: rgba(255,255,255,.92);
+  padding: 10px 12px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(0,0,0,.55);
+}
+
+.og-imgv .og-imgv-stage{
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: calc(100vh - 74px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.og-imgv img{
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.02);
+  object-fit: contain;
+  box-shadow: 0 30px 90px rgba(0,0,0,.65);
+}
