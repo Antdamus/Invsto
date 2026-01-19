@@ -164,6 +164,8 @@
   z-index: 5100;
   overflow:hidden;
 }
+
+.drawer.open,
 .drawer.show{
   transform: translateX(0);
   opacity:1;
