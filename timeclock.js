@@ -677,6 +677,7 @@ async function maybeWarnSchedule(entryId){
 async function onClockAction(){
   if (isPunching) return;
   isPunching = true;
+
   const btn = qs('clockBtn');
   btn.disabled = true;
 
@@ -685,28 +686,38 @@ async function onClockAction(){
     if (!geo.ok){ alert(geo.msg || 'Unable to get location.'); return; }
 
     // Are we clocking in or out?
-    const { data: openRows } = await supabaseClient
-      .from('time_entries').select('id')
+    const { data: openRows, error: openErr } = await supabaseClient
+      .from('time_entries')
+      .select('id')
       .eq('employee_id', currentEmployee.id)
-      .is('clock_out', null).limit(1);
+      .is('clock_out', null)
+      .limit(1);
+
+    if (openErr) { alert(openErr.message); return; }
+
     const kind = (openRows && openRows.length) ? 'out' : 'in';
 
     // Refresh today's schedule/exception (in case admin changed it)
     await fetchTodayScheduleAndExceptions();
 
-    // Decide store_id to pass to DB
+    // Decide store_id (ONLY used for clock-in; clock-out must NOT allow choosing)
     const storeRes = await resolveStoreForAction(kind, geo);
+
+    // Clock-in requires an assigned store (or exception that yields one)
     if (kind === 'in' && !storeRes.store_id){
       renderStoreContextLine(null, 'No store assigned today — contact a manager');
       alert('You are not assigned to any store today. Ask a manager to assign you (or add a day exception).');
       return;
     }
 
-    // Show the resolved store in the UI (nice feedback)
+    // UI feedback
     const distTxt = (storeRes?.distance_m != null)
       ? ` (distance ~${Math.round(storeRes.distance_m)}m)`
       : '';
-    renderStoreContextLine(storeRes.store || (storeRes.store_id ? (storeById.get(storeRes.store_id) || null) : null), (storeRes.hint || '') + distTxt);
+    renderStoreContextLine(
+      storeRes.store || (storeRes.store_id ? (storeById.get(storeRes.store_id) || null) : null),
+      (storeRes.hint || '') + distTxt
+    );
 
     // Require photo first
     const blob = await awaitPhoto(kind);
@@ -714,27 +725,32 @@ async function onClockAction(){
 
     // RPC
     let entry, err;
+
     if (kind === 'in') {
+      // ✅ Clock IN: pass store_id (allowed)
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_in_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
-        _photo_path: photoPath, _store_id: storeRes.store_id
+        _photo_path: photoPath,
+        _store_id: storeRes.store_id
       }));
     } else {
+      // ✅ Clock OUT: DO NOT pass _store_id (DB forbids non-admin choosing store)
       ({ data: entry, error: err } = await supabaseClient.rpc('clock_out_now_geo', {
         _employee_id: currentEmployee.id,
         _lat: geo.lat, _lng: geo.lng, _accuracy_m: geo.accuracy,
-        _photo_path: photoPath, _store_id: storeRes.store_id
+        _photo_path: photoPath
       }));
     }
+
     if (err){ alert(err.message || 'Clock action blocked.'); return; }
 
-    // 🔔 NEW: ask the DB view if this shift is outside the window and warn
     if (entry?.id) await maybeWarnSchedule(entry.id);
 
     await refreshShiftStatus();
     await refreshBreakStatus();
     await loadToday();
+
   } catch (e){
     if (e?.message !== 'cancelled') alert(e?.message || 'Clock action failed.');
   } finally {
@@ -742,6 +758,7 @@ async function onClockAction(){
     btn.disabled = false;
   }
 }
+
 
 
 // ===== Worker schedule (weekly) =====
@@ -915,12 +932,12 @@ async function onBreakAction(){
     if (!hasOpenBreak) {
       ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('start_break_now_geo', {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
-        _photo_path: photoPath, _store_id: shiftStoreId
+        _photo_path: photoPath
       }));
     } else {
       ({ data: brkRow, error: rpcErr } = await supabaseClient.rpc('end_break_now_geo', {
         _employee_id: currentEmployee.id, _lat: lat, _lng: lng, _accuracy_m: accuracy,
-        _photo_path: photoPath, _store_id: shiftStoreId
+        _photo_path: photoPath
       }));
     }
     if (rpcErr){ alert(rpcErr.message); return; }
