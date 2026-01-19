@@ -1,0 +1,251 @@
+/* =========================================================
+   Users — Cards + Manage Drawer (Phase 3A)
+   Paste near bottom of admin.css
+   ========================================================= */
+
+.users-cards{
+  display:grid;
+  gap:14px;
+  margin-top:12px;
+}
+
+/* Card shell */
+.user-card{
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.08);
+  background:
+    radial-gradient(1200px 320px at 18% 0%, rgba(157,123,255,.10), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.012));
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.45),
+    0 0 0 1px rgba(0,0,0,.30) inset;
+  padding:16px 16px 14px;
+  transition: transform .14s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.user-card:hover{
+  transform: translateY(-1px);
+  border-color: rgba(157,123,255,.22);
+  box-shadow:
+    0 28px 70px rgba(0,0,0,.55),
+    0 0 0 1px rgba(157,123,255,.18) inset;
+}
+
+.uc-top{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.uc-identity{ min-width:0; }
+.uc-name{
+  font-weight:800;
+  letter-spacing:.2px;
+  font-size:20px;
+  line-height:1.1;
+}
+.uc-sub{
+  margin-top:6px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  color: rgba(154,160,166,.95);
+  font-size:13px;
+}
+.uc-email{ opacity:.95; }
+.uc-dot{ opacity:.55; }
+.uc-hourly{ font-variant-numeric: tabular-nums; }
+
+/* Chips */
+.uc-chips{
+  margin-top:12px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+
+.uc-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 12px;
+  border-radius:999px;
+  font-size:13px;
+  line-height:1;
+  font-weight:800;
+  letter-spacing:.15px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.02);
+  box-shadow: 0 8px 22px rgba(0,0,0,.25);
+}
+
+.uc-chip .uc-ic{ opacity:.95; }
+
+.uc-ok{
+  color: var(--ok);
+  border-color: rgba(47,191,113,.25);
+  background: rgba(47,191,113,.08);
+}
+.uc-warn{
+  color: var(--warn);
+  border-color: rgba(224,169,0,.25);
+  background: rgba(224,169,0,.10);
+}
+.uc-bad{
+  color: #ff6b6b;
+  border-color: rgba(255,107,107,.25);
+  background: rgba(255,107,107,.08);
+}
+.uc-accent{
+  color: var(--accent);
+  border-color: rgba(157,123,255,.28);
+  background: rgba(157,123,255,.10);
+}
+.uc-neutral{
+  color: rgba(231,233,234,.86);
+}
+
+/* Manage button */
+.uc-actions .btn{
+  border-radius:12px;
+  padding:10px 14px;
+  font-weight:800;
+  letter-spacing:.2px;
+}
+.uc-actions .btn:hover{
+  transform: translateY(-1px);
+}
+
+/* Drawer backdrop + drawer (reuses your aesthetic) */
+.drawer-backdrop{
+  position:fixed;
+  inset:0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(10px);
+  opacity:0;
+  transition: opacity .16s ease;
+  z-index: 5000;
+}
+.drawer-backdrop.show{ opacity:1; }
+
+.drawer{
+  position:fixed;
+  top:14px;
+  right:14px;
+  bottom:14px;
+  width:min(520px, calc(100vw - 28px));
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(900px 420px at 20% 0%, rgba(157,123,255,.14), transparent 58%),
+    linear-gradient(180deg, rgba(18,19,22,.92), rgba(12,12,13,.92));
+  box-shadow:
+    0 40px 120px rgba(0,0,0,.70),
+    0 0 0 1px rgba(0,0,0,.45) inset;
+  transform: translateX(14px);
+  opacity:0;
+  transition: transform .18s ease, opacity .18s ease;
+  z-index: 5100;
+  overflow:hidden;
+}
+.drawer.show{
+  transform: translateX(0);
+  opacity:1;
+}
+
+.drawer-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:16px 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.ud-title{
+  font-size:16px;
+  font-weight:900;
+  letter-spacing:.2px;
+}
+.ud-sub{
+  margin-top:4px;
+  font-size:12px;
+  opacity:.9;
+}
+
+.drawer-body{
+  padding:14px 16px 16px;
+  overflow:auto;
+  height: calc(100% - 64px);
+}
+
+.ud-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+  margin-top:12px;
+}
+@media (max-width: 640px){
+  .ud-grid{ grid-template-columns: 1fr; }
+}
+
+.ud-field span{
+  display:block;
+  font-size:12px;
+  color: rgba(154,160,166,.95);
+  margin-bottom:7px;
+  font-weight:800;
+  letter-spacing:.2px;
+}
+
+.ud-field input,
+.ud-field select{
+  width:100%;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.02);
+  color: var(--text);
+  padding:11px 12px;
+  outline:none;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .12s ease;
+}
+.ud-field input:focus,
+.ud-field select:focus{
+  border-color: rgba(157,123,255,.35);
+  box-shadow: 0 0 0 4px rgba(157,123,255,.14);
+}
+
+.ud-active .ud-switch{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.02);
+}
+.ud-active input{ accent-color: var(--accent); }
+
+.ud-email input{
+  opacity:.85;
+}
+
+.ud-divider{
+  height:1px;
+  background: rgba(255,255,255,.08);
+  margin:14px 0 12px;
+}
+
+.ud-actions{
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+}
+
+.ud-msg{
+  margin-top:10px;
+  font-size:12px;
+  opacity:.9;
+}
