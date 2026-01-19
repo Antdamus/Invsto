@@ -2608,106 +2608,14 @@ function applyUsersFilterAndRender(){
   // NEW: cards renderer can live in admin-users.js
   if (typeof window.renderUsers === "function") {
     window.renderUsers(rows);
-  } else {
-    // fallback (keeps old behavior if cards script isn't loaded)
-    renderUsersTable(rows);
-  }
+  } 
 }
 
 
 const esc = escapeHtml;
 
-function renderUsersTable(rows){
-  const usersTbody = qs('usersTbody');
-  if (!usersTbody) return;
-
-  if (!rows?.length){
-    usersTbody.innerHTML = `<tr><td colspan="8" class="muted">No users found.</td></tr>`;
-    return;
-  }
-
-  const esc = escapeHtml;
-
-  usersTbody.innerHTML = rows.map(emp=>{
-    const created = emp.invited_at ? fmtLocal(emp.invited_at) : "—";
-    const accepted = !!emp.accepted_at;
-    const statusLabel = accepted ? "Accepted" : "Invited";
-    const badgeClass = accepted ? "badge ok" : "badge warn";
-
-    const hourlyVal = (emp.hourly_rate === null || emp.hourly_rate === undefined || emp.hourly_rate === "")
-      ? ""
-      : String(emp.hourly_rate);
-
-    const wt = (emp.worker_type || 'employee').toLowerCase();
-
-    return `
-      <tr data-employee-id="${emp.id}">
-        <!-- 1) Name -->
-        <td>
-          <input class="input user-name" value="${esc(emp.display_name||"")}" />
-        </td>
-
-        <!-- 2) Email -->
-        <td class="mono">${esc(emp.email||"—")}</td>
-
-        <!-- 3) Status -->
-        <td>
-          <div class="status-stack">
-            <span class="${badgeClass}">${statusLabel}</span>
-            <span class="muted">${statusLabel} • ${created}</span>
-          </div>
-        </td>
-
-        <!-- 4) Role (permissions) -->
-        <td>
-          <select class="select user-role">
-            ${["employee","manager","admin"].map(r=>`<option value="${r}" ${emp.role===r?"selected":""}>${r}</option>`).join("")}
-          </select>
-        </td>
-
-        <!-- 5) Worker Type (pay classification) -->
-        <td>
-          <select class="select user-worker-type">
-            ${["employee","contractor"].map(t=>`<option value="${t}" ${wt===t?"selected":""}>${t}</option>`).join("")}
-          </select>
-        </td>
-
-        <!-- 6) Hourly Rate -->
-        <td>
-          <input
-            class="input user-hourly-rate"
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="e.g., 18.50"
-            value="${esc(hourlyVal)}"
-          />
-        </td>
-
-        <!-- 7) Active -->
-        <td>
-          <label class="switch">
-            <input class="user-active" type="checkbox" ${emp.active ? "checked":""} />
-            <span>${emp.active ? "Yes":"No"}</span>
-          </label>
-        </td>
-
-        <!-- 8) Actions -->
-        <td>
-          <div class="row-actions">
-            ${accepted ? "" : `<button class="btn small ghost user-resend">Resend</button>`}
-            <button class="btn small user-save">Save</button>
-          </div>
-        </td>
-      </tr>`;
-  }).join("");
-}
 
 async function loadUsers(){
-  const tbody = qs('usersTbody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="muted">Loading…</td></tr>`;
-
   const { data, error } = await supabaseClient
     .from('employees')
     .select('id, user_id, display_name, email, role, worker_type, hourly_rate, active, created_at, invited_at, accepted_at')
@@ -2828,9 +2736,6 @@ window.saveUserRow = saveUserRow;
 window.resendInvite = resendInvite;
 window.showToast = showToast;
 
-// Optional (only if you want other scripts to hook your renderer)
-window.renderUsersTable = window.renderUsersTable || renderUsersTable;
-
 
 function wireUsersTab(){
   // tab click: activate + lazy init
@@ -2870,39 +2775,12 @@ function wireUsersTab(){
       applyUsersFilterAndRender();
     });
 
-    // actions per row (save + resend)
-qs('usersTbody')?.addEventListener('click', (e) => {
-  const tr = e.target.closest('tr');
-  if (!tr) return;
-
-  const saveBtn = e.target.closest('.user-save');
-  if (saveBtn){
-    saveUserRow(tr).catch(err => {
-      console.error(err);
-      showToast(err?.message || 'Save failed', 'err');
-    });
-    return;
-  }
-
-  const resendBtn = e.target.closest('.user-resend');
-  if (resendBtn){
-    resendBtn.disabled = true;
-    resendInvite(tr)
-      .catch(err => {
-        console.error(err);
-        showToast(err?.message || 'Resend failed', 'err');
-      })
-      .finally(() => { resendBtn.disabled = false; });
-    return;
-  }
-});
-
-
     // initial load
     loadUsers().catch(err => {
       console.error(err);
-      const tbody = qs('usersTbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="muted">Failed to load users.</td></tr>`;
+      const cards = qs('usersCards');
+      if (cards) cards.innerHTML = `<div class="muted">Failed to load users.</div>`;
+
     });
   });
 }
