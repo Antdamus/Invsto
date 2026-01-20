@@ -1,47 +1,12 @@
 import { initOverview } from "./admin-overview.js";
-
+import { initStores } from "./admin-stores.js";
 
 // admin.js — Overview + Drawer/Edit/Audit + Payroll Weekly + Period Lock/Unlock (Phase 3.3)
 let supabaseClient = null;
 let drawerOnlyAnoms = false;
 let lastDrawerShifts = []; // keep latest list to re-render on toggle
 
-/* =========================
-   Store name cache (for Overview drawer + anywhere)
-   ========================= */
 
-let _storeNameCache = null; // Map(store_id -> { id, name, lat, lng })
-
-async function ensureStoreNameCache(){
-  if (_storeNameCache) return;
-
-  const { data, error } = await supabaseClient
-    .from('store_locations')
-    .select('id,name,lat,lng')
-    .order('name', { ascending: true });
-
-  if (error) throw error;
-
-  _storeNameCache = new Map();
-  for (const s of (data || [])){
-    _storeNameCache.set(s.id, s);
-  }
-}
-
-function storeNameById(storeId){
-  if (!storeId) return '';
-  // Prefer cache (works even if Stores tab never opened)
-  if (_storeNameCache?.has(storeId)) return _storeNameCache.get(storeId)?.name || '';
-  // Fallback to Stores tab cache if present
-  const s = _allStores?.find?.(x => x.id === storeId);
-  return s?.name || '';
-}
-
-function storeDirectionsHref(storeId){
-  const s = _storeNameCache?.get(storeId) || _allStores?.find?.(x => x.id === storeId);
-  if (!s || s.lat == null || s.lng == null) return null;
-  return directionsUrl(s.lat, s.lng);
-}
 
 /* =========================================================
    Phase 3.5 — Clamp long anomaly chip lists in drawer cards
@@ -172,10 +137,27 @@ function toast(message, kind = "ok") {
   }
 }
 
-function applyDirectionsLinkFromStoreId(linkEl, storeId) {
+function applyDirectionsLinkFromStoreId(a, b) {
+  // Accept both call styles:
+  // 1) (linkEl, storeId)  [older code]
+  // 2) (storeId, linkEl)  [newer code / modules]
+  let linkEl, storeId;
+
+  if (a && typeof a === "object" && ("href" in a || a.tagName)) {
+    linkEl = a;
+    storeId = b;
+  } else {
+    storeId = a;
+    linkEl = b;
+  }
+
   if (!linkEl || typeof storeId !== "string") return;
 
-  const store = storesById[storeId]; // or however you map stores
+  // storesById is a Map, so use .get()
+  const store = (typeof storesById?.get === "function")
+    ? storesById.get(storeId)
+    : null;
+
   if (!store || store.lat == null || store.lng == null) {
     linkEl.href = "#";
     linkEl.classList.add("disabled");
@@ -185,6 +167,7 @@ function applyDirectionsLinkFromStoreId(linkEl, storeId) {
   linkEl.href = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}`;
   linkEl.classList.remove("disabled");
 }
+
 
 
 
@@ -1479,484 +1462,6 @@ function wireScheduleTab(){
 }
 
 
-/* ============== Stores (Phase 1 — Store setup) ============== */
-let _storesInitialized = false;
-let _allStores = []; // cached list
-
-const STORE_DEFAULTS = {
-  radius_m: 50,
-  timezone: 'America/New_York',
-  schedule_enforce: false,
-  schedule_grace_in_m: 5,
-  schedule_grace_out_m: 5,
-  paid_break_cap_min: 30,
-  active: true
-};
-
-function directionsUrl(lat, lng){
-  if (lat == null || lng == null) return '#';
-  const q = `${Number(lat)},${Number(lng)}`;
-  // Works in desktop + mobile (Google Maps web). If user has the app, browser will often deep-link.
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`;
-}
-
-function setStoreError(msg){
-  const el = qs('storeError');
-  if (!el) return;
-  el.textContent = msg || '';
-  show(el, !!msg);
-}
-
-function openStoreModal(store=null){
-  setStoreError('');
-
-  // Defaults
-  const s = {
-    id: store?.id || '',
-    name: store?.name ?? '',
-    lat: store?.lat ?? '',
-    lng: store?.lng ?? '',
-    radius_m: store?.radius_m ?? STORE_DEFAULTS.radius_m,
-    timezone: store?.timezone ?? STORE_DEFAULTS.timezone,
-    schedule_enforce: store?.schedule_enforce ?? STORE_DEFAULTS.schedule_enforce,
-    schedule_grace_in_m: store?.schedule_grace_in_m ?? STORE_DEFAULTS.schedule_grace_in_m,
-    schedule_grace_out_m: store?.schedule_grace_out_m ?? STORE_DEFAULTS.schedule_grace_out_m,
-    paid_break_cap_min: store?.paid_break_cap_min ?? STORE_DEFAULTS.paid_break_cap_min,
-    active: store?.active ?? STORE_DEFAULTS.active
-  };
-
-  qs('storeTitle').textContent = store?.id ? 'Edit store' : 'Add store';
-  qs('storeId').value = s.id;
-  qs('storeName').value = s.name;
-  qs('storeLat').value = s.lat;
-  qs('storeLng').value = s.lng;
-  qs('storeRadius').value = s.radius_m;
-  qs('storeTz').value = s.timezone;
-  qs('storeGraceIn').value = s.schedule_grace_in_m;
-  qs('storeGraceOut').value = s.schedule_grace_out_m;
-  qs('storePaidBreakCap').value = s.paid_break_cap_min;
-  qs('storeScheduleEnforce').checked = !!s.schedule_enforce;
-  qs('storeActive').checked = !!s.active;
-
-  updateDirectionsPreview();
-
-  qs('storeModal').classList.add('open');
-  qs('storeModal').classList.remove('hidden');
-  qs('storeModalBackdrop').classList.add('show');
-  qs('storeModalBackdrop').classList.remove('hidden');
-}
-
-function closeStoreModal(){
-  qs('storeModal').classList.remove('open');
-  qs('storeModalBackdrop').classList.remove('show');
-  setTimeout(() => {
-    qs('storeModal').classList.add('hidden');
-    qs('storeModalBackdrop').classList.add('hidden');
-  }, 180);
-}
-
-function updateDirectionsPreview(){
-  const lat = qs('storeLat')?.value;
-  const lng = qs('storeLng')?.value;
-  const link = qs('storeDirLink');
-  const hint = qs('storeDirHint');
-  if (!link || !hint) return;
-
-  const ok = lat !== '' && lng !== '' && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
-  if (!ok){
-    link.href = '#';
-    link.setAttribute('aria-disabled', 'true');
-    link.style.pointerEvents = 'none';
-    link.style.opacity = '0.55';
-    hint.textContent = 'Enter lat/lng to enable Directions';
-    return;
-  }
-  link.href = directionsUrl(lat, lng);
-  link.removeAttribute('aria-disabled');
-  link.style.pointerEvents = '';
-  link.style.opacity = '';
-  hint.textContent = `Directions to ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
-}
-
-function readStoreForm(){
-  const id = (qs('storeId').value || '').trim() || null;
-  const name = (qs('storeName').value || '').trim();
-  const lat = Number(qs('storeLat').value);
-  const lng = Number(qs('storeLng').value);
-  const radius_m = Number(qs('storeRadius').value);
-  const timezone = (qs('storeTz').value || STORE_DEFAULTS.timezone).trim() || STORE_DEFAULTS.timezone;
-  const schedule_enforce = !!qs('storeScheduleEnforce').checked;
-  const schedule_grace_in_m = Number(qs('storeGraceIn').value || STORE_DEFAULTS.schedule_grace_in_m);
-  const schedule_grace_out_m = Number(qs('storeGraceOut').value || STORE_DEFAULTS.schedule_grace_out_m);
-  const paid_break_cap_min = Number(qs('storePaidBreakCap').value || STORE_DEFAULTS.paid_break_cap_min);
-  const active = !!qs('storeActive').checked;
-
-  if (!name) return { ok:false, msg:'Store name is required.' };
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { ok:false, msg:'Latitude and longitude must be valid numbers.' };
-  if (!Number.isFinite(radius_m) || radius_m <= 0) return { ok:false, msg:'Radius must be a positive number.' };
-  if (!Number.isFinite(schedule_grace_in_m) || schedule_grace_in_m < 0) return { ok:false, msg:'Grace in must be 0 or more.' };
-  if (!Number.isFinite(schedule_grace_out_m) || schedule_grace_out_m < 0) return { ok:false, msg:'Grace out must be 0 or more.' };
-  if (!Number.isFinite(paid_break_cap_min) || paid_break_cap_min < 0) return { ok:false, msg:'Paid break cap must be 0 or more.' };
-
-  return {
-    ok:true,
-    data: {
-      ...(id ? { id } : {}),
-      name,
-      lat,
-      lng,
-      radius_m,
-      timezone,
-      schedule_enforce,
-      schedule_grace_in_m,
-      schedule_grace_out_m,
-      paid_break_cap_min,
-      active
-    }
-  };
-}
-
-async function upsertStore(){
-  const parsed = readStoreForm();
-  if (!parsed.ok) return setStoreError(parsed.msg);
-  setStoreError('');
-
-  const payload = parsed.data;
-
-  try {
-    let resp;
-    if (payload.id){
-      resp = await supabaseClient
-        .from('store_locations')
-        .update(payload)
-        .eq('id', payload.id)
-        .select()
-        .single();
-    } else {
-      resp = await supabaseClient
-        .from('store_locations')
-        .insert(payload)
-        .select()
-        .single();
-    }
-    if (resp.error) throw resp.error;
-
-    closeStoreModal();
-    showToast('Store saved', 'ok');
-    await loadStores();
-  } catch (err){
-    console.error(err);
-    setStoreError(err?.message || 'Failed to save store');
-  }
-}
-
-function storeStatusPill(active){
-  return `<span class="pill ${active ? 'work' : ''} store-pill">${active ? 'Active' : 'Inactive'}</span>`;
-}
-
-function renderStoresTable(){
-  const tb = qs('storesTbody');
-  if (!tb) return;
-
-  const q = (qs('storeSearchInput')?.value || '').trim().toLowerCase();
-  const showInactive = !!qs('storeShowInactive')?.checked;
-
-  const rows = _allStores
-    .filter(s => showInactive ? true : !!s.active)
-    .filter(s => q ? (s.name || '').toLowerCase().includes(q) : true)
-    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
-
-  tb.innerHTML = '';
-  if (!rows.length){
-    tb.innerHTML = `<tr><td colspan="9" class="muted">No stores found.</td></tr>`;
-    return;
-  }
-
-  for (const s of rows){
-    const lat = (s.lat == null) ? '—' : Number(s.lat).toFixed(5);
-    const lng = (s.lng == null) ? '—' : Number(s.lng).toFixed(5);
-    const dir = directionsUrl(s.lat, s.lng);
-
-    const tr = document.createElement('tr');
-    tr.dataset.storeId = s.id;
-    tr.innerHTML = `
-      <td><div style="font-weight:600;">${s.name || '—'}</div></td>
-      <td>${storeStatusPill(!!s.active)}</td>
-      <td><span class="coords">${lat}, ${lng}</span></td>
-      <td>${s.radius_m ?? '—'}</td>
-      <td>${s.timezone || '—'}</td>
-      <td>${s.schedule_enforce ? 'Yes' : 'No'}</td>
-      <td>${(s.schedule_grace_in_m ?? '—')}/${(s.schedule_grace_out_m ?? '—')}</td>
-      <td>${s.paid_break_cap_min ?? '—'} min</td>
-      <td>
-        <div class="store-actions">
-          <button class="btn small" data-store-edit="${s.id}">Edit</button>
-          <a class="btn small ghost" href="${dir}" target="_blank" rel="noopener">Directions</a>
-          <button class="btn small ghost" data-store-emerg="${s.id}">Emergency</button>
-          <button class="btn small ghost" data-store-toggle="${s.id}">${s.active ? 'Deactivate' : 'Activate'}</button>
-        </div>
-      </td>
-    `;
-    tb.appendChild(tr);
-  }
-}
-
-async function loadStores(){
-  const tb = qs('storesTbody');
-  if (tb) tb.innerHTML = `<tr><td colspan="9" class="muted">Loading…</td></tr>`;
-
-  const { data, error } = await supabaseClient
-    .from('store_locations')
-    .select('id,name,lat,lng,radius_m,timezone,schedule_enforce,schedule_grace_in_m,schedule_grace_out_m,paid_break_cap_min,active,created_at')
-    .order('name', { ascending: true });
-  if (error) throw error;
-
-  _allStores = data || [];
-  renderStoresTable();
-}
-
-async function toggleStoreActive(storeId){
-  const s = _allStores.find(x => x.id === storeId);
-  if (!s) return;
-  const next = !s.active;
-  const verb = next ? 'activate' : 'deactivate';
-  if (!confirm(`Are you sure you want to ${verb} “${s.name}”?`)) return;
-
-  try {
-    const { error } = await supabaseClient
-      .from('store_locations')
-      .update({ active: next })
-      .eq('id', storeId);
-    if (error) throw error;
-    showToast(`Store ${next ? 'activated' : 'deactivated'}`, 'ok');
-    await loadStores();
-  } catch (err){
-    console.error(err);
-    showToast(err?.message || 'Failed to update store', 'err');
-  }
-}
-
-function setEmergError(msg){
-  const el = qs('emergError');
-  if (!el) return;
-  el.textContent = msg || '';
-  show(el, !!msg);
-}
-
-function openEmergModal(storeId){
-  setEmergError('');
-  const s = _allStores.find(x => x.id === storeId);
-  if (!s) return;
-
-  qs('emergStoreId').value = s.id;
-  qs('emergStoreName').textContent = s.name || '—';
-
-  const today = toISODate(new Date());
-  qs('emergStart').value = today;
-  qs('emergEnd').value = today;
-
-  // Populate store dropdowns
-  const opt = storeOptionsHTML('');
-  qs('emergInStore').innerHTML = opt;
-  qs('emergOutStore').innerHTML = opt;
-
-  qs('emergAnyIn').checked = false;
-  qs('emergAnyOut').checked = false;
-
-  qs('emergInStore').disabled = false;
-  qs('emergOutStore').disabled = false;
-
-  // Initial directions disabled until store chosen
-  applyDirectionsLinkFromStoreId('', qs('emergInDir'));
-  applyDirectionsLinkFromStoreId('', qs('emergOutDir'));
-
-  qs('emergReason').value = '';
-
-  qs('emergModal').classList.add('open');
-  qs('emergModal').classList.remove('hidden');
-  qs('emergModalBackdrop').classList.add('show');
-  qs('emergModalBackdrop').classList.remove('hidden');
-}
-
-function closeEmergModal(){
-  qs('emergModal').classList.remove('open');
-  qs('emergModalBackdrop').classList.remove('show');
-  setTimeout(() => {
-    qs('emergModal').classList.add('hidden');
-    qs('emergModalBackdrop').classList.add('hidden');
-  }, 180);
-}
-
-async function saveEmergException(){
-  setEmergError('');
-
-  const storeId = (qs('emergStoreId').value || '').trim();
-  const start = qs('emergStart').value; // YYYY-MM-DD
-  const end = qs('emergEnd').value;     // YYYY-MM-DD
-  if (!storeId) return setEmergError('Missing store id.');
-  if (!start || !end) return setEmergError('Start and end date are required.');
-  if (end < start) return setEmergError('End date must be on/after start date.');
-
-  const allowAnyIn = !!qs('emergAnyIn').checked;
-  const allowAnyOut = !!qs('emergAnyOut').checked;
-
-  const inStoreId = allowAnyIn ? null : (qs('emergInStore').value || null);
-  const outStoreId = allowAnyOut ? null : (qs('emergOutStore').value || null);
-
-  const note = (qs('emergReason').value || '').trim() || null;
-
-  // Build one row per day (Option A)
-  const rows = [];
-  for (const d of enumerateIsoDates(start, end)){
-    rows.push({
-      store_id: storeId,
-      work_date: d,
-      allow_clock_in_any_store: allowAnyIn,
-      clock_in_store_id: inStoreId,
-      allow_clock_out_any_store: allowAnyOut,
-      clock_out_store_id: outStoreId,
-      note
-    });
-  }
-
-  try{
-    const { error } = await supabaseClient
-      .from('timeclock_store_exceptions')
-      .upsert(rows, { onConflict: 'store_id,work_date' });
-
-    if (error) throw error;
-
-    showToast?.('Emergency exception saved', 'ok');
-    closeEmergModal();
-  }catch(e){
-    console.error(e);
-    setEmergError(e?.message || 'Failed to save emergency exception');
-  }
-}
-
-function enumerateIsoDates(startIso, endIso){
-  // inputs: 'YYYY-MM-DD' -> yields each day inclusive
-  const out = [];
-  const start = new Date(startIso + 'T00:00:00');
-  const end = new Date(endIso + 'T00:00:00');
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)){
-    out.push(d.toISOString().slice(0,10));
-  }
-  return out;
-}
-
-async function clearEmergException(){
-  setEmergError('');
-
-  const storeId = (qs('emergStoreId').value || '').trim();
-  const start = qs('emergStart').value;
-  const end = qs('emergEnd').value;
-
-  if (!storeId) return setEmergError('Missing store id.');
-  if (!start || !end) return setEmergError('Start and end date are required.');
-  if (end < start) return setEmergError('End date must be on/after start date.');
-
-  try{
-    const { error } = await supabaseClient
-      .from('timeclock_store_exceptions')
-      .delete()
-      .eq('store_id', storeId)
-      .gte('work_date', start)
-      .lte('work_date', end);
-
-    if (error) throw error;
-
-    showToast?.('Emergency exception cleared', 'ok');
-    closeEmergModal();
-  }catch(e){
-    console.error(e);
-    setEmergError(e?.message || 'Failed to clear emergency exception');
-  }
-}
-
-
-
-async function initStoresPanel(){
-  if (_storesInitialized) return;
-  _storesInitialized = true;
-
-  // Filters
-  qs('storeSearchInput')?.addEventListener('input', () => renderStoresTable());
-  qs('storeShowInactive')?.addEventListener('change', () => renderStoresTable());
-
-  // Add button
-  qs('storeAddBtn')?.addEventListener('click', () => openStoreModal(null));
-
-  // Table actions
-  qs('storesTbody')?.addEventListener('click', (e) => {
-    const edit = e.target.closest('[data-store-edit]');
-    if (edit){
-      const id = edit.getAttribute('data-store-edit');
-      const s = _allStores.find(x => x.id === id);
-      openStoreModal(s || null);
-      return;
-    }
-    const tog = e.target.closest('[data-store-toggle]');
-    if (tog){
-      toggleStoreActive(tog.getAttribute('data-store-toggle'));
-      return;
-    }
-        const em = e.target.closest('[data-store-emerg]');
-    if (em){
-      openEmergModal(em.getAttribute('data-store-emerg'));
-      return;
-    }
-
-  });
-
-  // Modal close + save
-  qs('storeCloseBtn')?.addEventListener('click', closeStoreModal);
-  qs('storeCancelBtn')?.addEventListener('click', closeStoreModal);
-  qs('storeModalBackdrop')?.addEventListener('click', closeStoreModal);
-  qs('storeSaveBtn')?.addEventListener('click', upsertStore);
-
-    // Emergency modal close + save
-  qs('emergCloseBtn')?.addEventListener('click', closeEmergModal);
-  qs('emergCancelBtn')?.addEventListener('click', closeEmergModal);
-  qs('emergModalBackdrop')?.addEventListener('click', closeEmergModal);
-  qs('emergSaveBtn')?.addEventListener('click', saveEmergException);
-
-  // Emergency modal live enable/disable + directions
-  qs('emergAnyIn')?.addEventListener('change', () => {
-    const any = !!qs('emergAnyIn').checked;
-    qs('emergInStore').disabled = any;
-    applyDirectionsLinkFromStoreId(any ? '' : qs('emergInStore').value, qs('emergInDir'));
-  });
-
-  qs('emergAnyOut')?.addEventListener('change', () => {
-    const any = !!qs('emergAnyOut').checked;
-    qs('emergOutStore').disabled = any;
-    applyDirectionsLinkFromStoreId(any ? '' : qs('emergOutStore').value, qs('emergOutDir'));
-  });
-
-  qs('emergInStore')?.addEventListener('change', () => {
-    applyDirectionsLinkFromStoreId(qs('emergInStore').value, qs('emergInDir'));
-  });
-
-  qs('emergOutStore')?.addEventListener('change', () => {
-    applyDirectionsLinkFromStoreId(qs('emergOutStore').value, qs('emergOutDir'));
-  });
-
-
-  // Directions preview
-  ['storeLat','storeLng'].forEach(id => qs(id)?.addEventListener('input', updateDirectionsPreview));
-
-  await loadStores();
-}
-
-function wireStoresTab(){
-  qs('tabStores')?.addEventListener('click', async () => {
-    activateTab('stores');
-    try { await initStoresPanel(); }
-    catch (e){ console.error(e); showToast('Failed to load stores','err'); }
-  });
-}
-
 
 /* ============== Drawer + Edit/Audit ============== */
 async function fetchPeriodSummary(periodId){
@@ -2848,7 +2353,7 @@ const onRealtimeChange = debounce(async () => {
       renderDrawerSummary(shifts);
       renderDrawerList(shifts);
     }
-    await loadLiveNow(); // <— add this
+    if (overviewApi?.loadLiveNow) await overviewApi.loadLiveNow();
   } catch {}
 }, 400);
 
@@ -3129,6 +2634,67 @@ function wireUsersTab(){
 
 let overviewApi = null;
 
+let storesApi = null;
+
+function setupStores() {
+  storesApi = initStores({
+    qs,
+    show,
+    showToast,
+
+    // give the module access to the current supabase client
+    getSupabase: () => supabaseClient,
+
+    // shared utils it needs
+    activateTab,
+    toISODate,
+    storeOptionsHTML,
+
+    // IMPORTANT: your admin.js calls are inconsistent (sometimes (linkEl, storeId), sometimes (storeId, linkEl)).
+    // We'll pass the same function after we make it tolerant in Step 3B.
+    applyDirectionsLinkFromStoreId,
+  });
+}
+
+// =========================================================
+// Stores bridge (admin.js -> admin-stores.js module)
+// - keeps legacy calls working (drawer, schedule, etc.)
+// =========================================================
+
+function storeNameById(storeId) {
+  // Prefer module cache (best)
+  try {
+    if (storesApi?.storeNameById) return storesApi.storeNameById(storeId);
+  } catch {}
+
+  // Fallback: schedule store cache (Map)
+  if (!storeId) return "";
+  const s = (typeof storesById?.get === "function") ? storesById.get(storeId) : null;
+  return s?.name || "";
+}
+
+function storeDirectionsHref(storeId) {
+  try {
+    if (storesApi?.storeDirectionsHref) return storesApi.storeDirectionsHref(storeId);
+  } catch {}
+
+  // Fallback: build from storesById
+  if (!storeId) return null;
+  const s = (typeof storesById?.get === "function") ? storesById.get(storeId) : null;
+  if (!s || s.lat == null || s.lng == null) return null;
+
+  const q = `${Number(s.lat)},${Number(s.lng)}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`;
+}
+
+// Optional back-compat (some older code may still call this name)
+async function ensureStoreNameCache() {
+  if (storesApi?.ensureStoreNameCache) return storesApi.ensureStoreNameCache();
+  if (typeof ensureStoresCache === "function") return ensureStoresCache();
+}
+
+
+
 function setupOverview() {
   overviewApi = initOverview({
     qs,
@@ -3185,10 +2751,11 @@ document.addEventListener("supabase-ready", async () => {
 
   if (!ok) return;
 
-    // ✅ Preload store names for Overview drawer + directions
-  try { await ensureStoreNameCache(); }
-  catch(e){ console.warn('ensureStoreNameCache failed:', e); }
+setupStores();
 
+// ✅ Preload store names for Overview drawer + anywhere
+try { await storesApi.ensureStoreNameCache(); }
+catch(e){ console.warn("ensureStoreNameCache failed:", e); }
 
   // Header + tabs
   wireHeaderActions();
@@ -3212,7 +2779,9 @@ document.addEventListener("supabase-ready", async () => {
   // The rest of the dashboard
   bootRealtime();
   wireScheduleTab();
-  wireStoresTab();
+ storesApi.bootStores();
+
+
   wireUsersTab();
   wireUsersPanel();
   wireGlobalCalendar();
