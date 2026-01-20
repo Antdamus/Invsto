@@ -1952,19 +1952,40 @@ function wireGlobalCalendar(){
   qs('gcSearch')?.addEventListener('input', async () => { await loadGlobalCalendar(); });
 
 qs('globalCalGrid')?.addEventListener('click', async (e) => {
-  const dayCell = e.target.closest('.cal-day');
+  const slot = e.target.closest('.cal-slot');      // click on a worker row
+  const dayCell = e.target.closest('.cal-day');    // click anywhere in day
   if (!dayCell) return;
 
-  const workISO = dayCell.dataset.workDate; // make sure you set this when rendering cells
+  const workISO = dayCell.dataset.workDate;
   if (!workISO) return;
 
-  try{
-    // Re-fetch month range and filter to that date (simple + safe)
-    const gridStart = startOfMonthGrid(gcMonthStart);
-    const gridEnd = addDays(gridStart, 41);
-    const rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+  const clickedEmpId = slot?.dataset?.employeeId || null;
 
-    const dayRows = (rows || []).filter(r => String(r.work_date || '').slice(0,10) === workISO);
+  try{
+    // ✅ Use the exact same rows that were rendered (prevents mobile/desktop divergence)
+    const cache = window.__gcCache;
+    let rows = Array.isArray(cache?.rows) ? cache.rows : null;
+
+    // Fallback only if cache is missing
+    if (!rows){
+      const gridStart = startOfMonthGrid(gcMonthStart);
+      const gridEnd = addDays(gridStart, 41);
+      rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+    }
+
+    // Respect the current search filter (same as renderGlobalCalendar)
+    const q = (qs('gcSearch')?.value || '').trim().toLowerCase();
+
+    let dayRows = (rows || []).filter(r => String(r.work_date || '').slice(0,10) === workISO);
+
+    if (q){
+      dayRows = dayRows.filter(r => (String(r.display_name || '').toLowerCase().includes(q)));
+    }
+
+    // If they tapped a specific worker slot, open only that worker for the day
+    if (clickedEmpId){
+      dayRows = dayRows.filter(r => String(r.employee_id || '') === String(clickedEmpId));
+    }
 
     await openGlobalDayDrawer(workISO, dayRows);
   } catch (err){
@@ -1975,7 +1996,6 @@ qs('globalCalGrid')?.addEventListener('click', async (e) => {
     openDrawer();
   }
 });
-
 
 }
 

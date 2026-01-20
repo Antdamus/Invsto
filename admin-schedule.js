@@ -11,6 +11,15 @@ function startOfWeekSun(d){
 
 window.qs = window.qs || function(id){ return document.getElementById(id); };
 
+// ---- Global Calendar cache (so click uses EXACT same data as render) ----
+window.__gcCache = window.__gcCache || {
+  monthStartISO: null,
+  gridStartISO: null,
+  gridEndISO: null,
+  rows: []
+};
+
+
 
 async function fetchGlobalScheduleRange(gridStart, gridEnd){
   const { data, error } = await supabaseClient.rpc('get_schedule_range_all', {
@@ -85,14 +94,23 @@ async function loadGlobalCalendar(){
 
     // calendar grid range (from the Sunday before the 1st to cover 6 weeks)
     const gridStart = startOfMonthGrid(gcMonthStart);
-
     const gridEnd = addDays(gridStart, 41);
 
     const rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+
+    // ✅ cache what we rendered (desktop + mobile click will use this)
+    window.__gcCache = {
+      monthStartISO: toISODate(gcMonthStart),
+      gridStartISO: toISODate(gridStart),
+      gridEndISO: toISODate(gridEnd),
+      rows: rows || []
+    };
+
     renderGlobalCalendar(rows, gridStart, gcMonthStart);
   } catch (err){
     console.error(err);
-    const grid = qs('globalCalGrid'); if (grid) grid.innerHTML = `<div class="muted" style="grid-column:1/-1; padding:10px;">Failed to load global calendar.</div>`;
+    const grid = qs('globalCalGrid');
+    if (grid) grid.innerHTML = `<div class="muted" style="grid-column:1/-1; padding:10px;">Failed to load global calendar.</div>`;
   }
 }
 
