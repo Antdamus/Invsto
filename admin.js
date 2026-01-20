@@ -1765,7 +1765,24 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
   await Promise.all(empIds.map(async (empId) => {
     try{
       const monthShifts = await fetchWorkerShifts(empId, monthStartISO); // existing Overview loader
-      const sameDay = (monthShifts || []).filter(s => String(s.clock_in || '').slice(0,10) === workISO);
+const dayStart = new Date(`${workISO}T00:00:00`);
+const dayEnd   = new Date(`${workISO}T23:59:59.999`);
+
+const sameDay = (monthShifts || []).filter(s => {
+  const a = s.clock_in ? new Date(s.clock_in) : null;
+  const b = s.clock_out ? new Date(s.clock_out) : null;
+
+  // open shift: treat as "on day" if it started that day OR started earlier and is still open
+  if (a && !b) {
+    return a <= dayEnd;
+  }
+
+  if (!a || !b) return false;
+
+  // overlap test: shift overlaps the clicked day
+  return (a <= dayEnd) && (b >= dayStart);
+});
+
       actualByEmp.set(empId, sameDay);
     } catch (e){
       console.warn('openGlobalDayDrawer fetchWorkerShifts failed', empId, e);
