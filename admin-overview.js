@@ -10,12 +10,14 @@ export function initOverview(deps) {
     qs,
     debounce,
     fmtHours,
+    fmtDurationHM,           // ✅ needed by Live Now ticking + pills
     monthLabel,
     monthInputToStart,
     fetchMonthlySummary,
     fetchMonthlyPendingReviewCounts,
-    openWorkerDrawer,
     fetchMonthlyExceptionCounts,
+    fetchLiveNow,            // ✅ Live Now data fetcher (kept in admin.js for now)
+    openWorkerDrawer,        // ✅ only drawer API Overview should use
   } = deps;
 
   // ---------- state ----------
@@ -296,14 +298,150 @@ async function loadSummary() {
     });
   }
 
-  // ---------- public ----------
-  async function bootOverview() {
-    wireFilters();
-    wireSorting();
-    wireTableClicks();
-    wireCardClicks();
-    await loadSummary();
+
+
+// recompute durations from data-* timestamps (no network)
+  let liveTickTimer = null;
+  function tickLiveNow(){
+    const cards = document.querySelectorAll('.live-card');
+    const now = Date.now();
+
+    for (const card of cards){
+      const clockInMs = Number(card.dataset.clockInMs || 0);
+      if (!clockInMs) continue;
+
+      // update "since … • HHh MMm"
+      const timesEl = card.querySelector('.live-times');
+      if (timesEl){
+        const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+        const durStr = fmtDurationHM(now - clockInMs);
+        timesEl.textContent = `since ${sinceStr} • ${durStr}`;
+      }
+
+      // if on break, update pill to show current break duration
+      if (card.dataset.status === 'break'){
+        const bs = Number(card.dataset.breakStartMs || 0);
+        const pill = card.querySelector('.pill.break');
+        if (bs && pill){
+          pill.textContent = `On break ${fmtDurationHM(now - bs)}`;
+        }
+      }
+    }
   }
+
+  function startLiveTicker(intervalMs = 30000){ // 30s default; use 1000 for every second
+    if (liveTickTimer) clearInterval(liveTickTimer);
+    liveTickTimer = setInterval(tickLiveNow, intervalMs);
+    // also do an immediate tick so UI updates right away
+    tickLiveNow();
+  }
+
+  function stopLiveTicker(){
+    if (liveTickTimer) { clearInterval(liveTickTimer); liveTickTimer = null; }
+  }
+
+  function renderLiveNow(rows){
+  const list = qs('liveList'); if (!list) return;
+  const updated = qs('liveUpdated');
+
+  // header stamp + anomaly count
+  const flagged = rows.filter(r => r.has_anomaly).length;
+  if (updated){
+    updated.textContent = `Updated ${new Date().toLocaleTimeString()}${flagged ? ` • ⚠︎ ${flagged} flagged` : ''}`;
+  }
+
+  list.innerHTML = '';
+  if (!rows.length){
+    list.innerHTML = `<div class="muted">No one is clocked in right now.</div>`;
+    if (typeof tickLiveNow === 'function') tickLiveNow();
+    return;
+  }
+
+  for (const r of rows){
+    const clockInMs = new Date(r.clock_in).getTime();
+    const breakStartMs = r.break_started_at ? new Date(r.break_started_at).getTime() : 0;
+
+    const div = document.createElement('div');
+    div.className = 'live-card';
+    div.dataset.employeeId  = r.employee_id;
+    div.dataset.displayName  = r.display_name || '';
+    div.dataset.clockInMs    = String(clockInMs);
+    div.dataset.status       = r.status; // 'work' | 'break'
+    div.dataset.breakStartMs = breakStartMs ? String(breakStartMs) : '';
+
+    const sinceStr = new Date(clockInMs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const durStr   = fmtDurationHM(Date.now() - clockInMs);
+
+    const pill = r.status === 'break'
+      ? `<span class="pill break">On break ${fmtDurationHM(r.break_ms)}</span>`
+      : `<span class="pill work">Working</span>`;
+
+    const anomHtml = r.has_anomaly && r.anomalies?.length
+      ? `<div class="live-anoms">${r.anomalies.map(a => `<span class="chip anom">⚠︎ ${a}</span>`).join(' ')}</div>`
+      : '';
+
+    div.innerHTML = `
+      <div class="live-name">${r.display_name}</div>
+      <div class="live-times">since ${sinceStr} • ${durStr}</div>
+      <div class="live-status">${pill}</div>
+      ${anomHtml}
+      <div class="live-actions">
+        ${r.photo_in_url ? `<a href="${r.photo_in_url}" target="_blank" rel="noopener">Photo In</a>` : ''}
+        ${r.break_photo_url ? `<a href="${r.break_photo_url}" target="_blank" rel="noopener">Break Photo</a>` : ''}
+        <button class="btn small ghost">Details →</button>
+      </div>
+    `;
+    list.appendChild(div);
+  }
+
+  // immediately recompute durations so labels are fresh after render
+  if (typeof tickLiveNow === 'function') tickLiveNow();
+}
+
+async function loadLiveNow(){
+  try{
+    const rows = await fetchLiveNow();
+    renderLiveNow(rows);
+  }catch(err){
+    console.error(err);
+    const list = qs('liveList');
+    if (list) list.innerHTML = `<div class="muted">Failed to load live status.</div>`;
+  }
+}
+
+// Click a live card → open drawer for that worker (current month)
+function wireLiveList(){
+  const list = qs('liveList');
+  if (!list) return;
+
+  list.addEventListener('click', (e) => {
+    const card = e.target.closest('.live-card');
+    if (!card) return;
+
+    const employeeId  = card.dataset.employeeId;
+    const displayName = card.dataset.displayName || '—';
+    const monthStart  = monthInputToStart();
+
+    openWorkerDrawer({ employeeId, monthStart, displayName });
+  });
+}
+
+
+// ---------- public ----------
+async function bootOverview() {
+  wireFilters();
+  wireSorting();
+  wireTableClicks();
+  wireCardClicks();
+
+  // ✅ Live Now
+  wireLiveList();
+  await loadLiveNow();
+  startLiveTicker(30000);
+
+  // ✅ Monthly summary
+  await loadSummary();
+}
 
   return { bootOverview, loadSummary };
 }
