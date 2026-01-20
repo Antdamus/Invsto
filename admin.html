@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="admin.css" />
   <link rel="stylesheet" href="admin-overview-drawer.css" />
   <link rel="stylesheet" href="admin-schedule.css" />
+  <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
   <link rel="stylesheet" href="admin-users.css" />
 </head>
@@ -142,10 +143,206 @@
         </div>
       </section>
 
-      <!-- ===== Payroll panel ===== -->
-      <section id="panelPayroll" class="panel hidden" role="tabpanel" aria-labelledby="tabPayroll">
-        <!-- content injected/managed by JS -->
-      </section>
+   <section id="panelPayroll" class="panel hidden" role="tabpanel" aria-labelledby="tabPayroll">
+  <!-- ===============================
+       Payroll Console (Mobile-first)
+       - Desktop shows table
+       - Mobile shows cards + sticky action bar
+       =============================== -->
+
+  <div id="payrollRoot" class="og-payroll-shell">
+
+    <!-- Top console header -->
+    <div class="og-payroll-top">
+      <div class="og-payroll-title">
+        <div class="og-payroll-h1">Payroll</div>
+        <div class="og-payroll-sub">Biweekly runs • review, finalize, export</div>
+      </div>
+
+      <div class="og-payroll-controls">
+        <label class="og-field">
+          <span class="og-label">Pay period</span>
+          <select id="prPeriodSelect" class="og-select"></select>
+        </label>
+
+        <label class="og-field">
+          <span class="og-label">Rounding</span>
+          <select id="prRoundingSelect" class="og-select">
+            <option value="none">None</option>
+            <option value="5">Nearest 5 min</option>
+            <option value="10">Nearest 10 min</option>
+            <option value="15">Nearest 15 min</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- Pending review banner -->
+    <div id="prPendingWrap" class="og-payroll-banner hidden" aria-live="polite">
+      <div class="og-payroll-banner-left">
+        <div class="og-banner-dot" aria-hidden="true"></div>
+        <div class="og-payroll-banner-text">
+          <div class="og-payroll-banner-title">
+            <span id="prPendingCount">0</span> shifts need review
+          </div>
+          <div class="og-payroll-banner-sub">Fix anomalies before finalizing payroll.</div>
+        </div>
+      </div>
+      <button id="prPendingBtn" class="btn">Review now</button>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="og-payroll-kpis">
+      <div class="og-kpi">
+        <div class="og-kpi-label">Lines</div>
+        <div id="prKpiLines" class="og-kpi-value">—</div>
+      </div>
+      <div class="og-kpi">
+        <div class="og-kpi-label">Gross</div>
+        <div id="prKpiGross" class="og-kpi-value">—</div>
+      </div>
+      <div class="og-kpi">
+        <div class="og-kpi-label">Paid</div>
+        <div id="prKpiPaid" class="og-kpi-value">—</div>
+      </div>
+      <div class="og-kpi">
+        <div class="og-kpi-label">Due</div>
+        <div id="prKpiDue" class="og-kpi-value">—</div>
+      </div>
+    </div>
+
+    <!-- Desktop actions row -->
+    <div class="og-payroll-actions og-desktop-only">
+      <button id="prCreateDraft" class="btn">Create Draft Run</button>
+      <button id="prBuildLines" class="btn">Build Lines</button>
+      <button id="prFinalizeRun" class="btn">Finalize</button>
+
+      <div class="og-payroll-actions-split" aria-hidden="true"></div>
+
+      <button id="prExportCsv" class="btn ghost">Export CSV</button>
+      <button id="prLockPeriod" class="btn ghost">Lock</button>
+      <button id="prUnlockPeriod" class="btn ghost">Unlock</button>
+
+      <div class="og-payroll-actions-split" aria-hidden="true"></div>
+
+      <button id="prDeleteDraft" class="btn danger ghost">Delete Draft</button>
+      <button id="prDeletePeriod" class="btn danger ghost">Delete Period</button>
+    </div>
+
+    <!-- Desktop table -->
+    <div class="og-payroll-tablewrap og-desktop-only">
+      <table id="prTable" class="og-payroll-table">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th class="num">Hours</th>
+            <th class="num">Gross</th>
+            <th class="num">Paid</th>
+            <th class="num">Due</th>
+            <th class="actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="prTbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Mobile cards -->
+    <div class="og-payroll-cards og-mobile-only" id="prCards"></div>
+
+    <!-- Mobile sticky action bar -->
+    <div class="og-payroll-mobilebar og-mobile-only" role="toolbar" aria-label="Payroll actions">
+      <button id="prMobileBuild" class="btn">Build</button>
+      <button id="prMobileFinalize" class="btn">Finalize</button>
+      <button id="prMobileMore" class="btn ghost">More</button>
+    </div>
+
+  </div><!-- /#payrollRoot -->
+
+  <!-- Overlay (for sheets) -->
+  <div id="prOverlay" class="og-sheet-overlay hidden" aria-hidden="true"></div>
+
+  <!-- Actions Sheet -->
+  <div id="prActionSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Payroll actions">
+    <div class="og-sheet-hd">
+      <div class="og-sheet-title">Payroll actions</div>
+      <button class="btn ghost og-sheet-close" type="button" data-pr-close>✕</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div class="og-sheet-grid">
+        <button id="prSheetCreateDraft" class="btn">Create Draft Run</button>
+        <button id="prSheetBuild" class="btn">Build Lines</button>
+        <button id="prSheetFinalize" class="btn">Finalize</button>
+
+        <button id="prSheetExport" class="btn ghost">Export CSV</button>
+        <button id="prSheetLock" class="btn ghost">Lock</button>
+        <button id="prSheetUnlock" class="btn ghost">Unlock</button>
+
+        <button id="prSheetDeleteDraft" class="btn danger ghost">Delete Draft</button>
+        <button id="prSheetDeletePeriod" class="btn danger ghost">Delete Period</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Sheet (per employee) -->
+  <div id="prDetailSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Payroll line details">
+    <div class="og-sheet-hd">
+      <div class="og-sheet-title" id="prDetailTitle">Details</div>
+      <button class="btn ghost og-sheet-close" type="button" data-pr-close>✕</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div id="prDetailBody" class="og-payroll-detail"></div>
+
+      <div class="og-sheet-footer">
+        <button id="prDetailPayBtn" class="btn">Record payment</button>
+        <button id="prDetailPdfBtn" class="btn ghost">PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Sheet -->
+  <div id="prPaySheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Record payment">
+    <div class="og-sheet-hd">
+      <div class="og-sheet-title">Record payment</div>
+      <button class="btn ghost og-sheet-close" type="button" data-pr-close>✕</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div class="og-form">
+        <label class="og-field">
+          <span class="og-label">Amount</span>
+          <input id="prPayAmount" class="og-input" inputmode="decimal" placeholder="0.00" />
+        </label>
+
+        <div class="og-field">
+          <div class="og-label">Method</div>
+          <div class="og-seg" role="tablist" aria-label="Payment method">
+            <button type="button" class="og-seg-btn is-active" data-method="zelle">Zelle</button>
+            <button type="button" class="og-seg-btn" data-method="cash">Cash</button>
+            <button type="button" class="og-seg-btn" data-method="ach">ACH</button>
+            <button type="button" class="og-seg-btn" data-method="other">Other</button>
+          </div>
+          <input id="prPayMethod" class="og-input hidden" />
+        </div>
+
+        <label class="og-field">
+          <span class="og-label">Reference (optional)</span>
+          <input id="prPayRef" class="og-input" placeholder="Txn id / note / last 4…" />
+        </label>
+
+        <label class="og-field">
+          <span class="og-label">Note (optional)</span>
+          <textarea id="prPayNote" class="og-textarea" rows="3" placeholder="Anything you want to remember…"></textarea>
+        </label>
+
+        <button id="prPayConfirm" class="btn">Save payment</button>
+      </div>
+    </div>
+  </div>
+
+</section>
+
 
       <!-- ===== Schedule panel ===== -->
       <section id="panelSchedule" class="panel hidden" role="tabpanel" aria-labelledby="tabSchedule">
