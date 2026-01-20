@@ -43,6 +43,67 @@ function storeDirectionsHref(storeId){
   return directionsUrl(s.lat, s.lng);
 }
 
+/* =========================================================
+   Phase 3.5 — Clamp long anomaly chip lists in drawer cards
+   - Shows first N chips + "+X more" toggle
+   ========================================================= */
+
+function applyChipClamp(root, limit = 2) {
+  if (!root) return;
+
+  const cards = Array.from(root.querySelectorAll(".shift"));
+  cards.forEach((card) => {
+    const chipsWrap = card.querySelector(".shift-chips");
+    if (!chipsWrap) return;
+
+    // Only clamp anomaly chips (the badges inside the chips row)
+    const badges = Array.from(chipsWrap.querySelectorAll(".badge"));
+    if (badges.length <= limit) return;
+
+    // If we already clamped once, do nothing
+    if (chipsWrap.querySelector(".chip-more-btn")) return;
+
+    // Hide extras
+    badges.forEach((b, idx) => {
+      if (idx >= limit) b.classList.add("chip-hidden");
+    });
+
+    const hiddenCount = badges.length - limit;
+
+    // Create "+N more" toggle chip
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "badge chip-more-btn";
+    btn.setAttribute("data-chip-toggle", "1");
+    btn.textContent = `+${hiddenCount} more`;
+    chipsWrap.appendChild(btn);
+  });
+}
+
+function toggleChipClamp(btn) {
+  const chipsWrap = btn.closest(".shift-chips");
+  if (!chipsWrap) return;
+
+  const isOpen = chipsWrap.classList.toggle("chips-expanded");
+
+  const hidden = Array.from(chipsWrap.querySelectorAll(".badge.chip-hidden"));
+  hidden.forEach((b) => {
+    b.style.display = isOpen ? "inline-flex" : "";
+  });
+
+  // Update button label
+  if (isOpen) {
+    btn.textContent = "Show less";
+  } else {
+    // Recompute count (in case flags changed)
+    const all = Array.from(chipsWrap.querySelectorAll(".badge"));
+    const limit = +chipsWrap.getAttribute("data-chip-limit") || 2;
+    const nHidden = Math.max(0, all.length - 1 - limit); // -1 excludes the button badge itself
+    btn.textContent = `+${nHidden} more`;
+  }
+}
+
+
 // ===== Global calendar state =====
 let gcMonthStart = null; // first day of the month being shown (Date)
 // =========================================================
@@ -2026,11 +2087,10 @@ function renderDrawerList(shifts){
     return;
   }
 
-const storeName = (storeId) => {
-  const n = storeNameById(storeId);
-  return n ? n : '—';
-};
-
+  const storeName = (storeId) => {
+    const n = storeNameById(storeId);
+    return n ? n : '—';
+  };
 
   const statusBadgeHTML = (s) => {
     if (s.is_open) return `<span class="badge warn">OPEN</span>`;
@@ -2075,9 +2135,9 @@ const storeName = (storeId) => {
 
     const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
     const storeLabel = storeName(s.store_id);
-    const dirHref = s.store_id ? storeDirectionsHref(s.store_id) : '#';
+    const dirHref = s.store_id ? (storeDirectionsHref(s.store_id) || '#') : '#';
 
-    // Actions: hide approve/waive for OPEN shifts (existing behavior)
+    // Actions: hide approve/waive for OPEN shifts
     const showApprovalBtns = !s.is_open;
     const approvalBtns = showApprovalBtns ? `
       <button class="btn small" type="button" data-approve-id="${s.id}">Approve</button>
@@ -2093,6 +2153,15 @@ const storeName = (storeId) => {
         ${photoThumb(s.photo_out_url, 'Clock-out photo')}
       </div>
     ` : '';
+
+    // Waive note block (computed OUTSIDE the HTML string)
+    const waiveNoteBlock =
+      (String(s.approval_status || '').toLowerCase() === 'waived' && (s.approval_note || '').trim().length)
+        ? `<div class="shift-waive-note">
+             <div class="wn-label">Waived note</div>
+             <div class="wn-text">${escapeHtml(s.approval_note)}</div>
+           </div>`
+        : ``;
 
     // Breaks block
     let breaksBlock = '';
@@ -2130,7 +2199,14 @@ const storeName = (storeId) => {
 
         <div class="shift-status">
           ${statusBadgeHTML(s)}
-          ${s.has_anomaly ? `<span class="badge warn">Needs review</span>` : `<span class="badge">OK</span>`}
+          ${(() => {
+            const st = String(s.approval_status || 'pending').toLowerCase();
+            const unresolved = s.has_anomaly && (st === 'pending');
+            return unresolved
+              ? `<span class="badge warn">Needs review</span>`
+              : `<span class="badge">OK</span>`;
+          })()}
+
         </div>
       </div>
 
@@ -2152,7 +2228,7 @@ const storeName = (storeId) => {
       </div>
 
       <div class="shift-chips-row">
-        <div class="shift-chips">
+        <div class="shift-chips" data-chip-limit="2">
           ${anomBadgesHTML(s)}
         </div>
 
@@ -2160,6 +2236,8 @@ const storeName = (storeId) => {
           ${s.store_id ? `<a class="btn small ghost" href="${escapeHtml(dirHref)}" target="_blank" rel="noopener">Directions</a>` : ``}
         </div>
       </div>
+
+      ${waiveNoteBlock}
 
       ${shiftPhotos ? `<div class="shift-photos">${shiftPhotos}</div>` : ``}
 
@@ -2175,8 +2253,10 @@ const storeName = (storeId) => {
     `;
 
     host.appendChild(card);
-
   }
+
+  // ✅ Clamp after everything renders (once)
+  applyChipClamp(host, 2);
 }
 
 
@@ -2230,6 +2310,89 @@ async function onRevertClick(shiftId, adjustmentId){
   }catch(err){ console.error(err); showToast(err?.message||'Failed to revert','err'); }
 }
 let editingShiftId=null, saving=false;
+
+let waivingShiftId = null;
+let waiveSaving = false;
+
+function openWaiveModal(shiftId, presetNote){
+  waivingShiftId = shiftId;
+  qs('waiveNote').value = (presetNote || '').trim();
+  qs('waiveError').textContent = '';
+  show(qs('waiveError'), false);
+  updateWaiveCount();
+
+  qs('waiveModal').classList.add('open');
+  qs('waiveModal').classList.remove('hidden');
+  qs('waiveModalBackdrop').classList.add('show');
+  qs('waiveModalBackdrop').classList.remove('hidden');
+
+  // focus
+  setTimeout(()=>qs('waiveNote')?.focus(), 0);
+}
+
+function closeWaiveModal(){
+  waivingShiftId = null;
+  waiveSaving = false;
+
+  qs('waiveModal')?.classList.remove('open');
+  qs('waiveModal')?.classList.add('hidden');
+  qs('waiveModalBackdrop')?.classList.remove('show');
+  qs('waiveModalBackdrop')?.classList.add('hidden');
+}
+
+function updateWaiveCount(){
+  const v = (qs('waiveNote')?.value || '');
+  const c = qs('waiveCount');
+  if (c) c.textContent = String(v.length);
+}
+
+async function saveWaiveNote(){
+  if (waiveSaving) return;
+  if (!waivingShiftId) return;
+
+  const noteRaw = (qs('waiveNote')?.value || '').trim();
+  if (noteRaw.length < 3){
+    qs('waiveError').textContent = 'Waive reason is required (minimum 3 characters).';
+    show(qs('waiveError'), true);
+    return;
+  }
+
+  waiveSaving = true;
+  try{
+    // Uses your existing approval RPC (same as approve/unapprove flow)
+    const { error } = await supabaseClient.rpc('approve_shift', {
+      _time_entry_id: waivingShiftId,
+      _status: 'waived',
+      _note: noteRaw
+    });
+    if (error) throw error;
+
+    showToast('Waived (saved with note)', 'ok');
+    const changedId = waivingShiftId;
+    closeWaiveModal();
+
+    // refresh drawer + overview counts so "Needs review" disappears
+    if (typeof refreshDrawerAfterApprovalChange === 'function'){
+      await refreshDrawerAfterApprovalChange(changedId);
+    }else{
+      // fallback: reload current drawer
+      const { employeeId, monthStart } = drawerContext;
+      const shifts = await fetchWorkerShifts(employeeId, monthStart);
+      renderDrawerSummary(shifts);
+      renderDrawerList(shifts);
+      await loadSummary();
+    }
+  }catch(err){
+    console.error(err);
+    qs('waiveError').textContent = err?.message || 'Failed to save waive note.';
+    show(qs('waiveError'), true);
+  }finally{
+    waiveSaving = false;
+  }
+}
+
+
+
 function openEditModal(shift){ editingShiftId=shift.id; qs('editIn').value=toDatetimeLocalValue(shift.clock_in); qs('editOut').value=toDatetimeLocalValue(shift.clock_out); qs('editReason').value=''; qs('editError').textContent=''; show(qs('editError'),false); updateEditDuration(); qs('editModal').classList.add('open'); qs('editModal').classList.remove('hidden'); qs('editModalBackdrop').classList.add('show'); qs('editModalBackdrop').classList.remove('hidden'); qs('editIn').focus(); }
 function closeEditModal(){ editingShiftId=null; saving=false; qs('editModal').classList.remove('open'); qs('editModalBackdrop').classList.remove('show'); setTimeout(()=>{ qs('editModal').classList.add('hidden'); qs('editModalBackdrop').classList.add('hidden'); },180); }
 function updateEditDuration(){ const a=qs('editIn').value, b=qs('editOut').value; if(!a||!b){ qs('editDuration').textContent='—'; return; } const diff=new Date(b)-new Date(a); qs('editDuration').textContent = diff>0? fmtDurationHM(diff):'—'; }
@@ -2519,12 +2682,135 @@ function closePhotoViewer(){
   wrap?.classList.remove('show');
 }
 
+/* =========================================================
+   Drawer approvals — required by wireDrawer()
+   - Approve: sets status=approved
+   - Waive: opens your waive modal (already implemented)
+   - Remove: clears approval back to pending (or deletes row)
+   ========================================================= */
+
+async function refreshDrawerAfterApprovalChange(changedShiftId) {
+  // Re-fetch and re-render the drawer so chips/buttons update
+  if (!drawerContext?.employeeId || !drawerContext?.monthStart) return;
+
+  const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+  renderDrawerSummary(shifts);
+  renderDrawerList(shifts);
+
+  // Optional: also reopen the audit panel if it was open
+  if (changedShiftId) {
+    const auditEl = document.getElementById(`audit-${changedShiftId}`);
+    if (auditEl && !auditEl.classList.contains('hidden')) {
+      auditCache.delete(changedShiftId);
+      await toggleAudit(changedShiftId);
+    }
+  }
+}
+
+async function setShiftApprovalStatus(timeEntryId, status, note = null) {
+  // status: 'approved' | 'waived' | 'pending'
+  if (!timeEntryId) throw new Error("Missing time entry id.");
+
+  // "pending" means: remove the approval row (back to default state)
+if (String(status).toLowerCase() === "pending") {
+  const { error } = await supabaseClient.rpc("unapprove_shift", {
+    _time_entry_id: timeEntryId
+  });
+  if (error) throw error;
+  return;
+}
+
+
+  // Approved / waived go through the RPC
+  const { error } = await supabaseClient.rpc("approve_shift", {
+    _time_entry_id: timeEntryId,
+    _status: status,
+    _note: note,
+  });
+  if (error) throw error;
+}
+
+async function onApproveClick(shiftId) {
+  if (!shiftId) return;
+
+  const ok = window.confirm('Approve this shift?');
+  if (!ok) return;
+
+  try {
+    await setShiftApprovalStatus(shiftId, 'approved', null);
+    showToast('Approved ✅', 'ok');
+
+    await refreshDrawerAfterApprovalChange(shiftId);
+    if (typeof overviewApi?.loadSummary === 'function') await overviewApi.loadSummary();
+    else await loadSummary?.();
+  } catch (err) {
+    console.error(err);
+    showToast(err?.message || 'Failed to approve shift', 'err');
+  }
+}
+
+function onWaiveClick(shiftId) {
+  if (!shiftId) return;
+
+  // Open your existing waive modal (already wired to saveWaiveNote())
+  // Prefill with existing waive note if present
+  const s = currentShiftsById.get(shiftId);
+  const preset = (s?.approval_note || '').trim();
+  openWaiveModal(shiftId, preset);
+}
+
+async function onUnapproveClick(shiftId) {
+  if (!shiftId) return;
+
+  const ok = window.confirm(
+    'Remove approval/waive and return this shift to PENDING?\n\n' +
+    'This will make it show as “Needs review” again if there are anomalies.'
+  );
+  if (!ok) return;
+
+  try {
+    await setShiftApprovalStatus(shiftId, 'pending', null);
+    showToast('Removed (back to pending)', 'ok');
+
+    await refreshDrawerAfterApprovalChange(shiftId);
+    if (typeof overviewApi?.loadSummary === 'function') await overviewApi.loadSummary();
+    else await loadSummary?.();
+} catch (err) {
+  console.error(err);
+  const msg = err?.message || "Failed to remove approval";
+  if (msg.toLowerCase().includes("locked pay period")) {
+    showToast("Locked pay period: you can’t remove review for this shift.", "err");
+  } else {
+    showToast(msg, "err");
+  }
+}
+
+}
+
+
 function wireDrawer(){
   ensurePhotoViewer();
 
   // Close actions
   const closeBtn = qs('drawerCloseBtn');
   if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
+
+  // ---- Waive modal wiring ----
+  const wb = qs('waiveModalBackdrop');
+  if (wb) wb.addEventListener('click', closeWaiveModal);
+
+  const wc = qs('waiveCloseBtn');
+  if (wc) wc.addEventListener('click', closeWaiveModal);
+
+  const wcan = qs('waiveCancelBtn');
+  if (wcan) wcan.addEventListener('click', closeWaiveModal);
+
+  const wn = qs('waiveNote');
+  if (wn) wn.addEventListener('input', updateWaiveCount);
+
+  const ws = qs('waiveSaveBtn');
+  if (ws) ws.addEventListener('click', saveWaiveNote);
+
 
   const backdrop = qs('drawerBackdrop');
   if (backdrop) backdrop.addEventListener('click', closeDrawer);
@@ -2551,6 +2837,14 @@ function wireDrawer(){
         if (url) openPhotoViewer(url);
         return;
       }
+
+      // Phase 3.5: "+N more" anomaly chip toggle
+        const moreBtn = t.closest(".chip-more-btn");
+        if (moreBtn) {
+          toggleChipClamp(moreBtn);
+          return;
+        }
+
 
       // Edit shift
       const editBtn = t.closest('button[data-edit-id]');
@@ -2597,6 +2891,8 @@ function wireDrawer(){
       renderDrawerList(lastDrawerShifts); // re-render with current cache
     });
   }
+
+
 }
 
 
@@ -2744,88 +3040,6 @@ function closeUserModal() {
     md?.classList.add('hidden');
   }, 220);
 }
-
-// =========================================================
-// Shift Approval Handlers (restore missing functions)
-// Uses Supabase function: public.approve_shift(_time_entry_id, _status, _note)
-// =========================================================
-
-async function onApproveClick(timeEntryId) {
-  try {
-    if (!timeEntryId) return;
-
-    const { error } = await supabaseClient.rpc("approve_shift", {
-      _time_entry_id: timeEntryId,
-      _status: "approved",
-      _note: null,
-    });
-    if (error) throw error;
-
-    toast("Shift approved", "ok");
-    await refreshDrawerAfterApprovalChange();
-  } catch (err) {
-    console.error(err);
-    toast(err?.message || "Approve failed", "warn");
-  }
-}
-
-async function onWaiveClick(timeEntryId) {
-  try {
-    if (!timeEntryId) return;
-
-    const note = prompt("Waive reason / note (optional):", "") ?? "";
-    // If user hit cancel, do nothing
-    if (note === null) return;
-
-    const { error } = await supabaseClient.rpc("approve_shift", {
-      _time_entry_id: timeEntryId,
-      _status: "waived",
-      _note: note.trim() || null,
-    });
-    if (error) throw error;
-
-    toast("Shift waived", "ok");
-    await refreshDrawerAfterApprovalChange();
-  } catch (err) {
-    console.error(err);
-    toast(err?.message || "Waive failed", "warn");
-  }
-}
-
-async function onUnapproveClick(timeEntryId) {
-  try {
-    if (!timeEntryId) return;
-
-    const ok = confirm("Unapprove this shift? This will remove the approval/waiver.");
-    if (!ok) return;
-
-    // No RPC exists in your functions list for "unapprove",
-    // so we remove the shift_approvals row directly.
-    const { error } = await supabaseClient
-      .from("shift_approvals")
-      .delete()
-      .eq("time_entry_id", timeEntryId);
-
-    if (error) throw error;
-
-    toast("Approval removed", "ok");
-    await refreshDrawerAfterApprovalChange();
-  } catch (err) {
-    console.error(err);
-    toast(err?.message || "Unapprove failed", "warn");
-  }
-}
-
-// Re-fetch and re-render the drawer so chips/buttons update
-async function refreshDrawerAfterApprovalChange() {
-  if (!drawerContext?.employeeId || !drawerContext?.monthStart) return;
-
-  const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
-  renderDrawerSummary(shifts);
-  renderDrawerList(shifts);
-}
-
-
 
 function getUsersFilters(){
   const q = (qs('userSearchInput')?.value || '').trim().toLowerCase();

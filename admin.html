@@ -565,6 +565,41 @@
     </footer>
   </div>
 
+  <!-- =========================================================
+     Waive Reason Modal (Audit-required)
+     ========================================================= -->
+<div id="waiveModalBackdrop" class="modal-backdrop hidden"></div>
+
+<div id="waiveModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="waiveTitle">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <div id="waiveTitle" class="modal-title">Waive flags (approve with exception)</div>
+        <div class="modal-sub">Required: write why you’re accepting this shift despite the flags.</div>
+      </div>
+      <button id="waiveCloseBtn" class="btn ghost" type="button" aria-label="Close">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label class="field">
+        <div class="label">Waive reason</div>
+        <textarea id="waiveNote" class="input" rows="4" placeholder="Example: Employee was on-site; geo ping was inaccurate. Approved by manager."></textarea>
+        <div class="help-row">
+          <div id="waiveHint" class="hint">Minimum 3 characters.</div>
+          <div id="waiveCount" class="count">0</div>
+        </div>
+      </label>
+
+      <div id="waiveError" class="error hidden"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button id="waiveCancelBtn" class="btn ghost" type="button">Cancel</button>
+      <button id="waiveSaveBtn" class="btn" type="button">Save Waive Note</button>
+    </div>
+  </div>
+</div>
+
   <!-- Store Editor Modal -->
   <div id="storeModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
   <div id="storeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeTitle">

@@ -572,3 +572,93 @@
     align-items:flex-start;
   }
 }
+
+/* =========================================================
+   Phase 3.5 — Ensure Edit Modal always overlays the drawer
+   ========================================================= */
+
+.modal-backdrop{
+  z-index: 200000 !important;
+}
+
+.modal{
+  z-index: 200001 !important;
+}
+
+/* =========================================================
+   Phase 3.5 — Collapsible anomaly chips
+   ========================================================= */
+
+.shift-chips .badge{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shift-chips .badge.chip-hidden{
+  display: none;
+}
+
+.shift-chips .chip-more-btn{
+  cursor: pointer;
+  user-select: none;
+  border-style: dashed;
+  opacity: .95;
+  transition: transform .12s ease, opacity .18s ease, background .18s ease;
+}
+
+.shift-chips .chip-more-btn:active{
+  transform: scale(.98);
+}
+
+.shift-chips.chips-expanded .chip-more-btn{
+  opacity: 1;
+}
+
+/* =========================================================
+   Phase 4 — Waive note (auditable) + modal polish
+   ========================================================= */
+
+.shift-waive-note{
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(224,169,0,.22);
+  background: rgba(224,169,0,.08);
+  box-shadow: 0 14px 34px rgba(0,0,0,.30);
+}
+.shift-waive-note .wn-label{
+  font-size: 12px;
+  color: rgba(255,233,184,.92);
+  letter-spacing: .2px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.shift-waive-note .wn-text{
+  font-size: 13px;
+  color: rgba(231,233,234,.92);
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+/* Modal helpers (works with your existing modal system) */
+#waiveModal .modal-sub{
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(231,233,234,.65);
+}
+#waiveModal .help-row{
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+#waiveModal .hint{
+  font-size: 12px;
+  color: rgba(231,233,234,.60);
+}
+#waiveModal .count{
+  font-size: 12px;
+  color: rgba(231,233,234,.60);
+  font-variant-numeric: tabular-nums;
+}
