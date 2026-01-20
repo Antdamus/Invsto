@@ -1741,9 +1741,9 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
   qs('drawerTitle').textContent = 'Global schedule';
   qs('drawerSubtitle').textContent = workISO;
 
-  // Reset anomaly toggle (keep your existing behavior)
-  // (optional) drawerOnlyAnoms = false;
-  // qs('toggleAnoms').checked = false;
+  // Day window (used for overlap + KPI slicing)
+  const dayStart = new Date(`${workISO}T00:00:00`);
+  const dayEnd   = new Date(`${workISO}T23:59:59.999`);
 
   // Build a quick lookup of scheduled rows (by employee_id)
   const schedByEmp = new Map();
@@ -1765,23 +1765,20 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
   await Promise.all(empIds.map(async (empId) => {
     try{
       const monthShifts = await fetchWorkerShifts(empId, monthStartISO); // existing Overview loader
-const dayStart = new Date(`${workISO}T00:00:00`);
-const dayEnd   = new Date(`${workISO}T23:59:59.999`);
 
-const sameDay = (monthShifts || []).filter(s => {
-  const a = s.clock_in ? new Date(s.clock_in) : null;
-  const b = s.clock_out ? new Date(s.clock_out) : null;
+      // Show a shift on this day if it overlaps the day window
+      const sameDay = (monthShifts || []).filter(s => {
+        const a = s.clock_in ? new Date(s.clock_in) : null;
+        const b = s.clock_out ? new Date(s.clock_out) : null;
 
-  // open shift: treat as "on day" if it started that day OR started earlier and is still open
-  if (a && !b) {
-    return a <= dayEnd;
-  }
+        // open shift: include if it started before day end
+        if (a && !b) return a <= dayEnd;
 
-  if (!a || !b) return false;
+        if (!a || !b) return false;
 
-  // overlap test: shift overlaps the clicked day
-  return (a <= dayEnd) && (b >= dayStart);
-});
+        // overlap test
+        return (a <= dayEnd) && (b >= dayStart);
+      });
 
       actualByEmp.set(empId, sameDay);
     } catch (e){
@@ -1794,8 +1791,22 @@ const sameDay = (monthShifts || []).filter(s => {
   const nowISO = new Date().toISOString().slice(0,10);
   const isFuture = workISO > nowISO;
 
-  // We will render “cards”, but we need worker names in the card list.
-  // So we decorate each shift object with display_name (safe extra prop).
+  // helper: compute how many ms of a shift fall inside this day
+  const daySliceMs = (clockInISO, clockOutISO) => {
+    const a = clockInISO ? new Date(clockInISO) : null;
+    const b = clockOutISO ? new Date(clockOutISO) : null;
+
+    if (!a) return 0;
+
+    // open shift: slice up to now (but not beyond dayEnd)
+    const endMs = b ? b.getTime() : Math.min(Date.now(), dayEnd.getTime());
+
+    const start = Math.max(a.getTime(), dayStart.getTime());
+    const end   = Math.min(endMs, dayEnd.getTime());
+
+    return Math.max(0, end - start);
+  };
+
   const rendered = [];
 
   for (const [empId, sched] of schedByEmp.entries()){
@@ -1806,13 +1817,17 @@ const sameDay = (monthShifts || []).filter(s => {
       for (const s of actualList){
         rendered.push({
           ...s,
+
+          // ✅ for KPIs only (how much of this shift belongs to this clicked day)
+          _day_ms: daySliceMs(s.clock_in, s.clock_out),
+
           _display_name: displayName,
           _employee_id: empId,
           _month_start: monthStartISO
         });
       }
     } else {
-      // Placeholder “shift not done” card
+      // Placeholder “shift not done” card (still show it on both days via overlap logic above)
       const schedHoursMs = (() => {
         const a = new Date(sched.start_ts).getTime();
         const b = new Date(sched.end_ts).getTime();
@@ -1820,92 +1835,93 @@ const sameDay = (monthShifts || []).filter(s => {
         return Number.isFinite(ms) ? Math.max(0, ms) : 0;
       })();
 
-rendered.push({
-  id: `sched:${empId}:${workISO}`,    // ✅ unique fake id so audit-* ids aren't duplicated
-  clock_in: sched.start_ts,
-  clock_out: sched.end_ts,
-  duration_ms: schedHoursMs,
-  store_id: sched.store_id || null,
-  photo_in_url: null,
-  photo_out_url: null,
-  anomalies: [],
-  has_anomaly: false,
-  approval_status: isFuture ? 'scheduled' : 'missed',
-  approval_note: isFuture
-    ? 'Shift has not happened yet.'
-    : 'No timesheet entry found for this scheduled shift.',
-  approved_at: null,
-  breaks: [],
-  break_count: 0,
-  break_ms: 0,
-  is_open: false,
+      rendered.push({
+        id: `sched:${empId}:${workISO}`, // ✅ unique fake id so audit-* ids aren't duplicated
+        clock_in: sched.start_ts,
+        clock_out: sched.end_ts,
 
-  _display_name: displayName,
-  _employee_id: empId,               // ✅ required
-  _month_start: monthStartISO,       // ✅ required
-  _placeholder: true
-});
+        // keep full scheduled duration on the card (you said leave in/out as-is)
+        duration_ms: schedHoursMs,
 
+        // ✅ KPI slice for this day only
+        _day_ms: daySliceMs(sched.start_ts, sched.end_ts),
+
+        store_id: sched.store_id || null,
+        photo_in_url: null,
+        photo_out_url: null,
+        anomalies: [],
+        has_anomaly: false,
+        approval_status: isFuture ? 'scheduled' : 'missed',
+        approval_note: isFuture
+          ? 'Shift has not happened yet.'
+          : 'No timesheet entry found for this scheduled shift.',
+        approved_at: null,
+        breaks: [],
+        break_count: 0,
+        break_ms: 0,
+        is_open: false,
+
+        _display_name: displayName,
+        _employee_id: empId,
+        _month_start: monthStartISO,
+        _placeholder: true
+      });
     }
   }
 
-  // Summary KPIs (use rendered durations — scheduled durations for placeholders)
-  const totalHours = rendered.reduce((sum, s) => sum + ((s.duration_ms || 0) / 3600000), 0);
+  // ✅ Summary KPIs (ONLY hours inside this clicked day)
+  const totalHours = rendered.reduce((sum, s) => sum + ((s._day_ms || 0) / 3600000), 0);
   qs('dsShifts').textContent = String(rendered.length);
   qs('dsHours').textContent  = totalHours.toFixed(2);
   qs('dsAvg').textContent    = (rendered.length ? (totalHours / rendered.length) : 0).toFixed(2);
 
-  // Render using your existing drawer host, but we need name shown per card.
-  // Minimal approach: prepend a name line before each card after render.
+  // Render using your existing drawer host
   qs('drawerList').innerHTML = '';
   openDrawer();
-// IMPORTANT: save a dedicated “global-day” drawer mode
-drawerContext = {
-  employeeId: null,
-  displayName: 'Global schedule',
-  monthStart: monthStartISO
-};
 
-// Render normally
-renderDrawerList(rendered);
+  // Save a dedicated “global-day” drawer mode
+  drawerContext = {
+    employeeId: null,
+    displayName: 'Global schedule',
+    monthStart: monthStartISO
+  };
 
-// After render, prepend a worker name header above each card
-// AND attach per-card context onto the card DOM node
-const cards = Array.from(qs('drawerList').querySelectorAll('.shift'));
+  // Render normally (uses your existing card UI)
+  renderDrawerList(rendered);
 
-for (let i = 0; i < cards.length; i++){
-  const card = cards[i];
-  const item = rendered[i];
-  if (!item) continue;
+  // Prepend a worker name header above each card + attach context
+  const cards = Array.from(qs('drawerList').querySelectorAll('.shift'));
 
-  card.dataset.employeeId = item._employee_id || '';
-  card.dataset.monthStart = item._month_start || '';
-  card.dataset.placeholder = item._placeholder ? '1' : '0';
+  for (let i = 0; i < cards.length; i++){
+    const card = cards[i];
+    const item = rendered[i];
+    if (!item) continue;
 
-  // Add name header
-  const nameRow = document.createElement('div');
-  nameRow.className = 'drawer-day-name';
-  nameRow.style.margin = '10px 0 6px';
-  nameRow.style.fontWeight = '900';
-  nameRow.style.fontSize = '18px';
-  nameRow.textContent = item._display_name || '—';
+    card.dataset.employeeId = item._employee_id || '';
+    card.dataset.monthStart = item._month_start || '';
+    card.dataset.placeholder = item._placeholder ? '1' : '0';
 
-  card.parentNode.insertBefore(nameRow, card);
+    const nameRow = document.createElement('div');
+    nameRow.className = 'drawer-day-name';
+    nameRow.style.margin = '10px 0 6px';
+    nameRow.style.fontWeight = '900';
+    nameRow.style.fontSize = '18px';
+    nameRow.textContent = item._display_name || '—';
 
-  // If placeholder: remove actions completely + add a note
-  if (item._placeholder){
-    card.querySelector('.shift-actions')?.remove();
+    card.parentNode.insertBefore(nameRow, card);
 
-    // Add a subtle “status” line
-    const note = document.createElement('div');
-    note.className = 'drawer-empty';
-    note.style.marginTop = '8px';
-    note.textContent = item.approval_note || 'Scheduled';
-    card.appendChild(note);
+    if (item._placeholder){
+      card.querySelector('.shift-actions')?.remove();
+
+      const note = document.createElement('div');
+      note.className = 'drawer-empty';
+      note.style.marginTop = '8px';
+      note.textContent = item.approval_note || 'Scheduled';
+      card.appendChild(note);
+    }
   }
 }
 
-}
 
 function wireGlobalCalendar(){
   // toggle sections
