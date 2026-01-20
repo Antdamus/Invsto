@@ -44,6 +44,8 @@ function renderGlobalCalendar(rows, gridStart, monthStart){
 
     const cell = document.createElement('div');
     cell.className = `cal-day${outOfMonth ? ' out':''}`;
+    cell.dataset.workDate = iso;
+
 
     cell.innerHTML = `
       <div class="cal-day-header">
@@ -152,7 +154,7 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
   for (let i=0;i<7;i++){
     const day = addDays(weekStart, i);
     const iso = toISODate(day);
-
+    
     const resolved = resolvedByDate.get(iso) || null; // { start_ts, end_ts, source, store_id }
     const ov = overridesByDate.get(iso) || null;      // { off, start_local, end_local, store_id, ...exceptions }
 
@@ -881,4 +883,6 @@ async function patchOverrideExceptionExtras(empId, workISO, extras){
     console.warn('patchOverrideExceptionExtras failed:', e);
   }
 }
+
+
 

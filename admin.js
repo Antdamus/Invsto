@@ -1,5 +1,13 @@
 import { initOverview } from "./admin-overview.js";
 import { initStores } from "./admin-stores.js";
+import {
+  uploadW9ViaEdge,
+  listW9ViaEdge,
+  getW9SignedUrlViaEdge,
+  setW9StatusViaEdge
+} from './admin-taxdocs.js';
+
+
 
 // admin.js — Overview + Drawer/Edit/Audit + Payroll Weekly + Period Lock/Unlock (Phase 3.3)
 let supabaseClient = null;
@@ -73,13 +81,6 @@ function toggleChipClamp(btn) {
 // =========================================================
 // Minimal Toast Helper (admin.js needs this)
 // =========================================================
-
-import {
-  uploadW9ViaEdge,
-  listW9ViaEdge,
-  getW9SignedUrlViaEdge,
-  setW9StatusViaEdge
-} from './admin-taxdocs.js';
 
 
 function toast(message, kind = "ok") {
@@ -1326,8 +1327,33 @@ function wireDrawer(){
   // Delegated actions inside the drawer list
   const list = qs('drawerList');
   if (list) {
-    list.addEventListener('click', (e) => {
+    list.addEventListener('click', async (e) => {
       const t = e.target;
+
+// If this click happened inside a global-day shift card,
+// switch drawer context + shift map to the correct employee before acting.
+const shiftCard = t.closest('.shift');
+if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
+  const empId = shiftCard.dataset.employeeId;
+  const monthStart = shiftCard.dataset.monthStart;
+
+  // Only switch if different
+  if (drawerContext.employeeId !== empId || drawerContext.monthStart !== monthStart) {
+    drawerContext.employeeId = empId;
+    drawerContext.monthStart = monthStart;
+
+    // Rebuild currentShiftsById for THIS employee/month so Edit works
+    // (This is required because currentShiftsById is global.)
+    fetchWorkerShifts(empId, monthStart).catch(console.warn);
+  }
+
+  // Prevent actions on placeholders
+  if (shiftCard.dataset.placeholder === '1') {
+    e.preventDefault();
+    return;
+  }
+}
+  
 
       // ✅ Photo viewer (thumbnails)
       const photoLink = t.closest('a[data-photo-url]');
@@ -1349,10 +1375,17 @@ function wireDrawer(){
       // Edit shift
       const editBtn = t.closest('button[data-edit-id]');
       if (editBtn) {
-        const id = editBtn.getAttribute('data-edit-id');
-        const shift = currentShiftsById.get(id);
-        if (shift) openEditModal(shift);
-        return;
+const id = editBtn.getAttribute('data-edit-id');
+
+// If we don't have it yet (because we just switched employee), fetch then open
+let shift = currentShiftsById.get(id);
+if (!shift && drawerContext?.employeeId && drawerContext?.monthStart) {
+  await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+  shift = currentShiftsById.get(id);
+}
+if (shift) openEditModal(shift);
+return;
+
       }
 
       // Audit toggle
@@ -1703,6 +1736,160 @@ function wireScheduleTab(){
   });
 }
 
+async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
+  // Title/subtitle (don’t use monthLabel here)
+  qs('drawerTitle').textContent = 'Global schedule';
+  qs('drawerSubtitle').textContent = workISO;
+
+  // Reset anomaly toggle (keep your existing behavior)
+  // (optional) drawerOnlyAnoms = false;
+  // qs('toggleAnoms').checked = false;
+
+  // Build a quick lookup of scheduled rows (by employee_id)
+  const schedByEmp = new Map();
+  for (const r of (scheduledRowsForDay || [])){
+    schedByEmp.set(r.employee_id, r);
+  }
+
+  // For performance: only fetch month once per employee (few employees per day)
+  const monthStartISO = (() => {
+    const d = new Date(`${workISO}T00:00:00`);
+    const ms = new Date(d.getFullYear(), d.getMonth(), 1);
+    return ms.toISOString().slice(0,10);
+  })();
+
+  // Fetch actual shifts (Overview-style objects) for each scheduled employee
+  const empIds = Array.from(schedByEmp.keys());
+  const actualByEmp = new Map();
+
+  await Promise.all(empIds.map(async (empId) => {
+    try{
+      const monthShifts = await fetchWorkerShifts(empId, monthStartISO); // existing Overview loader
+      const sameDay = (monthShifts || []).filter(s => String(s.clock_in || '').slice(0,10) === workISO);
+      actualByEmp.set(empId, sameDay);
+    } catch (e){
+      console.warn('openGlobalDayDrawer fetchWorkerShifts failed', empId, e);
+      actualByEmp.set(empId, []);
+    }
+  }));
+
+  // Build a unified list to render
+  const nowISO = new Date().toISOString().slice(0,10);
+  const isFuture = workISO > nowISO;
+
+  // We will render “cards”, but we need worker names in the card list.
+  // So we decorate each shift object with display_name (safe extra prop).
+  const rendered = [];
+
+  for (const [empId, sched] of schedByEmp.entries()){
+    const displayName = sched.display_name || '—';
+    const actualList = actualByEmp.get(empId) || [];
+
+    if (actualList.length){
+      for (const s of actualList){
+        rendered.push({
+          ...s,
+          _display_name: displayName,
+          _employee_id: empId,
+          _month_start: monthStartISO
+        });
+      }
+    } else {
+      // Placeholder “shift not done” card
+      const schedHoursMs = (() => {
+        const a = new Date(sched.start_ts).getTime();
+        const b = new Date(sched.end_ts).getTime();
+        const ms = b - a;
+        return Number.isFinite(ms) ? Math.max(0, ms) : 0;
+      })();
+
+rendered.push({
+  id: `sched:${empId}:${workISO}`,    // ✅ unique fake id so audit-* ids aren't duplicated
+  clock_in: sched.start_ts,
+  clock_out: sched.end_ts,
+  duration_ms: schedHoursMs,
+  store_id: sched.store_id || null,
+  photo_in_url: null,
+  photo_out_url: null,
+  anomalies: [],
+  has_anomaly: false,
+  approval_status: isFuture ? 'scheduled' : 'missed',
+  approval_note: isFuture
+    ? 'Shift has not happened yet.'
+    : 'No timesheet entry found for this scheduled shift.',
+  approved_at: null,
+  breaks: [],
+  break_count: 0,
+  break_ms: 0,
+  is_open: false,
+
+  _display_name: displayName,
+  _employee_id: empId,               // ✅ required
+  _month_start: monthStartISO,       // ✅ required
+  _placeholder: true
+});
+
+    }
+  }
+
+  // Summary KPIs (use rendered durations — scheduled durations for placeholders)
+  const totalHours = rendered.reduce((sum, s) => sum + ((s.duration_ms || 0) / 3600000), 0);
+  qs('dsShifts').textContent = String(rendered.length);
+  qs('dsHours').textContent  = totalHours.toFixed(2);
+  qs('dsAvg').textContent    = (rendered.length ? (totalHours / rendered.length) : 0).toFixed(2);
+
+  // Render using your existing drawer host, but we need name shown per card.
+  // Minimal approach: prepend a name line before each card after render.
+  qs('drawerList').innerHTML = '';
+  openDrawer();
+// IMPORTANT: save a dedicated “global-day” drawer mode
+drawerContext = {
+  employeeId: null,
+  displayName: 'Global schedule',
+  monthStart: monthStartISO
+};
+
+// Render normally
+renderDrawerList(rendered);
+
+// After render, prepend a worker name header above each card
+// AND attach per-card context onto the card DOM node
+const cards = Array.from(qs('drawerList').querySelectorAll('.shift'));
+
+for (let i = 0; i < cards.length; i++){
+  const card = cards[i];
+  const item = rendered[i];
+  if (!item) continue;
+
+  card.dataset.employeeId = item._employee_id || '';
+  card.dataset.monthStart = item._month_start || '';
+  card.dataset.placeholder = item._placeholder ? '1' : '0';
+
+  // Add name header
+  const nameRow = document.createElement('div');
+  nameRow.className = 'drawer-day-name';
+  nameRow.style.margin = '10px 0 6px';
+  nameRow.style.fontWeight = '900';
+  nameRow.style.fontSize = '18px';
+  nameRow.textContent = item._display_name || '—';
+
+  card.parentNode.insertBefore(nameRow, card);
+
+  // If placeholder: remove actions completely + add a note
+  if (item._placeholder){
+    card.querySelector('.shift-actions')?.remove();
+
+    // Add a subtle “status” line
+    const note = document.createElement('div');
+    note.className = 'drawer-empty';
+    note.style.marginTop = '8px';
+    note.textContent = item.approval_note || 'Scheduled';
+    card.appendChild(note);
+  }
+}
+
+}
+
 function wireGlobalCalendar(){
   // toggle sections
   const emBtn = qs('modeEmp'), glBtn = qs('modeGlobal');
@@ -1731,28 +1918,32 @@ function wireGlobalCalendar(){
   });
   qs('gcSearch')?.addEventListener('input', async () => { await loadGlobalCalendar(); });
 
-  // click a slot → open that worker's drawer on the selected month
-  qs('globalCalGrid')?.addEventListener('click', async (e) => {
-    const slot = e.target.closest('.cal-slot'); if (!slot) return;
-    const employeeId = slot.dataset.employeeId;
-    const monthStartISO = slot.dataset.monthStart;
+qs('globalCalGrid')?.addEventListener('click', async (e) => {
+  const dayCell = e.target.closest('.cal-day');
+  if (!dayCell) return;
 
-    const emps = await getActiveEmployees();
-    const displayName = (emps.find(x => x.id === employeeId)?.display_name) || '—';
+  const workISO = dayCell.dataset.workDate; // make sure you set this when rendering cells
+  if (!workISO) return;
 
-    drawerContext = { employeeId, monthStart: monthStartISO, displayName };
-    renderDrawerHeader(displayName, monthStartISO);
-    qs('drawerList').innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
+  try{
+    // Re-fetch month range and filter to that date (simple + safe)
+    const gridStart = startOfMonthGrid(gcMonthStart);
+    const gridEnd = addDays(gridStart, 41);
+    const rows = await fetchGlobalScheduleRange(gridStart, gridEnd);
+
+    const dayRows = (rows || []).filter(r => String(r.work_date || '').slice(0,10) === workISO);
+
+    await openGlobalDayDrawer(workISO, dayRows);
+  } catch (err){
+    console.error(err);
+    qs('drawerTitle').textContent = 'Global schedule';
+    qs('drawerSubtitle').textContent = workISO;
+    qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading date.</div>`;
     openDrawer();
-    try{
-      const shifts = await fetchWorkerShifts(employeeId, monthStartISO);
-      renderDrawerSummary(shifts);
-      renderDrawerList(shifts);
-    }catch(err){
-      console.error(err);
-      qs('drawerList').innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
-    }
-  });
+  }
+});
+
+
 }
 
 // =========================================================
