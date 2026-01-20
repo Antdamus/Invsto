@@ -2138,13 +2138,23 @@ function renderDrawerList(shifts){
     const dirHref = s.store_id ? (storeDirectionsHref(s.store_id) || '#') : '#';
 
     // Actions: hide approve/waive for OPEN shifts
-    const showApprovalBtns = !s.is_open;
-    const approvalBtns = showApprovalBtns ? `
-      <button class="btn small" type="button" data-approve-id="${s.id}">Approve</button>
-      <button class="btn small ghost" type="button" data-waive-id="${s.id}">Waive</button>
-      ${(s.approval_status && (s.approval_status === 'approved' || s.approval_status === 'waived')) ?
-        `<button class="btn small ghost" type="button" data-unapprove-id="${s.id}">Remove</button>` : ``}
-    ` : '';
+// Actions: hide approve/waive for OPEN shifts
+const showApprovalBtns = !s.is_open;
+
+// Only allow Approve/Waive when still pending
+const st = String(s.approval_status || 'pending').toLowerCase();
+
+const approvalBtns = showApprovalBtns ? `
+  ${st === 'pending' ? `
+    <button class="btn small" type="button" data-approve-id="${s.id}">Approve</button>
+    <button class="btn small ghost" type="button" data-waive-id="${s.id}">Waive</button>
+  ` : ``}
+
+  ${(st === 'approved' || st === 'waived') ? `
+    <button class="btn small ghost" type="button" data-unapprove-id="${s.id}">Remove</button>
+  ` : ``}
+` : '';
+
 
     // Shift-level photo strip (clock in/out)
     const shiftPhotos = (s.photo_in_url || s.photo_out_url) ? `
@@ -2732,6 +2742,13 @@ if (String(status).toLowerCase() === "pending") {
 
 async function onApproveClick(shiftId) {
   if (!shiftId) return;
+
+  const s = currentShiftsById.get(shiftId);
+const st = String(s?.approval_status || 'pending').toLowerCase();
+if (st === 'waived') {
+  showToast("This shift was waived. Use Remove to return to pending first.", "warn");
+  return;
+}
 
   const ok = window.confirm('Approve this shift?');
   if (!ok) return;
