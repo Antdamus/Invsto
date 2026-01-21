@@ -694,38 +694,102 @@
     }
   }
 
-  async function previewPdfForEmployee(runId, empId) {
-    try {
-      const session = (await sb().auth.getSession()).data.session;
-      if (!session) {
-        toast("Not authenticated", "err");
-        return;
+async function previewPdfForEmployee(runId, empId) {
+  // iOS/Safari blocks window.open if it happens after an await.
+  // So we open a tab immediately, then later redirect it to the blob URL.
+  let w = null;
+
+  try {
+    // Open immediately (user gesture friendly)
+    w = window.open("", "_blank");
+
+    // If popup blocked, we’ll fall back to same-tab download later
+    if (w) {
+      w.document.title = "Generating PDF…";
+      w.document.body.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+      w.document.body.style.padding = "18px";
+      w.document.body.innerHTML = `
+        <div style="max-width:640px;margin:0 auto;">
+          <div style="font-size:18px;font-weight:800;letter-spacing:.2px;">Generating payroll PDF…</div>
+          <div style="margin-top:8px;opacity:.75;line-height:1.4;">
+            Please keep this tab open. It will load automatically.
+          </div>
+          <div style="margin-top:14px;height:10px;border-radius:999px;background:rgba(0,0,0,.12);overflow:hidden;">
+            <div style="width:60%;height:100%;background:rgba(0,0,0,.35);border-radius:999px;animation:pulse 1.2s ease-in-out infinite;"></div>
+          </div>
+          <style>
+            @keyframes pulse { 0%{transform:translateX(-40%)} 50%{transform:translateX(20%)} 100%{transform:translateX(120%)} }
+          </style>
+        </div>
+      `;
+    }
+
+    const session = (await sb().auth.getSession()).data.session;
+    if (!session) {
+      toast("Not authenticated", "err");
+      if (w) w.close();
+      return;
+    }
+
+    const res = await fetch(`${sb().supabaseUrl}/functions/v1/payroll-statement-pdf`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ run_id: runId, employee_id: empId }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("PDF function error:", text);
+      throw new Error(text || `PDF generation failed (${res.status})`);
+    }
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    // If we successfully opened a new tab/window, redirect it to the blob URL
+    if (w && !w.closed) {
+      try {
+        w.location.href = blobUrl;
+      } catch {
+        // fallback: put a clickable link inside the opened tab
+        w.document.body.innerHTML = `
+          <div style="font-family:system-ui;padding:18px;">
+            <div style="font-weight:800;">Tap to open PDF</div>
+            <a href="${blobUrl}" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;">
+              Open PDF
+            </a>
+          </div>
+        `;
       }
+    } else {
+      // Popup was blocked — fallback: trigger a download link in the current tab
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `payroll_statement_${empId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
 
-      const res = await fetch(`${sb().supabaseUrl}/functions/v1/payroll-statement-pdf`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ run_id: runId, employee_id: empId }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("PDF function error:", text);
-        throw new Error(text || `PDF generation failed (${res.status})`);
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      // revoke later to avoid killing the opened tab on some browsers
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    } catch (err) {
-      showAdminError("PDF preview failed", safeErrMsg(err));
+    // Don’t revoke instantly (iOS can fail if it’s revoked too early)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  } catch (err) {
+    showAdminError("PDF preview failed", safeErrMsg(err));
+    if (w && !w.closed) {
+      try {
+        w.document.body.innerHTML = `
+          <div style="font-family:system-ui;padding:18px;">
+            <div style="font-weight:900;">PDF failed</div>
+            <div style="margin-top:8px;opacity:.8;white-space:pre-wrap;">${escapeHtml(safeErrMsg(err))}</div>
+          </div>
+        `;
+      } catch {}
     }
   }
+}
 
   // ----------------------------
   // Actions (RPC wrappers)
