@@ -96,34 +96,39 @@
   }
 
   function ficaFromLine(line) {
-    // Prefer persisted DB values if present, else fallback compute.
-    const gross = Number(line?.gross_pay || 0);
+  // Prefer persisted DB values if present, else fallback compute.
+  const gross = Number(line?.gross_pay || 0);
 
-    const ssDb = line?.employee_ss;
-    const medDb = line?.employee_medicare;
-    const ficaDb = line?.employee_fica;
-    const netDb = line?.net_before_federal;
+  // ✅ DB columns from apply_fica_deductions_to_run
+  const ssDb = line?.ss_employee;
+  const medDb = Number(line?.medicare_employee || 0) + Number(line?.addl_medicare_employee || 0);
+  const ficaDb = line?.fica_employee_total;
+  const netDb = line?.net_pre_fed;
 
-    const hasDb =
-      Number.isFinite(Number(ssDb)) &&
-      Number.isFinite(Number(medDb)) &&
-      Number.isFinite(Number(ficaDb)) &&
-      Number.isFinite(Number(netDb));
+  const hasDb =
+    Number.isFinite(Number(ssDb)) &&
+    Number.isFinite(Number(medDb)) &&
+    Number.isFinite(Number(ficaDb)) &&
+    Number.isFinite(Number(netDb));
 
-    if (hasDb) {
-      return {
-        ss: Number(ssDb),
-        med: Number(medDb),
-        fica: Number(ficaDb),
-        net: Number(netDb),
-        estimate: !!line?.fica_is_estimate,
-        fromDb: true,
-      };
-    }
-
-    const fb = computeFicaFallback(gross);
-    return { ...fb, fromDb: false };
+  if (hasDb) {
+    return {
+      ss: Number(ssDb),
+      med: Number(medDb),
+      fica: Number(ficaDb),
+      net: Number(netDb),
+      estimate: false,
+      fromDb: true,
+      ytd: Number(line?.ytd_wages || 0),
+      ssTaxableThisRun: Number(line?.ss_taxable_this_run || 0),
+    };
   }
+
+  // Fallback estimate (simple 7.65% on entire gross)
+  const fb = computeFicaFallback(gross);
+  return { ...fb, fromDb: false, ytd: Number(line?.ytd_wages || 0), ssTaxableThisRun: Number(line?.ss_taxable_this_run || 0) };
+}
+
 
   // ----------------------------
   // Ensure required DOM exists
@@ -627,35 +632,41 @@
       </div>
     `;
 
-    if (isEmployeeLine(line)) {
-      const fica = ficaFromLine(line);
-      const badge = fica.fromDb ? "" : " (est.)";
-      ficaBlock = `
-        <div class="og-payroll-detail-divider"></div>
+if (isEmployeeLine(line)) {
+  const fica = ficaFromLine(line);
 
-        <div class="og-payroll-detail-row">
-          <div class="og-payroll-detail-k">Social Security (6.2%)</div>
-          <div class="og-payroll-detail-v">-${fmtMoney(fica.ss)}${badge}</div>
-        </div>
-        <div class="og-payroll-detail-row">
-          <div class="og-payroll-detail-k">Medicare (1.45%)</div>
-          <div class="og-payroll-detail-v">-${fmtMoney(fica.med)}${badge}</div>
-        </div>
-        <div class="og-payroll-detail-row">
-          <div class="og-payroll-detail-k"><b>Total FICA (7.65%)</b></div>
-          <div class="og-payroll-detail-v"><b>-${fmtMoney(fica.fica)}${badge}</b></div>
-        </div>
-        <div class="og-payroll-detail-row">
-          <div class="og-payroll-detail-k"><b>Net before federal</b></div>
-          <div class="og-payroll-detail-v"><b>${fmtMoney(fica.net)}${badge}</b></div>
-        </div>
+  ficaBlock = `
+    <div class="og-payroll-detail-divider"></div>
 
-        <div class="og-payroll-detail-row" style="opacity:.75;">
-          <div class="og-payroll-detail-k">Federal withholding</div>
-          <div class="og-payroll-detail-v">Handled by accountant (W-4)</div>
-        </div>
-      `;
-    }
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">YTD wages (est.)</div>
+      <div class="og-payroll-detail-v">${fmtMoney(fica.ytd || 0)}</div>
+    </div>
+
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">Social Security (6.2%)</div>
+      <div class="og-payroll-detail-v">-${fmtMoney(fica.ss)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k">Medicare (1.45% + addl if applicable)</div>
+      <div class="og-payroll-detail-v">-${fmtMoney(fica.med)}</div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k"><b>Total FICA</b></div>
+      <div class="og-payroll-detail-v"><b>-${fmtMoney(fica.fica)}</b></div>
+    </div>
+    <div class="og-payroll-detail-row">
+      <div class="og-payroll-detail-k"><b>Net before federal</b></div>
+      <div class="og-payroll-detail-v"><b>${fmtMoney(fica.net)}</b></div>
+    </div>
+
+    <div class="og-payroll-detail-row" style="opacity:.75;">
+      <div class="og-payroll-detail-k">Federal withholding</div>
+      <div class="og-payroll-detail-v">Handled by accountant (W-4)</div>
+    </div>
+  `;
+}
+
 
     return `
       <div class="og-payroll-detail-block">
@@ -934,6 +945,8 @@
       }
 
       toast("Payroll lines built", "ok");
+
+      
       await refreshAll(currentPeriod.id);
 
       if ((!currentLines || !currentLines.length) && pendingReview.length) {
@@ -1087,24 +1100,27 @@
   function buildCsv(lines, payments) {
     const paidMap = computePaidByEmployee(payments);
 
-    const headers = [
-      "employee_id",
-      "display_name",
-      "shift_count",
-      "minutes_worked",
-      "paid_break_minutes",
-      "unpaid_break_minutes",
-      "rounded_minutes",
-      "hours_rounded",
-      "hourly_rate",
-      "gross_pay",
-      "employee_ss",
-      "employee_medicare",
-      "employee_fica",
-      "net_before_federal",
-      "paid_amount",
-      "due_amount",
-    ];
+const headers = [
+  "employee_id",
+  "display_name",
+  "worker_type",
+  "shift_count",
+  "minutes_worked",
+  "paid_break_minutes",
+  "unpaid_break_minutes",
+  "rounded_minutes",
+  "hours_rounded",
+  "hourly_rate",
+  "gross_pay",
+  "ytd_wages",
+  "ss_employee",
+  "medicare_employee_total",
+  "fica_employee_total",
+  "net_pre_fed",
+  "paid_amount",
+  "due_amount",
+];
+
 
     const rows = (lines || []).map((l) => {
       const name = l.employees?.display_name || l.display_name || "";
@@ -1113,26 +1129,30 @@
       const due = Math.max(0, gross - paid);
       const t = extractTotalsFromDetails(l);
 
-      const fica = isEmployeeLine(l) ? ficaFromLine(l) : { ss: 0, med: 0, fica: 0, net: gross };
+const wt = (l.employees?.worker_type || l.worker_type || "").toLowerCase();
+const fica = isEmployeeLine(l) ? ficaFromLine(l) : { ss: 0, med: 0, fica: 0, net: gross, ytd: 0 };
 
-      const cols = [
-        l.employee_id,
-        name,
-        Number(l.shift_count || 0),
-        t.minutesWorked,
-        t.paidBreak,
-        t.unpaidBreak,
-        t.roundedMin,
-        t.hoursRounded.toFixed(2),
-        Number(l.hourly_rate || 0).toFixed(2),
-        gross.toFixed(2),
-        Number(fica.ss || 0).toFixed(2),
-        Number(fica.med || 0).toFixed(2),
-        Number(fica.fica || 0).toFixed(2),
-        Number(fica.net || gross).toFixed(2),
-        paid.toFixed(2),
-        due.toFixed(2),
-      ];
+const cols = [
+  l.employee_id,
+  name,
+  wt,
+  Number(l.shift_count || 0),
+  t.minutesWorked,
+  t.paidBreak,
+  t.unpaidBreak,
+  t.roundedMin,
+  t.hoursRounded.toFixed(2),
+  Number(l.hourly_rate || 0).toFixed(2),
+  gross.toFixed(2),
+  Number(fica.ytd || 0).toFixed(2),
+  Number(fica.ss || 0).toFixed(2),
+  Number(fica.med || 0).toFixed(2),
+  Number(fica.fica || 0).toFixed(2),
+  Number(fica.net || gross).toFixed(2),
+  paid.toFixed(2),
+  due.toFixed(2),
+];
+
 
       return cols.map(csvCell).join(",");
     });
@@ -1200,6 +1220,18 @@
 
     currentLines = await loadLines(currentRun.id);
     currentPayments = await loadPayments(currentRun.id);
+
+    // ✅ Auto-heal: if lines exist but net_pre_fed is missing, compute/persist FICA once and reload
+try {
+  const needsFica = (currentLines || []).some((l) => isEmployeeLine(l) && l.net_pre_fed == null);
+  if (needsFica) {
+    await sb().rpc("apply_fica_deductions_to_run", { _run_id: currentRun.id });
+    currentLines = await loadLines(currentRun.id); // reload after persist
+  }
+} catch (e) {
+  console.warn("Auto FICA heal failed:", safeErrMsg(e));
+}
+
 
     if (!currentLines.length) renderEmptyState(currentPayments);
     else await renderLines(currentLines, currentPayments);
