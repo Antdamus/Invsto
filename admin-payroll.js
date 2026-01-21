@@ -2,17 +2,12 @@
    OG Jewelers — Admin Payroll (Mobile-first Console)
    admin-payroll.js (FULL REPLACEMENT)
 
-   Works with the new admin.html Payroll Console markup:
-   - No UI injection (HTML already exists)
-   - Desktop table + Mobile cards
-   - Sticky mobile action bar
-   - Action sheet, Detail sheet, Payment sheet (no prompt())
-   - Pending review banner preserved
-   - No changes to payroll rules/RPC logic
+   Adds:
+   - Employee-side FICA estimate display (SS + Medicare) + Net before federal withholding
+   - Persists FICA amounts to DB via RPC: apply_fica_deductions_to_run(_run_id)
+   - Contractors show "no withholding"
 
-   Requires:
-   - window.supabaseClient (initSupabase.js)
-   - admin.html contains Payroll Console IDs (panelPayroll markup)
+   Requires DB migration + RPC from instructions.
    ========================================================= */
 
 (function () {
@@ -69,15 +64,6 @@
     return escapeHtml(s).replaceAll("\n", " ");
   }
 
-  function fmtShortDate(d) {
-    try {
-      const dt = new Date(d);
-      return dt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
-    } catch {
-      return String(d ?? "");
-    }
-  }
-
   function minutesBetween(a, b) {
     try {
       const ms = new Date(b).getTime() - new Date(a).getTime();
@@ -87,8 +73,56 @@
     }
   }
 
-  function isMobile() {
-    return window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+  // ----------------------------
+  // FICA (employee-side) estimate helpers
+  // ----------------------------
+  function isEmployeeLine(line) {
+    const wt = (line?.employees?.worker_type || line?.worker_type || "employee").toLowerCase();
+    return wt === "employee";
+  }
+
+  function computeFicaFallback(gross) {
+    const g = Number(gross || 0);
+    const ss = round2(g * 0.062);
+    const med = round2(g * 0.0145);
+    const fica = round2(ss + med);
+    const net = round2(g - fica);
+    return { ss, med, fica, net, estimate: true };
+  }
+
+  function round2(x) {
+    const n = Number(x || 0);
+    return Math.round(n * 100) / 100;
+  }
+
+  function ficaFromLine(line) {
+    // Prefer persisted DB values if present, else fallback compute.
+    const gross = Number(line?.gross_pay || 0);
+
+    const ssDb = line?.employee_ss;
+    const medDb = line?.employee_medicare;
+    const ficaDb = line?.employee_fica;
+    const netDb = line?.net_before_federal;
+
+    const hasDb =
+      Number.isFinite(Number(ssDb)) &&
+      Number.isFinite(Number(medDb)) &&
+      Number.isFinite(Number(ficaDb)) &&
+      Number.isFinite(Number(netDb));
+
+    if (hasDb) {
+      return {
+        ss: Number(ssDb),
+        med: Number(medDb),
+        fica: Number(ficaDb),
+        net: Number(netDb),
+        estimate: !!line?.fica_is_estimate,
+        fromDb: true,
+      };
+    }
+
+    const fb = computeFicaFallback(gross);
+    return { ...fb, fromDb: false };
   }
 
   // ----------------------------
@@ -98,8 +132,15 @@
     const panel = document.getElementById("panelPayroll");
     if (!panel) return false;
 
-    // new HTML IDs we rely on
-    const required = ["prPeriodSelect", "prTbody", "prCards", "prOverlay", "prActionSheet", "prDetailSheet", "prPaySheet"];
+    const required = [
+      "prPeriodSelect",
+      "prTbody",
+      "prCards",
+      "prOverlay",
+      "prActionSheet",
+      "prDetailSheet",
+      "prPaySheet",
+    ];
     for (const id of required) {
       if (!document.getElementById(id)) {
         console.error("Payroll HTML missing:", id);
@@ -118,7 +159,6 @@
   let currentPayments = [];
   let pendingReview = [];
 
-  // Sheet state
   let detailEmpId = null;
   let payEmpId = null;
 
@@ -126,7 +166,11 @@
   // Data loaders
   // ----------------------------
   async function loadPeriodsIntoSelect(selectEl) {
-    const { data, error } = await sb().from("pay_periods").select("*").order("start_date", { ascending: false }).limit(200);
+    const { data, error } = await sb()
+      .from("pay_periods")
+      .select("*")
+      .order("start_date", { ascending: false })
+      .limit(200);
     if (error) throw error;
 
     selectEl.innerHTML = "";
@@ -145,9 +189,10 @@
   }
 
   async function loadLines(runId) {
+    // ✅ include worker_type and the new fica columns (they live on payroll_run_lines)
     const { data, error } = await sb()
       .from("payroll_run_lines")
-      .select("*, employees(display_name)")
+      .select("*, employees(display_name, worker_type)")
       .eq("payroll_run_id", runId)
       .order("gross_pay", { ascending: false });
 
@@ -217,7 +262,10 @@
     const empIds = [...new Set(pending.map((p) => p.employee_id).filter(Boolean))];
     let empMap = new Map();
     if (empIds.length) {
-      const { data: emps, error: empErr } = await sb().from("employees").select("id, display_name").in("id", empIds);
+      const { data: emps, error: empErr } = await sb()
+        .from("employees")
+        .select("id, display_name")
+        .in("id", empIds);
       if (empErr) throw empErr;
       empMap = new Map((emps || []).map((e) => [e.id, e.display_name]));
     }
@@ -346,7 +394,6 @@
     countEl.textContent = String(count);
     wrap.classList.remove("hidden");
 
-    // UX guard
     if (finalizeDesktop) finalizeDesktop.disabled = true;
     if (finalizeMobile) finalizeMobile.disabled = true;
   }
@@ -363,7 +410,7 @@
   }
 
   // ----------------------------
-  // Rendering: table + cards
+  // Rendering
   // ----------------------------
   async function renderLines(lines, payments) {
     renderKPIs(lines, payments);
@@ -424,11 +471,18 @@
         const due = Math.max(0, gross - paid);
         const t = extractTotalsFromDetails(l);
 
+        // small hint in subline for employees
+        let sub2 = "";
+        if (isEmployeeLine(l)) {
+          const fica = ficaFromLine(l);
+          sub2 = ` • Net(pre-fed): ${fmtMoney(fica.net)}`;
+        }
+
         return `
           <tr class="og-pr-row">
             <td class="og-pr-cell">
               <div class="og-pr-name">${escapeHtml(name)}</div>
-              <div class="og-pr-sub">${Number(l.shift_count || 0)} shifts • ${t.hoursRounded.toFixed(2)} hrs</div>
+              <div class="og-pr-sub">${Number(l.shift_count || 0)} shifts • ${t.hoursRounded.toFixed(2)} hrs${sub2}</div>
             </td>
             <td class="og-pr-cell num">${t.hoursRounded.toFixed(2)}</td>
             <td class="og-pr-cell num">${fmtMoney(gross)}</td>
@@ -465,10 +519,7 @@
     const root = $("#prCards");
     if (!root) return;
 
-    if (!lines || !lines.length) {
-      // empty is handled by renderEmptyState
-      return;
-    }
+    if (!lines || !lines.length) return;
 
     const paidMap = computePaidByEmployee(payments);
     const canPay = !!currentRun && currentRun.status === "final";
@@ -482,6 +533,12 @@
         const t = extractTotalsFromDetails(l);
         const shifts = Number(l.shift_count || 0);
 
+        let netLine = "";
+        if (isEmployeeLine(l)) {
+          const fica = ficaFromLine(l);
+          netLine = `<div><span>Net (pre-fed)</span><b>${fmtMoney(fica.net)}</b></div>`;
+        }
+
         return `
           <div class="og-payroll-card">
             <div class="og-payroll-card-top">
@@ -493,6 +550,7 @@
               <div><span>Shifts</span><b>${shifts}</b></div>
               <div><span>Hours</span><b>${t.hoursRounded.toFixed(2)}</b></div>
               <div><span>Gross</span><b>${fmtMoney(gross)}</b></div>
+              ${netLine}
               <div><span>Paid</span><b>${fmtMoney(paid)}</b></div>
             </div>
 
@@ -519,6 +577,35 @@
   // ----------------------------
   // Detail + Payment sheets
   // ----------------------------
+  function renderPaymentsList(employeeId, payments) {
+    const list = (payments || []).filter((p) => p.employee_id === employeeId).slice(0, 10);
+
+    if (!list.length) {
+      return `<div class="og-payroll-pay-empty">No payments recorded for this run.</div>`;
+    }
+
+    return `
+      <div class="og-payroll-paylist">
+        ${list
+          .map((p) => {
+            const dt = p.paid_at ? new Date(p.paid_at).toLocaleString() : "";
+            return `
+              <div class="og-payroll-payitem">
+                <div class="og-payroll-payitem-top">
+                  <b>${fmtMoney(p.amount)}</b>
+                  <span>${escapeHtml(p.method || "other")}</span>
+                </div>
+                <div class="og-payroll-payitem-sub">
+                  ${escapeHtml(dt)}${p.reference ? ` • ${escapeHtml(p.reference)}` : ""}${p.note ? ` • ${escapeHtml(p.note)}` : ""}
+                </div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
   function buildDetailHtml(line, payments) {
     const paidMap = computePaidByEmployee(payments);
     const name = line.employees?.display_name || line.display_name || line.employee_id;
@@ -528,9 +615,47 @@
     const due = Math.max(0, gross - paid);
 
     const t = extractTotalsFromDetails(line);
-
     const rate = Number(line.hourly_rate || 0);
     const shifts = Number(line.shift_count || 0);
+
+    // ✅ FICA panel (employees only)
+    let ficaBlock = `
+      <div class="og-payroll-detail-divider"></div>
+      <div class="og-payroll-detail-row">
+        <div class="og-payroll-detail-k">Withholding</div>
+        <div class="og-payroll-detail-v">Not withheld (1099 contractor)</div>
+      </div>
+    `;
+
+    if (isEmployeeLine(line)) {
+      const fica = ficaFromLine(line);
+      const badge = fica.fromDb ? "" : " (est.)";
+      ficaBlock = `
+        <div class="og-payroll-detail-divider"></div>
+
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k">Social Security (6.2%)</div>
+          <div class="og-payroll-detail-v">-${fmtMoney(fica.ss)}${badge}</div>
+        </div>
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k">Medicare (1.45%)</div>
+          <div class="og-payroll-detail-v">-${fmtMoney(fica.med)}${badge}</div>
+        </div>
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k"><b>Total FICA (7.65%)</b></div>
+          <div class="og-payroll-detail-v"><b>-${fmtMoney(fica.fica)}${badge}</b></div>
+        </div>
+        <div class="og-payroll-detail-row">
+          <div class="og-payroll-detail-k"><b>Net before federal</b></div>
+          <div class="og-payroll-detail-v"><b>${fmtMoney(fica.net)}${badge}</b></div>
+        </div>
+
+        <div class="og-payroll-detail-row" style="opacity:.75;">
+          <div class="og-payroll-detail-k">Federal withholding</div>
+          <div class="og-payroll-detail-v">Handled by accountant (W-4)</div>
+        </div>
+      `;
+    }
 
     return `
       <div class="og-payroll-detail-block">
@@ -570,6 +695,11 @@
           <div class="og-payroll-detail-k">Gross</div>
           <div class="og-payroll-detail-v"><b>${fmtMoney(gross)}</b></div>
         </div>
+
+        ${ficaBlock}
+
+        <div class="og-payroll-detail-divider"></div>
+
         <div class="og-payroll-detail-row">
           <div class="og-payroll-detail-k">Paid</div>
           <div class="og-payroll-detail-v">${fmtMoney(paid)}</div>
@@ -587,35 +717,6 @@
     `;
   }
 
-  function renderPaymentsList(employeeId, payments) {
-    const list = (payments || []).filter((p) => p.employee_id === employeeId).slice(0, 10);
-
-    if (!list.length) {
-      return `<div class="og-payroll-pay-empty">No payments recorded for this run.</div>`;
-    }
-
-    return `
-      <div class="og-payroll-paylist">
-        ${list
-          .map((p) => {
-            const dt = p.paid_at ? new Date(p.paid_at).toLocaleString() : "";
-            return `
-              <div class="og-payroll-payitem">
-                <div class="og-payroll-payitem-top">
-                  <b>${fmtMoney(p.amount)}</b>
-                  <span>${escapeHtml(p.method || "other")}</span>
-                </div>
-                <div class="og-payroll-payitem-sub">
-                  ${escapeHtml(dt)}${p.reference ? ` • ${escapeHtml(p.reference)}` : ""}${p.note ? ` • ${escapeHtml(p.note)}` : ""}
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    `;
-  }
-
   function openDetailSheet(empId) {
     const line = (currentLines || []).find((l) => l.employee_id === empId);
     if (!line) return;
@@ -629,7 +730,6 @@
     if (title) title.textContent = name;
     if (body) body.innerHTML = buildDetailHtml(line, currentPayments);
 
-    // wire footer buttons state
     const canPay = !!currentRun && currentRun.status === "final";
     const payBtn = $("#prDetailPayBtn");
     if (payBtn) {
@@ -654,10 +754,8 @@
     $("#prPayRef").value = "";
     $("#prPayNote").value = "";
 
-    // default method
     setMethodSeg("zelle");
 
-    // store name/due in dataset for save
     const sheet = $("#prPaySheet");
     sheet.dataset.emp = empId;
     sheet.dataset.name = empName || empId;
@@ -694,115 +792,102 @@
     }
   }
 
-async function previewPdfForEmployee(runId, empId) {
-  // iOS/Safari blocks window.open if it happens after an await.
-  // So we open a tab immediately, then later redirect it to the blob URL.
-  let w = null;
+  async function previewPdfForEmployee(runId, empId) {
+    let w = null;
 
-  try {
-    // Open immediately (user gesture friendly)
-    w = window.open("", "_blank");
-
-    // If popup blocked, we’ll fall back to same-tab download later
-    if (w) {
-      w.document.title = "Generating PDF…";
-      w.document.body.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
-      w.document.body.style.padding = "18px";
-      w.document.body.innerHTML = `
-        <div style="max-width:640px;margin:0 auto;">
-          <div style="font-size:18px;font-weight:800;letter-spacing:.2px;">Generating payroll PDF…</div>
-          <div style="margin-top:8px;opacity:.75;line-height:1.4;">
-            Please keep this tab open. It will load automatically.
-          </div>
-          <div style="margin-top:14px;height:10px;border-radius:999px;background:rgba(0,0,0,.12);overflow:hidden;">
-            <div style="width:60%;height:100%;background:rgba(0,0,0,.35);border-radius:999px;animation:pulse 1.2s ease-in-out infinite;"></div>
-          </div>
-          <style>
-            @keyframes pulse { 0%{transform:translateX(-40%)} 50%{transform:translateX(20%)} 100%{transform:translateX(120%)} }
-          </style>
-        </div>
-      `;
-    }
-
-    const session = (await sb().auth.getSession()).data.session;
-    if (!session) {
-      toast("Not authenticated", "err");
-      if (w) w.close();
-      return;
-    }
-
-    const res = await fetch(`${sb().supabaseUrl}/functions/v1/payroll-statement-pdf`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ run_id: runId, employee_id: empId }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("PDF function error:", text);
-      throw new Error(text || `PDF generation failed (${res.status})`);
-    }
-
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
-    // If we successfully opened a new tab/window, redirect it to the blob URL
-    if (w && !w.closed) {
-      try {
-        w.location.href = blobUrl;
-      } catch {
-        // fallback: put a clickable link inside the opened tab
+    try {
+      w = window.open("", "_blank");
+      if (w) {
+        w.document.title = "Generating PDF…";
+        w.document.body.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial";
+        w.document.body.style.padding = "18px";
         w.document.body.innerHTML = `
-          <div style="font-family:system-ui;padding:18px;">
-            <div style="font-weight:800;">Tap to open PDF</div>
-            <a href="${blobUrl}" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;">
-              Open PDF
-            </a>
+          <div style="max-width:640px;margin:0 auto;">
+            <div style="font-size:18px;font-weight:800;letter-spacing:.2px;">Generating payroll PDF…</div>
+            <div style="margin-top:8px;opacity:.75;line-height:1.4;">
+              Please keep this tab open. It will load automatically.
+            </div>
+            <div style="margin-top:14px;height:10px;border-radius:999px;background:rgba(0,0,0,.12);overflow:hidden;">
+              <div style="width:60%;height:100%;background:rgba(0,0,0,.35);border-radius:999px;animation:pulse 1.2s ease-in-out infinite;"></div>
+            </div>
+            <style>
+              @keyframes pulse { 0%{transform:translateX(-40%)} 50%{transform:translateX(20%)} 100%{transform:translateX(120%)} }
+            </style>
           </div>
         `;
       }
-    } else {
-      // Popup was blocked — fallback: trigger a download link in the current tab
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `payroll_statement_${empId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }
 
-    // Don’t revoke instantly (iOS can fail if it’s revoked too early)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
-  } catch (err) {
-    showAdminError("PDF preview failed", safeErrMsg(err));
-    if (w && !w.closed) {
-      try {
-        w.document.body.innerHTML = `
-          <div style="font-family:system-ui;padding:18px;">
-            <div style="font-weight:900;">PDF failed</div>
-            <div style="margin-top:8px;opacity:.8;white-space:pre-wrap;">${escapeHtml(safeErrMsg(err))}</div>
-          </div>
-        `;
-      } catch {}
+      const session = (await sb().auth.getSession()).data.session;
+      if (!session) {
+        toast("Not authenticated", "err");
+        if (w) w.close();
+        return;
+      }
+
+      const res = await fetch(`${sb().supabaseUrl}/functions/v1/payroll-statement-pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ run_id: runId, employee_id: empId }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("PDF function error:", text);
+        throw new Error(text || `PDF generation failed (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      if (w && !w.closed) {
+        try {
+          w.location.href = blobUrl;
+        } catch {
+          w.document.body.innerHTML = `
+            <div style="font-family:system-ui;padding:18px;">
+              <div style="font-weight:800;">Tap to open PDF</div>
+              <a href="${blobUrl}" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;">
+                Open PDF
+              </a>
+            </div>
+          `;
+        }
+      } else {
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `payroll_statement_${empId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+    } catch (err) {
+      showAdminError("PDF preview failed", safeErrMsg(err));
+      if (w && !w.closed) {
+        try {
+          w.document.body.innerHTML = `
+            <div style="font-family:system-ui;padding:18px;">
+              <div style="font-weight:900;">PDF failed</div>
+              <div style="margin-top:8px;opacity:.8;white-space:pre-wrap;">${escapeHtml(safeErrMsg(err))}</div>
+            </div>
+          `;
+        } catch {}
+      }
     }
   }
-}
 
   // ----------------------------
   // Actions (RPC wrappers)
   // ----------------------------
   function uiRoundingMode() {
-    // new select is prRoundingSelect in HTML
     const v = $("#prRoundingSelect")?.value || "none";
-
-    // Your RPC expects your legacy strings: nearest_15 / nearest_5
-    // Map the UI to those.
     if (v === "5") return "nearest_5";
     if (v === "15") return "nearest_15";
-    if (v === "10") return "nearest_10"; // if your RPC supports it; if not, it will error and you'll remove this option
+    if (v === "10") return "nearest_10";
     return "none";
   }
 
@@ -839,8 +924,16 @@ async function previewPdfForEmployee(runId, empId) {
       });
       if (error) throw error;
 
-      toast("Payroll lines built", "ok");
+      // ✅ Persist FICA estimates right after building lines
+      try {
+        const r2 = await sb().rpc("apply_fica_deductions_to_run", { _run_id: currentRun.id });
+        if (r2?.error) throw r2.error;
+      } catch (e2) {
+        // Don’t fail build if this RPC isn't deployed yet
+        console.warn("apply_fica_deductions_to_run failed:", safeErrMsg(e2));
+      }
 
+      toast("Payroll lines built", "ok");
       await refreshAll(currentPeriod.id);
 
       if ((!currentLines || !currentLines.length) && pendingReview.length) {
@@ -868,6 +961,14 @@ async function previewPdfForEmployee(runId, empId) {
         _note: null,
       });
       if (error) throw error;
+
+      // ✅ Ensure deductions exist in DB at the end (final)
+      try {
+        const r2 = await sb().rpc("apply_fica_deductions_to_run", { _run_id: currentRun.id });
+        if (r2?.error) throw r2.error;
+      } catch (e2) {
+        console.warn("apply_fica_deductions_to_run failed:", safeErrMsg(e2));
+      }
 
       toast("Payroll run finalized", "ok");
       await refreshAll(currentPeriod.id);
@@ -913,34 +1014,6 @@ async function previewPdfForEmployee(runId, empId) {
       return data;
     } catch (e) {
       showAdminError("Unlock failed", safeErrMsg(e));
-      throw e;
-    }
-  }
-
-  async function createWeeklyPeriod() {
-    // Your RPC is create_weekly_pay_period(week_start, weeks, p_timezone, p_note)
-    const start = prompt(`Enter pay period start date (YYYY-MM-DD)`, isoDate(new Date()));
-    if (!start) return;
-
-    try {
-      const { data, error } = await sb().rpc("create_weekly_pay_period", {
-        week_start: start,
-        weeks: 2, // biweekly
-        p_timezone: ORG_TZ,
-        p_note: "Biweekly",
-      });
-      if (error) throw error;
-
-      toast("Biweekly pay period created", "ok");
-
-      const sel = $("#prPeriodSelect");
-      const newest = await loadPeriodsIntoSelect(sel);
-      currentPeriod = newest;
-      await refreshAll(sel.value);
-
-      return data;
-    } catch (e) {
-      showAdminError("Create period failed", safeErrMsg(e));
       throw e;
     }
   }
@@ -1009,7 +1082,7 @@ async function previewPdfForEmployee(runId, empId) {
   }
 
   // ----------------------------
-  // Export CSV (unchanged)
+  // Export CSV (unchanged, but you can add fica columns later if you want)
   // ----------------------------
   function buildCsv(lines, payments) {
     const paidMap = computePaidByEmployee(payments);
@@ -1025,6 +1098,10 @@ async function previewPdfForEmployee(runId, empId) {
       "hours_rounded",
       "hourly_rate",
       "gross_pay",
+      "employee_ss",
+      "employee_medicare",
+      "employee_fica",
+      "net_before_federal",
       "paid_amount",
       "due_amount",
     ];
@@ -1035,6 +1112,8 @@ async function previewPdfForEmployee(runId, empId) {
       const paid = Number(paidMap.get(l.employee_id) || 0);
       const due = Math.max(0, gross - paid);
       const t = extractTotalsFromDetails(l);
+
+      const fica = isEmployeeLine(l) ? ficaFromLine(l) : { ss: 0, med: 0, fica: 0, net: gross };
 
       const cols = [
         l.employee_id,
@@ -1047,6 +1126,10 @@ async function previewPdfForEmployee(runId, empId) {
         t.hoursRounded.toFixed(2),
         Number(l.hourly_rate || 0).toFixed(2),
         gross.toFixed(2),
+        Number(fica.ss || 0).toFixed(2),
+        Number(fica.med || 0).toFixed(2),
+        Number(fica.fica || 0).toFixed(2),
+        Number(fica.net || gross).toFixed(2),
         paid.toFixed(2),
         due.toFixed(2),
       ];
@@ -1085,12 +1168,10 @@ async function previewPdfForEmployee(runId, empId) {
   // Refresh
   // ----------------------------
   async function refreshAll(periodId) {
-    // period
     const { data: p, error: pe } = await sb().from("pay_periods").select("*").eq("id", periodId).single();
     if (pe) throw pe;
     currentPeriod = p;
 
-    // pending banner (informational)
     try {
       pendingReview = await fetchPendingReviewForPeriod(currentPeriod);
     } catch (e) {
@@ -1099,7 +1180,6 @@ async function previewPdfForEmployee(runId, empId) {
     }
     renderPendingBanner();
 
-    // runs
     const runs = await sb()
       .from("payroll_runs")
       .select("*")
@@ -1129,17 +1209,14 @@ async function previewPdfForEmployee(runId, empId) {
   // Event wiring
   // ----------------------------
   function bindEvents() {
-    // close on overlay click
     $("#prOverlay")?.addEventListener("click", closeAllSheets);
 
-    // close on any [data-pr-close]
     document.addEventListener("click", (e) => {
       const closeBtn = e.target.closest("[data-pr-close]");
       if (!closeBtn) return;
       closeAllSheets();
     });
 
-    // Period change
     $("#prPeriodSelect")?.addEventListener("change", async (e) => {
       const id = e.target.value;
       try {
@@ -1149,131 +1226,90 @@ async function previewPdfForEmployee(runId, empId) {
       }
     });
 
-    // Desktop actions row
     $("#prCreateDraft")?.addEventListener("click", async () => {
-      try {
-        await createDraftRun();
-      } catch {}
+      try { await createDraftRun(); } catch {}
     });
 
     $("#prBuildLines")?.addEventListener("click", async () => {
-      try {
-        await buildLines();
-      } catch {}
+      try { await buildLines(); } catch {}
     });
 
     $("#prFinalizeRun")?.addEventListener("click", async () => {
-      try {
-        await finalizeRun();
-      } catch {}
+      try { await finalizeRun(); } catch {}
     });
 
     $("#prExportCsv")?.addEventListener("click", async () => {
-      try {
-        await exportCsv();
-      } catch {}
+      try { await exportCsv(); } catch {}
     });
 
     $("#prLockPeriod")?.addEventListener("click", async () => {
-      try {
-        await lockPeriod();
-      } catch {}
+      try { await lockPeriod(); } catch {}
     });
 
     $("#prUnlockPeriod")?.addEventListener("click", async () => {
-      try {
-        await unlockPeriod();
-      } catch {}
+      try { await unlockPeriod(); } catch {}
     });
 
     $("#prDeleteDraft")?.addEventListener("click", async () => {
-      try {
-        await deleteDraftRun();
-      } catch {}
+      try { await deleteDraftRun(); } catch {}
     });
 
     $("#prDeletePeriod")?.addEventListener("click", async () => {
-      try {
-        await deleteSelectedPayPeriod();
-      } catch {}
+      try { await deleteSelectedPayPeriod(); } catch {}
     });
 
-    // Pending “Review now”
     $("#prPendingBtn")?.addEventListener("click", tryGoToOverviewTab);
 
-    // Mobile sticky bar
     $("#prMobileBuild")?.addEventListener("click", async () => {
-      try {
-        await buildLines();
-      } catch {}
+      try { await buildLines(); } catch {}
     });
 
     $("#prMobileFinalize")?.addEventListener("click", async () => {
-      try {
-        await finalizeRun();
-      } catch {}
+      try { await finalizeRun(); } catch {}
     });
 
     $("#prMobileMore")?.addEventListener("click", () => openSheet("prActionSheet"));
 
-    // Action sheet buttons
     $("#prSheetCreateDraft")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await createDraftRun();
-      } catch {}
+      try { await createDraftRun(); } catch {}
     });
 
     $("#prSheetBuild")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await buildLines();
-      } catch {}
+      try { await buildLines(); } catch {}
     });
 
     $("#prSheetFinalize")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await finalizeRun();
-      } catch {}
+      try { await finalizeRun(); } catch {}
     });
 
     $("#prSheetExport")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await exportCsv();
-      } catch {}
+      try { await exportCsv(); } catch {}
     });
 
     $("#prSheetLock")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await lockPeriod();
-      } catch {}
+      try { await lockPeriod(); } catch {}
     });
 
     $("#prSheetUnlock")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await unlockPeriod();
-      } catch {}
+      try { await unlockPeriod(); } catch {}
     });
 
     $("#prSheetDeleteDraft")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await deleteDraftRun();
-      } catch {}
+      try { await deleteDraftRun(); } catch {}
     });
 
     $("#prSheetDeletePeriod")?.addEventListener("click", async () => {
       closeAllSheets();
-      try {
-        await deleteSelectedPayPeriod();
-      } catch {}
+      try { await deleteSelectedPayPeriod(); } catch {}
     });
 
-    // Detail sheet footer actions
     $("#prDetailPayBtn")?.addEventListener("click", () => {
       if (!detailEmpId) return;
       const line = (currentLines || []).find((l) => l.employee_id === detailEmpId);
@@ -1293,14 +1329,12 @@ async function previewPdfForEmployee(runId, empId) {
       await previewPdfForEmployee(currentRun.id, detailEmpId);
     });
 
-    // Payment method segmented control
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("#prPaySheet .og-seg-btn");
       if (!btn) return;
       setMethodSeg(btn.dataset.method || "other");
     });
 
-    // Payment confirm
     $("#prPayConfirm")?.addEventListener("click", async () => {
       const sheet = $("#prPaySheet");
       const empId = sheet?.dataset.emp;
@@ -1324,7 +1358,6 @@ async function previewPdfForEmployee(runId, empId) {
       } catch {}
     });
 
-    // Delegated buttons: table + cards
     document.addEventListener("click", async (e) => {
       const detailBtn = e.target.closest(".prDetailBtn");
       if (detailBtn) {
@@ -1362,7 +1395,6 @@ async function previewPdfForEmployee(runId, empId) {
     }
 
     try {
-      // Load periods and select the newest
       const sel = $("#prPeriodSelect");
       const first = await loadPeriodsIntoSelect(sel);
 
