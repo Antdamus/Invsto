@@ -833,8 +833,11 @@ const flagsHtml = uniq.length ? `<div class="cal-flags" style="margin-top:6px;">
         Store: ${storeName}${dirUrl ? ` · <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}
       </div>` : '') : '';
 
+    const dow = day.toLocaleDateString([], { weekday: 'short' });
+
     cell.innerHTML = `
       <div class="cal-day-header">
+        <span class="cal-dow">${dow}</span>
         <span class="cal-date">${day.getMonth()+1}/${day.getDate()}</span>
       </div>
       <div class="cal-slots">
@@ -1207,6 +1210,57 @@ document.getElementById('wsWeekDate')?.addEventListener('change', async ()=>{
   wsWeekStart = startOfWeekSun(new Date(y,m-1,d));
   await loadMySchedule();
 });
+
+// Swipe week navigation (iPhone-friendly, scroll-safe)
+(() => {
+  const grid = document.getElementById('wsGrid');
+  if (!grid) return;
+
+  let x0 = null, y0 = null;
+  let startScrollLeft = 0;
+  let moved = false;
+
+  grid.addEventListener('touchstart', (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    x0 = t.clientX;
+    y0 = t.clientY;
+    startScrollLeft = grid.scrollLeft;
+    moved = false;
+  }, { passive: true });
+
+  grid.addEventListener('touchmove', () => {
+    moved = true;
+  }, { passive: true });
+
+  grid.addEventListener('touchend', async (e) => {
+    if (x0 == null || y0 == null) return;
+
+    const t = e.changedTouches?.[0];
+    if (!t) return;
+
+    const dx = t.clientX - x0;
+    const dy = t.clientY - y0;
+
+    // reset
+    x0 = null; y0 = null;
+
+    // If the carousel actually scrolled, don't treat it as a week-swipe
+    const scrolled = Math.abs(grid.scrollLeft - startScrollLeft) > 8;
+    if (scrolled) return;
+
+    // ignore mostly-vertical gestures
+    if (Math.abs(dy) > Math.abs(dx)) return;
+
+    // threshold
+    if (Math.abs(dx) < 70) return;
+
+    wsWeekStart = addDays(wsWeekStart, dx < 0 ? 7 : -7);
+    document.getElementById('wsWeekDate').value = toISODate(wsWeekStart);
+    await loadMySchedule();
+  }, { passive: true });
+})();
+
 
   // Initial session check (also fetch cap before first hydrate)
   const { data: { session } } = await supabaseClient.auth.getSession();

@@ -1,256 +1,679 @@
-/* timeclock.css — basic styling for test phase */
+/* timeclock.css — OG Jewelry Luxury Time Clock (iPhone-first, desktop-polished)
+   - Premium glass surfaces
+   - Safe-area support (iPhone notch/home bar)
+   - Mobile turns tables into scroll-safe surfaces
+   - Hero CTA design for Clock In/Out
+*/
 
-:root {
-  --bg: #0b0b0c;
-  --card: #121316;
-  --muted: #9aa0a6;
-  --text: #e7e9ea;
-  --accent: #9d7bff;
-  --ok: #2fbf71;
-  --border: #1d1f24;
+:root{
+  --bg: #070708;
+  --bg2:#0b0b0c;
+  --card: rgba(18,19,22,0.72);
+  --card2: rgba(18,19,22,0.88);
+  --border: rgba(255,255,255,0.08);
+  --border2: rgba(255,255,255,0.12);
+  --text: #eef0f2;
+  --muted: rgba(238,240,242,0.62);
+
+  /* OG luxe violet accent (your existing vibe, elevated) */
+  --accentA:#6a5cff;
+  --accentB:#9d7bff;
+
+  --ok:#2fbf71;
+  --warn:#ffb020;
+  --bad:#ff4d4d;
+
+  --shadow: 0 18px 60px rgba(0,0,0,.55);
+  --shadow2: 0 10px 30px rgba(0,0,0,.35);
+
+  --r12: 12px;
+  --r14: 14px;
+  --r18: 18px;
+  --r22: 22px;
+
+  --pad: 16px;
+
+  /* iPhone safe area */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
 }
 
-* { box-sizing: border-box; }
+*{ box-sizing:border-box; }
+html, body{ height:100%; }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+body{
+  margin:0;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(157,123,255,0.22), transparent 55%),
+    radial-gradient(900px 500px at 90% 10%, rgba(106,92,255,0.18), transparent 60%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text","SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-.app-header {
+/* =========================
+   Header (sticky glass)
+========================= */
+.app-header{
   position: sticky;
   top: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  background: rgba(11, 11, 12, 0.8);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--border);
-  z-index: 10;
+  z-index: 50;
+  padding:
+    calc(12px + var(--sat))
+    calc(14px + var(--sar))
+    12px
+    calc(14px + var(--sal));
+  background: rgba(7,7,8,0.62);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 18px;
+.app-header h1{
+  margin:0;
+  font-size: 15px;
+  letter-spacing: .4px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.92);
 }
 
-.app-header nav {
-  display: flex;
-  gap: 10px;
+.app-header nav{
+  display:flex;
+  gap:10px;
+  align-items:center;
 }
 
-.container {
-  max-width: 900px;
-  margin: 24px auto;
-  padding: 0 16px;
+/* =========================
+   Layout container
+========================= */
+.container{
+  max-width: 980px;
+  margin: 18px auto;
+  padding:
+    0
+    calc(var(--pad) + var(--sar))
+    calc(24px + var(--sab))
+    calc(var(--pad) + var(--sal));
 }
 
-.card {
+/* =========================
+   Card surface
+========================= */
+.card{
+  position: relative;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+  border-radius: var(--r22);
+  padding: 18px;
+  box-shadow: var(--shadow2);
+  overflow: hidden;
 }
 
-.hidden { display: none; }
+.card::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius: inherit;
+  background: radial-gradient(600px 240px at 20% 0%, rgba(157,123,255,0.12), transparent 55%),
+              radial-gradient(520px 240px at 85% 10%, rgba(106,92,255,0.10), transparent 62%);
+  pointer-events:none;
+}
 
-.btn {
+.hidden{ display:none !important; }
+
+/* =========================
+   Buttons (premium)
+========================= */
+.btn{
+  appearance:none;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.90);
   padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #1a1b1f;
-  color: var(--text);
-  cursor: pointer;
-  transition: transform .08s ease, box-shadow .2s ease;
-}
-
-.btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(0,0,0,.2);
-}
-
-.btn:active { transform: translateY(0); }
-
-.btn.primary {
-  background: linear-gradient(135deg, #6a5cff, #9d7bff);
-  border-color: #6a5cff;
-  color: white;
-}
-
-.btn.ghost {
-  background: transparent;
-  color: var(--muted);
-}
-
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.status-pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #191b20;
-  font-size: 14px;
-}
-
-.now {
-  margin-left: auto;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.actions {
-  margin-bottom: 12px;
-}
-
-.geo-row {
-  color: var(--muted);
+  border-radius: 14px;
+  font-weight: 650;
   font-size: 13px;
-  margin-bottom: 14px;
+  letter-spacing: .2px;
+  cursor:pointer;
+  transition: transform .10s ease, background .20s ease, border-color .20s ease, box-shadow .20s ease;
+  box-shadow: 0 10px 20px rgba(0,0,0,.25);
+  user-select:none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Phase 4: store context */
+.btn:hover{
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.14);
+  transform: translateY(-1px);
+}
+
+.btn:active{
+  transform: translateY(0px) scale(0.98);
+}
+
+.btn:disabled{
+  opacity: .55;
+  cursor:not-allowed;
+  transform:none;
+}
+
+.btn.ghost{
+  background: transparent;
+  box-shadow:none;
+  border-color: rgba(255,255,255,0.10);
+  color: var(--muted);
+}
+
+.btn.primary{
+  border: 1px solid rgba(157,123,255,0.45);
+  background: linear-gradient(135deg, rgba(106,92,255,0.92), rgba(157,123,255,0.92));
+  color: #ffffff;
+  box-shadow: 0 16px 34px rgba(106,92,255,0.22), 0 12px 30px rgba(0,0,0,.35);
+}
+
+/* =========================
+   Typography helpers
+========================= */
+.muted{ color: var(--muted); }
+.hint{
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+/* =========================
+   Status row (upgrade)
+========================= */
+.status-row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin: 14px 0 12px;
+}
+
+.status-pill{
+  position: relative;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .2px;
+  box-shadow: 0 12px 26px rgba(0,0,0,.25);
+}
+
+.now{
+  margin-left:auto;
+  color: rgba(238,240,242,0.70);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-size: 12.5px;
+}
+
+/* =========================
+   Hero actions (mobile)
+========================= */
+.actions{
+  display:flex;
+  gap: 10px;
+  align-items:center;
+  flex-wrap: wrap;
+  margin: 14px 0 10px;
+}
+
+/* Make Clock button the hero on iPhone */
+#clockBtn{
+  min-height: 54px;
+  padding: 14px 18px;
+  border-radius: 18px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: .3px;
+  flex: 1 1 240px;
+}
+
+/* Secondary Break button */
+#breakBtn{
+  min-height: 54px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+/* Elegant breathing glow when primary is available */
+@keyframes ogBreath{
+  0%   { box-shadow: 0 16px 34px rgba(106,92,255,0.16), 0 10px 26px rgba(0,0,0,.35); }
+  50%  { box-shadow: 0 18px 40px rgba(157,123,255,0.22), 0 12px 30px rgba(0,0,0,.38); }
+  100% { box-shadow: 0 16px 34px rgba(106,92,255,0.16), 0 10px 26px rgba(0,0,0,.35); }
+}
+#clockBtn.btn.primary:not(:disabled){
+  animation: ogBreath 2.8s ease-in-out infinite;
+}
+
+/* =========================
+   Geo + Store context (lux card)
+========================= */
+.geo-row{
+  margin-top: 10px;
+  color: rgba(238,240,242,0.62);
+  font-size: 12.5px;
+}
+
 .store-row{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap: 12px;
-  padding: 12px;
-  margin: 10px 0 16px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255,255,255,0.04);
+  padding: 14px 14px;
+  margin: 14px 0 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 16px 34px rgba(0,0,0,.25);
 }
+
 .store-left{ min-width: 0; }
 .store-line{
   margin-top: 4px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 800;
+  letter-spacing: .2px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+#storeContextHint{
+  color: rgba(238,240,242,0.58) !important;
+}
 
-.table {
-  width: 100%;
+/* =========================
+   Tables (desktop: normal; mobile: scroll-safe + nicer)
+========================= */
+.table{
+  width:100%;
   border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 13.5px;
+}
+.table th, .table td{
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 10px 10px;
+  text-align:left;
+}
+.table th{
+  color: rgba(238,240,242,0.70);
+  font-weight: 800;
+  letter-spacing: .2px;
+  font-size: 12px;
+  text-transform: uppercase;
 }
 
-.table th, .table td {
-  border-bottom: 1px solid var(--border);
-  padding: 8px;
-  text-align: left;
-  font-size: 14px;
+.link, .table a{
+  color: rgba(157,123,255,0.92);
+  text-decoration: none;
+  font-weight: 750;
 }
+.link:hover, .table a:hover{ text-decoration: underline; }
 
-.table th {
-  color: #b7bcc5;
-  font-weight: 600;
+/* =========================
+   Modal (camera) — make it feel iOS sheet
+========================= */
+.modal.hidden{ display:none; }
+.modal{
+  position: fixed;
+  inset:0;
+  z-index: 100;
 }
-
-/* --- Camera modal --- */
-.modal.hidden { display: none; }
-.modal { position: fixed; inset: 0; z-index: 50; }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(2px); }
-.modal-card { position: relative; width: 96%; max-width: 520px; margin: 6vh auto; background: var(--card); border:1px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
-.cam-stage { display: grid; place-items: center; background: #0f1013; border:1px dashed var(--border); border-radius: 10px; aspect-ratio: 3/4; overflow: hidden; }
-.cam-view { width: 100%; height: 100%; object-fit: cover; }
-.cam-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-
-/* === Match final timeclock.html structure === */
-
-/* Panels (your HTML uses .panel, CSS only had .card) */
-.panel {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+.modal-backdrop{
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,0.60);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
-
-/* Simple flex utilities used in the HTML */
-.row { display: flex; gap: 12px; }
-.between { justify-content: space-between; }
-.center { align-items: center; }
-.muted { color: var(--muted); }
-
-/* Current time element */
-.nowtime { color: var(--muted); font-variant-numeric: tabular-nums; }
-
-/* Status pill (HTML uses .pill, CSS had .status-pill) */
-.pill {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #191b20;
-  font-size: 14px;
-}
-
-/* Ensure tables look like cards (works with the existing .table styles) */
-.table-wrapper {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--card);
-}
-
-/* Modal styling compatible with HTML that has .modal-header/body/footer but no .modal-card */
-.modal.hidden { display: none; }
-.modal {
-  position: fixed; inset: 0; z-index: 50;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.6); backdrop-filter: blur(2px);
-}
-.modal .modal-header,
-.modal .modal-body,
-.modal .modal-footer {
-  width: 96%; max-width: 520px;
-  background: var(--card);
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+.modal-card{
+  position: relative;
+  width: min(520px, calc(100vw - 24px));
+  margin: calc(10vh + var(--sat)) auto 0;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(18,19,22,0.92);
+  box-shadow: var(--shadow);
   padding: 16px;
+  overflow:hidden;
 }
-.modal .modal-header {
-  border-top: 1px solid var(--border);
-  border-top-left-radius: 12px; border-top-right-radius: 12px;
-  display: flex; align-items: center; justify-content: space-between;
+.modal-card h3{
+  margin: 2px 0 12px;
+  font-size: 16px;
+  letter-spacing: .2px;
 }
-.modal .modal-body { border-top: 1px solid var(--border); }
-.modal .modal-footer {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
-  display: flex; gap: 8px; justify-content: flex-end;
+.cam-stage{
+  display:grid;
+  place-items:center;
+  background: rgba(255,255,255,0.04);
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 18px;
+  aspect-ratio: 3/4;
+  overflow:hidden;
 }
-
-/* Worker weekly schedule (calendar-like) */
-.cal-head { 
-  display:grid; grid-template-columns:repeat(7,1fr); gap:6px; 
-  color:#b7bcc5; font-weight:600; text-align:center; margin-top:10px; margin-bottom:6px;
-}
-.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
-.cal-day {
-  min-height:120px; background:#0f1116; border:1px solid var(--border); border-radius:10px;
-  display:flex; flex-direction:column; padding:6px; gap:6px;
-}
-.cal-day-header { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#c7ccd5; }
-.cal-date { font-weight:700; }
-.cal-slots { display:grid; gap:4px; }
-.cal-slot {
-  font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:8px;
-  background:#121722; color:#dfe6f2; display:flex; justify-content:space-between; gap:8px;
+.cam-view{ width:100%; height:100%; object-fit:cover; }
+.cam-actions{
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+  margin-top: 12px;
+  flex-wrap: wrap;
 }
 
-.row-anom { outline: 1px solid #5d3b3b; background: #130f12; }
-.badge.anom { display:inline-block; padding:2px 6px; border-radius:999px; font-size:12px;
-  background:#3a1e1e; color:#ffd0d0; border:1px solid #5c3333; margin-right:4px; }
+/* =========================
+   Weekly schedule — premium toolbar + iPhone carousel
+========================= */
+
+/* Top area in schedule card */
+#schedSection .status-row{
+  margin: 0 0 12px;
+}
+#schedSection h2{
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+#wsWeekLabel{
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+}
+
+/* Schedule controls toolbar */
+#schedSection .actions{
+  margin: 12px 0 14px;
+  padding: 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  box-shadow: 0 16px 34px rgba(0,0,0,.18);
+  gap: 10px;
+}
+
+/* Buttons inside schedule toolbar */
+#schedSection #wsPrev,
+#schedSection #wsNext{
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-weight: 850;
+}
+
+/* Premium date input */
+#schedSection #wsWeekDate{
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(18,19,22,0.55);
+  color: rgba(255,255,255,0.92);
+  font-weight: 850;
+  letter-spacing: .2px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+  -webkit-appearance: none;
+  appearance: none;
+}
+#schedSection #wsWeekDate:focus{
+  border-color: rgba(157,123,255,0.40);
+  box-shadow: 0 0 0 4px rgba(157,123,255,0.14);
+}
+
+/* Make the timezone hint behave like a real caption */
+#schedSection .actions .hint{
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: .85;
+}
+
+/* Day-of-week header row (desktop) */
+.cal-head{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:10px;
+  color: rgba(238,240,242,0.62);
+  font-weight: 950;
+  text-align:center;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  letter-spacing: .28px;
+  text-transform: uppercase;
+}
+
+/* Desktop grid */
+#wsGrid.cal-grid{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap: 10px;
+}
+
+/* Day card */
+.cal-day{
+  min-height: 148px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 12px;
+  display:flex;
+  flex-direction:column;
+  gap: 10px;
+  box-shadow: 0 14px 28px rgba(0,0,0,.18);
+}
+
+/* Header inside day card (weekday + date) */
+.cal-day-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap: 10px;
+}
+.cal-dow{
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .24px;
+  text-transform: uppercase;
+  color: rgba(238,240,242,0.62);
+}
+.cal-date{
+  font-weight: 950;
+  font-size: 16px;
+  color: rgba(255,255,255,0.92);
+}
+
+/* Slot styling */
+.cal-slots{ display:grid; gap: 8px; }
+
+.cal-slot{
+  font-size: 12.5px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(18,19,22,0.55);
+  color: rgba(238,240,242,0.92);
+  display:flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cal-slot .time{
+  font-weight: 950;
+  letter-spacing: .2px;
+}
+.cal-slot .note{
+  color: rgba(238,240,242,0.60);
+  font-weight: 800;
+}
+
+/* Anomaly badges (already used by JS) — tighten them up visually */
+.badge{
+  display:inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .15px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+}
+.badge.bad{
+  background: rgba(255,77,77,0.16);
+  border-color: rgba(255,77,77,0.28);
+  color: rgba(255,210,210,0.95);
+}
+.badge.warn{
+  background: rgba(255,176,32,0.14);
+  border-color: rgba(255,176,32,0.26);
+  color: rgba(255,233,195,0.95);
+}
+
+/* ===== iPhone: turn week into a luxe day-card carousel ===== */
+@media (max-width: 720px){
+  /* Toolbar becomes stacked, hint goes below */
+  #schedSection .actions{
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #schedSection .actions .hint{
+    margin-left: 0;
+    white-space: normal;
+    text-align: left;
+    padding-top: 2px;
+  }
+
+  /* Hide the 7-column weekday header row on mobile */
+  .cal-head{ display:none; }
+
+  /* Horizontal scroll-snap carousel */
+  #wsGrid.cal-grid{
+    display:flex;
+    gap: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+  }
+  #wsGrid.cal-grid::-webkit-scrollbar{ display:none; }
+
+  .cal-day{
+    min-width: 78vw;
+    scroll-snap-align: start;
+    border-radius: 22px;
+    padding: 14px;
+  }
+}
+
+
+/* =========================
+   Mobile “lux mode” rules
+   - Bigger tap targets
+   - Tables become horizontally scrollable
+   - Header becomes tighter but premium
+========================= */
+@media (max-width: 720px){
+  .container{
+    margin-top: 12px;
+  }
+
+  .app-header{
+    padding:
+      calc(10px + var(--sat))
+      calc(12px + var(--sar))
+      10px
+      calc(12px + var(--sal));
+  }
+
+  .app-header h1{
+    font-size: 14px;
+    letter-spacing: .3px;
+  }
+
+  .btn{
+    border-radius: 16px;
+  }
+
+  .card{
+    padding: 16px;
+    border-radius: 24px;
+  }
+
+  /* Make status feel like a “capsule bar” */
+  .status-row{
+    gap:10px;
+    margin-top: 10px;
+  }
+  .status-pill{
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+
+  /* HERO CTA dominates */
+  .actions{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  #clockBtn{
+    width: 100%;
+    min-height: 58px;
+    border-radius: 20px;
+    font-size: 16px;
+  }
+  #breakBtn{
+    width: 100%;
+    min-height: 54px;
+    border-radius: 20px;
+  }
+
+  /* Store card reads like a luxe module */
+  .store-row{
+    border-radius: 20px;
+    padding: 14px;
+  }
+
+  /* Tables: scroll-safe on small screens */
+  .table{
+    display:block;
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+  }
+  .table thead, .table tbody, .table tr{
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .table th, .table td{
+    white-space: nowrap;
+  }
+
+  /* Calendar becomes swipe-friendly visually (we’ll add swipe in JS later) */
+  .cal-grid{ gap: 10px; }
+  .cal-day{ border-radius: 18px; }
+}
+
+/* Reduce motion if user requests it */
+@media (prefers-reduced-motion: reduce){
+  #clockBtn.btn.primary{ animation: none; }
+  .btn{ transition:none; }
+}
