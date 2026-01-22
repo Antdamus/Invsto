@@ -648,7 +648,7 @@ body{
     padding: 14px;
   }
 
-  /* Tables: scroll-safe on small screens */
+  /* Tables: iPhone luxury mode (no squished headers) */
   .table{
     display:block;
     width:100%;
@@ -658,14 +658,53 @@ body{
     border: 1px solid rgba(255,255,255,0.08);
     background: rgba(255,255,255,0.03);
   }
-  .table thead, .table tbody, .table tr{
+
+  /* Let the table grow naturally so headers don't compress */
+  .table thead,
+  .table tbody{
     display: table;
-    width: 100%;
-    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
   }
-  .table th, .table td{
+
+  .table tr{ display: table-row; }
+
+  .table th,
+  .table td{
     white-space: nowrap;
+    padding: 11px 12px;
   }
+
+  /* Make header text compact + premium */
+  .table th{
+    font-weight: 900;
+    letter-spacing: .26px;
+    text-transform: uppercase;
+    color: rgba(238,240,242,0.70);
+    font-size: 0;                 /* we’ll render short labels via ::after */
+    line-height: 1;
+    position: relative;
+  }
+
+  .table th::after{
+    font-size: 11px;
+    display: inline-block;
+    transform: translateY(1px);
+  }
+
+  /* Short, elegant labels for mobile */
+  .table thead th:nth-child(1)::after{ content:"Store"; }
+  .table thead th:nth-child(2)::after{ content:"In"; }
+  .table thead th:nth-child(3)::after{ content:"Out"; }
+  .table thead th:nth-child(4)::after{ content:"Dur"; }
+  .table thead th:nth-child(5)::after{ content:"Pic In"; }
+  .table thead th:nth-child(6)::after{ content:"Pic Out"; }
+  .table thead th:nth-child(7)::after{ content:"Flags"; }
+
+  /* Give key columns a little breathing room */
+  .table td.store-cell{ min-width: 180px; }
+  .table td.flags-cell{ min-width: 140px; }
 
   /* Calendar becomes swipe-friendly visually (we’ll add swipe in JS later) */
   .cal-grid{ gap: 10px; }
@@ -677,3 +716,139 @@ body{
   #clockBtn.btn.primary{ animation: none; }
   .btn{ transition:none; }
 }
+
+/* =========================================================
+   Today (iPhone) — Luxe card list
+   - Removes the clunky table feel on mobile
+   - Keeps desktop table intact
+   ========================================================= */
+
+.today-cards{ display:none; margin-top: 12px; }
+
+.today-card{
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 12px 28px rgba(0,0,0,.22);
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.today-top{
+  display:flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.today-store{
+  min-width: 0;
+  font-weight: 800;
+  letter-spacing: .1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-dur{
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+}
+
+.today-times{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tblock{
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+  border-radius: 14px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.tlabel{
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .22px;
+  font-weight: 800;
+}
+
+.tvalue{
+  margin-top: 3px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.mono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.today-actions{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chiplink{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 900;
+  letter-spacing: .15px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chiplink:active{ transform: scale(0.98); }
+
+.chiplink.disabled,
+.chiplink[aria-disabled="true"]{
+  opacity: .45;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.today-flags{
+  display:flex;
+  align-items:center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.today-empty{
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(255,255,255,0.03);
+}
+
+@media (max-width: 720px){
+  /* Show cards, hide the table only in the Today section */
+  #clockSection .table{ display:none; }
+  #clockSection .today-cards{ display:grid; gap: 12px; }
+
+  /* Make store line wrap nicer on narrow screens */
+  .today-store{ white-space: normal; }
+  .today-times{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .today-times .tblock:last-child{ grid-column: 1 / -1; }
+}
+

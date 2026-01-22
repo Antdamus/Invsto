@@ -957,6 +957,142 @@ async function onBreakAction(){
   }
 }
 
+
+/* =========================
+   Today (mobile) — render shifts as luxe cards
+   Tables look clunky on iPhone; cards read better and feel premium.
+   Desktop can keep the table (CSS will toggle visibility).
+========================= */
+
+async function signedUrlOrNull(path, seconds = 180){
+  if (!path) return null;
+  try{
+    const { data, error } = await supabaseClient
+      .storage
+      .from('timeclock-photos')
+      .createSignedUrl(path, seconds);
+    if (error) return null;
+    return data?.signedUrl || null;
+  }catch(_e){
+    return null;
+  }
+}
+
+function el(tag, cls){
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  return n;
+}
+
+async function renderTodayCards(rows, anomalyMap){
+  const wrap = qs('todayCards');
+  if (!wrap) return;
+
+  wrap.innerHTML = '';
+
+  if (!rows || !rows.length){
+    const empty = el('div', 'today-empty');
+    empty.textContent = 'No shifts yet today.';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  for (const r of rows){
+    const endTs = r.clock_out ? new Date(r.clock_out) : new Date();
+    const durMs = endTs - new Date(r.clock_in);
+
+    const storeObj = r.store_id ? (storeById.get(r.store_id) || null) : null;
+    const storeName = storeObj?.name ? escHtml(storeObj.name) : '—';
+    const dirUrl = directionsUrlForStore(storeObj);
+
+    const a = anomalyMap?.[r.id] || { anomalies: [], has_anomaly: false };
+    const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
+
+    const flags = [];
+    if (anomalies.length) flags.push(renderAnomalyBadges(anomalies));
+    if (r.geo_ok_in === false || r.geo_ok_out === false) {
+      flags.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
+    }
+    if (Array.isArray(r.schedule_codes) && r.schedule_codes.length) {
+      flags.push(`<span class="badge warn" title="${r.schedule_codes.join(", ")}">Schedule</span>`);
+    }
+    const flagsHtml = flags.length ? flags.join(' ') : '<span class="muted">—</span>';
+
+    const card = el('div', 'today-card');
+
+    // Header
+    const top = el('div', 'today-top');
+    const store = el('div', 'today-store');
+    store.innerHTML = storeObj
+      ? `${storeName}${dirUrl ? ` <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}`
+      : '—';
+    const durPill = el('div', 'today-dur');
+    durPill.textContent = fmtDur(durMs);
+    top.appendChild(store);
+    top.appendChild(durPill);
+
+    // Times
+    const times = el('div', 'today-times');
+    const inBlock = el('div', 'tblock');
+    inBlock.innerHTML = `<div class="tlabel">In</div><div class="tvalue">${fmtTime(r.clock_in)}</div>`;
+    const outBlock = el('div', 'tblock');
+    outBlock.innerHTML = `<div class="tlabel">Out</div><div class="tvalue">${r.clock_out ? fmtTime(r.clock_out) : '—'}</div>`;
+    const idBlock = el('div', 'tblock');
+    idBlock.innerHTML = `<div class="tlabel">Entry</div><div class="tvalue mono">${String(r.id).slice(0,8)}</div>`;
+    times.appendChild(inBlock);
+    times.appendChild(outBlock);
+    times.appendChild(idBlock);
+
+    // Actions
+    const actions = el('div', 'today-actions');
+    const picIn = el('a', 'chiplink');
+    picIn.textContent = 'Pic In';
+    picIn.href = '#';
+    picIn.setAttribute('aria-disabled', 'true');
+
+    const picOut = el('a', 'chiplink');
+    picOut.textContent = 'Pic Out';
+    picOut.href = '#';
+    picOut.setAttribute('aria-disabled', 'true');
+
+    const flagsWrap = el('div', 'today-flags');
+    flagsWrap.innerHTML = flagsHtml;
+
+    actions.appendChild(picIn);
+    actions.appendChild(picOut);
+    actions.appendChild(flagsWrap);
+
+    card.appendChild(top);
+    card.appendChild(times);
+    card.appendChild(actions);
+    wrap.appendChild(card);
+
+    // Signed URLs (async)
+    const uIn = await signedUrlOrNull(r.photo_in_path, 180);
+    if (uIn){
+      picIn.href = uIn;
+      picIn.target = '_blank';
+      picIn.rel = 'noopener';
+      picIn.removeAttribute('aria-disabled');
+      picIn.classList.remove('disabled');
+    } else {
+      picIn.classList.add('disabled');
+    }
+
+    const uOut = await signedUrlOrNull(r.photo_out_path, 180);
+    if (uOut){
+      picOut.href = uOut;
+      picOut.target = '_blank';
+      picOut.rel = 'noopener';
+      picOut.removeAttribute('aria-disabled');
+      picOut.classList.remove('disabled');
+    } else {
+      picOut.classList.add('disabled');
+    }
+  }
+}
+
+
 async function loadToday(){
   if (isLoadingToday) return;
   if (!currentEmployee?.id) return;
@@ -1033,7 +1169,7 @@ async function loadToday(){
     if (tbody){
       tbody.innerHTML = '';
       if (!rows.length){
-        tbody.innerHTML = `<tr><td colspan="6" class="muted">No shifts yet today.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="muted">No shifts yet today.</td></tr>`;
       }
       for (const r of rows){
         const tr = document.createElement('tr');
@@ -1086,6 +1222,8 @@ async function loadToday(){
         tbody.appendChild(tr);
       }
     }
+    
+    await renderTodayCards(rows, anomalyMap);
 
     // F) Render Breaks table (async because it signs URLs for paths)
     await renderBreaksTable(todayBreaks, openShiftId || null);
