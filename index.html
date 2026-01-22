@@ -2,29 +2,107 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OG Jewelry - Login</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelers NY — Portal</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Styles -->
   <link rel="stylesheet" href="login.css" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
-</head>
-<body class="login-body">
-  <main class="login-main">
-    <div class="login-container">
-      <h1 class="login-heading">OG Jewelry Login</h1>
-      <form id="login-form" class="login-form">
-        <input type="email" id="email" placeholder="Email" class="login-input" required />
-        <div class="password-wrapper">
-          <input type="password" id="password" placeholder="Password" class="login-input" required />
-          <button type="button" id="toggle-password">👁</button>
-        </div>
-        <button type="submit" class="login-button">Login</button>
-        <div id="login-feedback" class="login-feedback"></div>
-        <a href="#" id="reset-link" class="reset-link">Forgot password?</a>
-      </form>
-    </div>
-  </main>
+
+  <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+</head>
+
+<body class="login-body">
+  <!-- Ambient background layers -->
+  <div class="bg-ambient" aria-hidden="true"></div>
+
+  <main class="login-main">
+    <section class="login-shell" aria-label="OG Jewelers Miami Login">
+      <!-- Brand header -->
+      <header class="brand-row">
+        <div class="brand-mark" aria-hidden="true">
+          <span class="brand-og">OG</span>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">OG Jewelers Miami</div>
+          <div class="brand-subtitle">Private Portal • Admin & Team Access</div>
+        </div>
+      </header>
+
+      <!-- Glass card -->
+      <div class="login-card">
+        <div class="card-top">
+          <h1 class="login-heading">Welcome back</h1>
+          <p class="login-tagline">Sign in to manage inventory, payroll, scheduling, and operations.</p>
+        </div>
+
+        <form id="login-form" class="login-form" autocomplete="on">
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input
+              type="email"
+              id="email"
+              placeholder="you@ogjewelersmia.com"
+              class="login-input"
+              autocomplete="email"
+              inputmode="email"
+              required
+            />
+          </label>
+
+          <label class="field">
+            <span class="field-label">Password</span>
+            <div class="password-wrapper">
+              <input
+                type="password"
+                id="password"
+                placeholder="••••••••••"
+                class="login-input"
+                autocomplete="current-password"
+                required
+              />
+              <button type="button" id="toggle-password" class="pw-toggle" aria-label="Show password">
+                <span class="pw-emoji" aria-hidden="true">👁</span>
+              </button>
+            </div>
+          </label>
+
+          <button type="submit" class="login-button" id="login-submit">
+            <span class="btn-shine" aria-hidden="true"></span>
+            <span class="btn-text">Enter</span>
+          </button>
+
+          <div id="login-feedback" class="login-feedback" role="status" aria-live="polite"></div>
+
+          <div class="login-actions">
+            <a href="#" id="reset-link" class="reset-link">Forgot password?</a>
+            <span class="dot" aria-hidden="true">•</span>
+            <span class="hint">Use your employee email</span>
+          </div>
+        </form>
+
+        <footer class="login-footer">
+          <div class="footer-note">
+            <span class="lock" aria-hidden="true">🔒</span>
+            Secure access • Role-based routing • OG systems
+          </div>
+        </footer>
+      </div>
+
+      <!-- Bottom micro-copy -->
+      <div class="below-card">
+        <div class="micro">
+          If you’re locked out, contact an admin to activate your employee record.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Scripts (keep your auth logic unchanged) -->
   <script src="initSupabase.js"></script>
   <script src="auth.js"></script>
 </body>

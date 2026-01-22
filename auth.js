@@ -19,8 +19,40 @@ async function getEmployeeRoleByUserId(userId) {
     .maybeSingle();
 
   if (error) throw error;
+  setLoginLoadingState(false);
   return emp; // { role, active } or null
 }
+
+function setLoginLoadingState(isLoading) {
+  const btn = document.getElementById("login-submit") || document.querySelector(".login-button");
+  const email = document.getElementById("email");
+  const password = document.getElementById("password");
+  const toggle = document.getElementById("toggle-password");
+
+  if (!btn) return;
+
+  if (isLoading) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.classList.add("is-loading");
+    btn.dataset.originalText = btn.textContent;
+    btn.textContent = "Entering…";
+
+    if (email) email.disabled = true;
+    if (password) password.disabled = true;
+    if (toggle) toggle.disabled = true;
+  } else {
+    btn.disabled = false;
+    btn.removeAttribute("aria-busy");
+    btn.classList.remove("is-loading");
+    btn.textContent = btn.dataset.originalText || btn.textContent;
+
+    if (email) email.disabled = false;
+    if (password) password.disabled = false;
+    if (toggle) toggle.disabled = false;
+  }
+}
+
 
 async function routeUser(session) {
   const sb = await waitForSupabaseReady();
@@ -96,10 +128,12 @@ document.getElementById("login-form")?.addEventListener("submit", async (e) => {
 
   if (!email || !password) return;
 
-  if (feedback) {
-    feedback.style.color = "#333";
-    feedback.textContent = "⏳ Logging in...";
-  }
+setLoginLoadingState(true);
+
+if (feedback) {
+  feedback.style.color = "#d6b25e";
+  feedback.textContent = "⏳ Entering secure portal…";
+}
 
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
 
@@ -108,6 +142,7 @@ document.getElementById("login-form")?.addEventListener("submit", async (e) => {
       feedback.style.color = "crimson";
       feedback.textContent = `❌ Login failed: ${error.message}`;
     }
+    setLoginLoadingState(false);
     return;
   }
 
