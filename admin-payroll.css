@@ -749,3 +749,153 @@
   .og-textarea,
   .og-seg-btn { transition: none !important; }
 }
+
+/* =========================================================
+   iOS-grade Pay Period Sheet polish
+   Targets the "Generate Pay Period" sheet that uses:
+   .og-sheet-card / .og-sheet-head / .og-sheet-foot
+   (different from .og-sheet-hd/.og-sheet-footer)
+   ========================================================= */
+
+#prPeriodSheet .og-sheet-card{
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Make it feel like the other sheets */
+#prPeriodSheet .og-sheet-head{
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.18);
+}
+
+/* iOS grabber bar */
+#prPeriodSheet .og-sheet-head::before{
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+/* Title look */
+#prPeriodSheet .og-sheet-title{
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-top: 6px; /* leaves room for grabber */
+}
+
+/* Close button to match other sheets */
+#prPeriodSheet .og-sheet-head .btn.ghost{
+  width: 42px;
+  height: 42px;
+  padding: 0 !important;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+}
+
+/* Body spacing like iOS cards */
+#prPeriodSheet .og-sheet-body{
+  padding: 14px;
+  overflow: auto;
+  max-height: calc(84vh - 140px);
+}
+
+/* Improve field rhythm */
+#prPeriodSheet .og-field{
+  margin: 0 !important;
+  display: grid;
+  gap: 8px;
+}
+
+#prPeriodSheet .og-label{
+  font-size: 12px;
+  font-weight: 800;
+  opacity: 0.82;
+  letter-spacing: 0.2px;
+}
+
+/* Make date input feel premium */
+#prPeriodSheet input[type="date"].og-input{
+  height: 46px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  color-scheme: dark;
+}
+
+#prPeriodSheet input[type="date"].og-input:focus{
+  outline: none;
+  border-color: rgba(255,255,255,0.22);
+  box-shadow:
+    0 0 0 4px rgba(255,255,255,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Textarea premium */
+#prPeriodSheet .og-textarea{
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+#prPeriodSheet .og-textarea:focus{
+  outline: none;
+  border-color: rgba(255,255,255,0.22);
+  box-shadow:
+    0 0 0 4px rgba(255,255,255,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Footer: sticky, iOS-style, with safe area */
+#prPeriodSheet .og-sheet-foot{
+  margin-top: auto;
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 10px;
+
+  border-top: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.18);
+}
+
+/* Buttons inside footer look more "tap-able" */
+#prPeriodSheet .og-sheet-foot .btn{
+  height: 44px;
+  border-radius: 16px;
+  font-weight: 850;
+  letter-spacing: 0.2px;
+}
+
+/* Make Cancel less visually heavy */
+#prPeriodSheet .og-sheet-foot .btn.ghost{
+  opacity: 0.92;
+}
+
+/* Slight “lift” on open for this sheet specifically */
+#prPeriodSheet{
+  animation: ogPayPeriodIn 260ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes ogPayPeriodIn{
+  from { opacity: 0; transform: translateX(-50%) translateY(18px) scale(0.985); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}

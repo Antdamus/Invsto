@@ -213,6 +213,8 @@
 
     <!-- Desktop actions row -->
     <div class="og-payroll-actions og-desktop-only">
+      <button id="prCreatePeriod" class="btn ghost">Generate Pay Period</button>
+      <button id="prNextPeriod" class="btn ghost">Generate Next</button>
       <button id="prCreateDraft" class="btn">Create Draft Run</button>
       <button id="prBuildLines" class="btn">Build Lines</button>
       <button id="prFinalizeRun" class="btn">Finalize</button>
@@ -270,6 +272,8 @@
 
     <div class="og-sheet-body">
       <div class="og-sheet-grid">
+        <button id="prSheetCreatePeriod" class="btn ghost">Generate Pay Period</button>
+        <button id="prSheetNextPeriod" class="btn ghost">Generate Next</button>
         <button id="prSheetCreateDraft" class="btn">Create Draft Run</button>
         <button id="prSheetBuild" class="btn">Build Lines</button>
         <button id="prSheetFinalize" class="btn">Finalize</button>
@@ -282,7 +286,35 @@
         <button id="prSheetDeletePeriod" class="btn danger ghost">Delete Period</button>
       </div>
     </div>
+
   </div>
+
+<!-- Create Pay Period Sheet (MUST be a sibling, not inside prActionSheet) -->
+<div id="prPeriodSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Create pay period">
+  <div class="og-sheet-card">
+    <div class="og-sheet-head">
+      <div class="og-sheet-title">Generate Pay Period</div>
+      <button class="btn ghost" data-pr-close>✕</button>
+    </div>
+
+    <div class="og-sheet-body">
+      <div class="og-field">
+        <label class="og-label" for="prPeriodStart">Week start (Sunday)</label>
+        <input id="prPeriodStart" class="og-input" type="date" />
+      </div>
+
+      <div class="og-field" style="margin-top:10px;">
+        <label class="og-label" for="prPeriodNote">Note (optional)</label>
+        <textarea id="prPeriodNote" class="og-textarea" rows="3" placeholder="Reason / notes."></textarea>
+      </div>
+    </div>
+
+    <div class="og-sheet-foot">
+      <button class="btn ghost" data-pr-close>Cancel</button>
+      <button id="prPeriodCreateConfirm" class="btn">Create (Biweekly)</button>
+    </div>
+  </div>
+</div>
 
   <!-- Detail Sheet (per employee) -->
   <div id="prDetailSheet" class="og-sheet hidden" role="dialog" aria-modal="true" aria-label="Payroll line details">

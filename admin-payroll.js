@@ -295,6 +295,7 @@
     $("#prDetailSheet")?.classList.add("hidden");
     $("#prPaySheet")?.classList.add("hidden");
     $("#prOverlay")?.classList.add("hidden");
+    $("#prPeriodSheet")?.classList.add("hidden");
     document.body.classList.remove("pr-sheet-open");
   }
 
@@ -1094,6 +1095,133 @@ if (isEmployeeLine(line)) {
     }
   }
 
+
+// ============================
+// Pay Period: Generate + Next
+// ============================
+function addDaysISO(dateISO, days) {
+  const d = new Date(`${dateISO}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + Number(days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function isSunday(iso) {
+  // Uses UTC to avoid local offset surprises
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  return d.getUTCDay() === 0;
+}
+
+function openPayPeriodSheet(prefillStartISO = null) {
+  // Prefer chaining from current period end_date + 1 day
+  const startISO =
+    prefillStartISO ||
+    (currentPeriod?.end_date
+      ? addDaysISO(currentPeriod.end_date, 1)
+      : new Date().toISOString().slice(0, 10));
+
+  const startEl = document.getElementById("prPeriodStart");
+  const noteEl = document.getElementById("prPeriodNote");
+
+  if (startEl) startEl.value = startISO;
+  if (noteEl) noteEl.value = "";
+
+  // Use your standard sheet open behavior
+  openSheet("prPeriodSheet");
+}
+
+async function createPayPeriodFromSheet() {
+  const weekStart = (document.getElementById("prPeriodStart")?.value || "").trim();
+  const noteRaw = (document.getElementById("prPeriodNote")?.value || "").trim();
+  const note = noteRaw ? noteRaw : null;
+
+  if (!weekStart) return toast("Pick a start date", "err");
+
+  // Optional: enforce your own convention (your label says Sunday)
+  if (!isSunday(weekStart)) {
+    const ok = confirm(
+      `That start date is not a Sunday.\n\nStart: ${weekStart}\n\nContinue anyway?`
+    );
+    if (!ok) return;
+  }
+
+  try {
+    // Biweekly = weeks: 2
+    let rpc = await sb().rpc("create_weekly_pay_period", {
+      week_start: weekStart,
+      weeks: 2,
+      p_note: note,
+    });
+
+    // Defensive fallback if your RPC arg names differ (common in your other RPCs)
+    if (rpc?.error && /argument|parameter|unknown|week_start/i.test(String(rpc.error.message || rpc.error))) {
+      rpc = await sb().rpc("create_weekly_pay_period", {
+        _week_start: weekStart,
+        _weeks: 2,
+        _note: note,
+      });
+    }
+
+    if (rpc.error) throw rpc.error;
+
+    toast("Pay period created", "ok");
+    closeAllSheets();
+
+    // Reload dropdown + jump to new period
+    const sel = document.getElementById("prPeriodSelect");
+    const newest = await loadPeriodsIntoSelect(sel);
+
+    if (rpc.data?.id) sel.value = rpc.data.id;
+    else if (newest?.id) sel.value = newest.id;
+
+    await refreshAll(sel.value);
+  } catch (e) {
+    showAdminError("Create pay period failed", safeErrMsg(e));
+  }
+}
+
+async function createNextPayPeriod() {
+  // Needs a current selected period to chain from
+  if (!currentPeriod?.end_date) {
+    // If none selected yet, just open the sheet
+    openPayPeriodSheet(null);
+    return;
+  }
+
+  const nextStart = addDaysISO(currentPeriod.end_date, 1);
+
+  try {
+    let rpc = await sb().rpc("create_weekly_pay_period", {
+      week_start: nextStart,
+      weeks: 2,
+      p_note: null,
+    });
+
+    if (rpc?.error && /argument|parameter|unknown|week_start/i.test(String(rpc.error.message || rpc.error))) {
+      rpc = await sb().rpc("create_weekly_pay_period", {
+        _week_start: nextStart,
+        _weeks: 2,
+        _note: null,
+      });
+    }
+
+    if (rpc.error) throw rpc.error;
+
+    toast("Next pay period created", "ok");
+
+    const sel = document.getElementById("prPeriodSelect");
+    const newest = await loadPeriodsIntoSelect(sel);
+
+    if (rpc.data?.id) sel.value = rpc.data.id;
+    else if (newest?.id) sel.value = newest.id;
+
+    await refreshAll(sel.value);
+  } catch (e) {
+    showAdminError("Generate next pay period failed", safeErrMsg(e));
+  }
+}
+
+
+
   // ----------------------------
   // Export CSV (unchanged, but you can add fica columns later if you want)
   // ----------------------------
@@ -1341,6 +1469,25 @@ try {
       closeAllSheets();
       try { await deleteSelectedPayPeriod(); } catch {}
     });
+
+// Pay period buttons (desktop + mobile sheet)
+document.getElementById("prCreatePeriod")?.addEventListener("click", () => openPayPeriodSheet(null));
+document.getElementById("prNextPeriod")?.addEventListener("click", () => createNextPayPeriod());
+
+document.getElementById("prSheetCreatePeriod")?.addEventListener("click", () => {
+  closeAllSheets();
+  openPayPeriodSheet(null);
+});
+
+document.getElementById("prSheetNextPeriod")?.addEventListener("click", () => {
+  closeAllSheets();
+  createNextPayPeriod();
+});
+
+document.getElementById("prPeriodCreateConfirm")?.addEventListener("click", () => {
+  createPayPeriodFromSheet();
+});
+
 
     $("#prDetailPayBtn")?.addEventListener("click", () => {
       if (!detailEmpId) return;
