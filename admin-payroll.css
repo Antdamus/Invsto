@@ -515,6 +515,41 @@
   animation: ogSheetIn 220ms ease both;
 }
 
+/* =========================================================
+   iPhone fix: keep payroll sheets ABOVE the bottom nav
+   - Your bottom nav is height: var(--nav-h) in admin.css
+   - iOS Safari needs the extra offset or the sheet looks "wrong"
+   ========================================================= */
+
+@media (max-width: 760px){
+  /* Apply only to payroll sheets */
+  #prActionSheet,
+  #prPeriodSheet,
+  #prDetailSheet,
+  #prPaySheet{
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px) + var(--nav-h));
+    max-height: calc(84vh - env(safe-area-inset-bottom, 0px) - var(--nav-h));
+  }
+}
+/* =========================================================
+   OPTIONAL: Center payroll sheets on mobile (instead of bottom)
+   - More "modal" vibe, less iOS bottom-sheet vibe
+   ========================================================= */
+
+@media (max-width: 760px){
+  #prPeriodSheet{
+    top: 50%;
+    bottom: auto;
+
+    /* your .og-sheet likely already has left:50% */
+    transform: translate(-50%, -50%);
+
+    /* keep it within the visible viewport above nav + safe area */
+    max-height: calc(100vh - env(safe-area-inset-bottom, 0px) - var(--nav-h) - 28px);
+  }
+}
+
+
 .og-sheet.hidden {
   display: none !important;
 }
@@ -898,4 +933,65 @@
 @keyframes ogPayPeriodIn{
   from { opacity: 0; transform: translateX(-50%) translateY(18px) scale(0.985); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+/* =========================================================
+   BEST iPhone EXPERIENCE (iOS-native bottom sheet)
+   - Not centered modal (keyboard-friendly)
+   - More breathing room above bottom nav
+   - Better proportions + spacing + button layout
+   ========================================================= */
+
+@media (max-width: 760px){
+
+  /* All payroll sheets: sit above bottom nav + safe area */
+  #prActionSheet,
+  #prPeriodSheet,
+  #prDetailSheet,
+  #prPaySheet{
+    left: 50%;
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 14px);
+    top: auto;
+
+    /* keep the bottom-sheet vibe, but slightly “lifted” */
+    transform: translateX(-50%) translateY(-6px);
+
+    width: min(560px, calc(100vw - 20px));
+    max-height: calc(82vh - var(--nav-h) - env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+  }
+
+  /* Make the sheet card feel more “Apple” */
+  #prActionSheet .og-sheet-card,
+  #prPeriodSheet .og-sheet-card,
+  #prDetailSheet .og-sheet-card,
+  #prPaySheet .og-sheet-card{
+    border-radius: 22px;
+  }
+
+  /* Slightly bigger, cleaner padding on the pay-period form */
+  #prPeriodSheet .og-sheet-body{
+    padding-top: 12px;
+    padding-bottom: 6px;
+  }
+
+  /* Footer: full-width buttons with a clean gap */
+  #prPeriodSheet .og-sheet-foot{
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 12px;
+    padding-top: 12px;
+  }
+
+  #prPeriodSheet .og-sheet-foot .btn{
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Make the close button hit-target feel iOS */
+  #prPeriodSheet .og-sheet-head .btn.ghost{
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 14px;
+  }
 }
