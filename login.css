@@ -341,3 +341,29 @@ html,body{ height:100%; }
 @media (prefers-reduced-motion: reduce){
   *{ animation:none !important; transition:none !important; }
 }
+
+/* ===== Luxury Loading State ===== */
+.login-button.is-loading{
+  opacity: .92;
+  cursor: not-allowed;
+  transform: none !important;
+  filter: saturate(1.05);
+}
+
+.login-button.is-loading .btn-shine{
+  opacity:.55 !important;
+  animation: shine 1.1s cubic-bezier(.2,.9,.2,1) infinite;
+}
+
+/* fallback if your older button has no .btn-shine */
+.login-button.is-loading::after{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.22), transparent);
+  transform: translateX(-65%);
+  opacity:.45;
+  pointer-events:none;
+  animation: shine 1.1s cubic-bezier(.2,.9,.2,1) infinite;
+}
+

@@ -152,6 +152,7 @@ if (feedback) {
       feedback.style.color = "crimson";
       feedback.textContent = "❌ Unexpected error. No session returned.";
     }
+    setLoginLoadingState(false);
     return;
   }
 
@@ -165,6 +166,7 @@ if (feedback) {
         feedback.textContent = "⚠️ Your account is not active. Contact an admin.";
       }
       await sb.auth.signOut();
+      setLoginLoadingState(false);
       return;
     }
 
@@ -187,6 +189,7 @@ if (feedback) {
       feedback.textContent = "❌ Could not verify your role. Please try again.";
     }
     await sb.auth.signOut();
+    setLoginLoadingState(false);
   }
 });
 
