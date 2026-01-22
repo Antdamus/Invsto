@@ -56,10 +56,20 @@ async function checkAuth() {
   return true;
 }
 
+/** =================== Active Nav =================== */
+function setActiveNavLink() {
+  const path = (location.pathname || "").split("/").pop() || "dashboard.html";
+  document.querySelectorAll(".nav-link").forEach(a => {
+    const href = (a.getAttribute("href") || "").split("/").pop();
+    if (href && href === path) a.classList.add("active");
+  });
+}
+
+/** =================== Formatters =================== */
+const fmtMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
+
 /** =================== Data Loading =================== */
 async function loadInventoryData() {
-  let allItems = [];
-
   const { data: itemTypes, error: itemTypeError } = await supabase
     .from("item_types")
     .select("*");
@@ -74,19 +84,21 @@ async function loadInventoryData() {
   }
 
   const quantityMap = {};
-  for (const stock of stockData) {
+  for (const stock of (stockData || [])) {
     if (!quantityMap[stock.item_id]) quantityMap[stock.item_id] = 0;
     quantityMap[stock.item_id] += stock.quantity;
   }
 
-  for (const item of itemTypes) {
+  const allItems = [];
+  for (const item of (itemTypes || [])) {
     const quantity = quantityMap[item.id] || 0;
-    if (quantity > 0 && (!Array.isArray(item.categories) || !item.categories.includes("testcard"))) {
+    const categoryList = Array.isArray(item.categories) ? item.categories : [];
+    if (quantity > 0 && !categoryList.includes("testcard")) {
       allItems.push({
         ...item,
         quantity,
-        totalCost: item.cost * quantity,
-        totalValue: item.sale_price * quantity,
+        totalCost: Number(item.cost || 0) * quantity,
+        totalValue: Number(item.sale_price || 0) * quantity,
       });
     }
   }
@@ -103,10 +115,13 @@ function computeSummaryByCategory(items) {
     categories: {},
   };
 
-  for (const item of items) {
-    const { categories, quantity, totalCost, totalValue } = item;
-    const categoryList = Array.isArray(categories) ? categories : [];
+  for (const item of (items || [])) {
+    const categoryList = Array.isArray(item.categories) ? item.categories : [];
     if (categoryList.includes("testcard")) continue;
+
+    const quantity = Number(item.quantity || 0);
+    const totalCost = Number(item.totalCost || 0);
+    const totalValue = Number(item.totalValue || 0);
 
     summary.totalItems += quantity;
     summary.totalCost += totalCost;
@@ -134,24 +149,78 @@ function computeSummaryByCategory(items) {
 /** =================== UI Rendering =================== */
 function renderMetricCards(summary) {
   const container = document.getElementById("metric-cards");
+  if (!container) return;
+
+  const markup = summary.totalCost ? (summary.totalValue / summary.totalCost) : null;
+
   container.innerHTML = `
-    <div class="metric-card">💰 Total Value: $${summary.totalValue.toLocaleString()}</div>
-    <div class="metric-card">📦 Total Items: ${summary.totalItems}</div>
-    <div class="metric-card">🧾 Total Cost: $${summary.totalCost.toLocaleString()}</div>
-    <div class="metric-card">📈 Avg Markup: ${summary.totalCost ? (summary.totalValue / summary.totalCost).toFixed(2) : '—'}x</div>
+    <div class="metric-card">
+      <div class="metric-top">
+        <div class="metric-label">Total Value</div>
+        <div class="metric-icon">💎</div>
+      </div>
+      <div class="metric-value">${fmtMoney(summary.totalValue)}</div>
+      <div class="metric-foot">Estimated retail value</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <div class="metric-label">Total Items</div>
+        <div class="metric-icon">📦</div>
+      </div>
+      <div class="metric-value">${Number(summary.totalItems || 0).toLocaleString()}</div>
+      <div class="metric-foot">Units currently in stock</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <div class="metric-label">Total Cost</div>
+        <div class="metric-icon">🧾</div>
+      </div>
+      <div class="metric-value">${fmtMoney(summary.totalCost)}</div>
+      <div class="metric-foot">Total inventory cost basis</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <div class="metric-label">Avg Markup</div>
+        <div class="metric-icon">📈</div>
+      </div>
+      <div class="metric-value">${markup ? `${markup.toFixed(2)}x` : "—"}</div>
+      <div class="metric-foot">Value / cost multiplier</div>
+    </div>
   `;
+}
+
+function getSortedCategories(summary) {
+  return Object.values(summary.categories || {})
+    .filter(c => c && c.category)
+    .sort((a, b) => (Number(b.totalValue || 0) - Number(a.totalValue || 0)));
 }
 
 function renderCategoryTable(summary) {
   const tableContainer = document.getElementById("inventory-table-container");
-  const categories = Object.values(summary.categories);
+  if (!tableContainer) return;
+
+  const categories = getSortedCategories(summary);
+
+  if (!categories.length) {
+    tableContainer.innerHTML = `
+      <div class="table-wrapper">
+        <div style="padding:16px; color: rgba(242,243,245,.72);">
+          No inventory data to display yet.
+        </div>
+      </div>
+    `;
+    return;
+  }
 
   const rows = categories.map(cat => `
     <tr>
       <td>${cat.category}</td>
-      <td>${cat.quantity}</td>
-      <td>$${cat.totalCost.toLocaleString()}</td>
-      <td>$${cat.totalValue.toLocaleString()}</td>
+      <td>${Number(cat.quantity || 0).toLocaleString()}</td>
+      <td>${fmtMoney(cat.totalCost)}</td>
+      <td>${fmtMoney(cat.totalValue)}</td>
       <td>${cat.totalCost ? (cat.totalValue / cat.totalCost).toFixed(2) : '—'}x</td>
     </tr>
   `).join("");
@@ -174,30 +243,50 @@ function renderCategoryTable(summary) {
   `;
 }
 
-function renderCategoryChart(summary) {
-  const categories = Object.values(summary.categories);
-  const ctx = document.getElementById("category-chart").getContext("2d");
+/** =================== Chart =================== */
+let _categoryChart = null;
 
-  new Chart(ctx, {
+function renderCategoryChart(summary) {
+  const canvas = document.getElementById("category-chart");
+  if (!canvas) return;
+
+  const categories = getSortedCategories(summary);
+  const ctx = canvas.getContext("2d");
+
+  // If no categories, clear chart area gracefully
+  if (!categories.length) {
+    if (_categoryChart) {
+      _categoryChart.destroy();
+      _categoryChart = null;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  // Prevent duplicate instances
+  if (_categoryChart) {
+    _categoryChart.destroy();
+    _categoryChart = null;
+  }
+
+  _categoryChart = new Chart(ctx, {
     type: "doughnut",
     data: {
       labels: categories.map(c => c.category),
       datasets: [{
-        data: categories.map(c => c.totalValue),
+        data: categories.map(c => Number(c.totalValue || 0)),
         backgroundColor: generateColors(categories.length),
         borderWidth: 1,
       }],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: true,
       plugins: {
         legend: { position: "bottom" },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const val = ctx.parsed;
-              return `${ctx.label}: $${val.toLocaleString()}`;
-            },
+            label: (ctx) => `${ctx.label}: ${fmtMoney(ctx.parsed)}`
           },
         },
       },
@@ -211,29 +300,29 @@ function generateColors(count) {
     "#fd79a8", "#81ecec", "#e17055", "#00cec9", "#fdcb6e"
   ];
   const colors = [];
-  for (let i = 0; i < count; i++) {
-    colors.push(base[i % base.length]);
-  }
+  for (let i = 0; i < count; i++) colors.push(base[i % base.length]);
   return colors;
 }
 
 /** =================== Navigation =================== */
 function setupNavigation() {
-  document.getElementById('logout')?.addEventListener('click', async () => {
+  document.getElementById("logout")?.addEventListener("click", async (e) => {
+    e.preventDefault();
     await supabase.auth.signOut();
-    window.location.href = 'index.html';
+    window.location.href = "index.html";
   });
 
-  document.getElementById('logout-mobile')?.addEventListener('click', async () => {
+  document.getElementById("logout-mobile")?.addEventListener("click", async (e) => {
+    e.preventDefault();
     await supabase.auth.signOut();
-    window.location.href = 'index.html';
+    window.location.href = "index.html";
   });
 
   document.getElementById("menu-toggle")?.addEventListener("click", () => {
     document.getElementById("mobile-menu")?.classList.toggle("show");
   });
 
-  if (typeof lucide !== 'undefined') {
+  if (typeof lucide !== "undefined") {
     lucide.createIcons();
   }
 }
@@ -243,9 +332,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   const allowed = await checkAuth();
   if (!allowed) return;
 
+  setActiveNavLink();
+
+  const pill = document.getElementById("pill-date");
+  if (pill) {
+    const d = new Date();
+    const nice = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+    pill.innerHTML = `Date: <b>${nice}</b>`;
+  }
+
   setupNavigation();
+
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);
+
   renderMetricCards(summary);
   renderCategoryTable(summary);
   renderCategoryChart(summary);

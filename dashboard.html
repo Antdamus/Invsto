@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
   <title>OG Jewelry Dashboard</title>
 
   <!-- Core Styles -->
@@ -13,6 +14,7 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
+
 <body>
   <!-- Mobile Header -->
   <div class="mobile-header">
@@ -40,44 +42,96 @@
     <aside class="sidebar">
       <div class="sidebar-inner">
         <div class="logo">OG</div>
+
         <nav class="nav-links">
           <a class="nav-link" href="admin.html">
-          <i class="ti ti-settings"></i>
-          <span class="link-text">Admin</span>
+            <i class="ti ti-settings"></i>
+            <span class="link-text">Admin</span>
           </a>
-          <a class="nav-link" href="dashboard.html"><i class="ti ti-layout-dashboard"></i><span class="link-text">Dashboard</span></a>
-          <a class="nav-link" href="add-item.html"><i class="ti ti-plus"></i><span class="link-text">Add Item</span></a>
-          <a class="nav-link" href="add-inventory.html"><i class="ti ti-box-seam"></i><span class="link-text">Add Inventory</span></a>
-          <a class="nav-link" href="stock.html"><i class="ti ti-archive"></i><span class="link-text">Stock</span></a>
-          <a class="nav-link" href="timeclock.html"><i class="ti ti-archive"></i><span class="link-text">Timesheet</span></a>
-          <a class="nav-link" href="#" id="logout"><i class="ti ti-logout"></i><span class="link-text">Logout</span></a>
+
+          <a class="nav-link" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i>
+            <span class="link-text">Add Item</span>
+          </a>
+
+          <a class="nav-link" href="add-inventory.html">
+            <i class="ti ti-box-seam"></i>
+            <span class="link-text">Add Inventory</span>
+          </a>
+
+          <a class="nav-link" href="stock.html">
+            <i class="ti ti-archive"></i>
+            <span class="link-text">Stock</span>
+          </a>
+
+          <a class="nav-link" href="timeclock.html">
+            <i class="ti ti-clock"></i>
+            <span class="link-text">Timesheet</span>
+          </a>
+
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
         </nav>
       </div>
     </aside>
 
     <div class="main">
       <header class="header">
-        <span id="admin-greeting"><strong>Welcome, Admin</strong></span>
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="admin-greeting">Welcome, Admin</strong>
+            <div class="sub" id="header-subtitle">Inventory intelligence • Live snapshot</div>
+          </div>
+
+          <div class="header-pills" aria-label="Quick stats">
+            <div class="pill">Status: <b>Secure</b></div>
+            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill" id="pill-date">Date: <b>—</b></div>
+          </div>
+        </div>
       </header>
 
       <main class="content">
-        <h2 class="page-title">📊 Inventory Summary</h2>
+        <h2 class="page-title">Inventory Summary</h2>
 
+        <!-- Metric Cards -->
         <div class="metrics-grid" id="metric-cards"></div>
 
-        <section class="chart-section">
-          <h3 class="section-title">Category Breakdown (Visual)</h3>
-          <canvas id="category-chart" class="chart-canvas"></canvas>
+        <!-- Chart -->
+        <section class="section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Category Breakdown</h3>
+              <div class="section-sub">Value distribution by category</div>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="category-chart" class="chart-canvas"></canvas>
+          </div>
         </section>
 
-        <section class="table-section">
-          <h3 class="section-title">Category Details</h3>
-          <div id="inventory-table-container" class="inventory-table"></div>
+        <!-- Table -->
+        <section class="section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Category Details</h3>
+              <div class="section-sub">Quantity, cost, value, and markup by category</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <div id="inventory-table-container" class="inventory-table"></div>
+          </div>
         </section>
       </main>
     </div>
   </div>
-
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
