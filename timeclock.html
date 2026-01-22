@@ -42,7 +42,8 @@
           <div id="storeContextText" class="store-line">—</div>
           <div id="storeContextHint" class="muted" style="font-size:12px; margin-top:4px;"></div>
         </div>
-        <a id="storeDirectionsLink" class="btn ghost hidden" target="_blank" rel="noopener">Directions</a>
+        <a id="storeDirectionsLink" class="pill pill-dir hidden" target="_blank" rel="noopener">Directions</a>
+
       </div>
 
       <h3>Today</h3>
@@ -64,6 +65,28 @@
         </thead>
         <tbody id="todayBody"></tbody>
       </table>
+
+      <!-- Breaks Today (cards on iPhone, table on desktop) -->
+<div class="today-subhead">
+  <h3 style="margin:16px 0 8px;">Breaks today</h3>
+  <div class="hint" style="margin:0;">Start/end times, duration, and photos for each break.</div>
+</div>
+
+<div id="breaksCards" class="breaks-cards" aria-live="polite"></div>
+
+<table id="breaksTable" class="table">
+  <thead>
+    <tr>
+      <th>Start</th>
+      <th>End</th>
+      <th>Duration</th>
+      <th>Photo Start</th>
+      <th>Photo End</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="breaksBody"></tbody>
+</table>
     </section>
 
     <!-- Your Schedule (weekly calendar) -->

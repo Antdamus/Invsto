@@ -830,7 +830,7 @@ const flagsHtml = uniq.length ? `<div class="cal-flags" style="margin-top:6px;">
     const storeName = storeObj?.name ? escHtml(storeObj.name) : (r?.store_id ? 'Store' : '');
     const dirUrl = directionsUrlForStore(storeObj);
     const storeLine = r ? (r.store_id ? `<div class="muted" style="font-size:12px;margin-top:4px;">
-        Store: ${storeName}${dirUrl ? ` · <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}
+        Store: ${storeName}${dirUrl ? ` · <a class="pill pill-dir" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}
       </div>` : '') : '';
 
     const dow = day.toLocaleDateString([], { weekday: 'short' });
@@ -904,10 +904,10 @@ async function onBreakAction(){
     // If we still don't know the shift store, fall back to today's assigned store, then nearest store.
     if (!shiftStoreId) shiftStoreId = todayScheduleRow?.store_id || null;
     if (!shiftStoreId) {
-      const nearest = pickNearestActiveStore(lat, lng);
-      if (nearest?.store && (nearest.distance_m <= (nearest.store.radius_m ?? 0))) {
-        shiftStoreId = nearest.store.id;
-      }
+      const nearest = pickNearestStoreWithinRadius(lat, lng);
+if (nearest?.store && (nearest.distance_m <= (nearest.store.radius_m ?? 0))) {
+  shiftStoreId = nearest.store.id;
+}
     }
 
     const shiftStoreObj = shiftStoreId ? (storeById.get(shiftStoreId) || null) : null;
@@ -1024,7 +1024,7 @@ async function renderTodayCards(rows, anomalyMap){
     const top = el('div', 'today-top');
     const store = el('div', 'today-store');
     store.innerHTML = storeObj
-      ? `${storeName}${dirUrl ? ` <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}`
+      ? `${storeName}${dirUrl ? ` <a class="pill pill-dir" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}`
       : '—';
     const durPill = el('div', 'today-dur');
     durPill.textContent = fmtDur(durMs);
@@ -1089,6 +1089,60 @@ async function renderTodayCards(rows, anomalyMap){
     } else {
       picOut.classList.add('disabled');
     }
+  }
+}
+
+async function renderBreaksCards(breaks){
+  const wrap = qs('breaksCards');
+  if (!wrap) return;
+
+  wrap.innerHTML = '';
+
+  if (!breaks || !breaks.length){
+    const empty = document.createElement('div');
+    empty.className = 'today-empty';
+    empty.textContent = 'No breaks yet.';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  for (const b of breaks){
+    const isOpen = !b.ended_at;
+    const durMs = isOpen
+      ? (Date.now() - new Date(b.started_at).getTime())
+      : (new Date(b.ended_at) - new Date(b.started_at));
+
+    const card = document.createElement('div');
+    card.className = `break-card ${isOpen ? 'break-open' : ''}`;
+    if (isOpen) card.dataset.startedAt = b.started_at;
+
+    const startUrl = await signedUrlOrNull(b.photo_start_path, 120);
+    const endUrl   = await signedUrlOrNull(b.photo_end_path, 120);
+
+    card.innerHTML = `
+      <div class="break-top">
+        <div class="break-title">Break</div>
+        <div class="break-pill js-break-dur">${fmtDur(durMs)}</div>
+      </div>
+
+      <div class="break-grid">
+        <div class="tblock">
+          <div class="tlabel">Start</div>
+          <div class="tvalue">${fmtTime(b.started_at)}</div>
+        </div>
+        <div class="tblock">
+          <div class="tlabel">End</div>
+          <div class="tvalue">${isOpen ? 'OPEN' : fmtTime(b.ended_at)}</div>
+        </div>
+      </div>
+
+      <div class="break-actions">
+        ${startUrl ? `<a class="pill" href="${startUrl}" target="_blank" rel="noopener">Start photo</a>` : `<span class="chiplink disabled">Start photo —</span>`}
+        ${endUrl   ? `<a class="pill" href="${endUrl}" target="_blank" rel="noopener">End photo</a>`   : `<span class="chiplink disabled">End photo —</span>`}
+        <span class="chip">${isOpen ? 'Open' : 'Closed'}</span>
+      </div>
+    `;
+    wrap.appendChild(card);
   }
 }
 
@@ -1194,7 +1248,7 @@ async function loadToday(){
         const flagsCell = flags.length ? flags.join(" ") : `<span style="opacity:0.6;">—</span>`;
 
         tr.innerHTML = `
-          <td class="store-cell">${storeObj ? `${storeName}${dirUrl ? ` <a class="link" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</td>
+          <td class="store-cell">${storeObj ? `${storeName}${dirUrl ? ` <a class="pill pill-dir" href="${dirUrl}" target="_blank" rel="noopener">Directions</a>` : ''}` : '—'}</td>
           <td>${new Date(r.clock_in).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</td>
           <td>${r.clock_out ? new Date(r.clock_out).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—'}</td>
           <td>${fmtDur(durMs)}</td>
@@ -1224,6 +1278,8 @@ async function loadToday(){
     }
     
     await renderTodayCards(rows, anomalyMap);
+    await renderBreaksCards(todayBreaks);
+
 
     // F) Render Breaks table (async because it signs URLs for paths)
     await renderBreaksTable(todayBreaks, openShiftId || null);
@@ -1241,6 +1297,19 @@ async function loadToday(){
           const durEl = tr.querySelector('.b-dur');
           if (durEl) durEl.textContent = fmtDur(ms);
         }
+
+        // Update open break CARD duration too (mobile)
+const cards = qs('breaksCards');
+const openCard = cards?.querySelector('.break-card.break-open');
+if (openCard){
+  const startedAt = openCard.dataset.startedAt;
+  if (startedAt){
+    const ms = Date.now() - new Date(startedAt).getTime();
+    const durEl = openCard.querySelector('.js-break-dur');
+    if (durEl) durEl.textContent = fmtDur(ms);
+  }
+}
+
         // update the hint
         updateBreakHint();
       }, 1000);

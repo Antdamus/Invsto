@@ -38,6 +38,7 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+  --accent: var(--accentB);
 }
 
 *{ box-sizing:border-box; }
@@ -852,3 +853,218 @@ body{
   .today-times .tblock:last-child{ grid-column: 1 / -1; }
 }
 
+/* =========================================================
+   Fix: accent token used by chiplink
+   ========================================================= */
+:root{
+  --accent: var(--accentB);
+}
+
+/* =========================================================
+   Pill system (used for "Directions", break photo links, etc.)
+   Works in: schedule cards, today table rows, today cards, break cards
+   ========================================================= */
+.pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap: 8px;
+
+  padding: 7px 10px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+
+  color: rgba(255,255,255,0.92);
+  text-decoration: none;
+  font-weight: 900;
+  letter-spacing: .15px;
+  font-size: 12px;
+
+  box-shadow: 0 10px 22px rgba(0,0,0,.18);
+  transition: transform .12s ease, background .20s ease, border-color .20s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pill:hover{
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.16);
+  transform: translateY(-1px);
+}
+
+.pill:active{
+  transform: translateY(0px) scale(0.98);
+}
+
+.pill.pill-dir{
+  border-color: rgba(157,123,255,0.28);
+  background: rgba(157,123,255,0.10);
+  color: rgba(235,232,255,0.98);
+}
+
+/* Make pills sit nicely inside table cells */
+.table .pill{
+  padding: 6px 10px;
+  font-size: 11.5px;
+  box-shadow: none;
+}
+
+/* =========================================================
+   Today table: polish store cell layout + links
+   (Your JS adds .store-cell and .flags-cell)
+   ========================================================= */
+.table td.store-cell{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+  min-width: 220px;
+}
+.table td.store-cell a{
+  white-space: nowrap;
+}
+
+/* =========================================================
+   Break Cards (mobile) — matches Today cards aesthetic
+   Used by renderBreaksCards(): .break-card, .break-top, .break-grid, .break-actions
+   ========================================================= */
+
+.break-card{
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 12px 28px rgba(0,0,0,.22);
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Subtle premium glow */
+.break-card::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius: inherit;
+  background: radial-gradient(520px 220px at 18% 0%, rgba(157,123,255,0.10), transparent 60%),
+              radial-gradient(420px 180px at 88% 20%, rgba(106,92,255,0.08), transparent 62%);
+  pointer-events:none;
+}
+
+.break-top{
+  display:flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.break-title{
+  font-weight: 950;
+  letter-spacing: .14px;
+}
+
+.break-pill{
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+
+  font-weight: 950;
+  padding: 6px 10px;
+  border-radius: 999px;
+
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+}
+
+.break-grid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Reuse your existing tblock look; just ensure it reads well here */
+.break-card .tblock{
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border);
+}
+
+.break-actions{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+/* Small status chip used in break cards ("Open"/"Closed") */
+.chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  padding: 8px 10px;
+  border-radius: 999px;
+
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  color: rgba(238,240,242,0.78);
+
+  font-weight: 950;
+  font-size: 12px;
+  letter-spacing: .12px;
+}
+
+/* Open break gets a slight “live” emphasis */
+.break-card.break-open{
+  border-color: rgba(255,176,32,0.28);
+}
+.break-card.break-open .break-pill{
+  border-color: rgba(255,176,32,0.26);
+  background: rgba(255,176,32,0.10);
+  color: rgba(255,233,195,0.96);
+}
+
+/* =========================================================
+   Breaks table polish (desktop + mobile scroll surface already exists)
+   Your break table uses: .b-end, .b-dur, .row-open-break
+   ========================================================= */
+
+#breaksTable .table td,
+#breaksTable .table th{
+  vertical-align: middle;
+}
+
+#breaksTable .row-open-break td{
+  background: rgba(255,176,32,0.06);
+}
+
+#breaksTable .row-open-break .b-end{
+  font-weight: 950;
+  color: rgba(255,233,195,0.92);
+}
+
+#breaksTable .row-open-break .b-dur{
+  font-weight: 950;
+}
+
+/* Make photo cells not look dead when empty */
+#breaksTable .table td a{
+  font-weight: 900;
+}
+
+/* =========================================================
+   Mobile: ensure Break Cards show and Break Table hides
+   (Your Today CSS already hides #clockSection .table on mobile)
+   ========================================================= */
+@media (max-width: 720px){
+  /* Hide breaks table on iPhone, show breaks cards */
+  #breaksTable{ display:none; }
+  #breaksCards{ display:grid; gap: 12px; }
+}
