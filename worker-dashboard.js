@@ -173,30 +173,106 @@ function renderAnomalyBadges(anomalies) {
 }
 
 
-
 function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs, anomalyMap = {}) {
   const container = $("recent-shifts-container");
   if (!container) return;
 
+  const isMobile = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+
+  // Empty state
   if (!Array.isArray(entries) || entries.length === 0) {
-    container.innerHTML = `
-      <div class="table-wrapper">
-        <table class="summary-table">
-          <thead>
-            <tr>
-              <th>Date</th><th>Store</th><th>Clock In</th><th>Clock Out</th>
-              <th>Worked (Net)</th><th>Break</th><th>Flags</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td colspan="7" style="opacity:0.75;">No shifts in this month.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    `;
+    container.innerHTML = isMobile
+      ? `<div class="shift-empty">No shifts in this month.</div>`
+      : `
+        <div class="table-wrapper">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Store</th><th>Clock In</th><th>Clock Out</th>
+                <th>Worked (Net)</th><th>Break</th><th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="7" style="opacity:0.75;">No shifts in this month.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
     return;
   }
 
+  // ---------- MOBILE: render as cards ----------
+  if (isMobile) {
+    const cards = entries.map(e => {
+      const a = anomalyMap?.[e.id] || { anomalies: [], has_anomaly: false };
+      const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
+
+      const net = fmtHM(perEntryNetMs?.[e.id] ?? 0);
+      const brk = fmtHM(perEntryBreakMs?.[e.id] ?? 0);
+
+      const store = e.store_id ? storeById.get(e.store_id) : null;
+      const storeName = store?.name ? String(store.name) : "—";
+      const dirUrl = directionsUrlForStore(store);
+      const storeHtml = dirUrl
+        ? `<span class="shift-store">${storeName} · <a href="${dirUrl}" target="_blank" rel="noopener">Directions</a></span>`
+        : `<span class="shift-store">${storeName}</span>`;
+
+      const outText = e.clock_out ? fmtTime(e.clock_out) : "In progress";
+
+      const flagsHtml = [];
+
+      // anomalies
+      if (anomalies.length) flagsHtml.push(renderAnomalyBadges(anomalies));
+
+      // geo flags
+      if (e.geo_ok_in === false || e.geo_ok_out === false) {
+        flagsHtml.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
+      }
+
+      // schedule flags
+      if (Array.isArray(e.schedule_codes) && e.schedule_codes.length > 0) {
+        flagsHtml.push(`<span class="badge warn" title="${e.schedule_codes.join(", ")}">Schedule</span>`);
+      }
+
+      const flags = flagsHtml.length ? flagsHtml.join(" ") : `<span style="opacity:0.6;">—</span>`;
+
+      return `
+        <div class="shift-card">
+          <div class="shift-card-top">
+            <div class="shift-date">${fmtDate(e.clock_in)}</div>
+            ${storeHtml}
+          </div>
+
+          <div class="shift-grid">
+            <div>
+              <div class="shift-k">Clock In</div>
+              <div class="shift-v">${fmtTime(e.clock_in)}</div>
+            </div>
+            <div>
+              <div class="shift-k">Clock Out</div>
+              <div class="shift-v">${outText}</div>
+            </div>
+
+            <div>
+              <div class="shift-k">Worked (Net)</div>
+              <div class="shift-v">${net}</div>
+            </div>
+            <div>
+              <div class="shift-k">Break</div>
+              <div class="shift-v">${brk}</div>
+            </div>
+          </div>
+
+          <div class="shift-flags">${flags}</div>
+        </div>
+      `;
+    }).join("");
+
+    container.innerHTML = `<div class="shift-cards">${cards}</div>`;
+    return;
+  }
+
+  // ---------- DESKTOP: render as table ----------
   const rows = entries.map(e => {
     const a = anomalyMap?.[e.id] || { anomalies: [], has_anomaly: false };
     const anomalies = Array.isArray(a.anomalies) ? a.anomalies : [];
@@ -214,19 +290,9 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs, anomalyMap 
     const outText = e.clock_out ? fmtTime(e.clock_out) : "In progress";
 
     const flagsHtml = [];
-
-    // anomalies (late/early/etc.)
     if (anomalies.length) flagsHtml.push(renderAnomalyBadges(anomalies));
-
-    // geo flags
-    if (e.geo_ok_in === false || e.geo_ok_out === false) {
-      flagsHtml.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
-    }
-
-    // schedule flags (if you store schedule codes)
-    if (Array.isArray(e.schedule_codes) && e.schedule_codes.length > 0) {
-      flagsHtml.push(`<span class="badge warn" title="${e.schedule_codes.join(", ")}">Schedule</span>`);
-    }
+    if (e.geo_ok_in === false || e.geo_ok_out === false) flagsHtml.push(`<span class="badge bad" title="Geofence issue">Geo</span>`);
+    if (Array.isArray(e.schedule_codes) && e.schedule_codes.length > 0) flagsHtml.push(`<span class="badge warn" title="${e.schedule_codes.join(", ")}">Schedule</span>`);
 
     const flagsCell = flagsHtml.length ? flagsHtml.join(" ") : `<span style="opacity:0.6;">—</span>`;
 
@@ -257,6 +323,7 @@ function renderRecentShifts(entries, perEntryNetMs, perEntryBreakMs, anomalyMap 
     </div>
   `;
 }
+
 
 function setPill(id, text, tone) {
   const el = $(id);

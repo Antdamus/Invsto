@@ -1,248 +1,470 @@
-/* ================================
-   Worker Dashboard Enhancements
-   Uses dashboard.css as base
-================================ */
+/* =========================================================
+   OG Jewelers NY — Worker Dashboard (Ultra Luxury + Mobile)
+   Full replacement for worker-dashboard.css
+   Designed to pair with dashboard.css
+   ========================================================= */
 
-.status-card {
-  background: white;
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+:root{
+  --w-text: #f2f3f5;
+  --w-muted: rgba(242,243,245,.72);
+
+  --w-stroke: rgba(255,255,255,.10);
+  --w-stroke2: rgba(255,255,255,.16);
+
+  --w-glass: rgba(12,13,16,.55);
+  --w-glass2: rgba(14,16,20,.62);
+
+  --w-gold: #d6b25e;
+  --w-gold2:#f0d78c;
+
+  --w-good: rgba(105,239,174,.95);
+  --w-warn: rgba(240,177,90,.95);
+  --w-bad:  rgba(255,99,99,.95);
+
+  --w-ease: cubic-bezier(.2,.9,.2,1);
 }
 
-.status-card-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
+/* ---------------------------------------------------------
+   Global polish for worker page
+--------------------------------------------------------- */
+
+.page-title{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
 
-.status-title {
-  font-size: 1.35rem;
-  font-weight: 600;
+/* Make the worker header match the admin header vibe */
+.header{
+  padding: 18px 22px !important;
 }
-
-.status-now {
-  font-size: 0.95rem;
-  opacity: 0.75;
-}
-
-.status-row {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.95rem;
-  background: #f1f3f5;
-  border: 1px solid #e5e7eb;
-}
-
-.pill.good {
-  background: #ecfdf3;
-  border-color: #bbf7d0;
-}
-
-.pill.warn {
-  background: #fff7ed;
-  border-color: #fed7aa;
-}
-
-.pill.bad {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.status-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
-  gap: 0.75rem;
-}
-
-.status-metric {
-  background: #fafafa;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  padding: 0.9rem 1rem;
-}
-
-.status-metric-label {
-  font-size: 0.9rem;
-  opacity: 0.75;
-}
-
-.status-metric-value {
-  margin-top: 0.35rem;
-  font-size: 1.15rem;
-  font-weight: 600;
-}
-
-.status-actions {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.btn-like {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  padding: 0.65rem 0.9rem;
-  text-decoration: none;
-  font-size: 1rem;
-  font-weight: 600;
-  background: #1c1c1e;
-  color: white;
-  transition: transform 0.15s ease, opacity 0.15s ease;
-}
-
-.btn-like:hover {
-  transform: translateY(-1px);
-  opacity: 0.95;
-}
-
-.btn-like.subtle {
-  background: #2c2c2e;
-  font-weight: 600;
-}
-
-.mini-note {
-  margin-top: 0.65rem;
-  font-size: 0.95rem;
-  opacity: 0.75;
-}
-
-.status-note {
-  font-size: 0.95rem;
-  opacity: 0.75;
-}
-
-.recent-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  margin-left: 0.4rem;
-  white-space: nowrap;
-}
-
-.badge.warn {
-  background: #fff7ed;
-  border-color: #fed7aa;
-}
-
-.badge.bad {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.soft-error {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  color: #7c2d12;
-  padding: 1rem 1.25rem;
-  border-radius: 12px;
-}
-
-/* ================================
-   History Month Picker
-================================ */
-.history-bar {
-  margin-top: 1.2rem;
-  background: white;
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
-  border: 1px solid #eee;
-
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.history-title {
+#worker-greeting strong{
+  display:block;
   font-size: 1.05rem;
-  font-weight: 700;
+  letter-spacing:.25px;
+}
+#worker-greeting{
+  color: rgba(242,243,245,.92);
 }
 
-.history-sub {
-  font-size: 0.95rem;
-  opacity: 0.7;
-  margin-top: 0.15rem;
+/* ---------------------------------------------------------
+   Section card base (re-use for multiple blocks)
+--------------------------------------------------------- */
+
+.table-section{
+  border: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: 22px;
+  box-shadow: 0 18px 45px rgba(0,0,0,.40);
+  padding: 16px 16px 18px;
+  overflow:hidden;
 }
 
-.history-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+.section-title{
+  margin: 0 0 10px 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing:.25px;
 }
 
-.history-btn {
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  border-radius: 10px;
-  padding: 0.45rem 0.7rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+/* ---------------------------------------------------------
+   Status Card (hero)
+--------------------------------------------------------- */
+
+.status-card{
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,.08);
+  background:
+    radial-gradient(900px 240px at 16% 0%, rgba(214,178,94,.16), transparent 60%),
+    radial-gradient(760px 240px at 86% 45%, rgba(120,130,255,.10), transparent 62%),
+    rgba(255,255,255,.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 22px 58px rgba(0,0,0,.48);
+  padding: 18px 18px;
+  display:flex;
+  flex-direction:column;
+  gap: 14px;
+  overflow:hidden;
+  position:relative;
 }
 
-.history-btn:hover {
-  transform: translateY(-1px);
-  opacity: 0.95;
+.status-card::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent);
+  transform: translateX(-60%);
+  opacity:0;
+  pointer-events:none;
+}
+.status-card:hover::before{
+  opacity:.25;
+  animation: wShimmer 1.15s var(--w-ease) 1;
+}
+@keyframes wShimmer{
+  from{ transform: translateX(-60%); }
+  to{ transform: translateX(60%); }
 }
 
-.history-label {
-  min-width: 170px;
-  text-align: center;
+.status-card-top{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap: 12px;
+}
+
+.status-title{
+  font-family: "DM Serif Display", serif;
+  font-size: 1.6rem;
+  letter-spacing:.55px;
+}
+
+.status-now{
+  font-size:.92rem;
+  color: var(--w-muted);
+  padding: 9px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.18);
+}
+
+/* pills row */
+.status-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.pill{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  font-size:.92rem;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  color: rgba(242,243,245,.88);
+  box-shadow: 0 10px 22px rgba(0,0,0,.20);
+}
+.pill.good{ border-color: rgba(105,239,174,.30); background: rgba(105,239,174,.10); }
+.pill.warn{ border-color: rgba(240,177,90,.30);  background: rgba(240,177,90,.10); }
+.pill.bad{  border-color: rgba(255,99,99,.30);   background: rgba(255,99,99,.10); }
+
+/* status metrics */
+.status-metrics{
+  display:grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 12px;
+}
+.status-metric{
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.16);
+  box-shadow: 0 16px 35px rgba(0,0,0,.30);
+  padding: 12px 12px;
+  transition: transform .18s var(--w-ease), border-color .18s var(--w-ease);
+}
+.status-metric:hover{
+  transform: translateY(-2px);
+  border-color: rgba(214,178,94,.18);
+}
+.status-metric-label{
+  font-size:.90rem;
+  color: rgba(242,243,245,.70);
+  letter-spacing:.2px;
+}
+.status-metric-value{
+  margin-top:6px;
+  font-size: 1.12rem;
+  font-weight: 900;
+  letter-spacing:.25px;
+  color: rgba(242,243,245,.92);
+}
+
+/* actions */
+.status-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.btn-like{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius: 16px;
+  padding: 12px 14px;
+  text-decoration: none;
+  font-weight: 900;
+  letter-spacing:.2px;
+  color:#0b0b0c;
+  background:
+    radial-gradient(120% 140% at 20% 10%, var(--w-gold2), var(--w-gold)),
+    linear-gradient(180deg, rgba(255,255,255,.20), rgba(255,255,255,0));
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 18px 45px rgba(214,178,94,.16), 0 16px 40px rgba(0,0,0,.50);
+  transition: transform .18s var(--w-ease), box-shadow .18s var(--w-ease);
+  position:relative;
+  overflow:hidden;
+}
+.btn-like:hover{
+  transform: translateY(-2px);
+  box-shadow: 0 24px 62px rgba(214,178,94,.18), 0 18px 55px rgba(0,0,0,.60);
+}
+.btn-like:active{ transform: translateY(0) scale(.99); }
+
+.btn-like.subtle{
+  color: rgba(242,243,245,.92);
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 12px 26px rgba(0,0,0,.35);
+}
+.btn-like.subtle:hover{
+  border-color: rgba(214,178,94,.18);
+}
+
+/* status note */
+.status-note{
+  font-size: .95rem;
+  color: rgba(242,243,245,.70);
+}
+.status-note a{
+  color: rgba(240,215,140,.92);
+  text-decoration:none;
   font-weight: 800;
 }
+.status-note a:hover{ opacity:.9; }
 
-.history-select {
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  border-radius: 10px;
-  padding: 0.55rem 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
+/* ---------------------------------------------------------
+   History Month Picker (luxury)
+--------------------------------------------------------- */
+
+.history-bar{
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 18px 45px rgba(0,0,0,.38);
+  padding: 14px 16px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
 }
 
-/* Responsive tweaks */
-@media (max-width: 1100px) {
-  .status-metrics {
-    grid-template-columns: repeat(2, minmax(180px, 1fr));
-  }
+.history-title{
+  font-weight: 900;
+  letter-spacing:.25px;
+  font-size: 1.02rem;
+}
+.history-sub{
+  margin-top:4px;
+  color: rgba(242,243,245,.65);
+  font-size:.93rem;
 }
 
-@media (max-width: 768px) {
-  .status-metrics {
-    grid-template-columns: 1fr;
-  }
-  .history-label {
-    min-width: auto;
-  }
+.history-controls{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.history-btn{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  color: rgba(242,243,245,.92);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 900;
+  cursor:pointer;
+  transition: transform .16s var(--w-ease), border-color .16s var(--w-ease), background .16s var(--w-ease);
+}
+.history-btn:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.04);
+  border-color: rgba(214,178,94,.18);
+}
+.history-btn:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+  transform:none;
+}
+
+.history-label{
+  min-width: 170px;
+  text-align:center;
+  font-weight: 950;
+  letter-spacing:.25px;
+  color: rgba(242,243,245,.92);
+}
+
+.history-select{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  color: rgba(242,243,245,.92);
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-weight: 900;
+  cursor:pointer;
+}
+
+/* ---------------------------------------------------------
+   Metric cards (re-use dashboard.css .metric-card, but enhance)
+--------------------------------------------------------- */
+
+.metrics-grid .metric-card{
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.14);
+  box-shadow: 0 16px 35px rgba(0,0,0,.30);
+  transition: transform .18s var(--w-ease), border-color .18s var(--w-ease);
+}
+.metrics-grid .metric-card:hover{
+  transform: translateY(-2px);
+  border-color: rgba(214,178,94,.18);
+}
+
+/* mini-note */
+.mini-note{
+  margin-top: 10px;
+  color: rgba(242,243,245,.62);
+  font-size: .92rem;
+}
+
+/* ---------------------------------------------------------
+   Badges (flags)
+--------------------------------------------------------- */
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: .80rem;
+  font-weight: 900;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.badge.warn{ border-color: rgba(240,177,90,.30); background: rgba(240,177,90,.10); }
+.badge.bad{  border-color: rgba(255,99,99,.30);  background: rgba(255,99,99,.10); }
+
+/* ---------------------------------------------------------
+   Recent shifts: desktop table stays table
+   mobile: cards (rendered by JS patch below)
+--------------------------------------------------------- */
+
+.inventory-table .table-wrapper{
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(0,0,0,.18);
+  overflow:auto;
+}
+
+/* soften table edges to match suite */
+.summary-table thead th{
+  background: rgba(10,11,14,.78) !important;
+  color: rgba(242,243,245,.92) !important;
+  border-bottom: 1px solid rgba(255,255,255,.08) !important;
+}
+.summary-table td{
+  border-bottom: 1px solid rgba(255,255,255,.06) !important;
+}
+.summary-table tbody tr:hover{
+  background: rgba(214,178,94,.06) !important;
+}
+
+/* Card list used on mobile for recent shifts */
+.shift-cards{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.shift-card{
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.16);
+  box-shadow: 0 16px 35px rgba(0,0,0,.30);
+  padding: 12px 12px;
+  overflow:hidden;
+  position:relative;
+}
+.shift-card-top{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.shift-date{
+  font-weight: 950;
+  letter-spacing:.2px;
+}
+.shift-store a{
+  color: rgba(240,215,140,.92);
+  text-decoration:none;
+  font-weight: 900;
+}
+.shift-store a:hover{ opacity:.9; }
+
+.shift-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+}
+.shift-k{
+  color: rgba(242,243,245,.62);
+  font-size: .86rem;
+  letter-spacing:.15px;
+}
+.shift-v{
+  font-weight: 900;
+  color: rgba(242,243,245,.92);
+}
+
+.shift-flags{
+  margin-top: 10px;
+  display:flex;
+  flex-wrap:wrap;
+  gap: 8px;
+}
+.shift-empty{
+  color: rgba(242,243,245,.65);
+  padding: 12px;
+}
+
+/* ---------------------------------------------------------
+   Errors
+--------------------------------------------------------- */
+
+.soft-error{
+  border-radius: 18px;
+  border: 1px solid rgba(240,177,90,.28);
+  background: rgba(240,177,90,.10);
+  color: rgba(242,243,245,.92);
+  padding: 14px 14px;
+  box-shadow: 0 14px 30px rgba(0,0,0,.35);
+}
+
+/* ---------------------------------------------------------
+   Responsive
+--------------------------------------------------------- */
+
+@media (max-width: 1100px){
+  .status-metrics{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .shift-cards{ grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px){
+  .status-metrics{ grid-template-columns: 1fr; }
+  .history-label{ min-width: auto; }
+  .shift-cards{ grid-template-columns: 1fr; }
 }
