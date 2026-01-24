@@ -46,3 +46,4 @@ for all
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
+
