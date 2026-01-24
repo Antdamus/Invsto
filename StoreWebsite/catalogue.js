@@ -52,94 +52,67 @@
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-  /* =========================
-     Demo data (replace later)
-     - category: gold|diamonds|chains|signature
-     - material: gold|silver|platinum|diamond
-     - tags: array: new|featured|best_value|limited
+   /* =========================
+     Data source (Supabase Edge Function)
   ========================= */
-  const PRODUCTS = [
-    {
-      id: "p1",
-      name: "Diamond Studs",
-      category: "diamonds",
-      material: "diamond",
-      price: 650,
-      tags: ["featured", "best_value"],
-      created_at: "2026-01-10",
-      image: "assets/featured/diamond-studs.jpg",
-    },
-    {
-      id: "p2",
-      name: "Gold Rope Chain",
-      category: "chains",
-      material: "gold",
-      price: 1200,
-      tags: ["featured"],
-      created_at: "2026-01-02",
-      image: "assets/featured/gold-rope.jpg",
-    },
-    {
-      id: "p3",
-      name: "Signature Pendant",
-      category: "signature",
-      material: "gold",
-      price: 980,
-      tags: ["limited", "new"],
-      created_at: "2026-01-16",
-      image: "assets/featured/signature-pendant.jpg",
-    },
-    {
-      id: "p4",
-      name: "Tennis Bracelet",
-      category: "diamonds",
-      material: "diamond",
-      price: 2200,
-      tags: ["featured"],
-      created_at: "2025-12-18",
-      image: "assets/featured/tennis-bracelet.jpg",
-    },
-    {
-      id: "p5",
-      name: "Gold Cuban Chain",
-      category: "chains",
-      material: "gold",
-      price: 1750,
-      tags: ["best_value"],
-      created_at: "2025-12-28",
-      image: "assets/collections/chains.jpg",
-    },
-    {
-      id: "p6",
-      name: "Classic Gold Band",
-      category: "gold",
-      material: "gold",
-      price: 340,
-      tags: ["best_value"],
-      created_at: "2025-12-05",
-      image: "assets/collections/gold.jpg",
-    },
-    {
-      id: "p7",
-      name: "Platinum Minimal Ring",
-      category: "signature",
-      material: "platinum",
-      price: 1450,
-      tags: ["new"],
-      created_at: "2026-01-12",
-      image: "assets/story/craft.jpg",
-    },
-    {
-      id: "p8",
-      name: "Silver Figaro Chain",
-      category: "chains",
-      material: "silver",
-      price: 260,
-      tags: ["best_value"],
-      created_at: "2025-11-20",
-      image: "assets/collections/chains.jpg",
-    },
-  ];
+  const SUPABASE_PROJECT_URL = "https://byhytmarmigalvawkedi.supabase.co"; // <-- your project
+  const STOREFRONT_CHANNEL = "og_main";
+  const FALLBACK_IMAGE = "assets/collections/chains.jpg";
+
+  // This becomes the live dataset (replaces demo PRODUCTS)
+  let PRODUCTS = [];
+
+  const fiveMinBucket = () => Math.floor(Date.now() / 300000); // 5 min
+  const toNum = (x) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Map RPC item -> UI product shape used by the existing UI logic
+  const mapStoreItemToProduct = (it) => {
+    const cats = Array.isArray(it.categories) ? it.categories : [];
+    const category = String(cats[0] || "all").toLowerCase();
+
+    const tags = Array.isArray(it.badge_flags) ? it.badge_flags : [];
+
+    return {
+      id: String(it.item_type_id),
+      name: String(it.title || ""),
+      category,
+      material: String(it.material || "").toLowerCase(), // returned by RPC if you added it; otherwise empty ok
+      price: toNum(it.display_price),
+      tags,
+      created_at: new Date().toISOString(), // (optional) upgrade later if you add created_at to RPC
+      image: it.image_url || FALLBACK_IMAGE,
+    };
+  };
+
+  const loadCatalog = async () => {
+    const t = fiveMinBucket();
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/storefront-catalog?channel=${encodeURIComponent(
+      STOREFRONT_CHANNEL
+    )}&t=${t}`;
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        // For most setups, anon key is NOT required if verify_jwt is off.
+        // If your function requires JWT, add Authorization/apikey here later.
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`catalog_fetch_failed (${res.status}) ${text}`);
+    }
+
+    const data = await res.json();
+    const items = Array.isArray(data?.items) ? data.items : [];
+    PRODUCTS = items.map(mapStoreItemToProduct);
+  };
+
 
   /* =========================
      State
@@ -868,7 +841,7 @@
     yearEl.textContent = String(new Date().getFullYear());
   };
 
-  const init = () => {
+    const init = async () => {
     document.addEventListener("keydown", handleEscape);
     document.addEventListener("click", outsideClickClose);
 
@@ -883,14 +856,27 @@
 
     initYear();
 
+    // Load live catalog first (so filters/sorting render against real data)
+    try {
+      if (grid) grid.innerHTML = ""; // clean slate
+      if (resultsCount) resultsCount.textContent = "…";
+      if (resultsCountInline) resultsCountInline.textContent = "…";
+      await loadCatalog();
+    } catch (err) {
+      console.error(err);
+      toast("Could not load catalog.");
+      PRODUCTS = []; // keep empty rather than demo
+    }
+
     // Initialize from URL then render
     initFromURL();
 
-    // Replace URL with normalized params (no duplicates / invalid values)
+    // Normalize URL params
     writeURLFromState(true);
 
     render();
   };
+
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
