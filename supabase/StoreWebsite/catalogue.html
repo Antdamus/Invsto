@@ -1,0 +1,350 @@
+<!-- shop.html — OG Jewelry (Catalog) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Shop</title>
+  <meta name="description" content="Shop OG Jewelers — curated fine jewelry with premium filters and a luxury browsing experience." />
+
+  <!-- Fonts (match homepage) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="catalogue.css" />
+
+  <!-- JS -->
+  <script defer src="catalogue.js"></script>
+</head>
+
+<body>
+  <!-- Ambient background -->
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-grain"></div>
+  </div>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Header -->
+  <header class="site-header" data-elevate-on-scroll>
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="OG Jewelry Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name">OG Jewelry</span>
+      </a>
+
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="nav-link" href="index.html#collections">Collections</a>
+        <a class="nav-link is-active" href="shop.html">Shop</a>
+        <a class="nav-link" href="index.html#story">Story</a>
+        <a class="nav-link" href="index.html#contact">Contact</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn ghost" href="index.html">Home</a>
+
+        <button class="btn ghost icon-only nav-toggle" type="button"
+                aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
+          <span class="hamburger" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile menu -->
+    <div id="mobileMenu" class="mobile-menu" hidden>
+      <div class="container mobile-menu-inner">
+        <a class="mobile-link" href="index.html#collections">Collections</a>
+        <a class="mobile-link" href="shop.html">Shop</a>
+        <a class="mobile-link" href="index.html#story">Story</a>
+        <a class="mobile-link" href="index.html#contact">Contact</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Shop intro -->
+    <section class="shop-hero" aria-label="Shop header">
+      <div class="container shop-hero-inner">
+        <div class="shop-hero-left">
+          <p class="eyebrow">OG Jewelry • Shop</p>
+          <h1 class="shop-title">Curated pieces. Filter with precision.</h1>
+          <p class="shop-subtitle">
+            Refine by category, material, price, and more—then save the exact link for later.
+          </p>
+
+          <!-- Active path chips (filled by JS) -->
+          <div class="path-row" aria-label="Shop path">
+            <a class="path-link" href="index.html">Home</a>
+            <span class="path-sep" aria-hidden="true">/</span>
+            <span class="path-current">Shop</span>
+            <span class="path-sep" aria-hidden="true">•</span>
+            <span id="pathContext" class="path-context">All items</span>
+          </div>
+        </div>
+
+        <!-- Small stat card -->
+        <aside class="shop-hero-card" aria-label="Shop quick info">
+          <div class="card-top">
+            <span class="badge">Premium Browse</span>
+            <span class="badge subtle">Fast</span>
+          </div>
+          <p class="card-text">
+            Use filters to narrow down quickly. Your selections stay in the URL.
+          </p>
+          <div class="card-mini">
+            <span class="mini-dot" aria-hidden="true"></span>
+            <span id="resultsCount">—</span> items shown
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Sticky filter HUD -->
+    <section class="hud-wrap" aria-label="Shop controls">
+      <div class="container">
+        <div class="hud" role="region" aria-label="Filter and sort controls">
+          <!-- Search -->
+          <div class="hud-search" role="search">
+            <label class="sr-only" for="q">Search</label>
+            <input id="q" name="q" type="search" placeholder="Search (e.g., rope chain, diamond studs…)" autocomplete="off" />
+            <button class="hud-icon-btn" type="button" data-action="clear-search" aria-label="Clear search" title="Clear">
+              ✕
+            </button>
+          </div>
+
+          <!-- Sort -->
+          <div class="hud-sort">
+            <label class="sr-only" for="sort">Sort</label>
+            <select id="sort" name="sort" aria-label="Sort products">
+              <option value="featured">Featured</option>
+              <option value="newest">Newest</option>
+              <option value="price_asc">Price: Low → High</option>
+              <option value="price_desc">Price: High → Low</option>
+              <option value="name_asc">Name: A → Z</option>
+            </select>
+          </div>
+
+          <!-- Filters toggle -->
+          <button class="btn ghost filters-btn" type="button"
+                  data-action="open-filters" aria-haspopup="dialog" aria-controls="filtersDrawer">
+            Filters
+            <span class="pill" id="activeFiltersPill" aria-label="Active filters count">0</span>
+          </button>
+
+          <!-- Reset -->
+          <button class="btn ghost reset-btn" type="button" data-action="reset-filters">
+            Reset
+          </button>
+        </div>
+
+        <!-- Active filter chips row (JS renders) -->
+        <div class="chips-row" aria-label="Active filters">
+          <div id="chips" class="chips"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section class="results" aria-label="Shop results">
+      <div class="container">
+        <div class="results-top">
+          <div class="results-left">
+            <h2 class="results-title">Results</h2>
+            <p class="results-subtitle">
+              Showing <span id="resultsCountInline">—</span> items
+            </p>
+          </div>
+
+          <div class="results-right">
+            <button class="btn ghost icon-only" type="button" data-action="toggle-view" aria-label="Toggle view">
+              ⧉
+            </button>
+          </div>
+        </div>
+
+        <!-- Grid -->
+        <div id="grid" class="product-grid" aria-live="polite"></div>
+
+        <!-- Empty state -->
+        <div id="emptyState" class="empty" hidden>
+          <div class="empty-card">
+            <span class="empty-icon" aria-hidden="true">✦</span>
+            <h3>No matches</h3>
+            <p>Try removing filters or searching a different term.</p>
+            <button class="btn primary" type="button" data-action="reset-filters">Reset filters</button>
+          </div>
+        </div>
+
+        <!-- Pagination (optional; JS can show/hide) -->
+        <div class="pager" aria-label="Pagination">
+          <button class="btn ghost" type="button" data-action="prev-page" aria-label="Previous page">← Prev</button>
+          <div class="pager-mid">
+            <span class="pager-label">Page</span>
+            <span id="pageNum" class="pager-num">1</span>
+            <span class="pager-label">of</span>
+            <span id="pageTotal" class="pager-num">1</span>
+          </div>
+          <button class="btn ghost" type="button" data-action="next-page" aria-label="Next page">Next →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer" id="contact">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <div class="brand-row">
+            <span class="brand-mark" aria-hidden="true">OG</span>
+            <span class="brand-name">OG Jewelry</span>
+          </div>
+          <p class="footer-text">
+            Fine jewelry. Timeless value. Crafted with intention.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Shop</h3>
+          <a href="shop.html?category=gold">Gold</a>
+          <a href="shop.html?category=diamonds">Diamonds</a>
+          <a href="shop.html?category=chains">Chains</a>
+          <a href="shop.html?category=signature">Signature</a>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Support</h3>
+          <a href="shipping.html">Shipping</a>
+          <a href="returns.html">Returns</a>
+          <a href="care.html">Care</a>
+          <a href="contact.html">Contact</a>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Connect</h3>
+          <a href="#" rel="noopener">Instagram</a>
+          <a href="#" rel="noopener">TikTok</a>
+          <a href="#" rel="noopener">YouTube</a>
+          <a href="mailto:support@your-domain.com">support@your-domain.com</a>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>© <span id="year">2026</span> OG Jewelry. All rights reserved.</p>
+        <div class="footer-legal">
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Filters Drawer (modal-style, glassy) -->
+  <div class="drawer-backdrop" data-action="close-filters" hidden></div>
+
+  <aside id="filtersDrawer" class="drawer" role="dialog" aria-modal="true" aria-label="Filters" hidden>
+    <div class="drawer-inner">
+      <header class="drawer-head">
+        <div class="drawer-title-wrap">
+          <h2 class="drawer-title">Filters</h2>
+          <p class="drawer-subtitle">Refine your selection with a few taps.</p>
+        </div>
+
+        <button class="btn ghost icon-only" type="button" data-action="close-filters" aria-label="Close filters">
+          ✕
+        </button>
+      </header>
+
+      <div class="drawer-body">
+        <!-- Category -->
+        <section class="filter-block" aria-label="Category filters">
+          <div class="filter-head">
+            <h3>Category</h3>
+            <p>Choose one or more.</p>
+          </div>
+          <div class="chip-grid" data-filter="category">
+            <button class="chip" type="button" data-value="gold">Gold</button>
+            <button class="chip" type="button" data-value="diamonds">Diamonds</button>
+            <button class="chip" type="button" data-value="chains">Chains</button>
+            <button class="chip" type="button" data-value="signature">Signature</button>
+          </div>
+        </section>
+
+        <!-- Material -->
+        <section class="filter-block" aria-label="Material filters">
+          <div class="filter-head">
+            <h3>Material</h3>
+            <p>Pick what you want to see.</p>
+          </div>
+          <div class="chip-grid" data-filter="material">
+            <button class="chip" type="button" data-value="gold">Gold</button>
+            <button class="chip" type="button" data-value="silver">Silver</button>
+            <button class="chip" type="button" data-value="platinum">Platinum</button>
+            <button class="chip" type="button" data-value="diamond">Diamond</button>
+          </div>
+        </section>
+
+        <!-- Price -->
+        <section class="filter-block" aria-label="Price filters">
+          <div class="filter-head">
+            <h3>Price</h3>
+            <p>Set a comfortable range.</p>
+          </div>
+
+          <div class="range-grid">
+            <div class="range-field">
+              <label for="minPrice">Min</label>
+              <input id="minPrice" type="number" inputmode="numeric" placeholder="0" min="0" step="1" />
+            </div>
+
+            <div class="range-field">
+              <label for="maxPrice">Max</label>
+              <input id="maxPrice" type="number" inputmode="numeric" placeholder="5000" min="0" step="1" />
+            </div>
+          </div>
+
+          <div class="range-presets" aria-label="Price presets">
+            <button class="chip soft" type="button" data-action="preset-price" data-min="0" data-max="250">$0–$250</button>
+            <button class="chip soft" type="button" data-action="preset-price" data-min="250" data-max="750">$250–$750</button>
+            <button class="chip soft" type="button" data-action="preset-price" data-min="750" data-max="2000">$750–$2,000</button>
+            <button class="chip soft" type="button" data-action="preset-price" data-min="2000" data-max="">$2,000+</button>
+          </div>
+        </section>
+
+        <!-- Tags -->
+        <section class="filter-block" aria-label="Tag filters">
+          <div class="filter-head">
+            <h3>Tags</h3>
+            <p>Extra refinement.</p>
+          </div>
+          <div class="chip-grid" data-filter="tag">
+            <button class="chip" type="button" data-value="new">New</button>
+            <button class="chip" type="button" data-value="featured">Featured</button>
+            <button class="chip" type="button" data-value="best_value">Best Value</button>
+            <button class="chip" type="button" data-value="limited">Limited</button>
+          </div>
+        </section>
+      </div>
+
+      <footer class="drawer-foot">
+        <button class="btn ghost" type="button" data-action="reset-filters">
+          Reset
+        </button>
+        <button class="btn primary" type="button" data-action="apply-filters">
+          Apply filters
+        </button>
+      </footer>
+    </div>
+  </aside>
+
+  <!-- Quick View Modal (optional; JS can implement later) -->
+  <div id="modalRoot" class="modal-root" aria-hidden="true"></div>
+
+  <!-- Toast (JS creates if needed; leaving container helps) -->
+  <div class="toast" aria-live="polite" role="status" hidden></div>
+</body>
+</html>

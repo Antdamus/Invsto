@@ -1,0 +1,406 @@
+<!-- index.html — OG Jewelry (Frontpage) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelry — Fine Jewelry</title>
+  <meta name="description" content="OG Jewelry — fine jewelry, timeless pieces, crafted to last." />
+
+  <!-- Open Graph / Social (replace placeholders later) -->
+  <meta property="og:title" content="OG Jewelry — Fine Jewelry" />
+  <meta property="og:description" content="Fine jewelry. Timeless value." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/og/og-cover.jpg" />
+  <meta property="og:url" content="https://your-domain.com" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="index.css" />
+
+  <!-- JS (defer so it runs after HTML parses) -->
+  <script defer src="index.js"></script>
+</head>
+
+<body>
+  <!-- Ambient background (purely decorative) -->
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-grain"></div>
+  </div>
+
+  <!-- Skip link for accessibility -->
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Header / Nav -->
+  <header class="site-header" data-elevate-on-scroll>
+    <div class="container header-inner">
+      <a class="brand" href="/" aria-label="OG Jewelers Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name">OG Jewelers</span>
+      </a>
+
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="nav-link" href="#collections">Collections</a>
+        <a class="nav-link" href="#featured">Featured</a>
+        <a class="nav-link" href="#story">Story</a>
+        <a class="nav-link" href="#contact">Contact</a>
+      </nav>
+
+      <div class="header-actions">
+        <!-- Optional: search later -->
+        <button class="btn ghost" type="button" data-action="open-search" aria-label="Search">
+          <span aria-hidden="true">⌕</span>
+        </button>
+
+        <!-- Primary CTA -->
+        <a class="btn primary" href="#collections">
+          View Collection
+        </a>
+
+        <!-- Mobile menu toggle -->
+        <button class="btn ghost icon-only nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
+          <span class="hamburger" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile menu panel -->
+    <div id="mobileMenu" class="mobile-menu" hidden>
+      <div class="container mobile-menu-inner">
+        <a class="mobile-link" href="#collections">Collections</a>
+        <a class="mobile-link" href="#featured">Featured</a>
+        <a class="mobile-link" href="#story">Story</a>
+        <a class="mobile-link" href="#contact">Contact</a>
+        <div class="mobile-cta">
+          <a class="btn primary" href="#collections">View Collection</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- HERO -->
+    <section class="hero" aria-label="OG Jewelry hero">
+      <div class="hero-media" aria-hidden="true">
+        <!-- Option A: video loop (recommended). Place file at assets/hero/hero.mp4 -->
+        <video class="hero-video" autoplay muted playsinline loop preload="metadata" poster="assets/hero/hero-poster.jpg">
+          <source src="assets/hero/hero.mp4" type="video/mp4" />
+        </video>
+
+        <!-- Option B: image fallback (kept via poster above). -->
+        <div class="hero-overlay"></div>
+      </div>
+
+      <div class="container hero-inner">
+        <div class="hero-content">
+          <p class="eyebrow">Fine Jewelry • Crafted to last</p>
+          <h1 class="hero-title">Timeless pieces, made to be worn.</h1>
+          <p class="hero-subtitle">
+            Gold, diamonds, and signature designs—curated with intention.
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn primary" href="#collections">Shop Collections</a>
+            <a class="btn ghost" href="#cta">Book a Private Viewing</a>
+          </div>
+
+          <div class="hero-micro">
+            <span class="micro-item">
+              <span class="dot" aria-hidden="true"></span> Secure checkout
+            </span>
+            <span class="micro-item">
+              <span class="dot" aria-hidden="true"></span> Authentic materials
+            </span>
+            <span class="micro-item">
+              <span class="dot" aria-hidden="true"></span> Fast shipping
+            </span>
+          </div>
+        </div>
+
+        <!-- Side card / highlight -->
+        <aside class="hero-card" aria-label="Featured highlight">
+          <div class="hero-card-top">
+            <span class="badge">Signature</span>
+            <span class="badge subtle">Limited</span>
+          </div>
+          <h2 class="hero-card-title">The OG Chain</h2>
+          <p class="hero-card-text">
+            A classic silhouette with a modern finish—built for daily wear.
+          </p>
+          <a class="link-arrow" href="#featured">
+            Explore featured pieces <span aria-hidden="true">→</span>
+          </a>
+        </aside>
+      </div>
+
+      <a class="scroll-cue" href="#trust" aria-label="Scroll to next section">
+        <span class="scroll-line" aria-hidden="true"></span>
+        <span class="scroll-text">Scroll</span>
+      </a>
+    </section>
+
+    <!-- TRUST STRIP -->
+    <section id="trust" class="trust-strip" aria-label="Trust and value">
+      <div class="container trust-grid">
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">✦</span>
+          <span class="trust-text">Authentic materials</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">⟡</span>
+          <span class="trust-text">Secure checkout</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">◆</span>
+          <span class="trust-text">Quality guaranteed</span>
+        </div>
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">⬖</span>
+          <span class="trust-text">Fast shipping</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- COLLECTIONS -->
+    <section id="collections" class="section">
+      <div class="container">
+        <header class="section-head">
+          <h2 class="section-title">Signature Collections</h2>
+          <p class="section-subtitle">
+            Curated categories—clean, bold, and timeless.
+          </p>
+        </header>
+
+        <div class="collections-grid">
+          <a class="collection-tile tile-large" href="collections/gold.html" aria-label="Shop Gold collection">
+            <div class="tile-bg" style="--img:url('assets/collections/gold.jpg');"></div>
+            <div class="tile-content">
+              <h3>Gold</h3>
+              <p>Warm classics, refined finish.</p>
+              <span class="tile-cta">Explore <span aria-hidden="true">→</span></span>
+            </div>
+          </a>
+
+          <a class="collection-tile" href="collections/diamonds.html" aria-label="Shop Diamonds collection">
+            <div class="tile-bg" style="--img:url('assets/collections/diamonds.jpg');"></div>
+            <div class="tile-content">
+              <h3>Diamonds</h3>
+              <p>Brilliant detail, subtle power.</p>
+              <span class="tile-cta">Explore <span aria-hidden="true">→</span></span>
+            </div>
+          </a>
+
+          <a class="collection-tile" href="collections/chains.html" aria-label="Shop Chains collection">
+            <div class="tile-bg" style="--img:url('assets/collections/chains.jpg');"></div>
+            <div class="tile-content">
+              <h3>Chains</h3>
+              <p>Everyday pieces with weight.</p>
+              <span class="tile-cta">Explore <span aria-hidden="true">→</span></span>
+            </div>
+          </a>
+
+          <a class="collection-tile" href="collections/signature.html" aria-label="Shop Signature collection">
+            <div class="tile-bg" style="--img:url('assets/collections/signature.jpg');"></div>
+            <div class="tile-content">
+              <h3>Signature</h3>
+              <p>Limited drops & standout designs.</p>
+              <span class="tile-cta">Explore <span aria-hidden="true">→</span></span>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURED PIECES -->
+    <section id="featured" class="section section-muted">
+      <div class="container">
+        <header class="section-head row">
+          <div>
+            <h2 class="section-title">Featured Pieces</h2>
+            <p class="section-subtitle">
+              A few favorites—selected for shape, finish, and presence.
+            </p>
+          </div>
+          <a class="btn ghost" href="shop.html">View all</a>
+        </header>
+
+        <div class="featured-grid">
+          <article class="product-card">
+            <a class="product-media" href="product.html" aria-label="View product: Diamond Studs">
+              <img src="assets/featured/diamond-studs.jpg" alt="Diamond stud earrings on a dark background" loading="lazy" />
+            </a>
+            <div class="product-body">
+              <h3 class="product-title">Diamond Studs</h3>
+              <p class="product-meta">Clean sparkle • Everyday</p>
+              <div class="product-actions">
+                <a class="link-arrow" href="product.html">View details <span aria-hidden="true">→</span></a>
+              </div>
+            </div>
+          </article>
+
+          <article class="product-card">
+            <a class="product-media" href="product.html" aria-label="View product: Gold Rope Chain">
+              <img src="assets/featured/gold-rope.jpg" alt="Gold rope chain close-up" loading="lazy" />
+            </a>
+            <div class="product-body">
+              <h3 class="product-title">Gold Rope Chain</h3>
+              <p class="product-meta">Bold classic • Heavy feel</p>
+              <div class="product-actions">
+                <a class="link-arrow" href="product.html">View details <span aria-hidden="true">→</span></a>
+              </div>
+            </div>
+          </article>
+
+          <article class="product-card">
+            <a class="product-media" href="product.html" aria-label="View product: Signature Pendant">
+              <img src="assets/featured/signature-pendant.jpg" alt="Signature pendant with gold accents" loading="lazy" />
+            </a>
+            <div class="product-body">
+              <h3 class="product-title">Signature Pendant</h3>
+              <p class="product-meta">Limited • Polished edge</p>
+              <div class="product-actions">
+                <a class="link-arrow" href="product.html">View details <span aria-hidden="true">→</span></a>
+              </div>
+            </div>
+          </article>
+
+          <article class="product-card">
+            <a class="product-media" href="product.html" aria-label="View product: Tennis Bracelet">
+              <img src="assets/featured/tennis-bracelet.jpg" alt="Diamond tennis bracelet detail shot" loading="lazy" />
+            </a>
+            <div class="product-body">
+              <h3 class="product-title">Tennis Bracelet</h3>
+              <p class="product-meta">Iconic line • Smooth shine</p>
+              <div class="product-actions">
+                <a class="link-arrow" href="product.html">View details <span aria-hidden="true">→</span></a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- STORY -->
+    <section id="story" class="section">
+      <div class="container story-grid">
+        <div class="story-copy">
+          <h2 class="section-title">Made with intention.</h2>
+          <p class="story-text">
+            OG Jewelry is built on craftsmanship and clarity—pieces that feel premium,
+            wear comfortably, and hold their value in design. We focus on timeless shapes,
+            refined finishes, and details you can see up close.
+          </p>
+
+          <div class="story-actions">
+            <a class="btn primary" href="#cta">Book a private viewing</a>
+            <a class="btn ghost" href="about.html">Learn more</a>
+          </div>
+
+          <div class="story-points" role="list">
+            <div class="story-point" role="listitem">
+              <span class="mini-icon" aria-hidden="true">✦</span>
+              <span>Curated selection, no clutter</span>
+            </div>
+            <div class="story-point" role="listitem">
+              <span class="mini-icon" aria-hidden="true">✦</span>
+              <span>Premium look and feel</span>
+            </div>
+            <div class="story-point" role="listitem">
+              <span class="mini-icon" aria-hidden="true">✦</span>
+              <span>Support when you need it</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="story-media" aria-hidden="true">
+          <div class="story-image" style="--img:url('assets/story/craft.jpg');"></div>
+          <div class="story-caption">
+            <span class="badge subtle">Craft</span>
+            <span class="caption-text">Close-up finishes that hold up in real life.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="cta" class="section section-cta">
+      <div class="container cta-card">
+        <div class="cta-left">
+          <h2 class="cta-title">Join private drops.</h2>
+          <p class="cta-text">
+            Early access to limited releases and exclusive offers—kept tasteful, never spammy.
+          </p>
+        </div>
+
+        <form class="cta-form" action="#" method="post" aria-label="Join private drops">
+          <label class="sr-only" for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="Email address" autocomplete="email" required />
+          <button class="btn primary" type="submit">Join</button>
+          <p class="cta-note">By joining, you agree to receive emails from OG Jewelry.</p>
+        </form>
+      </div>
+    </section>
+
+    <!-- CONTACT / FOOTER -->
+    <footer id="contact" class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <div class="brand-row">
+            <span class="brand-mark" aria-hidden="true">OG</span>
+            <span class="brand-name">OG Jewelry</span>
+          </div>
+          <p class="footer-text">
+            Fine jewelry. Timeless value. Crafted with intention.
+          </p>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Explore</h3>
+          <a href="#collections">Collections</a>
+          <a href="#featured">Featured</a>
+          <a href="shop.html">Shop</a>
+          <a href="about.html">About</a>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Support</h3>
+          <a href="shipping.html">Shipping</a>
+          <a href="returns.html">Returns</a>
+          <a href="care.html">Care</a>
+          <a href="contact.html">Contact</a>
+        </div>
+
+        <div class="footer-col">
+          <h3 class="footer-title">Connect</h3>
+          <a href="#" rel="noopener">Instagram</a>
+          <a href="#" rel="noopener">TikTok</a>
+          <a href="#" rel="noopener">YouTube</a>
+          <a href="mailto:support@your-domain.com">support@your-domain.com</a>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>© <span id="year">2026</span> OG Jewelry. All rights reserved.</p>
+        <div class="footer-legal">
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Future: Chatbot mount point (keeps things framework-free) -->
+  <div id="chatbot-root" aria-live="polite" aria-label="Chat support"></div>
+
+  <!-- Optional: lightweight modal container for later use -->
+  <div id="modal-root" aria-hidden="true"></div>
+</body>
+</html>
