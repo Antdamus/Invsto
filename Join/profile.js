@@ -69,6 +69,21 @@
     try { return JSON.parse(s); } catch { return null; }
   }
 
+function isNewMemberRow(member) {
+  // New row typically has created_at ≈ updated_at (no updates yet)
+  // We'll treat "new" as created/updated within ~90 seconds.
+  if (!member?.created_at || !member?.updated_at) return false;
+
+  const c = new Date(member.created_at).getTime();
+  const u = new Date(member.updated_at).getTime();
+
+  if (!Number.isFinite(c) || !Number.isFinite(u)) return false;
+
+  const diff = Math.abs(u - c);
+  return diff < 90_000; // 90 seconds
+}
+
+
   function getJoinContext() {
     return safeParseJSON(localStorage.getItem(LS_JOIN_CTX)) || null;
   }
@@ -169,117 +184,128 @@
   // ---------------------------
   // Main init
   // ---------------------------
-  async function init() {
-    if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+async function init() {
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-    // modal wiring
-    vipCloseBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
-    vipNotNowBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
-    vipBackdrop?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
+  // modal wiring
+  vipCloseBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
+  vipNotNowBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
+  vipBackdrop?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
 
-    vipUpgradeBtn?.addEventListener("click", () => {
-      hideVipModal();
-      markVipModalShown();
-      window.location.hash = "vip";
-      $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+  vipUpgradeBtn?.addEventListener("click", () => {
+    hideVipModal();
+    markVipModalShown();
+    window.location.hash = "vip";
+    $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 
-    vipLearnBtn?.addEventListener("click", () => {
-      window.location.hash = "vip";
-      $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      showVipModal();
-    });
+  vipLearnBtn?.addEventListener("click", () => {
+    window.location.hash = "vip";
+    $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    showVipModal();
+  });
 
-    vipOpenBtn?.addEventListener("click", () => showVipModal());
+  vipOpenBtn?.addEventListener("click", () => showVipModal());
 
-    // sign out
-    signOutBtn?.addEventListener("click", onSignOut);
+  // sign out
+  signOutBtn?.addEventListener("click", onSignOut);
 
-    // ensure supabase exists
-    await waitForSupabaseReady();
-    if (!window.supabase) {
-      setSubtitle("Supabase is not initialized.");
-      setStatus("Check initSupabase.js loading order.", "error");
-      return;
-    }
+  // ensure supabase exists
+  await waitForSupabaseReady();
+  if (!window.supabase) {
+    setSubtitle("Supabase is not initialized.");
+    setStatus("Check initSupabase.js loading order.", "error");
+    return;
+  }
 
-    // require session
-    const { data: { session }, error } = await window.supabase.auth.getSession();
-    if (error) console.warn("Session error:", error);
+  // require session
+  const { data: { session }, error } = await window.supabase.auth.getSession();
+  if (error) console.warn("Session error:", error);
 
-    if (!session) {
-      window.location.href = "join.html";
-      return;
-    }
+  if (!session) {
+    window.location.href = "join.html";
+    return;
+  }
 
-    const user = session.user;
-    const userId = user?.id;
-    const email = user?.email || "—";
-    if (!userId) {
-      setSubtitle("Missing user session.");
-      setStatus("Please sign in again.", "error");
-      window.location.href = "join.html";
-      return;
-    }
+  const user = session.user;
+  const userId = user?.id;
+  const email = user?.email || "—";
 
-    if (emailValueEl) emailValueEl.textContent = email;
+  if (!userId) {
+    setSubtitle("Missing user session.");
+    setStatus("Please sign in again.", "error");
+    window.location.href = "join.html";
+    return;
+  }
 
-    const ctx = getJoinContext();
+  if (emailValueEl) emailValueEl.textContent = email;
 
-    // Upsert + fetch member row
-    let member;
-    try {
-      member = await upsertAndFetchMember({ userId, email, ctx });
-    } catch (e) {
-      console.error("Member upsert/fetch failed:", e);
-      // Fall back to local-only behavior
-      member = null;
-      setStatus("⚠️ Could not load your saved profile yet. Using local settings for now.", "error");
-    }
+  const ctx = getJoinContext();
 
-    // Hydrate UI from member row (preferred), else local
-    const localPrefs = getPrefsLocal() || {};
-    const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
-    const emailAlerts = (member?.email_alerts ?? localPrefs?.emailAlerts ?? true);
-    const earlyAccess = (member?.early_access ?? localPrefs?.earlyAccess ?? true);
+  // Upsert + fetch member row
+  let member = null;
+  let isNew = false;
 
-    if (nameInput) nameInput.value = name;
-    if (emailAlertsToggle) emailAlertsToggle.checked = !!emailAlerts;
-    if (earlyAccessToggle) earlyAccessToggle.checked = !!earlyAccess;
+  try {
+    member = await upsertAndFetchMember({ userId, email, ctx });
+    isNew = isNewMemberRow(member);
+  } catch (e) {
+    console.error("Member upsert/fetch failed:", e);
+    setStatus("⚠️ Could not load your saved profile yet. Using local settings for now.", "error");
+  }
 
-    // Source chip
-    const src = member?.source || ctx?.src || "direct";
-    const campaign = member?.campaign || ctx?.campaign || "";
-    if (sourceChip) {
-      sourceChip.textContent = campaign ? `source: ${src} • ${campaign}` : `source: ${src}`;
-    }
+  // Hydrate UI from member row (preferred), else local
+  const localPrefs = getPrefsLocal() || {};
+  const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
+  const emailAlerts = (member?.email_alerts ?? localPrefs?.emailAlerts ?? true);
+  const earlyAccess = (member?.early_access ?? localPrefs?.earlyAccess ?? true);
 
-    setMemberPill("Member");
+  if (nameInput) nameInput.value = name;
+  if (emailAlertsToggle) emailAlertsToggle.checked = !!emailAlerts;
+  if (earlyAccessToggle) earlyAccessToggle.checked = !!earlyAccess;
 
-    // Tier pill (future)
-    const vipStatus = member?.vip_status || "free";
-    if (tierPill) tierPill.textContent = vipStatus === "vip" ? "VIP Member" : "Free Member";
+  // Source chip
+  const src = member?.source || ctx?.src || "direct";
+  const campaign = member?.campaign || ctx?.campaign || "";
+  if (sourceChip) {
+    sourceChip.textContent = campaign ? `source: ${src} • ${campaign}` : `source: ${src}`;
+  }
 
-    // Subtitle greeting
+  setMemberPill("Member");
+
+  // Tier pill (future)
+  const vipStatus = member?.vip_status || "free";
+  if (tierPill) tierPill.textContent = vipStatus === "vip" ? "VIP Member" : "Free Member";
+
+  // Greeting + success moment (NEW vs RETURNING)
+  if (isNew) {
+    setSubtitle("Welcome to OG. Your membership is active.");
+    setStatus("✅ Membership activated. You’re on the list for live alerts and early access.", "success");
+  } else {
     const greet = name ? `Welcome back, ${name}.` : "Welcome back.";
     setSubtitle(`${greet} Manage your alerts and access here.`);
-
-    // Save handlers
-    saveNameBtn?.addEventListener("click", () => saveName(userId));
-    savePrefsBtn?.addEventListener("click", () => savePrefs(userId));
-
-    // Success moment (keep gentle)
-    setStatus("✅ You’re in. Your membership is active.", "success");
-
-    // Soft VIP modal once (per browser for now)
-    if (shouldSoftShowVipModal()) {
-      window.setTimeout(() => showVipModal(), 650);
-    }
-
-    if (window.location.hash === "#vip") {
-      $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    // keep status quiet for returning users
+    setStatus("", "info");
   }
+
+  // Save handlers
+  saveNameBtn?.addEventListener("click", () => saveName(userId));
+  savePrefsBtn?.addEventListener("click", () => savePrefs(userId));
+
+  // Soft VIP modal: only for NEW members (and only once per browser)
+ if (isNew && shouldSoftShowVipModal()) {
+  window.setTimeout(() => {
+    showVipModal();
+    markVipModalShown();
+  }, 650);
+}
+
+
+  if (window.location.hash === "#vip") {
+    $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 
   // ---------------------------
   // Actions
