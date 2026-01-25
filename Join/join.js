@@ -206,10 +206,12 @@
 
       if (error) throw error;
 
-      setStatus(
-        "✅ Check your email — we sent a secure sign-in link. Open it on this device to finish.",
-        "success"
-      );
+ statusEl.innerHTML = `
+  <strong>✅ Secure sign-in link sent.</strong><br>
+  <span class="muted">If that email is valid, check your inbox. No email? Check spam, then try again in 60 seconds.</span>
+`;
+statusEl.className = "status success";
+
       setLoading(false);
 
       // Light UX: lock inputs to prevent repeated submits without intent
