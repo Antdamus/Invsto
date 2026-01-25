@@ -1180,3 +1180,49 @@ select{
     transition: none !important;
   }
 }
+
+/* =========================
+   Spot Ticker (Luxury Live)
+========================= */
+.spot-ticker{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+
+  background: rgba(18, 19, 22, 0.55);
+  border: 1px solid rgba(200, 162, 74, 0.22);
+  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  color: var(--ivory);
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+.spot-dot{
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--gold-2);
+  box-shadow: 0 0 0 0 rgba(227, 200, 120, 0.55);
+  animation: spotPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes spotPulse{
+  0%   { box-shadow: 0 0 0 0 rgba(227, 200, 120, 0.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(227, 200, 120, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(227, 200, 120, 0); }
+}
+
+.spot-ticker .spot-text b{
+  color: var(--gold-2);
+  font-weight: 600;
+}
+.spot-ticker .spot-text .muted{
+  color: rgba(244, 241, 234, 0.65);
+}
