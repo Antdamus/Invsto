@@ -349,13 +349,6 @@
     saveNameBtn?.addEventListener("click", () => saveName(sb, userId));
     savePrefsBtn?.addEventListener("click", () => savePrefs(sb, userId));
 
-    // Soft VIP modal only for NEW members (and only once)
-    if (isNew && shouldSoftShowVipModal()) {
-      window.setTimeout(() => {
-        showVipModal();
-        markVipModalShown(); // once means once
-      }, 650);
-    }
 
     if (window.location.hash === "#vip") {
       $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
