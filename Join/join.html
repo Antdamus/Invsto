@@ -1,0 +1,181 @@
+<!-- join.html — OG Jewelers (Join / Alerts Signup) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Join</title>
+  <meta name="description" content="Join OG Jewelers alerts for live notifications and early access." />
+
+  <!-- Fonts (match your luxury system) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet" />
+
+  <!-- Page CSS -->
+  <link rel="stylesheet" href="join.css" />
+</head>
+
+<body>
+  <!-- Ambient background -->
+  <div class="bg">
+    <div class="bg-noise"></div>
+    <div class="bg-glow"></div>
+  </div>
+
+  <!-- Top brand bar -->
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+      <span class="brand-mark">OG</span>
+      <span class="brand-name">OG Jewelers</span>
+    </a>
+
+    <div class="topbar-right">
+      <!-- Optional: tiny hint of source for debugging -->
+      <span class="pill" id="sourcePill" title="Signup source">source: —</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card" aria-labelledby="joinTitle">
+      <div class="hero">
+        <h1 id="joinTitle" class="title">Get Live Alerts + Early Access</h1>
+        <p class="subtitle" id="subtitleText">
+          Join for free. We’ll only email you for lives, drops, and important releases.
+        </p>
+
+        <!-- Trust row -->
+        <div class="trust">
+          <span class="trust-item">No spam</span>
+          <span class="dot"></span>
+          <span class="trust-item">Unsubscribe anytime</span>
+          <span class="dot"></span>
+          <span class="trust-item">1 minute signup</span>
+        </div>
+      </div>
+
+      <!-- Form -->
+      <form id="joinForm" class="form" autocomplete="on" novalidate>
+        <!-- Context -->
+        <input type="hidden" id="src" name="src" value="" />
+        <input type="hidden" id="campaign" name="campaign" value="" />
+
+        <div class="field">
+          <label for="name">Name <span class="muted">(optional)</span></label>
+          <input id="name" name="name" type="text" placeholder="Your name" autocomplete="name" />
+        </div>
+
+        <div class="field">
+          <label for="email">Email <span class="req">*</span></label>
+          <input id="email" name="email" type="email" placeholder="you@email.com" autocomplete="email" inputmode="email" required />
+          <div class="hint">We’ll send you a secure sign-in link.</div>
+        </div>
+
+        <div class="consent">
+          <label class="check">
+            <input type="checkbox" id="consent" required />
+            <span>
+              I agree to receive email notifications about OG Jewelers lives, drops, and early access.
+            </span>
+          </label>
+          <p class="fineprint">
+            By joining, you agree to our <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
+          </p>
+        </div>
+
+        <button id="submitBtn" class="btn primary" type="submit">
+          <span class="btn-text">Join Free</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+
+      <!-- Divider -->
+      <div class="divider"><span>After you join</span></div>
+
+      <!-- What happens next -->
+      <div class="next">
+        <div class="next-item">
+          <div class="icon">🔔</div>
+          <div class="next-text">
+            <div class="next-title">Live alerts</div>
+            <div class="next-sub">We’ll notify you before we go live.</div>
+          </div>
+        </div>
+
+        <div class="next-item">
+          <div class="icon">⚡</div>
+          <div class="next-text">
+            <div class="next-title">Early access</div>
+            <div class="next-sub">Get first shot at limited inventory.</div>
+          </div>
+        </div>
+
+        <div class="next-item">
+          <div class="icon">👑</div>
+          <div class="next-text">
+            <div class="next-title">Optional VIP</div>
+            <div class="next-sub">Unlock member-only discounts + raffles.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tiny footer -->
+    <footer class="foot">
+      <span>© <span id="year"></span> OG Jewelers</span>
+      <span class="sep">•</span>
+      <a href="shop.html">Shop</a>
+      <span class="sep">•</span>
+      <a href="privacy.html">Privacy</a>
+    </footer>
+  </main>
+
+  <!-- VIP Upsell Modal (HTML only for now; we wire it later) -->
+  <div class="modal-backdrop" id="vipBackdrop" hidden></div>
+  <div class="modal" id="vipModal" role="dialog" aria-modal="true" aria-labelledby="vipTitle" hidden>
+    <div class="modal-shell">
+      <div class="modal-head">
+        <h2 id="vipTitle">Unlock VIP Access?</h2>
+        <button class="icon-btn" id="vipCloseBtn" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <p class="modal-sub">
+        VIP members get early links, exclusive eBay Live discounts, and raffle perks.
+      </p>
+
+      <div class="vip-grid">
+        <div class="vip-card">
+          <div class="vip-kicker">Discount Codes</div>
+          <div class="vip-desc">Members-only codes during lives.</div>
+        </div>
+        <div class="vip-card">
+          <div class="vip-kicker">Early Drops</div>
+          <div class="vip-desc">Access inventory before public.</div>
+        </div>
+        <div class="vip-card">
+          <div class="vip-kicker">Raffles</div>
+          <div class="vip-desc">Bonus perks and surprise wins.</div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" id="vipNotNowBtn" type="button">Not now</button>
+        <button class="btn primary" id="vipUpgradeBtn" type="button">See VIP Plans</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Supabase JS (we’ll use this in join.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Your shared init (if you already have one, keep it; otherwise we’ll create in JS step) -->
+  <script src="initSupabase.js"></script> 
+
+  <!-- Page JS -->
+  <script src="join.js"></script>
+</body>
+</html>
