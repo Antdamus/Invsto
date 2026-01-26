@@ -2,22 +2,13 @@
    Ultra-aesthetic, framework-free catalog with:
    - URL-driven filters (category/material/tag/q/minPrice/maxPrice/sort/page/view)
    - Filter drawer (open/close, backdrop, escape, focus behavior)
-   - Chip-based filters + removable active chips
-   - Search with debounce
-   - Sort + pagination
+   - Chip-based filter summary
+   - Pagination
    - Grid/List view toggle
-   - Demo dataset (swap later to Supabase/JSON fetch without changing UI logic)
+   - Mobile-first UI polish
 
-   Query params supported:
-   - category=gold&category=chains (multi)
-   - material=gold (multi)
-   - tag=featured (multi)
-   - q=rope
-   - minPrice=0
-   - maxPrice=750
-   - sort=featured|newest|price_asc|price_desc|name_asc
-   - page=1
-   - view=grid|list
+   IMPORTANT: This public storefront reads inventory via a Supabase Edge Function
+   and shows only "published" listings.
 */
 
 (() => {
@@ -26,25 +17,16 @@
   /* =========================
      Tiny helpers
   ========================= */
-  const qs = (sel, root = document) => root.querySelector(sel);
-  const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const prefersReducedMotion = () =>
-    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  const clampInt = (n, a, b) => {
-    const x = Number.isFinite(n) ? n : parseInt(String(n || ""), 10);
-    const v = Number.isFinite(x) ? x : a;
-    return Math.max(a, Math.min(b, v));
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const toNum = (x, fallback = 0) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : fallback;
   };
 
-  const formatUSD = (n) => {
-    const v = Number(n);
-    if (!Number.isFinite(v)) return "";
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
-  };
-
-  const esc = (s) =>
+  const escapeHtml = (s) =>
     String(s ?? "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -52,81 +34,110 @@
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-   /* =========================
+  /* =========================
      Data source (Supabase Edge Function)
   ========================= */
   const SUPABASE_PROJECT_URL = "https://byhytmarmigalvawkedi.supabase.co"; // <-- your project
   const STOREFRONT_CHANNEL = "og_main";
   const FALLBACK_IMAGE = "assets/collections/chains.jpg";
 
-async function fetchSpotSnapshot(){
-  const url = `${SUPABASE_PROJECT_URL}/functions/v1/spot-snapshot`;
-  const res = await fetch(url, { method: "GET", cache: "no-store" });
+  // ✅ IMPORTANT: set this to your PUBLIC bucket name that holds storefront images
+  // (This is the bucket where your admin uploads cover images / product photos for the public site.)
+  const PUBLIC_PHOTO_BUCKET = "public-ebay-photos";
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`spot_snapshot_failed (${res.status}) ${text}`);
-  }
+  const isHttpUrl = (s) => /^https?:\/\//i.test(String(s || ""));
 
-  const json = await res.json();
-  return Array.isArray(json?.rows) ? json.rows : [];
-}
-
-
-function fmtMoney(n){
-  // USD per gram - show 2 decimals (gold), 3 decimals (silver) optional, but we’ll keep it consistent:
-  return Number(n).toFixed(2);
-}
-
-function fmtTime(ts){
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-async function renderSpotTicker(){
-  const el = document.getElementById('spotTicker');
-  if (!el) return;
-
-  try{
-    const rows = await fetchSpotSnapshot();
-    const gold = rows.find(r => r.metal === 'gold');
-    const silver = rows.find(r => r.metal === 'silver');
-
-    if (!gold || !silver){
-      el.querySelector('.spot-text').textContent = 'Spot unavailable';
-      return;
-    }
-
-    const asOf = gold.as_of || silver.as_of;
-    const time = asOf ? fmtTime(asOf) : '';
-
-    el.querySelector('.spot-text').innerHTML =
-      `<b>Gold</b> $${fmtMoney(gold.price_per_gram)}/g
-       <span class="muted">•</span>
-       <b>Silver</b> $${fmtMoney(silver.price_per_gram)}/g
-       <span class="muted">• Updated ${time}</span>`;
-  } catch (e){
-    console.error('Spot ticker error:', e);
-    const txt = el.querySelector('.spot-text');
-    if (txt) txt.textContent = 'Spot unavailable';
-  }
-}
-
-function initSpotTicker(){
-  renderSpotTicker();
-  setInterval(renderSpotTicker, 60 * 1000);
-}
-
-  // This becomes the live dataset (replaces demo PRODUCTS)
-  let PRODUCTS = [];
-
-  const fiveMinBucket = () => Math.floor(Date.now() / 300000); // 5 min
-  const toNum = (x) => {
-    const n = Number(x);
-    return Number.isFinite(n) ? n : 0;
+  const publicObjectUrl = (bucket, key) => {
+    const k = String(key || "").replace(/^\/+/, "");
+    if (!k) return "";
+    return `${SUPABASE_PROJECT_URL}/storage/v1/object/public/${bucket}/${encodeURI(k)}`;
   };
 
-  // Map RPC item -> UI product shape used by the existing UI logic
+  const pickBestImageUrl = (row) => {
+    // 1) Admin-controlled listing override (storefront_listings.public_photo_keys)
+    const keys = Array.isArray(row?.public_photo_keys) ? row.public_photo_keys : [];
+    if (keys.length && keys[0]) return publicObjectUrl(PUBLIC_PHOTO_BUCKET, keys[0]);
+
+    // 2) Direct URL (or key) on item_types.photo_url
+    if (row?.photo_url) {
+      if (isHttpUrl(row.photo_url)) return row.photo_url;
+      return publicObjectUrl(PUBLIC_PHOTO_BUCKET, row.photo_url);
+    }
+
+    // 3) item_types.photos array (either URLs or storage keys)
+    const photos = Array.isArray(row?.photos) ? row.photos : [];
+    const first = photos[0];
+    if (first) return isHttpUrl(first) ? first : publicObjectUrl(PUBLIC_PHOTO_BUCKET, first);
+
+    // 4) fallback
+    return FALLBACK_IMAGE;
+  };
+
+  async function fetchSpotSnapshot() {
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/spot-snapshot`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`spot-snapshot failed: ${res.status}`);
+    return res.json();
+  }
+
+  /* =========================
+     URL State
+  ========================= */
+  const DEFAULTS = {
+    q: "",
+    category: "all",
+    material: "all",
+    tag: "all",
+    minPrice: "",
+    maxPrice: "",
+    sort: "featured",
+    page: 1,
+    view: "grid",
+  };
+
+  const readStateFromUrl = () => {
+    const p = new URLSearchParams(location.search);
+
+    const s = {
+      q: p.get("q") ?? DEFAULTS.q,
+      category: p.get("category") ?? DEFAULTS.category,
+      material: p.get("material") ?? DEFAULTS.material,
+      tag: p.get("tag") ?? DEFAULTS.tag,
+      minPrice: p.get("minPrice") ?? DEFAULTS.minPrice,
+      maxPrice: p.get("maxPrice") ?? DEFAULTS.maxPrice,
+      sort: p.get("sort") ?? DEFAULTS.sort,
+      page: toNum(p.get("page") ?? DEFAULTS.page, 1),
+      view: p.get("view") ?? DEFAULTS.view,
+    };
+
+    s.page = clamp(s.page, 1, 9999);
+    if (!["grid", "list"].includes(s.view)) s.view = "grid";
+
+    return s;
+  };
+
+  const writeStateToUrl = (state, replace = true) => {
+    const p = new URLSearchParams();
+
+    for (const [k, v] of Object.entries(state)) {
+      if (v == null) continue;
+      if (String(v) === String(DEFAULTS[k])) continue;
+      if (String(v).trim() === "" && String(DEFAULTS[k]).trim() === "") continue;
+      p.set(k, String(v));
+    }
+
+    const newUrl = `${location.pathname}${p.toString() ? "?" + p.toString() : ""}${location.hash || ""}`;
+    if (replace) history.replaceState(null, "", newUrl);
+    else history.pushState(null, "", newUrl);
+  };
+
+  /* =========================
+     In-memory data
+  ========================= */
+  let allProducts = []; // normalized list used by UI
+  let spot = null;      // spot snapshot (if used by your UI)
+
+  // > UI product shape used by the existing UI logic
   const mapStoreItemToProduct = (it) => {
     const cats = Array.isArray(it.categories) ? it.categories : [];
     const category = String(cats[0] || "all").toLowerCase();
@@ -135,812 +146,275 @@ function initSpotTicker(){
 
     return {
       id: String(it.item_type_id),
-      name: String(it.title || ""),
+      name: String(it.public_title || it.title || ""),
       category,
-      material: String(it.material || "").toLowerCase(), // returned by RPC if you added it; otherwise empty ok
+      material: String(it.metal || "").toLowerCase(),
       price: toNum(it.display_price),
       tags,
-      created_at: new Date().toISOString(), // (optional) upgrade later if you add created_at to RPC
-      image: it.image_url || FALLBACK_IMAGE,
+      created_at: it.created_at ? new Date(it.created_at).toISOString() : new Date().toISOString(),
+      image: pickBestImageUrl(it),
     };
   };
 
+  /* =========================
+     Data load
+  ========================= */
+  const fiveMinBucket = () => Math.floor(Date.now() / (5 * 60 * 1000));
+
   const loadCatalog = async () => {
     const t = fiveMinBucket();
-    const url = `${SUPABASE_PROJECT_URL}/functions/v1/storefront-catalog?channel=${encodeURIComponent(
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/public-storefront?channel_id=${encodeURIComponent(
       STOREFRONT_CHANNEL
     )}&t=${t}`;
 
     const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        // For most setups, anon key is NOT required if verify_jwt is off.
-        // If your function requires JWT, add Authorization/apikey here later.
-        "Content-Type": "application/json",
-      },
+      headers: { "Accept": "application/json" },
       cache: "no-store",
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`catalog_fetch_failed (${res.status}) ${text}`);
+      const txt = await res.text().catch(() => "");
+      throw new Error(`public-storefront failed ${res.status}: ${txt}`);
     }
 
-    const data = await res.json();
-    const items = Array.isArray(data?.items) ? data.items : [];
-    PRODUCTS = items.map(mapStoreItemToProduct);
-  };
-
-
-  /* =========================
-     State
-  ========================= */
-  const DEFAULTS = {
-    q: "",
-    category: new Set(),
-    material: new Set(),
-    tag: new Set(),
-    minPrice: "",
-    maxPrice: "",
-    sort: "featured",
-    page: 1,
-    view: "grid",
-  };
-
-  const state = {
-    ...DEFAULTS,
-    pageSize: 12, // adjust later
+    const rows = await res.json();
+    const list = Array.isArray(rows?.items) ? rows.items : (Array.isArray(rows) ? rows : []);
+    allProducts = list.map(mapStoreItemToProduct);
   };
 
   /* =========================
-     DOM
+     Filtering / sorting
   ========================= */
-  const header = qs("[data-elevate-on-scroll]");
-  const yearEl = qs("#year");
+  const normalize = (s) => String(s || "").trim().toLowerCase();
 
-  const navToggle = qs(".nav-toggle");
-  const mobileMenu = qs("#mobileMenu");
+  const applyFilters = (products, state) => {
+    const q = normalize(state.q);
+    const cat = normalize(state.category);
+    const mat = normalize(state.material);
+    const tag = normalize(state.tag);
 
-  const qInput = qs("#q");
-  const clearSearchBtn = qs('[data-action="clear-search"]');
+    const minP = state.minPrice === "" ? null : toNum(state.minPrice, null);
+    const maxP = state.maxPrice === "" ? null : toNum(state.maxPrice, null);
 
-  const sortSel = qs("#sort");
-  const openFiltersBtn = qs('[data-action="open-filters"]');
-  const resetBtns = qsa('[data-action="reset-filters"]');
+    return products.filter((p) => {
+      if (cat && cat !== "all" && normalize(p.category) !== cat) return false;
+      if (mat && mat !== "all" && normalize(p.material) !== mat) return false;
+      if (tag && tag !== "all" && !p.tags.map(normalize).includes(tag)) return false;
 
-  const chipsWrap = qs("#chips");
-  const activePill = qs("#activeFiltersPill");
-
-  const grid = qs("#grid");
-  const emptyState = qs("#emptyState");
-
-  const resultsCount = qs("#resultsCount");
-  const resultsCountInline = qs("#resultsCountInline");
-
-  const pathContext = qs("#pathContext");
-
-  const pageNum = qs("#pageNum");
-  const pageTotal = qs("#pageTotal");
-  const prevBtn = qs('[data-action="prev-page"]');
-  const nextBtn = qs('[data-action="next-page"]');
-  const toggleViewBtn = qs('[data-action="toggle-view"]');
-
-  // Drawer
-  const drawer = qs("#filtersDrawer");
-  const backdrop = qs(".drawer-backdrop");
-  const applyBtn = qs('[data-action="apply-filters"]');
-  const closeBtns = qsa('[data-action="close-filters"]');
-
-  // Drawer fields
-  const minPriceInput = qs("#minPrice");
-  const maxPriceInput = qs("#maxPrice");
-  const chipGrids = qsa(".chip-grid"); // each has data-filter
-  const presetPriceBtns = qsa('[data-action="preset-price"]');
-
-  // Toast
-  const toastEl = qs(".toast");
-  let toastTimer = null;
-
-  /* =========================
-     Header elevate on scroll
-  ========================= */
-  const setHeaderState = () => {
-    if (!header) return;
-    header.classList.toggle("is-elevated", (window.scrollY || 0) > 6);
-  };
-
-  /* =========================
-     URL <-> State
-  ========================= */
-  const parseParams = () => new URLSearchParams(window.location.search);
-
-  const readMulti = (params, key) => new Set(params.getAll(key).map((v) => String(v).trim()).filter(Boolean));
-
-  const writeMulti = (params, key, set) => {
-    params.delete(key);
-    Array.from(set).forEach((v) => params.append(key, v));
-  };
-
-  const readStateFromURL = () => {
-    const p = parseParams();
-
-    state.q = (p.get("q") || "").trim();
-
-    state.category = readMulti(p, "category");
-    state.material = readMulti(p, "material");
-    state.tag = readMulti(p, "tag");
-
-    state.minPrice = (p.get("minPrice") || "").trim();
-    state.maxPrice = (p.get("maxPrice") || "").trim();
-
-    state.sort = (p.get("sort") || DEFAULTS.sort).trim();
-    state.view = (p.get("view") || DEFAULTS.view).trim();
-
-    state.page = clampInt(parseInt(p.get("page") || "1", 10), 1, 9999);
-
-    // Safety: only allow known values
-    if (!["featured", "newest", "price_asc", "price_desc", "name_asc"].includes(state.sort)) {
-      state.sort = DEFAULTS.sort;
-    }
-    if (!["grid", "list"].includes(state.view)) {
-      state.view = DEFAULTS.view;
-    }
-  };
-
-  const writeURLFromState = (replace = false) => {
-    const p = new URLSearchParams();
-
-    if (state.q) p.set("q", state.q);
-    if (state.minPrice !== "") p.set("minPrice", state.minPrice);
-    if (state.maxPrice !== "") p.set("maxPrice", state.maxPrice);
-
-    writeMulti(p, "category", state.category);
-    writeMulti(p, "material", state.material);
-    writeMulti(p, "tag", state.tag);
-
-    if (state.sort && state.sort !== DEFAULTS.sort) p.set("sort", state.sort);
-    if (state.view && state.view !== DEFAULTS.view) p.set("view", state.view);
-    if (state.page && state.page !== 1) p.set("page", String(state.page));
-
-    const newUrl = `${window.location.pathname}${p.toString() ? "?" + p.toString() : ""}`;
-    if (replace) history.replaceState(null, "", newUrl);
-    else history.pushState(null, "", newUrl);
-  };
-
-  /* =========================
-     UI sync from state
-  ========================= */
-  const syncControlsFromState = () => {
-    if (qInput) qInput.value = state.q || "";
-    if (sortSel) sortSel.value = state.sort;
-
-    if (minPriceInput) minPriceInput.value = state.minPrice;
-    if (maxPriceInput) maxPriceInput.value = state.maxPrice;
-
-    // Drawer chips active styling
-    chipGrids.forEach((gridEl) => {
-      const key = gridEl.dataset.filter;
-      const set = state[key] instanceof Set ? state[key] : new Set();
-      qsa(".chip", gridEl).forEach((btn) => {
-        const val = btn.dataset.value;
-        btn.classList.toggle("is-active", set.has(val));
-      });
-    });
-
-    // View mode class
-    if (grid) {
-      grid.dataset.view = state.view;
-    }
-  };
-
-  /* =========================
-     Filtering + Sorting
-  ========================= */
-  const matchesSet = (set, value) => (set.size === 0 ? true : set.has(value));
-
-  const matchesTags = (tagSet, tagsArr) => {
-    if (tagSet.size === 0) return true;
-    const tags = Array.isArray(tagsArr) ? tagsArr : [];
-    return Array.from(tagSet).some((t) => tags.includes(t));
-  };
-
-  const applyFilters = (items) => {
-    const q = (state.q || "").toLowerCase().trim();
-
-    const min = state.minPrice === "" ? null : Number(state.minPrice);
-    const max = state.maxPrice === "" ? null : Number(state.maxPrice);
-
-    return items.filter((it) => {
-      if (!matchesSet(state.category, it.category)) return false;
-      if (!matchesSet(state.material, it.material)) return false;
-      if (!matchesTags(state.tag, it.tags)) return false;
-
-      if (Number.isFinite(min) && it.price < min) return false;
-      if (Number.isFinite(max) && it.price > max) return false;
+      if (minP != null && p.price < minP) return false;
+      if (maxP != null && p.price > maxP) return false;
 
       if (q) {
-        const hay = `${it.name} ${it.category} ${it.material} ${(it.tags || []).join(" ")}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+        const blob = normalize(`${p.name} ${p.category} ${p.material} ${p.tags.join(" ")}`);
+        if (!blob.includes(q)) return false;
       }
 
       return true;
     });
   };
 
-  const sortItems = (items) => {
-    const arr = items.slice();
-    switch (state.sort) {
-      case "newest":
-        arr.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        break;
-      case "price_asc":
-        arr.sort((a, b) => a.price - b.price);
-        break;
-      case "price_desc":
-        arr.sort((a, b) => b.price - a.price);
-        break;
-      case "name_asc":
-        arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-        break;
-      case "featured":
-      default:
-        // Featured heuristic: featured tag first, then newest
-        arr.sort((a, b) => {
-          const af = (a.tags || []).includes("featured") ? 1 : 0;
-          const bf = (b.tags || []).includes("featured") ? 1 : 0;
-          if (af !== bf) return bf - af;
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        });
-        break;
+  const applySort = (products, sort) => {
+    const s = normalize(sort);
+
+    const arr = products.slice();
+    if (s === "price-asc") arr.sort((a, b) => a.price - b.price);
+    else if (s === "price-desc") arr.sort((a, b) => b.price - a.price);
+    else if (s === "newest") arr.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    else {
+      // featured (default) — keep original order from API
     }
     return arr;
-  };
-
-  const paginate = (items) => {
-    const total = items.length;
-    const pages = Math.max(1, Math.ceil(total / state.pageSize));
-    state.page = clampInt(state.page, 1, pages);
-
-    const start = (state.page - 1) * state.pageSize;
-    const end = start + state.pageSize;
-
-    return {
-      pageItems: items.slice(start, end),
-      total,
-      pages,
-    };
-  };
-
-  /* =========================
-     Chips / Active count
-  ========================= */
-  const humanize = (key, val) => {
-    const maps = {
-      category: { gold: "Gold", diamonds: "Diamonds", chains: "Chains", signature: "Signature" },
-      material: { gold: "Gold", silver: "Silver", platinum: "Platinum", diamond: "Diamond" },
-      tag: { new: "New", featured: "Featured", best_value: "Best Value", limited: "Limited" },
-    };
-    return (maps[key] && maps[key][val]) ? maps[key][val] : val;
-  };
-
-  const buildActiveChips = () => {
-    if (!chipsWrap) return;
-
-    const chips = [];
-
-    // Multi sets
-    ["category", "material", "tag"].forEach((k) => {
-      Array.from(state[k]).forEach((v) => {
-        chips.push({ key: k, value: v, label: `${humanize(k, v)}` });
-      });
-    });
-
-    // Price chips
-    if (state.minPrice !== "" || state.maxPrice !== "") {
-      const min = state.minPrice !== "" ? formatUSD(state.minPrice) : "—";
-      const max = state.maxPrice !== "" ? formatUSD(state.maxPrice) : "—";
-      chips.push({ key: "price", value: "range", label: `Price: ${min} – ${max}` });
-    }
-
-    // Search chip
-    if (state.q) chips.push({ key: "q", value: state.q, label: `Search: “${state.q}”` });
-
-    // Render
-    chipsWrap.innerHTML = chips
-      .map((c) => {
-        return `
-          <button class="active-chip" type="button" data-chip-key="${esc(c.key)}" data-chip-value="${esc(c.value)}" aria-label="Remove ${esc(c.label)}">
-            <span class="active-chip-label">${esc(c.label)}</span>
-            <span class="active-chip-x" aria-hidden="true">✕</span>
-          </button>
-        `;
-      })
-      .join("");
-
-    // Pill count (exclude q? include it. include price.)
-    if (activePill) activePill.textContent = String(chips.length);
-
-    // Path context
-    if (pathContext) {
-      const cat = Array.from(state.category)[0];
-      if (cat) pathContext.textContent = humanize("category", cat);
-      else pathContext.textContent = "All items";
-    }
-  };
-
-  const clearChip = (key, value) => {
-    if (key === "category" || key === "material" || key === "tag") {
-      state[key].delete(value);
-    } else if (key === "price") {
-      state.minPrice = "";
-      state.maxPrice = "";
-      if (minPriceInput) minPriceInput.value = "";
-      if (maxPriceInput) maxPriceInput.value = "";
-    } else if (key === "q") {
-      state.q = "";
-      if (qInput) qInput.value = "";
-    }
-
-    state.page = 1;
-    writeURLFromState(false);
-    render();
-  };
-
-  /* =========================
-     Drawer open/close
-  ========================= */
-  let lastFocus = null;
-
-  const openDrawer = () => {
-    if (!drawer || !backdrop) return;
-    lastFocus = document.activeElement;
-
-    backdrop.hidden = false;
-    drawer.hidden = false;
-    document.body.classList.add("drawer-open");
-
-    // Focus first interactive element
-    const closeBtn = qs('[data-action="close-filters"]', drawer);
-    if (closeBtn) closeBtn.focus({ preventScroll: true });
-  };
-
-  const closeDrawer = () => {
-    if (!drawer || !backdrop) return;
-
-    drawer.hidden = true;
-    backdrop.hidden = true;
-    document.body.classList.remove("drawer-open");
-
-    if (lastFocus && typeof lastFocus.focus === "function") {
-      lastFocus.focus({ preventScroll: true });
-    }
-    lastFocus = null;
-  };
-
-  const handleEscape = (e) => {
-    if (e.key !== "Escape") return;
-
-    // Close drawer first
-    if (drawer && !drawer.hidden) {
-      closeDrawer();
-      return;
-    }
-
-    // Close mobile menu if open
-    if (mobileMenu && !mobileMenu.hidden) {
-      closeMobileMenu();
-    }
-  };
-
-  /* =========================
-     Mobile menu
-  ========================= */
-  const openMobileMenu = () => {
-    if (!mobileMenu || !navToggle) return;
-    mobileMenu.hidden = false;
-    navToggle.setAttribute("aria-expanded", "true");
-    document.body.classList.add("menu-open");
-  };
-
-  const closeMobileMenu = () => {
-    if (!mobileMenu || !navToggle) return;
-    mobileMenu.hidden = true;
-    navToggle.setAttribute("aria-expanded", "false");
-    document.body.classList.remove("menu-open");
-  };
-
-  const toggleMobileMenu = () => {
-    if (!mobileMenu) return;
-    if (mobileMenu.hidden) openMobileMenu();
-    else closeMobileMenu();
-  };
-
-  const outsideClickClose = (e) => {
-    // Close drawer if click backdrop
-    const isBackdrop = backdrop && !backdrop.hidden && backdrop.contains(e.target);
-    if (isBackdrop) closeDrawer();
-
-    // Close mobile menu on outside click
-    if (mobileMenu && !mobileMenu.hidden) {
-      const clickedToggle = navToggle && navToggle.contains(e.target);
-      const clickedMenu = mobileMenu.contains(e.target);
-      if (!clickedToggle && !clickedMenu) closeMobileMenu();
-    }
-  };
-
-  /* =========================
-     Toast
-  ========================= */
-  const toast = (text) => {
-    if (!toastEl) return;
-    toastEl.textContent = text;
-    toastEl.hidden = false;
-    toastEl.classList.add("show");
-
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-      toastEl.classList.remove("show");
-      window.setTimeout(() => (toastEl.hidden = true), prefersReducedMotion() ? 0 : 160);
-    }, 1600);
   };
 
   /* =========================
      Rendering
   ========================= */
-  const renderCard = (p) => {
-    const tags = (p.tags || []).slice(0, 2).map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`).join("");
-    return `
-      <article class="product-card" data-id="${esc(p.id)}">
-        <button class="product-hit" type="button" data-action="quick-view" data-id="${esc(p.id)}" aria-label="Quick view ${esc(p.name)}">
-          <div class="product-media">
-            <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
-          </div>
-          <div class="product-body">
-            <div class="product-top">
-              <h3 class="product-title">${esc(p.name)}</h3>
-              <div class="product-price">${esc(formatUSD(p.price))}</div>
+  const PAGE_SIZE = 12;
+
+  const renderProducts = (products, state) => {
+    const container = $("#products");
+    if (!container) return;
+
+    container.classList.toggle("list", state.view === "list");
+
+    const total = products.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const page = clamp(state.page, 1, pages);
+
+    const start = (page - 1) * PAGE_SIZE;
+    const chunk = products.slice(start, start + PAGE_SIZE);
+
+    $("#resultsCount") && ($("#resultsCount").textContent = `${total} results`);
+    $("#pagePill") && ($("#pagePill").textContent = `Page ${page} / ${pages}`);
+
+    container.innerHTML = chunk
+      .map((p) => {
+        return `
+          <article class="product-card" data-id="${escapeHtml(p.id)}">
+            <div class="media">
+              <img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" loading="lazy" />
             </div>
-            <div class="product-meta">
-              <span>${esc(humanize("category", p.category))}</span>
-              <span class="sep" aria-hidden="true">•</span>
-              <span>${esc(humanize("material", p.material))}</span>
+            <div class="body">
+              <div class="title-row">
+                <h3 class="name">${escapeHtml(p.name)}</h3>
+                <div class="price">$${escapeHtml(p.price.toFixed(2))}</div>
+              </div>
+              <div class="meta">
+                <span class="pill">${escapeHtml(p.category)}</span>
+                ${p.material ? `<span class="pill subtle">${escapeHtml(p.material)}</span>` : ""}
+              </div>
+              ${p.tags?.length ? `<div class="tags">${p.tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
             </div>
-            <div class="product-tags">${tags}</div>
-          </div>
-        </button>
-      </article>
-    `;
+          </article>
+        `;
+      })
+      .join("");
+
+    state.page = page;
+    writeStateToUrl(state, true);
+    renderPagination(pages, state);
   };
 
-  const render = () => {
-    // Filters + sort
-    const filtered = applyFilters(PRODUCTS);
-    const sorted = sortItems(filtered);
-    const { pageItems, total, pages } = paginate(sorted);
+  const renderPagination = (pages, state) => {
+    const el = $("#pagination");
+    if (!el) return;
 
-    // Update counts
-    if (resultsCount) resultsCount.textContent = String(total);
-    if (resultsCountInline) resultsCountInline.textContent = String(total);
+    const page = clamp(state.page, 1, pages);
 
-    if (pageNum) pageNum.textContent = String(state.page);
-    if (pageTotal) pageTotal.textContent = String(pages);
+    const btn = (label, target, disabled = false) => `
+      <button class="page-btn ${disabled ? "disabled" : ""}" ${disabled ? "disabled" : ""} data-page="${target}">
+        ${label}
+      </button>
+    `;
 
-    if (prevBtn) prevBtn.disabled = state.page <= 1;
-    if (nextBtn) nextBtn.disabled = state.page >= pages;
+    let html = "";
+    html += btn("Prev", page - 1, page <= 1);
 
-    // Empty state
-    if (emptyState) emptyState.hidden = total !== 0;
+    const start = Math.max(1, page - 2);
+    const end = Math.min(pages, page + 2);
 
-    // Render grid
-    if (grid) {
-      grid.innerHTML = pageItems.map(renderCard).join("");
-      grid.dataset.view = state.view;
+    if (start > 1) html += btn("1", 1, page === 1);
+    if (start > 2) html += `<span class="dots">…</span>`;
+
+    for (let i = start; i <= end; i++) {
+      html += btn(String(i), i, i === page);
     }
 
-    // Chips
-    buildActiveChips();
+    if (end < pages - 1) html += `<span class="dots">…</span>`;
+    if (end < pages) html += btn(String(pages), pages, page === pages);
 
-    // Controls
-    syncControlsFromState();
-  };
+    html += btn("Next", page + 1, page >= pages);
+    el.innerHTML = html;
 
-  /* =========================
-     Event wiring
-  ========================= */
-  const debounce = (fn, ms = 180) => {
-    let t = null;
-    return (...args) => {
-      window.clearTimeout(t);
-      t = window.setTimeout(() => fn(...args), ms);
+    el.onclick = (e) => {
+      const b = e.target.closest("[data-page]");
+      if (!b || b.disabled) return;
+      const next = toNum(b.getAttribute("data-page"), page);
+      const ns = readStateFromUrl();
+      ns.page = clamp(next, 1, pages);
+      writeStateToUrl(ns, false);
+      render();
     };
   };
 
-  const onSearchInput = debounce(() => {
-    state.q = (qInput?.value || "").trim();
-    state.page = 1;
-    writeURLFromState(false);
-    render();
-  }, 170);
-
-  const onSortChange = () => {
-    state.sort = (sortSel?.value || DEFAULTS.sort).trim();
-    state.page = 1;
-    writeURLFromState(false);
-    render();
-  };
-
-  const resetAll = () => {
-    state.q = "";
-    state.category = new Set();
-    state.material = new Set();
-    state.tag = new Set();
-    state.minPrice = "";
-    state.maxPrice = "";
-    state.sort = DEFAULTS.sort;
-    state.page = 1;
-    state.view = state.view || DEFAULTS.view;
-
-    writeURLFromState(false);
-    render();
-    toast("Filters reset.");
-  };
-
-  const applyDrawerToState = () => {
-    // price
-    state.minPrice = (minPriceInput?.value || "").trim();
-    state.maxPrice = (maxPriceInput?.value || "").trim();
-
-    // Safety: swap if min > max
-    const min = Number(state.minPrice);
-    const max = Number(state.maxPrice);
-    if (Number.isFinite(min) && Number.isFinite(max) && min > max) {
-      state.minPrice = String(max);
-      state.maxPrice = String(min);
-      if (minPriceInput) minPriceInput.value = state.minPrice;
-      if (maxPriceInput) maxPriceInput.value = state.maxPrice;
-    }
-
-    state.page = 1;
-    writeURLFromState(false);
-    render();
-    closeDrawer();
-  };
-
-  const toggleSetValue = (key, value) => {
-    if (!(state[key] instanceof Set)) return;
-    if (state[key].has(value)) state[key].delete(value);
-    else state[key].add(value);
-  };
-
-  const wireDrawerChips = () => {
-    chipGrids.forEach((gridEl) => {
-      const key = gridEl.dataset.filter;
-      gridEl.addEventListener("click", (e) => {
-        const btn = e.target.closest(".chip");
-        if (!btn) return;
-
-        const val = btn.dataset.value;
-        if (!val) return;
-
-        toggleSetValue(key, val);
-        btn.classList.toggle("is-active", state[key].has(val));
-      });
-    });
-  };
-
-  const wirePricePresets = () => {
-    presetPriceBtns.forEach((b) => {
-      b.addEventListener("click", () => {
-        const min = b.dataset.min ?? "";
-        const max = b.dataset.max ?? "";
-
-        if (minPriceInput) minPriceInput.value = String(min);
-        if (maxPriceInput) maxPriceInput.value = String(max);
-
-        state.minPrice = String(min);
-        state.maxPrice = String(max);
-
-        // visual toast, but do NOT apply until user hits Apply (premium feel)
-        toast("Preset selected.");
-      });
-    });
-  };
-
-  const wireGlobalClicks = () => {
-    document.addEventListener("click", (e) => {
-      const el = e.target.closest("[data-action]");
-      if (!el) return;
-
-      const action = el.dataset.action;
-
-      // Filter drawer
-      if (action === "open-filters") {
-        openDrawer();
-        return;
-      }
-      if (action === "close-filters") {
-        closeDrawer();
-        return;
-      }
-      if (action === "apply-filters") {
-        applyDrawerToState();
-        return;
-      }
-
-      // Reset
-      if (action === "reset-filters") {
-        resetAll();
-        closeDrawer();
-        return;
-      }
-
-      // Search
-      if (action === "clear-search") {
-        state.q = "";
-        if (qInput) qInput.value = "";
-        state.page = 1;
-        writeURLFromState(false);
-        render();
-        return;
-      }
-
-      // Pagination
-      if (action === "prev-page") {
-        state.page = Math.max(1, state.page - 1);
-        writeURLFromState(false);
-        render();
-        window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        return;
-      }
-      if (action === "next-page") {
-        state.page = state.page + 1;
-        writeURLFromState(false);
-        render();
-        window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        return;
-      }
-
-      // View toggle
-      if (action === "toggle-view") {
-        state.view = state.view === "grid" ? "list" : "grid";
-        writeURLFromState(false);
-        render();
-        toast(state.view === "grid" ? "Grid view" : "List view");
-        return;
-      }
-
-      // Quick view placeholder
-      if (action === "quick-view") {
-        const id = el.dataset.id;
-        const item = PRODUCTS.find((p) => p.id === id);
-        if (item) toast(item.name);
-        return;
-      }
-
-      // Chip removal
-      const chip = e.target.closest(".active-chip");
-      if (chip) {
-        const key = chip.dataset.chipKey;
-        const val = chip.dataset.chipValue;
-        if (key) clearChip(key, val);
-      }
-    });
-  };
-
-  const wireInputs = () => {
-    if (qInput) qInput.addEventListener("input", onSearchInput);
-    if (sortSel) sortSel.addEventListener("change", onSortChange);
-
-    resetBtns.forEach((b) => b.addEventListener("click", resetAll));
-  };
-
-  const wireHeader = () => {
-    setHeaderState();
-    window.addEventListener("scroll", setHeaderState, { passive: true });
-  };
-
-  const wireMobileMenu = () => {
-    if (navToggle) navToggle.addEventListener("click", toggleMobileMenu);
-
-    // Close menu after clicking a link inside it
-    if (mobileMenu) {
-      mobileMenu.addEventListener("click", (e) => {
-        const a = e.target.closest("a");
-        if (!a) return;
-        closeMobileMenu();
-      });
-    }
-  };
-
   /* =========================
-     Initial context from URL
+     Filters UI (lightweight)
   ========================= */
-  const initFromURL = () => {
-    readStateFromURL();
-    syncControlsFromState();
+  const bindUI = () => {
+    const state = readStateFromUrl();
 
-    // Ensure drawer chip visuals reflect URL state
-    chipGrids.forEach((gridEl) => {
-      const key = gridEl.dataset.filter;
-      const set = state[key] instanceof Set ? state[key] : new Set();
-      qsa(".chip", gridEl).forEach((btn) => {
-        const val = btn.dataset.value;
-        btn.classList.toggle("is-active", set.has(val));
-      });
-    });
+    $("#q") && ($("#q").value = state.q);
+    $("#minPrice") && ($("#minPrice").value = state.minPrice);
+    $("#maxPrice") && ($("#maxPrice").value = state.maxPrice);
 
-    // If URL has min/max, reflect it
-    if (minPriceInput) minPriceInput.value = state.minPrice;
-    if (maxPriceInput) maxPriceInput.value = state.maxPrice;
+    $("#sortSelect") && ($("#sortSelect").value = state.sort);
+    $("#viewToggle") && ($("#viewToggle").value = state.view);
 
-    // Sort reflect
-    if (sortSel) sortSel.value = state.sort;
-
-    // Search reflect
-    if (qInput) qInput.value = state.q;
-  };
-
-  /* =========================
-     Popstate (back/forward)
-  ========================= */
-  const wirePopstate = () => {
-    window.addEventListener("popstate", () => {
-      readStateFromURL();
-      syncControlsFromState();
+    // Update on inputs
+    const onChange = () => {
+      const s = readStateFromUrl();
+      s.q = $("#q")?.value ?? "";
+      s.minPrice = $("#minPrice")?.value ?? "";
+      s.maxPrice = $("#maxPrice")?.value ?? "";
+      s.sort = $("#sortSelect")?.value ?? DEFAULTS.sort;
+      s.view = $("#viewToggle")?.value ?? DEFAULTS.view;
+      s.page = 1;
+      writeStateToUrl(s, false);
       render();
-    });
+    };
+
+    $("#q") && ($("#q").addEventListener("input", onChange));
+    $("#minPrice") && ($("#minPrice").addEventListener("input", onChange));
+    $("#maxPrice") && ($("#maxPrice").addEventListener("input", onChange));
+    $("#sortSelect") && ($("#sortSelect").addEventListener("change", onChange));
+    $("#viewToggle") && ($("#viewToggle").addEventListener("change", onChange));
+
+    // Basic category/material/tag dropdowns if present
+    $("#categorySelect") &&
+      $("#categorySelect").addEventListener("change", () => {
+        const s = readStateFromUrl();
+        s.category = $("#categorySelect").value || "all";
+        s.page = 1;
+        writeStateToUrl(s, false);
+        render();
+      });
+
+    $("#materialSelect") &&
+      $("#materialSelect").addEventListener("change", () => {
+        const s = readStateFromUrl();
+        s.material = $("#materialSelect").value || "all";
+        s.page = 1;
+        writeStateToUrl(s, false);
+        render();
+      });
+
+    $("#tagSelect") &&
+      $("#tagSelect").addEventListener("change", () => {
+        const s = readStateFromUrl();
+        s.tag = $("#tagSelect").value || "all";
+        s.page = 1;
+        writeStateToUrl(s, false);
+        render();
+      });
+
+    // Back/forward support
+    window.addEventListener("popstate", () => render());
+  };
+
+  const render = () => {
+    const state = readStateFromUrl();
+    const filtered = applyFilters(allProducts, state);
+    const sorted = applySort(filtered, state.sort);
+    renderProducts(sorted, state);
   };
 
   /* =========================
-     Boot
+     Init
   ========================= */
-  const initYear = () => {
-    if (!yearEl) return;
-    yearEl.textContent = String(new Date().getFullYear());
-  };
-
-    const init = async () => {
-    document.addEventListener("keydown", handleEscape);
-    document.addEventListener("click", outsideClickClose);
-
-    wireHeader();
-    wireMobileMenu();
-
-    wireDrawerChips();
-    wirePricePresets();
-    wireInputs();
-    wireGlobalClicks();
-    wirePopstate();
-
-    initYear();
-
-    // Load live catalog first (so filters/sorting render against real data)
+  const init = async () => {
     try {
-      if (grid) grid.innerHTML = ""; // clean slate
-      if (resultsCount) resultsCount.textContent = "…";
-      if (resultsCountInline) resultsCountInline.textContent = "…";
+      $("#statusText") && ($("#statusText").textContent = "Loading spot prices…");
+
+      try {
+        spot = await fetchSpotSnapshot();
+        $("#statusText") && ($("#statusText").textContent = "Loading catalog…");
+      } catch (e) {
+        // spot may fail; allow catalog to load anyway
+        $("#statusText") && ($("#statusText").textContent = "Loading catalog…");
+        console.warn("Spot snapshot failed (non-fatal):", e);
+      }
+
       await loadCatalog();
-    } catch (err) {
-      console.error(err);
-      toast("Could not load catalog.");
-      PRODUCTS = []; // keep empty rather than demo
+
+      bindUI();
+      render();
+
+      $("#statusText") && ($("#statusText").textContent = "");
+    } catch (e) {
+      console.error(e);
+      $("#statusText") && ($("#statusText").textContent = "Failed to load shop data.");
     }
-
-    // Initialize from URL then render
-    initFromURL();
-
-    // Normalize URL params
-    writeURLFromState(true);
-
-    initSpotTicker();
-
-    render();
   };
 
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  init();
 })();

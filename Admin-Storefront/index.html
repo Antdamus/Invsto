@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Admin Login</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="index.css" />
+
+  <!-- ✅ Supabase UMD (creates global `supabase`) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- ✅ Your existing initializer (creates window.supabase + fires supabase-ready) -->
+  <script defer src="initSupabase.js"></script>
+
+  <!-- ✅ Page logic -->
+  <script defer src="index.js"></script>
+</head>
+
+<body>
+  <div class="bg" aria-hidden="true">
+    <div class="orb o1"></div>
+    <div class="orb o2"></div>
+    <div class="grain"></div>
+  </div>
+
+  <main class="wrap">
+    <header class="top">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">OG</div>
+        <div class="txt">
+          <div class="name">OG Jewelers</div>
+          <div class="sub">Admin Access</div>
+        </div>
+      </div>
+
+      <div class="pills">
+        <span class="pill subtle" id="pillConn">Supabase…</span>
+        <span class="pill" id="pillRole">Role…</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <h1>Sign in</h1>
+      <p class="lead">Admins only. Sign in to manage the storefront channel and cover images.</p>
+
+      <form id="loginForm" autocomplete="on">
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="you@domain.com" required autocomplete="email" />
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+
+        <button class="btn primary" id="btnLogin" type="submit">
+          <span class="btnText">Sign in</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+
+        <button class="btn ghost" id="btnLogout" type="button" hidden>Sign out</button>
+
+        <div class="msg" id="msg" role="status" aria-live="polite"></div>
+      </form>
+
+      <div class="note">
+        <span class="mono">Tip:</span> If you’re already signed in, this page will auto-check your role and redirect admins.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Admin Storefront</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="admin-storefront.css" />
+  <!-- Supabase UMD (creates global `supabase`) -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+<!-- Your init (likely in project root, so use ../ if admin is in /Admin-Storefront/) -->
+<script defer src="../initSupabase.js"></script>
+
+<!-- Admin page logic -->
+<script defer src="admin-storefront.js"></script>
+
+</head>
+
+<body>
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-grain"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name">OG Jewelers</span>
+        <span class="brand-sub">Admin</span>
+      </a>
+
+      <div class="topbar-actions">
+        <button class="btn ghost" id="btnSignOut" type="button">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="hero-left">
+        <p class="eyebrow">Storefront Editor</p>
+        <h1>Control what customers see — without touching code.</h1>
+        <p class="sub">
+          Publish items, edit public titles, set pricing mode, reorder featured listings, and manage badges.
+        </p>
+      </div>
+
+      <aside class="hero-card">
+        <div class="hero-card-row">
+          <span class="pill" id="adminRolePill">Checking role…</span>
+          <span class="pill subtle" id="connectionPill">Supabase…</span>
+        </div>
+        <p class="mini">
+          Tip: Keep your shop page reading only <span class="mono">published</span> listings.
+        </p>
+      </aside>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Channel & Add Items</h2>
+        <p>Pick a sales channel, then search your inventory to add listings.</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="channelSelect">Sales channel</label>
+          <select id="channelSelect"></select>
+          <div class="hint">This maps to <span class="mono">storefront_listings.channel_id</span>.</div>
+        </div>
+
+        <div class="field">
+          <label for="itemSearch">Search item_types</label>
+          <input id="itemSearch" type="search" placeholder="Search by title / barcode / category…" autocomplete="off" />
+          <div class="hint">Add creates a storefront listing for the selected channel.</div>
+        </div>
+      </div>
+
+      <div id="searchResults" class="search-results" hidden></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Listings</h2>
+        <p>Edit public content, pricing, badges, and publishing status. Reorder with ↑ ↓.</p>
+      </div>
+
+      <div class="toolbar">
+        <div class="pill subtle" id="listingCountPill">0 listings</div>
+        <div class="toolbar-right">
+          <button class="btn ghost" id="btnRefresh" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div id="listings" class="listings"></div>
+
+      <div id="emptyListings" class="empty" hidden>
+        <div class="empty-card">
+          <span class="empty-icon" aria-hidden="true">✦</span>
+          <h3>No listings in this channel</h3>
+          <p>Search above and add items to start curating your shop.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </main>
+</body>
+</html>

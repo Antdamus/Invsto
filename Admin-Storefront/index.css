@@ -1,0 +1,220 @@
+/* index.css — OG Jewelers Admin Login (luxury, dark, glassy) */
+
+:root{
+  --bg: #070708;
+  --card: rgba(255,255,255,0.06);
+  --card2: rgba(255,255,255,0.08);
+  --stroke: rgba(255,255,255,0.10);
+  --text: rgba(255,255,255,0.92);
+  --muted: rgba(255,255,255,0.65);
+  --muted2: rgba(255,255,255,0.50);
+  --gold: #d7b46a;
+  --gold2:#f1d28b;
+  --danger:#ff5a5a;
+  --ok:#3be37a;
+  --shadow: 0 20px 60px rgba(0,0,0,0.55);
+}
+
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x:hidden;
+}
+
+.bg{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+}
+.orb{
+  position:absolute;
+  width:520px;
+  height:520px;
+  border-radius:999px;
+  filter: blur(28px);
+  opacity:0.28;
+}
+.o1{ top:-140px; left:-160px; background: radial-gradient(circle at 30% 30%, var(--gold2), transparent 60%); }
+.o2{ bottom:-180px; right:-160px; background: radial-gradient(circle at 30% 30%, #6aa9ff, transparent 60%); }
+.grain{
+  position:absolute;
+  inset:-40%;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
+  opacity:.08;
+  transform: rotate(12deg);
+}
+
+.wrap{
+  position:relative;
+  z-index:1;
+  min-height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:28px 16px;
+}
+
+.top{
+  width:min(880px, 100%);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  margin-bottom:14px;
+}
+
+.brand{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.mark{
+  width:44px; height:44px;
+  border-radius:14px;
+  display:grid;
+  place-items:center;
+  font-weight:700;
+  letter-spacing:.6px;
+  background: linear-gradient(180deg, rgba(215,180,106,0.22), rgba(215,180,106,0.10));
+  border:1px solid rgba(215,180,106,0.35);
+  color: var(--gold2);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+.name{
+  font-family: "Cormorant Garamond", serif;
+  font-size: 22px;
+  letter-spacing:.2px;
+}
+.sub{
+  font-size: 12px;
+  color: var(--muted2);
+  margin-top:2px;
+}
+
+.pills{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.pill{
+  padding:8px 10px;
+  border-radius:999px;
+  border:1px solid var(--stroke);
+  background: rgba(255,255,255,0.05);
+  font-size:12px;
+  color: var(--muted);
+}
+.pill.subtle{ color: var(--muted2); }
+.pill.ok{ border-color: rgba(59,227,122,0.35); color: rgba(59,227,122,0.95); }
+.pill.bad{ border-color: rgba(255,90,90,0.35); color: rgba(255,90,90,0.95); }
+
+.card{
+  width:min(880px, 100%);
+  padding:22px;
+  border-radius:22px;
+  background: linear-gradient(180deg, var(--card), rgba(255,255,255,0.04));
+  border:1px solid var(--stroke);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+h1{
+  margin:0 0 6px 0;
+  font-family:"Cormorant Garamond", serif;
+  font-weight:600;
+  letter-spacing:.2px;
+  font-size:34px;
+}
+.lead{
+  margin:0 0 16px 0;
+  color: var(--muted);
+  line-height:1.45;
+  font-size:14px;
+}
+
+.field{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-bottom:12px;
+}
+label{
+  font-size:12px;
+  color: var(--muted2);
+}
+input{
+  width:100%;
+  padding:12px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.35);
+  color: var(--text);
+  outline:none;
+}
+input:focus{
+  border-color: rgba(215,180,106,0.50);
+  box-shadow: 0 0 0 4px rgba(215,180,106,0.12);
+}
+
+.btn{
+  width:100%;
+  border:1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  border-radius:16px;
+  padding:12px 14px;
+  font-weight:600;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.btn:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.08); }
+.btn:active{ transform: translateY(0px) scale(0.99); }
+
+.btn.primary{
+  border-color: rgba(215,180,106,0.35);
+  background: linear-gradient(180deg, rgba(215,180,106,0.22), rgba(215,180,106,0.12));
+}
+.btn.ghost{
+  margin-top:10px;
+  background: transparent;
+}
+
+.btn.loading .spinner{
+  display:inline-block;
+}
+.spinner{
+  width:14px; height:14px;
+  border-radius:999px;
+  border:2px solid rgba(255,255,255,0.25);
+  border-top-color: rgba(255,255,255,0.85);
+  display:none;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin{ to{ transform: rotate(360deg); } }
+
+.msg{
+  margin-top:12px;
+  min-height:18px;
+  font-size:13px;
+  color: var(--muted);
+}
+.msg.ok{ color: rgba(59,227,122,0.95); }
+.msg.bad{ color: rgba(255,90,90,0.95); }
+
+.note{
+  margin-top:16px;
+  font-size:12px;
+  color: var(--muted2);
+}
+.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
