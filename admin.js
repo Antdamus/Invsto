@@ -335,15 +335,6 @@ function escapeHtml(s){
     .replaceAll("'","&#039;");
 }
 
-async function markAcceptedIfNeeded() {
-  try {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return;
-    await supabaseClient.rpc('mark_invite_accepted');
-  } catch (e) {
-    console.warn('mark_invite_accepted failed:', e);
-  }
-}
 
 
 function wireUsersPanel() {

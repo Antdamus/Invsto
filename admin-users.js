@@ -34,6 +34,9 @@
   let drawerSnapshot = null; // {name, role, type, hourly, active}
   let drawerDirty = false;
 
+  let activeUserId = null; // auth.users.id
+
+
   function getEmpId(r) {
     return String(r?.employee_id || r?.id || "");
   }
@@ -157,6 +160,21 @@ function scheduleTaxStatusRefresh(rows) {
     }, 180);
     }
 
+async function saveUserPhone({ userId, phone, canSms }) {
+  const { error } = await supabase.rpc("admin_upsert_user_phone", {
+    _user_id: userId,
+    _phone_e164: phone,
+    _can_sms: canSms
+  });
+
+  if (error) {
+    console.error("Phone save failed", error);
+    alert(error.message);
+    return false;
+  }
+
+  return true;
+}
 
   // ---------- init ----------
   function initUsersCardsTab() {
@@ -383,6 +401,31 @@ if (!taxStatusLoaded) {
             </div>
           </section>
 
+<!-- Contact -->
+<section class="ud-section">
+  <div class="ud-section-title">Contact</div>
+
+  <div class="ud-grid">
+    <label class="ud-field ud-span2">
+      <span>Phone (E.164)</span>
+      <input
+        id="udPhone"
+        type="tel"
+        placeholder="+13055551234"
+        autocomplete="off"
+      />
+    </label>
+
+    <label class="ud-field ud-active">
+      <span>Allow SMS</span>
+      <div class="ud-switch">
+        <input id="udCanSms" type="checkbox" />
+        <span class="muted">Yes</span>
+      </div>
+    </label>
+  </div>
+</section>
+
           <!-- Employment -->
           <section class="ud-section">
             <div class="ud-section-title">Employment</div>
@@ -576,6 +619,15 @@ if (!taxStatusLoaded) {
         try {
           await window.saveUserRow(drawerEl);
           msg.textContent = "Saved ✅";
+          
+if (activeUserId) {
+  await saveUserPhone({
+    userId: activeUserId,
+    phone: (qs("#udPhone")?.value || "").trim(),
+    canSms: !!qs("#udCanSms")?.checked
+  });
+}
+
 
           // refresh list
           if (typeof window.loadUsers === "function") await window.loadUsers();
@@ -633,15 +685,18 @@ if (!taxStatusLoaded) {
     drawerReady = true;
   }
 
-  function readDrawerState() {
-    return {
-      name: qs("#udName")?.value || "",
-      role: qs("#udRole")?.value || "",
-      type: qs("#udType")?.value || "",
-      hourly: qs("#udHourly")?.value || "",
-      active: !!qs("#udActive")?.checked,
-    };
-  }
+function readDrawerState() {
+  return {
+    name: qs("#udName")?.value || "",
+    role: qs("#udRole")?.value || "",
+    type: qs("#udType")?.value || "",
+    hourly: qs("#udHourly")?.value || "",
+    active: !!qs("#udActive")?.checked,
+    phone: qs("#udPhone")?.value || "",
+    canSms: !!qs("#udCanSms")?.checked
+  };
+}
+
 
   function setDirty(on) {
     drawerDirty = !!on;
@@ -657,21 +712,25 @@ if (!taxStatusLoaded) {
     if (msg) msg.textContent = "Unsaved changes…";
   }
 
-  function setDirtyFromCurrent() {
-    if (!drawerSnapshot) {
-      setDirty(false);
-      return;
-    }
-    const cur = readDrawerState();
-    const changed =
-      cur.name !== drawerSnapshot.name ||
-      cur.role !== drawerSnapshot.role ||
-      cur.type !== drawerSnapshot.type ||
-      cur.hourly !== drawerSnapshot.hourly ||
-      cur.active !== drawerSnapshot.active;
-
-    setDirty(changed);
+function setDirtyFromCurrent() {
+  if (!drawerSnapshot) {
+    setDirty(false);
+    return;
   }
+
+  const cur = readDrawerState();
+
+  const changed =
+    cur.name !== drawerSnapshot.name ||
+    cur.role !== drawerSnapshot.role ||
+    cur.type !== drawerSnapshot.type ||
+    cur.hourly !== drawerSnapshot.hourly ||
+    cur.active !== drawerSnapshot.active ||
+    cur.phone !== drawerSnapshot.phone ||
+    cur.canSms !== drawerSnapshot.canSms;
+
+  setDirty(changed);
+}
 
   // ---------- Phase 2: Addresses ----------
 function fmtTs(ts){
@@ -815,12 +874,41 @@ async function addAddressForEmployee(employeeId){
   }
 }
 
+async function loadUserPhone(userId) {
+  const supabase = window.supabase;
+  if (!supabase || !userId) return { phone: "", canSms: true };
 
-  function openUserDrawer(row) {
+  const { data, error } = await supabase
+    .from("user_phones")
+    .select("phone_e164, can_sms")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load user phone", error);
+    return { phone: "", canSms: true };
+  }
+
+  return {
+    phone: data?.phone_e164 || "",
+    canSms: data?.can_sms !== false
+  };
+}
+
+
+async function openUserDrawer(row) {
     if (!row) return;
     ensureDrawer();
 
-    activeEmployeeId = getEmpId(row);
+  activeEmployeeId = getEmpId(row);         // employees.id
+activeUserId = String(row.user_id || ""); // auth.users.id
+
+const phoneState = await loadUserPhone(activeUserId);
+
+
+    qs("#udPhone").value = phoneState.phone;
+    qs("#udCanSms").checked = phoneState.canSms;
+
 
     const backdrop = qs("#userDrawerBackdrop");
     const drawer = qs("#userDrawer");
@@ -876,6 +964,8 @@ refreshAddresses(activeEmployeeId);
     activeEmployeeId = null;
     drawerSnapshot = null;
     drawerDirty = false;
+    activeUserId = null;
+
   }
 
   // ---------- boot ----------

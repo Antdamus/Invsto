@@ -1,4 +1,26 @@
 /** =================== Auth (Admin Only) =================== */
+/** =================== Supabase Ready Guard =================== */
+function waitForSupabaseReady(timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (window.supabase) return resolve(window.supabase);
+
+    let done = false;
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error("Supabase not ready (timeout). Did initSupabase.js load and finish?"));
+    }, timeoutMs);
+
+    document.addEventListener("supabase-ready", () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(window.supabase);
+    }, { once: true });
+  });
+}
+
+
 async function checkAuth() {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
@@ -329,6 +351,14 @@ function setupNavigation() {
 
 /** =================== Init =================== */
 document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    await waitForSupabaseReady(); // ✅ ensures window.supabase exists + init finished
+  } catch (e) {
+    console.error("❌ Supabase failed to initialize:", e);
+    // Optional: redirect to login or show an error banner
+    return;
+  }
+
   const allowed = await checkAuth();
   if (!allowed) return;
 
@@ -350,3 +380,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderCategoryTable(summary);
   renderCategoryChart(summary);
 });
+
