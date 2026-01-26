@@ -426,3 +426,36 @@ entrypoint = "./functions/spot-snapshot/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/spot-snapshot/*.html" ]
+
+[functions.enqueue-upcoming-shift-reminders]
+enabled = true
+verify_jwt = true
+import_map = "./functions/enqueue-upcoming-shift-reminders/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/enqueue-upcoming-shift-reminders/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/enqueue-upcoming-shift-reminders/*.html" ]
+
+[functions.scan-no-show]
+enabled = true
+verify_jwt = true
+import_map = "./functions/scan-no-show/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/scan-no-show/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/scan-no-show/*.html" ]
+
+[functions.scan-open-break-too-long]
+enabled = true
+verify_jwt = true
+import_map = "./functions/scan-open-break-too-long/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/scan-open-break-too-long/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/scan-open-break-too-long/*.html" ]
