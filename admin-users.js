@@ -26,7 +26,7 @@
     let lastDocMap = new Map(); // employee_id -> { status, doc_type }
     let lastAddrMap = new Map(); // employee_id -> true (has current address)
     let addrStatusLoaded = false;
-
+let usersCardsInited = false;
   let drawerReady = false;
   let activeEmployeeId = null;
 
@@ -177,70 +177,65 @@ async function saveUserPhone({ userId, phone, canSms }) {
 }
 
   // ---------- init ----------
-  function initUsersCardsTab() {
-    const cards = qs("#usersCards");
-    if (!cards) return;
+function initUsersCardsTab() {
+  if (usersCardsInited) return;
+  usersCardsInited = true;
 
-    const search = qs("#userSearchInput");
-    const showInactive = qs("#userShowInactive");
+  const cards = qs("#usersCards");
+  if (!cards) return;
 
-    if (search) {
-      search.addEventListener("input", () => renderUsersCards(lastRows, lastDocMap));
-    }
-    if (showInactive) {
-      showInactive.addEventListener("change", () => renderUsersCards(lastRows, lastDocMap));
-    }
+  const search = qs("#userSearchInput");
+  const showInactive = qs("#userShowInactive");
 
-    // Press micro-interaction
-    cards.addEventListener("pointerdown", (e) => {
-      const card = e.target.closest(".user-card");
-      if (!card) return;
-      card.classList.add("uc-pressed");
-    });
-    window.addEventListener("pointerup", () => {
-      qsa(".user-card.uc-pressed").forEach((c) => c.classList.remove("uc-pressed"));
-    });
+  if (search) search.addEventListener("input", () => renderUsersCards(lastRows, lastDocMap));
+  if (showInactive) showInactive.addEventListener("change", () => renderUsersCards(lastRows, lastDocMap));
 
-    // Delegated click:
-    // - Manage button opens drawer
-    // - Clicking anywhere on card also opens drawer (except interactive elements)
-    cards.addEventListener("click", (e) => {
-      const card = e.target.closest(".user-card");
-      if (!card) return;
+  cards.addEventListener("pointerdown", (e) => {
+    const card = e.target.closest(".user-card");
+    if (!card) return;
+    card.classList.add("uc-pressed");
+  });
+  window.addEventListener("pointerup", () => {
+    qsa(".user-card.uc-pressed").forEach((c) => c.classList.remove("uc-pressed"));
+  });
 
-      const employeeId = card.getAttribute("data-employee-id") || "";
-      if (!employeeId) return;
+  cards.addEventListener("click", (e) => {
+    const card = e.target.closest(".user-card");
+    if (!card) return;
 
-      // If clicked an interactive element, don't treat as "open drawer"
-      const interactive = e.target.closest("button, a, input, select, textarea, label");
-      const btn = e.target.closest("[data-action]");
+    const employeeId = card.getAttribute("data-employee-id") || "";
+    if (!employeeId) return;
 
-      // Explicit actions
-      if (btn) {
-        const action = btn.getAttribute("data-action");
-        if (action === "manage") {
-          const row = lastRows.find((r) => getEmpId(r) === String(employeeId));
-          if (!row) return;
-          openUserDrawer(row);
-        }
-        return;
-      }
+    const interactive = e.target.closest("button, a, input, select, textarea, label");
+    const btn = e.target.closest("[data-action]");
 
-      // Card click opens drawer (unless interactive)
-      if (!interactive) {
+    if (btn) {
+      const action = btn.getAttribute("data-action");
+      if (action === "manage") {
         const row = lastRows.find((r) => getEmpId(r) === String(employeeId));
         if (!row) return;
         openUserDrawer(row);
       }
-    });
+      return;
+    }
 
-    // Expose renderer so admin.js can call it
-    window.renderUsers = (rows, docMap) => {
-      lastRows = Array.isArray(rows) ? rows : [];
-      lastDocMap = normalizeDocMap(docMap);
-      renderUsersCards(lastRows, lastDocMap);
-    };
-  }
+    if (!interactive) {
+      const row = lastRows.find((r) => getEmpId(r) === String(employeeId));
+      if (!row) return;
+      openUserDrawer(row);
+    }
+  });
+
+  // ✅ KEEP these exports (your admin shell expects them)
+  window.renderUsers = (rows, docMap) => {
+    lastRows = Array.isArray(rows) ? rows : [];
+    lastDocMap = normalizeDocMap(docMap);
+    renderUsersCards(lastRows, lastDocMap);
+  };
+
+  window.initUsersCardsTab = initUsersCardsTab;
+}
+
 
   // ---------- chip UI ----------
   function chip(label, kind = "neutral", icon = "") {
@@ -461,6 +456,26 @@ if (!taxStatusLoaded) {
               </label>
             </div>
           </section>
+<!-- Watchlist (who this user watches) -->
+<section class="ud-section" id="udWatchSection">
+  <div class="ud-section-title">Watchlist</div>
+  <div class="ud-hint muted">Assign who this person will receive exception alerts for (active employees only).</div>
+
+  <div class="ud-watch-add">
+    <div class="ud-watch-search">
+      <input id="udWatchSearch" type="text" autocomplete="off" placeholder="Search active employees…" />
+      <div id="udWatchSug" class="ud-watch-sug hidden" aria-label="Suggestions"></div>
+    </div>
+    <button id="udWatchAddBtn" class="btn" type="button" disabled>Add</button>
+  </div>
+
+  <div id="udWatchList" class="ud-watch-list">
+    <div class="muted">—</div>
+  </div>
+
+  <div id="udWatchMsg" class="ud-watch-msg muted">—</div>
+</section>
+
 
           <!-- Address (Phase 2: history) -->
 <section class="ud-section">
@@ -681,7 +696,7 @@ if (activeUserId) {
         await addAddressForEmployee(activeEmployeeId);
     });
 
-
+    setupWatchlistUI();
     drawerReady = true;
   }
 
@@ -730,6 +745,280 @@ function setDirtyFromCurrent() {
     cur.canSms !== drawerSnapshot.canSms;
 
   setDirty(changed);
+}
+
+// =========================================================
+// Watchlist (employee_watchers): A watches B
+// - active-only picker for watched employees
+// - stored in public.employee_watchers
+// =========================================================
+
+let watchCache = new Map(); // watcher_employee_id -> [watched_employee_id]
+
+function setWatchMsg(text) {
+  const el = qs("#udWatchMsg");
+  if (el) el.textContent = text || "—";
+}
+
+function activeEmployeesForPicker(excludeEmployeeId) {
+  const exclude = String(excludeEmployeeId || "");
+  return (Array.isArray(lastRows) ? lastRows : [])
+    .filter((r) => !!r && !!getEmpId(r) && r.active === true)
+    .map((r) => ({
+      id: getEmpId(r),
+      name: r.display_name || r.name || r.email || getEmpId(r),
+    }))
+    .filter((x) => x.id !== exclude)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function hideWatchSuggestions() {
+  const sug = qs("#udWatchSug");
+  if (sug) sug.classList.add("hidden");
+}
+
+function showWatchSuggestions(items) {
+  const sug = qs("#udWatchSug");
+  if (!sug) return;
+
+  if (!items || !items.length) {
+    sug.innerHTML = "";
+    sug.classList.add("hidden");
+    return;
+  }
+
+  sug.innerHTML = items.slice(0, 8).map((it) => `
+    <button type="button" class="ud-watch-sug-item" data-emp="${esc(it.id)}">
+      <span class="ud-watch-sug-name">${esc(it.name)}</span>
+    </button>
+  `).join("");
+
+  sug.classList.remove("hidden");
+}
+
+function clearWatchPicker() {
+  const input = qs("#udWatchSearch");
+  const addBtn = qs("#udWatchAddBtn");
+  if (input) {
+    input.value = "";
+    input.dataset.targetId = "";
+  }
+  if (addBtn) addBtn.disabled = true;
+  hideWatchSuggestions();
+}
+
+function renderWatchList(watcherEmployeeId, watchedIds) {
+  const list = qs("#udWatchList");
+  if (!list) return;
+
+  const map = new Map(
+    (Array.isArray(lastRows) ? lastRows : [])
+      .filter((r) => !!r && !!getEmpId(r))
+      .map((r) => [getEmpId(r), r])
+  );
+
+  const rows = (watchedIds || [])
+    .map((id) => {
+      const r = map.get(String(id));
+      return {
+        id: String(id),
+        name: (r && (r.display_name || r.name || r.email)) || String(id),
+        active: r ? r.active === true : true
+      };
+    })
+    .filter((x) => x.active) // ✅ active-only targets shown
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!rows.length) {
+    list.innerHTML = `<div class="muted">No watch targets yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map((x) => `
+    <div class="ud-watch-row" data-emp="${esc(x.id)}">
+      <div class="ud-watch-left">
+        <div class="ud-watch-name">${esc(x.name)}</div>
+        <div class="ud-watch-sub muted">${esc(x.id)}</div>
+      </div>
+      <div class="ud-watch-actions">
+        <button type="button" class="btn ghost ud-watch-remove" data-action="watch-remove" data-emp="${esc(x.id)}">
+          Remove
+        </button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadWatchTargets(watcherEmployeeId) {
+  const supabase = window.supabase;
+  if (!supabase || !watcherEmployeeId) return;
+
+  setWatchMsg("Loading…");
+
+  const { data, error } = await supabase
+    .from("employee_watchers")
+    .select("watched_employee_id, active")
+    .eq("watcher_employee_id", watcherEmployeeId)
+    .eq("active", true);
+
+  if (error) {
+    console.error("Failed to load watch targets", error);
+    setWatchMsg("Failed to load watchlist.");
+    return;
+  }
+
+  const ids = (data || [])
+    .map((r) => String(r.watched_employee_id || ""))
+    .filter(Boolean);
+
+  watchCache.set(String(watcherEmployeeId), ids);
+  renderWatchList(watcherEmployeeId, ids);
+
+  setWatchMsg("—");
+}
+
+async function addWatchTarget(watcherEmployeeId, watchedEmployeeId) {
+  const supabase = window.supabase;
+  if (!supabase || !watcherEmployeeId || !watchedEmployeeId) return;
+
+  const cached = watchCache.get(String(watcherEmployeeId)) || [];
+  if (cached.includes(String(watchedEmployeeId))) {
+    setWatchMsg("Already watching that employee.");
+    return;
+  }
+
+  // ✅ enforce active-only at runtime too
+  const ok = activeEmployeesForPicker(watcherEmployeeId).some((x) => x.id === watchedEmployeeId);
+  if (!ok) {
+    setWatchMsg("Only active employees can be watched.");
+    return;
+  }
+
+  setWatchMsg("Adding…");
+
+  const { error } = await supabase
+    .from("employee_watchers")
+    .upsert(
+      {
+        watcher_employee_id: watcherEmployeeId,
+        watched_employee_id: watchedEmployeeId,
+        active: true
+      },
+      { onConflict: "watcher_employee_id,watched_employee_id" }
+    );
+
+  if (error) {
+    console.error("Failed to add watch target", error);
+    setWatchMsg(error.message || "Failed to add.");
+    return;
+  }
+
+  await loadWatchTargets(watcherEmployeeId);
+  setWatchMsg("Added ✅");
+  setTimeout(() => setWatchMsg("—"), 900);
+}
+
+async function removeWatchTarget(watcherEmployeeId, watchedEmployeeId) {
+  const supabase = window.supabase;
+  if (!supabase || !watcherEmployeeId || !watchedEmployeeId) return;
+
+  setWatchMsg("Removing…");
+
+  const { error } = await supabase
+    .from("employee_watchers")
+    .delete()
+    .eq("watcher_employee_id", watcherEmployeeId)
+    .eq("watched_employee_id", watchedEmployeeId);
+
+  if (error) {
+    console.error("Failed to remove watch target", error);
+    setWatchMsg(error.message || "Failed to remove.");
+    return;
+  }
+
+  await loadWatchTargets(watcherEmployeeId);
+  setWatchMsg("Removed ✅");
+  setTimeout(() => setWatchMsg("—"), 900);
+}
+
+function setupWatchlistUI() {
+  const input = qs("#udWatchSearch");
+  const sug = qs("#udWatchSug");
+  const addBtn = qs("#udWatchAddBtn");
+  const list = qs("#udWatchList");
+  if (!input || !sug || !addBtn || !list) return;
+
+  const refreshSug = () => {
+    const watcherId = activeEmployeeId;
+    if (!watcherId) return;
+
+    const all = activeEmployeesForPicker(watcherId);
+    const q = (input.value || "").trim().toLowerCase();
+
+    if (!q) {
+      input.dataset.targetId = "";
+      addBtn.disabled = true;
+      showWatchSuggestions([]);
+      return;
+    }
+
+    const matches = all.filter((x) => x.name.toLowerCase().includes(q)).slice(0, 8);
+    showWatchSuggestions(matches);
+
+    // only enable Add if we selected a suggestion (explicit)
+    input.dataset.targetId = "";
+    addBtn.disabled = true;
+  };
+
+  input.addEventListener("input", refreshSug);
+  input.addEventListener("focus", refreshSug);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideWatchSuggestions();
+  });
+
+  // click suggestion
+  sug.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ud-watch-sug-item");
+    if (!btn) return;
+    const emp = btn.getAttribute("data-emp") || "";
+    if (!emp) return;
+
+    const map = new Map(activeEmployeesForPicker(activeEmployeeId).map((x) => [x.id, x.name]));
+    input.value = map.get(emp) || input.value;
+    input.dataset.targetId = emp;
+    addBtn.disabled = false;
+    hideWatchSuggestions();
+  });
+
+  // Add target
+  addBtn.addEventListener("click", async () => {
+    const watcherId = activeEmployeeId;
+    const targetId = input.dataset.targetId || "";
+    if (!watcherId || !targetId) return;
+
+    await addWatchTarget(watcherId, targetId);
+    clearWatchPicker();
+  });
+
+  // remove target
+  list.addEventListener("click", async (e) => {
+    const btn = e.target.closest('[data-action="watch-remove"]');
+    if (!btn) return;
+
+    const watcherId = activeEmployeeId;
+    const targetId = btn.getAttribute("data-emp") || "";
+    if (!watcherId || !targetId) return;
+
+    if (!window.confirm("Remove this watch assignment?")) return;
+    await removeWatchTarget(watcherId, targetId);
+  });
+
+  // click outside closes suggestions
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#udWatchSug")) return;
+    if (e.target.closest("#udWatchSearch")) return;
+    hideWatchSuggestions();
+  });
 }
 
   // ---------- Phase 2: Addresses ----------
@@ -896,6 +1185,7 @@ async function loadUserPhone(userId) {
 }
 
 
+
 async function openUserDrawer(row) {
     if (!row) return;
     ensureDrawer();
@@ -930,6 +1220,8 @@ const phoneState = await loadUserPhone(activeUserId);
     // Phase 2: address section
 refreshAddresses(activeEmployeeId);
 
+clearWatchPicker();
+loadWatchTargets(activeEmployeeId);
 
     // snapshot + clean state
     drawerSnapshot = readDrawerState();
@@ -968,10 +1260,10 @@ refreshAddresses(activeEmployeeId);
 
   }
 
-  // ---------- boot ----------
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initUsersCardsTab);
-  } else {
-    initUsersCardsTab();
-  }
+  document.addEventListener("DOMContentLoaded", initUsersCardsTab);
+} else {
+  initUsersCardsTab();
+}
+
 })();

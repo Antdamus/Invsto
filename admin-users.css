@@ -308,3 +308,20 @@
   font-size:12px;
   opacity:.9;
 }
+
+/* Watchlist section (drawer) */
+.ud-watch-add{display:flex;gap:10px;align-items:flex-start;margin-top:10px;}
+.ud-watch-search{position:relative;flex:1;min-width:180px;}
+.ud-watch-sug{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 8px);padding:8px;border-radius:14px;
+  background:rgba(18,18,20,.92);border:1px solid rgba(255,255,255,.10);backdrop-filter:blur(16px);
+  box-shadow:0 18px 60px rgba(0,0,0,.45);}
+.ud-watch-sug.hidden{display:none;}
+.ud-watch-sug-item{width:100%;text-align:left;border:0;background:transparent;padding:10px;border-radius:12px;
+  color:rgba(255,255,255,.92);cursor:pointer;transition:transform .12s ease,background .12s ease;}
+.ud-watch-sug-item:hover{background:rgba(255,255,255,.08);transform:translateY(-1px);}
+.ud-watch-list{margin-top:12px;display:flex;flex-direction:column;gap:10px;}
+.ud-watch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:16px;
+  border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);}
+.ud-watch-name{font-weight:650;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ud-watch-sub{font-size:12px;margin-top:2px;}
+.ud-watch-msg{margin-top:10px;}
