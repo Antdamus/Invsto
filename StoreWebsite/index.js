@@ -1,367 +1,621 @@
-/* index.js — OG Jewelry Frontpage
-   - Mobile nav toggle + outside click + escape
-   - Header elevate on scroll
-   - Smooth anchor scrolling (respect reduced motion)
-   - CTA email form (front-end only demo)
-   - Year auto-update
-   - Tiny “search” placeholder action
-*/
+// index.js — OG Jewelers Storefront (V2)
+// Matches your provided index.html (data-ui + data-action hooks).
+// Fixes: search backdrop, X close reliability, close-before-navigate to shop.
 
-(() => {
-  "use strict";
+console.log("✅ index.js LOADED — storefront v2:", new Date().toISOString());
 
-  /* =========================
-     Tiny helpers
-  ========================= */
-  const qs = (sel, root = document) => root.querySelector(sel);
-  const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+/* =========================
+   Tiny helpers
+========================= */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  const prefersReducedMotion = () =>
-    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function prefersReducedMotion() {
+  return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
-  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+function setAriaHidden(el, hidden) {
+  if (!el) return;
+  el.setAttribute("aria-hidden", hidden ? "true" : "false");
+}
 
-  /* =========================
-     Header elevate on scroll
-  ========================= */
-  const header = qs("[data-elevate-on-scroll]");
-  const setHeaderState = () => {
-    if (!header) return;
-    const y = window.scrollY || 0;
-    header.classList.toggle("is-elevated", y > 6);
-  };
+function lockScroll(on) {
+  document.documentElement.classList.toggle("lock", on);
+  document.body.classList.toggle("lock", on);
+}
 
-  /* =========================
-     Mobile menu
-  ========================= */
-  const navToggle = qs(".nav-toggle");
-  const mobileMenu = qs("#mobileMenu");
+/* =========================
+   UI refs (match your HTML)
+========================= */
+const ui = {
+  year: $('[data-ui="year"]'),
 
-  const isMenuOpen = () => mobileMenu && !mobileMenu.hasAttribute("hidden");
+  notice: $('[data-ui="top-notice"]'),
 
-  const openMenu = () => {
-    if (!navToggle || !mobileMenu) return;
+  drawer: $('[data-ui="drawer"]'),
+  drawerBackdrop: $('[data-ui="drawer-backdrop"]'),
 
-    mobileMenu.removeAttribute("hidden");
-    navToggle.setAttribute("aria-expanded", "true");
-    document.body.classList.add("menu-open");
+  modal: $('[data-ui="quickview"]'),
+  modalBackdrop: $('[data-ui="modal-backdrop"]'),
 
-    // Optional focus: first link
-    const firstLink = qs(".mobile-menu a", mobileMenu);
-    if (firstLink) firstLink.focus({ preventScroll: true });
-  };
+  search: $('[data-ui="search"]'),
+  searchInput: $('[data-ui="search-input"]'),
 
-  const closeMenu = () => {
-    if (!navToggle || !mobileMenu) return;
+  featuredGrid: $('[data-ui="featured-grid"]'),
 
-    mobileMenu.setAttribute("hidden", "");
-    navToggle.setAttribute("aria-expanded", "false");
-    document.body.classList.remove("menu-open");
-  };
+  qv: {
+    title: $('[data-ui="qv-title"]'),
+    img: $('[data-ui="qv-img"]'),
+    badges: $('[data-ui="qv-badges"]'),
+    h: $('[data-ui="qv-h"]'),
+    p: $('[data-ui="qv-p"]'),
+    price: $('[data-ui="qv-price"]'),
+    link: $('[data-ui="qv-link"]'),
+    note: $('[data-ui="qv-note"]'),
+  },
+};
 
-  const toggleMenu = () => {
-    if (isMenuOpen()) closeMenu();
-    else openMenu();
-  };
+/* =========================
+   State
+========================= */
+const state = {
+  mood: "noir", // noir | warm
+  moodKey: "og_mood_v1",
 
-  const closeMenuIfAnchorClicked = (e) => {
-    const a = e.target.closest("a");
-    if (!a) return;
-    // Close only if it's an in-page anchor or a normal link (mobile nav UX)
-    closeMenu();
-  };
+  noticeDismissedKey: "og_notice_dismissed_v1",
 
-  const handleOutsideClick = (e) => {
-    if (!isMenuOpen()) return;
-    const clickedToggle = navToggle && navToggle.contains(e.target);
-    const clickedMenu = mobileMenu && mobileMenu.contains(e.target);
-    if (!clickedToggle && !clickedMenu) closeMenu();
-  };
+  featured: [
+    {
+      slot: "featured.1",
+      title: "Diamond Ring",
+      subtitle: "A statement in every angle.",
+      price: "$2,999",
+      badges: ["New"],
+      img: "assets/featured/diamond-ring.jpg",
+      link: "catalogue.html",
+    },
+    {
+      slot: "featured.2",
+      title: "Gold Chain",
+      subtitle: "Polished links, premium weight.",
+      price: "$1,799",
+      badges: ["Best Value"],
+      img: "assets/featured/gold-chain.jpg",
+      link: "catalogue.html",
+    },
+    {
+      slot: "featured.3",
+      title: "Luxury Watch",
+      subtitle: "Timepiece with presence.",
+      price: "$9,499",
+      badges: ["Limited"],
+      img: "assets/featured/luxury-watch.jpg",
+      link: "catalogue.html",
+    },
+    {
+      slot: "featured.4",
+      title: "Diamond Necklace",
+      subtitle: "Clean sparkle, camera-ready.",
+      price: "$4,599",
+      badges: ["OG Pick"],
+      img: "assets/featured/diamond-necklace.jpg",
+      link: "catalogue.html",
+    },
+  ],
+};
 
-  const handleEscape = (e) => {
-    if (e.key !== "Escape") return;
-    if (!isMenuOpen()) return;
-    closeMenu();
-    if (navToggle) navToggle.focus({ preventScroll: true });
-  };
+/* =========================
+   Search Backdrop (created in JS)
+========================= */
+let searchBackdrop = null;
 
-  /* =========================
-     Smooth anchors (respect reduced motion)
-  ========================= */
-  const smoothScrollToId = (id) => {
-    const el = qs(id);
-    if (!el) return;
+function ensureSearchBackdrop() {
+  if (!ui.search) return null;
 
-    const reduce = prefersReducedMotion();
+  if (searchBackdrop && document.body.contains(searchBackdrop)) return searchBackdrop;
 
-    // Calculate offset for sticky header
-    const headerH = header ? header.getBoundingClientRect().height : 0;
-    const top = window.scrollY + el.getBoundingClientRect().top - headerH - 10;
+  searchBackdrop = document.createElement("div");
+  searchBackdrop.id = "search-backdrop";
+  // Re-use your existing blur backdrop class (same as drawer)
+  searchBackdrop.className = "drawer-backdrop";
+  searchBackdrop.hidden = true;
 
-    window.scrollTo({
-      top: Math.max(0, top),
-      behavior: reduce ? "auto" : "smooth",
+  // Click backdrop closes search
+  searchBackdrop.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSearch();
+  });
+
+  document.body.appendChild(searchBackdrop);
+  return searchBackdrop;
+}
+
+function isSearchOpen() {
+  return !!ui.search && !ui.search.hasAttribute("hidden");
+}
+
+function openSearch() {
+  if (!ui.search) return;
+
+  ensureSearchBackdrop();
+  if (searchBackdrop) searchBackdrop.hidden = false;
+
+  ui.search.removeAttribute("hidden");
+  setAriaHidden(ui.search, false);
+  lockScroll(true);
+
+  // Focus input
+  setTimeout(() => ui.searchInput?.focus({ preventScroll: true }), 30);
+}
+
+function closeSearch() {
+  if (!ui.search) return;
+
+  ui.search.setAttribute("hidden", "");
+  setAriaHidden(ui.search, true);
+
+  if (searchBackdrop) searchBackdrop.hidden = true;
+
+  lockScroll(false);
+}
+
+/* =========================
+   Drawer (mobile)
+========================= */
+function isDrawerOpen() {
+  return !!ui.drawer && !ui.drawer.hasAttribute("hidden");
+}
+
+function openDrawer() {
+  if (!ui.drawer || !ui.drawerBackdrop) return;
+
+  ui.drawer.removeAttribute("hidden");
+  ui.drawerBackdrop.removeAttribute("hidden");
+  setAriaHidden(ui.drawer, false);
+  lockScroll(true);
+
+  const first = $(".drawer a, .drawer button", ui.drawer);
+  first?.focus({ preventScroll: true });
+}
+
+function closeDrawer() {
+  if (!ui.drawer || !ui.drawerBackdrop) return;
+
+  ui.drawer.setAttribute("hidden", "");
+  ui.drawerBackdrop.setAttribute("hidden", "");
+  setAriaHidden(ui.drawer, true);
+  lockScroll(false);
+}
+
+/* =========================
+   Quick View modal
+========================= */
+let lastFocusEl = null;
+
+function isModalOpen() {
+  return !!ui.modal && !ui.modal.hasAttribute("hidden");
+}
+
+function openQuickview(payload) {
+  if (!ui.modal || !ui.modalBackdrop) return;
+
+  lastFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  const p = payload || state.featured[0];
+
+  if (ui.qv.title) ui.qv.title.textContent = "Quick View";
+  if (ui.qv.h) ui.qv.h.textContent = p.title || "Featured";
+  if (ui.qv.p) ui.qv.p.textContent = p.subtitle || "";
+  if (ui.qv.price) ui.qv.price.textContent = p.price || "";
+  if (ui.qv.link) ui.qv.link.setAttribute("href", p.link || "catalogue.html");
+  if (ui.qv.img) ui.qv.img.style.setProperty("--img", `url('${p.img || ""}')`);
+
+  if (ui.qv.badges) {
+    ui.qv.badges.innerHTML = "";
+    (p.badges || []).slice(0, 3).forEach((b) => {
+      const span = document.createElement("span");
+      span.className = "badge";
+      span.textContent = b;
+      ui.qv.badges.appendChild(span);
     });
-  };
+  }
 
-  const interceptAnchorClicks = () => {
-    document.addEventListener("click", (e) => {
-      const a = e.target.closest('a[href^="#"]');
-      if (!a) return;
+  ui.modal.removeAttribute("hidden");
+  ui.modalBackdrop.removeAttribute("hidden");
+  setAriaHidden(ui.modal, false);
 
-      const href = a.getAttribute("href");
-      // Allow skip link & empty href
-      if (!href || href === "#") return;
+  lockScroll(true);
 
-      // If anchor is on the page, intercept for smooth scroll
-      const target = qs(href);
-      if (!target) return;
+  const closeBtn = $('[data-action="close-modal"]', ui.modal);
+  closeBtn?.focus({ preventScroll: true });
+}
 
-      e.preventDefault();
-      closeMenu();
-      smoothScrollToId(href);
+function closeQuickview() {
+  if (!ui.modal || !ui.modalBackdrop) return;
 
-      // Update URL hash without jumping
-      history.pushState(null, "", href);
+  ui.modal.setAttribute("hidden", "");
+  ui.modalBackdrop.setAttribute("hidden", "");
+  setAriaHidden(ui.modal, true);
+
+  lockScroll(false);
+
+  lastFocusEl?.focus?.({ preventScroll: true });
+  lastFocusEl = null;
+}
+
+function openQuickviewFromTrigger(triggerEl) {
+  const card = triggerEl.closest(".card");
+  if (!card) return openQuickview();
+
+  const slot = card.getAttribute("data-slot") || "";
+  const match = state.featured.find((x) => x.slot === slot);
+  openQuickview(match || state.featured[0]);
+}
+
+/* =========================
+   Mood toggle
+========================= */
+function hydrateMood() {
+  try {
+    const saved = localStorage.getItem(state.moodKey);
+    if (saved === "warm" || saved === "noir") state.mood = saved;
+  } catch {}
+
+  document.documentElement.setAttribute("data-mood", state.mood);
+}
+
+function toggleMood(btn) {
+  state.mood = state.mood === "noir" ? "warm" : "noir";
+  document.documentElement.setAttribute("data-mood", state.mood);
+
+  try {
+    localStorage.setItem(state.moodKey, state.mood);
+  } catch {}
+
+  if (btn) {
+    const pressed = state.mood !== "noir";
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    // keep text consistent
+    btn.childNodes.forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE) n.textContent = pressed ? " Mood: Warm" : " Mood: Noir";
     });
-  };
+  }
+}
 
-  // Handle initial hash on load
-  const scrollToHashOnLoad = () => {
-    const hash = window.location.hash;
-    if (!hash || hash === "#") return;
+/* =========================
+   Notice persistence
+========================= */
+function hydrateNoticeDismissed() {
+  try {
+    const dismissed = localStorage.getItem(state.noticeDismissedKey);
+    if (dismissed === "1") ui.notice?.setAttribute("hidden", "");
+  } catch {}
+}
 
-    // Let layout settle first
-    window.requestAnimationFrame(() => {
-      // Avoid smooth on initial if reduced motion
-      const reduce = prefersReducedMotion();
-      if (reduce) {
-        const el = qs(hash);
-        if (el) el.scrollIntoView();
-        return;
-      }
-      smoothScrollToId(hash);
-    });
-  };
+function dismissNotice() {
+  ui.notice?.setAttribute("hidden", "");
+  try {
+    localStorage.setItem(state.noticeDismissedKey, "1");
+  } catch {}
+}
 
-  /* =========================
-     CTA form (demo)
-     - Keep static site safe: no network request by default.
-     - Later: wire to Supabase / email service.
-  ========================= */
-  const initCtaForm = () => {
-    const form = qs(".cta-form");
-    if (!form) return;
+/* =========================
+   Collections → catalogue routing
+========================= */
+function wireCollectionRouting() {
+  const tiles = $$(".tile[data-collection]");
+  tiles.forEach((tile) => {
+    const key = tile.getAttribute("data-collection");
+    const a = $(".tile-hit", tile);
+    if (!a || !key) return;
 
-    const input = qs('input[type="email"]', form);
-    const button = qs('button[type="submit"]', form);
+    const href = a.getAttribute("href") || "";
+    if (href.includes("catalogue.html")) {
+      a.setAttribute("href", `catalogue.html?collection=${encodeURIComponent(key)}`);
+    }
+  });
+}
 
-    const setBusy = (busy) => {
-      if (!button) return;
-      button.disabled = busy;
-      button.setAttribute("aria-busy", busy ? "true" : "false");
-      button.dataset.originalText = button.dataset.originalText || button.textContent;
-      button.textContent = busy ? "Joining…" : button.dataset.originalText;
+/* =========================
+   Featured shuffle
+========================= */
+function shuffleFeatured() {
+  if (!ui.featuredGrid) return;
+
+  const cards = $$(".card", ui.featuredGrid);
+  if (cards.length < 2) return;
+
+  const shuffled = cards
+    .map((el) => ({ el, r: Math.random() }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.el);
+
+  shuffled.forEach((c) => ui.featuredGrid.appendChild(c));
+
+  if (!prefersReducedMotion()) {
+    ui.featuredGrid.classList.remove("pulse");
+    void ui.featuredGrid.offsetHeight;
+    ui.featuredGrid.classList.add("pulse");
+    setTimeout(() => ui.featuredGrid.classList.remove("pulse"), 420);
+  }
+}
+
+/* =========================
+   Hydrate quickview model from DOM
+========================= */
+function hydrateFeaturedQuickviewModel() {
+  const cards = $$(".card[data-slot^='featured.']");
+  if (!cards.length) return;
+
+  cards.forEach((card) => {
+    const slot = card.getAttribute("data-slot") || "";
+    if (!slot) return;
+
+    const title = $(`[data-slot="${slot}.title"]`, card)?.textContent?.trim() || "";
+    const subtitle = $(`[data-slot="${slot}.subtitle"]`, card)?.textContent?.trim() || "";
+    const price = $(`[data-slot="${slot}.price"]`, card)?.textContent?.trim() || "";
+    const badge = $(`[data-slot="${slot}.badge"]`, card)?.textContent?.trim() || "";
+
+    const imgEl = $(`[data-slot="${slot}.image"]`, card);
+    const styleImg = imgEl?.style?.getPropertyValue("--img") || "";
+    const img = extractUrlFromCssVar(styleImg) || "";
+
+    const idx = state.featured.findIndex((x) => x.slot === slot);
+    const payload = {
+      slot,
+      title: title || "Featured",
+      subtitle,
+      price,
+      badges: badge ? [badge] : [],
+      img,
+      link: "catalogue.html",
     };
 
-    const showInlineMessage = (msg, type = "info") => {
-      // Create once
-      let note = qs(".cta-inline-msg", form);
-      if (!note) {
-        note = document.createElement("div");
-        note.className = "cta-inline-msg";
-        note.setAttribute("role", "status");
-        form.appendChild(note);
+    if (idx >= 0) state.featured[idx] = payload;
+    else state.featured.push(payload);
+  });
+}
+
+function extractUrlFromCssVar(cssVarVal) {
+  if (!cssVarVal) return "";
+  const m = cssVarVal.match(/url\((['"]?)(.*?)\1\)/i);
+  return m ? m[2] : "";
+}
+
+/* =========================
+   Soft reveal (optional)
+========================= */
+function setupReveal() {
+  if (prefersReducedMotion()) return;
+  if (!("IntersectionObserver" in window)) return;
+
+  const targets = $$(".section, .hero, .footer");
+  targets.forEach((el) => el.classList.add("reveal"));
+
+  const io = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((ent) => {
+        if (ent.isIntersecting) {
+          ent.target.classList.add("in");
+          io.unobserve(ent.target);
+        }
+      });
+    },
+    { threshold: 0.12 }
+  );
+
+  targets.forEach((el) => io.observe(el));
+}
+
+/* =========================
+   Focus trap basics
+========================= */
+function trapTabFocusSetup() {
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+
+    const trapRoot = getTopTrapRoot();
+    if (!trapRoot) return;
+
+    const focusables = getFocusable(trapRoot);
+    if (!focusables.length) return;
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return;
+
+    if (e.shiftKey) {
+      if (active === first) {
+        e.preventDefault();
+        last.focus({ preventScroll: true });
       }
-      note.dataset.type = type;
-      note.textContent = msg;
-    };
+    } else {
+      if (active === last) {
+        e.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    }
+  });
+}
 
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
+function getTopTrapRoot() {
+  if (isModalOpen()) return ui.modal;
+  if (isSearchOpen()) return ui.search;
+  if (isDrawerOpen()) return ui.drawer;
+  return null;
+}
 
-      const email = (input?.value || "").trim();
-      if (!email) {
-        showInlineMessage("Please enter your email.", "error");
-        input?.focus();
+function getFocusable(root) {
+  const selectors = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+
+  return $$(selectors, root).filter((el) => {
+    const style = window.getComputedStyle(el);
+    return style.visibility !== "hidden" && style.display !== "none";
+  });
+}
+
+/* =========================
+   Global click/key handling
+========================= */
+function onClick(e) {
+  // 1) data-action buttons (your primary wiring)
+  const btn = e.target.closest("[data-action]");
+  if (btn) {
+    const action = btn.getAttribute("data-action");
+
+    switch (action) {
+      case "dismiss-notice":
+        e.preventDefault();
+        dismissNotice();
         return;
-      }
 
-      // Basic client check (browser already validates type="email")
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        showInlineMessage("That email doesn’t look right. Please check it.", "error");
-        input?.focus();
+      case "open-menu":
+        e.preventDefault();
+        openDrawer();
         return;
-      }
 
-      // Simulate success (no backend yet)
-      setBusy(true);
+      case "close-menu":
+        e.preventDefault();
+        closeDrawer();
+        return;
 
-      const done = () => {
-        setBusy(false);
-        showInlineMessage("You’re in. Watch for private drops soon.", "success");
-        if (input) input.value = "";
-      };
+      case "open-quickview":
+        e.preventDefault();
+        openQuickviewFromTrigger(btn);
+        return;
 
-      if (prefersReducedMotion()) {
-        done();
-      } else {
-        window.setTimeout(done, 650);
-      }
-    });
-  };
+      case "close-modal":
+        e.preventDefault();
+        closeQuickview();
+        return;
 
-  /* =========================
-     Year auto-update
-  ========================= */
-  const initYear = () => {
-    const yearEl = qs("#year");
-    if (!yearEl) return;
-    yearEl.textContent = String(new Date().getFullYear());
-  };
+      case "open-search":
+        e.preventDefault();
+        openSearch();
+        return;
 
-  /* =========================
-     Optional: Hero video safety
-     - If video fails to autoplay on some browsers, just keep poster.
-  ========================= */
-  const initHeroVideo = () => {
-    const video = qs(".hero-video");
-    if (!video) return;
+      case "close-search":
+        e.preventDefault();
+        closeSearch();
+        return;
 
-    // If reduced motion, pause video to be respectful
-    if (prefersReducedMotion()) {
-      video.pause();
-      video.removeAttribute("autoplay");
+      case "toggle-mood":
+        e.preventDefault();
+        toggleMood(btn);
+        return;
+
+      case "shuffle-featured":
+        e.preventDefault();
+        shuffleFeatured();
+        return;
+
+      default:
+        break;
+    }
+  }
+
+  // 2) Backdrops close their layers
+  if (e.target === ui.drawerBackdrop) {
+    e.preventDefault();
+    closeDrawer();
+    return;
+  }
+  if (e.target === ui.modalBackdrop) {
+    e.preventDefault();
+    closeQuickview();
+    return;
+  }
+
+  // 3) Search: hint buttons inside overlay (data-search)
+  const hint = e.target.closest("[data-search]");
+  if (hint && ui.search && ui.search.contains(hint)) {
+    e.preventDefault();
+    const q = hint.getAttribute("data-search") || "";
+    if (ui.searchInput) ui.searchInput.value = q;
+    closeSearch();
+    window.location.href = `catalogue.html?q=${encodeURIComponent(q)}`;
+    return;
+  }
+
+  // 4) If user clicks any link to catalogue while search is open, close first.
+  const a = e.target.closest("a[href]");
+  if (a && isSearchOpen()) {
+    const href = a.getAttribute("href") || "";
+    if (href.includes("catalogue.html")) {
+      // Close overlay before navigating so you don't land with it on-screen
+      closeSearch();
+      // let navigation continue naturally
       return;
     }
-
-    // Try to play; ignore errors silently (poster remains)
-    const p = video.play?.();
-    if (p && typeof p.then === "function") {
-      p.catch(() => {
-        // Autoplay might be blocked; no action needed.
-      });
-    }
-  };
-
-  /* =========================
-     Search placeholder
-  ========================= */
-  const initSearchPlaceholder = () => {
-    const btn = qs('[data-action="open-search"]');
-    if (!btn) return;
-
-    btn.addEventListener("click", () => {
-      // Placeholder: replace later with a modal / command palette
-      // Keep it subtle (no alerts if you prefer). We'll do a tiny toast.
-      showToast("Search coming soon.");
-    });
-  };
-
-  /* =========================
-     Minimal toast (non-intrusive)
-  ========================= */
-  let toastTimer = null;
-  const showToast = (text) => {
-    let toast = qs(".toast");
-    if (!toast) {
-      toast = document.createElement("div");
-      toast.className = "toast";
-      toast.setAttribute("role", "status");
-      toast.setAttribute("aria-live", "polite");
-      document.body.appendChild(toast);
-    }
-
-    toast.textContent = text;
-    toast.classList.add("show");
-
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-      toast.classList.remove("show");
-    }, 1800);
-  };
-
-  /* =========================
-     Active nav link (nice polish)
-  ========================= */
-  const initActiveSectionObserver = () => {
-    const links = qsa('.nav a[href^="#"], .mobile-menu a[href^="#"]');
-    const sections = ["#collections", "#featured", "#story", "#contact"]
-      .map((id) => qs(id))
-      .filter(Boolean);
-
-    if (!("IntersectionObserver" in window) || sections.length === 0 || links.length === 0) return;
-
-    const byHref = new Map();
-    links.forEach((a) => byHref.set(a.getAttribute("href"), a));
-
-    const setActive = (href) => {
-      links.forEach((a) => a.classList.toggle("is-active", a.getAttribute("href") === href));
-    };
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        // Choose the most visible entry
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-
-        if (!visible) return;
-
-        const id = "#" + visible.target.id;
-        if (byHref.has(id)) setActive(id);
-      },
-      {
-        root: null,
-        // Trigger when section is meaningfully in view
-        threshold: [0.2, 0.35, 0.5, 0.65],
-        rootMargin: "-10% 0px -65% 0px",
-      }
-    );
-
-    sections.forEach((s) => io.observe(s));
-  };
-
-  /* =========================
-     Boot
-  ========================= */
-  const init = () => {
-    // Header scroll state
-    setHeaderState();
-    window.addEventListener("scroll", setHeaderState, { passive: true });
-
-    // Mobile nav
-    if (navToggle && mobileMenu) {
-      navToggle.addEventListener("click", toggleMenu);
-      mobileMenu.addEventListener("click", closeMenuIfAnchorClicked);
-      document.addEventListener("click", handleOutsideClick);
-      document.addEventListener("keydown", handleEscape);
-    }
-
-    // Anchors
-    interceptAnchorClicks();
-    scrollToHashOnLoad();
-
-    // CTA
-    initCtaForm();
-
-    // Footer year
-    initYear();
-
-    // Hero video
-    initHeroVideo();
-
-    // Search placeholder
-    initSearchPlaceholder();
-
-    // Active section observer
-    initActiveSectionObserver();
-  };
-
-  // Run after DOM is ready (defer already helps, but safe)
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
   }
-})();
+}
+
+function onKeyDown(e) {
+  if (e.key === "Escape") {
+    if (isSearchOpen()) {
+      e.preventDefault();
+      closeSearch();
+      return;
+    }
+    if (isModalOpen()) {
+      e.preventDefault();
+      closeQuickview();
+      return;
+    }
+    if (isDrawerOpen()) {
+      e.preventDefault();
+      closeDrawer();
+      return;
+    }
+  }
+
+  // Enter inside search input → go to catalogue with query
+  if (isSearchOpen() && e.key === "Enter") {
+    const val = (ui.searchInput?.value || "").trim();
+    closeSearch();
+    window.location.href = val.length
+      ? `catalogue.html?q=${encodeURIComponent(val)}`
+      : "catalogue.html";
+  }
+}
+
+/* =========================
+   Boot
+========================= */
+init();
+
+function init() {
+  // Footer year
+  if (ui.year) ui.year.textContent = String(new Date().getFullYear());
+
+  // Create search backdrop once
+  ensureSearchBackdrop();
+
+  // Wire global handlers
+  document.addEventListener("click", onClick, { passive: false });
+  document.addEventListener("keydown", onKeyDown);
+
+  // Focus trapping
+  trapTabFocusSetup();
+
+  // Optional: reveals
+  setupReveal();
+
+  // Mood + routing + quickview
+  hydrateMood();
+  wireCollectionRouting();
+  hydrateFeaturedQuickviewModel();
+
+  // Notice persistence
+  hydrateNoticeDismissed();
+}
