@@ -138,9 +138,6 @@ function isSearchOpen() {
 function openSearch() {
   if (!ui.search) return;
 
-  ensureSearchBackdrop();
-  if (searchBackdrop) searchBackdrop.hidden = false;
-
   ui.search.removeAttribute("hidden");
   setAriaHidden(ui.search, false);
   lockScroll(true);
@@ -154,8 +151,6 @@ function closeSearch() {
 
   ui.search.setAttribute("hidden", "");
   setAriaHidden(ui.search, true);
-
-  if (searchBackdrop) searchBackdrop.hidden = true;
 
   lockScroll(false);
 }
@@ -175,7 +170,8 @@ function openDrawer() {
   setAriaHidden(ui.drawer, false);
   lockScroll(true);
 
-  const first = $(".drawer a, .drawer button", ui.drawer);
+const first = $("a, button", ui.drawer);
+
   first?.focus({ preventScroll: true });
 }
 
@@ -484,10 +480,28 @@ function onClick(e) {
         openDrawer();
         return;
 
-      case "close-menu":
-        e.preventDefault();
-        closeDrawer();
-        return;
+case "close-menu": {
+  // If it's an anchor (Collections/Featured/Story), let it navigate after closing.
+  const href = btn.getAttribute("href") || "";
+  const isAnchor = href.startsWith("#");
+
+  e.preventDefault();
+  closeDrawer();
+
+  // If it's an in-page anchor, jump after close.
+  if (isAnchor) {
+    // use rAF so the drawer hides first, then scroll happens reliably
+    requestAnimationFrame(() => {
+      const target = document.querySelector(href);
+      if (target) target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+      // also update URL hash (optional but nice)
+      history.replaceState(null, "", href);
+    });
+  }
+
+  return;
+}
+
 
       case "open-quickview":
         e.preventDefault();
@@ -598,11 +612,14 @@ function init() {
   // Footer year
   if (ui.year) ui.year.textContent = String(new Date().getFullYear());
 
-  // Create search backdrop once
-  ensureSearchBackdrop();
-
   // Wire global handlers
   document.addEventListener("click", onClick, { passive: false });
+
+// Click outside the search shell closes search
+ui.search?.addEventListener("click", (e) => {
+  if (e.target === ui.search) closeSearch();
+});
+
   document.addEventListener("keydown", onKeyDown);
 
   // Focus trapping
