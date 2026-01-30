@@ -156,6 +156,157 @@ function closeSearch() {
 }
 
 /* =========================
+   Storefront published content loader
+========================= */
+const SUPABASE_PROJECT_URL =
+  window.SUPABASE_URL || "https://byhytmarmigalvawkedi.supabase.co";
+
+const STOREFRONT_CONTENT_FN = "storefront-content";
+const STOREFRONT_CATALOG_FN = "storefront-catalog";
+const CHANNEL = "og_main";
+
+const INV_PREFIX = "__inv__:";
+const FALLBACK_IMAGE = "assets/collections/chains.jpg";
+
+const invState = {
+  loaded: false,
+  map: new Map(), // id -> {id,name,price,image}
+};
+
+const fiveMinBucket = () => Math.floor(Date.now() / 300000);
+
+function toNum(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function mapStoreItemToInv(it) {
+  return {
+    id: String(it.item_type_id),
+    name: String(it.title || ""),
+    price: toNum(it.display_price),
+    image: it.image_url || FALLBACK_IMAGE,
+  };
+}
+
+async function loadInventoryMapForBindings() {
+  try {
+    const t = fiveMinBucket();
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/${STOREFRONT_CATALOG_FN}?channel=${encodeURIComponent(CHANNEL)}&t=${t}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    if (!res.ok) return;
+
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const inv = items.map(mapStoreItemToInv).filter((x) => x.id && x.name);
+
+    invState.map = new Map(inv.map((x) => [x.id, x]));
+    invState.loaded = true;
+  } catch {}
+}
+
+function formatUSD(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
+}
+
+function applyInventoryToSlot(slotRoot, itemId) {
+  const it = invState.map.get(String(itemId));
+  if (!it || !slotRoot) return;
+
+  // image
+  if (slotRoot.style?.getPropertyValue("--img") !== undefined) {
+    slotRoot.style.setProperty("--img", `url("${it.image}")`);
+  }
+  if (slotRoot.tagName === "IMG") {
+    slotRoot.src = it.image;
+  } else {
+    const img =
+      slotRoot.querySelector('[data-bind="image"]') ||
+      slotRoot.querySelector(".product-media img") ||
+      slotRoot.querySelector("img");
+    if (img) img.src = it.image;
+  }
+
+  // title
+  const titleEl =
+    slotRoot.querySelector('[data-bind="title"]') ||
+    slotRoot.querySelector(".product-title") ||
+    slotRoot.querySelector("h1,h2,h3,h4");
+  if (titleEl) titleEl.textContent = it.name;
+
+  // price
+  const priceEl =
+    slotRoot.querySelector('[data-bind="price"]') ||
+    slotRoot.querySelector(".product-price") ||
+    slotRoot.querySelector(".price");
+  if (priceEl) priceEl.textContent = formatUSD(it.price);
+}
+
+function getFeaturedGroupKey(slot) {
+  const s = String(slot || "");
+  const m = s.match(/^(featured\.\d+)(?:\..+)?$/i);
+  return m ? m[1] : null;
+}
+
+function getGroupSlotElements(groupKey) {
+  if (!groupKey) return [];
+  const exact = document.querySelector(`[data-slot="${groupKey}"]`);
+  const children = $$( `[data-slot^="${groupKey}."]` );
+  return exact ? [exact, ...children] : children;
+}
+
+function applyPublishedContentMap(content) {
+  Object.entries(content || {}).forEach(([slot, entry]) => {
+    const el = document.querySelector(`[data-slot="${slot}"]`);
+    if (!el || !entry) return;
+
+    // Inventory marker
+    if (entry.type === "text" && typeof entry.value === "string" && entry.value.startsWith(INV_PREFIX)) {
+      const id = entry.value.slice(INV_PREFIX.length);
+
+      // If this is featured.X.*, sync the whole card group
+      const groupKey = getFeaturedGroupKey(slot);
+      if (groupKey) {
+        const groupEls = getGroupSlotElements(groupKey);
+        groupEls.forEach((ge) => applyInventoryToSlot(ge, id));
+        return;
+      }
+
+      // Otherwise bind just this element
+      applyInventoryToSlot(el, id);
+      return;
+    }
+
+    if (entry.type === "text") el.textContent = entry.value;
+
+    if (entry.type === "image") {
+      if (el.tagName === "IMG") el.src = entry.value;
+      else el.style?.setProperty("--img", `url("${entry.value}")`);
+    }
+  });
+}
+
+async function loadPublishedStorefrontContent() {
+  try {
+    // load inventory first so __inv__ markers can hydrate immediately
+    await loadInventoryMapForBindings();
+
+    const t = fiveMinBucket();
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/${STOREFRONT_CONTENT_FN}?channel=${encodeURIComponent(CHANNEL)}&t=${t}`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    if (!res.ok) return;
+
+    const data = await res.json().catch(() => ({}));
+    if (!data?.ok || !data?.content) return;
+
+    applyPublishedContentMap(data.content);
+  } catch {}
+}
+
+
+/* =========================
    Drawer (mobile)
 ========================= */
 function isDrawerOpen() {
@@ -608,7 +759,7 @@ function onKeyDown(e) {
 ========================= */
 init();
 
-function init() {
+async function init() {
   // Footer year
   if (ui.year) ui.year.textContent = String(new Date().getFullYear());
 
@@ -631,6 +782,10 @@ ui.search?.addEventListener("click", (e) => {
   // Mood + routing + quickview
   hydrateMood();
   wireCollectionRouting();
+
+    // Load published storefront content first (so DOM slots reflect live data)
+  await loadPublishedStorefrontContent();
+
   hydrateFeaturedQuickviewModel();
 
   // Notice persistence

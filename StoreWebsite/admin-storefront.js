@@ -320,6 +320,8 @@
     if (!state.supabaseReady || !window.supabase) {
       setStatus("Saved (local)", "warn");
       state.pendingSaveSlots.clear();
+      updateUnpublishedIndicator();
+
       return;
     }
 
@@ -602,6 +604,8 @@
 
     state.draft[state.slot] = { type, value };
     persistDraftLocal();
+    updateUnpublishedIndicator();
+
 
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
@@ -686,6 +690,7 @@
     applyContent(state.draft);
 
     persistDraftLocal();
+updateUnpublishedIndicator();
 
     return true;
   }
@@ -744,49 +749,172 @@
   /* =========================
      Publish & Preview
   ========================= */
-  function initPublishPreview() {
-    previewBtn?.addEventListener("click", () => {
-      applyContent(state.published);
-      applyContent(state.draft);
-      alert("Previewing draft");
-    });
+ function initPublishPreview() {
+  // Convert old Preview button into "View Live" toggle
+  if (previewBtn) {
+    previewBtn.textContent = "View Live";
+    previewBtn.dataset.mode = "edit"; // edit | live
+  }
 
-    publishBtn?.addEventListener("click", async () => {
-      if (!state.supabaseReady || !window.supabase) {
-        alert("Supabase not ready. Cannot publish right now.");
-        return;
-      }
+  previewBtn?.addEventListener("click", () => {
+    const mode = previewBtn.dataset.mode || "edit";
+    if (mode === "edit") {
+      // Switch to live
+      previewBtn.dataset.mode = "live";
+      previewBtn.textContent = "Back to Editing";
+      applyPublishedOnly();
+      setStatus("Viewing Live", "dim");
+    } else {
+      // Back to editing (draft overlay)
+      previewBtn.dataset.mode = "edit";
+      previewBtn.textContent = "View Live";
+      applyEditingView();
+      updateUnpublishedIndicator();
+    }
+  });
 
-      setStatus("Publishing…", "dim");
+  // Add a Discard Draft button next to Publish (no HTML changes)
+  const discardBtn = document.createElement("button");
+  discardBtn.className = "admin-btn";
+  discardBtn.textContent = "Discard Draft";
+  discardBtn.style.marginLeft = "8px";
+  publishBtn?.insertAdjacentElement("afterend", discardBtn);
 
-      const payload = Object.entries(state.draft).map(([slot, v]) => ({
-        channel: CHANNEL,
-        slot,
-        type: v.type,
-        value: v.value,
-        status: MODE_PUBLISHED,
-      }));
+  discardBtn.addEventListener("click", async () => {
+    const ok = confirm("Discard ALL draft changes and revert to what is Live?");
+    if (!ok) return;
+
+    // Clear local draft
+    state.draft = {};
+    try { localStorage.removeItem(LS_KEY); } catch {}
+
+    // Clear draft rows in Supabase if available
+    if (state.supabaseReady && window.supabase) {
+      setStatus("Discarding…", "dim");
 
       const { error } = await window.supabase
         .from(TABLE)
-        .upsert(payload, { onConflict: "channel,slot,status" });
+        .delete()
+        .eq("channel", CHANNEL)
+        .eq("status", MODE_DRAFT);
 
       if (error) {
-        console.error("❌ Publish failed", error);
-        setStatus("Publish failed (check RLS)", "bad");
-        alert("Publish failed");
+        console.error("❌ Discard failed", error);
+        setStatus("Discard failed", "bad");
+        alert("Discard failed (check RLS).");
         return;
       }
+    }
 
-      state.published = { ...state.published, ...state.draft };
+    // Return to editing view (now just published)
+    if (previewBtn) {
+      previewBtn.dataset.mode = "edit";
+      previewBtn.textContent = "View Live";
+    }
 
-      applyContent(state.published);
-      flushPendingInvBinds();
+    applyEditingView();
+    setStatus("Draft cleared", "ok");
+  });
 
-      setStatus("Published", "ok");
-      alert("✅ Published successfully");
-    });
+  publishBtn?.addEventListener("click", async () => {
+    if (!state.supabaseReady || !window.supabase) {
+      alert("Supabase not ready. Cannot publish right now.");
+      return;
+    }
+
+    if (!draftsDifferFromPublished()) {
+      alert("No changes to publish.");
+      return;
+    }
+
+    const ok = confirm("Publish these changes to the live storefront?");
+    if (!ok) return;
+
+    setStatus("Publishing…", "dim");
+
+    const payload = Object.entries(state.draft).map(([slot, v]) => ({
+      channel: CHANNEL,
+      slot,
+      type: v.type,
+      value: v.value,
+      status: MODE_PUBLISHED,
+    }));
+
+    const { error } = await window.supabase
+      .from(TABLE)
+      .upsert(payload, { onConflict: "channel,slot,status" });
+
+    if (error) {
+      console.error("❌ Publish failed", error);
+      setStatus("Publish failed (check RLS)", "bad");
+      alert("Publish failed");
+      return;
+    }
+
+    // Update local published cache
+    state.published = { ...state.published, ...state.draft };
+
+    // ✅ Clear draft everywhere after publish (keeps workflow clean)
+    state.draft = {};
+    try { localStorage.removeItem(LS_KEY); } catch {}
+
+    const { error: delErr } = await window.supabase
+      .from(TABLE)
+      .delete()
+      .eq("channel", CHANNEL)
+      .eq("status", MODE_DRAFT);
+
+    if (delErr) console.warn("⚠️ Draft clear after publish failed:", delErr);
+
+    // Ensure we're back in editing mode (but now it's all live)
+    if (previewBtn) {
+      previewBtn.dataset.mode = "edit";
+      previewBtn.textContent = "View Live";
+    }
+
+    applyEditingView();
+    setStatus("Published", "ok");
+    alert("✅ Published successfully");
+  });
+}
+
+
+  function draftsDifferFromPublished() {
+  const d = state.draft || {};
+  const p = state.published || {};
+  const dKeys = Object.keys(d);
+  if (!dKeys.length) return false;
+
+  for (const k of dKeys) {
+    const dv = d[k];
+    const pv = p[k];
+    if (!pv) return true;
+    if (dv?.type !== pv?.type) return true;
+    if (String(dv?.value ?? "") !== String(pv?.value ?? "")) return true;
   }
+  return false;
+}
+
+function applyPublishedOnly() {
+  // Re-apply published and do NOT overlay draft
+  applyContent(state.published);
+  flushPendingInvBinds();
+}
+
+function applyEditingView() {
+  // Published + draft overlay
+  applyContent(state.published);
+  applyContent(state.draft);
+  flushPendingInvBinds();
+}
+
+function updateUnpublishedIndicator() {
+  const has = draftsDifferFromPublished();
+  // Keep pill text clean but informative
+  if (has) setStatus("Unpublished changes", "warn");
+  else setStatus(state.supabaseReady ? "Ready" : "Local mode", state.supabaseReady ? "ok" : "warn");
+}
+
 
   /* =========================
      Admin bar status pill
