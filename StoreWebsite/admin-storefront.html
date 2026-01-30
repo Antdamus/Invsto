@@ -1,0 +1,561 @@
+<!-- index.html — OG Jewelers (Storefront V2) -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Signature Pieces</title>
+  <meta name="description" content="OG Jewelers — curated fine jewelry with a luxury browsing experience." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="index.css" />
+
+  <!-- ADMIN-ONLY STYLES -->
+  <style>
+    html[data-admin="true"] [data-slot] {
+      cursor: pointer;
+    }
+    html[data-admin="true"] [data-slot]:hover {
+      outline: 2px dashed rgba(212,175,55,0.6);
+      outline-offset: 4px;
+    }
+
+    .admin-bar {
+      position: sticky;
+      top: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: rgba(10,10,12,0.75);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-family: Inter, sans-serif;
+    }
+    .admin-left {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+      color: #e6e6e6;
+    }
+    .admin-badge {
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(212,175,55,0.15);
+      color: #d4af37;
+      font-weight: 600;
+    }
+    .admin-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .admin-btn {
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+      cursor: pointer;
+    }
+    .admin-btn.primary {
+      background: #d4af37;
+      color: #070708;
+      border-color: transparent;
+      font-weight: 600;
+    }
+
+    .admin-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100vh;
+      width: 360px;
+      background: #0b0b0e;
+      border-left: 1px solid rgba(255,255,255,0.08);
+      z-index: 10000;
+    }
+    .admin-panel-header {
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-weight: 600;
+      color: #fff;
+    }
+    .admin-panel-body {
+      padding: 16px;
+      font-size: 14px;
+      color: #ccc;
+    }
+  </style>
+
+</head>
+
+<body>
+
+  <!-- ADMIN MODE FLAG -->
+  <script>
+    document.documentElement.setAttribute("data-admin", "true");
+  </script>
+
+  <!-- ADMIN TOP BAR -->
+  <div class="admin-bar">
+    <div class="admin-left">
+      <span class="admin-badge">ADMIN</span>
+      <span>Storefront Editor</span>
+      <span style="opacity:.6;">• Draft mode</span>
+    </div>
+    <div class="admin-actions">
+      <button class="admin-btn" type="button">Preview</button>
+      <button class="admin-btn primary" type="button">Publish</button>
+    </div>
+  </div>
+
+  <!-- ADMIN SIDE PANEL (hidden by default) -->
+  <aside class="admin-panel" hidden>
+    <div class="admin-panel-header">Edit element</div>
+    <div class="admin-panel-body">
+      Select any highlighted element to edit its content.
+    </div>
+  </aside>
+
+  <!-- Ambient background -->
+  <div class="ambient" aria-hidden="true">
+    <div class="grain"></div>
+    <div class="orb o1"></div>
+    <div class="orb o2"></div>
+    <div class="orb o3"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <!-- Top notice (optional; JS can hide) -->
+  <div class="top-notice" role="status" aria-live="polite" data-ui="top-notice">
+    <span class="pill">Live</span>
+    <span class="txt">New drops weekly • Premium pieces • Fast shipping</span>
+    <button class="notice-x" type="button" aria-label="Dismiss notice" data-action="dismiss-notice">×</button>
+  </div>
+
+  <!-- Header -->
+  <header class="header" id="top">
+    <div class="header-inner">
+      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-text">
+          <span class="brand-name">OG Jewelers</span>
+          <span class="brand-sub">Signature Collection</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a class="nav-link" href="#collections">Collections</a>
+        <a class="nav-link" href="#featured">Featured</a>
+        <a class="nav-link" href="#story">Our Story</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
+          <span class="i" aria-hidden="true">⌕</span>
+        </button>
+        <a class="cta-btn" href="catalogue.html" aria-label="Shop OG Jewelers">
+          Shop
+          <span class="cta-arrow" aria-hidden="true">→</span>
+        </a>
+        <button class="icon-btn mobile-menu" type="button" aria-label="Open menu" data-action="open-menu">
+          <span class="hamburger" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Mobile drawer -->
+  <div class="drawer-backdrop" data-ui="drawer-backdrop" hidden></div>
+  <aside class="drawer" data-ui="drawer" aria-label="Menu" aria-hidden="true" hidden>
+    <div class="drawer-top">
+      <div class="drawer-title">Menu</div>
+      <button class="icon-btn" type="button" aria-label="Close menu" data-action="close-menu">×</button>
+    </div>
+    <nav class="drawer-nav" aria-label="Mobile Primary">
+      <a class="drawer-link" href="#collections" data-action="close-menu">Collections</a>
+      <a class="drawer-link" href="#featured" data-action="close-menu">Featured</a>
+      <a class="drawer-link" href="#story" data-action="close-menu">Our Story</a>
+      <a class="drawer-link strong" href="catalogue.html">Shop</a>
+    </nav>
+    <div class="drawer-foot">
+      <div class="drawer-meta">OG Jewelers • Premium Curations</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- HERO (cinematic, with editor slots) -->
+    <section class="hero" aria-label="Hero">
+      <div class="hero-media" aria-hidden="true">
+        <!-- Optional: use video later. For now, we keep it image-based and let JS inject. -->
+        <div class="hero-img" data-slot="hero.image" style="--img:url('assets/hero/hero.jpg');"></div>
+        <div class="hero-glow"></div>
+      </div>
+
+      <div class="hero-inner">
+        <div class="hero-card">
+          <div class="hero-kicker" data-slot="hero.kicker">Signature Pieces</div>
+          <h1 class="hero-title" data-slot="hero.title">Luxury that lands instantly.</h1>
+          <p class="hero-sub" data-slot="hero.subtitle">
+            Curated gold, diamonds, and statement chains — built to shine on camera and in real life.
+          </p>
+
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="catalogue.html" data-slot="hero.primary_link">
+              Shop the Drop <span aria-hidden="true">→</span>
+            </a>
+            <button class="btn btn-ghost" type="button" data-action="open-quickview" data-slot="hero.secondary_action">
+              View Featured
+            </button>
+          </div>
+
+          <div class="hero-metrics" aria-label="Highlights">
+            <div class="metric">
+              <div class="metric-top">
+                <span class="metric-dot" aria-hidden="true"></span>
+                <span class="metric-label" data-slot="hero.metric1.label">Ready to ship</span>
+              </div>
+              <div class="metric-val" data-slot="hero.metric1.value">Fast fulfillment</div>
+            </div>
+            <div class="metric">
+              <div class="metric-top">
+                <span class="metric-dot" aria-hidden="true"></span>
+                <span class="metric-label" data-slot="hero.metric2.label">Authenticity</span>
+              </div>
+              <div class="metric-val" data-slot="hero.metric2.value">Trusted sourcing</div>
+            </div>
+            <div class="metric">
+              <div class="metric-top">
+                <span class="metric-dot" aria-hidden="true"></span>
+                <span class="metric-label" data-slot="hero.metric3.label">Curated drops</span>
+              </div>
+              <div class="metric-val" data-slot="hero.metric3.value">Weekly updates</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hero side panel (editorial) -->
+        <aside class="hero-side" aria-label="Spotlight">
+          <div class="spotlight" data-slot="hero.spotlight">
+            <div class="spotlight-img" data-slot="hero.spotlight.image" style="--img:url('assets/hero/spotlight.jpg');"></div>
+            <div class="spotlight-body">
+              <div class="spotlight-tag" data-slot="hero.spotlight.tag">Spotlight</div>
+              <div class="spotlight-title" data-slot="hero.spotlight.title">The Gold Edit</div>
+              <div class="spotlight-sub" data-slot="hero.spotlight.subtitle">Polished. Bold. Timeless.</div>
+              <a class="spotlight-link" href="catalogue.html" data-slot="hero.spotlight.link">Explore →</a>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="scroll-hint" aria-hidden="true">
+        <span class="scroll-line"></span>
+        <span class="scroll-text">Scroll</span>
+      </div>
+    </section>
+
+    <!-- COLLECTIONS (editorial covers) -->
+    <section class="section" id="collections" aria-label="Signature Collections">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" data-slot="collections.title">Signature Collections</h2>
+          <p class="section-sub" data-slot="collections.subtitle">Editorial curations — designed to feel like a cover.</p>
+        </div>
+
+        <div class="section-actions">
+          <button class="chip" type="button" data-action="toggle-mood" aria-pressed="false">
+            <span class="chip-dot" aria-hidden="true"></span>
+            Mood: Noir
+          </button>
+          <a class="text-link" href="catalogue.html">Browse all →</a>
+        </div>
+      </div>
+
+      <div class="tiles" role="list">
+        <!-- NOTE: data-collection is used by JS to route clicks or load curated sets -->
+        <article class="tile" role="listitem" data-collection="gold" data-slot="collections.gold" style="--img:url('assets/collections/gold.jpg');">
+          <a class="tile-hit" href="catalogue.html" aria-label="Explore Gold">
+            <div class="tile-overlay"></div>
+            <div class="tile-body">
+              <div class="tile-top">
+                <span class="tile-badge" data-slot="collections.gold.badge">Signature</span>
+                <span class="tile-mini" data-slot="collections.gold.mini">Polished Classics</span>
+              </div>
+              <h3 class="tile-title" data-slot="collections.gold.title">Gold</h3>
+              <p class="tile-sub" data-slot="collections.gold.subtitle">Warm glow, bold presence.</p>
+              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+            </div>
+            <div class="tile-shine" aria-hidden="true"></div>
+          </a>
+        </article>
+
+        <article class="tile" role="listitem" data-collection="diamonds" data-slot="collections.diamonds" style="--img:url('assets/collections/diamonds.jpg');">
+          <a class="tile-hit" href="catalogue.html" aria-label="Explore Diamonds">
+            <div class="tile-overlay"></div>
+            <div class="tile-body">
+              <div class="tile-top">
+                <span class="tile-badge" data-slot="collections.diamonds.badge">Best Sellers</span>
+                <span class="tile-mini" data-slot="collections.diamonds.mini">High Sparkle</span>
+              </div>
+              <h3 class="tile-title" data-slot="collections.diamonds.title">Diamonds</h3>
+              <p class="tile-sub" data-slot="collections.diamonds.subtitle">Light-catching details.</p>
+              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+            </div>
+            <div class="tile-shine" aria-hidden="true"></div>
+          </a>
+        </article>
+
+        <article class="tile" role="listitem" data-collection="chains" data-slot="collections.chains" style="--img:url('assets/collections/chains.jpg');">
+          <a class="tile-hit" href="catalogue.html" aria-label="Explore Chains">
+            <div class="tile-overlay"></div>
+            <div class="tile-body">
+              <div class="tile-top">
+                <span class="tile-badge" data-slot="collections.chains.badge">New</span>
+                <span class="tile-mini" data-slot="collections.chains.mini">Statement Links</span>
+              </div>
+              <h3 class="tile-title" data-slot="collections.chains.title">Chains</h3>
+              <p class="tile-sub" data-slot="collections.chains.subtitle">Heavy energy, clean lines.</p>
+              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+            </div>
+            <div class="tile-shine" aria-hidden="true"></div>
+          </a>
+        </article>
+
+        <article class="tile tile-wide" role="listitem" data-collection="signature" data-slot="collections.signature" style="--img:url('assets/collections/signature.jpg');">
+          <a class="tile-hit" href="catalogue.html" aria-label="Explore Signature">
+            <div class="tile-overlay"></div>
+            <div class="tile-body">
+              <div class="tile-top">
+                <span class="tile-badge" data-slot="collections.signature.badge">Editor’s Pick</span>
+                <span class="tile-mini" data-slot="collections.signature.mini">Limited Curations</span>
+              </div>
+              <h3 class="tile-title" data-slot="collections.signature.title">Signature</h3>
+              <p class="tile-sub" data-slot="collections.signature.subtitle">The OG pieces that define the brand.</p>
+              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+            </div>
+            <div class="tile-shine" aria-hidden="true"></div>
+          </a>
+        </article>
+      </div>
+    </section>
+
+    <!-- FEATURED (dynamic-ready grid) -->
+    <section class="section" id="featured" aria-label="Featured Pieces">
+      <div class="section-head">
+        <div>
+          <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
+          <p class="section-sub" data-slot="featured.subtitle">Handpicked shine — tap to quick view.</p>
+        </div>
+
+        <div class="section-actions">
+          <button class="chip" type="button" data-action="shuffle-featured">
+            Shuffle
+          </button>
+          <a class="text-link" href="catalogue.html">Shop featured →</a>
+        </div>
+      </div>
+
+      <!-- JS will optionally replace these with live featured picks -->
+      <div class="cards" data-ui="featured-grid">
+        <article class="card" data-slot="featured.1" data-item-id="">
+          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
+            <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
+            <div class="card-body">
+              <div class="card-top">
+                <span class="badge" data-slot="featured.1.badge">New</span>
+                <span class="price" data-slot="featured.1.price">$2,999</span>
+              </div>
+              <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
+              <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
+            </div>
+          </button>
+        </article>
+
+        <article class="card" data-slot="featured.2" data-item-id="">
+          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
+            <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
+            <div class="card-body">
+              <div class="card-top">
+                <span class="badge" data-slot="featured.2.badge">Best Value</span>
+                <span class="price" data-slot="featured.2.price">$1,799</span>
+              </div>
+              <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
+              <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
+            </div>
+          </button>
+        </article>
+
+        <article class="card" data-slot="featured.3" data-item-id="">
+          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
+            <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
+            <div class="card-body">
+              <div class="card-top">
+                <span class="badge" data-slot="featured.3.badge">Limited</span>
+                <span class="price" data-slot="featured.3.price">$9,499</span>
+              </div>
+              <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
+              <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
+            </div>
+          </button>
+        </article>
+
+        <article class="card" data-slot="featured.4" data-item-id="">
+          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
+            <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
+            <div class="card-body">
+              <div class="card-top">
+                <span class="badge" data-slot="featured.4.badge">OG Pick</span>
+                <span class="price" data-slot="featured.4.price">$4,599</span>
+              </div>
+              <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
+              <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
+            </div>
+          </button>
+        </article>
+      </div>
+    </section>
+
+    <!-- STORY (editorial) -->
+    <section class="section story" id="story" aria-label="Our Story">
+      <div class="story-grid">
+        <div class="story-card">
+          <div class="story-kicker" data-slot="story.kicker">Our Story</div>
+          <h2 class="story-title" data-slot="story.title">Curated like art. Worn like power.</h2>
+          <p class="story-sub" data-slot="story.subtitle">
+            OG Jewelers is built around real curation: clean designs, premium materials, and pieces that stand out
+            in person and on camera — without the noise.
+          </p>
+
+          <div class="story-points" aria-label="Brand pillars">
+            <div class="point">
+              <div class="point-ic" aria-hidden="true">✦</div>
+              <div>
+                <div class="point-title" data-slot="story.point1.title">Premium sourcing</div>
+                <div class="point-sub" data-slot="story.point1.subtitle">Only pieces we’d wear ourselves.</div>
+              </div>
+            </div>
+            <div class="point">
+              <div class="point-ic" aria-hidden="true">✦</div>
+              <div>
+                <div class="point-title" data-slot="story.point2.title">Luxury presentation</div>
+                <div class="point-sub" data-slot="story.point2.subtitle">Designed for an elevated experience.</div>
+              </div>
+            </div>
+            <div class="point">
+              <div class="point-ic" aria-hidden="true">✦</div>
+              <div>
+                <div class="point-title" data-slot="story.point3.title">Drops & exclusives</div>
+                <div class="point-sub" data-slot="story.point3.subtitle">Limited runs, curated weekly.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="story-ctas">
+            <a class="btn btn-primary" href="catalogue.html">Shop now <span aria-hidden="true">→</span></a>
+            <a class="btn btn-ghost" href="#collections">Explore collections</a>
+          </div>
+        </div>
+
+        <div class="story-visual" aria-hidden="true">
+          <div class="story-img" data-slot="story.image" style="--img:url('assets/story/story.jpg');"></div>
+          <div class="story-glass"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer" aria-label="Footer">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <div class="brand-mini">
+            <span class="brand-mark" aria-hidden="true">OG</span>
+            <span class="brand-name">OG Jewelers</span>
+          </div>
+          <p class="footer-sub">Curated fine jewelry — luxury, simplified.</p>
+        </div>
+
+        <div class="footer-links" role="navigation" aria-label="Footer">
+          <a href="#top">Top</a>
+          <a href="#collections">Collections</a>
+          <a href="#featured">Featured</a>
+          <a href="catalogue.html">Shop</a>
+        </div>
+
+        <div class="footer-meta">
+          <div class="meta-line">© <span data-ui="year"></span> OG Jewelers</div>
+          <div class="meta-line">Built for premium drops.</div>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Quick View Modal (JS will populate) -->
+  <div class="modal-backdrop" data-ui="modal-backdrop" hidden></div>
+  <section class="modal" role="dialog" aria-modal="true" aria-label="Quick view" data-ui="quickview" hidden>
+    <div class="modal-shell">
+      <div class="modal-top">
+        <div class="modal-title" data-ui="qv-title">Quick View</div>
+        <button class="icon-btn" type="button" aria-label="Close" data-action="close-modal">×</button>
+      </div>
+
+      <div class="modal-grid">
+        <div class="modal-media">
+          <div class="modal-img" data-ui="qv-img" style="--img:url('assets/featured/diamond-ring.jpg');"></div>
+        </div>
+        <div class="modal-body">
+          <div class="modal-badges" data-ui="qv-badges"></div>
+          <h3 class="modal-h" data-ui="qv-h">Diamond Ring</h3>
+          <p class="modal-p" data-ui="qv-p">A statement in every angle.</p>
+
+          <div class="modal-row">
+            <div class="modal-price" data-ui="qv-price">$2,999</div>
+            <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
+          </div>
+
+          <div class="modal-note" data-ui="qv-note">
+            Tip: In the admin page, this modal will also let you pick which item powers each featured card.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Search Overlay (optional; JS controls) -->
+  <div class="search" data-ui="search" hidden>
+    <div class="search-shell">
+      <div class="search-top">
+        <div class="search-title">Search</div>
+        <button class="icon-btn" type="button" aria-label="Close search" data-action="close-search">×</button>
+      </div>
+      <label class="search-input">
+        <span class="search-ic" aria-hidden="true">⌕</span>
+        <input type="text" placeholder="Search collections, styles, keywords…" autocomplete="off" data-ui="search-input" />
+      </label>
+      <div class="search-hints">
+        <button class="hint" type="button" data-search="gold">Gold</button>
+        <button class="hint" type="button" data-search="diamonds">Diamonds</button>
+        <button class="hint" type="button" data-search="chains">Chains</button>
+        <button class="hint" type="button" data-search="iced">Iced</button>
+      </div>
+      <div class="search-foot">
+        <a class="text-link" href="catalogue.html">Go to shop →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- JS -->
+  <script src="index.js" defer></script>
+  <script src="admin-storefront.js" defer></script>
+</body>
+</html>
