@@ -1,6 +1,7 @@
 /* =========================================================
    admin-storefront.js — OG Jewelers
-   Phase 3 (Hardened): Draft persistence + Publish + Fallback
+   Phase 4: Inventory-bound slots (via Edge Function) + Editorial
+   Built ON TOP of Phase 3 (Hardened): Draft persistence + Publish + Fallback
    ========================================================= */
 
 (() => {
@@ -18,6 +19,15 @@
   const MODE_PUBLISHED = "published";
   const LS_KEY = `og_storefront_draft__${CHANNEL}`;
 
+  // ✅ Phase 4: use same Edge Function as catalogue.js (no item_types direct reads)
+  const SUPABASE_PROJECT_URL =
+    window.SUPABASE_URL || "https://byhytmarmigalvawkedi.supabase.co";
+  const STOREFRONT_CATALOG_FN = "storefront-catalog";
+  const FALLBACK_IMAGE = "assets/collections/chains.jpg";
+
+  // Inventory binding marker (stored in storefront_content.value)
+  const INV_PREFIX = "__inv__:";
+
   const state = {
     selectedEl: null,
     slot: null,
@@ -25,6 +35,17 @@
     published: {},  // { slot: {type, value} }
     saveTimer: null,
     supabaseReady: false,
+
+    // ✅ Phase 4 inventory cache (from Edge Function)
+    invItems: [],          // [{id,name,price,image,raw}]
+    invMap: new Map(),     // id -> item
+    invLoaded: false,
+
+    // ✅ FIX: if content applies before inventory loads, queue bindings and hydrate later
+    pendingInvBinds: new Map(), // slot -> { el, id }
+
+    // ✅ FIX: batch-save multiple slots at once (used by group binding)
+    pendingSaveSlots: new Set(),
   };
 
   /* -------------------------
@@ -46,14 +67,21 @@
   initSlotClicking();
   initPublishPreview();
 
-  // Boot sequence: wait for Supabase, then load. If Supabase fails, fall back to local.
   boot();
 
   async function boot() {
     setStatus("Loading…", "dim");
 
-    await waitForSupabase(2500); // waits up to 2.5s
-    await loadContent();         // tries Supabase first, then local fallback
+    await waitForSupabase(2500);
+    await loadContent();            // Phase 3: loads published + draft (supabase then local)
+    await loadInventoryFromEdge();  // Phase 4: load inventory list for picker
+
+    // ✅ inventory often loads AFTER content applied; re-apply so __inv__ markers hydrate
+    applyContent(state.published);
+    applyContent(state.draft);
+
+    // ✅ apply any bindings we encountered before inventory finished loading
+    flushPendingInvBinds();
 
     setStatus(state.supabaseReady ? "Ready" : "Local mode", state.supabaseReady ? "ok" : "warn");
   }
@@ -79,6 +107,72 @@
   }
 
   /* =========================
+     Phase 4: Inventory load (Edge Function)
+  ========================= */
+  const fiveMinBucket = () => Math.floor(Date.now() / 300000);
+
+  function toNum(x) {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function mapStoreItemToInv(it) {
+    // Mirrors your catalogue.js mapping logic
+    return {
+      id: String(it.item_type_id),
+      name: String(it.title || ""),
+      price: toNum(it.display_price),
+      image: it.image_url || FALLBACK_IMAGE,
+      raw: it,
+    };
+  }
+
+  async function loadInventoryFromEdge() {
+    // Admin should still work if inventory cannot load
+    try {
+      const t = fiveMinBucket();
+      const url = `${SUPABASE_PROJECT_URL}/functions/v1/${STOREFRONT_CATALOG_FN}?channel=${encodeURIComponent(CHANNEL)}&t=${t}`;
+
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        console.warn("⚠️ Inventory load failed:", res.status, txt);
+        state.invLoaded = false;
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const inv = items.map(mapStoreItemToInv).filter(x => x.id && x.name);
+
+      state.invItems = inv;
+      state.invMap = new Map(inv.map(x => [x.id, x]));
+      state.invLoaded = true;
+
+      // If any inventory slots were applied before invLoaded, hydrate them now
+      flushPendingInvBinds();
+    } catch (e) {
+      console.warn("⚠️ Inventory load exception:", e);
+      state.invLoaded = false;
+    }
+  }
+
+  function flushPendingInvBinds() {
+    if (!state.invLoaded || !state.pendingInvBinds.size) return;
+
+    for (const [, bind] of state.pendingInvBinds) {
+      if (!bind?.el || !bind?.id) continue;
+      applyInventoryToSlot(bind.el, bind.id);
+    }
+    state.pendingInvBinds.clear();
+  }
+
+  /* =========================
      Slot clicking
   ========================= */
   function initSlotClicking() {
@@ -97,6 +191,13 @@
 
     panel.hidden = false;
     panelHeader.textContent = `Edit: ${state.slot}`;
+
+    // Prefer saved content over DOM inference
+    const saved = state.draft[state.slot] || state.published[state.slot];
+    if (saved) {
+      renderEditor(saved);
+      return;
+    }
 
     renderEditor(inferEditor(el));
   }
@@ -130,6 +231,7 @@
      Editor inference
   ========================= */
   function inferEditor(el) {
+    // If DOM looks like image slot, infer image. Else text.
     if (el.style?.getPropertyValue("--img") || el.tagName === "IMG") {
       return { type: "image", value: extractImage(el) };
     }
@@ -144,39 +246,290 @@
   }
 
   /* =========================
-     Render editors
+     ✅ Featured Group Binding (DOT notation)
+     Your real featured slot names look like:
+       featured.1.image
+       featured.1.title
+       featured.1.price
+       featured.1.subtitle
+     Group key should be:
+       featured.1
   ========================= */
-  function renderEditor({ type, value }) {
-    panelBody.innerHTML = "";
+
+  function isFeaturedSlot(slot) {
+    return /^featured\.\d+(\.|$)/i.test(String(slot || ""));
+  }
+
+  function getFeaturedGroupKey(slot) {
+    const s = String(slot || "");
+    const m = s.match(/^(featured\.\d+)(?:\..+)?$/i);
+    return m ? m[1] : null;
+  }
+
+  function getGroupSlotElements(groupKey) {
+    if (!groupKey) return [];
+    const exact = document.querySelector(`[data-slot="${groupKey}"]`);
+    const children = $$(`[data-slot^="${groupKey}."]`);
+    return exact ? [exact, ...children] : children;
+  }
+
+  function bindInventoryToFeaturedGroup(groupKey, itemId) {
+    if (!groupKey || !itemId) return;
+
+    const marker = `${INV_PREFIX}${itemId}`;
+    const groupEls = getGroupSlotElements(groupKey);
+
+    // If no matching group elements exist, just bind current slot normally
+    if (!groupEls.length) {
+      queueDraftSave("text", marker);
+      applyInventoryToSelectedSlot(itemId);
+      return;
+    }
+
+    // ✅ Persist same marker for EVERY slot in the group
+    for (const el of groupEls) {
+      const slotName = el.getAttribute("data-slot");
+      if (!slotName) continue;
+
+      // set local draft immediately
+      state.draft[slotName] = { type: "text", value: marker };
+      state.pendingSaveSlots.add(slotName);
+
+      // hydrate UI
+      if (!state.invLoaded) {
+        state.pendingInvBinds.set(slotName, { el, id: itemId });
+      } else {
+        applyInventoryToSlot(el, itemId);
+      }
+    }
+
+    // always keep local backup so refresh never loses work
+    persistDraftLocal();
+
+    // ✅ Debounced batch-save all group slots to Supabase
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(() => {
+      savePendingDraftSlotsToSupabase();
+    }, 350);
+  }
+
+  async function savePendingDraftSlotsToSupabase() {
+    if (!state.pendingSaveSlots.size) return;
+
+    // If no Supabase, still fine (local already persisted)
+    if (!state.supabaseReady || !window.supabase) {
+      setStatus("Saved (local)", "warn");
+      state.pendingSaveSlots.clear();
+      return;
+    }
+
+    setStatus("Saving…", "dim");
+
+    const slots = [...state.pendingSaveSlots];
+    state.pendingSaveSlots.clear();
+
+    const payload = slots
+      .map(slot => {
+        const v = state.draft[slot];
+        if (!v) return null;
+        return {
+          channel: CHANNEL,
+          slot,
+          type: v.type,
+          value: v.value,
+          status: MODE_DRAFT,
+        };
+      })
+      .filter(Boolean);
+
+    if (!payload.length) {
+      setStatus("Saved", "ok");
+      return;
+    }
+
+    const { error } = await window.supabase
+      .from(TABLE)
+      .upsert(payload, { onConflict: "channel,slot,status" });
+
+    if (error) {
+      console.error("❌ Failed to save draft batch (Supabase)", error);
+      setStatus("Save failed (check RLS)", "bad");
+      return;
+    }
+
+    setStatus("Saved", "ok");
+  }
+
+  /* =========================
+     Render editors (Phase 4)
+     - Source selector: Editorial | Inventory
+     - Editorial: Text or Image editor
+     - Inventory: Picker that saves "__inv__:id" into value
+     ✅ FIX: For featured.X.* slots, inventory selection binds ALL featured.X.* slots.
+  ========================= */
+  function renderEditor(entry) {
+    const type = entry?.type || "text";
+    const value = entry?.value ?? "";
+
+    const isInventory = typeof value === "string" && value.startsWith(INV_PREFIX);
+    const invId = isInventory ? value.slice(INV_PREFIX.length) : "";
+
+    // Default source based on value
+    const sourceDefault = isInventory ? "inventory" : "editorial";
+
+    panelBody.innerHTML = `
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+          <label>Source</label>
+          <select id="sf_source">
+            <option value="editorial"${sourceDefault === "editorial" ? " selected" : ""}>Editorial</option>
+            <option value="inventory"${sourceDefault === "inventory" ? " selected" : ""}>Inventory</option>
+          </select>
+        </div>
+
+        <div style="flex:1; min-width:180px;">
+          <label>Editorial Type</label>
+          <select id="sf_editorial_type"${sourceDefault === "inventory" ? " disabled" : ""}>
+            <option value="text"${type === "text" && !isInventory ? " selected" : ""}>Text</option>
+            <option value="image"${type === "image" && !isInventory ? " selected" : ""}>Image</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="sf_editor" style="margin-top:12px;"></div>
+    `;
+
+    const sourceSel = $("#sf_source");
+    const edTypeSel = $("#sf_editorial_type");
+    const editorWrap = $("#sf_editor");
+
+    const renderSourceBody = () => {
+      const source = sourceSel.value;
+
+      if (source === "inventory") {
+        edTypeSel.disabled = true;
+        renderInventoryPicker(editorWrap, invId);
+      } else {
+        edTypeSel.disabled = false;
+        renderEditorialEditor(editorWrap, edTypeSel.value, isInventory ? "" : value);
+      }
+    };
+
+    sourceSel.addEventListener("change", () => {
+      renderSourceBody();
+    });
+
+    edTypeSel.addEventListener("change", () => {
+      renderSourceBody();
+    });
+
+    renderSourceBody();
+  }
+
+  function renderEditorialEditor(root, type, value) {
+    root.innerHTML = "";
 
     if (type === "text") {
-      panelBody.innerHTML = `<label>Text</label><textarea rows="4">${escapeHtml(value)}</textarea>`;
-      panelBody.querySelector("textarea").oninput = e => {
+      root.innerHTML = `
+        <label>Text</label>
+        <textarea id="sf_text" rows="4">${escapeHtml(value)}</textarea>
+      `;
+      $("#sf_text").oninput = (e) => {
         const v = e.target.value;
         applyText(v);
         queueDraftSave("text", v);
       };
+      return;
     }
 
-    if (type === "image") {
-      panelBody.innerHTML = `<label>Image URL</label><input type="text" value="${escapeAttr(value)}" />`;
-      panelBody.querySelector("input").oninput = e => {
-        const v = e.target.value;
-        applyImage(v);
-        queueDraftSave("image", v);
-      };
+    // image
+    root.innerHTML = `
+      <label>Image URL</label>
+      <input id="sf_img" type="text" value="${escapeAttr(value)}" />
+      <div style="margin-top:10px; font-size:12px; opacity:.7;">
+        Tip: Inventory mode is best for featured product cards (auto image + price).
+      </div>
+    `;
+    $("#sf_img").oninput = (e) => {
+      const v = e.target.value;
+      applyImage(v);
+      queueDraftSave("image", v);
+    };
+  }
+
+  function renderInventoryPicker(root, currentId) {
+    if (!state.invLoaded || !state.invItems.length) {
+      root.innerHTML = `
+        <div style="padding:10px; border:1px solid rgba(255,255,255,.12); border-radius:12px;">
+          <div style="font-weight:600; margin-bottom:6px;">Inventory unavailable</div>
+          <div style="opacity:.75; font-size:13px;">
+            Could not load items from Edge Function. Check <code>storefront-catalog</code> availability.
+          </div>
+        </div>
+      `;
+      return;
     }
-  }
 
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
-  }
+    const optionsHtml = state.invItems
+      .map(it => `<option value="${escapeAttr(it.id)}"${it.id === currentId ? " selected" : ""}>${escapeHtml(it.name)}</option>`)
+      .join("");
 
-  function escapeAttr(s) {
-    return String(s ?? "").replaceAll('"', "&quot;");
+    const isFeatured = isFeaturedSlot(state.slot);
+    const groupKey = getFeaturedGroupKey(state.slot);
+
+    root.innerHTML = `
+      <label>Search</label>
+      <input id="sf_inv_search" type="text" placeholder="Type to filter…" />
+
+      <div style="margin-top:10px;">
+        <label>Pick item</label>
+        <select id="sf_inv_select" size="8" style="height:auto;">
+          ${optionsHtml}
+        </select>
+      </div>
+
+      <div style="margin-top:10px; font-size:12px; opacity:.75;">
+        Inventory mode saves a reference (item_type_id) and pulls image/price/title from the same source as Catalogue.
+        ${isFeatured && groupKey ? `<div style="margin-top:6px; opacity:.85;"><b>Note:</b> This binds the entire featured card (<code>${escapeHtml(groupKey)}</code>) so image/title/price/subtitle stay synced.</div>` : ""}
+      </div>
+    `;
+
+    const search = $("#sf_inv_search");
+    const sel = $("#sf_inv_select");
+
+    // Apply current selection immediately (if any)
+    if (currentId) {
+      if (isFeatured && groupKey) bindInventoryToFeaturedGroup(groupKey, currentId);
+      else applyInventoryToSelectedSlot(currentId);
+    }
+
+    // Filter options client-side
+    search.addEventListener("input", () => {
+      const q = (search.value || "").toLowerCase().trim();
+      const filtered = !q
+        ? state.invItems
+        : state.invItems.filter(it => it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q));
+
+      sel.innerHTML = filtered
+        .map(it => `<option value="${escapeAttr(it.id)}"${it.id === sel.value ? " selected" : ""}>${escapeHtml(it.name)}</option>`)
+        .join("");
+    });
+
+    sel.addEventListener("change", () => {
+      const id = sel.value;
+      if (!id) return;
+
+      // ✅ FIX: featured cards bind as a group
+      if (isFeatured && groupKey) {
+        bindInventoryToFeaturedGroup(groupKey, id);
+        return;
+      }
+
+      // Otherwise: previous behavior (single slot binding)
+      const marker = `${INV_PREFIX}${id}`;
+      queueDraftSave("text", marker);
+      applyInventoryToSelectedSlot(id);
+    });
   }
 
   /* =========================
@@ -188,12 +541,57 @@
 
   function applyImage(url) {
     if (!state.selectedEl) return;
-    // Support both --img elements and <img>
+
     if (state.selectedEl.tagName === "IMG") {
       state.selectedEl.src = url;
     } else {
       state.selectedEl.style?.setProperty("--img", `url("${url}")`);
+      const innerImg = state.selectedEl.querySelector("img");
+      if (innerImg) innerImg.src = url;
     }
+  }
+
+  function applyInventoryToSelectedSlot(itemId) {
+    if (!state.selectedEl) return;
+    applyInventoryToSlot(state.selectedEl, itemId);
+  }
+
+  function applyInventoryToSlot(slotRoot, itemId) {
+    const it = state.invMap.get(String(itemId));
+    if (!it) return;
+
+    if (slotRoot.style?.getPropertyValue("--img") !== undefined) {
+      slotRoot.style.setProperty("--img", `url("${it.image}")`);
+    }
+    if (slotRoot.tagName === "IMG") {
+      slotRoot.src = it.image;
+    } else {
+      const img =
+        slotRoot.querySelector('[data-bind="image"]') ||
+        slotRoot.querySelector(".product-media img") ||
+        slotRoot.querySelector("img");
+      if (img) img.src = it.image;
+    }
+
+    const titleEl =
+      slotRoot.querySelector('[data-bind="title"]') ||
+      slotRoot.querySelector(".product-title") ||
+      slotRoot.querySelector("h1,h2,h3,h4");
+    if (titleEl) titleEl.textContent = it.name;
+
+    const priceEl =
+      slotRoot.querySelector('[data-bind="price"]') ||
+      slotRoot.querySelector(".product-price") ||
+      slotRoot.querySelector(".price");
+    if (priceEl) priceEl.textContent = formatUSD(it.price);
+
+    slotRoot.dataset.boundItemId = String(itemId);
+  }
+
+  function formatUSD(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "";
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
   }
 
   /* =========================
@@ -203,7 +601,7 @@
     if (!state.slot) return;
 
     state.draft[state.slot] = { type, value };
-    persistDraftLocal(); // always keep local backup so refresh never loses work
+    persistDraftLocal();
 
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
@@ -243,7 +641,6 @@
     if (error) {
       console.error("❌ Failed to save draft (Supabase)", error);
       setStatus("Save failed (check RLS)", "bad");
-      // keep local backup already done
       return;
     }
 
@@ -254,13 +651,11 @@
      Load content (Supabase first, then local)
   ========================= */
   async function loadContent() {
-    // 1) Try Supabase load
     if (state.supabaseReady && window.supabase) {
       const ok = await loadFromSupabase();
       if (ok) return;
     }
 
-    // 2) Fallback to local
     loadDraftFromLocal();
     applyContent(state.draft);
   }
@@ -279,7 +674,6 @@
       return false;
     }
 
-    // reset caches
     state.published = {};
     state.draft = {};
 
@@ -288,11 +682,9 @@
       if (row.status === MODE_DRAFT) state.draft[row.slot] = { type: row.type, value: row.value };
     }
 
-    // Apply published, then draft overrides in admin view
     applyContent(state.published);
     applyContent(state.draft);
 
-    // Also refresh local backup from what DB says (so you can recover offline later)
     persistDraftLocal();
 
     return true;
@@ -314,6 +706,32 @@
       const el = document.querySelector(`[data-slot="${slot}"]`);
       if (!el || !entry) return;
 
+      if (entry.type === "text" && typeof entry.value === "string" && entry.value.startsWith(INV_PREFIX)) {
+        const id = entry.value.slice(INV_PREFIX.length);
+
+        // ✅ If a featured card somehow got inconsistent in DB, this visually re-syncs the group
+        const groupKey = getFeaturedGroupKey(slot);
+        if (groupKey) {
+          const groupEls = getGroupSlotElements(groupKey);
+          if (groupEls.length) {
+            for (const ge of groupEls) {
+              const gSlot = ge.getAttribute("data-slot") || "";
+              if (!state.invLoaded) state.pendingInvBinds.set(gSlot, { el: ge, id });
+              else applyInventoryToSlot(ge, id);
+            }
+            return;
+          }
+        }
+
+        if (!state.invLoaded) {
+          state.pendingInvBinds.set(slot, { el, id });
+          return;
+        }
+
+        applyInventoryToSlot(el, id);
+        return;
+      }
+
       if (entry.type === "text") el.textContent = entry.value;
 
       if (entry.type === "image") {
@@ -334,7 +752,6 @@
     });
 
     publishBtn?.addEventListener("click", async () => {
-      // Always allow publish even if Supabase not ready — but warn.
       if (!state.supabaseReady || !window.supabase) {
         alert("Supabase not ready. Cannot publish right now.");
         return;
@@ -361,8 +778,11 @@
         return;
       }
 
-      // update published snapshot and keep the UI consistent
       state.published = { ...state.published, ...state.draft };
+
+      applyContent(state.published);
+      flushPendingInvBinds();
+
       setStatus("Published", "ok");
       alert("✅ Published successfully");
     });
@@ -410,5 +830,19 @@
     statusEl.style.background = t.bg;
     statusEl.style.borderColor = t.bd;
     statusEl.style.color = t.fg;
+  }
+
+  /* =========================
+     Escaping
+  ========================= */
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  function escapeAttr(s) {
+    return String(s ?? "").replaceAll('"', "&quot;");
   }
 })();
