@@ -124,7 +124,16 @@ const mobileAccountWrap = qs('[data-ui="mobile-account-wrap"]');
 const mobileInitials = qs('[data-ui="mobile-initials"]');
 
 
-    if (!chip || !initialsEl) return;
+    // ✅ Safe defaults immediately (prevents any “M / Sign out” flash)
+if (chip) chip.hidden = true;
+if (accessBtn) accessBtn.style.display = "";
+if (mobileAccess) mobileAccess.hidden = false;
+if (mobileAccountWrap) mobileAccountWrap.hidden = true;
+if (mobileAccount) mobileAccount.hidden = true;
+
+// ✅ If desktop chip elements are missing, still continue (don’t return)
+// (we’ll only write initials if the elements exist)
+
 
     let session = null;
     try {
@@ -134,26 +143,21 @@ const mobileInitials = qs('[data-ui="mobile-initials"]');
 
 if (session?.user) {
   const initials = computeInitials(session.user);
-  initialsEl.textContent = initials;
+  if (initialsEl) initialsEl.textContent = initials;
   if (mobileInitials) mobileInitials.textContent = initials;
 
-  chip.hidden = false;
+  if (chip) chip.hidden = false;
   if (accessBtn) accessBtn.style.display = "none";
 
   if (mobileAccess) mobileAccess.hidden = true;
   if (mobileAccountWrap) mobileAccountWrap.hidden = false;
   if (mobileAccount) mobileAccount.hidden = false;
 } else {
-  chip.hidden = true;
-  if (accessBtn) accessBtn.style.display = "";
-
-  if (mobileAccess) mobileAccess.hidden = false;
-  if (mobileAccountWrap) mobileAccountWrap.hidden = true;
-  if (mobileAccount) mobileAccount.hidden = true;
-
+  // logged out: keep defaults (already applied above)
   if (mobileInitials) mobileInitials.textContent = "M";
-  initialsEl.textContent = "M";
+  if (initialsEl) initialsEl.textContent = "M";
 }
+
 
   };
 
