@@ -1801,3 +1801,42 @@ html.lock, body.lock{
   pointer-events:none !important;
 }
 
+/* Member Access (premium, subtle) */
+.access-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding: 10px 14px;
+  border-radius: 999px;
+
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+
+  color: rgba(244,241,234,0.85);
+  text-decoration: none;
+
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  transition:
+    transform .18s ease,
+    background .18s ease,
+    border-color .18s ease,
+    color .18s ease;
+}
+
+.access-pill:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(227,200,120,0.22);
+  color: rgba(227,200,120,0.95);
+}
+
+.access-pill:active{
+  transform: translateY(0) scale(.98);
+}
