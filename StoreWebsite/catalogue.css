@@ -1609,3 +1609,21 @@ body.lock {
     border-bottom-left-radius: 16px;
   }
 }
+
+/* =========================
+   Mobile-only hamburger
+========================= */
+
+/* Desktop default: hide burger */
+.nav-toggle {
+  display: none;
+}
+
+/* Mobile: show burger */
+@media (max-width: 900px) {
+  .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
