@@ -146,11 +146,12 @@ const applyAuthUI = async (sb) => {
   if (accessBtn) accessBtn.style.display = "";
 
   // ✅ DESKTOP MENU: DO NOT hard-hide with display:none (it breaks toggling)
-  if (acctMenu) {
-    acctMenu.hidden = true;
-  
-    acctMenu.style.display = ""; // clear any previous inline display:none
-  }
+if (acctMenu) {
+  acctMenu.hidden = true;
+  acctMenu.setAttribute("aria-hidden", "true");
+  acctMenu.style.display = ""; // clear any previous inline display:none
+}
+
 
   // Mobile baseline
   setHardHidden(mobileAccess, false);
@@ -1043,10 +1044,15 @@ function initAccountDropdown() {
   const menu = qs('[data-ui="acct-menu"]');
   const signOutBtn = qs('[data-ui="acct-signout"]');
 
-  // Desktop-only breakpoint — match your CSS "desktop-only"
-  const isDesktop = () => window.matchMedia("(min-width: 901px)").matches;
-
   if (!chip || !menu) return;
+
+  // ✅ Desktop detection that won't break when DevTools changes viewport width
+  const isActuallyVisible = (el) => {
+    if (!el) return false;
+    if (el.hidden) return false;
+    const cs = window.getComputedStyle(el);
+    return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+  };
 
   const closeMenu = () => {
     menu.hidden = true;
@@ -1055,21 +1061,22 @@ function initAccountDropdown() {
   };
 
   const openMenu = () => {
-    if (chip.hidden) return;      // logged out
-    if (!isDesktop()) return;     // desktop-only behavior
+    // ✅ don’t open when logged out / hidden by CSS
+    if (chip.hidden) return;
+    if (!isActuallyVisible(chip)) return;
 
-    // ✅ clear any forced hiding
     menu.hidden = false;
-    menu.style.display = "";      // IMPORTANT: defeats leftover inline display:none
+    menu.style.display = ""; // defeats any leftover inline display:none
     menu.removeAttribute("aria-hidden");
     chip.setAttribute("aria-expanded", "true");
   };
 
   const toggleMenu = (e) => {
     e.preventDefault();
+    e.stopPropagation(); // ✅ prevents any outer click logic from instantly closing it
 
-    if (chip.hidden) return;      // logged out
-    if (!isDesktop()) return;     // desktop-only behavior
+    if (chip.hidden) return;
+    if (!isActuallyVisible(chip)) return;
 
     if (menu.hidden) openMenu();
     else closeMenu();
@@ -1079,7 +1086,11 @@ function initAccountDropdown() {
   chip.setAttribute("aria-expanded", "false");
   closeMenu();
 
-  chip.addEventListener("click", toggleMenu);
+  // ✅ Avoid double-binding if script reloads
+  if (!chip.dataset.bound) {
+    chip.dataset.bound = "1";
+    chip.addEventListener("click", toggleMenu);
+  }
 
   // Click outside closes
   document.addEventListener("click", (e) => {
@@ -1112,12 +1123,8 @@ function initAccountDropdown() {
     if (chip.hidden) closeMenu();
   });
   observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
-
-  // If you resize from desktop->mobile while open, close it
-  window.addEventListener("resize", () => {
-    if (!isDesktop()) closeMenu();
-  });
 }
+
 
 
 const outsideClickClose = (e) => {
