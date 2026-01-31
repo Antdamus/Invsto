@@ -1496,10 +1496,12 @@ html.lock, body.lock{
   content:"";
   position:absolute;
   inset:0;
+  /* Neutral vignette + soft highlight — no gold tint */
   background:
-    radial-gradient(900px 320px at 20% 10%, rgba(234,195,90,.14), transparent 60%),
-    linear-gradient(180deg, rgba(0,0,0,.06), rgba(0,0,0,.70));
+    radial-gradient(900px 340px at 55% 5%, rgba(255,255,255,.06), transparent 60%),
+    linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.58));
 }
+
 
 .modal-body{
   padding: 18px 18px 18px 10px;
