@@ -113,64 +113,100 @@
     return "M";
   };
 
-  const applyAuthUI = async (sb) => {
-    const accessBtn = qs('[data-ui="access-btn"]');
-    const chip = qs('[data-ui="acct-chip"]');
-    const initialsEl = qs('[data-ui="acct-initials"]');
+// ✅ Force-hide helper (wins even if CSS uses display: flex !important)
+const setHardHidden = (el, shouldHide, showDisplay = "") => {
+  if (!el) return;
 
-const mobileAccess = qs('[data-ui="mobile-access"]');
-const mobileAccount = qs('[data-ui="mobile-account"]');
-const mobileAccountWrap = qs('[data-ui="mobile-account-wrap"]');
-const mobileInitials = qs('[data-ui="mobile-initials"]');
+  el.hidden = !!shouldHide;
 
+  if (shouldHide) {
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+  } else {
+    el.style.display = showDisplay; // "" lets CSS decide
+    el.removeAttribute("aria-hidden");
+  }
+};
 
-    // ✅ Safe defaults immediately (prevents any “M / Sign out” flash)
-if (chip) chip.hidden = true;
-if (accessBtn) accessBtn.style.display = "";
-if (mobileAccess) mobileAccess.hidden = false;
-if (mobileAccountWrap) mobileAccountWrap.hidden = true;
-if (mobileAccount) mobileAccount.hidden = true;
+const applyAuthUI = async (sb) => {
+  const accessBtn = qs('[data-ui="access-btn"]');
+  const chip = qs('[data-ui="acct-chip"]');
+  const initialsEl = qs('[data-ui="acct-initials"]');
+  const acctMenu = qs('[data-ui="acct-menu"]');
 
-// ✅ If desktop chip elements are missing, still continue (don’t return)
-// (we’ll only write initials if the elements exist)
+  // Mobile drawer
+  const mobileAccess = qs('[data-ui="mobile-access"]');
+  const mobileAccountWrap = qs('[data-ui="mobile-account-wrap"]');
+  const mobileAccount = qs('[data-ui="mobile-account"]');
+  const mobileInitials = qs('[data-ui="mobile-initials"]');
+  const mobileSignOutBtn = qs('[data-ui="mobile-signout"]');
 
+  // ✅ HARD BASELINE: assume logged out (prevents any flash + defeats CSS overrides)
+  setHardHidden(chip, true);
+  if (accessBtn) accessBtn.style.display = "";
 
-    let session = null;
-    try {
-      const { data } = await sb.auth.getSession();
-      session = data?.session || null;
-    } catch {}
+  setHardHidden(acctMenu, true);
 
-if (session?.user) {
-  const initials = computeInitials(session.user);
-  if (initialsEl) initialsEl.textContent = initials;
-  if (mobileInitials) mobileInitials.textContent = initials;
+  setHardHidden(mobileAccess, false);
+  setHardHidden(mobileAccountWrap, true);
+  setHardHidden(mobileAccount, true);
+  setHardHidden(mobileSignOutBtn, true);
 
-  if (chip) chip.hidden = false;
-  if (accessBtn) accessBtn.style.display = "none";
+  if (initialsEl) initialsEl.textContent = "";
+  if (mobileInitials) mobileInitials.textContent = "";
 
-  if (mobileAccess) mobileAccess.hidden = true;
-  if (mobileAccountWrap) mobileAccountWrap.hidden = false;
-  if (mobileAccount) mobileAccount.hidden = false;
-} else {
-  // logged out: keep defaults (already applied above)
-  if (mobileInitials) mobileInitials.textContent = "M";
-  if (initialsEl) initialsEl.textContent = "M";
-}
+  // ✅ Session check
+  let session = null;
+  try {
+    const { data } = await sb.auth.getSession();
+    session = data?.session || null;
+  } catch {
+    session = null;
+  }
 
+  // ✅ Logged in => show account + signout
+  if (session?.user) {
+    const initials = computeInitials(session.user);
 
-  };
+    if (initialsEl) initialsEl.textContent = initials;
+    if (mobileInitials) mobileInitials.textContent = initials;
 
-  const initAuthUI = async () => {
-    const sb = await waitForSupabaseReady();
-    if (!sb) return;
+    setHardHidden(chip, false);
+    if (accessBtn) accessBtn.style.display = "none";
 
+    setHardHidden(mobileAccess, true);
+    setHardHidden(mobileAccountWrap, false);
+    setHardHidden(mobileAccount, false);
+    setHardHidden(mobileSignOutBtn, false);
+  }
+};
+
+const initAuthUI = async () => {
+  const sb = await waitForSupabaseReady();
+  if (!sb) return;
+
+  // Run once immediately
+  await applyAuthUI(sb);
+
+  // Re-apply on auth changes
+  sb.auth.onAuthStateChange(async () => {
     await applyAuthUI(sb);
+  });
 
-    sb.auth.onAuthStateChange(() => {
-      applyAuthUI(sb);
+  // ✅ Ensure mobile signout works (your current initAccountDropdown no longer wires it)
+  const mobileSignOutBtn = qs('[data-ui="mobile-signout"]');
+  if (mobileSignOutBtn && !mobileSignOutBtn.dataset.bound) {
+    mobileSignOutBtn.dataset.bound = "1";
+    mobileSignOutBtn.addEventListener("click", async () => {
+      try {
+        await sb.auth.signOut();
+      } catch {}
+      await applyAuthUI(sb);
+      window.location.href = "catalogue.html";
     });
-  };
+  }
+};
+
 
 
 async function fetchSpotSnapshot(){
@@ -996,10 +1032,9 @@ const wireNavDrawer = () => {
 
 
 function initAccountDropdown() {
-  const chip = document.querySelector('[data-ui="acct-chip"]');
-  const menu = document.querySelector('[data-ui="acct-menu"]');
-  const signOutBtn = document.querySelector('[data-ui="acct-signout"]');
-  const mobileSignOutBtn = document.querySelector('[data-ui="mobile-signout"]');
+  const chip = qs('[data-ui="acct-chip"]');
+  const menu = qs('[data-ui="acct-menu"]');
+  const signOutBtn = qs('[data-ui="acct-signout"]');
 
   if (!chip || !menu) return;
 
@@ -1009,18 +1044,22 @@ function initAccountDropdown() {
   };
 
   const openMenu = () => {
+    // ✅ don’t allow opening if chip is hidden (logged out)
+    if (chip.hidden) return;
     menu.hidden = false;
     chip.setAttribute("aria-expanded", "true");
   };
 
   const toggleMenu = (e) => {
     e.preventDefault();
+    if (chip.hidden) return; // ✅ logged out => do nothing
     if (menu.hidden) openMenu();
     else closeMenu();
   };
 
   chip.setAttribute("aria-haspopup", "menu");
   chip.setAttribute("aria-expanded", "false");
+  closeMenu();
 
   chip.addEventListener("click", toggleMenu);
 
@@ -1044,31 +1083,16 @@ function initAccountDropdown() {
       await sb.auth.signOut();
     } catch {}
 
-    // After signing out from catalogue, keep them on catalogue
     window.location.href = "catalogue.html";
   });
 
-mobileSignOutBtn?.addEventListener("click", async () => {
-  const sb = window.supabaseClient || window.supabase;
-  if (!sb?.auth) return;
-
-  try {
-    await sb.auth.signOut();
-  } catch {}
-
-  // Force UI refresh immediately (prevents “stuck initial” feeling)
-  await applyAuthUI(sb);
-
-  // Keep them on catalogue
-  window.location.href = "catalogue.html";
-});
-
-
+  // ✅ If chip becomes hidden (logout), force menu closed
   const observer = new MutationObserver(() => {
     if (chip.hidden) closeMenu();
   });
   observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
 }
+
 
 const outsideClickClose = (e) => {
   // Close filters drawer if click backdrop
