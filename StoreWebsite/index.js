@@ -556,6 +556,73 @@ function setupReveal() {
 }
 
 /* =========================
+   Account dropdown
+========================= */
+
+function initAccountDropdown() {
+  const chip = document.querySelector('[data-ui="acct-chip"]');
+  const menu = document.querySelector('[data-ui="acct-menu"]');
+  const signOutBtn = document.querySelector('[data-ui="acct-signout"]');
+
+  if (!chip || !menu) return;
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    chip.setAttribute("aria-expanded", "false");
+  };
+
+  const openMenu = () => {
+    menu.hidden = false;
+    chip.setAttribute("aria-expanded", "true");
+  };
+
+  const toggleMenu = (e) => {
+    e.preventDefault(); // don’t navigate to profile on click; menu takes over
+    if (menu.hidden) openMenu();
+    else closeMenu();
+  };
+
+  chip.setAttribute("aria-haspopup", "menu");
+  chip.setAttribute("aria-expanded", "false");
+
+  chip.addEventListener("click", toggleMenu);
+
+  // Close on outside click
+  document.addEventListener("click", (e) => {
+    if (menu.hidden) return;
+    const t = e.target;
+    if (chip.contains(t) || menu.contains(t)) return;
+    closeMenu();
+  });
+
+  // Close on escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenu();
+  });
+
+  // Sign out
+  signOutBtn?.addEventListener("click", async () => {
+    const sb = window.supabaseClient || window.supabase;
+    if (!sb?.auth) return;
+
+    closeMenu();
+    try {
+      await sb.auth.signOut();
+    } catch {}
+
+    // Optional: send them home (keeps UX consistent)
+    window.location.href = "index.html";
+  });
+
+  // If auth UI hides chip (logged out), ensure menu closes too
+  const observer = new MutationObserver(() => {
+    if (chip.hidden) closeMenu();
+  });
+  observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
+}
+
+
+/* =========================
    Focus trap basics
 ========================= */
 function trapTabFocusSetup() {
@@ -884,6 +951,8 @@ ui.search?.addEventListener("click", (e) => {
   hydrateFeaturedQuickviewModel();
 
   initAccountChip();
+
+  initAccountDropdown();
 
 
   // Notice persistence

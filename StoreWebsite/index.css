@@ -1922,3 +1922,74 @@ html.lock, body.lock{
     linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.10);
 }
+
+/* Account dropdown (glass) */
+.header-actions{ position: relative; } /* ensures menu anchors correctly */
+
+.acct-menu{
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 190px;
+  padding: 8px;
+  border-radius: 16px;
+
+  background: rgba(12, 12, 14, 0.62);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+
+  box-shadow:
+    0 18px 70px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+
+  transform-origin: top right;
+  animation: acctPop .16s ease both;
+  z-index: 999;
+}
+
+@keyframes acctPop{
+  from { opacity: 0; transform: translateY(-6px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.acct-item{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 10px 12px;
+  border-radius: 12px;
+
+  color: rgba(244,241,234,0.90);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: .01em;
+
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+
+  transition: background .16s ease, transform .16s ease, color .16s ease;
+}
+
+.acct-item:hover{
+  background: rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+
+.acct-item:active{
+  transform: translateY(0) scale(.99);
+}
+
+.acct-item.danger{
+  color: rgba(255, 140, 140, 0.95);
+}
+
+.acct-divider{
+  height: 1px;
+  margin: 6px 8px;
+  background: rgba(255,255,255,0.08);
+}

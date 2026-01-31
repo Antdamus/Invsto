@@ -59,6 +59,105 @@
   const STOREFRONT_CHANNEL = "og_main";
   const FALLBACK_IMAGE = "assets/collections/chains.jpg";
 
+  /* =========================
+     Auth UI (Member Access ↔ Initials)
+  ========================= */
+  const getSupabaseClientIfReady = () => {
+    const c = window.supabaseClient || window.supabase;
+    if (c && c.auth && typeof c.auth.getSession === "function") return c;
+    return null;
+  };
+
+  const waitForSupabaseReady = (timeoutMs = 3500) => {
+    return new Promise((resolve) => {
+      const readyNow = getSupabaseClientIfReady();
+      if (readyNow) return resolve(readyNow);
+
+      const onReady = () => {
+        document.removeEventListener("supabase-ready", onReady);
+        resolve(getSupabaseClientIfReady() || null);
+      };
+
+      document.addEventListener("supabase-ready", onReady);
+
+      const t0 = Date.now();
+      const timer = setInterval(() => {
+        const client = getSupabaseClientIfReady();
+        if (client) {
+          clearInterval(timer);
+          document.removeEventListener("supabase-ready", onReady);
+          resolve(client);
+        } else if (Date.now() - t0 > timeoutMs) {
+          clearInterval(timer);
+          document.removeEventListener("supabase-ready", onReady);
+          resolve(null);
+        }
+      }, 60);
+    });
+  };
+
+  const computeInitials = (user) => {
+    const meta = user?.user_metadata || {};
+    const full = String(meta.full_name || meta.name || "").trim();
+
+    if (full) {
+      const parts = full.split(/\s+/).filter(Boolean);
+      const a = (parts[0]?.[0] || "").toUpperCase();
+      const b = (parts[1]?.[0] || "").toUpperCase();
+      return (a + b) || "M";
+    }
+
+    const email = String(user?.email || "").trim();
+    if (email) return (email[0] || "M").toUpperCase();
+
+    return "M";
+  };
+
+  const applyAuthUI = async (sb) => {
+    const accessBtn = qs('[data-ui="access-btn"]');
+    const chip = qs('[data-ui="acct-chip"]');
+    const initialsEl = qs('[data-ui="acct-initials"]');
+
+    const mobileAccess = qs('[data-ui="mobile-access"]');
+    const mobileAccount = qs('[data-ui="mobile-account"]');
+
+    if (!chip || !initialsEl) return;
+
+    let session = null;
+    try {
+      const { data } = await sb.auth.getSession();
+      session = data?.session || null;
+    } catch {}
+
+    if (session?.user) {
+      initialsEl.textContent = computeInitials(session.user);
+
+      chip.hidden = false;
+      if (accessBtn) accessBtn.style.display = "none";
+
+      if (mobileAccess) mobileAccess.hidden = true;
+      if (mobileAccount) mobileAccount.hidden = false;
+    } else {
+      chip.hidden = true;
+      if (accessBtn) accessBtn.style.display = "";
+
+      if (mobileAccess) mobileAccess.hidden = false;
+      if (mobileAccount) mobileAccount.hidden = true;
+    }
+  };
+
+  const initAuthUI = async () => {
+    const sb = await waitForSupabaseReady();
+    if (!sb) return;
+
+    await applyAuthUI(sb);
+
+    sb.auth.onAuthStateChange(() => {
+      applyAuthUI(sb);
+    });
+  };
+
+
 async function fetchSpotSnapshot(){
   const url = `${SUPABASE_PROJECT_URL}/functions/v1/spot-snapshot`;
   const res = await fetch(url, { method: "GET", cache: "no-store" });
@@ -852,6 +951,64 @@ function initSpotTicker(){
     }
   };
 
+function initAccountDropdown() {
+  const chip = document.querySelector('[data-ui="acct-chip"]');
+  const menu = document.querySelector('[data-ui="acct-menu"]');
+  const signOutBtn = document.querySelector('[data-ui="acct-signout"]');
+
+  if (!chip || !menu) return;
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    chip.setAttribute("aria-expanded", "false");
+  };
+
+  const openMenu = () => {
+    menu.hidden = false;
+    chip.setAttribute("aria-expanded", "true");
+  };
+
+  const toggleMenu = (e) => {
+    e.preventDefault();
+    if (menu.hidden) openMenu();
+    else closeMenu();
+  };
+
+  chip.setAttribute("aria-haspopup", "menu");
+  chip.setAttribute("aria-expanded", "false");
+
+  chip.addEventListener("click", toggleMenu);
+
+  document.addEventListener("click", (e) => {
+    if (menu.hidden) return;
+    const t = e.target;
+    if (chip.contains(t) || menu.contains(t)) return;
+    closeMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenu();
+  });
+
+  signOutBtn?.addEventListener("click", async () => {
+    const sb = window.supabaseClient || window.supabase;
+    if (!sb?.auth) return;
+
+    closeMenu();
+    try {
+      await sb.auth.signOut();
+    } catch {}
+
+    // After signing out from catalogue, keep them on catalogue
+    window.location.href = "catalogue.html";
+  });
+
+  const observer = new MutationObserver(() => {
+    if (chip.hidden) closeMenu();
+  });
+  observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
+}
+
   /* =========================
      Initial context from URL
   ========================= */
@@ -913,6 +1070,10 @@ function initSpotTicker(){
     wirePopstate();
 
     initYear();
+
+    initAuthUI();
+
+    initAccountDropdown();
 
     // Load live catalog first (so filters/sorting render against real data)
     try {
