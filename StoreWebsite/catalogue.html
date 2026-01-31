@@ -56,15 +56,14 @@
 <div class="header-actions">
   <a class="btn ghost" href="index.html">Home</a>
 
-  <!-- Logged-out: Member Access -->
-  <a class="btn ghost access-btn" href="access.html" data-ui="access-btn" aria-label="Member Access">
-    Member Access
-  </a>
+<a class="btn ghost access-btn desktop-only" href="access.html" data-ui="access-btn" aria-label="Member Access">
+  Member Access
+</a>
 
-  <!-- Logged-in: initials chip -->
-  <a class="acct-chip" href="profile.html" data-ui="acct-chip" hidden aria-label="Your account">
-    <span class="acct-dot" data-ui="acct-initials">M</span>
-  </a>
+<a class="acct-chip desktop-only" href="profile.html" data-ui="acct-chip" hidden aria-label="Your account">
+  <span class="acct-dot" data-ui="acct-initials">M</span>
+</a>
+
 
   <!-- Account dropdown -->
 <div class="acct-menu" data-ui="acct-menu" hidden>
@@ -83,8 +82,20 @@
     <!-- Mobile menu -->
     <div id="mobileMenu" class="mobile-menu" hidden>
       <div class="container mobile-menu-inner">
-          <a class="mobile-link" href="access.html" data-ui="mobile-access">Member Access</a>
-  <a class="mobile-link" href="profile.html" data-ui="mobile-account" hidden>Account</a>
+<!-- Logged-out -->
+<a class="mobile-link" href="access.html" data-ui="mobile-access">Member Access</a>
+
+<!-- Logged-in -->
+<div class="mobile-account" data-ui="mobile-account-wrap" hidden>
+  <a class="mobile-link mobile-account-link" href="profile.html" data-ui="mobile-account">
+    <span class="mobile-avatar" aria-hidden="true"><span data-ui="mobile-initials">M</span></span>
+    <span>Account</span>
+  </a>
+  <button class="mobile-link mobile-signout" type="button" data-ui="mobile-signout">
+    Sign out
+  </button>
+</div>
+
 
         <a class="mobile-link" href="index.html#collections">Collections</a>
         <a class="mobile-link" href="index.html#story">Story</a>

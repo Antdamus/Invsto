@@ -1993,3 +1993,79 @@ html.lock, body.lock{
   margin: 6px 8px;
   background: rgba(255,255,255,0.08);
 }
+
+/* Mobile: reduce header crowding */
+@media (max-width: 720px){
+  .acct-chip{ display:none; }
+}
+
+/* Drawer account row (premium) */
+.drawer-account{
+  margin: 6px 0 10px;
+  padding: 6px 2px;
+}
+
+.drawer-account-link{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 18px;
+  text-decoration:none;
+
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+  transition: transform .16s ease, background .16s ease, border-color .16s ease;
+}
+
+.drawer-account-link:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(234,195,90,0.20);
+}
+
+.drawer-initials{
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  display:grid;
+  place-items:center;
+
+  font: 800 13px/1 Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  letter-spacing: .09em;
+  color: rgba(244,241,234,0.95);
+
+  border: 1px solid rgba(234,195,90,.20);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(234,195,90,.20), rgba(0,0,0,0) 60%),
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+}
+
+.drawer-account-text{
+  display:flex;
+  flex-direction:column;
+  line-height: 1.1;
+}
+
+.drawer-account-title{
+  font-weight: 800;
+  color: rgba(244,241,234,0.92);
+  letter-spacing: .01em;
+}
+
+.drawer-account-sub{
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(244,241,234,0.68);
+}
+
+.drawer-divider{
+  height: 1px;
+  margin: 10px 6px 12px;
+  background: rgba(255,255,255,0.10);
+}
+

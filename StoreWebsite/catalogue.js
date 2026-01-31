@@ -118,8 +118,11 @@
     const chip = qs('[data-ui="acct-chip"]');
     const initialsEl = qs('[data-ui="acct-initials"]');
 
-    const mobileAccess = qs('[data-ui="mobile-access"]');
-    const mobileAccount = qs('[data-ui="mobile-account"]');
+const mobileAccess = qs('[data-ui="mobile-access"]');
+const mobileAccount = qs('[data-ui="mobile-account"]');
+const mobileAccountWrap = qs('[data-ui="mobile-account-wrap"]');
+const mobileInitials = qs('[data-ui="mobile-initials"]');
+
 
     if (!chip || !initialsEl) return;
 
@@ -129,21 +132,29 @@
       session = data?.session || null;
     } catch {}
 
-    if (session?.user) {
-      initialsEl.textContent = computeInitials(session.user);
+if (session?.user) {
+  const initials = computeInitials(session.user);
+  initialsEl.textContent = initials;
+  if (mobileInitials) mobileInitials.textContent = initials;
 
-      chip.hidden = false;
-      if (accessBtn) accessBtn.style.display = "none";
+  chip.hidden = false;
+  if (accessBtn) accessBtn.style.display = "none";
 
-      if (mobileAccess) mobileAccess.hidden = true;
-      if (mobileAccount) mobileAccount.hidden = false;
-    } else {
-      chip.hidden = true;
-      if (accessBtn) accessBtn.style.display = "";
+  if (mobileAccess) mobileAccess.hidden = true;
+  if (mobileAccountWrap) mobileAccountWrap.hidden = false;
+  if (mobileAccount) mobileAccount.hidden = false;
+} else {
+  chip.hidden = true;
+  if (accessBtn) accessBtn.style.display = "";
 
-      if (mobileAccess) mobileAccess.hidden = false;
-      if (mobileAccount) mobileAccount.hidden = true;
-    }
+  if (mobileAccess) mobileAccess.hidden = false;
+  if (mobileAccountWrap) mobileAccountWrap.hidden = true;
+  if (mobileAccount) mobileAccount.hidden = true;
+
+  if (mobileInitials) mobileInitials.textContent = "M";
+  initialsEl.textContent = "M";
+}
+
   };
 
   const initAuthUI = async () => {
@@ -955,6 +966,7 @@ function initAccountDropdown() {
   const chip = document.querySelector('[data-ui="acct-chip"]');
   const menu = document.querySelector('[data-ui="acct-menu"]');
   const signOutBtn = document.querySelector('[data-ui="acct-signout"]');
+  const mobileSignOutBtn = document.querySelector('[data-ui="mobile-signout"]');
 
   if (!chip || !menu) return;
 
@@ -1002,6 +1014,22 @@ function initAccountDropdown() {
     // After signing out from catalogue, keep them on catalogue
     window.location.href = "catalogue.html";
   });
+
+mobileSignOutBtn?.addEventListener("click", async () => {
+  const sb = window.supabaseClient || window.supabase;
+  if (!sb?.auth) return;
+
+  try {
+    await sb.auth.signOut();
+  } catch {}
+
+  // Force UI refresh immediately (prevents “stuck initial” feeling)
+  await applyAuthUI(sb);
+
+  // Keep them on catalogue
+  window.location.href = "catalogue.html";
+});
+
 
   const observer = new MutationObserver(() => {
     if (chip.hidden) closeMenu();

@@ -89,10 +89,24 @@
       <button class="icon-btn" type="button" aria-label="Close menu" data-action="close-menu">×</button>
     </div>
     <nav class="drawer-nav" aria-label="Mobile Primary">
+
+      <!-- Mobile account row (shown only when logged in) -->
+<div class="drawer-account" data-ui="drawer-account" hidden>
+  <a class="drawer-account-link" href="profile.html" aria-label="Your account">
+    <span class="drawer-initials" data-ui="drawer-initials">M</span>
+    <span class="drawer-account-text">
+      <span class="drawer-account-title">Account</span>
+      <span class="drawer-account-sub">View profile • Sign out</span>
+    </span>
+  </a>
+</div>
+
+<div class="drawer-divider" data-ui="drawer-divider" hidden></div>
+
       <a class="drawer-link" href="#collections" data-action="close-menu">Collections</a>
       <a class="drawer-link" href="#featured" data-action="close-menu">Featured</a>
       <a class="drawer-link" href="#story" data-action="close-menu">Our Story</a>
-      <a class="drawer-link strong" href="access.html">Member Access</a>
+      <a class="drawer-link strong" href="access.html" data-ui="mobile-access">Member Access</a>
       <a class="drawer-link strong" href="catalogue.html">Shop</a>
     </nav>
     <div class="drawer-foot">

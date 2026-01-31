@@ -883,6 +883,12 @@ async function applyAccountChip(sb) {
   const initialsEl = document.querySelector('[data-ui="acct-initials"]');
   const accessPill = document.querySelector(".access-pill");
 
+  // NEW: drawer account row
+  const drawerAccount = document.querySelector('[data-ui="drawer-account"]');
+  const drawerDivider = document.querySelector('[data-ui="drawer-divider"]');
+  const drawerInitials = document.querySelector('[data-ui="drawer-initials"]');
+  const mobileAccess = document.querySelector('[data-ui="mobile-access"]');
+
   if (!chip || !initialsEl) return;
 
   let session = null;
@@ -893,13 +899,28 @@ async function applyAccountChip(sb) {
 
   if (session?.user) {
     const initials = computeInitials(session.user);
-    initialsEl.textContent = initials;
 
+    // Desktop/header chip (still works; mobile hides it via CSS)
+    initialsEl.textContent = initials;
     chip.hidden = false;
     if (accessPill) accessPill.style.display = "none";
+
+    // Drawer account row (mobile)
+    if (drawerInitials) drawerInitials.textContent = initials;
+    if (drawerAccount) drawerAccount.hidden = false;
+    if (drawerDivider) drawerDivider.hidden = false;
+
+    // Hide Member Access link in drawer when logged in
+    if (mobileAccess) mobileAccess.hidden = true;
   } else {
+    // Desktop/header
     chip.hidden = true;
     if (accessPill) accessPill.style.display = "";
+
+    // Drawer
+    if (drawerAccount) drawerAccount.hidden = true;
+    if (drawerDivider) drawerDivider.hidden = true;
+    if (mobileAccess) mobileAccess.hidden = false;
   }
 }
 

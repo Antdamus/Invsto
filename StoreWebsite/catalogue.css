@@ -1335,3 +1335,57 @@ select{
 .acct-item.danger{
   color: rgba(255, 140, 140, 0.95);
 }
+
+/* =========================
+   Mobile nav: keep header clean
+========================= */
+@media (max-width: 720px) {
+  .desktop-only { display: none !important; }
+
+  /* Make sure the mobile menu reads like a drawer panel */
+  .mobile-menu[hidden] { display: none !important; }
+  .mobile-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    padding: 14px 0 18px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    background: rgba(10, 10, 12, 0.55);
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+  }
+
+  .mobile-menu-inner {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-account {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-account-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mobile-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    color: #f5f0de;
+    border: 1px solid rgba(255, 215, 100, 0.35);
+    background: radial-gradient(circle at 30% 20%, rgba(255, 215, 100, 0.18), rgba(255, 255, 255, 0.06));
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  }
+
+  .mobile-signout {
+    text-align: left;
+  }
+}
