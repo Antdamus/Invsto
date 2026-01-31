@@ -308,8 +308,13 @@ function initSpotTicker(){
   const header = qs("[data-elevate-on-scroll]");
   const yearEl = qs("#year");
 
-  const navToggle = qs(".nav-toggle");
-  const mobileMenu = qs("#mobileMenu");
+const navToggle = qs(".nav-toggle");
+
+// NEW: index-style nav drawer (left slide-in)
+const navDrawer = qs("#navDrawer");
+const navBackdrop = qs("#navDrawerBackdrop");
+const navCloseBtn = qs(".nav-drawer-close");
+
 
   const qInput = qs("#q");
   const clearSearchBtn = qs('[data-action="clear-search"]');
@@ -627,56 +632,71 @@ function initSpotTicker(){
     lastFocus = null;
   };
 
-  const handleEscape = (e) => {
-    if (e.key !== "Escape") return;
+const handleEscape = (e) => {
+  if (e.key !== "Escape") return;
 
-    // Close drawer first
-    if (drawer && !drawer.hidden) {
-      closeDrawer();
-      return;
-    }
+  // Close filters drawer first
+  if (drawer && !drawer.hidden) {
+    closeDrawer();
+    return;
+  }
 
-    // Close mobile menu if open
-    if (mobileMenu && !mobileMenu.hidden) {
-      closeMobileMenu();
-    }
-  };
+  // Close nav drawer
+  if (isNavOpen()) {
+    closeNavDrawer();
+    return;
+  }
+};
 
-  /* =========================
-     Mobile menu
-  ========================= */
-  const openMobileMenu = () => {
-    if (!mobileMenu || !navToggle) return;
-    mobileMenu.hidden = false;
-    navToggle.setAttribute("aria-expanded", "true");
-    document.body.classList.add("menu-open");
-  };
 
-  const closeMobileMenu = () => {
-    if (!mobileMenu || !navToggle) return;
-    mobileMenu.hidden = true;
-    navToggle.setAttribute("aria-expanded", "false");
-    document.body.classList.remove("menu-open");
-  };
+ /* =========================
+   Nav drawer (index-style: left slide-in)
+========================= */
+const lockScroll = (on) => {
+  document.documentElement.classList.toggle("lock", on);
+  document.body.classList.toggle("lock", on);
+};
 
-  const toggleMobileMenu = () => {
-    if (!mobileMenu) return;
-    if (mobileMenu.hidden) openMobileMenu();
-    else closeMobileMenu();
-  };
+const isNavOpen = () => !!navDrawer && !navDrawer.hidden;
 
-  const outsideClickClose = (e) => {
-    // Close drawer if click backdrop
-    const isBackdrop = backdrop && !backdrop.hidden && backdrop.contains(e.target);
-    if (isBackdrop) closeDrawer();
+const openNavDrawer = () => {
+  if (!navDrawer || !navBackdrop || !navToggle) return;
 
-    // Close mobile menu on outside click
-    if (mobileMenu && !mobileMenu.hidden) {
-      const clickedToggle = navToggle && navToggle.contains(e.target);
-      const clickedMenu = mobileMenu.contains(e.target);
-      if (!clickedToggle && !clickedMenu) closeMobileMenu();
-    }
-  };
+  navBackdrop.hidden = false;
+  navDrawer.hidden = false;
+
+  navToggle.setAttribute("aria-expanded", "true");
+  navDrawer.setAttribute("aria-hidden", "false");
+
+  document.body.classList.add("menu-open"); // keep your hamburger animation hook
+  lockScroll(true);
+
+  // Focus close button or first link
+  const focusEl =
+    navCloseBtn ||
+    qs("a, button", navDrawer);
+  focusEl?.focus?.({ preventScroll: true });
+};
+
+const closeNavDrawer = () => {
+  if (!navDrawer || !navBackdrop || !navToggle) return;
+
+  navDrawer.hidden = true;
+  navBackdrop.hidden = true;
+
+  navToggle.setAttribute("aria-expanded", "false");
+  navDrawer.setAttribute("aria-hidden", "true");
+
+  document.body.classList.remove("menu-open");
+  lockScroll(false);
+};
+
+const toggleNavDrawer = () => {
+  if (!navDrawer) return;
+  if (navDrawer.hidden) openNavDrawer();
+  else closeNavDrawer();
+};
+
 
   /* =========================
      Toast
@@ -949,18 +969,27 @@ function initSpotTicker(){
     window.addEventListener("scroll", setHeaderState, { passive: true });
   };
 
-  const wireMobileMenu = () => {
-    if (navToggle) navToggle.addEventListener("click", toggleMobileMenu);
+const wireNavDrawer = () => {
+  if (navToggle) navToggle.addEventListener("click", toggleNavDrawer);
+  if (navCloseBtn) navCloseBtn.addEventListener("click", closeNavDrawer);
 
-    // Close menu after clicking a link inside it
-    if (mobileMenu) {
-      mobileMenu.addEventListener("click", (e) => {
-        const a = e.target.closest("a");
-        if (!a) return;
-        closeMobileMenu();
-      });
-    }
-  };
+  // Close drawer after clicking any link inside it
+  if (navDrawer) {
+    navDrawer.addEventListener("click", (e) => {
+      const a = e.target.closest("a[href]");
+      if (a) closeNavDrawer();
+    });
+  }
+
+  // Backdrop closes drawer
+  if (navBackdrop) {
+    navBackdrop.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeNavDrawer();
+    });
+  }
+};
+
 
 function initAccountDropdown() {
   const chip = document.querySelector('[data-ui="acct-chip"]');
@@ -1037,6 +1066,30 @@ mobileSignOutBtn?.addEventListener("click", async () => {
   observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
 }
 
+const outsideClickClose = (e) => {
+  // Close filters drawer if click backdrop
+  if (backdrop && !backdrop.hidden && e.target === backdrop) {
+    closeDrawer();
+    return;
+  }
+
+  // Close nav drawer if click backdrop
+  if (navBackdrop && !navBackdrop.hidden && e.target === navBackdrop) {
+    closeNavDrawer();
+    return;
+  }
+
+  // Optional: click outside drawer closes it (premium feel)
+  if (isNavOpen()) {
+    const clickedToggle = navToggle && navToggle.contains(e.target);
+    const clickedDrawer = navDrawer && navDrawer.contains(e.target);
+    if (!clickedToggle && !clickedDrawer) {
+      closeNavDrawer();
+      return;
+    }
+  }
+};
+
   /* =========================
      Initial context from URL
   ========================= */
@@ -1089,7 +1142,8 @@ mobileSignOutBtn?.addEventListener("click", async () => {
     document.addEventListener("click", outsideClickClose);
 
     wireHeader();
-    wireMobileMenu();
+    wireNavDrawer();
+
 
     wireDrawerChips();
     wirePricePresets();

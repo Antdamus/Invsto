@@ -1389,3 +1389,223 @@ select{
     text-align: left;
   }
 }
+
+/* ============================================================
+   NAV DRAWER (Right-slide) — Catalogue burger menu
+   Paste this ENTIRE block at the VERY END of catalogue.css
+   (It will not interfere with your existing Filters drawer)
+============================================================ */
+
+/* Scroll lock (JS toggles html.lock + body.lock) */
+html.lock,
+body.lock {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+/* Backdrop */
+.nav-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 1;
+  transition: opacity 240ms ease;
+}
+
+/* IMPORTANT:
+   We override [hidden] ONLY for the nav drawer + backdrop
+   so you still get animations while your JS uses .hidden toggles. */
+.nav-drawer-backdrop[hidden] {
+  display: block !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Drawer shell */
+.nav-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;              /* ✅ RIGHT side */
+  height: 100vh;
+  width: min(86vw, 360px);
+  z-index: 2300;
+
+  /* Glass / luxury feel */
+  background: rgba(14, 14, 16, 0.78);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-left: 1px solid rgba(255, 255, 255, 0.10);
+
+  /* Shape */
+  border-top-left-radius: 18px;
+  border-bottom-left-radius: 18px;
+
+  /* Motion */
+  transform: translateX(104%); /* off-canvas (to the right) */
+  opacity: 0;
+  transition: transform 280ms cubic-bezier(0.2, 0.9, 0.2, 1),
+              opacity 220ms ease;
+
+  /* Layout */
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 16px;
+  box-shadow: -18px 0 60px rgba(0, 0, 0, 0.45);
+}
+
+/* Hidden state (override UA display:none) */
+.nav-drawer[hidden] {
+  display: flex !important;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Open state */
+.nav-drawer:not([hidden]) {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+/* Top row */
+.nav-drawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 10px;
+}
+
+.nav-drawer-title {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.70);
+}
+
+/* Close button (works with your existing .btn.ghost.icon-only) */
+.nav-drawer-close {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  line-height: 1;
+  font-size: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+.nav-drawer-close:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.nav-drawer-close:active {
+  transform: scale(0.96);
+}
+
+/* Nav links */
+.nav-drawer-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 6px 10px;
+  overflow: auto;
+}
+
+.nav-drawer-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.90);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.nav-drawer-link:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.nav-drawer-link:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.nav-drawer-link.strong {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-drawer-link.danger {
+  background: rgba(255, 80, 80, 0.10);
+  border-color: rgba(255, 80, 80, 0.18);
+  color: rgba(255, 210, 210, 0.95);
+}
+
+/* Account row */
+.nav-drawer-account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.nav-drawer-account-link {
+  justify-content: flex-start;
+}
+
+.nav-drawer-initials {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* Divider + footer */
+.nav-drawer-divider {
+  height: 1px;
+  margin: 10px 8px 6px;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.nav-drawer-foot {
+  padding: 10px 10px 0;
+  margin-top: auto;
+}
+
+.nav-drawer-meta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer,
+  .nav-drawer-backdrop {
+    transition: none !important;
+  }
+}
+
+/* Slightly wider on very small screens */
+@media (max-width: 420px) {
+  .nav-drawer {
+    width: min(90vw, 360px);
+    border-top-left-radius: 16px;
+    border-bottom-left-radius: 16px;
+  }
+}

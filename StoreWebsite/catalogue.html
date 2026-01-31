@@ -71,38 +71,57 @@
   <button class="acct-item danger" type="button" data-ui="acct-signout">Sign out</button>
 </div>
 
-  <button class="btn ghost icon-only nav-toggle" type="button"
-          aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
-    <span class="hamburger" aria-hidden="true"></span>
-  </button>
+<button class="btn ghost icon-only nav-toggle" type="button"
+        aria-label="Open menu" aria-expanded="false" aria-controls="navDrawer">
+  <span class="hamburger" aria-hidden="true"></span>
+</button>
+
 </div>
 
     </div>
 
-    <!-- Mobile menu -->
-    <div id="mobileMenu" class="mobile-menu" hidden>
-      <div class="container mobile-menu-inner">
-<!-- Logged-out -->
-<a class="mobile-link" href="access.html" data-ui="mobile-access">Member Access</a>
 
-<!-- Logged-in -->
-<div class="mobile-account" data-ui="mobile-account-wrap" hidden>
-  <a class="mobile-link mobile-account-link" href="profile.html" data-ui="mobile-account">
-    <span class="mobile-avatar" aria-hidden="true"><span data-ui="mobile-initials">M</span></span>
-    <span>Account</span>
-  </a>
-  <button class="mobile-link mobile-signout" type="button" data-ui="mobile-signout">
-    Sign out
-  </button>
-</div>
-
-
-        <a class="mobile-link" href="index.html#collections">Collections</a>
-        <a class="mobile-link" href="index.html#story">Story</a>
-        <a class="mobile-link" href="index.html#contact">Contact</a>
-      </div>
-    </div>
   </header>
+
+  <!-- Mobile nav drawer (index-style: left slide-in) -->
+<div class="nav-drawer-backdrop" id="navDrawerBackdrop" hidden></div>
+
+<aside class="nav-drawer" id="navDrawer" aria-label="Menu" aria-hidden="true" hidden>
+  <div class="nav-drawer-top">
+    <div class="nav-drawer-title">Menu</div>
+    <button class="btn ghost icon-only nav-drawer-close" type="button" aria-label="Close menu">
+      ×
+    </button>
+  </div>
+
+  <nav class="nav-drawer-nav" aria-label="Mobile navigation">
+    <!-- Logged-out -->
+    <a class="nav-drawer-link strong" href="access.html" data-ui="mobile-access">Member Access</a>
+
+    <!-- Logged-in -->
+    <div class="nav-drawer-account" data-ui="mobile-account-wrap" hidden>
+      <a class="nav-drawer-link nav-drawer-account-link" href="profile.html" data-ui="mobile-account" aria-label="Your account">
+        <span class="nav-drawer-initials" aria-hidden="true"><span data-ui="mobile-initials">M</span></span>
+        <span>Account</span>
+      </a>
+
+      <button class="nav-drawer-link danger" type="button" data-ui="mobile-signout">
+        Sign out
+      </button>
+    </div>
+
+    <div class="nav-drawer-divider" aria-hidden="true"></div>
+
+    <a class="nav-drawer-link" href="index.html#collections">Collections</a>
+    <a class="nav-drawer-link" href="index.html#story">Story</a>
+    <a class="nav-drawer-link" href="index.html#contact">Contact</a>
+    <a class="nav-drawer-link" href="index.html">Home</a>
+  </nav>
+
+  <div class="nav-drawer-foot">
+    <div class="nav-drawer-meta">OG Jewelry • Premium Browse</div>
+  </div>
+</aside>
 
   <main id="main">
     <!-- Shop intro -->
