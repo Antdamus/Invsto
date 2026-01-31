@@ -755,6 +755,101 @@ function onKeyDown(e) {
 }
 
 /* =========================
+   Account chip (session -> initials)
+========================= */
+
+function getSupabaseClientIfReady() {
+  const c = window.supabaseClient || window.supabase;
+  if (c && c.auth && typeof c.auth.getSession === "function") return c;
+  return null;
+}
+
+function waitForSupabaseReady(timeoutMs = 3500) {
+  return new Promise((resolve) => {
+    const readyNow = getSupabaseClientIfReady();
+    if (readyNow) return resolve(readyNow);
+
+    const onReady = () => {
+      document.removeEventListener("supabase-ready", onReady);
+      resolve(getSupabaseClientIfReady() || null);
+    };
+
+    document.addEventListener("supabase-ready", onReady);
+
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      const client = getSupabaseClientIfReady();
+      if (client) {
+        clearInterval(timer);
+        document.removeEventListener("supabase-ready", onReady);
+        resolve(client);
+      } else if (Date.now() - t0 > timeoutMs) {
+        clearInterval(timer);
+        document.removeEventListener("supabase-ready", onReady);
+        resolve(null);
+      }
+    }, 50);
+  });
+}
+
+function computeInitials(user) {
+  // Prefer metadata name if available; fallback to email; fallback to "M"
+  const meta = user?.user_metadata || {};
+  const full =
+    String(meta.full_name || meta.name || "").trim();
+
+  if (full) {
+    const parts = full.split(/\s+/).filter(Boolean);
+    const a = (parts[0]?.[0] || "").toUpperCase();
+    const b = (parts[1]?.[0] || "").toUpperCase();
+    return (a + b) || "M";
+  }
+
+  const email = String(user?.email || "").trim();
+  if (email) return (email[0] || "M").toUpperCase();
+
+  return "M";
+}
+
+async function applyAccountChip(sb) {
+  const chip = document.querySelector('[data-ui="acct-chip"]');
+  const initialsEl = document.querySelector('[data-ui="acct-initials"]');
+  const accessPill = document.querySelector(".access-pill");
+
+  if (!chip || !initialsEl) return;
+
+  let session = null;
+  try {
+    const { data } = await sb.auth.getSession();
+    session = data?.session || null;
+  } catch {}
+
+  if (session?.user) {
+    const initials = computeInitials(session.user);
+    initialsEl.textContent = initials;
+
+    chip.hidden = false;
+    if (accessPill) accessPill.style.display = "none";
+  } else {
+    chip.hidden = true;
+    if (accessPill) accessPill.style.display = "";
+  }
+}
+
+async function initAccountChip() {
+  const sb = await waitForSupabaseReady();
+  if (!sb) return;
+
+  // First paint
+  await applyAccountChip(sb);
+
+  // Keep in sync
+  sb.auth.onAuthStateChange(() => {
+    applyAccountChip(sb);
+  });
+}
+
+/* =========================
    Boot
 ========================= */
 init();
@@ -787,6 +882,9 @@ ui.search?.addEventListener("click", (e) => {
   await loadPublishedStorefrontContent();
 
   hydrateFeaturedQuickviewModel();
+
+  initAccountChip();
+
 
   // Notice persistence
   hydrateNoticeDismissed();

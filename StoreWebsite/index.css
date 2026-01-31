@@ -1885,3 +1885,40 @@ html.lock, body.lock{
   background: rgba(227, 200, 120, 0.55);
   box-shadow: 0 0 18px rgba(227, 200, 120, 0.22);
 }
+
+/* Account chip (initials circle) */
+.acct-chip{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:42px;
+  height:42px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  text-decoration:none;
+  transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease);
+}
+
+.acct-chip:hover{
+  transform: translateY(-1px) scale(1.02);
+  background: rgba(255,255,255,.07);
+  border-color: rgba(234,195,90,.22);
+  box-shadow: 0 10px 30px rgba(0,0,0,.25), var(--goldGlow);
+}
+
+.acct-dot{
+  width:28px;
+  height:28px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  font: 700 12px/1 Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  letter-spacing: .06em;
+  color: rgba(244,241,234,0.95);
+  border: 1px solid rgba(234,195,90,.18);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(234,195,90,.18), rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.10);
+}

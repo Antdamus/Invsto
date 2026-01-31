@@ -56,6 +56,10 @@
         <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
           <span class="i" aria-hidden="true">⌕</span>
         </button>
+<a class="acct-chip" href="profile.html" data-ui="acct-chip" hidden aria-label="Your account">
+  <span class="acct-dot" data-ui="acct-initials">M</span>
+</a>
+
 <a class="access-pill" href="access.html" aria-label="Member Access">
   Member Access
 </a>
@@ -458,6 +462,12 @@
   </div>
 
   <!-- JS -->
-  <script src="index.js" defer></script>
+<!-- Supabase MUST load before initSupabase.js -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+<script src="initSupabase.js" defer></script>
+
+<!-- Your page logic -->
+<script src="index.js" defer></script>
+
 </body>
 </html>

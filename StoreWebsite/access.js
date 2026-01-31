@@ -123,12 +123,13 @@
     });
   }
 
-  function computeRedirectToProfile() {
-    // Same pattern as join.js, but kept explicit.
-    // Ensures redirect works whether site is in a subfolder or root.
-    const base = `${window.location.origin}${window.location.pathname.replace(/[^/]+$/, "")}`;
-    return `${base}profile.html`;
-  }
+function computeRedirectToProfile() {
+  // After magic-link auth, send them back to homepage
+  const base = `${window.location.origin}${window.location.pathname.replace(/[^/]+$/, "")}`;
+  return `${base}index.html`;
+}
+
+
 
   // ---------------------------
   // Main
