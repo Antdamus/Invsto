@@ -1840,3 +1840,46 @@ html.lock, body.lock{
 .access-pill:active{
   transform: translateY(0) scale(.98);
 }
+/* Mobile header refinement */
+@media (max-width: 720px){
+  .access-pill{
+    display: none;
+  }
+}
+
+.drawer-link.strong{
+  font-weight: 700;
+  color: rgba(227,200,120,0.95);
+}
+
+/* Story quote (premium editorial) */
+.story-glass{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 18px;
+}
+
+.story-quote{
+  text-align: center;
+  font-family: "Cormorant Garamond", serif;
+  font-size: clamp(18px, 1.7vw, 26px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  color: rgba(244, 241, 234, 0.92);
+  text-shadow: 0 10px 28px rgba(0,0,0,0.55);
+
+  max-width: 22ch;
+}
+
+/* A tiny golden accent line above (subtle, very luxury) */
+.story-quote::before{
+  content: "";
+  display: block;
+  width: 34px;
+  height: 1px;
+  margin: 0 auto 10px;
+  background: rgba(227, 200, 120, 0.55);
+  box-shadow: 0 0 18px rgba(227, 200, 120, 0.22);
+}
