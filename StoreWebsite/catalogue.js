@@ -141,12 +141,18 @@ const applyAuthUI = async (sb) => {
   const mobileInitials = qs('[data-ui="mobile-initials"]');
   const mobileSignOutBtn = qs('[data-ui="mobile-signout"]');
 
-  // ✅ HARD BASELINE: assume logged out (prevents any flash + defeats CSS overrides)
+  // ✅ HARD BASELINE: assume logged out (prevents flash)
   setHardHidden(chip, true);
   if (accessBtn) accessBtn.style.display = "";
 
-  setHardHidden(acctMenu, true);
+  // ✅ DESKTOP MENU: DO NOT hard-hide with display:none (it breaks toggling)
+  if (acctMenu) {
+    acctMenu.hidden = true;
+  
+    acctMenu.style.display = ""; // clear any previous inline display:none
+  }
 
+  // Mobile baseline
   setHardHidden(mobileAccess, false);
   setHardHidden(mobileAccountWrap, true);
   setHardHidden(mobileAccount, true);
@@ -180,6 +186,7 @@ const applyAuthUI = async (sb) => {
     setHardHidden(mobileSignOutBtn, false);
   }
 };
+
 
 const initAuthUI = async () => {
   const sb = await waitForSupabaseReady();
@@ -1036,23 +1043,34 @@ function initAccountDropdown() {
   const menu = qs('[data-ui="acct-menu"]');
   const signOutBtn = qs('[data-ui="acct-signout"]');
 
+  // Desktop-only breakpoint — match your CSS "desktop-only"
+  const isDesktop = () => window.matchMedia("(min-width: 901px)").matches;
+
   if (!chip || !menu) return;
 
   const closeMenu = () => {
     menu.hidden = true;
+    menu.setAttribute("aria-hidden", "true");
     chip.setAttribute("aria-expanded", "false");
   };
 
   const openMenu = () => {
-    // ✅ don’t allow opening if chip is hidden (logged out)
-    if (chip.hidden) return;
+    if (chip.hidden) return;      // logged out
+    if (!isDesktop()) return;     // desktop-only behavior
+
+    // ✅ clear any forced hiding
     menu.hidden = false;
+    menu.style.display = "";      // IMPORTANT: defeats leftover inline display:none
+    menu.removeAttribute("aria-hidden");
     chip.setAttribute("aria-expanded", "true");
   };
 
   const toggleMenu = (e) => {
     e.preventDefault();
-    if (chip.hidden) return; // ✅ logged out => do nothing
+
+    if (chip.hidden) return;      // logged out
+    if (!isDesktop()) return;     // desktop-only behavior
+
     if (menu.hidden) openMenu();
     else closeMenu();
   };
@@ -1063,6 +1081,7 @@ function initAccountDropdown() {
 
   chip.addEventListener("click", toggleMenu);
 
+  // Click outside closes
   document.addEventListener("click", (e) => {
     if (menu.hidden) return;
     const t = e.target;
@@ -1070,10 +1089,12 @@ function initAccountDropdown() {
     closeMenu();
   });
 
+  // Escape closes
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeMenu();
   });
 
+  // Sign out
   signOutBtn?.addEventListener("click", async () => {
     const sb = window.supabaseClient || window.supabase;
     if (!sb?.auth) return;
@@ -1086,11 +1107,16 @@ function initAccountDropdown() {
     window.location.href = "catalogue.html";
   });
 
-  // ✅ If chip becomes hidden (logout), force menu closed
+  // If chip becomes hidden (logout), force menu closed
   const observer = new MutationObserver(() => {
     if (chip.hidden) closeMenu();
   });
   observer.observe(chip, { attributes: true, attributeFilter: ["hidden"] });
+
+  // If you resize from desktop->mobile while open, close it
+  window.addEventListener("resize", () => {
+    if (!isDesktop()) closeMenu();
+  });
 }
 
 
