@@ -16,6 +16,7 @@
 
   <!-- CSS -->
   <link rel="stylesheet" href="index.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css">
 </head>
 
 <body>
@@ -57,7 +58,7 @@
           <span class="i" aria-hidden="true">⌕</span>
         </button>
 
-       <a class="btn ghost icon-only cart-icon" href="./StoreCart/cart.html" aria-label="Cart">
+       <a class="btn ghost icon-only cart-icon" href="./StoreCart/cart.html" data-action="open-cart-drawer" aria-label="Cart">
           <span class="i" aria-hidden="true">🛒</span>
           <span class="cart-badge" data-ui="cart-count" hidden>0</span>
         </a>
@@ -500,8 +501,43 @@
 
 <!-- Your page logic -->
 <script src="cart.shared.js" defer></script>
+  <script src="./StoreCart/cart.drawer.js" defer></script>
 
   <script src="index.js" defer></script>
+
+
+  <!-- =========================
+       Cart Drawer (mini cart)
+       ========================= -->
+  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+    <div class="cd-topbar">
+      <div class="cd-titlewrap">
+        <div class="cd-title">Cart</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+      </div>
+
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+    </div>
+
+    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+    <div class="cd-list" data-ui="cart-drawer-list"></div>
+    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+    <div class="cd-footer">
+      <div class="cd-summary">
+        <div>Subtotal</div>
+        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+      </div>
+
+      <div class="cd-actionsRow">
+        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+      </div>
+    </div>
+  </aside>
 
 </body>
 </html>

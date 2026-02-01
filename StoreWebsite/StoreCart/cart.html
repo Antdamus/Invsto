@@ -13,9 +13,20 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 
+<script>
+  window.OG_CART_DRAWER_CFG = {
+    supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+    channel: "og_main",
+    fn: "storefront-catalog"
+  };
+</script>
+
+
   <!-- cart.html is in /StoreCart/, but catalogue.css is in parent /StoreWebsite/ -->
   <link rel="stylesheet" href="../catalogue.css" />
   <link rel="stylesheet" href="./cart.css" />
+    <link rel="stylesheet" href="./cart.drawer.css">
+    <script src="./cart.drawer.js" defer></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="../initSupabase.js" defer></script>
