@@ -1,0 +1,47 @@
+flowchart LR
+  %% =========================================================
+  %% cart-storage-contract.mmd
+  %% Summary:
+  %% - Cart data lives in localStorage under og_cart_v1.
+  %% - loadCart returns a valid cart object always.
+  %% - normalizeCart enforces allowed fields, types, and dedupes ids.
+  %% - saveCart persists normalized cart and updates updated_at.
+  %% - cartQtySum is used for badge totals.
+  %% =========================================================
+
+  classDef fn fill:#0b1220,stroke:#c7a24b,stroke-width:1.8px,color:#f4f2ed,rx:12,ry:12;
+  classDef dec fill:#111827,stroke:#fbbf24,stroke-width:1.8px,color:#fff7db,rx:12,ry:12;
+  classDef ext fill:#121018,stroke:#a78bfa,stroke-width:1.6px,color:#f5f3ff,rx:12,ry:12;
+  classDef ok fill:#052e1a,stroke:#22c55e,stroke-width:1.4px,color:#eafff2,rx:12,ry:12;
+  classDef warn fill:#2a1010,stroke:#ef4444,stroke-width:1.4px,color:#ffecec,rx:12,ry:12;
+
+  subgraph Legend["Legend"]
+    direction TB
+    L1["Internal function"]:::fn
+    L2{"Decision"}:::dec
+    L3["External API, localStorage, JSON"]:::ext
+    L4["Normal return"]:::ok
+    L5["Fallback path"]:::warn
+  end
+
+  LS["External, localStorage og_cart_v1"]:::ext
+
+  createEmptyCart["createEmptyCart"]:::fn --> EmptyCart["Return cart, version, updated_at, items empty"]:::ok
+
+  loadCart["loadCart"]:::fn --> ReadLS["Read localStorage getItem"]:::ext --> HasRaw{"raw exists"}:::dec
+  HasRaw -->|No| createEmptyCart --> LoadOut0["Return empty cart"]:::ok
+  HasRaw -->|Yes| Parse["Parse JSON"]:::ext --> Shape{"valid version, items array"}:::dec
+  Shape -->|No| createEmptyCart --> LoadOut0
+  Shape -->|Yes| normalizeCart["normalizeCart"]:::fn --> LoadOut1["Return normalized cart"]:::ok
+
+  normalizeCart --> Loop["Loop items, dedupe ids"]:::fn --> LineOk{"line valid, id, qty, price"}:::dec
+  LineOk -->|No| Loop
+  LineOk -->|Yes| Keep["Keep cleaned line, id, qty, lock fields"]:::fn --> Loop
+  Loop --> NormOut["Return normalized cart"]:::ok
+
+  saveCart["saveCart"]:::fn --> normalizeCart --> Stamp["Update updated_at"]:::fn --> WriteLS["Write localStorage setItem"]:::ext --> SaveOut["Return saved cart"]:::ok
+
+  cartQtySum["cartQtySum"]:::fn --> Sum["Sum qty across items"]:::fn --> QtyOut["Return total qty"]:::ok
+
+  ReadLS -.-> LS
+  WriteLS -.-> LS

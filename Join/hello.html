@@ -1,0 +1,214 @@
+<!-- cart.html — OG Jewelry (Cart) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Cart</title>
+  <meta name="description" content="Your OG Jewelers cart — review items, quantities, and locked pricing." />
+
+  <!-- Fonts (match shop) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="catalogue.css" />
+  <link rel="stylesheet" href="cart.css" />
+
+  <!-- JS (Supabase MUST load before initSupabase.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="initSupabase.js" defer></script>
+
+  <!-- Cart badge updater -->
+  <script src="cart.shared.js" defer></script>
+
+  <!-- Page logic -->
+  <script src="cart.js" defer></script>
+</head>
+
+<body>
+  <!-- Ambient background -->
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-grain"></div>
+  </div>
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-elevate-on-scroll>
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="OG Jewelry Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name">OG Jewelry</span>
+      </a>
+
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="index.html#collections">Collections</a>
+        <a class="nav-link" href="index.html#contact">Contact</a>
+        <div class="spot-ticker" id="spotTicker" aria-live="polite">
+  <span class="spot-dot"></span>
+  <span class="spot-text">Loading spot prices…</span>
+</div>
+
+      </nav>
+
+<div class="header-actions">
+
+<a class="btn ghost icon-only cart-icon" href="cart.html" aria-label="Cart">
+  <span aria-hidden="true">🛒</span>
+  <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+</a>
+
+
+<a class="btn ghost access-btn desktop-only" href="access.html" data-ui="access-btn" aria-label="Member Access">
+  Member Access
+</a>
+
+<button class="acct-chip desktop-only"
+        type="button"
+        data-ui="acct-chip"
+        aria-label="Your account"
+        aria-haspopup="menu"
+        aria-expanded="false">
+  <span class="acct-dot" data-ui="acct-initials"></span>
+</button>
+
+
+
+  <!-- Account dropdown -->
+<div class="acct-menu" data-ui="acct-menu" hidden>
+  <a class="acct-item" href="profile.html" data-ui="acct-profile">Profile</a>
+  <button class="acct-item danger" type="button" data-ui="acct-signout">Sign out</button>
+</div>
+
+<button class="btn ghost icon-only nav-toggle" type="button"
+        aria-label="Open menu" aria-expanded="false" aria-controls="navDrawer">
+  <span class="hamburger" aria-hidden="true"></span>
+</button>
+
+</div>
+
+    </div>
+
+
+  </header>
+
+  <div class="nav-drawer-backdrop" id="navDrawerBackdrop" hidden></div>
+
+<aside class="nav-drawer" id="navDrawer" aria-label="Menu" aria-hidden="true" hidden>
+  <div class="nav-drawer-top">
+    <div class="nav-drawer-title">Menu</div>
+    <button class="btn ghost icon-only nav-drawer-close" type="button" aria-label="Close menu">
+      ×
+    </button>
+  </div>
+
+  <nav class="nav-drawer-nav" aria-label="Mobile navigation">
+    <!-- Logged-out -->
+    <a class="nav-drawer-link strong" href="access.html" data-ui="mobile-access">Member Access</a>
+
+    <!-- Logged-in -->
+    <div class="nav-drawer-account" data-ui="mobile-account-wrap" hidden>
+      <a class="nav-drawer-link nav-drawer-account-link" href="profile.html" data-ui="mobile-account" aria-label="Your account">
+        <span class="nav-drawer-initials" aria-hidden="true"><span data-ui="mobile-initials">M</span></span>
+        <span>Account</span>
+      </a>
+
+      <button class="nav-drawer-link danger" type="button" data-ui="mobile-signout">
+        Sign out
+      </button>
+    </div>
+
+    <div class="nav-drawer-divider" aria-hidden="true"></div>
+
+    <a class="nav-drawer-link" href="index.html#collections">Collections</a>
+    <a class="nav-drawer-link" href="index.html#story">Story</a>
+    <a class="nav-drawer-link" href="index.html#contact">Contact</a>
+    <a class="nav-drawer-link" href="index.html">Home</a>
+  </nav>
+
+  <div class="nav-drawer-foot">
+    <div class="nav-drawer-meta">OG Jewelry • Premium Browse</div>
+  </div>
+</aside>
+
+  <main id="main">
+    <div class="container cart-wrap">
+      <div class="cart-head">
+        <div>
+          <h1 class="cart-title">Your Cart</h1>
+          <p class="cart-sub">Prices are locked for 15 minutes. If a lock expires while an item is still in your cart, we’ll refresh the price and lock it again.</p>
+        </div>
+
+        <a class="btn ghost" href="catalogue.html">Continue shopping</a>
+      </div>
+
+      <div id="cartBanner" class="cart-banner" hidden>
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <strong>Price update:</strong> one or more items had a price lock expire and were refreshed.
+          <div class="muted" style="margin-top:4px;">Your totals below reflect the latest locked prices.</div>
+        </div>
+      </div>
+
+      <div class="cart-grid">
+        <section class="cart-panel" aria-label="Cart items">
+          <div class="panel-top">
+            <h2>Items</h2>
+            <button class="btn ghost" type="button" id="clearCartBtn">Clear</button>
+          </div>
+          <div class="panel-body">
+            <div id="cartList"></div>
+            <div id="cartEmpty" class="cart-empty" hidden>Your cart is empty.</div>
+          </div>
+        </section>
+
+        <aside class="cart-panel" aria-label="Order summary">
+          <div class="panel-top">
+            <h2>Summary</h2>
+          </div>
+          <div class="panel-body">
+            <div class="summary-row">
+              <div>Subtotal</div>
+              <div class="val" id="subtotalVal">$0.00</div>
+            </div>
+            <div class="summary-row">
+              <div>Unavailable</div>
+              <div class="val" id="unavailVal">0</div>
+            </div>
+            <div class="summary-row">
+              <div>Total items</div>
+              <div class="val" id="countVal">0</div>
+            </div>
+
+            <div class="summary-actions">
+              <button class="btn" type="button" id="checkoutBtn" disabled>Checkout (later)</button>
+              <div class="muted" style="font-size:12px; line-height:1.45;">
+                Unavailable items stay visible so the user isn’t confused, but they’re excluded from totals.
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-left">
+        <span>© <span id="year"></span> OG Jewelry</span>
+      </div>
+      <div class="footer-right">
+        <a class="text-link" href="index.html#contact">Contact</a>
+        <span class="sep" aria-hidden="true">•</span>
+        <a class="text-link" href="catalogue.html">Shop</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

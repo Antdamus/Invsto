@@ -1,0 +1,45 @@
+flowchart LR
+  %% =========================================================
+  %% cart-boot-and-dom.mmd
+  %% Summary:
+  %% - External DOMContentLoaded fires once.
+  %% - init runs, resolves required DOM, exits safely if missing.
+  %% - bindEvents attaches listeners after DOM is confirmed.
+  %% - inventory is hydrated once, cart is loaded and refreshed, then rendered.
+  %% - timer is started to drive tick each second.
+  %% =========================================================
+
+  classDef fn fill:#0b1220,stroke:#c7a24b,stroke-width:1.8px,color:#f4f2ed,rx:12,ry:12;
+  classDef dec fill:#111827,stroke:#fbbf24,stroke-width:1.8px,color:#fff7db,rx:12,ry:12;
+  classDef ext fill:#121018,stroke:#a78bfa,stroke-width:1.6px,color:#f5f3ff,rx:12,ry:12;
+  classDef data fill:#0a0f1a,stroke:#334155,stroke-width:1.4px,color:#e5e7eb,rx:12,ry:12;
+  classDef ok fill:#052e1a,stroke:#22c55e,stroke-width:1.4px,color:#eafff2,rx:12,ry:12;
+  classDef warn fill:#2a1010,stroke:#ef4444,stroke-width:1.4px,color:#ffecec,rx:12,ry:12;
+
+  subgraph Legend["Legend"]
+    direction TB
+    L1["Internal function"]:::fn
+    L2{"Decision"}:::dec
+    L3["External trigger or API"]:::ext
+    L4["State or data"]:::data
+    L5["Normal path"]:::ok
+    L6["Stop or safe exit"]:::warn
+  end
+
+  DOMReady["External, DOMContentLoaded"]:::ext --> init["init"]:::fn
+  init --> resolveDom["resolveDom"]:::fn --> DomOk{"Required DOM present"}:::dec
+  DomOk -->|No| ExitSafe["Exit init, log missing IDs"]:::warn
+  DomOk -->|Yes| SetYear["Set year text if present"]:::fn --> bindEvents["bindEvents"]:::fn
+
+  bindEvents --> Listeners["Attach listeners, click, change, clear"]:::ext
+
+  init --> Hydrate["fetchInventoryMap, force false"]:::fn --> InvReady["invState.map ready"]:::ok
+  init --> Load["loadCart"]:::fn --> Refresh["refreshExpiredLocks"]:::fn --> BannerDec{"Any refreshed"}:::dec
+  BannerDec -->|Yes| ShowBanner["Show banner"]:::fn --> Render1["render"]:::fn
+  BannerDec -->|No| Render1
+
+  init --> StartTimer["Start setInterval, 1 second"]:::ext --> TimerEvt["External, timer ticks"]:::ext
+  TimerEvt --> tick["tick"]:::fn
+
+  DomState["State, el refs assigned"]:::data
+  init -.-> DomState

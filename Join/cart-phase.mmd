@@ -1,0 +1,236 @@
+flowchart LR
+  %% =========================================================
+  %% OG Jewelers — cart.js (Phase 2) CLEAN AUDIT DIAGRAM
+  %% - No \n, only <br/>
+  %% - Clear legend
+  %% - Clear separation: External vs Internal functions
+  %% =========================================================
+
+  %% ---------- Styles ----------
+  classDef ext fill:#0f172a,stroke:#60a5fa,stroke-width:2px,color:#eaf2ff,rx:12,ry:12;
+  classDef fn  fill:#0b1220,stroke:#c7a24b,stroke-width:1.8px,color:#f4f2ed,rx:12,ry:12;
+  classDef dec fill:#111827,stroke:#fbbf24,stroke-width:1.8px,color:#fff7db,rx:12,ry:12;
+  classDef data fill:#0a0f1a,stroke:#334155,stroke-width:1.4px,color:#e5e7eb,rx:12,ry:12;
+  classDef dom fill:#0b0c0e,stroke:#ffffff22,stroke-width:1.2px,color:#f4f2ed,rx:12,ry:12;
+  classDef evt fill:#111018,stroke:#a78bfa,stroke-width:1.6px,color:#f5f3ff,rx:12,ry:12;
+  classDef ok  fill:#052e1a,stroke:#22c55e,stroke-width:1.4px,color:#eafff2,rx:12,ry:12;
+  classDef warn fill:#2a1010,stroke:#ef4444,stroke-width:1.4px,color:#ffecec,rx:12,ry:12;
+
+  %% ---------- Legend ----------
+  subgraph Legend["Legend"]
+    direction TB
+    LEXT["External call or API<br/>Browser or network"]:::ext
+    LFN["Internal function<br/>Defined in cart.js"]:::fn
+    LDEC{"Decision<br/>if/else"}:::dec
+    LDATA["Data or state<br/>not a function"]:::data
+    LDOM["DOM refs<br/>el.*"]:::dom
+    LEVT["Event trigger<br/>click change timer"]:::evt
+    LOK["Normal path"]:::ok
+    LWARN["Edge case"]:::warn
+  end
+
+  %% =========================================================
+  %% External Sources (outside functions)
+  %% =========================================================
+  subgraph External["External sources (outside cart.js functions)"]
+    direction TB
+    DOMContentLoaded["Browser event<br/>DOMContentLoaded"]:::ext
+    FetchAPI["Browser API<br/>fetch GET Edge Function"]:::ext
+    LocalStorage["Browser API<br/>localStorage getItem setItem removeItem"]:::ext
+    TimerAPI["Browser API<br/>setInterval clearInterval"]:::ext
+    IntlAPI["Browser API<br/>Intl.NumberFormat"]:::ext
+    DateAPI["Browser API<br/>Date now toISOString"]:::ext
+    DOMAPI["Browser API<br/>querySelectorAll addEventListener innerHTML"]:::ext
+  end
+
+  %% =========================================================
+  %% Non-functions (state)
+  %% =========================================================
+  subgraph State["State (not functions)"]
+    direction TB
+    CFG["Config constants<br/>CART_STORAGE_KEY CART_VERSION PRICE_LOCK_MS<br/>SUPABASE url CHANNEL function name"]:::data
+    DOMS["DOM refs el<br/>year banner list empty subtotal unavail count clearBtn"]:::dom
+    INV["invState<br/>loaded map lastFetchMs"]:::data
+    TICKSTATE["tickTimer state"]:::data
+  end
+
+  %% =========================================================
+  %% Internal Functions (cart.js)
+  %% =========================================================
+  subgraph Internal["Internal functions (defined in cart.js)"]
+    direction TB
+
+    %% Core cart storage
+    createEmptyCart["createEmptyCart"]:::fn
+    loadCart["loadCart"]:::fn
+    saveCart["saveCart"]:::fn
+    normalizeCart["normalizeCart"]:::fn
+    createPriceLock["createPriceLock"]:::fn
+    isLockExpired["isLockExpired"]:::fn
+    cartQtySum["cartQtySum"]:::fn
+
+    %% Inventory
+    mapStoreItemToInv["mapStoreItemToInv"]:::fn
+    fetchInventoryMap["fetchInventoryMap"]:::fn
+
+    %% Price lock rolling refresh
+    refreshExpiredLocks["refreshExpiredLocks"]:::fn
+
+    %% Render
+    render["render"]:::fn
+    updateCountdownPills["updateCountdownPills"]:::fn
+
+    %% Events and mutations
+    bindEvents["bindEvents"]:::fn
+    findLine["findLine"]:::fn
+    setQty["setQty"]:::fn
+    incQty["incQty"]:::fn
+    removeLine["removeLine"]:::fn
+    clearCartFn["clearCart local"]:::fn
+
+    %% Tick and boot
+    tick["tick"]:::fn
+    init["init"]:::fn
+  end
+
+  %% =========================================================
+  %% Boot sequence
+  %% =========================================================
+  DOMContentLoaded --> init
+
+  init --> bindEvents
+  bindEvents --> DOMAPI
+
+  init --> fetchInventoryMap
+  fetchInventoryMap --> FetchAPI
+
+  init --> loadCart
+  loadCart --> LocalStorage
+
+  init --> refreshExpiredLocks
+  refreshExpiredLocks --> fetchInventoryMap
+
+  init --> DInitBanner{"refreshed list not empty"}:::dec
+  DInitBanner -->|Yes| ShowBannerInit["Show banner<br/>el.banner hidden false"]:::ok
+  DInitBanner -->|No| SkipBannerInit["Keep banner hidden"]:::ok
+
+  init --> render
+  render --> DOMAPI
+
+  init --> StartTimer["Start tick loop<br/>setInterval 1 second"]:::evt
+  StartTimer --> TimerAPI
+  StartTimer --> tick
+
+  %% =========================================================
+  %% Cart core flows
+  %% =========================================================
+  loadCart --> DHasKey{"Storage key exists"}:::dec
+  DHasKey -->|No| createEmptyCart --> loadCartRet0["Return empty cart"]:::ok
+  DHasKey -->|Yes| ParseJSON["Parse JSON"]:::ext --> DValidShape{"Valid shape<br/>version ok items array"}:::dec
+  DValidShape -->|No| createEmptyCart --> loadCartRet0
+  DValidShape -->|Yes| normalizeCart --> loadCartRet1["Return normalized cart"]:::ok
+
+  saveCart --> normalizeCart --> SaveStamp["Set updated_at"]:::fn --> WriteLS["Write storage"]:::ext --> saveCartRet["Return saved cart"]:::ok
+  WriteLS --> LocalStorage
+
+  normalizeCart --> NLoop["Loop items"]:::fn --> NValid{"Line valid<br/>id qty price locked<br/>no duplicate"}:::dec
+  NValid -->|No| NLoop
+  NValid -->|Yes| NKeep["Keep cleaned line<br/>id qty lock fields"]:::fn --> NLoop
+  NLoop --> NOut["Return normalized cart"]:::ok
+
+  createPriceLock --> PValid{"Price valid number"}:::dec
+  PValid -->|No| PThrow["Throw error"]:::warn
+  PValid -->|Yes| PMake["Create timestamps<br/>locked now expires plus 15 min"]:::fn --> POut["Return lock object"]:::ok
+
+  isLockExpired --> XParse["Parse expiry time"]:::ext --> XBad{"Expiry missing or invalid"}:::dec
+  XBad -->|Yes| XTrue["Return true expired"]:::ok
+  XBad -->|No| XCmp["Compare now to expiry"]:::fn --> XOut["Return boolean"]:::ok
+  XParse --> DateAPI
+
+  cartQtySum --> QSum["Sum qty across cart items"]:::fn --> QOut["Return total qty"]:::ok
+
+  %% =========================================================
+  %% Inventory hydration
+  %% =========================================================
+  fetchInventoryMap --> DCached{"force false and cached map exists"}:::dec
+  DCached -->|Yes| InvCached["Return cached invState.map"]:::ok
+  DCached -->|No| BuildURL["Build Edge Function URL<br/>includes five minute bucket"]:::fn --> FetchAPI --> ParseInv["Parse JSON response"]:::ext
+  ParseInv --> MapItems["Map items<br/>mapStoreItemToInv"]:::fn --> SetMap["Set invState.map and loaded"]:::fn --> InvFresh["Return invState.map"]:::ok
+  ParseInv --> DateAPI
+
+  %% =========================================================
+  %% Price lock rolling refresh
+  %% =========================================================
+  refreshExpiredLocks --> ExpiredIds["Collect expired ids<br/>filter with isLockExpired"]:::fn
+  ExpiredIds --> DNone{"No expired ids"}:::dec
+  DNone -->|Yes| NoRefresh["Return cart unchanged<br/>refreshed empty unavailable empty"]:::ok
+  DNone -->|No| ForceFresh["Force inventory fetch<br/>fetchInventoryMap force true"]:::fn
+
+  ForceFresh --> LoopLines["Loop cart lines"]:::fn
+  LoopLines --> DLineExp{"Line expired"}:::dec
+  DLineExp -->|No| LoopLines
+  DLineExp -->|Yes| DInMap{"Inventory has id"}:::dec
+  DInMap -->|No| AddUnavail["Add id to unavailable list"]:::warn --> LoopLines
+  DInMap -->|Yes| NewLock["Create new lock from current price<br/>createPriceLock"]:::fn --> UpdateLine["Update line lock fields"]:::fn --> AddRef["Add id to refreshed list"]:::ok --> LoopLines
+
+  LoopLines --> SaveAfter["saveCart updated cart"]:::fn --> RefreshOut["Return result cart refreshed unavailable"]:::ok
+
+  %% =========================================================
+  %% Render flow
+  %% =========================================================
+  render --> DEmpty{"Cart has lines"}:::dec
+  DEmpty -->|No| RenderEmpty["Render empty UI<br/>zero totals"]:::ok
+  DEmpty -->|Yes| RenderLoop["Build HTML per line"]:::fn
+
+  RenderLoop --> DAvail{"Inventory has id"}:::dec
+  DAvail -->|No| RenderUnavail["Render unavailable line<br/>pill Unavailable<br/>Excluded from totals"]:::warn --> RenderLoop
+  DAvail -->|Yes| RenderAvail["Render available line<br/>use locked price<br/>add to subtotal and totalQty"]:::ok --> RenderLoop
+
+  RenderLoop --> WriteHTML["Write el.list innerHTML"]:::ext --> Totals["Set subtotal unavail count"]:::fn
+  Totals --> IntlAPI
+  WriteHTML --> DOMAPI
+
+  Totals --> Badge["Update cart badge<br/>data ui cart-count"]:::fn --> DOMAPI
+
+  %% =========================================================
+  %% Tick loop
+  %% =========================================================
+  tick --> loadCart
+  tick --> DAnyExp{"Any line expired"}:::dec
+  DAnyExp -->|Yes| refreshExpiredLocks --> DBanner{"refreshed list not empty"}:::dec
+  DBanner -->|Yes| ShowBanner["Show banner<br/>el.banner hidden false"]:::ok --> render --> updateCountdownPills
+  DBanner -->|No| render --> updateCountdownPills
+  DAnyExp -->|No| updateCountdownPills
+
+  updateCountdownPills --> Rows["Loop DOM rows cart-line"]:::fn --> DPill{"Inventory exists for id"}:::dec
+  DPill -->|No| PillUnavail["Set pill Unavailable"]:::warn --> Rows
+  DPill -->|Yes| PillLocked["Set pill Locked time remaining"]:::ok --> Rows
+  updateCountdownPills --> DOMAPI
+  PillLocked --> DateAPI
+
+  %% =========================================================
+  %% User interactions
+  %% =========================================================
+  bindEvents --> ClickEvt["Event listener click on el.list"]:::evt
+  ClickEvt --> DOMAPI
+  ClickEvt --> DAction{"Action remove inc dec"}:::dec
+  DAction -->|remove| loadCart --> removeLine --> saveCart --> render
+  DAction -->|inc| loadCart --> incQty --> saveCart --> render
+  DAction -->|dec| loadCart --> incQty --> saveCart --> render
+
+  bindEvents --> ChangeEvt["Event listener change on qty input"]:::evt
+  ChangeEvt --> DOMAPI
+  ChangeEvt --> loadCart --> setQty --> saveCart --> render
+
+  bindEvents --> ClearEvt["Event listener click clear button"]:::evt
+  ClearEvt --> DOMAPI
+  ClearEvt --> clearCartFn --> LocalStorage --> createEmptyCart --> render
+
+  %% =========================================================
+  %% Light state wiring
+  %% =========================================================
+  CFG --- Internal
+  DOMS --- Internal
+  INV --- fetchInventoryMap
+  INV --- render
+  TICKSTATE --- tick

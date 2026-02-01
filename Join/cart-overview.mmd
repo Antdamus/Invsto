@@ -1,0 +1,66 @@
+flowchart LR
+  %% =========================================================
+  %% OG Jewelers — Cart Overview (Phase 2)
+  %% Summary (read this first):
+  %% - Boot: starts the cart page, resolves required DOM, binds events, loads inventory, renders, starts timer.
+  %% - Storage: reads and writes cart state in localStorage, always normalizes shape and fields.
+  %% - Inventory: fetches current catalog data from the Edge Function, caches a map by id for fast lookup.
+  %% - Price Lock: checks 15-minute lock expiry, refreshes expired locks using current inventory price, records refreshed and unavailable.
+  %% - Render: builds cart UI, computes totals, excludes unavailable from totals, updates cart badge.
+  %% - User Actions: click and change events mutate qty or remove items, then save and re-render.
+  %% - Timer Tick: runs every second, updates countdown pills and refreshes locks when needed.
+  %% =========================================================
+
+  classDef mod fill:#0b1220,stroke:#c7a24b,stroke-width:1.8px,color:#f4f2ed,rx:14,ry:14;
+  classDef fn fill:#0f172a,stroke:#60a5fa,stroke-width:1.6px,color:#eaf2ff,rx:12,ry:12;
+  classDef ext fill:#121018,stroke:#a78bfa,stroke-width:1.4px,color:#f5f3ff,rx:12,ry:12;
+
+  %% Modules
+  Boot["Boot<br/>init, resolveDom, bindEvents<br/>fetchInventoryMap, loadCart<br/>refreshExpiredLocks, render<br/>start setInterval tick"]:::mod
+
+  Storage["Storage<br/>createEmptyCart, loadCart<br/>normalizeCart, saveCart<br/>cartQtySum"]:::mod
+
+  Inventory["Inventory<br/>fetchInventoryMap, mapStoreItemToInv<br/>cache invState.map by id"]:::mod
+
+  PriceLock["Price Lock<br/>isLockExpired, refreshExpiredLocks<br/>re-lock price for 15 min<br/>mark unavailable when missing"]:::mod
+
+  Render["Render<br/>render, paintBadges<br/>build UI, compute totals<br/>exclude unavailable from totals"]:::mod
+
+  Actions["User Actions<br/>click: remove, inc, dec<br/>change: setQty<br/>clear: clearCart"]:::mod
+
+  Tick["Timer Tick<br/>setInterval every 1s<br/>tick, updateCountdownPills<br/>refresh locks when expired"]:::mod
+
+  %% External triggers
+  DOMReady["External<br/>DOMContentLoaded"]:::ext
+  ClickEvt["External<br/>click event"]:::ext
+  ChangeEvt["External<br/>change event"]:::ext
+  ClearEvt["External<br/>clear button click"]:::ext
+  TimerEvt["External<br/>timer event"]:::ext
+
+  %% Top-level triggers
+  DOMReady --> Boot
+  ClickEvt --> Actions
+  ChangeEvt --> Actions
+  ClearEvt --> Actions
+  TimerEvt --> Tick
+
+  %% Core relationships
+  Boot --> Inventory
+  Boot --> Storage
+  Boot --> PriceLock
+  Boot --> Render
+  Boot --> Tick
+
+  Actions --> Storage
+  Actions --> Render
+
+  Tick --> Storage
+  Tick --> PriceLock
+  Tick --> Render
+
+  PriceLock --> Inventory
+  PriceLock --> Storage
+  PriceLock --> Render
+
+  Render --> Storage
+  Render --> Inventory
