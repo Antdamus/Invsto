@@ -56,6 +56,11 @@
         <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
           <span class="i" aria-hidden="true">⌕</span>
         </button>
+
+       <a class="btn ghost icon-only cart-icon" href="./StoreCart/cart.html" aria-label="Cart">
+          <span class="i" aria-hidden="true">🛒</span>
+          <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+        </a>
 <a class="acct-chip" href="profile.html" data-ui="acct-chip" hidden aria-label="Your account">
   <span class="acct-dot" data-ui="acct-initials">M</span>
 </a>
@@ -445,9 +450,16 @@
           <p class="modal-p" data-ui="qv-p">A statement in every angle.</p>
 
           <div class="modal-row">
-            <div class="modal-price" data-ui="qv-price">$2,999</div>
-            <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
-          </div>
+  <div class="modal-price" data-ui="qv-price">$2,999</div>
+
+  <div class="modal-actions">
+    <button class="btn btn-ghost" type="button" data-action="add-to-cart">
+      Add to cart
+    </button>
+    <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
+  </div>
+</div>
+
 
 <div class="modal-note" data-ui="qv-note">
   Ships fast • Premium sourcing • Limited drops
@@ -487,7 +499,9 @@
 <script src="initSupabase.js" defer></script>
 
 <!-- Your page logic -->
-<script src="index.js" defer></script>
+<script src="cart.shared.js" defer></script>
+
+  <script src="index.js" defer></script>
 
 </body>
 </html>

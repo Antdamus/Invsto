@@ -3,10 +3,75 @@
 // Fixes: search backdrop, X close reliability, close-before-navigate to shop.
 
 console.log("✅ index.js LOADED — storefront v2:", new Date().toISOString());
+/* =========================
+   Cart helpers (Phase 3 — aligned with cart.js)
+========================= */
+const CART_KEY = "og_cart_v1";
+const CART_VERSION = 1;
+const PRICE_LOCK_MS = 15 * 60 * 1000; // 15 minutes
+
+function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+
+function getCart() {
+  const raw = localStorage.getItem(CART_KEY);
+  const cart = safeParseJSON(raw);
+  if (!cart || cart.version !== CART_VERSION || !Array.isArray(cart.items)) {
+    return { version: CART_VERSION, updated_at: new Date().toISOString(), items: [] };
+  }
+  return cart;
+}
+
+function setCart(cart) {
+  cart.version = CART_VERSION;
+  cart.updated_at = new Date().toISOString();
+  try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch {}
+  window.dispatchEvent(new Event("og-cart-changed"));
+}
+
+function makePriceLock(price) {
+  const p = Number(price);
+  const t0 = Date.now();
+  return {
+    price_locked: Number.isFinite(p) ? p : 0,
+    price_locked_at: new Date(t0).toISOString(),
+    price_lock_expires_at: new Date(t0 + PRICE_LOCK_MS).toISOString(),
+  };
+}
+
+function upsertCartItem({ id, qtyDelta = 1, currentPrice }) {
+  const cart = getCart();
+  const sid = String(id);
+  const idx = cart.items.findIndex((x) => String(x.id) === sid);
+
+  const delta = Math.floor(Number(qtyDelta)) || 1;
+  const lock = makePriceLock(currentPrice);
+
+  if (idx >= 0) {
+    const cur = cart.items[idx];
+    const nextQty = Math.max(1, Math.min(99, (Number(cur.qty) || 1) + delta));
+    cart.items[idx] = {
+      ...cur,
+      qty: nextQty,
+      // reset price lock on add (your rule)
+      ...lock,
+    };
+  } else {
+    cart.items.push({
+      id: sid,
+      qty: Math.max(1, Math.min(99, delta)),
+      ...lock,
+    });
+  }
+
+  setCart(cart);
+}
+
+
 
 /* =========================
    Tiny helpers
 ========================= */
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -214,6 +279,8 @@ function formatUSD(n) {
 function applyInventoryToSlot(slotRoot, itemId) {
   const it = invState.map.get(String(itemId));
   if (!it || !slotRoot) return;
+  // stamp the DOM so quickview knows what inventory id it represents
+  if (slotRoot && slotRoot.dataset) slotRoot.dataset.itemId = String(itemId);
 
   // image
   if (slotRoot.style?.getPropertyValue("--img") !== undefined) {
@@ -339,6 +406,7 @@ function closeDrawer() {
    Quick View modal
 ========================= */
 let lastFocusEl = null;
+let activeQuickviewId = null;
 
 function isModalOpen() {
   return !!ui.modal && !ui.modal.hasAttribute("hidden");
@@ -393,12 +461,37 @@ function closeQuickview() {
 
 function openQuickviewFromTrigger(triggerEl) {
   const card = triggerEl.closest(".card");
-  if (!card) return openQuickview();
+  if (!card) {
+    activeQuickviewId = null;
+    return openQuickview();
+  }
 
+  // If inventory hydrated this card, prefer that (real id/price/image)
+  const invId = card.dataset.itemId;
+  const inv = invId ? invState.map.get(String(invId)) : null;
+
+  if (inv) {
+    activeQuickviewId = String(inv.id);
+
+    openQuickview({
+      slot: card.getAttribute("data-slot") || "",
+      title: inv.name,
+      subtitle: "Featured pick",
+      price: formatUSD(inv.price),
+      badges: ["Featured"],
+      img: inv.image,
+      link: "catalogue.html",
+    });
+    return;
+  }
+
+  // fallback to static featured state
   const slot = card.getAttribute("data-slot") || "";
   const match = state.featured.find((x) => x.slot === slot);
+  activeQuickviewId = null;
   openQuickview(match || state.featured[0]);
 }
+
 
 /* =========================
    Mood toggle
@@ -698,6 +791,10 @@ function onClick(e) {
         openDrawer();
         return;
 
+
+
+
+        
 case "close-menu": {
   // If it's an anchor (Collections/Featured/Story), let it navigate after closing.
   const href = btn.getAttribute("href") || "";
@@ -724,6 +821,40 @@ case "close-menu": {
       case "open-quickview":
         e.preventDefault();
         openQuickviewFromTrigger(btn);
+        return;
+      case "add-to-cart":
+        e.preventDefault();
+        {
+          // Prefer the inventory-bound id when available
+          const id = activeQuickviewId;
+
+          if (!id) {
+            // no crash; just ignore gracefully
+            return;
+          }
+
+          const it = invState.map.get(String(id));
+          if (!it) {
+            // no crash hydration: show “no longer available” path later on cart hydration
+            upsertCartItem({
+              id,
+              nameSnapshot: "Item",
+              imageSnapshot: "assets/collections/chains.jpg",
+              lockedPrice: 0,
+              qtyDelta: 1,
+            });
+            closeQuickview();
+            window.location.href = "./StoreCart/cart.html";
+            return;
+          }
+
+         upsertCartItem({ id: it.id, qtyDelta: 1, currentPrice: it.price })
+;
+
+          closeQuickview();
+          window.location.href = "./StoreCart/cart.html";
+
+        }
         return;
 
       case "close-modal":
@@ -790,6 +921,7 @@ case "close-menu": {
       return;
     }
   }
+  
 }
 
 function onKeyDown(e) {

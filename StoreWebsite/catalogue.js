@@ -43,14 +43,87 @@
     if (!Number.isFinite(v)) return "";
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v);
   };
+  // HTML escape helper (needed by renderCard templates)
+const esc = (s) =>
+  String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 
-  const esc = (s) =>
-    String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+    const toPriceNumber = (v) => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const s = String(v ?? "").trim();
+  // remove $ and commas etc.
+  const cleaned = s.replace(/[^0-9.]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/* =========================
+   Cart helpers (Phase 3 — aligned with cart.js)
+========================= */
+const CART_KEY = "og_cart_v1";
+const CART_VERSION = 1;
+const PRICE_LOCK_MS = 15 * 60 * 1000; // 15 minutes
+
+function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
+
+function getCart() {
+  const raw = localStorage.getItem(CART_KEY);
+  const cart = safeParseJSON(raw);
+  if (!cart || cart.version !== CART_VERSION || !Array.isArray(cart.items)) {
+    return { version: CART_VERSION, updated_at: new Date().toISOString(), items: [] };
+  }
+  return cart;
+}
+
+function setCart(cart) {
+  cart.version = CART_VERSION;
+  cart.updated_at = new Date().toISOString();
+  try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch {}
+  window.dispatchEvent(new Event("og-cart-changed"));
+}
+
+function makePriceLock(price) {
+  const p = Number(price);
+  const t0 = Date.now();
+  return {
+    price_locked: Number.isFinite(p) ? p : 0,
+    price_locked_at: new Date(t0).toISOString(),
+    price_lock_expires_at: new Date(t0 + PRICE_LOCK_MS).toISOString(),
+  };
+}
+
+function upsertCartItem({ id, qtyDelta = 1, currentPrice }) {
+  const cart = getCart();
+  const sid = String(id);
+  const idx = cart.items.findIndex((x) => String(x.id) === sid);
+
+  const delta = Math.floor(Number(qtyDelta)) || 1;
+  const lock = makePriceLock(currentPrice);
+
+  if (idx >= 0) {
+    const cur = cart.items[idx];
+    const nextQty = Math.max(1, Math.min(99, (Number(cur.qty) || 1) + delta));
+    cart.items[idx] = {
+      ...cur,
+      qty: nextQty,
+      // reset price lock on add (your rule)
+      ...lock,
+    };
+  } else {
+    cart.items.push({
+      id: sid,
+      qty: Math.max(1, Math.min(99, delta)),
+      ...lock,
+    });
+  }
+
+  setCart(cart);
+}
+
 
    /* =========================
      Data source (Supabase Edge Function)
@@ -766,29 +839,44 @@ const toggleNavDrawer = () => {
      Rendering
   ========================= */
   const renderCard = (p) => {
-    const tags = (p.tags || []).slice(0, 2).map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`).join("");
-    return `
-      <article class="product-card" data-id="${esc(p.id)}">
-        <button class="product-hit" type="button" data-action="quick-view" data-id="${esc(p.id)}" aria-label="Quick view ${esc(p.name)}">
-          <div class="product-media">
-            <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
+  const tags = (p.tags || []).slice(0, 2)
+    .map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`)
+    .join("");
+
+  return `
+    <article class="product-card" data-id="${esc(p.id)}">
+      <button class="product-hit" type="button"
+              data-action="quick-view"
+              data-id="${esc(p.id)}"
+              aria-label="Quick view ${esc(p.name)}">
+        <div class="product-media">
+          <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
+        </div>
+        <div class="product-body">
+          <div class="product-top">
+            <h3 class="product-title">${esc(p.name)}</h3>
+            <div class="product-price">${esc(formatUSD(p.price))}</div>
           </div>
-          <div class="product-body">
-            <div class="product-top">
-              <h3 class="product-title">${esc(p.name)}</h3>
-              <div class="product-price">${esc(formatUSD(p.price))}</div>
-            </div>
-            <div class="product-meta">
-              <span>${esc(humanize("category", p.category))}</span>
-              <span class="sep" aria-hidden="true">•</span>
-              <span>${esc(humanize("material", p.material))}</span>
-            </div>
-            <div class="product-tags">${tags}</div>
+          <div class="product-meta">
+            <span>${esc(humanize("category", p.category))}</span>
+            <span class="sep" aria-hidden="true">•</span>
+            <span>${esc(humanize("material", p.material))}</span>
           </div>
+          <div class="product-tags">${tags}</div>
+        </div>
+      </button>
+
+      <div class="product-actions">
+        <button class="btn ghost" type="button"
+                data-action="add-to-cart"
+                data-id="${esc(p.id)}">
+          Add to cart
         </button>
-      </article>
-    `;
-  };
+      </div>
+    </article>
+  `;
+};
+
 
   const render = () => {
     // Filters + sort
@@ -987,7 +1075,30 @@ const toggleNavDrawer = () => {
         return;
       }
 
-      // Quick view placeholder
+    // Add to cart
+if (action === "add-to-cart") {
+  const id = el.dataset.id;
+  const item = PRODUCTS.find((p) => p.id === id);
+
+  if (item) {
+    // IMPORTANT: use the Phase-2/Phase-3 cart contract (price_locked + expires)
+    upsertCartItem({
+      id: item.id,
+      qtyDelta: 1,
+      currentPrice: toPriceNumber(item.price),
+    });
+  } else {
+    upsertCartItem({
+      id,
+      qtyDelta: 1,
+      currentPrice: 0,
+    });
+  }
+
+  window.location.href = "./StoreCart/cart.html";
+  return;
+}
+
       if (action === "quick-view") {
         const id = el.dataset.id;
         const item = PRODUCTS.find((p) => p.id === id);
