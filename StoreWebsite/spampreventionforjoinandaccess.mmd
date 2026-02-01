@@ -1,0 +1,143 @@
+flowchart TD
+  %% ============================================================
+  %% OG Jewelers — Access Security Map (Scaled, Bucketed Counters)
+  %% Decisions locked in:
+  %% - Bucket size: 1 minute
+  %% - Rolling window: 10 minutes
+  %% - Burst rule: 30 seconds
+  %% VS Code Mermaid safe, no \n line breaks
+  %% ============================================================
+
+  %% -------------------------
+  %% SUMMARY
+  %% Client: validate email, neutral messaging, 60s cooldown for UX and accidental double-send protection.
+  %% Server: Edge Function proxy enforces rate limits before sending OTP email.
+  %% Rate limits: 30s burst limit plus 10m rolling window totals, using 1-minute buckets, per IP and per email.
+  %% Maintenance: cleanup job deletes old buckets to keep tables tiny and fast.
+  %% Note: If many legit users share an IP, per-IP caps can be raised and per-email limits carry most protection.
+  %% -------------------------
+
+  %% -------------------------
+  %% LEGEND
+  %% -------------------------
+  subgraph LEGEND[Legend]
+    LG1[Client, Browser UI]:::client
+    LG2[Edge Function Proxy, Supabase]:::edge
+    LG3[Supabase Auth]:::supabase
+    LG4[(DB Table, Bucketed Counters)]:::db
+    LG5[Mailbox, Email Provider]:::email
+    LG6[[Policy or Control]]:::policy
+    LG7[[Scheduled Job]]:::job
+    LG8{Decision}:::decision
+  end
+
+  %% -------------------------
+  %% CLIENT FLOW
+  %% -------------------------
+  subgraph CLIENT[Client Flow, UX Safeguards]
+    C0[User opens access page]:::client
+    C1[User enters email, then submits]:::client
+    C2[[Client validation: valid email, neutral status text]]:::policy
+    C3[[Client cooldown: 60 seconds, countdown label]]:::policy
+
+    C0 --> C1 --> C2
+    C1 --> C3 --> C1
+  end
+
+  %% -------------------------
+  %% SERVER FLOW
+  %% -------------------------
+  subgraph SERVER[Server Flow, Edge Proxy with Rate Limiting]
+    S0[Edge Function proxy receives request]:::edge
+    S1[[Normalize: email lowercased, trim, basic validation]]:::policy
+    S2[[Fingerprint: IP, user agent]]:::policy
+
+    K0[[Compute keys: ipKey, emailKey]]:::policy
+    B0[[Compute bucket: 1-minute bucket timestamp]]:::policy
+
+    %% Burst rule uses a short rolling window check
+    BR0[[Burst policy: max attempts per 30 seconds]]:::policy
+    BR1[(DB, burst counters by ipKey and emailKey)]:::db
+    BR2{Burst allowed?}:::decision
+
+    %% 10-minute rolling window using 1-minute buckets
+    W0[[Window policy: 10-minute rolling window]]:::policy
+    W1[(DB, 1-minute buckets by ipKey)]:::db
+    W2[(DB, 1-minute buckets by emailKey)]:::db
+    W3[[Read totals: sum last 10 buckets for ipKey, sum last 10 buckets for emailKey]]:::policy
+    W4{Window allowed?}:::decision
+
+    %% Increment counters only when allowed
+    INC0[[Upsert increment: burst counters plus 1]]:::policy
+    INC1[[Upsert increment: 1-minute bucket counters plus 1]]:::policy
+
+    AUTH0[Supabase Auth sends OTP email]:::supabase
+    MAIL0[Magic link email sent]:::email
+
+    OK0[Return: success response, generic message]:::edge
+    NO0[Return: 429 try later, generic message]:::edge
+
+    S0 --> S1 --> S2 --> K0 --> B0 --> BR0 --> BR1 --> BR2
+    BR2 -->|No| NO0
+    BR2 -->|Yes| W0 --> W3 --> W4
+    W3 --> W1
+    W3 --> W2
+    W4 -->|No| NO0
+
+    W4 -->|Yes| INC0 --> BR1
+    W4 -->|Yes| INC1 --> W1
+    W4 -->|Yes| INC1 --> W2
+    W1 --> AUTH0
+    W2 --> AUTH0
+    AUTH0 --> MAIL0 --> OK0
+  end
+
+  %% -------------------------
+  %% COMPLETION FLOW
+  %% -------------------------
+  subgraph COMPLETE[Completion Flow]
+    U0[User clicks magic link]:::client
+    R0[Redirect: index.html]:::client
+    MAIL0 --> U0 --> R0
+  end
+
+  %% Connect client to server
+  C2 --> S0
+
+  %% -------------------------
+  %% MAINTENANCE
+  %% -------------------------
+  subgraph MAINT[Maintenance, Keeps DB Tiny]
+    M0[[Retention: keep buckets for N days, then delete]]:::policy
+    J0[[Scheduled cleanup job runs periodically]]:::job
+    J1[[Delete old rows: burst counters and bucket counters older than retention]]:::job
+
+    M0 --> J0 --> J1
+    J1 --> BR1
+    J1 --> W1
+    J1 --> W2
+  end
+
+  %% -------------------------
+  %% TUNING NOTE
+  %% -------------------------
+  subgraph TUNING[Tuning, If Many Legit Users Share One IP]
+    T0[[Adjust policy: raise per-IP caps, keep per-email caps stronger]]:::policy
+    T1[[Optional: exempt trusted IP ranges, if needed]]:::policy
+    T0 --> BR0
+    T0 --> W0
+    T1 --> BR0
+    T1 --> W0
+  end
+
+  %% -------------------------
+  %% STYLES
+  %% -------------------------
+  classDef client fill:#0f141c,stroke:#8aa0b8,color:#eef4ff,stroke-width:1.2px;
+  classDef edge fill:#241534,stroke:#c7a6ff,color:#f6f0ff,stroke-width:1.2px;
+  classDef supabase fill:#0b2f2a,stroke:#47e0cf,color:#eafffb,stroke-width:1.2px;
+  classDef db fill:#2b1f12,stroke:#f0b35a,color:#fff3e3,stroke-width:1.2px;
+  classDef email fill:#15253a,stroke:#7fb0ff,color:#eef5ff,stroke-width:1.2px;
+  classDef policy fill:#121212,stroke:#d0d0d0,color:#f2f2f2,stroke-width:1.1px,stroke-dasharray: 4 3;
+  classDef decision fill:#111820,stroke:#ffffff,color:#ffffff,stroke-width:1.2px;
+  classDef job fill:#101010,stroke:#9aa4af,color:#ffffff,stroke-width:1.2px,stroke-dasharray: 2 4;

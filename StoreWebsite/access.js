@@ -85,6 +85,49 @@
       subtitle.textContent = "Secure sign-in with a one-time link. No passwords. No friction.";
     }
   }
+  // ---------------------------
+  // Cooldown (client-side)
+  // ---------------------------
+  const COOLDOWN_MS = 60 * 1000;
+  const COOLDOWN_KEY = "og_access_cooldown_until";
+
+  function getCooldownUntil() {
+    const n = Number(localStorage.getItem(COOLDOWN_KEY));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function setCooldownUntil(ts) {
+    localStorage.setItem(COOLDOWN_KEY, String(ts));
+  }
+
+  function startCooldown() {
+    if (!submitBtn) return;
+
+    const until = Date.now() + COOLDOWN_MS;
+    setCooldownUntil(until);
+
+    const tick = () => {
+      const left = getCooldownUntil() - Date.now();
+      if (left <= 0) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("cooldown");
+        if (btnText) btnText.textContent = "Send Sign-In Link";
+        localStorage.removeItem(COOLDOWN_KEY);
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.classList.add("cooldown");
+      const secs = Math.ceil(left / 1000);
+      if (btnText) btnText.textContent = `Try again in ${secs}s`;
+      requestAnimationFrame(tick);
+    };
+
+    tick();
+  }
+
+  function resumeCooldownIfNeeded() {
+    if (getCooldownUntil() > Date.now()) startCooldown();
+  }
 
   // ---------------------------
   // Supabase ready gate (race-proof)
@@ -146,6 +189,9 @@ function computeRedirectToProfile() {
       return;
     }
 
+    resumeCooldownIfNeeded();
+
+
     // If already signed in, go straight to profile
     try {
       const { data } = await sb.auth.getSession();
@@ -162,6 +208,11 @@ function computeRedirectToProfile() {
 
   async function onSubmit(e, sb) {
     e.preventDefault();
+    if (getCooldownUntil() > Date.now()) {
+      startCooldown(); // refresh label/countdown
+      return;
+    }
+
     setStatus("");
 
     const email = String(emailEl?.value || "").trim();
@@ -188,12 +239,30 @@ function computeRedirectToProfile() {
 
       const redirectTo = computeRedirectToProfile();
 
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: redirectTo }
-      });
+const fnUrl = `${window.SUPABASE_URL}/functions/v1/og_send_magic_link`;
 
-      if (error) throw error;
+const res = await fetch(fnUrl, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: safeLower(email), redirectTo })
+});
+
+if (res.status === 429) {
+  // neutral, no details
+  setLoading(false);
+  setStatusHTML(
+    `<strong>⏳ Please wait a moment.</strong><br>
+     <span class="muted">Too many requests. Try again shortly.</span>`,
+    "error"
+  );
+  return;
+}
+
+if (!res.ok) throw new Error("Request failed. Please try again.");
+
+const data = await res.json().catch(() => ({}));
+if (!data?.ok) throw new Error("Request failed. Please try again.");
+
 
       setStatusHTML(
         `<strong>✅ Secure sign-in link sent.</strong><br>
@@ -201,7 +270,11 @@ function computeRedirectToProfile() {
         "success"
       );
 
+
+
+
       setLoading(false);
+      startCooldown();
 
       // Gentle lock to prevent accidental spam-clicking
       if (emailEl) emailEl.readOnly = true;

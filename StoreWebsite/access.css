@@ -476,3 +476,5 @@ a:hover{ text-decoration: underline; }
 @media (prefers-reduced-motion: reduce){
   *{ animation: none !important; transition: none !important; }
 }
+
+.btn.cooldown { opacity: .75; cursor: not-allowed; }

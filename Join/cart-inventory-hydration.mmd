@@ -1,0 +1,40 @@
+flowchart LR
+  %% =========================================================
+  %% cart-inventory-hydration.mmd
+  %% Summary:
+  %% - fetchInventoryMap loads catalog from Edge Function.
+  %% - Uses cache unless force is true or map is empty.
+  %% - Uses five-minute bucket param to reduce stale caching.
+  %% - Normalizes items into invState.map keyed by item id.
+  %% =========================================================
+
+  classDef fn fill:#0b1220,stroke:#c7a24b,stroke-width:1.8px,color:#f4f2ed,rx:12,ry:12;
+  classDef dec fill:#111827,stroke:#fbbf24,stroke-width:1.8px,color:#fff7db,rx:12,ry:12;
+  classDef ext fill:#121018,stroke:#a78bfa,stroke-width:1.6px,color:#f5f3ff,rx:12,ry:12;
+  classDef data fill:#0a0f1a,stroke:#334155,stroke-width:1.4px,color:#e5e7eb,rx:12,ry:12;
+  classDef ok fill:#052e1a,stroke:#22c55e,stroke-width:1.4px,color:#eafff2,rx:12,ry:12;
+  classDef warn fill:#2a1010,stroke:#ef4444,stroke-width:1.4px,color:#ffecec,rx:12,ry:12;
+
+  subgraph Legend["Legend"]
+    direction TB
+    L1["Internal function"]:::fn
+    L2{"Decision"}:::dec
+    L3["External API, fetch, JSON"]:::ext
+    L4["State, invState"]:::data
+    L5["Normal return"]:::ok
+    L6["Error path"]:::warn
+  end
+
+  invState["State, invState map loaded lastFetchMs"]:::data
+
+  fetchInventoryMap["fetchInventoryMap, force flag"]:::fn --> UseCache{"force false, loaded true, map has entries"}:::dec
+  UseCache -->|Yes| Cached["Return cached invState.map"]:::ok
+  UseCache -->|No| Bucket["Compute five-minute bucket"]:::fn --> BuildURL["Build Edge Function URL, channel, bucket"]:::fn
+  BuildURL --> Fetch["External, fetch GET storefront-catalog"]:::ext --> OkResp{"response ok"}:::dec
+
+  OkResp -->|No| Err["Log error, keep best map, mark not loaded"]:::warn --> KeepMap["Return existing map"]:::ok
+  OkResp -->|Yes| Parse["Parse JSON items array"]:::ext --> mapStoreItemToInv["mapStoreItemToInv"]:::fn --> BuildMap["Build new Map keyed by id"]:::fn
+  BuildMap --> SetState["Set invState.map, loaded true, lastFetchMs"]:::fn --> Fresh["Return invState.map"]:::ok
+
+  SetState -.-> invState
+  Err -.-> invState

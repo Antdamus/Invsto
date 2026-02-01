@@ -1,9 +1,13 @@
-/* join.js — OG Jewelers (Join / Alerts Signup)
-   - Email-only
+/* =========================================================
+   join.js — OG Jewelers (Join / Alerts Signup)
+   - Email-only + consent
    - Passwordless (magic link)
-   - Redirect to profile.html after link click
+   - Uses Edge Function proxy (rate-limited) instead of direct signInWithOtp
+   - Client cooldown: 60s (prevents accidental resends)
+   - Neutral messaging (security)
+   - Race-proof Supabase readiness
    - Reads URL params: ?src=package|social&campaign=...
-*/
+   ========================================================= */
 
 (() => {
   "use strict";
@@ -33,7 +37,7 @@
   const vipUpgradeBtn = $("#vipUpgradeBtn");
 
   // ---------------------------
-  // Helpers
+  // UI helpers
   // ---------------------------
   function setStatus(message, kind = "info") {
     if (!statusEl) return;
@@ -41,8 +45,18 @@
     statusEl.className = `status ${kind}`.trim();
   }
 
+  function setStatusHTML(html, kind = "info") {
+    if (!statusEl) return;
+    statusEl.innerHTML = html || "";
+    statusEl.className = `status ${kind}`.trim();
+  }
+
   function setLoading(isLoading) {
     if (!submitBtn) return;
+
+    // If cooldown is active, never re-enable the button here
+    if (!isLoading && getCooldownUntil() > Date.now()) return;
+
     submitBtn.disabled = !!isLoading;
     submitBtn.classList.toggle("loading", !!isLoading);
     if (btnText) btnText.textContent = isLoading ? "Sending Link..." : "Join Free";
@@ -53,7 +67,6 @@
   }
 
   function validEmail(email) {
-    // pragmatic email validation (not overly strict)
     const e = String(email || "").trim();
     if (e.length < 5) return false;
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
@@ -76,7 +89,6 @@
     if (srcHidden) srcHidden.value = pretty;
     if (campaignHidden) campaignHidden.value = campaign || "";
 
-    // Optional: customize subtitle slightly by source (pure UX polish)
     const subtitle = $("#subtitleText");
     if (!subtitle) return;
 
@@ -99,66 +111,143 @@
   }
 
   // ---------------------------
-  // Supabase ready gate
+  // Cooldown (client-side)
   // ---------------------------
+const COOLDOWN_MS = 60 * 1000;
+const COOLDOWN_KEY = "og_access_cooldown_until";
+
+
+  function getCooldownUntil() {
+    const n = Number(localStorage.getItem(COOLDOWN_KEY));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function setCooldownUntil(ts) {
+    localStorage.setItem(COOLDOWN_KEY, String(ts));
+  }
+
+  function startCooldown() {
+    if (!submitBtn) return;
+
+    const until = Date.now() + COOLDOWN_MS;
+    setCooldownUntil(until);
+
+    const tick = () => {
+      const left = getCooldownUntil() - Date.now();
+      if (left <= 0) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("cooldown");
+        if (btnText) btnText.textContent = "Join Free";
+        localStorage.removeItem(COOLDOWN_KEY);
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.classList.add("cooldown");
+
+      const secs = Math.ceil(left / 1000);
+      if (btnText) btnText.textContent = `Try again in ${secs}s`;
+
+      requestAnimationFrame(tick);
+    };
+
+    tick();
+  }
+
+  function resumeCooldownIfNeeded() {
+    if (getCooldownUntil() > Date.now()) startCooldown();
+  }
+
+  // ---------------------------
+  // Supabase ready gate (race-proof)
+  // ---------------------------
+  function getSupabaseClientIfReady() {
+    const c = window.supabaseClient || window.supabase;
+    if (c && c.auth && typeof c.auth.getSession === "function") return c;
+    return null;
+  }
+
   function waitForSupabaseReady() {
     return new Promise((resolve) => {
-      if (window.supabase) return resolve(window.supabase);
+      const readyNow = getSupabaseClientIfReady();
+      if (readyNow) return resolve(readyNow);
 
       const onReady = () => {
         document.removeEventListener("supabase-ready", onReady);
-        resolve(window.supabase);
+        resolve(getSupabaseClientIfReady() || null);
       };
       document.addEventListener("supabase-ready", onReady);
+
+      const t0 = Date.now();
+      const timer = setInterval(() => {
+        const client = getSupabaseClientIfReady();
+        if (client) {
+          clearInterval(timer);
+          document.removeEventListener("supabase-ready", onReady);
+          resolve(client);
+        } else if (Date.now() - t0 > 3000) {
+          clearInterval(timer);
+          document.removeEventListener("supabase-ready", onReady);
+          resolve(null);
+        }
+      }, 50);
     });
+  }
+
+  function computeRedirectToProfile() {
+    const base = `${window.location.origin}${window.location.pathname.replace(/[^/]+$/, "")}`;
+    return `${base}profile.html`;
   }
 
   // ---------------------------
   // Main
   // ---------------------------
   async function init() {
-    // footer year
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-    // source params
     const { src, campaign } = parseParams();
     applySourceUI(src, campaign);
 
-    // modal close wiring (even though we won't show it here yet)
+    // VIP modal close wiring (even though we won't show it here yet)
     vipCloseBtn?.addEventListener("click", hideVipModal);
     vipNotNowBtn?.addEventListener("click", hideVipModal);
     vipBackdrop?.addEventListener("click", hideVipModal);
     vipUpgradeBtn?.addEventListener("click", () => {
-      // later we’ll route to VIP plans page
       hideVipModal();
       window.location.href = "profile.html#vip";
     });
 
-    // ensure supabase exists (from initSupabase.js)
-    await waitForSupabaseReady();
-    if (!window.supabase) {
+    const sb = await waitForSupabaseReady();
+    if (!sb) {
       setStatus("Supabase is not initialized. Check initSupabase.js loading order.", "error");
       return;
     }
 
+    resumeCooldownIfNeeded();
+
     // If a session already exists, go straight to profile
     try {
-      const { data } = await window.supabase.auth.getSession();
+      const { data } = await sb.auth.getSession();
       if (data?.session) {
         window.location.href = "profile.html";
         return;
       }
     } catch (e) {
-      // non-fatal; user can still request link
       console.warn("Session check failed:", e);
     }
 
-    // form submit
-    form?.addEventListener("submit", onSubmit);
+    form?.addEventListener("submit", (e) => onSubmit(e, sb));
   }
 
-  async function onSubmit(e) {
+  async function onSubmit(e, sb) {
     e.preventDefault();
+
+    // If cooldown active, keep the countdown fresh and exit
+    if (getCooldownUntil() > Date.now()) {
+      startCooldown();
+      return;
+    }
+
     setStatus("");
 
     const name = String(nameEl?.value || "").trim();
@@ -183,8 +272,7 @@
       const src = String(srcHidden?.value || "direct");
       const campaign = String(campaignHidden?.value || "");
 
-      // Store “pre-auth” context in localStorage so profile.html can read it
-      // after the magic-link completes auth.
+      // Store “pre-auth” context so profile.html can read it after magic-link auth
       const joinContext = {
         name,
         email: safeLower(email),
@@ -194,25 +282,41 @@
       };
       localStorage.setItem("og_join_context", JSON.stringify(joinContext));
 
-      // Send magic link. After clicking, Supabase will redirect to profile.html
-      const redirectTo = `${window.location.origin}${window.location.pathname.replace(/[^/]+$/, "")}profile.html`;
+      const redirectTo = computeRedirectToProfile();
 
-      const { error } = await window.supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: redirectTo
-        }
+      // Call Edge Function proxy (rate limited)
+      const fnUrl = `${window.SUPABASE_URL}/functions/v1/og_send_magic_link`;
+
+      const res = await fetch(fnUrl, {
+        method: "POST",
+        credentials: "omit",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: safeLower(email), redirectTo })
       });
 
-      if (error) throw error;
+      if (res.status === 429) {
+        setLoading(false);
+        setStatusHTML(
+          `<strong>⏳ Please wait a moment.</strong><br>
+           <span class="muted">Too many requests. Try again shortly.</span>`,
+          "error"
+        );
+        return;
+      }
 
- statusEl.innerHTML = `
-  <strong>✅ Secure sign-in link sent.</strong><br>
-  <span class="muted">If that email is valid, check your inbox. No email? Check spam, then try again in 60 seconds.</span>
-`;
-statusEl.className = "status success";
+      if (!res.ok) throw new Error("Request failed. Please try again.");
+
+      const data = await res.json().catch(() => ({}));
+      if (!data?.ok) throw new Error("Request failed. Please try again.");
+
+      setStatusHTML(
+        `<strong>✅ Secure sign-in link sent.</strong><br>
+         <span class="muted">If that email is valid, check your inbox. No email? Check spam, then try again in 60 seconds.</span>`,
+        "success"
+      );
 
       setLoading(false);
+      startCooldown();
 
       // Light UX: lock inputs to prevent repeated submits without intent
       if (emailEl) emailEl.readOnly = true;
@@ -222,8 +326,6 @@ statusEl.className = "status success";
     } catch (err) {
       console.error(err);
       setLoading(false);
-
-      // Common failure modes: bad URL config / rate limit
       const msg = (err && err.message) ? err.message : "Something went wrong. Please try again.";
       setStatus(`❌ ${msg}`, "error");
     }
