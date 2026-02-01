@@ -4,6 +4,10 @@
    CORS FIXED: OPTIONS preflight + Access-Control-Allow-Origin
    Scaling: 1-minute buckets, 10-minute rolling window, 30s burst
    Neutral responses: no account enumeration
+
+   DEBUG UPGRADE:
+   - Always logs otp errors server-side (with request_id)
+   - Optional debug response when payload.debug === true
    ========================================================= */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -51,7 +55,23 @@ function bucketEpoch(epochSec: number, sizeSec: number) {
   return Math.floor(epochSec / sizeSec) * sizeSec;
 }
 
+function requestId() {
+  try { return crypto.randomUUID(); } catch { return `${Date.now()}-${Math.random()}`; }
+}
+
+function safeErrorShape(err: any) {
+  // Supabase errors typically have: message, status, code
+  return {
+    message: String(err?.message || "unknown_error"),
+    code: err?.code ?? null,
+    status: err?.status ?? null,
+    name: err?.name ?? null,
+  };
+}
+
 Deno.serve(async (req) => {
+  const rid = requestId();
+
   // Preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -60,7 +80,10 @@ Deno.serve(async (req) => {
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!SUPABASE_URL || !SERVICE_ROLE) return json(500, { ok: false, error: "server_not_configured" });
+  if (!SUPABASE_URL || !SERVICE_ROLE) {
+    console.error("[og_send_magic_link]", rid, "server_not_configured");
+    return json(500, { ok: false, error: "server_not_configured", request_id: rid });
+  }
 
   const sb = createClient(SUPABASE_URL, SERVICE_ROLE, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -70,13 +93,16 @@ Deno.serve(async (req) => {
   try {
     payload = await req.json();
   } catch {
-    return json(400, { ok: false, error: "invalid_json" });
+    return json(400, { ok: false, error: "invalid_json", request_id: rid });
   }
+
+  const debug = payload?.debug === true; // <-- opt-in debug
 
   const email = cleanEmail(payload?.email);
   const redirectTo = String(payload?.redirectTo ?? "").trim();
-  if (!isValidEmail(email)) return json(400, { ok: false, error: "invalid_email" });
-  if (!redirectTo) return json(400, { ok: false, error: "missing_redirect" });
+
+  if (!isValidEmail(email)) return json(400, { ok: false, error: "invalid_email", request_id: rid });
+  if (!redirectTo) return json(400, { ok: false, error: "missing_redirect", request_id: rid });
 
   const ipKey = getClientIp(req);
   const emailKey = email;
@@ -106,10 +132,13 @@ Deno.serve(async (req) => {
       .eq("bucket_epoch", burstBucket)
       .maybeSingle();
 
-    if (error) return json(500, { ok: false, error: "rl_read_failed" });
+    if (error) {
+      console.error("[og_send_magic_link]", rid, "rl_read_failed", safeErrorShape(error));
+      return json(500, { ok: false, error: "rl_read_failed", request_id: rid });
+    }
 
     const burstCnt = Number(data?.cnt ?? 0);
-    if (burstCnt >= MAX_BURST) return json(429, { ok: false, blocked: true });
+    if (burstCnt >= MAX_BURST) return json(429, { ok: false, blocked: true, request_id: rid });
   }
 
   // 2) 10m window checks (sum last 10 1m buckets)
@@ -126,20 +155,22 @@ Deno.serve(async (req) => {
       .gte("bucket_epoch", windowCutoffBucket),
   ]);
 
-  if (ipRows.error || emailRows.error) return json(500, { ok: false, error: "rl_sum_failed" });
+  if (ipRows.error || emailRows.error) {
+    console.error("[og_send_magic_link]", rid, "rl_sum_failed", {
+      ipErr: ipRows.error ? safeErrorShape(ipRows.error) : null,
+      emailErr: emailRows.error ? safeErrorShape(emailRows.error) : null,
+    });
+    return json(500, { ok: false, error: "rl_sum_failed", request_id: rid });
+  }
 
   const totalIp = (ipRows.data || []).reduce((a: number, r: any) => a + Number(r.cnt || 0), 0);
   const totalEmail = (emailRows.data || []).reduce((a: number, r: any) => a + Number(r.cnt || 0), 0);
 
   if (totalIp >= MAX_IP_WINDOW || totalEmail >= MAX_EMAIL_WINDOW) {
-    return json(429, { ok: false, blocked: true });
+    return json(429, { ok: false, blocked: true, request_id: rid });
   }
 
   // 3) Increment counters (no overwrites, safe inserts)
-  // Insert-if-missing, then atomic increment via RPC (your existing RPCs)
-  // NOTE: ignoreDuplicates prevents resetting counters to 0 for existing rows.
-
-  // Burst row insert-if-missing
   {
     const { error } = await sb
       .from("og_rl_burst_30s")
@@ -154,17 +185,22 @@ Deno.serve(async (req) => {
         { onConflict: "ip_key,email_key,bucket_epoch", ignoreDuplicates: true }
       );
 
-    if (error) return json(500, { ok: false, error: "rl_write_failed" });
+    if (error) {
+      console.error("[og_send_magic_link]", rid, "rl_write_failed(burst)", safeErrorShape(error));
+      return json(500, { ok: false, error: "rl_write_failed", request_id: rid });
+    }
 
     const { error: incErr } = await sb.rpc("increment_og_rl_burst_30s", {
       p_ip_key: ipKey,
       p_email_key: emailKey,
       p_bucket_epoch: burstBucket,
     });
-    if (incErr) return json(500, { ok: false, error: "rl_inc_failed" });
+    if (incErr) {
+      console.error("[og_send_magic_link]", rid, "rl_inc_failed(burst)", safeErrorShape(incErr));
+      return json(500, { ok: false, error: "rl_inc_failed", request_id: rid });
+    }
   }
 
-  // IP minute row insert-if-missing
   {
     const { error } = await sb
       .from("og_rl_ip_minute")
@@ -178,16 +214,21 @@ Deno.serve(async (req) => {
         { onConflict: "ip_key,bucket_epoch", ignoreDuplicates: true }
       );
 
-    if (error) return json(500, { ok: false, error: "rl_write_failed" });
+    if (error) {
+      console.error("[og_send_magic_link]", rid, "rl_write_failed(ip)", safeErrorShape(error));
+      return json(500, { ok: false, error: "rl_write_failed", request_id: rid });
+    }
 
     const { error: incErr } = await sb.rpc("increment_og_rl_ip_minute", {
       p_ip_key: ipKey,
       p_bucket_epoch: minuteBucket,
     });
-    if (incErr) return json(500, { ok: false, error: "rl_inc_failed" });
+    if (incErr) {
+      console.error("[og_send_magic_link]", rid, "rl_inc_failed(ip)", safeErrorShape(incErr));
+      return json(500, { ok: false, error: "rl_inc_failed", request_id: rid });
+    }
   }
 
-  // Email minute row insert-if-missing
   {
     const { error } = await sb
       .from("og_rl_email_minute")
@@ -201,13 +242,19 @@ Deno.serve(async (req) => {
         { onConflict: "email_key,bucket_epoch", ignoreDuplicates: true }
       );
 
-    if (error) return json(500, { ok: false, error: "rl_write_failed" });
+    if (error) {
+      console.error("[og_send_magic_link]", rid, "rl_write_failed(email)", safeErrorShape(error));
+      return json(500, { ok: false, error: "rl_write_failed", request_id: rid });
+    }
 
     const { error: incErr } = await sb.rpc("increment_og_rl_email_minute", {
       p_email_key: emailKey,
       p_bucket_epoch: minuteBucket,
     });
-    if (incErr) return json(500, { ok: false, error: "rl_inc_failed" });
+    if (incErr) {
+      console.error("[og_send_magic_link]", rid, "rl_inc_failed(email)", safeErrorShape(incErr));
+      return json(500, { ok: false, error: "rl_inc_failed", request_id: rid });
+    }
   }
 
   // 4) Send magic link (neutral response regardless of Auth outcome)
@@ -216,8 +263,23 @@ Deno.serve(async (req) => {
     options: { emailRedirectTo: redirectTo },
   });
 
-  // Do not leak details; still return ok
-  if (otpErr) return json(200, { ok: true });
+  if (otpErr) {
+    // Log full details server-side for debugging
+    console.error("[og_send_magic_link]", rid, "otp_failed", {
+      otp: safeErrorShape(otpErr),
+      email,
+      redirectTo,
+      ipKey,
+      ua,
+    });
 
-  return json(200, { ok: true });
+    // Neutral response to client (unless debug flag is set)
+    return json(200, {
+      ok: true,
+      request_id: rid,
+      ...(debug ? { debug: { otp_error: safeErrorShape(otpErr), redirectTo } } : {}),
+    });
+  }
+
+  return json(200, { ok: true, request_id: rid, ...(debug ? { debug: { sent: true, redirectTo } } : {}) });
 });

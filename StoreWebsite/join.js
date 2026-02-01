@@ -273,14 +273,22 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
       const campaign = String(campaignHidden?.value || "");
 
       // Store “pre-auth” context so profile.html can read it after magic-link auth
-      const joinContext = {
-        name,
-        email: safeLower(email),
-        src,
-        campaign,
-        joined_at: new Date().toISOString()
-      };
-      localStorage.setItem("og_join_context", JSON.stringify(joinContext));
+const joinContext = {
+  name,
+  email: safeLower(email),
+  src,
+  campaign,
+
+  // NEW: differentiate Join vs Access
+  flow: "join",
+
+  // NEW: explicit marketing consent captured here (Join requires consent)
+  marketing_opt_in: true,
+  marketing_opt_in_at: new Date().toISOString(),
+
+  joined_at: new Date().toISOString()
+};
+localStorage.setItem("og_join_context", JSON.stringify(joinContext));
 
       const redirectTo = computeRedirectToProfile();
 
@@ -309,11 +317,14 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
       const data = await res.json().catch(() => ({}));
       if (!data?.ok) throw new Error("Request failed. Please try again.");
 
-      setStatusHTML(
-        `<strong>✅ Secure sign-in link sent.</strong><br>
-         <span class="muted">If that email is valid, check your inbox. No email? Check spam, then try again in 60 seconds.</span>`,
-        "success"
-      );
+setStatusHTML(
+  `<strong>✅ Secure sign-in link sent.</strong><br>
+   <span class="muted">For the fastest access, open the sign-in link on <strong>this same device</strong>.</span><br>
+   <span class="muted">If you open it on another device, you’ll be signed in there instead.</span><br>
+   <span class="muted">No email? Check spam, then try again in 60 seconds.</span>`,
+  "success"
+);
+
 
       setLoading(false);
       startCooldown();

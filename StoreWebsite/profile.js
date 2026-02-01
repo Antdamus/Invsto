@@ -104,6 +104,19 @@
     localStorage.setItem(LS_VIP_SHOWN, "1");
   }
 
+  function computeDefaultPrefsFromCtx(ctx) {
+  const flow = String(ctx?.flow || "").toLowerCase();
+  const optedIn = ctx?.marketing_opt_in === true;
+
+  // Join requires consent checkbox, so defaults ON only for Join opt-in.
+  if (flow === "join" && optedIn) {
+    return { emailAlerts: true, earlyAccess: true };
+  }
+
+  // Access flow (or unknown) defaults OFF until explicitly saved.
+  return { emailAlerts: false, earlyAccess: false };
+}
+
   // NEW vs RETURNING heuristic (works well without extra columns)
   function isNewMemberRow(member) {
     if (!member?.created_at || !member?.updated_at) return false;
@@ -168,18 +181,26 @@
     const ctxName = String(ctx?.name || "").trim() || null;
 
     // local prefs fallback (first-load convenience)
-    const localPrefs = getPrefsLocal() || {};
-    const localName = String(localPrefs?.name || "").trim() || null;
+// local prefs fallback (first-load convenience)
+const localPrefs = getPrefsLocal() || {};
+const localName = String(localPrefs?.name || "").trim() || null;
 
-    const upsertPayload = {
-      id: userId,
-      email,
-      name: localName || ctxName,
-      source: src || "direct",
-      campaign,
-      email_alerts: (localPrefs?.emailAlerts ?? true),
-      early_access: (localPrefs?.earlyAccess ?? true),
-    };
+// NEW: choose first-time defaults based on Join vs Access
+const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
+
+const upsertPayload = {
+  id: userId,
+  email,
+  name: localName || ctxName,
+  source: src || "direct",
+  campaign,
+
+  // If local prefs exist, respect them.
+  // Otherwise, use ctx-based defaults (Join opt-in => ON, Access => OFF).
+  email_alerts: (localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts),
+  early_access: (localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess),
+};
+
 
     const { error: upsertError } = await sb
       .from("members")
@@ -313,10 +334,13 @@
     }
 
     // Hydrate UI from member row (preferred), else local
-    const localPrefs = getPrefsLocal() || {};
-    const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
-    const emailAlerts = (member?.email_alerts ?? localPrefs?.emailAlerts ?? true);
-    const earlyAccess = (member?.early_access ?? localPrefs?.earlyAccess ?? true);
+const localPrefs = getPrefsLocal() || {};
+const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
+
+const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
+const emailAlerts = (member?.email_alerts ?? localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts);
+const earlyAccess = (member?.early_access ?? localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess);
+
 
     if (nameInput) nameInput.value = name;
     if (emailAlertsToggle) emailAlertsToggle.checked = !!emailAlerts;
@@ -336,14 +360,23 @@
     if (tierPill) tierPill.textContent = vipStatus === "vip" ? "VIP Member" : "Free Member";
 
     // Greeting + success moment (NEW vs RETURNING)
-    if (isNew) {
-      setSubtitle("Welcome to OG. Your membership is active.");
-      setStatus("✅ Membership activated. You’re on the list for live alerts and early access.", "success");
-    } else {
-      const greet = name ? `Welcome back, ${name}.` : "Welcome back.";
-      setSubtitle(`${greet} Manage your alerts and access here.`);
-      setStatus("", "info");
-    }
+// Greeting + success moment (NEW vs RETURNING)
+if (isNew) {
+  setSubtitle("Welcome to OG. Your membership is active.");
+
+  // If they joined via Join with consent, celebrate that they’re opted in.
+  // If they came via Access (or unknown), keep it accurate: account is active, preferences are in their control.
+  if (emailAlerts || earlyAccess) {
+    setStatus("✅ Membership activated. You’re set for alerts and early access — you can fine-tune anytime.", "success");
+  } else {
+    setStatus("✅ Membership activated. Choose your alerts and early access preferences below.", "success");
+  }
+} else {
+  const greet = name ? `Welcome back, ${name}.` : "Welcome back.";
+  setSubtitle(`${greet} Manage your alerts and access here.`);
+  setStatus("", "info");
+}
+
 
     // Save handlers (use sb + userId)
     saveNameBtn?.addEventListener("click", () => saveName(sb, userId));

@@ -229,13 +229,16 @@ function computeRedirectToProfile() {
       const campaign = String(campaignHidden?.value || "");
 
       // Store minimal context (profile can still read source/campaign)
-      const ctx = {
-        email: safeLower(email),
-        src,
-        campaign,
-        accessed_at: new Date().toISOString()
-      };
-      localStorage.setItem("og_join_context", JSON.stringify(ctx));
+const ctx = {
+  email: safeLower(email),
+  src,
+  campaign,
+  flow: "access",
+  marketing_opt_in: false,
+  accessed_at: new Date().toISOString()
+};
+localStorage.setItem("og_join_context", JSON.stringify(ctx));
+
 
       const redirectTo = computeRedirectToProfile();
 
@@ -244,7 +247,7 @@ const fnUrl = `${window.SUPABASE_URL}/functions/v1/og_send_magic_link`;
 const res = await fetch(fnUrl, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ email: safeLower(email), redirectTo })
+  body: JSON.stringify({ email: safeLower(email), redirectTo, debug: true })
 });
 
 if (res.status === 429) {
@@ -264,11 +267,14 @@ const data = await res.json().catch(() => ({}));
 if (!data?.ok) throw new Error("Request failed. Please try again.");
 
 
-      setStatusHTML(
-        `<strong>✅ Secure sign-in link sent.</strong><br>
-         <span class="muted">If that email is valid, check your inbox. No email? Check spam, then try again in 60 seconds.</span>`,
-        "success"
-      );
+setStatusHTML(
+  `<strong>✅ Secure sign-in link sent.</strong><br>
+   <span class="muted">For the fastest access, open the sign-in link on <strong>this same device</strong>.</span><br>
+   <span class="muted">If you open it on another device, you’ll be signed in there instead.</span><br>
+   <span class="muted">No email? Check spam, then try again in 60 seconds.</span>`,
+  "success"
+);
+
 
 
 

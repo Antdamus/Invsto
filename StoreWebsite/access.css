@@ -478,3 +478,33 @@ a:hover{ text-decoration: underline; }
 }
 
 .btn.cooldown { opacity: .75; cursor: not-allowed; }
+
+/* =========================
+   Access: transactional email notice (best-practice)
+========================= */
+.access-disclaimer{
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(16,18,22,.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  display: grid;
+  gap: 4px;
+}
+
+.access-disclaimer-strong{
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: rgba(244,242,237,.92);
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+
+.access-disclaimer-muted{
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(244,242,237,.62);
+}
