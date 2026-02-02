@@ -1,0 +1,158 @@
+flowchart TB
+
+%% =========================================================
+%% OG Jewelers — Catalog Extraction, Field Contract, Used vs Unused
+%% VS Code Mermaid-safe: simple labels, no bracketed subgraph titles
+%% =========================================================
+
+classDef req fill:#0b1220,stroke:#7dd3fc,color:#e5e7eb,stroke-width:1px
+classDef rpc fill:#0f172a,stroke:#c4b5fd,color:#e5e7eb,stroke-width:1px
+classDef edge fill:#071a10,stroke:#22c55e,color:#e5e7eb,stroke-width:1px
+classDef used fill:#06141f,stroke:#34d399,color:#e5e7eb,stroke-width:1px
+classDef unused fill:#1b1222,stroke:#fb7185,color:#ffe4e6,stroke-width:1px
+classDef ui fill:#0a0f16,stroke:#60a5fa,color:#e5e7eb,stroke-width:1px
+classDef note fill:#1f130a,stroke:#f59e0b,color:#fff7ed,stroke-width:1px
+
+subgraph A
+  A0[Client Request]:::req
+  A1[GET storefront-catalog, channel = og_main or param]:::req
+  A2[Edge Function Response, JSON items array]:::req
+  A0 --> A1 --> A2
+end
+
+subgraph B
+  B0[Edge Function Steps]:::edge
+  B1[Load settings, bucket and ttl]:::edge
+  B2[Call RPC rpc_storefront_catalog, p_channel_id]:::edge
+  B3[Load published listings, public_photo_keys allowlist]:::edge
+  B4[Pick first allowed photo key per item]:::edge
+  B5[Sign only first key, create image_url]:::edge
+  B6[Return items with image_url and expires_in]:::edge
+  B0 --> B1 --> B2 --> B3 --> B4 --> B5 --> B6
+end
+
+A1 --> B0
+B6 --> A2
+
+subgraph C
+  C0[RPC Output Per Item, raw fields]:::rpc
+
+  C1[channel_id]:::rpc
+  C2[item_type_id]:::rpc
+  C3[title]:::rpc
+  C4[description]:::rpc
+  C5[display_price]:::rpc
+  C6[pricing_mode]:::rpc
+  C7[badge_flags]:::rpc
+  C8[photo_keys]:::rpc
+  C9[categories]:::rpc
+  C10[material]:::rpc
+  C11[weight_g]:::rpc
+  C12[stock_label]:::rpc
+  C13[remaining_count]:::rpc
+
+  C0 --> C1
+  C0 --> C2
+  C0 --> C3
+  C0 --> C4
+  C0 --> C5
+  C0 --> C6
+  C0 --> C7
+  C0 --> C8
+  C0 --> C9
+  C0 --> C10
+  C0 --> C11
+  C0 --> C12
+  C0 --> C13
+end
+
+B2 --> C0
+
+subgraph D
+  D0[Edge Added Field]:::edge
+  D1[image_url, signed URL for first allowed photo]:::edge
+  D0 --> D1
+end
+
+B5 --> D1
+
+subgraph E
+  E0[Catalogue Mapping, what UI keeps]:::ui
+  E1[mapStoreItemToProduct]:::ui
+  E2[UI Product fields used by UI]:::ui
+  E3[id = item_type_id]:::used
+  E4[name = title]:::used
+  E5[price = display_price]:::used
+  E6[image = image_url]:::used
+  E7[category = categories first]:::used
+  E8[material = material]:::used
+  E9[tags = badge_flags]:::used
+
+  E0 --> E1 --> E2
+  E2 --> E3
+  E2 --> E4
+  E2 --> E5
+  E2 --> E6
+  E2 --> E7
+  E2 --> E8
+  E2 --> E9
+end
+
+A2 --> E0
+
+subgraph F
+  F0[Used Now, directly in catalogue UI]:::used
+  F1[item_type_id -> id]:::used
+  F2[title -> name]:::used
+  F3[display_price -> price]:::used
+  F4[categories -> category]:::used
+  F5[material -> material]:::used
+  F6[badge_flags -> tags]:::used
+  F7[image_url -> card image]:::used
+  F0 --> F1
+  F0 --> F2
+  F0 --> F3
+  F0 --> F4
+  F0 --> F5
+  F0 --> F6
+  F0 --> F7
+end
+
+subgraph G
+  G0[Not Used Yet, available but ignored by current catalogue mapping]:::unused
+  G1[description]:::unused
+  G2[pricing_mode]:::unused
+  G3[photo_keys beyond first]:::unused
+  G4[channel_id]:::unused
+  G5[weight_g]:::unused
+  G6[stock_label]:::unused
+  G7[remaining_count]:::unused
+  G0 --> G1
+  G0 --> G2
+  G0 --> G3
+  G0 --> G4
+  G0 --> G5
+  G0 --> G6
+  G0 --> G7
+end
+
+subgraph H
+  H0[What the catalogue does with the used fields]:::ui
+  H1[Filter by q, category, material, tag, price]:::ui
+  H2[Sort and paginate]:::ui
+  H3[Render cards, image name price badges]:::ui
+  H4[Add to cart uses id and current price]:::ui
+  H0 --> H1 --> H2 --> H3 --> H4
+end
+
+F0 --> H0
+
+subgraph L
+  L0[Legend]:::note
+  L1[req = request and response]:::req
+  L2[rpc = fields produced by rpc_storefront_catalog]:::rpc
+  L3[edge = edge function signing and shaping]:::edge
+  L4[used = fields currently used by catalogue UI]:::used
+  L5[unused = fields available but not used yet]:::unused
+  L6[ui = mapping and UI pipeline]:::ui
+end
