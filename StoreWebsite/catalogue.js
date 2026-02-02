@@ -194,12 +194,13 @@ function upsertCartItem({ id, qtyDelta = 1, currentPrice }) {
 ========================= */
 
 let __og_lastKnownUser = null;
+
 function forceLogoutUI() {
   // kill any cached user immediately so UI can’t “stick”
   __og_lastKnownUser = null;
   __og_signingOut = true;
 
-  // hard-hide all account UI instantly
+  // desktop: hide account UI
   qsa('[data-ui="acct-initials"]').forEach((el) => (el.textContent = ""));
   qsa('[data-ui="acct-chip"]').forEach((chip) => setHardHidden(chip, true));
   qsa('[data-ui="acct-menu"]').forEach((m) => {
@@ -207,11 +208,16 @@ function forceLogoutUI() {
     m.setAttribute("aria-hidden", "true");
   });
 
-  // mobile
-  setHardHidden(qs('[data-ui="mobile-access"]'), true);
+  // ✅ desktop: SHOW member access when logged out
+  qsa('[data-ui="access-btn"]').forEach((btn) => setHardHidden(btn, false, ""));
+
+  // mobile: hide account wrap, show member access
   setHardHidden(qs('[data-ui="mobile-account-wrap"]'), true);
   setHardHidden(qs('[data-ui="mobile-account"]'), true);
   setHardHidden(qs('[data-ui="mobile-signout"]'), true);
+
+  // ✅ mobile: SHOW member access when logged out
+  setHardHidden(qs('[data-ui="mobile-access"]'), false, "");
 }
 
 let __og_authWiringBound = false;
@@ -292,14 +298,6 @@ const applyAuthUI = async (sb) => {
     menu.style.display = "";
   });
 
-  // Your preference: never show access button on this page (logged in OR out)
-  accessBtns.forEach((btn) => {
-    if (!btn) return;
-    btn.style.display = "none";
-    btn.hidden = true;
-    btn.setAttribute("aria-hidden", "true");
-  });
-
   // We'll resolve auth state:
   const freshUser = await resolveUser(sb);
 
@@ -328,10 +326,20 @@ const applyAuthUI = async (sb) => {
     setHardHidden(mobileAccountWrap, false);
     setHardHidden(mobileAccount, false);
     setHardHidden(mobileSignOutBtn, false);
+
+    // Logged in: hide Member Access
+accessBtns.forEach((btn) => setHardHidden(btn, true));
+setHardHidden(mobileAccess, true);
+
   } else {
     // Logged out (or truly no session)
     initialsEls.forEach((el) => (el.textContent = ""));
     if (mobileInitials) mobileInitials.textContent = "";
+
+    // Logged out: show Member Access
+accessBtns.forEach((btn) => setHardHidden(btn, false, ""));
+setHardHidden(mobileAccess, false, "");
+
 
     chips.forEach((chip) => setHardHidden(chip, true));
 
