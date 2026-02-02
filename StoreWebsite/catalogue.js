@@ -183,29 +183,43 @@ function upsertCartItem({ id, qtyDelta = 1, currentPrice }) {
     });
   };
 
-  const computeInitials = (user) => {
-    const meta = user?.user_metadata || {};
-    const full = String(meta.full_name || meta.name || "").trim();
-
-    if (full) {
-      const parts = full.split(/\s+/).filter(Boolean);
-      const a = (parts[0]?.[0] || "").toUpperCase();
-      const b = (parts[1]?.[0] || "").toUpperCase();
-      return (a + b) || "M";
-    }
-
-    const email = String(user?.email || "").trim();
-    if (email) return (email[0] || "M").toUpperCase();
-
-    return "M";
-  };
 
 
+/* =========================
+   Auth UI (Member Access ↔ Initials)
+   FIX: tab-switch / BFCache resilient
+========================= */
+/* =========================
+   Auth UI (Revamped: stable across tab switches + no random disappear)
+========================= */
 
-// ✅ Force-hide helper (wins even if CSS uses display: flex !important)
+let __og_lastKnownUser = null;
+function forceLogoutUI() {
+  // kill any cached user immediately so UI can’t “stick”
+  __og_lastKnownUser = null;
+  __og_signingOut = true;
+
+  // hard-hide all account UI instantly
+  qsa('[data-ui="acct-initials"]').forEach((el) => (el.textContent = ""));
+  qsa('[data-ui="acct-chip"]').forEach((chip) => setHardHidden(chip, true));
+  qsa('[data-ui="acct-menu"]').forEach((m) => {
+    m.hidden = true;
+    m.setAttribute("aria-hidden", "true");
+  });
+
+  // mobile
+  setHardHidden(qs('[data-ui="mobile-access"]'), true);
+  setHardHidden(qs('[data-ui="mobile-account-wrap"]'), true);
+  setHardHidden(qs('[data-ui="mobile-account"]'), true);
+  setHardHidden(qs('[data-ui="mobile-signout"]'), true);
+}
+
+let __og_authWiringBound = false;
+let __og_signingOut = false;
+
+// ✅ Force-hide helper (wins even if CSS uses display:flex !important)
 const setHardHidden = (el, shouldHide, showDisplay = "") => {
   if (!el) return;
-
   el.hidden = !!shouldHide;
 
   if (shouldHide) {
@@ -217,13 +231,46 @@ const setHardHidden = (el, shouldHide, showDisplay = "") => {
   }
 };
 
-/* =========================
-   Auth UI (Member Access ↔ Initials)
-   FIX: tab-switch / BFCache resilient
-========================= */
-const applyAuthUI = async (sb, opts = {}) => {
-  const { initial = false } = opts;
+// ✅ More resilient "who is logged in?" resolver.
+// - Tries getSession (fast, local)
+// - Falls back to getUser (also local but sometimes more reliable depending on state)
+// - If both fail, returns null (but we won't instantly nuke UI if we have a cached user)
+async function resolveUser(sb) {
+  if (!sb?.auth) return null;
 
+  try {
+    const { data } = await sb.auth.getSession();
+    const u = data?.session?.user || null;
+    if (u) return u;
+  } catch {}
+
+  try {
+    const { data } = await sb.auth.getUser();
+    const u = data?.user || null;
+    if (u) return u;
+  } catch {}
+
+  return null;
+}
+
+const computeInitials = (user) => {
+  const meta = user?.user_metadata || {};
+  const full = String(meta.full_name || meta.name || "").trim();
+
+  if (full) {
+    const parts = full.split(/\s+/).filter(Boolean);
+    const a = (parts[0]?.[0] || "").toUpperCase();
+    const b = (parts[1]?.[0] || "").toUpperCase();
+    return (a + b) || "M";
+  }
+
+  const email = String(user?.email || "").trim();
+  if (email) return (email[0] || "M").toUpperCase();
+
+  return "M";
+};
+
+const applyAuthUI = async (sb) => {
   // ✅ Grab ALL possible matches (covers duplicated header DOM)
   const accessBtns = qsa('[data-ui="access-btn"]');
   const chips = qsa('[data-ui="acct-chip"]');
@@ -237,91 +284,7 @@ const applyAuthUI = async (sb, opts = {}) => {
   const mobileInitials = qs('[data-ui="mobile-initials"]');
   const mobileSignOutBtn = qs('[data-ui="mobile-signout"]');
 
-  // ✅ Only do the "hard baseline hide" on FIRST load
-  // (On tab restore we do NOT hide first — prevents getting stuck hidden.)
-  if (initial) {
-    chips.forEach((chip) => setHardHidden(chip, true));
-    initialsEls.forEach((el) => (el.textContent = ""));
-    if (mobileInitials) mobileInitials.textContent = "";
-
-    // Keep your preference: do NOT show access button when logged out
-    accessBtns.forEach((btn) => {
-      if (!btn) return;
-      btn.style.display = "none";
-      btn.hidden = true;
-      btn.setAttribute("aria-hidden", "true");
-    });
-
-    // Ensure menus closed
-    acctMenus.forEach((menu) => {
-      if (!menu) return;
-      menu.hidden = true;
-      menu.setAttribute("aria-hidden", "true");
-      menu.style.display = "";
-    });
-
-    setHardHidden(mobileAccess, true);
-    setHardHidden(mobileAccountWrap, true);
-    setHardHidden(mobileAccount, true);
-    setHardHidden(mobileSignOutBtn, true);
-  }
-
-  // ✅ Session check (with refresh fallback)
-  let session = null;
-  try {
-    const { data } = await sb.auth.getSession();
-    session = data?.session || null;
-
-    // If null, try a refresh once (helps after tab switching / BFCache restore)
-    if (!session && typeof sb.auth.refreshSession === "function") {
-      try {
-        await sb.auth.refreshSession();
-        const { data: d2 } = await sb.auth.getSession();
-        session = d2?.session || null;
-      } catch {}
-    }
-  } catch {
-    session = null;
-  }
-
-  // ✅ Always keep access hidden (your preference), regardless of session
-  accessBtns.forEach((btn) => {
-    if (!btn) return;
-    btn.style.display = "none";
-    btn.hidden = true;
-    btn.setAttribute("aria-hidden", "true");
-  });
-  setHardHidden(mobileAccess, true);
-
-  // ✅ Logged OUT
-  if (!session?.user) {
-    chips.forEach((chip) => setHardHidden(chip, true));
-    initialsEls.forEach((el) => (el.textContent = ""));
-    if (mobileInitials) mobileInitials.textContent = "";
-
-    // close any open menus
-    acctMenus.forEach((menu) => {
-      if (!menu) return;
-      menu.hidden = true;
-      menu.setAttribute("aria-hidden", "true");
-      menu.style.display = "";
-    });
-
-    setHardHidden(mobileAccountWrap, true);
-    setHardHidden(mobileAccount, true);
-    setHardHidden(mobileSignOutBtn, true);
-    return;
-  }
-
-  // ✅ Logged IN
-  const initials = computeInitials(session.user);
-
-  initialsEls.forEach((el) => (el.textContent = initials));
-  if (mobileInitials) mobileInitials.textContent = initials;
-
-  chips.forEach((chip) => setHardHidden(chip, false));
-
-  // Menus should exist but default closed until user taps chip
+  // ✅ Baseline: hide dropdown menu always until user clicks chip
   acctMenus.forEach((menu) => {
     if (!menu) return;
     menu.hidden = true;
@@ -329,66 +292,116 @@ const applyAuthUI = async (sb, opts = {}) => {
     menu.style.display = "";
   });
 
-  setHardHidden(mobileAccountWrap, false);
-  setHardHidden(mobileAccount, false);
-  setHardHidden(mobileSignOutBtn, false);
+  // Your preference: never show access button on this page (logged in OR out)
+  accessBtns.forEach((btn) => {
+    if (!btn) return;
+    btn.style.display = "none";
+    btn.hidden = true;
+    btn.setAttribute("aria-hidden", "true");
+  });
+
+  // We'll resolve auth state:
+  const freshUser = await resolveUser(sb);
+
+  // ✅ Cache behavior:
+  // If we got a real user -> cache it.
+  // If we didn't get a user due to a transient auth hiccup,
+  // do NOT blow away UI if we *previously* knew the user.
+  if (freshUser) {
+    __og_lastKnownUser = freshUser;
+  } else if (__og_signingOut) {
+    // if user is signing out, allow clearing UI
+    __og_lastKnownUser = null;
+  }
+
+  const user = freshUser || __og_lastKnownUser;
+
+  // ✅ Render based on "best known" user
+  if (user) {
+    const initials = computeInitials(user);
+
+    initialsEls.forEach((el) => (el.textContent = initials));
+    if (mobileInitials) mobileInitials.textContent = initials;
+
+    chips.forEach((chip) => setHardHidden(chip, false));
+    setHardHidden(mobileAccess, true);
+    setHardHidden(mobileAccountWrap, false);
+    setHardHidden(mobileAccount, false);
+    setHardHidden(mobileSignOutBtn, false);
+  } else {
+    // Logged out (or truly no session)
+    initialsEls.forEach((el) => (el.textContent = ""));
+    if (mobileInitials) mobileInitials.textContent = "";
+
+    chips.forEach((chip) => setHardHidden(chip, true));
+
+    // keep hidden when logged out (your preference)
+    setHardHidden(mobileAccess, true);
+    setHardHidden(mobileAccountWrap, true);
+    setHardHidden(mobileAccount, true);
+    setHardHidden(mobileSignOutBtn, true);
+  }
 };
 
 const initAuthUI = async () => {
-  // helper: always re-grab a fresh client (important on tab restore)
-  const getFreshClient = async () => await waitForSupabaseReady();
-
-  const sb = await getFreshClient();
+  const sb = await waitForSupabaseReady();
   if (!sb) return;
 
-  // ✅ first paint: hard baseline hide, then show if logged in
-  await applyAuthUI(sb, { initial: true });
+  // Paint now
+  await applyAuthUI(sb);
 
-  // ✅ Auth changes
-  sb.auth.onAuthStateChange(async () => {
-    const fresh = (window.supabaseClient || window.supabase) || sb;
-    await applyAuthUI(fresh, { initial: false });
+  // Auth changes (real signal)
+  sb.auth.onAuthStateChange(async (_event) => {
+    __og_signingOut = false; // reset unless our handler set it
+    await applyAuthUI(sb);
   });
 
-  // ✅ Rehydrate on BFCache restore / tab return
-  const rehydrate = async () => {
-    const fresh = await getFreshClient();
-    if (!fresh) return;
-    await applyAuthUI(fresh, { initial: false });
-  };
+  // Bind rehydrate wiring once
+  if (!__og_authWiringBound) {
+    __og_authWiringBound = true;
 
-  if (!window.__og_auth_rehydrate_bound) {
-    window.__og_auth_rehydrate_bound = "1";
-
-    window.addEventListener("pageshow", rehydrate);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") rehydrate();
+    // BFCache restore
+    window.addEventListener("pageshow", async (e) => {
+      // if persisted, this is a BFCache restore — rehydrate
+      if (e.persisted) await applyAuthUI(sb);
+      else await applyAuthUI(sb);
     });
-    window.addEventListener("focus", rehydrate);
 
-    // Optional: if another tab logs in/out, reflect here
-    window.addEventListener("storage", (e) => {
-      if (!e.key) return;
-      // Supabase auth keys vary; this catches common patterns
-      if (e.key.includes("supabase") || e.key.includes("sb-")) rehydrate();
+    // Tab becomes visible again
+    document.addEventListener("visibilitychange", async () => {
+      if (document.visibilityState === "visible") {
+        await applyAuthUI(sb);
+      }
     });
-  }
 
-  // ✅ Ensure mobile signout works
-  const mobileSignOutBtn = qs('[data-ui="mobile-signout"]');
-  if (mobileSignOutBtn && !mobileSignOutBtn.dataset.bound) {
-    mobileSignOutBtn.dataset.bound = "1";
-    mobileSignOutBtn.addEventListener("click", async () => {
-      const fresh = (window.supabaseClient || window.supabase) || sb;
-      try {
-        await fresh.auth.signOut();
-      } catch {}
-      await applyAuthUI(fresh, { initial: false });
-      window.location.href = "catalogue.html";
+    // Cross-tab sign-in/out sync
+    window.addEventListener("storage", async () => {
+      await applyAuthUI(sb);
     });
   }
+
+  // ✅ Ensure mobile signout always works (waits for SB inside handler)
+qsa('[data-ui="mobile-signout"]').forEach((btn) => {
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = "1";
+
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    forceLogoutUI();
+
+    try {
+      const sb2 = await waitForSupabaseReady();
+      await sb2?.auth?.signOut?.();
+    } catch {}
+
+    const bust = Date.now();
+    window.location.replace(`catalogue.html?logout=1&bust=${bust}`);
+  });
+});
+
 };
-
 
 
 
@@ -1255,7 +1268,6 @@ const wireNavDrawer = () => {
 function initAccountDropdown() {
   const chip = qs('[data-ui="acct-chip"]');
   const menu = qs('[data-ui="acct-menu"]');
-  const signOutBtn = qs('[data-ui="acct-signout"]');
 
   if (!chip || !menu) return;
 
@@ -1318,18 +1330,30 @@ function initAccountDropdown() {
     if (e.key === "Escape") closeMenu();
   });
 
-  // Sign out
-  signOutBtn?.addEventListener("click", async () => {
-    const sb = window.supabaseClient || window.supabase;
-    if (!sb?.auth) return;
+// ✅ Bind ALL signout buttons (desktop + any duplicates)
+qsa('[data-ui="acct-signout"]').forEach((btn) => {
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = "1";
+
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
     closeMenu();
+    forceLogoutUI(); // ✅ immediate UI change (no waiting)
+
     try {
-      await sb.auth.signOut();
+      const sb = await waitForSupabaseReady();
+      await sb?.auth?.signOut?.();
     } catch {}
 
-    window.location.href = "catalogue.html";
+    // ✅ hard reload the SAME page (cache-bust)
+    const bust = Date.now();
+    window.location.replace(`catalogue.html?logout=1&bust=${bust}`);
   });
+});
+
+
 
   // If chip becomes hidden (logout), force menu closed
   const observer = new MutationObserver(() => {
@@ -1431,6 +1455,8 @@ const outsideClickClose = (e) => {
 
     initAccountDropdown();
 
+    
+
     // Load live catalog first (so filters/sorting render against real data)
     try {
       if (grid) grid.innerHTML = ""; // clean slate
@@ -1448,6 +1474,23 @@ const outsideClickClose = (e) => {
 
     // Normalize URL params
     writeURLFromState(true);
+// ✅ clean up logout param so URLs stay pretty
+try {
+  const u = new URL(window.location.href);
+  if (u.searchParams.has("logout")) {
+    u.searchParams.delete("logout");
+    try {
+  const u = new URL(window.location.href);
+  if (u.searchParams.has("logout")) {
+    u.searchParams.delete("logout");
+    u.searchParams.delete("bust");
+    const qs = u.searchParams.toString();
+    history.replaceState(null, "", u.pathname + (qs ? "?" + qs : ""));
+  }
+} catch {}
+
+  }
+} catch {}
 
     initSpotTicker();
 
