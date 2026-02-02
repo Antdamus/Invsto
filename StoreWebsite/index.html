@@ -16,6 +16,7 @@
 
   <!-- CSS -->
   <link rel="stylesheet" href="index.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css">
 </head>
 
 <body>
@@ -56,6 +57,11 @@
         <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
           <span class="i" aria-hidden="true">⌕</span>
         </button>
+
+       <button class="btn ghost icon-only cart-icon"   aria-label="Cart" type="button" data-action="open-cart-drawer">
+          <span class="i" aria-hidden="true">🛒</span>
+          <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+        </button>
 <a class="acct-chip" href="profile.html" data-ui="acct-chip" hidden aria-label="Your account">
   <span class="acct-dot" data-ui="acct-initials">M</span>
 </a>
@@ -66,9 +72,10 @@
   <button class="acct-item danger" type="button" data-ui="acct-signout">Sign out</button>
 </div>
 
-<a class="access-pill" href="access.html" aria-label="Member Access">
+<a class="access-pill" href="access.html" aria-label="Member Access" style="display:none">
   Member Access
 </a>
+
 
         <a class="cta-btn" href="catalogue.html" aria-label="Shop OG Jewelers">
           Shop
@@ -445,9 +452,16 @@
           <p class="modal-p" data-ui="qv-p">A statement in every angle.</p>
 
           <div class="modal-row">
-            <div class="modal-price" data-ui="qv-price">$2,999</div>
-            <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
-          </div>
+  <div class="modal-price" data-ui="qv-price">$2,999</div>
+
+  <div class="modal-actions">
+    <button class="btn btn-ghost" type="button" data-action="add-to-cart">
+      Add to cart
+    </button>
+    <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
+  </div>
+</div>
+
 
 <div class="modal-note" data-ui="qv-note">
   Ships fast • Premium sourcing • Limited drops
@@ -481,13 +495,66 @@
     </div>
   </div>
 
-  <!-- JS -->
+ <!-- JS -->
 <!-- Supabase MUST load before initSupabase.js -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
 <script src="initSupabase.js" defer></script>
 
+<!-- Shared cart badge (FIX: correct path) -->
+<script src="./StoreCart/cart.shared.js" defer></script>
+
+<!-- ✅ Phase 6B Step 1: Drawer hydration config MUST be defined before cart.drawer.js -->
+<script>
+  (function () {
+    // Hard-code the project URL you already use in cart.js (so hydration works immediately)
+    window.OG_CART_DRAWER_CFG = {
+      supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+      channel: "og_main",
+      fn: "storefront-catalog"
+    };
+  })();
+</script>
+
+<!-- Drawer logic -->
+<script src="./StoreCart/cart.drawer.js" defer></script>
+
 <!-- Your page logic -->
 <script src="index.js" defer></script>
+
+
+
+  <!-- =========================
+       Cart Drawer (mini cart)
+       ========================= -->
+  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+    <div class="cd-topbar">
+      <div class="cd-titlewrap">
+        <div class="cd-title">Cart</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+      </div>
+
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+    </div>
+
+    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+    <div class="cd-list" data-ui="cart-drawer-list"></div>
+    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+    <div class="cd-footer">
+      <div class="cd-summary">
+        <div>Subtotal</div>
+        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+      </div>
+
+      <div class="cd-actionsRow">
+        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+      </div>
+    </div>
+  </aside>
 
 </body>
 </html>
