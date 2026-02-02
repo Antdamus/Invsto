@@ -1209,23 +1209,42 @@ const wireDrawerChips = () => {
 };
 
 
-  const wirePricePresets = () => {
-    presetPriceBtns.forEach((b) => {
-      b.addEventListener("click", () => {
-        const min = b.dataset.min ?? "";
-        const max = b.dataset.max ?? "";
+const wirePricePresets = () => {
+  presetPriceBtns.forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
 
-        if (minPriceInput) minPriceInput.value = String(min);
-        if (maxPriceInput) maxPriceInput.value = String(max);
+      const min = (b.dataset.min ?? "").trim();
+      const max = (b.dataset.max ?? "").trim();
 
-        state.minPrice = String(min);
-        state.maxPrice = String(max);
+      // Update inputs
+      if (minPriceInput) minPriceInput.value = String(min);
+      if (maxPriceInput) maxPriceInput.value = String(max);
 
-        // visual toast, but do NOT apply until user hits Apply (premium feel)
-        toast("Preset selected.");
-      });
+      // Update state
+      state.minPrice = String(min);
+      state.maxPrice = String(max);
+
+      // Safety: swap if min > max (same rule as applyDrawerToState)
+      const nMin = Number(state.minPrice);
+      const nMax = Number(state.maxPrice);
+      if (Number.isFinite(nMin) && Number.isFinite(nMax) && nMin > nMax) {
+        state.minPrice = String(nMax);
+        state.maxPrice = String(nMin);
+        if (minPriceInput) minPriceInput.value = state.minPrice;
+        if (maxPriceInput) maxPriceInput.value = state.maxPrice;
+      }
+
+      // ✅ Apply instantly (match category/material behavior)
+      state.page = 1;
+      writeURLFromState(false);
+      render();
+
+      toast("Price applied.");
     });
-  };
+  });
+};
+
 
 const wireGlobalClicks = () => {
   document.addEventListener("click", (e) => {
@@ -1330,6 +1349,29 @@ const wireGlobalClicks = () => {
       return;
     }
   });
+};
+
+const wirePriceInputsLive = () => {
+  const applyNow = debounce(() => {
+    state.minPrice = (minPriceInput?.value || "").trim();
+    state.maxPrice = (maxPriceInput?.value || "").trim();
+
+    const nMin = Number(state.minPrice);
+    const nMax = Number(state.maxPrice);
+    if (Number.isFinite(nMin) && Number.isFinite(nMax) && nMin > nMax) {
+      state.minPrice = String(nMax);
+      state.maxPrice = String(nMin);
+      if (minPriceInput) minPriceInput.value = state.minPrice;
+      if (maxPriceInput) maxPriceInput.value = state.maxPrice;
+    }
+
+    state.page = 1;
+    writeURLFromState(false);
+    render();
+  }, 180);
+
+  if (minPriceInput) minPriceInput.addEventListener("input", applyNow);
+  if (maxPriceInput) maxPriceInput.addEventListener("input", applyNow);
 };
 
 
@@ -1546,7 +1588,10 @@ const outsideClickClose = (e) => {
 
 
     wireDrawerChips();
+
     wirePricePresets();
+wirePriceInputsLive();
+
     wireInputs();
     wireGlobalClicks();
     wirePopstate();
