@@ -1,6 +1,7 @@
 /* =========================================================
    cart.drawer.js — OG Jewelers
    Toggleable drawer (open/close) + mini-cart rendering
+   Phase 6B: public open API + reacts to og-cart-changed
    ========================================================= */
 
 (() => {
@@ -18,6 +19,14 @@
   const $ = (sel, root = document) => root.querySelector(sel);
 
   const safeParse = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
+  const toPriceNumber = (v) => {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    const s = String(v ?? "").trim();
+    const cleaned = s.replace(/[^0-9.]/g, "");
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  };
+
   const money = (n) => {
     const x = Number(n);
     if (!Number.isFinite(x)) return "$0.00";
@@ -40,8 +49,14 @@
       updated_at: new Date().toISOString(),
       items: Array.isArray(items) ? items : [],
     }));
+
+    // refresh header badge (cart.shared.js)
     if (typeof window.ogCartBadgeRefresh === "function") window.ogCartBadgeRefresh();
+
+    // ✅ Phase 6B: same-tab live sync for drawer/pages
+    window.dispatchEvent(new Event("og-cart-changed"));
   };
+
 
   const clampQty = (q) => {
     const n = Math.floor(Number(q));
@@ -58,11 +73,6 @@
     const m = Math.floor(s / 60);
     const r = s % 60;
     return `${m}:${String(r).padStart(2, "0")}`;
-  };
-
-  const resolveCartHref = () => {
-    const path = window.location.pathname || "";
-    return path.includes("/StoreCart/") ? "./cart.html" : "./StoreCart/cart.html";
   };
 
   // -------------------------
@@ -88,7 +98,6 @@
       r.backdrop.hidden = false;
       r.drawer.hidden = false;
 
-      // next tick for transitions
       requestAnimationFrame(() => {
         r.backdrop.classList.add("is-open");
         r.drawer.classList.add("is-open");
@@ -104,7 +113,6 @@
       document.documentElement.classList.remove("cd-lock");
       document.body.classList.remove("cd-lock");
 
-      // allow transition to finish, then hide
       window.setTimeout(() => {
         r.backdrop.hidden = true;
         r.drawer.hidden = true;
@@ -135,14 +143,16 @@
     );
   }
 
-  async function hydrateInventory() {
-    // If no config, skip hydration (drawer still works)
+  async function hydrateInventory(force = false) {
     if (!SUPABASE_URL) return;
 
     // refresh cache max every 5 minutes
-    if (Date.now() - invLast < 5 * 60 * 1000 && invMap.size) return;
+    if (!force && Date.now() - invLast < 5 * 60 * 1000 && invMap.size) return;
 
-    const url = `${SUPABASE_URL}/functions/v1/${encodeURIComponent(FN)}?channel=${encodeURIComponent(CHANNEL)}&t=${Math.floor(Date.now()/300000)}`;
+    const url =
+      `${SUPABASE_URL}/functions/v1/${encodeURIComponent(FN)}` +
+      `?channel=${encodeURIComponent(CHANNEL)}` +
+      `&t=${Math.floor(Date.now() / 300000)}`;
 
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`inventory fetch failed ${res.status}`);
@@ -159,6 +169,7 @@
         title: String(it?.title || it?.name || "Item"),
         image: String(it?.image_url || it?.image || ""),
         desc: pickDesc(it),
+        price: toPriceNumber(it?.sale_price ?? it?.price ?? it?.unit_price ?? it?.price_usd ?? it?.display_price ?? it?.amount),
       });
     }
 
@@ -177,6 +188,89 @@
     }, 0);
   }
 
+
+  function isExpired(expiresIso) {
+    if (!expiresIso) return false;
+    const t = new Date(expiresIso).getTime();
+    return Number.isFinite(t) ? (Date.now() > t) : false;
+  }
+
+  function makeNewLock(price) {
+    const now = Date.now();
+    const ms = 15 * 60 * 1000;
+    return {
+      price_locked: toPriceNumber(price),
+      price_locked_at: new Date(now).toISOString(),
+      price_lock_expires_at: new Date(now + ms).toISOString(),
+    };
+  }
+
+  async function refreshExpiredLocksIfNeeded() {
+    const cart = readCart();
+    const items = cart.items || [];
+    if (!items.length) return { changed: false };
+
+    // If anything is expired, force-refresh inventory so price can update now.
+    const anyExpired = items.some((l) => isExpired(l?.price_lock_expires_at));
+    if (!anyExpired) return { changed: false };
+
+    try { await hydrateInventory(true); } catch { /* ignore */ }
+
+    let changed = false;
+    const next = items.map((line) => {
+      const id = String(line?.id || "");
+      if (!id) return line;
+
+      if (!isExpired(line?.price_lock_expires_at)) return line;
+
+      const meta = invMap.get(id);
+      const newPrice = meta?.price;
+
+      // If we don't have a current price, keep the line as-is (still shows 0:00).
+      if (!Number.isFinite(Number(newPrice)) || Number(newPrice) <= 0) return line;
+
+      changed = true;
+      return { ...line, ...makeNewLock(newPrice) };
+    });
+
+    if (changed) {
+      writeCart(next);
+    }
+
+    return { changed };
+  }
+
+  function showNotice(msg) {
+    const r = refs();
+    if (!r.notice) return;
+    r.notice.textContent = msg;
+    r.notice.hidden = false;
+    window.setTimeout(() => {
+      // only hide if drawer still open
+      if (isOpen()) r.notice.hidden = true;
+    }, 2400);
+  }
+
+  function updateCountdownInPlace() {
+    const root = refs().list;
+    if (!root) return;
+    const rows = root.querySelectorAll(".cd-line");
+    rows.forEach((row) => {
+      const id = row.getAttribute("data-id") || "";
+      const cart = readCart();
+      const line = (cart.items || []).find((x) => String(x?.id) === String(id));
+      const cd = formatCountdown(line?.price_lock_expires_at);
+      const node = row.querySelector("[data-ui='lock']") || row.querySelector(".cd-lock");
+      if (node) {
+        node.textContent = cd ? `LOCKED: ${cd}` : "LOCKED";
+      } else {
+        // fallback: update the second span in .cd-row
+        const spans = row.querySelectorAll(".cd-row span");
+        if (spans && spans.length >= 2) spans[1].textContent = cd ? `LOCKED: ${cd}` : "LOCKED";
+      }
+    });
+  }
+
   async function render() {
     const r = refs();
     if (!r.list || !r.empty || !r.subtotal || !r.count) return;
@@ -184,8 +278,7 @@
     const cart = readCart();
     const items = cart.items || [];
 
-    // Attempt hydration (won't break render if it fails)
-    try { await hydrateInventory(); } catch (e) { /* ignore */ }
+    try { await hydrateInventory(); } catch { /* ignore */ }
 
     r.count.textContent = String(items.length);
 
@@ -222,7 +315,7 @@
             ${desc ? `<div class="cd-desc">${desc}</div>` : ``}
             <div class="cd-row">
               <span class="cd-price">${money(price)}</span>
-              ${cd ? `<span>LOCKED: ${cd}</span>` : `<span>LOCKED</span>`}
+              ${cd ? `<span data-ui="lock">LOCKED: ${cd}</span>` : `<span data-ui="lock">LOCKED</span>`}
             </div>
           </div>
 
@@ -264,15 +357,27 @@
   }
 
   // -------------------------
-  // Wiring (open/close works everywhere)
+  // Wiring
   // -------------------------
   let tickTimer = null;
 
   function startTick() {
     if (tickTimer) return;
-    tickTimer = window.setInterval(() => {
-      if (isOpen()) render();
-      else stopTick();
+    tickTimer = window.setInterval(async () => {
+      if (!isOpen()) { stopTick(); return; }
+
+      // Update countdown UI cheaply
+      try { updateCountdownInPlace(); } catch {}
+
+      // If any lock expired, refresh + full rerender (to restart timer + update prices)
+      try {
+        const { changed } = await refreshExpiredLocksIfNeeded();
+        if (changed) {
+          showNotice("Prices updated — lock restarted.");
+          await render();
+        }
+      } catch {}
+
     }, 1000);
   }
 
@@ -282,17 +387,29 @@
     tickTimer = null;
   }
 
+  async function openProgrammatic() {
+    setOpen(true);
+    try {
+      const { changed } = await refreshExpiredLocksIfNeeded();
+      if (changed) showNotice("Prices updated — lock restarted.");
+    } catch {}
+    await render();
+    startTick();
+  }
+
+  function closeProgrammatic() {
+    setOpen(false);
+    stopTick();
+  }
+
   function wire() {
     // Open drawer when clicking any element with data-action="open-cart-drawer"
     document.addEventListener("click", async (e) => {
       const openBtn = e.target.closest('[data-action="open-cart-drawer"]');
       if (openBtn) {
-        // keep link behavior for new tab / modifiers
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         e.preventDefault();
-        setOpen(true);
-        await render();
-        startTick();
+        await openProgrammatic();
         return;
       }
 
@@ -302,14 +419,12 @@
       const action = actionBtn.getAttribute("data-action");
 
       if (action === "close-cart-drawer") {
-        setOpen(false);
-        stopTick();
+        closeProgrammatic();
         return;
       }
 
       if (action === "go-cart") {
-        // let anchor navigate normally
-        return;
+        return; // let anchor navigate
       }
 
       const row = actionBtn.closest(".cd-line");
@@ -328,16 +443,14 @@
     const r = refs();
     if (r.backdrop) {
       r.backdrop.addEventListener("click", () => {
-        setOpen(false);
-        stopTick();
+        closeProgrammatic();
       });
     }
 
     // Esc closes
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && isOpen()) {
-        setOpen(false);
-        stopTick();
+        closeProgrammatic();
       }
     });
 
@@ -349,15 +462,35 @@
       }
     });
 
-    // Ensure drawer starts CLOSED (prevents the catalogue “shift” look)
+    // ✅ Phase 6B: page-level cart updates (same tab)
+    window.addEventListener("og-cart-changed", async () => {
+      if (isOpen()) {
+        await render();
+        startTick();
+      }
+    });
+
+    // Ensure drawer starts CLOSED
     document.addEventListener("DOMContentLoaded", () => {
-      // if markup exists, force closed state
       const rr = refs();
       if (rr.backdrop) { rr.backdrop.hidden = true; rr.backdrop.classList.remove("is-open"); }
-      if (rr.drawer) { rr.drawer.hidden = true; rr.drawer.classList.remove("is-open"); rr.drawer.setAttribute("aria-hidden","true"); }
+      if (rr.drawer) { rr.drawer.hidden = true; rr.drawer.classList.remove("is-open"); rr.drawer.setAttribute("aria-hidden", "true"); }
       stopTick();
     });
   }
+
+  // ✅ Phase 6B: Public API (index.js / catalogue.js)
+  window.ogCartDrawerOpen = async () => {
+    setOpen(true);
+    await render();
+    startTick();
+  };
+
+  window.ogCartDrawerClose = () => {
+    setOpen(false);
+    stopTick();
+  };
+
 
   wire();
 })();

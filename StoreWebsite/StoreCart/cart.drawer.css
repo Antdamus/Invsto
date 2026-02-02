@@ -1,10 +1,26 @@
 /* =========================================================
    cart.drawer.css — OG Jewelers
    Drawer: open/close + fixed overlay + mini cart layout
+   UNIFIED: self-contained styling across index.css + catalogue.css
    ========================================================= */
 
 /* Hard guarantee: hidden means gone */
 [hidden]{ display:none !important; }
+
+/* Namespace-hard reset (prevents host page CSS from leaking in) */
+.cd-backdrop,
+.cd-drawer,
+.cd-drawer *{
+  box-sizing: border-box;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  letter-spacing: normal;
+}
+
+.cd-drawer a{ color: inherit; }
+.cd-drawer button,
+.cd-drawer a{
+  -webkit-tap-highlight-color: transparent;
+}
 
 :root{
   --cd-bg: rgba(14, 15, 18, .86);
@@ -14,6 +30,10 @@
   --cd-muted: rgba(244,242,237,.64);
   --cd-gold: rgba(225,190,120,.92);
   --cd-shadow: 0 30px 120px rgba(0,0,0,.65);
+
+  --cd-radius: 18px;
+  --cd-radius2: 14px;
+  --cd-ease: cubic-bezier(.2,.8,.2,1);
 }
 
 /* Backdrop */
@@ -48,9 +68,13 @@
   box-shadow: var(--cd-shadow);
 
   transform: translateX(104%);
-  transition: transform .26s cubic-bezier(.2,.8,.2,1);
+  transition: transform .26s var(--cd-ease);
+
   display: flex;
   flex-direction: column;
+
+  /* Critical: prevents flex children overflow quirks across pages */
+  min-height: 0;
 }
 
 .cd-drawer.is-open{
@@ -68,6 +92,9 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+
+  /* host-safe */
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));
 }
 
 .cd-titlewrap{ display:flex; flex-direction:column; gap:2px; }
@@ -82,6 +109,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   font-size: 12px;
 }
 
+/* Close button (host-proof) */
 .cd-close{
   appearance: none;
   border: 1px solid var(--cd-line);
@@ -90,6 +118,8 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   border-radius: 12px;
   padding: 8px 10px;
   cursor: pointer;
+  line-height: 1;
+  text-decoration: none;
   transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
 .cd-close:hover{
@@ -103,7 +133,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   border: 1px solid rgba(225,190,120,.22);
   background: rgba(225,190,120,.10);
   color: var(--cd-ink);
-  border-radius: 14px;
+  border-radius: var(--cd-radius2);
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.35;
@@ -114,6 +144,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   padding: 12px 14px;
   overflow: auto;
   flex: 1;
+  min-height: 0; /* critical in some browsers/pages */
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -134,8 +165,9 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
 .cd-line{
   border: 1px solid var(--cd-line);
   background: var(--cd-glass);
-  border-radius: 18px;
+  border-radius: var(--cd-radius);
   padding: 12px;
+
   display: grid;
   grid-template-columns: 56px 1fr auto;
   gap: 10px;
@@ -145,7 +177,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
 .cd-thumb{
   width: 56px;
   height: 56px;
-  border-radius: 14px;
+  border-radius: var(--cd-radius2);
   border: 1px solid rgba(255,255,255,.10);
   overflow: hidden;
   background: rgba(0,0,0,.25);
@@ -155,9 +187,16 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   height: 100%;
   object-fit: cover;
   display: block;
+  /* prevents host css from changing image rendering */
+  max-width: 100%;
 }
 
-.cd-meta{ min-width:0; display:flex; flex-direction:column; gap:6px; }
+.cd-meta{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
 .cd-name{
   color: var(--cd-ink);
   font-size: 13px;
@@ -193,6 +232,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   align-items:flex-end;
 }
 
+/* Remove (host-proof) */
 .cd-x{
   appearance:none;
   border: 1px solid rgba(255,255,255,.14);
@@ -202,7 +242,8 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   padding: 7px 10px;
   cursor: pointer;
   font-size: 12px;
-  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+  line-height: 1;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease, color .15s ease;
 }
 .cd-x:hover{
   background: rgba(255,255,255,.08);
@@ -227,6 +268,8 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   color: var(--cd-ink);
   padding: 8px 10px;
   cursor:pointer;
+  font-size: 14px;
+  line-height: 1;
   transition: background .15s ease;
 }
 .cd-qty button:hover{ background: rgba(255,255,255,.07); }
@@ -245,6 +288,9 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   display:flex;
   flex-direction:column;
   gap: 10px;
+
+  /* host-safe */
+  background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,.03));
 }
 
 .cd-summary{
@@ -266,6 +312,7 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   gap: 10px;
 }
 
+/* Buttons/links in footer (host-proof) */
 .cd-btn{
   appearance:none;
   border: 1px solid rgba(255,255,255,.14);
@@ -278,6 +325,10 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
   letter-spacing: .15px;
   text-align:center;
   text-decoration:none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
 .cd-btn:hover{

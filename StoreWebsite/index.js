@@ -88,6 +88,37 @@ function lockScroll(on) {
   document.documentElement.classList.toggle("lock", on);
   document.body.classList.toggle("lock", on);
 }
+/* =========================
+   Toast (Phase 6B)
+========================= */
+let toastTimer = null;
+
+function toast(msg, ms = 1600) {
+  const el = document.querySelector(".toast");
+  if (!el) return;
+
+  el.textContent = String(msg || "");
+  el.hidden = false;
+
+  // simple show class if you have styling for it; safe if you don't
+  el.classList.add("show");
+
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+    el.hidden = true;
+  }, ms);
+}
+
+function openCartDrawerSoft() {
+  if (typeof window.ogCartDrawerOpen === "function") {
+    // don’t await inside event handler; keep it safe
+    window.ogCartDrawerOpen();
+    return;
+  }
+  // fallback: click your cart icon button (has data-action="open-cart-drawer")
+  document.querySelector('[data-action="open-cart-drawer"]')?.click?.();
+}
 
 /* =========================
    UI refs (match your HTML)
@@ -844,7 +875,7 @@ case "close-menu": {
               qtyDelta: 1,
             });
             closeQuickview();
-            window.location.href = "./StoreCart/cart.html";
+            if (window.ogCartDrawerOpen) { window.ogCartDrawerOpen(); }
             return;
           }
 
@@ -852,7 +883,7 @@ case "close-menu": {
 ;
 
           closeQuickview();
-          window.location.href = "./StoreCart/cart.html";
+          if (window.ogCartDrawerOpen) { window.ogCartDrawerOpen(); }
 
         }
         return;
@@ -1015,7 +1046,7 @@ async function applyAccountChip(sb) {
   const initialsEl = document.querySelector('[data-ui="acct-initials"]');
   const accessPill = document.querySelector(".access-pill");
 
-  // NEW: drawer account row
+  // Drawer account row
   const drawerAccount = document.querySelector('[data-ui="drawer-account"]');
   const drawerDivider = document.querySelector('[data-ui="drawer-divider"]');
   const drawerInitials = document.querySelector('[data-ui="drawer-initials"]');
@@ -1023,6 +1054,20 @@ async function applyAccountChip(sb) {
 
   if (!chip || !initialsEl) return;
 
+  /* ✅ HARD BASELINE (prevents “Member Access” flash)
+     Hide everything that depends on auth immediately,
+     then reveal the correct UI once session is known. */
+  chip.hidden = true;
+  if (accessPill) accessPill.style.display = "none";
+
+  if (drawerAccount) drawerAccount.hidden = true;
+  if (drawerDivider) drawerDivider.hidden = true;
+  if (mobileAccess) mobileAccess.hidden = true;
+
+  initialsEl.textContent = "";
+  if (drawerInitials) drawerInitials.textContent = "";
+
+  // Session check
   let session = null;
   try {
     const { data } = await sb.auth.getSession();
@@ -1032,7 +1077,7 @@ async function applyAccountChip(sb) {
   if (session?.user) {
     const initials = computeInitials(session.user);
 
-    // Desktop/header chip (still works; mobile hides it via CSS)
+    // Desktop/header chip
     initialsEl.textContent = initials;
     chip.hidden = false;
     if (accessPill) accessPill.style.display = "none";
@@ -1042,10 +1087,10 @@ async function applyAccountChip(sb) {
     if (drawerAccount) drawerAccount.hidden = false;
     if (drawerDivider) drawerDivider.hidden = false;
 
-    // Hide Member Access link in drawer when logged in
+    // Logged in => hide Member Access link in drawer
     if (mobileAccess) mobileAccess.hidden = true;
   } else {
-    // Desktop/header
+    // Logged out => show Member Access
     chip.hidden = true;
     if (accessPill) accessPill.style.display = "";
 
@@ -1055,6 +1100,7 @@ async function applyAccountChip(sb) {
     if (mobileAccess) mobileAccess.hidden = false;
   }
 }
+
 
 async function initAccountChip() {
   const sb = await waitForSupabaseReady();

@@ -61,6 +61,20 @@ const esc = (s) =>
   return Number.isFinite(n) ? n : 0;
 };
 
+
+/* =========================
+   Phase 6B: Drawer open helper
+========================= */
+function openCartDrawerSoft() {
+  try {
+    if (typeof window.ogCartDrawerOpen === "function") {
+      window.ogCartDrawerOpen();
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 /* =========================
    Cart helpers (Phase 3 — aligned with cart.js)
 ========================= */
@@ -1095,7 +1109,7 @@ if (action === "add-to-cart") {
     });
   }
 
-  window.location.href = "./StoreCart/cart.html";
+  if (typeof window.ogCartDrawerOpen === "function") { window.ogCartDrawerOpen(); }
   return;
 }
 
