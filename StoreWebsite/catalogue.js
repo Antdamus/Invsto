@@ -1177,21 +1177,37 @@ const toggleNavDrawer = () => {
     else state[key].add(value);
   };
 
-  const wireDrawerChips = () => {
-    chipGrids.forEach((gridEl) => {
-      const key = gridEl.dataset.filter;
-      gridEl.addEventListener("click", (e) => {
-        const btn = e.target.closest(".chip");
-        if (!btn) return;
+const wireDrawerChips = () => {
+  chipGrids.forEach((gridEl) => {
+    const key = gridEl.dataset.filter;
 
-        const val = btn.dataset.value;
-        if (!val) return;
+    // Only these are real state sets
+    const isSetKey = key === "category" || key === "material" || key === "tag";
+    if (!isSetKey) return;
 
-        toggleSetValue(key, val);
-        btn.classList.toggle("is-active", state[key].has(val));
-      });
+    gridEl.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip");
+      if (!btn) return;
+
+      e.preventDefault();
+
+      const val = btn.dataset.value;
+      if (!val) return;
+
+      // Toggle state
+      toggleSetValue(key, val);
+
+      // Toggle UI class
+      btn.classList.toggle("is-active", state[key].has(val));
+
+      // ✅ Instant apply behavior
+      state.page = 1;
+      writeURLFromState(false);
+      render();
     });
-  };
+  });
+};
+
 
   const wirePricePresets = () => {
     presetPriceBtns.forEach((b) => {
@@ -1211,109 +1227,111 @@ const toggleNavDrawer = () => {
     });
   };
 
-  const wireGlobalClicks = () => {
-    document.addEventListener("click", (e) => {
-      const el = e.target.closest("[data-action]");
-      if (!el) return;
+const wireGlobalClicks = () => {
+  document.addEventListener("click", (e) => {
+    // ✅ 1) Active chip removal FIRST (does not use data-action)
+    const chip = e.target.closest(".active-chip");
+    if (chip) {
+      const key = chip.dataset.chipKey;
+      const val = chip.dataset.chipValue;
+      if (key) clearChip(key, val);
+      return;
+    }
 
-      const action = el.dataset.action;
+    // ✅ 2) Then handle data-action clicks
+    const el = e.target.closest("[data-action]");
+    if (!el) return;
 
-      // Filter drawer
-      if (action === "open-filters") {
-        openDrawer();
-        return;
-      }
-      if (action === "close-filters") {
-        closeDrawer();
-        return;
-      }
-      if (action === "apply-filters") {
-        applyDrawerToState();
-        return;
-      }
+    const action = el.dataset.action;
 
-      // Reset
-      if (action === "reset-filters") {
-        resetAll();
-        closeDrawer();
-        return;
-      }
+    // Filter drawer
+    if (action === "open-filters") {
+      openDrawer();
+      return;
+    }
+    if (action === "close-filters") {
+      closeDrawer();
+      return;
+    }
+    if (action === "apply-filters") {
+      applyDrawerToState();
+      return;
+    }
 
-      // Search
-      if (action === "clear-search") {
-        state.q = "";
-        if (qInput) qInput.value = "";
-        state.page = 1;
-        writeURLFromState(false);
-        render();
-        return;
-      }
+    // Reset
+    if (action === "reset-filters") {
+      resetAll();
+      closeDrawer();
+      return;
+    }
 
-      // Pagination
-      if (action === "prev-page") {
-        state.page = Math.max(1, state.page - 1);
-        writeURLFromState(false);
-        render();
-        window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        return;
-      }
-      if (action === "next-page") {
-        state.page = state.page + 1;
-        writeURLFromState(false);
-        render();
-        window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        return;
-      }
+    // Search
+    if (action === "clear-search") {
+      state.q = "";
+      if (qInput) qInput.value = "";
+      state.page = 1;
+      writeURLFromState(false);
+      render();
+      return;
+    }
 
-      // View toggle
-      if (action === "toggle-view") {
-        state.view = state.view === "grid" ? "list" : "grid";
-        writeURLFromState(false);
-        render();
-        toast(state.view === "grid" ? "Grid view" : "List view");
-        return;
-      }
+    // Pagination
+    if (action === "prev-page") {
+      state.page = Math.max(1, state.page - 1);
+      writeURLFromState(false);
+      render();
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      return;
+    }
+    if (action === "next-page") {
+      state.page = state.page + 1;
+      writeURLFromState(false);
+      render();
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+      return;
+    }
+
+    // View toggle
+    if (action === "toggle-view") {
+      state.view = state.view === "grid" ? "list" : "grid";
+      writeURLFromState(false);
+      render();
+      toast(state.view === "grid" ? "Grid view" : "List view");
+      return;
+    }
 
     // Add to cart
-if (action === "add-to-cart") {
-  const id = el.dataset.id;
-  const item = PRODUCTS.find((p) => p.id === id);
+    if (action === "add-to-cart") {
+      const id = el.dataset.id;
+      const item = PRODUCTS.find((p) => p.id === id);
 
-  if (item) {
-    // IMPORTANT: use the Phase-2/Phase-3 cart contract (price_locked + expires)
-    upsertCartItem({
-      id: item.id,
-      qtyDelta: 1,
-      currentPrice: toPriceNumber(item.price),
-    });
-  } else {
-    upsertCartItem({
-      id,
-      qtyDelta: 1,
-      currentPrice: 0,
-    });
-  }
-
-  if (typeof window.ogCartDrawerOpen === "function") { window.ogCartDrawerOpen(); }
-  return;
-}
-
-      if (action === "quick-view") {
-        const id = el.dataset.id;
-        const item = PRODUCTS.find((p) => p.id === id);
-        if (item) toast(item.name);
-        return;
+      if (item) {
+        upsertCartItem({
+          id: item.id,
+          qtyDelta: 1,
+          currentPrice: toPriceNumber(item.price),
+        });
+      } else {
+        upsertCartItem({
+          id,
+          qtyDelta: 1,
+          currentPrice: 0,
+        });
       }
 
-      // Chip removal
-      const chip = e.target.closest(".active-chip");
-      if (chip) {
-        const key = chip.dataset.chipKey;
-        const val = chip.dataset.chipValue;
-        if (key) clearChip(key, val);
-      }
-    });
-  };
+      if (typeof window.ogCartDrawerOpen === "function") window.ogCartDrawerOpen();
+      return;
+    }
+
+    if (action === "quick-view") {
+      const id = el.dataset.id;
+      const item = PRODUCTS.find((p) => p.id === id);
+      if (item) toast(item.name);
+      return;
+    }
+  });
+};
+
 
   const wireInputs = () => {
     if (qInput) qInput.addEventListener("input", onSearchInput);
