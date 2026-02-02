@@ -1,0 +1,145 @@
+stateDiagram-v2
+    direction TB
+
+    %% =========================
+    %% BROWSE PHASE (SOFT CART + DEMAND SIGNAL)
+    %% =========================
+    BROWSE: Browsing Catalog
+    BROWSE --> ADD_TO_CART: Add item to cart
+    ADD_TO_CART --> ADD_TO_CART: Modify quantities
+    ADD_TO_CART --> BROWSE: Remove item
+
+    note right of ADD_TO_CART
+      • No reservation
+      • No stock blocked
+      • Unlimited browsing
+      • No audit event
+      • Demand Signal (soft):
+        - Track "interest" (approx) per item
+        - TTL window + deduped per user/session
+        - Safe display (e.g., "10+ watching")
+    end note
+
+    %% =========================
+    %% CHECKOUT GATING (SOFT CART ALLOWED EVEN IF UNAVAILABLE)
+    %% =========================
+    ADD_TO_CART --> CHECKOUT_ATTEMPT: Click Checkout
+    CHECKOUT_ATTEMPT --> CHECKOUT_PENDING: All items available-to-sell
+    CHECKOUT_ATTEMPT --> WAITING: Some items fully reserved / unavailable
+
+    WAITING: Waiting In Cart (Not Reserved)
+    WAITING --> CHECKOUT_ATTEMPT: Retry / auto-refresh availability
+
+    note right of WAITING
+      • Cart may include items even if availability is 0
+      • Show countdown until next expected release
+      • User can keep item in cart (no ownership implied)
+      • If reservation releases, user can proceed
+      • If another buyer pays, show "Sold out" and block/require removal
+      • No inventory mutation
+      • Optional AUDIT: checkout_waiting
+    end note
+
+    %% =========================
+    %% CHECKOUT / RESERVATION (HARD HOLD BEGINS HERE)
+    %% =========================
+    CHECKOUT_PENDING: Stripe Checkout Session Active
+    CHECKOUT_PENDING --> RESERVED: Reservation Created
+
+    note right of RESERVED
+      • 10-minute timer
+      • Stock treated as decremented
+      • Visible to all users
+      • Prevents overselling
+      • AUDIT: reservation_created
+      • Correlation ID = reservation_id
+    end note
+
+    %% =========================
+    %% RESERVATION OUTCOMES
+    %% =========================
+    RESERVED --> EXPIRED: Timer expires
+    EXPIRED: Reservation Expired
+    EXPIRED --> ADD_TO_CART: Stock auto-released
+
+    note right of EXPIRED
+      • Stripe session fails
+      • Stock restored globally
+      • AUDIT: reservation_expired
+      • Inventory delta logged (+qty)
+    end note
+
+    %% =========================
+    %% PAYMENT SUCCESS (AUTHORITATIVE)
+    %% =========================
+    RESERVED --> PAID: Stripe webhook\ncheckout.session.completed
+    PAID: Payment Confirmed (Single Authority)
+
+    note right of PAID
+      • Idempotent webhook
+      • Stripe event_id recorded
+      • Reservation → Order
+      • AUDIT: payment_confirmed
+      • AUDIT: inventory_decremented
+      • Inventory delta logged (-qty)
+    end note
+
+    %% =========================
+    %% FULFILLMENT
+    %% =========================
+    PAID --> FULFILLMENT_ASSIGNED: Auto-assign location
+    FULFILLMENT_ASSIGNED --> FULFILLMENT_ASSIGNED: Admin override (optional)
+
+    note right of FULFILLMENT_ASSIGNED
+      • Location chosen after payment
+      • Global stock already reduced
+      • Location stock decremented here
+      • AUDIT: fulfillment_assigned
+      • Location-level delta logged
+    end note
+
+    %% =========================
+    %% COMPLETION
+    %% =========================
+    FULFILLMENT_ASSIGNED --> FULFILLED: Item shipped / picked up
+
+    note right of FULFILLED
+      • Physical handling complete
+      • AUDIT: order_fulfilled
+    end note
+
+    FULFILLED --> COMPLETED: Order closed
+
+    note right of COMPLETED
+      • Order immutable
+      • Inventory settled
+      • AUDIT: order_completed
+    end note
+
+    %% =========================
+    %% REFUNDS / CANCELLATIONS
+    %% =========================
+    PAID --> REFUNDED: Cancel before fulfillment
+    REFUNDED: Payment refunded
+    REFUNDED --> BROWSE: Stock returned
+
+    note right of REFUNDED
+      • Allowed only pre-fulfillment
+      • Stock restored explicitly
+      • AUDIT: order_refunded
+      • Inventory delta logged (+qty)
+    end note
+
+    %% =========================
+    %% HARD STOPS (POST-CART, PRE-RESERVATION)
+    %% =========================
+    CHECKOUT_PENDING --> BLOCKED: Any item unavailable (race / stale cart)
+    BLOCKED --> ADD_TO_CART
+
+    note right of BLOCKED
+      • Checkout blocked
+      • Clear user message
+      • Item requires removal OR wait (if temporarily reserved)
+      • No inventory mutation
+      • Optional AUDIT: checkout_blocked
+    end note
