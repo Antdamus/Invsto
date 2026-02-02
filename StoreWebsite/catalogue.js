@@ -481,23 +481,40 @@ function initSpotTicker(){
   };
 
   // Map RPC item -> UI product shape used by the existing UI logic
-  const mapStoreItemToProduct = (it) => {
-    const cats = Array.isArray(it.categories) ? it.categories : [];
-    const category = String(cats[0] || "all").toLowerCase();
+// Map RPC item -> UI product shape used by the existing UI logic
+const mapStoreItemToProduct = (it) => {
+  const normalizeToken = (v) =>
+    String(v || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
 
-    const tags = Array.isArray(it.badge_flags) ? it.badge_flags : [];
+  const catsRaw = Array.isArray(it.categories) ? it.categories : [];
+  const categories = catsRaw
+    .map(normalizeToken)
+    .filter(Boolean);
 
-    return {
-      id: String(it.item_type_id),
-      name: String(it.title || ""),
-      category,
-      material: String(it.material || "").toLowerCase(), // returned by RPC if you added it; otherwise empty ok
-      price: toNum(it.display_price),
-      tags,
-      created_at: new Date().toISOString(), // (optional) upgrade later if you add created_at to RPC
-      image: it.image_url || FALLBACK_IMAGE,
-    };
+  const primaryCategory = categories[0] || "all";
+
+  const tags = Array.isArray(it.badge_flags) ? it.badge_flags.map(normalizeToken).filter(Boolean) : [];
+
+  const material = normalizeToken(it.material || "");
+
+  return {
+    id: String(it.item_type_id),
+    name: String(it.title || ""),
+    // For display
+    category: primaryCategory,
+    // For filtering
+    categories,
+    material,
+    price: toNum(it.display_price),
+    tags,
+    created_at: new Date().toISOString(), // upgrade later if RPC provides created_at
+    image: it.image_url || FALLBACK_IMAGE,
   };
+};
+
 
   const loadCatalog = async () => {
     const t = fiveMinBucket();
@@ -692,39 +709,91 @@ const navCloseBtn = qs(".nav-drawer-close");
     }
   };
 
+const buildDynamicFilterChips = () => {
+  // Build unique pools from PRODUCTS
+  const catSet = new Set();
+  const matSet = new Set();
+
+  PRODUCTS.forEach((p) => {
+    (Array.isArray(p.categories) ? p.categories : []).forEach((c) => c && catSet.add(c));
+    if (p.material) matSet.add(p.material);
+  });
+
+  const cats = Array.from(catSet).sort((a, b) => a.localeCompare(b));
+  const mats = Array.from(matSet).sort((a, b) => a.localeCompare(b));
+
+  // Render to chip grids
+  const renderGrid = (key, values) => {
+    const gridEl = qs(`.chip-grid[data-filter="${key}"]`);
+    if (!gridEl) return;
+
+    gridEl.innerHTML = values
+      .map((v) => {
+        const active = state[key] instanceof Set && state[key].has(v);
+        return `<button class="chip${active ? " is-active" : ""}" type="button" data-value="${esc(v)}">${esc(humanize(key, v))}</button>`;
+      })
+      .join("");
+
+    // If empty, show subtle placeholder
+    if (!values.length) {
+      gridEl.innerHTML = `<span class="muted" style="opacity:.8">No options available</span>`;
+    }
+  };
+
+  renderGrid("category", cats);
+  renderGrid("material", mats);
+};
+
+
   /* =========================
      Filtering + Sorting
   ========================= */
-  const matchesSet = (set, value) => (set.size === 0 ? true : set.has(value));
 
-  const matchesTags = (tagSet, tagsArr) => {
-    if (tagSet.size === 0) return true;
-    const tags = Array.isArray(tagsArr) ? tagsArr : [];
-    return Array.from(tagSet).some((t) => tags.includes(t));
-  };
+const matchesSet = (set, value) => (set.size === 0 ? true : set.has(value));
 
-  const applyFilters = (items) => {
-    const q = (state.q || "").toLowerCase().trim();
+const matchesAnyFromArray = (set, arr) => {
+  if (set.size === 0) return true;
+  const a = Array.isArray(arr) ? arr : [];
+  return a.some((v) => set.has(v));
+};
 
-    const min = state.minPrice === "" ? null : Number(state.minPrice);
-    const max = state.maxPrice === "" ? null : Number(state.maxPrice);
+const matchesTags = (tagSet, tagsArr) => {
+  if (tagSet.size === 0) return true;
+  const tags = Array.isArray(tagsArr) ? tagsArr : [];
+  return Array.from(tagSet).some((t) => tags.includes(t));
+};
 
-    return items.filter((it) => {
-      if (!matchesSet(state.category, it.category)) return false;
-      if (!matchesSet(state.material, it.material)) return false;
-      if (!matchesTags(state.tag, it.tags)) return false;
+const applyFilters = (items) => {
+  const q = (state.q || "").toLowerCase().trim();
 
-      if (Number.isFinite(min) && it.price < min) return false;
-      if (Number.isFinite(max) && it.price > max) return false;
+  const min = state.minPrice === "" ? null : Number(state.minPrice);
+  const max = state.maxPrice === "" ? null : Number(state.maxPrice);
 
-      if (q) {
-        const hay = `${it.name} ${it.category} ${it.material} ${(it.tags || []).join(" ")}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
+  return items.filter((it) => {
+    // ✅ Category: match ANY category from it.categories
+    if (!matchesAnyFromArray(state.category, it.categories)) return false;
 
-      return true;
-    });
-  };
+    // Material: still single token per item
+    if (!matchesSet(state.material, it.material)) return false;
+
+    // Tags: match any tag
+    if (!matchesTags(state.tag, it.tags)) return false;
+
+    // Price
+    if (Number.isFinite(min) && it.price < min) return false;
+    if (Number.isFinite(max) && it.price > max) return false;
+
+    // Search
+    if (q) {
+      const catText = Array.isArray(it.categories) ? it.categories.join(" ") : "";
+      const hay = `${it.name} ${catText} ${it.material} ${(it.tags || []).join(" ")}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+
+    return true;
+  });
+};
+
 
   const sortItems = (items) => {
     const arr = items.slice();
@@ -773,14 +842,21 @@ const navCloseBtn = qs(".nav-drawer-close");
   /* =========================
      Chips / Active count
   ========================= */
-  const humanize = (key, val) => {
-    const maps = {
-      category: { gold: "Gold", diamonds: "Diamonds", chains: "Chains", signature: "Signature" },
-      material: { gold: "Gold", silver: "Silver", platinum: "Platinum", diamond: "Diamond" },
-      tag: { new: "New", featured: "Featured", best_value: "Best Value", limited: "Limited" },
-    };
-    return (maps[key] && maps[key][val]) ? maps[key][val] : val;
+const titleize = (v) => {
+  const s = String(v || "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const humanize = (key, val) => {
+  const maps = {
+    tag: { new: "New", featured: "Featured", best_value: "Best Value", limited: "Limited" },
   };
+  if (maps[key] && maps[key][val]) return maps[key][val];
+  return titleize(val);
+};
+
 
   const buildActiveChips = () => {
     if (!chipsWrap) return;
@@ -1471,6 +1547,7 @@ const outsideClickClose = (e) => {
       if (resultsCount) resultsCount.textContent = "…";
       if (resultsCountInline) resultsCountInline.textContent = "…";
       await loadCatalog();
+      buildDynamicFilterChips();
     } catch (err) {
       console.error(err);
       toast("Could not load catalog.");

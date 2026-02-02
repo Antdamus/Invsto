@@ -1,0 +1,148 @@
+flowchart LR
+
+  %% =========================
+  %% OG Catalogue Filter Wiring
+  %% Safe for VS Code Mermaid
+  %% =========================
+
+  %% ---------- Styles ----------
+  classDef boot fill:#0b1220,stroke:#93c5fd,stroke-width:1.5px,color:#e5e7eb
+  classDef state fill:#0a1a12,stroke:#34d399,stroke-width:1.5px,color:#e5e7eb
+  classDef url fill:#1b1230,stroke:#c4b5fd,stroke-width:1.5px,color:#e5e7eb
+  classDef ui fill:#1a1410,stroke:#fbbf24,stroke-width:1.5px,color:#fff7ed
+  classDef logic fill:#101827,stroke:#60a5fa,stroke-width:1.5px,color:#e5e7eb
+  classDef render fill:#111111,stroke:#f59e0b,stroke-width:1.5px,color:#f9fafb
+  classDef note fill:#0f172a,stroke:#94a3b8,stroke-dasharray: 4 3,color:#e2e8f0
+
+  %% ---------- Boot ----------
+  A0([Page load]):::boot --> A1[Init]:::boot
+  A1 --> A2[Wire events]:::boot
+  A1 --> A3[Load products]:::boot
+  A1 --> A4[Read URL to state]:::boot
+  A1 --> A5[Sync UI from state]:::boot
+  A1 --> A6[Render]:::boot
+
+  %% ---------- URL and State ----------
+  subgraph G0[URL and State]
+    direction LR
+    U1[(URL query)]:::url --> U2[Parse URL]:::url --> S0[(State)]:::state
+    S0 --> U3[Write URL]:::url --> U1
+    U4[Back forward]:::url --> U2
+  end
+
+  %% ---------- State content ----------
+  subgraph G1[State fields]
+    direction TB
+    S1[q text]:::state
+    S2[category set]:::state
+    S3[material set]:::state
+    S4[tag set]:::state
+    S5[min price]:::state
+    S6[max price]:::state
+    S7[sort]:::state
+    S8[page]:::state
+    S9[view]:::state
+    S0 --> S1
+    S0 --> S2
+    S0 --> S3
+    S0 --> S4
+    S0 --> S5
+    S0 --> S6
+    S0 --> S7
+    S0 --> S8
+    S0 --> S9
+  end
+
+  %% ---------- UI ----------
+  subgraph G2[UI controls]
+    direction TB
+    UI1[Search input]:::ui
+    UI2[Sort select]:::ui
+    UI3[Drawer chips]:::ui
+    UI4[Min max inputs]:::ui
+    UI5[Preset price buttons]:::ui
+    UI6[Apply filters button]:::ui
+    UI7[Reset filters button]:::ui
+    UI8[Pagination buttons]:::ui
+    UI9[View toggle]:::ui
+    UI10[Active chips bar]:::ui
+  end
+
+  %% ---------- Events and handlers ----------
+  subgraph G3[Handlers]
+    direction TB
+
+    H1[Search change]:::logic --> S0
+    H1 --> U3
+    H1 --> R0
+
+    H2[Sort change]:::logic --> S0
+    H2 --> U3
+    H2 --> R0
+
+    H3[Drawer chip toggle]:::logic --> S0
+
+    H4[Preset price click]:::logic --> S0
+
+    H5[Apply click]:::logic --> S0
+    H5 --> U3
+    H5 --> R0
+
+    H6[Reset click]:::logic --> S0
+    H6 --> U3
+    H6 --> R0
+
+    H7[Page prev next]:::logic --> S0
+    H7 --> U3
+    H7 --> R0
+
+    H8[View toggle click]:::logic --> S0
+    H8 --> U3
+    H8 --> R0
+
+    H9[Active chip remove]:::logic --> S0
+    H9 --> U3
+    H9 --> R0
+
+    H10[Popstate]:::logic --> U2
+    H10 --> UI0
+    H10 --> R0
+  end
+
+  %% ---------- Render pipeline ----------
+  subgraph G4[Render pipeline]
+    direction LR
+    R0[Render]:::render --> R2[Filter products]:::render
+    R2 --> R3[Sort products]:::render
+    R3 --> R4[Paginate]:::render
+    R4 --> R5[Paint grid]:::render
+    R0 --> R6[Paint active chips]:::render
+    R0 --> R7[Sync UI controls]:::render
+  end
+
+  %% ---------- Wiring UI to handlers ----------
+  UI1 --> H1
+  UI2 --> H2
+  UI3 --> H3
+  UI4 --> H5
+  UI5 --> H4
+  UI6 --> H5
+  UI7 --> H6
+  UI8 --> H7
+  UI9 --> H8
+  UI10 --> H9
+
+  %% ---------- Init wiring to URL and render ----------
+  A4 --> U2
+  A6 --> R0
+
+  %% ---------- Legend and summary ----------
+  subgraph G5[Legend]
+    direction TB
+    L1[Summary events update state then write URL then render]:::note
+    L2[URL read happens on init and on back forward]:::note
+    L3[Drawer chip toggles update sets apply commits and triggers render]:::note
+  end
+
+  %% Dummy node for UI0 target
+  UI0[Sync controls]:::ui
