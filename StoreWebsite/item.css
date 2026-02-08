@@ -1,0 +1,490 @@
+/* =========================================================
+   item.css — OG Jewelers (Product Details)
+   Uses catalogue.css as base; this file adds item page layout polish.
+   ========================================================= */
+
+.item-page { padding: 22px 0 70px; }
+
+/* Error */
+.item-error {
+  margin: 14px 0 18px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 80, 80, 0.28);
+  background: rgba(255, 40, 40, 0.08);
+  color: rgba(255, 235, 235, 0.95);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+/* Skeleton */
+.item-skeleton {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1.15fr 0.85fr;
+  align-items: start;
+}
+.sk-hero {
+  height: min(520px, 56vh);
+  border-radius: 22px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.10), rgba(255,255,255,0.05));
+  background-size: 200% 100%;
+  animation: sk 1.1s infinite linear;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.sk-lines { display: grid; gap: 10px; }
+.sk-line {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.10), rgba(255,255,255,0.05));
+  background-size: 200% 100%;
+  animation: sk 1.1s infinite linear;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.sk-line.w60 { width: 60%; }
+.sk-line.w30 { width: 30%; }
+.sk-line.w80 { width: 80%; }
+.sk-line.w75 { width: 75%; }
+
+@keyframes sk {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Layout */
+.item-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.item-hero {
+  height: min(560px, 64vh);
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.09);
+  background:
+    radial-gradient(1200px 600px at 20% 15%, rgba(255, 210, 120, 0.10), transparent 60%),
+    radial-gradient(900px 520px at 85% 35%, rgba(255, 255, 255, 0.06), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+    var(--img, none);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 22px 60px rgba(0,0,0,0.55);
+}
+
+.item-info {
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.09);
+  background: rgba(10, 10, 12, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 18px 18px 16px;
+}
+
+.item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.item-back {
+  color: rgba(255,255,255,0.74);
+  text-decoration: none;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+}
+.item-back:hover { color: rgba(255, 220, 150, 0.92); }
+
+.item-stock {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.86);
+}
+.item-stock[data-tone="ok"] {
+  border-color: rgba(120, 255, 200, 0.22);
+  background: rgba(40, 255, 190, 0.08);
+}
+.item-stock[data-tone="warn"] {
+  border-color: rgba(255, 210, 120, 0.26);
+  background: rgba(255, 190, 80, 0.10);
+  color: rgba(255, 240, 220, 0.95);
+}
+.item-stock[data-tone="bad"] {
+  border-color: rgba(255, 80, 80, 0.28);
+  background: rgba(255, 40, 40, 0.08);
+  color: rgba(255, 235, 235, 0.95);
+}
+
+.item-title {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 600;
+  font-size: clamp(28px, 3vw, 40px);
+  letter-spacing: 0.2px;
+  margin: 6px 0 4px;
+  color: rgba(255,255,255,0.95);
+}
+
+.item-price {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 18px;
+  color: rgba(255, 220, 150, 0.95);
+  margin-bottom: 12px;
+}
+
+.item-desc {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.78);
+  margin: 0 0 16px;
+  white-space: pre-wrap;
+}
+
+.item-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+/* =========================
+   Item page CTAs (match View Cart look)
+   ========================= */
+.item-add,
+.item-open-cart{
+  flex: 1;
+  border-radius: 14px;
+}
+
+/* Fix: Add to Cart was white-on-white (solid). Make it match the ghost button. */
+.item-actions .btn.solid.item-add{
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.08);
+  color: rgba(244,241,234,0.92);
+  box-shadow: none;
+}
+
+.item-actions .btn.solid.item-add:hover{
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(200,162,74,0.18);
+  transform: translateY(-1px);
+}
+
+.item-actions .btn.solid.item-add:active{
+  transform: translateY(1px) scale(.99);
+}
+
+.item-actions .btn.solid.item-add:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 6px rgba(200,162,74,0.12);
+}
+
+
+.item-fineprint {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 12px;
+}
+
+/* Related */
+.related {
+  margin-top: 26px;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.09);
+  background: rgba(10, 10, 12, 0.40);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 18px;
+}
+.related-head { margin-bottom: 14px; }
+.related-title {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 600;
+  font-size: 22px;
+  margin: 0 0 4px;
+  color: rgba(255,255,255,0.92);
+}
+.related-sub {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: rgba(255,255,255,0.62);
+}
+.related-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.rel-card {
+  text-decoration: none;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  overflow: hidden;
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+.rel-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 220, 150, 0.22);
+}
+.rel-img {
+  height: 120px;
+  background:
+    radial-gradient(700px 220px at 20% 20%, rgba(255, 210, 120, 0.10), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+    var(--img, none);
+  background-size: cover;
+  background-position: center;
+}
+.rel-meta { padding: 10px 10px 12px; }
+.rel-title {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: rgba(255,255,255,0.86);
+  margin-bottom: 6px;
+}
+.rel-price {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 12px;
+  color: rgba(255, 220, 150, 0.90);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 9999;
+  border-radius: 999px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(10,10,12,0.72);
+  color: rgba(255,255,255,0.88);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-2px);
+}
+
+/* Responsive */
+@media (max-width: 980px) {
+  .item-skeleton, .item-grid { grid-template-columns: 1fr; }
+  .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .item-hero { height: min(420px, 48vh); }
+}
+
+/* =========================================
+   ITEM HEADER — CLEAN SINGLE ROW (OG LUX)
+   One color system, one row, no crowding
+   ========================================= */
+
+.og-header{
+  position: sticky;
+  top: 0;
+  z-index: 60;
+
+  /* unified dark/glass look */
+  background: rgba(7,7,8,0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+}
+
+.og-header-inner{
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 0;
+}
+
+/* Brand */
+.og-brand{
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: rgba(244,242,237,0.95);
+  min-width: 0;
+}
+
+.og-brand-mark{
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+
+  font-weight: 800;
+  letter-spacing: 0.08em;
+
+  background:
+    radial-gradient(circle at 30% 30%, rgba(234,195,90,.28), rgba(255,255,255,.04)),
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+  border: 1px solid rgba(234,195,90,.22);
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+  color: rgba(247,231,168,0.95);
+}
+
+.og-brand-name{
+  font-family: "Cormorant Garamond", ui-serif, Georgia, serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Nav (center) */
+.og-nav{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  min-width: 0;
+}
+
+.og-nav-link{
+  position: relative;
+  text-decoration: none;
+  color: rgba(244,242,237,0.72);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 10px 2px;
+  white-space: nowrap;
+  transition: color 180ms ease, transform 180ms ease;
+}
+
+.og-nav-link:hover{
+  color: rgba(244,242,237,0.94);
+  transform: translateY(-1px);
+}
+
+.og-nav-link::after{
+  content:"";
+  position:absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(234,195,90,.55), transparent);
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.og-nav-link:hover::after{
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Actions (right) */
+.og-actions{
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.og-iconbtn{
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: rgba(244,242,237,0.90);
+
+  cursor: pointer;
+  text-decoration: none;
+
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.og-iconbtn:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.16);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.25);
+}
+
+.og-iconbtn:active{
+  transform: translateY(0) scale(0.98);
+}
+
+.og-icon{
+  font-size: 16px;
+  transform: translateY(-0.5px);
+}
+
+/* Cart badge */
+.og-cartbtn .cart-badge{
+  position: absolute;
+  top: 6px;
+  right: 6px;
+
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1;
+
+  background: rgba(0,0,0,0.70);
+  color: rgba(247,231,168,0.95);
+  border: 1px solid rgba(234,195,90,0.28);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.30);
+}
+
+/* Responsive: keep one row, reduce crowding */
+@media (max-width: 980px){
+  .og-nav{
+    justify-content: flex-start;
+    gap: 16px;
+  }
+  .og-nav-link{
+    font-size: 11px;
+    letter-spacing: 0.12em;
+  }
+}
+
+@media (max-width: 760px){
+  /* On small screens, hide nav to prevent crowding */
+  .og-nav{ display: none; }
+  .og-header-inner{
+    grid-template-columns: 1fr auto;
+  }
+}
+
+@media (max-width: 420px){
+  .og-brand-name{ font-size: 18px; }
+  .og-iconbtn{ width: 40px; height: 40px; }
+}

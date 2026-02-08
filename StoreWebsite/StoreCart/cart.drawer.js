@@ -33,6 +33,9 @@
     return `$${x.toFixed(2)}`;
   };
 
+    // Product details page link (item.html sits in the site root)
+  const itemHrefFor = (id) => `item.html?id=${encodeURIComponent(String(id || ""))}`;
+
   const readCart = () => {
     const raw = localStorage.getItem(CART_KEY);
     if (!raw) return { version: VERSION, items: [], updated_at: new Date().toISOString() };
@@ -262,12 +265,14 @@
       const cd = formatCountdown(line?.price_lock_expires_at);
       const node = row.querySelector("[data-ui='lock']") || row.querySelector(".cd-lock");
       if (node) {
-        node.textContent = cd ? `LOCKED: ${cd}` : "LOCKED";
-      } else {
-        // fallback: update the second span in .cd-row
-        const spans = row.querySelectorAll(".cd-row span");
-        if (spans && spans.length >= 2) spans[1].textContent = cd ? `LOCKED: ${cd}` : "LOCKED";
-      }
+  node.textContent = cd ? `Time remaining: ${cd}` : "Time remaining: 0:00";
+} else {
+  const spans = row.querySelectorAll(".cd-row span");
+  if (spans && spans.length >= 2) {
+    spans[1].textContent = cd ? `Time remaining: ${cd}` : "Time remaining: 0:00";
+  }
+}
+
     });
   }
 
@@ -304,21 +309,25 @@
 
       const cd = formatCountdown(line?.price_lock_expires_at);
 
-      return `
+                  return `
         <div class="cd-line" data-id="${id}">
-          <div class="cd-thumb">
-            ${img ? `<img src="${img}" alt="${title.replaceAll('"', "&quot;")}" loading="lazy">` : ``}
-          </div>
-
-          <div class="cd-meta">
-            <div class="cd-name">${title}</div>
-            ${desc ? `<div class="cd-desc">${desc}</div>` : ``}
-            <div class="cd-row">
-              <span class="cd-price">${money(price)}</span>
-              ${cd ? `<span data-ui="lock">LOCKED: ${cd}</span>` : `<span data-ui="lock">LOCKED</span>`}
+          <!-- Clickable product area -->
+          <a class="cd-link" href="item.html?id=${encodeURIComponent(id)}" aria-label="View ${title.replaceAll('"', "&quot;")}">
+            <div class="cd-thumb">
+              ${img ? `<img src="${img}" alt="${title.replaceAll('"', "&quot;")}" loading="lazy">` : ``}
             </div>
-          </div>
 
+            <div class="cd-meta">
+              <div class="cd-name">${title}</div>
+              ${desc ? `<div class="cd-desc">${desc}</div>` : ``}
+              <div class="cd-row">
+                <span class="cd-price">${money(price)}</span>
+                <span data-ui="lock" class="cd-lockText">${cd ? `Time remaining: ${cd}` : `Time remaining: 0:00`}</span>
+              </div>
+            </div>
+          </a>
+
+          <!-- Controls stay separate and never navigate -->
           <div class="cd-controls">
             <button class="cd-x" type="button" data-action="remove-line" aria-label="Remove item">×</button>
 
@@ -330,6 +339,8 @@
           </div>
         </div>
       `;
+
+
     }).join("");
 
     r.subtotal.textContent = money(computeSubtotal(items));
@@ -410,6 +421,24 @@
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         e.preventDefault();
         await openProgrammatic();
+        return;
+      }
+      // If user clicks the product link inside the drawer, close first, then navigate
+      const productLink = e.target.closest(".cd-link");
+      if (productLink) {
+        // Only intercept normal left-click navigation
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+
+        e.preventDefault();
+
+        // Close drawer first (keeps it feeling premium)
+        closeProgrammatic();
+
+        // Navigate after close animation completes (matches setOpen(false) timeout)
+        window.setTimeout(() => {
+          window.location.assign(productLink.href);
+        }, 240);
+
         return;
       }
 

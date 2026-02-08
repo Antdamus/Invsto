@@ -432,8 +432,48 @@
     </div>
   </aside>
 
-  <!-- Quick View Modal (optional; JS can implement later) -->
-  <div id="modalRoot" class="modal-root" aria-hidden="true"></div>
+   <!-- Quick View Modal (same vibe as index) -->
+  <div class="modal-backdrop" data-ui="modal-backdrop" hidden></div>
+
+  <section class="modal" role="dialog" aria-modal="true" aria-label="Quick view" data-ui="quickview" hidden>
+    <div class="modal-shell">
+      <div class="modal-top">
+        <div class="modal-title" data-ui="qv-title">Quick View</div>
+
+        <button class="btn ghost icon-only" type="button" aria-label="Close" data-action="close-quickview">
+          ✕
+        </button>
+      </div>
+
+      <div class="modal-grid">
+        <div class="modal-media">
+          <div class="modal-img" data-ui="qv-img" style="--img:url('');"></div>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-badges" data-ui="qv-badges"></div>
+          <h3 class="modal-h" data-ui="qv-h">Item</h3>
+          <p class="modal-p" data-ui="qv-p">Description…</p>
+
+          <div class="modal-row">
+            <div class="modal-price" data-ui="qv-price">$0.00</div>
+
+            <div class="modal-actions">
+              <button class="btn ghost" type="button" data-ui="qv-add" data-action="add-to-cart">
+                Add to cart
+              </button>
+              <a class="btn primary" href="item.html" data-ui="qv-link">View in shop →</a>
+            </div>
+          </div>
+
+          <div class="modal-note" data-ui="qv-note">
+            Premium sourcing • Fast shipping • Limited drops
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
 
   <!-- Toast (JS creates if needed; leaving container helps) -->
   <div class="toast" aria-live="polite" role="status" hidden></div>

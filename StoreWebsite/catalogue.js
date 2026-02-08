@@ -501,18 +501,19 @@ const mapStoreItemToProduct = (it) => {
   const material = normalizeToken(it.material || "");
 
   return {
-    id: String(it.item_type_id),
-    name: String(it.title || ""),
-    // For display
-    category: primaryCategory,
-    // For filtering
-    categories,
-    material,
-    price: toNum(it.display_price),
-    tags,
-    created_at: new Date().toISOString(), // upgrade later if RPC provides created_at
-    image: it.image_url || FALLBACK_IMAGE,
-  };
+  id: String(it.item_type_id),
+  name: String(it.title || ""),
+  description: String(it.description || ""),          // ✅ NEW (for quick view)
+  remaining_count: Number(it.remaining_count),        // ✅ NEW (optional: later stock messaging)
+  category: primaryCategory,
+  categories,
+  material,
+  price: toNum(it.display_price),
+  tags,
+  created_at: new Date().toISOString(),
+  image: it.image_url || FALLBACK_IMAGE,
+};
+
 };
 
 
@@ -617,6 +618,63 @@ const navCloseBtn = qs(".nav-drawer-close");
   const toastEl = qs(".toast");
   let toastTimer = null;
 
+    /* =========================
+     Quick View Modal (index-style)
+  ========================= */
+  const qv = qs('[data-ui="quickview"]');
+  const qvBackdrop = qs('[data-ui="modal-backdrop"]');
+
+  const qvTitle = qs('[data-ui="qv-title"]');
+  const qvImg = qs('[data-ui="qv-img"]');
+  const qvBadges = qs('[data-ui="qv-badges"]');
+  const qvH = qs('[data-ui="qv-h"]');
+  const qvP = qs('[data-ui="qv-p"]');
+  const qvPrice = qs('[data-ui="qv-price"]');
+  const qvLink = qs('[data-ui="qv-link"]');
+  const qvAdd = qs('[data-ui="qv-add"]');
+
+  let activeQuickviewId = null;
+
+  const isQuickviewOpen = () => !!qv && !qv.hidden;
+
+  const openQuickview = (item) => {
+    if (!qv || !qvBackdrop || !item) return;
+
+    activeQuickviewId = String(item.id);
+
+    if (qvTitle) qvTitle.textContent = "Quick View";
+    if (qvH) qvH.textContent = item.name || "Item";
+    if (qvP) qvP.textContent = item.description || "No description yet.";
+    if (qvPrice) qvPrice.textContent = formatUSD(item.price);
+
+    if (qvImg) qvImg.style.setProperty("--img", `url("${item.image || ""}")`);
+
+    // badges from tags (simple + consistent)
+    if (qvBadges) {
+      const tags = (item.tags || []).slice(0, 3);
+      qvBadges.innerHTML = tags.map(t => `<span class="badge">${esc(humanize("tag", t))}</span>`).join("");
+    }
+
+    // ✅ This is the key: "View in shop" -> item page
+    if (qvLink) qvLink.href = `item.html?id=${encodeURIComponent(String(item.id))}`;
+
+    // make the modal’s Add-to-cart button reuse the existing handler
+    if (qvAdd) qvAdd.dataset.id = String(item.id);
+
+    qvBackdrop.hidden = false;
+    qv.hidden = false;
+    document.documentElement.style.overflow = "hidden";
+  };
+
+  const closeQuickview = () => {
+    if (!qv || !qvBackdrop) return;
+    qv.hidden = true;
+    qvBackdrop.hidden = true;
+    document.documentElement.style.overflow = "";
+    activeQuickviewId = null;
+  };
+
+  
   /* =========================
      Header elevate on scroll
   ========================= */
@@ -1042,12 +1100,13 @@ const toggleNavDrawer = () => {
     .map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`)
     .join("");
 
+  const href = `item.html?id=${encodeURIComponent(p.id)}`;
+
   return `
     <article class="product-card" data-id="${esc(p.id)}">
-      <button class="product-hit" type="button"
-              data-action="quick-view"
-              data-id="${esc(p.id)}"
-              aria-label="Quick view ${esc(p.name)}">
+      <a class="product-hit"
+         href="${href}"
+         aria-label="View details for ${esc(p.name)}">
         <div class="product-media">
           <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
         </div>
@@ -1063,7 +1122,7 @@ const toggleNavDrawer = () => {
           </div>
           <div class="product-tags">${tags}</div>
         </div>
-      </button>
+      </a>
 
       <div class="product-actions">
         <button class="btn ghost" type="button"
@@ -1075,6 +1134,7 @@ const toggleNavDrawer = () => {
     </article>
   `;
 };
+
 
 
   const render = () => {
@@ -1257,6 +1317,24 @@ const wireGlobalClicks = () => {
       return;
     }
 
+        // Close quick view
+    if (action === "close-quickview") {
+      closeQuickview();
+      return;
+    }
+
+      // Backdrop closes quick view
+  document.addEventListener("click", (e) => {
+    if (qvBackdrop && e.target === qvBackdrop && isQuickviewOpen()) {
+      closeQuickview();
+    }
+  });
+
+  // Escape closes quick view
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isQuickviewOpen()) closeQuickview();
+  });
+
     // ✅ 2) Then handle data-action clicks
     const el = e.target.closest("[data-action]");
     if (!el) return;
@@ -1319,6 +1397,14 @@ const wireGlobalClicks = () => {
       return;
     }
 
+    if (action === "quick-view") {
+      const id = el.dataset.id;
+      const item = PRODUCTS.find((p) => p.id === id);
+      if (item) openQuickview(item);
+      return;
+    }
+
+
     // Add to cart
     if (action === "add-to-cart") {
       const id = el.dataset.id;
@@ -1342,12 +1428,7 @@ const wireGlobalClicks = () => {
       return;
     }
 
-    if (action === "quick-view") {
-      const id = el.dataset.id;
-      const item = PRODUCTS.find((p) => p.id === id);
-      if (item) toast(item.name);
-      return;
-    }
+  
   });
 };
 

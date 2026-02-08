@@ -1,0 +1,170 @@
+<!-- item.html — OG Jewelers (Product Details) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelers — Item</title>
+
+  <!-- Fonts (match your pages) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Base styles (match catalogue/index look) -->
+  <link rel="stylesheet" href="catalogue.css" />
+  <link rel="stylesheet" href="item.css" />
+
+  <!-- Cart drawer styles -->
+  <link rel="stylesheet" href="cart.drawer.css" />
+
+  <!-- Drawer hydration config (same pattern as index.html) -->
+  <script>
+    (function () {
+      window.OG_CART_DRAWER_CFG = {
+        supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+        channel: "og_main",
+        fn: "storefront-catalog"
+      };
+    })();
+  </script>
+
+  <!-- Drawer logic -->
+  <script src="cart.drawer.js" defer></script>
+
+  <!-- Item page logic -->
+  <script src="item.js" defer></script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+ <header class="site-header og-header" data-elevate-on-scroll>
+  <div class="container og-header-inner">
+    <!-- Brand -->
+    <a class="og-brand" href="index.html" aria-label="OG Jewelry Home">
+      <span class="og-brand-mark" aria-hidden="true">OG</span>
+      <span class="og-brand-name">OG Jewelry</span>
+    </a>
+
+    <!-- Nav -->
+    <nav class="og-nav" aria-label="Primary navigation">
+      <a class="og-nav-link" href="catalogue.html">Shop</a>
+      <a class="og-nav-link" href="index.html#collections">Collections</a>
+      <a class="og-nav-link" href="index.html#story">Story</a>
+      <a class="og-nav-link" href="index.html#contact">Contact</a>
+    </nav>
+
+    <!-- Actions -->
+    <div class="og-actions" aria-label="Header actions">
+      <a class="og-iconbtn" href="catalogue.html" aria-label="Search">
+        <span class="og-icon" aria-hidden="true">⌕</span>
+      </a>
+
+      <a class="og-iconbtn" href="access.html" aria-label="Login">
+        <span class="og-icon" aria-hidden="true">👤</span>
+      </a>
+
+      <button class="og-iconbtn og-cartbtn" type="button" aria-label="Cart" data-action="open-cart-drawer">
+        <span class="og-icon" aria-hidden="true">🛒</span>
+        <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+
+
+
+  <main id="main" class="container item-page">
+    <div class="item-error" data-ui="item-error" hidden></div>
+
+    <!-- Skeleton -->
+    <section class="item-skeleton" data-ui="item-skeleton">
+      <div class="sk-hero"></div>
+      <div class="sk-lines">
+        <div class="sk-line w60"></div>
+        <div class="sk-line w30"></div>
+        <div class="sk-line w80"></div>
+        <div class="sk-line w75"></div>
+      </div>
+    </section>
+
+    <!-- Actual content -->
+    <section class="item-wrap" data-ui="item-wrap" hidden>
+      <div class="item-grid">
+        <div class="item-hero" data-ui="item-hero" role="img" aria-label="Item image"></div>
+
+        <div class="item-info">
+          <div class="item-top">
+            <a class="item-back" href="catalogue.html">← Back to Shop</a>
+            <span class="item-stock" data-ui="item-stock" data-tone="ok">In Stock</span>
+          </div>
+
+          <h1 class="item-title" data-ui="item-title">Item</h1>
+          <div class="item-price" data-ui="item-price">$0.00</div>
+
+          <p class="item-desc" data-ui="item-desc">Description...</p>
+
+          <div class="item-actions">
+  <button class="btn solid item-add" type="button" data-action="add-to-cart">Add to Cart</button>
+  <button class="btn ghost item-open-cart" type="button" data-action="open-cart-drawer">View Cart</button>
+</div>
+
+<div class="item-fineprint">
+  Price locks for 15 minutes after you add to cart.
+</div>
+
+        </div>
+      </div>
+
+      <!-- Related -->
+      <section class="related" data-ui="related-wrap" hidden>
+        <div class="related-head">
+          <h2 class="related-title">You may also like</h2>
+          <div class="related-sub">Curated picks based on similar categories/material.</div>
+        </div>
+        <div class="related-grid" data-ui="related-grid"></div>
+      </section>
+    </section>
+  </main>
+
+  <!-- Toast -->
+  <div class="toast" hidden aria-live="polite"></div>
+
+  <!-- =========================
+       Cart Drawer (mini cart)
+       Copied from your index.html
+       ========================= -->
+  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+    <div class="cd-topbar">
+      <div class="cd-titlewrap">
+        <div class="cd-title">Cart</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+      </div>
+
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+    </div>
+
+    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+    <div class="cd-list" data-ui="cart-drawer-list"></div>
+    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+    <div class="cd-footer">
+      <div class="cd-summary">
+        <div>Subtotal</div>
+        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+      </div>
+
+      <div class="cd-actionsRow">
+        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+      </div>
+    </div>
+  </aside>
+</body>
+</html>
