@@ -120,6 +120,47 @@
   background: rgba(255, 40, 40, 0.08);
   color: rgba(255, 235, 235, 0.95);
 }
+/* Stock pill micro-interactions */
+.item-stock {
+  transform: translateZ(0);
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.item-stock.is-pop {
+  animation: ogPillPop 520ms ease-out;
+}
+
+.item-stock[data-tone="warn"].is-alert {
+  animation: ogPillWarn 950ms ease-in-out;
+}
+
+.item-stock[data-tone="bad"].is-alert {
+  animation: ogPillBad 950ms ease-in-out;
+}
+
+@keyframes ogPillPop {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+@keyframes ogPillWarn {
+  0%   { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255, 210, 120, 0)); }
+  40%  { transform: scale(1.06); filter: drop-shadow(0 0 14px rgba(255, 210, 120, 0.28)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255, 210, 120, 0)); }
+}
+
+@keyframes ogPillBad {
+  0%   { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0)); }
+  40%  { transform: scale(1.06); filter: drop-shadow(0 0 14px rgba(255, 80, 80, 0.26)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-stock { transition: none; }
+  .item-stock.is-pop,
+  .item-stock.is-alert { animation: none; }
+}
 
 .item-title {
   font-family: "Cormorant Garamond", serif;
@@ -152,6 +193,46 @@
   align-items: center;
   margin-bottom: 10px;
 }
+
+/* CTA micro-interactions (no layout/visual changes, just motion) */
+.item-add,
+.item-open-cart {
+  flex: 1;
+  border-radius: 14px;
+  transform: translateZ(0);
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.item-add:active,
+.item-open-cart:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.item-add.is-press,
+.item-open-cart.is-press {
+  animation: ogCtaPress 220ms ease-out;
+}
+
+@keyframes ogCtaPress {
+  0%   { transform: translateY(0) scale(1); }
+  45%  { transform: translateY(1px) scale(0.985); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item-add,
+  .item-open-cart {
+    transition: none;
+  }
+  .item-add.is-press,
+  .item-open-cart.is-press {
+    animation: none;
+  }
+}
+
 
 /* =========================
    Item page CTAs (match View Cart look)
@@ -487,4 +568,223 @@
 @media (max-width: 420px){
   .og-brand-name{ font-size: 18px; }
   .og-iconbtn{ width: 40px; height: 40px; }
+}
+
+/* =========================================================
+   OG Header (Item Page) — clean single-row + mobile drawer
+   ========================================================= */
+
+/* Make sure header stays one row and never looks crowded */
+.og-header .og-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+/* Brand */
+.og-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.og-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255, 220, 150, 0.95);
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+
+.og-brand-name {
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* Desktop nav */
+.og-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.og-nav-link {
+  text-decoration: none;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: rgba(255,255,255,0.72);
+}
+
+.og-nav-link:hover {
+  color: rgba(255, 220, 150, 0.92);
+}
+
+/* Right actions */
+.og-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.og-iconbtn {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.og-loginbtn {
+  height: 42px;
+  border-radius: 14px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Mobile nav toggle (hamburger) */
+.og-navtoggle {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: none; /* show on mobile only */
+}
+
+.og-hamburger {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.og-hamburger i {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(255,255,255,0.78);
+}
+
+/* Mobile drawer */
+.og-navbackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 9998;
+}
+
+.og-navdrawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: min(360px, 88vw);
+  z-index: 9999;
+  border-right: 1px solid rgba(255,255,255,0.10);
+  background: rgba(9,9,10,0.86);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transform: translateX(-102%);
+  transition: transform 220ms ease;
+  padding: 14px;
+}
+
+.og-navdrawer[aria-hidden="false"] {
+  transform: translateX(0);
+}
+
+.og-navdrawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 10px;
+}
+
+.og-navdrawer-title {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  color: rgba(255,255,255,0.70);
+}
+
+.og-navdrawer-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.85);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.og-navdrawer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.og-navdrawer-links a {
+  text-decoration: none;
+  border-radius: 14px;
+  padding: 12px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.82);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 14px;
+}
+
+.og-navdrawer-links a:hover {
+  border-color: rgba(255, 220, 150, 0.22);
+  color: rgba(255, 220, 150, 0.92);
+}
+
+.og-navdrawer-cart {
+  margin-top: 6px;
+  border-radius: 14px;
+  padding: 12px 12px;
+  border: 1px solid rgba(255, 220, 150, 0.22);
+  background: rgba(255, 210, 120, 0.10);
+  color: rgba(255, 240, 220, 0.92);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* CTA unify: Add-to-cart matches View Cart (ghost) but with subtle gold edge */
+.item-actions .og-cta {
+  border-color: rgba(255, 220, 150, 0.20);
+}
+
+.item-actions .og-cta:hover {
+  border-color: rgba(255, 220, 150, 0.34);
+  transform: translateY(-1px);
+}
+
+/* Responsive: desktop nav collapses to hamburger */
+@media (max-width: 860px) {
+  .og-nav { display: none; }
+  .og-navtoggle { display: inline-flex; }
+  .og-brand-name { display: none; } /* keeps it clean on small screens */
 }

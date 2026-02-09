@@ -1,3 +1,8 @@
+<!-- JS (Supabase MUST load before initSupabase.js) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+<script src="initSupabase.js" defer></script>
+
+
 <!-- item.html — OG Jewelers (Product Details) -->
 <!DOCTYPE html>
 <html lang="en">
@@ -40,42 +45,91 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
- <header class="site-header og-header" data-elevate-on-scroll>
-  <div class="container og-header-inner">
-    <!-- Brand -->
-    <a class="og-brand" href="index.html" aria-label="OG Jewelry Home">
-      <span class="og-brand-mark" aria-hidden="true">OG</span>
-      <span class="og-brand-name">OG Jewelry</span>
-    </a>
-
-    <!-- Nav -->
-    <nav class="og-nav" aria-label="Primary navigation">
-      <a class="og-nav-link" href="catalogue.html">Shop</a>
-      <a class="og-nav-link" href="index.html#collections">Collections</a>
-      <a class="og-nav-link" href="index.html#story">Story</a>
-      <a class="og-nav-link" href="index.html#contact">Contact</a>
-    </nav>
-
-    <!-- Actions -->
-    <div class="og-actions" aria-label="Header actions">
-      <a class="og-iconbtn" href="catalogue.html" aria-label="Search">
-        <span class="og-icon" aria-hidden="true">⌕</span>
-      </a>
-
-      <a class="og-iconbtn" href="access.html" aria-label="Login">
-        <span class="og-icon" aria-hidden="true">👤</span>
-      </a>
-
-      <button class="og-iconbtn og-cartbtn" type="button" aria-label="Cart" data-action="open-cart-drawer">
-        <span class="og-icon" aria-hidden="true">🛒</span>
-        <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+   <!-- Header -->
+  <header class="site-header og-header" data-elevate-on-scroll>
+    <div class="container header-inner og-header-inner">
+      <!-- Mobile menu button -->
+      <button class="btn ghost icon-only og-iconbtn og-navtoggle"
+              type="button"
+              aria-label="Open menu"
+              aria-controls="ogNavDrawer"
+              aria-expanded="false"
+              data-action="open-nav-drawer">
+        <span class="og-hamburger" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
       </button>
-    </div>
+
+      <!-- Brand -->
+      <a class="brand og-brand" href="index.html" aria-label="OG Jewelers Home">
+        <span class="brand-mark og-brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name og-brand-name">OG Jewelers</span>
+      </a>
+
+      <!-- Desktop nav -->
+      <nav class="nav og-nav" aria-label="Primary navigation">
+        <a class="nav-link og-nav-link" href="catalogue.html">Shop</a>
+        <a class="nav-link og-nav-link" href="index.html#collections">Collections</a>
+        <a class="nav-link og-nav-link" href="index.html#story">Story</a>
+        <a class="nav-link og-nav-link" href="index.html#contact">Contact</a>
+      </nav>
+
+      <div class="header-actions">
+  <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
+    <span aria-hidden="true">⌕</span>
+  </button>
+
+  <!-- Logged OUT: show Login -->
+  <a class="btn btn-ghost og-loginbtn" href="join.html" data-ui="access-btn">Login</a>
+
+  <!-- Logged IN: show initials chip -->
+  <button class="acct-chip" type="button" aria-label="Account" data-ui="acct-chip" hidden>
+    <span class="acct-initials" data-ui="acct-initials">M</span>
+  </button>
+
+  <!-- Account menu -->
+  <div class="acct-menu" data-ui="acct-menu" aria-hidden="true" hidden>
+    <a class="acct-menu-item" href="profile.html">Account</a>
+    <button class="acct-menu-item danger" type="button" data-action="signout">Sign out</button>
   </div>
-</header>
 
+  <a class="icon-btn" href="./StoreCart/cart.html" aria-label="Cart">
+    <span aria-hidden="true">🛒</span>
+    <span class="cart-badge" data-ui="cart-badge" hidden>0</span>
+  </a>
+</div>
 
+  </header>
 
+  <!-- Mobile Nav Drawer -->
+  <div class="og-navbackdrop" data-ui="nav-drawer-backdrop" hidden></div>
+
+  <aside class="og-navdrawer" id="ogNavDrawer" data-ui="nav-drawer" aria-hidden="true" hidden>
+    <div class="og-navdrawer-top">
+      <div class="og-navdrawer-title">Menu</div>
+      <button class="og-navdrawer-close" type="button" aria-label="Close menu" data-action="close-nav-drawer">×</button>
+    </div>
+
+   <nav class="nav-drawer" aria-label="Mobile navigation">
+  <!-- Logged OUT -->
+  <a class="nav-drawer-link" href="join.html" data-ui="mobile-access">Login</a>
+
+  <!-- Logged IN -->
+  <a class="nav-drawer-link" href="profile.html" data-ui="drawer-account" hidden>
+    <span class="nav-drawer-initials" aria-hidden="true"><span data-ui="drawer-initials">M</span></span>
+    <span>Account</span>
+  </a>
+
+  <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
+
+  <!-- Your existing links -->
+  <a class="nav-drawer-link" href="catalogue.html">Shop</a>
+  <a class="nav-drawer-link" href="index.html#collections">Collections</a>
+  <a class="nav-drawer-link" href="index.html#story">Story</a>
+  <a class="nav-drawer-link" href="index.html#contact">Contact</a>
+</nav>
+
+  </aside>
 
   <main id="main" class="container item-page">
     <div class="item-error" data-ui="item-error" hidden></div>
@@ -97,25 +151,30 @@
         <div class="item-hero" data-ui="item-hero" role="img" aria-label="Item image"></div>
 
         <div class="item-info">
+          <!-- Keep stock visible early -->
           <div class="item-top">
-            <a class="item-back" href="catalogue.html">← Back to Shop</a>
             <span class="item-stock" data-ui="item-stock" data-tone="ok">In Stock</span>
           </div>
 
+          <!-- Primary hierarchy -->
           <h1 class="item-title" data-ui="item-title">Item</h1>
           <div class="item-price" data-ui="item-price">$0.00</div>
 
+          <!-- CTAs moved above long text -->
+          <div class="item-actions">
+            <button class="btn ghost item-add og-cta" type="button" data-action="add-to-cart">Add to Cart</button>
+            <button class="btn ghost item-open-cart" type="button" data-action="open-cart-drawer">View Cart</button>
+          </div>
+
+          <div class="item-fineprint">
+            Price locks for 15 minutes after you add to cart.
+          </div>
+
+          <!-- Description moved later -->
           <p class="item-desc" data-ui="item-desc">Description...</p>
 
-          <div class="item-actions">
-  <button class="btn solid item-add" type="button" data-action="add-to-cart">Add to Cart</button>
-  <button class="btn ghost item-open-cart" type="button" data-action="open-cart-drawer">View Cart</button>
-</div>
-
-<div class="item-fineprint">
-  Price locks for 15 minutes after you add to cart.
-</div>
-
+          <!-- Back link moved to the bottom so it doesn't compete -->
+          <a class="item-back" href="catalogue.html">← Back to Shop</a>
         </div>
       </div>
 

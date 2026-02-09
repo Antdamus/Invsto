@@ -12,6 +12,63 @@
   "use strict";
 
   /* =========================
+     Nav drawer (mobile header)
+  ========================= */
+  function setAriaHidden(el, hidden) {
+    if (!el) return;
+    el.setAttribute("aria-hidden", hidden ? "true" : "false");
+  }
+
+  function lockScroll(on) {
+    document.documentElement.style.overflow = on ? "hidden" : "";
+    document.body.style.overflow = on ? "hidden" : "";
+  }
+
+  function navRefs() {
+    return {
+      btn: document.querySelector('[data-action="open-nav-drawer"]'),
+      backdrop: document.querySelector('[data-ui="nav-drawer-backdrop"]'),
+      drawer: document.querySelector('[data-ui="nav-drawer"]'),
+    };
+  }
+
+  function isNavOpen() {
+    const { drawer } = navRefs();
+    return !!drawer && drawer.getAttribute("aria-hidden") === "false";
+  }
+
+  function openNav() {
+    const { btn, backdrop, drawer } = navRefs();
+    if (!backdrop || !drawer) return;
+
+    backdrop.hidden = false;
+    drawer.hidden = false;
+    setAriaHidden(drawer, false);
+    if (btn) btn.setAttribute("aria-expanded", "true");
+
+    lockScroll(true);
+
+    // focus first link for accessibility
+    const first = drawer.querySelector("a, button");
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function closeNav() {
+    const { btn, backdrop, drawer } = navRefs();
+    if (!backdrop || !drawer) return;
+
+    setAriaHidden(drawer, true);
+    drawer.hidden = true;
+    backdrop.hidden = true;
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      btn.focus({ preventScroll: true });
+    }
+
+    lockScroll(false);
+  }
+
+  /* =========================
      Config (match catalogue.js)
   ========================= */
   const SUPABASE_PROJECT_URL = "https://byhytmarmigalvawkedi.supabase.co";
@@ -247,12 +304,43 @@
         if (typeof window.ogCartDrawerOpen === "function") window.ogCartDrawerOpen();
         return;
       }
+
+            if (action === "open-nav-drawer") {
+        e.preventDefault();
+        openNav();
+        return;
+      }
+
+      if (action === "close-nav-drawer") {
+        e.preventDefault();
+        closeNav();
+        return;
+      }
+
     });
   }
 
   async function init() {
     setLoading(true);
     clearError();
+    
+    // nav drawer: close on backdrop click + escape + link click
+    const { backdrop, drawer } = navRefs();
+
+    if (backdrop) {
+      backdrop.addEventListener("click", () => closeNav());
+    }
+
+    if (drawer) {
+      drawer.addEventListener("click", (e) => {
+        const a = e.target.closest("a");
+        if (a) closeNav();
+      });
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && isNavOpen()) closeNav();
+    });
 
     const id = getIdFromUrl();
     if (!id) {
@@ -321,4 +409,193 @@
   }
 
   document.addEventListener("DOMContentLoaded", init);
+
+  /* =========================
+   Auth UI (Login ↔ Initials)
+   (matches index/catalogue behavior)
+========================= */
+
+function getSupabaseClientIfReady() {
+  const c = window.supabaseClient || window.supabase;
+  if (c && c.auth && typeof c.auth.getSession === "function") return c;
+  return null;
+}
+
+function waitForSupabaseReady(timeoutMs = 3500) {
+  return new Promise((resolve) => {
+    const readyNow = getSupabaseClientIfReady();
+    if (readyNow) return resolve(readyNow);
+
+    const onReady = () => {
+      document.removeEventListener("supabase-ready", onReady);
+      resolve(getSupabaseClientIfReady() || null);
+    };
+
+    document.addEventListener("supabase-ready", onReady);
+
+    const t0 = Date.now();
+    const timer = setInterval(() => {
+      const client = getSupabaseClientIfReady();
+      if (client) {
+        clearInterval(timer);
+        document.removeEventListener("supabase-ready", onReady);
+        resolve(client);
+      } else if (Date.now() - t0 > timeoutMs) {
+        clearInterval(timer);
+        document.removeEventListener("supabase-ready", onReady);
+        resolve(null);
+      }
+    }, 60);
+  });
+}
+
+function computeInitials(user) {
+  const meta = user?.user_metadata || {};
+  const full = String(meta.full_name || meta.name || "").trim();
+
+  if (full) {
+    const parts = full.split(/\s+/).filter(Boolean);
+    const a = (parts[0]?.[0] || "").toUpperCase();
+    const b = (parts[1]?.[0] || "").toUpperCase();
+    return (a + b) || "M";
+  }
+
+  const email = String(user?.email || "").trim();
+  if (email) return (email[0] || "M").toUpperCase();
+
+  return "M";
+}
+
+function setHardHidden(el, shouldHide, showDisplay = "") {
+  if (!el) return;
+  if (shouldHide) {
+    el.hidden = true;
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+  } else {
+    el.hidden = false;
+    el.style.display = showDisplay || "";
+    el.setAttribute("aria-hidden", "false");
+  }
+}
+
+function closeAcctMenu() {
+  const menu = document.querySelector('[data-ui="acct-menu"]');
+  if (!menu) return;
+  menu.hidden = true;
+  menu.setAttribute("aria-hidden", "true");
+}
+
+function openAcctMenu() {
+  const menu = document.querySelector('[data-ui="acct-menu"]');
+  if (!menu) return;
+  menu.hidden = false;
+  menu.setAttribute("aria-hidden", "false");
+}
+
+function wireAcctMenu(sb) {
+  const chip = document.querySelector('[data-ui="acct-chip"]');
+  const menu = document.querySelector('[data-ui="acct-menu"]');
+  if (!chip || !menu) return;
+
+  // Toggle menu
+  chip.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (menu.hidden) openAcctMenu();
+    else closeAcctMenu();
+  });
+
+  // Click outside closes
+  document.addEventListener("click", () => closeAcctMenu());
+
+  // Sign out handler
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest('[data-action="signout"]');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      await sb?.auth?.signOut?.();
+    } catch {}
+
+    // Return to index and bust cache so UI updates immediately
+    const bust = Date.now();
+    window.location.replace(`index.html?logout=1&bust=${bust}`);
+  });
+}
+
+async function applyAuthUI(sb) {
+  const accessBtn = document.querySelector('[data-ui="access-btn"]');
+  const chip = document.querySelector('[data-ui="acct-chip"]');
+  const initialsEl = document.querySelector('[data-ui="acct-initials"]');
+
+  const drawerAccount = document.querySelector('[data-ui="drawer-account"]');
+  const drawerDivider = document.querySelector('[data-ui="drawer-divider"]');
+  const drawerInitials = document.querySelector('[data-ui="drawer-initials"]');
+  const mobileAccess = document.querySelector('[data-ui="mobile-access"]');
+
+  // Baseline: hide auth-dependent elements until session known
+  setHardHidden(chip, true);
+  if (initialsEl) initialsEl.textContent = "";
+  setHardHidden(drawerAccount, true);
+  setHardHidden(drawerDivider, true);
+
+  // Session check
+  let session = null;
+  try {
+    const { data } = await sb.auth.getSession();
+    session = data?.session || null;
+  } catch {}
+
+  if (session?.user) {
+    const initials = computeInitials(session.user);
+
+    if (initialsEl) initialsEl.textContent = initials;
+    if (drawerInitials) drawerInitials.textContent = initials;
+
+    setHardHidden(accessBtn, true);
+    setHardHidden(mobileAccess, true);
+
+    setHardHidden(chip, false, "inline-flex");
+    setHardHidden(drawerAccount, false, "");
+    setHardHidden(drawerDivider, false, "");
+  } else {
+    setHardHidden(chip, true);
+    setHardHidden(drawerAccount, true);
+    setHardHidden(drawerDivider, true);
+
+    setHardHidden(accessBtn, false, "");
+    setHardHidden(mobileAccess, false, "");
+  }
+}
+
+function initAuthUI() {
+  // If item.html doesn’t include supabase scripts yet, fail silently
+  waitForSupabaseReady().then(async (sb) => {
+    if (!sb) return;
+
+    wireAcctMenu(sb);
+    await applyAuthUI(sb);
+
+    // Keep it synced if auth changes while tab is open
+    sb.auth.onAuthStateChange(async () => {
+      await applyAuthUI(sb);
+    });
+
+    // BFCache / tab-switch resilience
+    window.addEventListener("pageshow", async () => {
+      await applyAuthUI(sb);
+    });
+    document.addEventListener("visibilitychange", async () => {
+      if (document.visibilityState === "visible") await applyAuthUI(sb);
+    });
+  });
+}
+
+// call it (safe even if supabase not available yet)
+initAuthUI();
+
 })();
