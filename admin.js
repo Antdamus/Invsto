@@ -310,6 +310,8 @@ if (!window.invokeEdgeJson) {
 
 
 async function resendInvite(trOrObj) {
+  let data = null;
+
   try {
     // Allow both call styles:
     // 1) resendInvite(tr)  (table row)
@@ -334,27 +336,27 @@ async function resendInvite(trOrObj) {
 
     console.log("[admin-user resend payload]", payload);
 
-    const data = await invokeEdgeJson("admin-user", payload);
+    data = await invokeEdgeJson("admin-user", payload);
 
     console.log("[admin-user resend response]", data);
 
     if (!data?.ok) throw new Error(data?.error || "Resend failed.");
 
-    // NEW (after you get `data` back):
-const method = (data?.method || 'invite');
-if (method === 'recovery') {
-  showToast('Password setup link sent 🔐', 'ok');
-} else {
-  showToast('Invite resent ✉️', 'ok');
-}
+    // ✅ Toast based on server method
+    const method = String(data?.method || "invite").toLowerCase();
+    if (method === "recovery") {
+      showToast("Password setup link sent 🔐", "ok");
+    } else {
+      showToast("Invite resent ✉️", "ok");
+    }
+
     await loadUsers();
+    return data;
   } catch (err) {
     console.error("[admin-user resend error]", err);
     showToast(err?.message || "Resend failed", "err");
     throw err;
   }
-
-  return data;
 }
 
 
