@@ -667,29 +667,49 @@ if (activeUserId) {
       msg.textContent = "Save handler missing in admin.js.";
     });
 
-    // Resend invite
-    qs("#udResendBtn")?.addEventListener("click", async () => {
-      const msg = qs("#udMsg");
-      const btn = qs("#udResendBtn");
-      const email = qs("#udEmail")?.value || "";
-      if (!email) return;
+// Resend invite (or send password setup link if already registered)
+qs("#udResendBtn")?.addEventListener("click", async () => {
+  const msg = qs("#udMsg");
+  const btn = qs("#udResendBtn");
+  const email = (qs("#udEmail")?.value || "").trim();
+  if (!email || !activeEmployeeId) return;
 
-      if (typeof window.resendInvite === "function") {
-        btn.disabled = true;
-        msg.textContent = "Resending invite…";
-        try {
-          await window.resendInvite(email);
-          msg.textContent = "Invite resent ✅";
-        } catch (err) {
-          msg.textContent = `Resend failed: ${err?.message || err}`;
-        } finally {
-          btn.disabled = false;
-        }
-        return;
-      }
+  if (typeof window.resendInvite !== "function") {
+    msg.textContent = "Resend handler missing in admin.js.";
+    return;
+  }
 
-      msg.textContent = "Resend handler missing in admin.js.";
-    });
+  btn.disabled = true;
+  msg.textContent = "Sending…";
+
+  try {
+    // ✅ capture response from admin.js (make sure admin.js returns it)
+    const data = await window.resendInvite({ employee_id: activeEmployeeId, email });
+
+    const method = String(data?.method || "invite"); // "invite" | "recovery"
+    const toastMsg =
+      method === "recovery" ? "Password setup link sent 🔐" : "Invite resent ✉️";
+
+    // ✅ toast (if your global toast exists)
+    if (typeof window.showToast === "function") window.showToast(toastMsg, "ok");
+
+    msg.textContent = `${toastMsg} ✅`;
+
+    // ✅ refresh list (keeps cards/chips current)
+    if (typeof window.loadUsers === "function") await window.loadUsers();
+
+    // ✅ close drawer (THIS fixes your issue)
+    closeUserDrawer();
+  } catch (err) {
+    const eMsg = err?.message || String(err);
+    msg.textContent = `Send failed: ${eMsg}`;
+    if (typeof window.showToast === "function") window.showToast(eMsg, "bad");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+
 
     qs("#udAddrAddBtn")?.addEventListener("click", async () => {
         if (!activeEmployeeId) return;

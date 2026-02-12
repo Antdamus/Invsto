@@ -309,22 +309,57 @@ if (!window.invokeEdgeJson) {
 }
 
 
-async function resendInvite(tr){
-  const employee_id = tr?.dataset?.employeeId;
-  const email = (tr?.querySelector('td.mono')?.textContent || '').trim();
+async function resendInvite(trOrObj) {
+  try {
+    // Allow both call styles:
+    // 1) resendInvite(tr)  (table row)
+    // 2) resendInvite({ employee_id, email })
+    let employee_id = null;
+    let email = null;
 
-  if (!employee_id && !email) throw new Error('Missing employee reference.');
+    if (trOrObj && typeof trOrObj === "object" && "employee_id" in trOrObj) {
+      employee_id = trOrObj.employee_id || null;
+      email = (trOrObj.email || "").trim().toLowerCase();
+    } else {
+      const tr = trOrObj;
+      employee_id = tr?.dataset?.employeeId || null;
+      email = (tr?.querySelector("td.mono")?.textContent || "").trim().toLowerCase();
+    }
 
-  const { data, error } = await supabaseClient.functions.invoke('admin-user', {
-    body: { action: 'resend', employee_id: employee_id || undefined, email: email || undefined }
-  });
+    const payload = {
+      action: "resend",
+      employee_id: employee_id || undefined,
+      email: email || undefined,
+    };
 
-  if (error) throw error;
-  if (!data?.ok) throw new Error('Resend failed.');
+    console.log("[admin-user resend payload]", payload);
 
+    const data = await invokeEdgeJson("admin-user", payload);
+
+    console.log("[admin-user resend response]", data);
+
+    if (!data?.ok) throw new Error(data?.error || "Resend failed.");
+
+    // NEW (after you get `data` back):
+const method = (data?.method || 'invite');
+if (method === 'recovery') {
+  showToast('Password setup link sent 🔐', 'ok');
+} else {
   showToast('Invite resent ✉️', 'ok');
-  await loadUsers();
 }
+    await loadUsers();
+  } catch (err) {
+    console.error("[admin-user resend error]", err);
+    showToast(err?.message || "Resend failed", "err");
+    throw err;
+  }
+
+  return data;
+}
+
+
+
+
 
 function escapeHtml(s){
   return (s ?? '').toString()
