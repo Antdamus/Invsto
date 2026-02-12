@@ -788,3 +788,134 @@
   .og-navtoggle { display: inline-flex; }
   .og-brand-name { display: none; } /* keeps it clean on small screens */
 }
+
+/* =========================================================
+   ITEM PAGE HEADER — Icon visibility fix (OG noir)
+   ========================================================= */
+
+.site-header .header-actions a,
+.site-header .header-actions button {
+  color: rgba(244, 241, 234, 0.92); /* ivory */
+}
+
+.site-header .header-actions a:hover,
+.site-header .header-actions button:hover {
+  color: rgba(227, 200, 120, 0.98); /* warm gold */
+}
+
+/* icon buttons: always readable over any background */
+.site-header .header-actions .icon-only,
+.site-header .header-actions .btn.icon-only,
+.site-header .header-actions .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(200, 162, 74, 0.22);
+  background: rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.site-header .header-actions .icon-only:hover,
+.site-header .header-actions .btn.icon-only:hover,
+.site-header .header-actions .icon-btn:hover {
+  border-color: rgba(200, 162, 74, 0.38);
+  background: rgba(0, 0, 0, 0.30);
+}
+
+/* If icons are SVGs */
+.site-header .header-actions svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* If icons are SVGs that use fill (common for "cart" icons) */
+.site-header .header-actions svg [fill] {
+  fill: currentColor !important;
+}
+.site-header .header-actions svg [stroke] {
+  stroke: currentColor !important;
+}
+
+/* If icons are IMG files (white icons) */
+.site-header .header-actions img {
+  width: 18px;
+  height: 18px;
+  display: block;
+  filter: brightness(0) invert(1) opacity(0.92);
+}
+
+.site-header .header-actions .icon-only:hover img,
+.site-header .header-actions .icon-btn:hover img {
+  filter: brightness(0) invert(1) sepia(1) saturate(220%) hue-rotate(12deg) opacity(0.98);
+}
+
+/* Keep header readable over bright hero images */
+.site-header {
+  background: rgba(7, 7, 8, 0.72);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* =========================================================
+   Account menu (acct-menu) — visibility + luxury hover
+   ========================================================= */
+
+.site-header .acct-menu {
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 55px rgba(0,0,0,0.55);
+  overflow: hidden;
+}
+
+/* Menu items (including Sign out) */
+.site-header .acct-menu .acct-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  color: rgba(244, 241, 234, 0.92); /* ivory */
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Hover */
+.site-header .acct-menu .acct-menu-item:hover {
+  background: rgba(200, 162, 74, 0.12);
+  color: rgba(227, 200, 120, 0.98);
+}
+
+/* The "danger" item = Sign out */
+.site-header .acct-menu .acct-menu-item.danger {
+  color: rgba(255, 190, 190, 0.98); /* soft red, readable */
+}
+
+.site-header .acct-menu .acct-menu-item.danger:hover {
+  background: rgba(255, 95, 95, 0.12);
+  color: rgba(255, 210, 210, 0.98);
+}
+
+/* Tooltip label you saw ("Account") */
+.site-header .acct-tooltip {
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(244, 241, 234, 0.92);
+  padding: 8px 10px;
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+}
