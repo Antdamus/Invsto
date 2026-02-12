@@ -1,0 +1,169 @@
+# Repository Summary (OG Jewelers)
+
+**1) Repository Overview**
+This repository hosts multiple browser-based applications for OG Jewelers:
+- A public storefront site with catalog, product detail, cart, and member profile experiences in `StoreWebsite/`.
+- An internal operations portal (login, admin dashboard, inventory, stock, timeclock, payroll, scheduling, users) at repo root (e.g., `index.html`, `dashboard.html`, `admin.html`, `stock.html`, `timeclock.html`).
+- Supabase infrastructure for database schema and Edge Functions in `supabase/`.
+- Supporting experiments and docs in `Join/` and `testground/`.
+
+Major components observed:
+- Frontend pages and JS modules for storefront and internal ops (`StoreWebsite/*.html`, `StoreWebsite/StoreCart/*.js`, root `*.html` + `*.js`).
+- Supabase Edge Functions for storefront catalog/content, auth utilities, and operational scans (`supabase/functions/*/index.ts`).
+- Supabase migrations for pricing, storefront rules, scheduling, notifications, and access logic (`supabase/migrations/*.sql`).
+
+**2) Directory Classification**
+- `.git` — Infrastructure. Git metadata for version control.
+- `.vscode` — Infrastructure. Editor settings (`.vscode/settings.json`).
+- `Join` — Experimental / Test. Contains mermaid diagrams and a small `hello.html`/`hello.js` demo plus `initSupabase.js` (`Join/*.mmd`, `Join/hello.*`).
+- `StoreWebsite` — Production. Public storefront site with catalog, item detail, cart drawer, profile, join/access flows, and a separate storefront admin login (`StoreWebsite/index.html`, `StoreWebsite/catalogue.html`, `StoreWebsite/item.html`, `StoreWebsite/StoreCart/*`, `StoreWebsite/StoreAdmin/*`).
+- `node_modules` — Infrastructure. Installed dependencies.
+- `supabase` — Infrastructure. Supabase config, Edge Functions, and SQL migrations (`supabase/config.toml`, `supabase/functions/*`, `supabase/migrations/*`).
+- `testground` — Experimental / Test. Standalone test HTML/CSS/JS (`testground/test.*`).
+
+**3) Directory Tree (Condensed)**
+```
+.
+├── StoreWebsite/
+│   ├── StoreAdmin/
+│   │   ├── index.html
+│   │   ├── index.js
+│   │   ├── index.css
+│   │   └── initSupabase.js
+│   ├── StoreCart/
+│   │   ├── cart.core.js
+│   │   ├── cart.service.js
+│   │   ├── cart.drawer.js
+│   │   ├── cart.shared.js
+│   │   ├── cart.html
+│   │   └── cart.css
+│   ├── index.html
+│   ├── index.js
+│   ├── catalogue.html
+│   ├── catalogue.js
+│   ├── item.html
+│   ├── item.js
+│   ├── profile.html
+│   ├── profile.js
+│   ├── join.html
+│   ├── join.js
+│   ├── access.html
+│   ├── access.js
+│   ├── initSupabase.js
+│   └── *.css / *.mmd
+├── supabase/
+│   ├── config.toml
+│   ├── migrations/
+│   │   └── *.sql
+│   └── functions/
+│       ├── storefront-catalog/index.ts
+│       ├── storefront-content/index.ts
+│       ├── og_send_magic_link/index.ts
+│       ├── storefront-sign-photos/index.ts
+│       ├── spot-snapshot/index.ts
+│       ├── enqueue-upcoming-shift-reminders/index.ts
+│       ├── scan-no-show/index.ts
+│       ├── scan-open-break-too-long/index.ts
+│       ├── update-metal-spots/index.ts
+│       └── jwt-custom-claims/index.ts
+├── index.html
+├── initSupabase.js
+├── auth.js
+├── dashboard.html / dashboard.js / dashboard.css
+├── admin.html / admin.js / admin-*.js / admin-*.css
+├── stock.html / stock.js / stock-*.js / stock-*.css
+├── timeclock.html / timeclock.js / timeclock.css
+├── add-item.html / additem.js / add-item.css
+├── add-inventory.html / add-inventory.js / add-inventory.css
+├── worker-dashboard.html / worker-dashboard.js / worker-dashboard.css
+├── Join/
+│   ├── *.mmd
+│   └── hello.html / hello.js / initSupabase.js
+├── testground/
+│   └── test.html / test.js / test.css / initSupabase.js
+└── package.json
+```
+
+**4) Architectural Layers**
+- Frontend layer:
+  - Storefront pages and UX in `StoreWebsite/*.html`, `StoreWebsite/*.js`, and cart modules in `StoreWebsite/StoreCart/*.js`.
+  - Internal ops portal in repo root (`index.html`, `dashboard.html`, `admin.html`, `stock.html`, `timeclock.html`, etc.) with JS modules (`admin.js`, `dashboard.js`, `stock.js`, `timeclock.js`, etc.).
+- Backend / Supabase layer:
+  - Supabase Edge Functions in `supabase/functions/*/index.ts` (e.g., `storefront-catalog`, `storefront-content`, `og_send_magic_link`).
+  - JS clients initialize via `initSupabase.js` in multiple locations (root, `StoreWebsite/`, `StoreWebsite/StoreAdmin/`, `Join/`, `testground/`).
+- Data layer:
+  - SQL migrations in `supabase/migrations/*.sql` covering storefront, admin, scheduling, notifications, and pricing logic.
+  - Storage usage via Supabase Storage in inventory flows (`add-inventory.js`, `additem.js`) and storefront catalog signing (`supabase/functions/storefront-catalog/index.ts`).
+- Admin layer:
+  - Root admin suite in `admin.html` + `admin.js` + `admin-*.js/css` and related pages (`dashboard.html`, `stock.html`, `timeclock.html`, `worker-dashboard.html`).
+  - Storefront-specific admin login in `StoreWebsite/StoreAdmin/`.
+- Experimental sandboxes:
+  - `Join/` and `testground/` folders.
+
+Connections:
+- Frontend pages call Supabase REST/auth from the browser via `initSupabase.js` (global `window.supabase`/`window.supabaseClient`).
+- Storefront pages fetch catalog/content from Edge Functions (e.g., `StoreWebsite/catalogue.js` and `StoreWebsite/item.js` call `storefront-catalog`).
+- Admin tooling calls Supabase tables, RPCs, and Edge Functions (e.g., `admin.js`, `admin-schedule.js`, `admin-taxdocs.js`).
+
+**5) Core Systems Identified**
+- Cart system:
+  - Canonical cart contract and service modules in `StoreWebsite/StoreCart/cart.core.js` and `StoreWebsite/StoreCart/cart.service.js`.
+  - Drawer UI in `StoreWebsite/StoreCart/cart.drawer.js` and badge updates in `StoreWebsite/StoreCart/cart.shared.js`.
+  - Parallel, page-local cart logic duplicated in `StoreWebsite/index.js`, `StoreWebsite/catalogue.js`, and `StoreWebsite/item.js` (localStorage `og_cart_v1`, 15-minute price lock).
+- Supabase initialization and usage:
+  - Global client initializer duplicated in `initSupabase.js`, `StoreWebsite/initSupabase.js`, `StoreWebsite/StoreAdmin/initSupabase.js`, `Join/initSupabase.js`, `testground/initSupabase.js`.
+  - Auth/role routing for internal portal in `auth.js` and storefront admin in `StoreWebsite/StoreAdmin/index.js`.
+- UI modules (modals, drawer, badge logic):
+  - Cart drawer and badge in `StoreWebsite/StoreCart/cart.drawer.js` and `StoreWebsite/StoreCart/cart.shared.js`.
+  - Quickview modal in storefront page logic (`StoreWebsite/index.js` uses `[data-ui="quickview"]`).
+  - Timeclock camera modal in `timeclock.html` + `timeclock.js` (modal markup present, JS handles capture).
+- Duplicated systems across folders:
+  - Cart logic duplicated across `StoreWebsite/StoreCart/*` and page-level scripts (`StoreWebsite/index.js`, `StoreWebsite/catalogue.js`, `StoreWebsite/item.js`).
+  - Supabase init duplicated across multiple directories as listed above.
+
+**6) Mermaid Diagrams**
+A) High-level architecture
+```mermaid
+graph TD
+  A[Storefront UI<br/>StoreWebsite/*.html + *.js] --> B[Cart Logic<br/>StoreWebsite/StoreCart/*.js]
+  A --> C[Supabase Edge Functions<br/>supabase/functions/*]
+  D[Internal Ops UI<br/>root *.html + *.js] --> C
+  C --> E[(Supabase Database + Storage)]
+```
+
+B) Folder relationship diagram
+```mermaid
+graph TD
+  RootApp[Repo Root UI<br/>index.html, admin.html, stock.html] --> Supa[supabase/]
+  StoreSite[StoreWebsite/] --> Supa
+  StoreCart[StoreWebsite/StoreCart/] --> StoreSite
+  StoreAdmin[StoreWebsite/StoreAdmin/] --> Supa
+  Join[Join/] --> Supa
+  Testground[testground/] --> Supa
+```
+
+**7) Current State Assessment (Based on Code)**
+- Appears production-ready:
+  - Storefront cart drawer and shared badge logic (`StoreWebsite/StoreCart/cart.drawer.js`, `StoreWebsite/StoreCart/cart.shared.js`).
+  - Storefront catalog and item detail flows that fetch from Edge Functions (`StoreWebsite/catalogue.js`, `StoreWebsite/item.js`).
+  - Internal admin dashboard suite with multiple operational modules (`admin.html`, `admin.js`, `admin-payroll.js`, `admin-schedule.js`, `admin-users.js`).
+- Appears duplicated:
+  - Cart logic repeated across page scripts and the cart module set (see `StoreWebsite/index.js`, `StoreWebsite/catalogue.js`, `StoreWebsite/item.js` vs `StoreWebsite/StoreCart/cart.core.js`).
+  - Supabase init duplicated across multiple folders (`initSupabase.js` variants).
+- Appears unfinished or placeholder:
+  - `StoreWebsite/catalogue.js` includes a “Demo dataset” note in comments indicating a planned swap to live data while preserving UI logic.
+  - `Join/*.mmd` and `StoreWebsite/*.mmd` files read as design/spec notes rather than integrated code.
+- Potential architectural risks (observable from code):
+  - Multiple cart implementations can drift in behavior, versioning, and lock logic (separate implementations in `StoreWebsite/StoreCart/*` vs page scripts).
+  - Multiple copies of Supabase init logic can lead to subtle divergence in client setup and event wiring.
+
+**8) Strategic Recommendations (Prioritized)**
+1. Consolidate cart logic by using `StoreWebsite/StoreCart/cart.core.js` + `cart.service.js` everywhere, and remove page-local cart implementations in `StoreWebsite/index.js`, `StoreWebsite/catalogue.js`, and `StoreWebsite/item.js`.
+2. Centralize Supabase initialization into a shared module and reuse it across `initSupabase.js`, `StoreWebsite/initSupabase.js`, `StoreWebsite/StoreAdmin/initSupabase.js`, `Join/initSupabase.js`, and `testground/initSupabase.js`.
+3. Introduce a shared UI utilities module for repeated patterns (modals, drawers, toasts) used in `StoreWebsite/index.js`, `StoreWebsite/StoreCart/cart.drawer.js`, and `timeclock.js`.
+4. Formalize a single source of truth for storefront config (channel, project URL) to avoid hardcoded duplicates in `StoreWebsite/catalogue.js`, `StoreWebsite/item.js`, and `StoreWebsite/StoreCart/cart.drawer.js`.
+5. Split the repo into clear apps or packages (root ops portal vs `StoreWebsite`) to reduce cross-app coupling and make deployments clearer.
+6. Add a small documentation index in `docs/` referencing key entry points (`index.html`, `StoreWebsite/index.html`, `admin.html`) and how they map to Supabase functions (`supabase/functions/*`).
+7. Track and deprecate experimental folders by either promoting (`Join/`) into production docs or moving them under a clearly named `docs/` or `experiments/` directory.
+8. Consider a linting/format pass for consistency across large JS files (e.g., `admin.js`, `stock.js`) to reduce drift and make refactoring safer.
+
