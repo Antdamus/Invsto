@@ -617,55 +617,60 @@ if (!taxStatusLoaded) {
     });
 
 
-    // Save
-    qs("#udSaveBtn")?.addEventListener("click", async () => {
-      const msg = qs("#udMsg");
-      const saveBtn = qs("#udSaveBtn");
-      if (!activeEmployeeId) return;
+// Save
+qs("#udSaveBtn")?.addEventListener("click", async () => {
+  const msg = qs("#udMsg");
+  const saveBtn = qs("#udSaveBtn");
+  if (!activeEmployeeId) return;
 
-      const drawerEl = qs("#userDrawer");
-      if (!drawerEl) return;
+  const drawerEl = qs("#userDrawer");
+  if (!drawerEl) return;
 
-      if (typeof window.saveUserRow === "function") {
-        msg.textContent = "Saving…";
-        saveBtn.disabled = true;
-        saveBtn.textContent = "Saving…";
+  if (typeof window.saveUserRow === "function") {
+    msg.textContent = "Saving…";
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
 
-        try {
-          await window.saveUserRow(drawerEl);
-          msg.textContent = "Saved ✅";
-          
-if (activeUserId) {
-  await saveUserPhone({
-    userId: activeUserId,
-    phone: (qs("#udPhone")?.value || "").trim(),
-    canSms: !!qs("#udCanSms")?.checked
-  });
-}
+    try {
+      await window.saveUserRow(drawerEl);
 
-
-          // refresh list
-          if (typeof window.loadUsers === "function") await window.loadUsers();
-
-          // reset dirty-state snapshot to current
-          drawerSnapshot = readDrawerState();
-          setDirty(false);
-        } catch (err) {
-          msg.textContent = `Save failed: ${err?.message || err}`;
-          // re-enable if still dirty
-          setDirtyFromCurrent();
-        } finally {
-          if (!drawerDirty) saveBtn.textContent = "Save changes";
-          else {
-            saveBtn.textContent = "Save changes";
-            saveBtn.disabled = false;
-          }
-        }
-        return;
+      // ✅ save phone (if you want it saved as part of save)
+      if (activeUserId) {
+        await saveUserPhone({
+          userId: activeUserId,
+          phone: (qs("#udPhone")?.value || "").trim(),
+          canSms: !!qs("#udCanSms")?.checked
+        });
       }
 
-      msg.textContent = "Save handler missing in admin.js.";
-    });
+      // refresh list
+      if (typeof window.loadUsers === "function") await window.loadUsers();
+
+      // reset dirty-state snapshot to current
+      drawerSnapshot = readDrawerState();
+      setDirty(false);
+
+      msg.textContent = "Saved ✅";
+      if (typeof window.showToast === "function") window.showToast("Saved ✅", "ok");
+
+      // ✅ CLOSE after success
+      closeUserDrawer();
+      return;
+    } catch (err) {
+      msg.textContent = `Save failed: ${err?.message || err}`;
+      if (typeof window.showToast === "function") window.showToast(err?.message || "Save failed", "err");
+      setDirtyFromCurrent(); // re-enable save if still dirty
+    } finally {
+      saveBtn.textContent = "Save changes";
+      saveBtn.disabled = !drawerDirty;
+    }
+
+    return;
+  }
+
+  msg.textContent = "Save handler missing in admin.js.";
+});
+
 
 // Resend invite (or send password setup link if already registered)
 qs("#udResendBtn")?.addEventListener("click", async () => {
