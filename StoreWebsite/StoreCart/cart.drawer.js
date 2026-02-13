@@ -317,11 +317,12 @@
       const desc = meta?.desc || "";
 
       const cd = formatCountdown(line?.price_lock_expires_at);
+      const href = itemHrefFor(id);
 
                   return `
         <div class="cd-line" data-id="${id}">
           <!-- Clickable product area -->
-          <a class="cd-link" href="${itemHrefFor(id)}" aria-label="View ${title.replaceAll('"', "&quot;")}">
+          <a class="cd-link" href="${href}" aria-label="View ${title.replaceAll('"', "&quot;")}">
             <div class="cd-thumb">
               ${img ? `<img src="${img}" alt="${title.replaceAll('"', "&quot;")}" loading="lazy">` : ``}
             </div>
@@ -438,16 +439,17 @@
         // Only intercept normal left-click navigation
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 
+        const href = productLink.getAttribute("href") || productLink.href;
+        if (!href) return;
+
         e.preventDefault();
-        e.stopPropagation();
 
         // Close drawer first (keeps it feeling premium)
         closeProgrammatic();
 
         // Navigate after close animation completes (matches setOpen(false) timeout)
         window.setTimeout(() => {
-          const href = productLink.getAttribute("href");
-          if (href) window.location.assign(href);
+          window.location.assign(href);
         }, 240);
 
         return;
