@@ -1307,7 +1307,18 @@ const wirePricePresets = () => {
 
 
 const wireGlobalClicks = () => {
+  // Escape closes quick view
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isQuickviewOpen()) closeQuickview();
+  });
+
   document.addEventListener("click", (e) => {
+    // Backdrop closes quick view
+    if (qvBackdrop && e.target === qvBackdrop && isQuickviewOpen()) {
+      closeQuickview();
+      return;
+    }
+
     // ✅ 1) Active chip removal FIRST (does not use data-action)
     const chip = e.target.closest(".active-chip");
     if (chip) {
@@ -1317,29 +1328,17 @@ const wireGlobalClicks = () => {
       return;
     }
 
-        // Close quick view
+    const el = e.target.closest("[data-action]");
+    const action = el ? el.dataset.action : "";
+
+    // Close quick view
     if (action === "close-quickview") {
       closeQuickview();
       return;
     }
 
-      // Backdrop closes quick view
-  document.addEventListener("click", (e) => {
-    if (qvBackdrop && e.target === qvBackdrop && isQuickviewOpen()) {
-      closeQuickview();
-    }
-  });
-
-  // Escape closes quick view
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && isQuickviewOpen()) closeQuickview();
-  });
-
     // ✅ 2) Then handle data-action clicks
-    const el = e.target.closest("[data-action]");
     if (!el) return;
-
-    const action = el.dataset.action;
 
     // Filter drawer
     if (action === "open-filters") {

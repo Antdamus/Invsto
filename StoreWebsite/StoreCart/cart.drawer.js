@@ -35,8 +35,14 @@
 
   // Product details page link (item.html sits in the site root)
   const itemHrefFor = (id) => {
-    const base = window.location.pathname.includes("/StoreCart/") ? "../item.html" : "item.html";
-    return `${base}?id=${encodeURIComponent(String(id || ""))}`;
+    const inStoreCart = window.location.pathname.includes("/StoreCart/");
+    const base = inStoreCart ? "../item.html" : "item.html";
+    const href = `${base}?id=${encodeURIComponent(String(id || ""))}`;
+    try {
+      return new URL(href, window.location.href).href;
+    } catch {
+      return href;
+    }
   };
 
   const readCart = () => {
@@ -433,13 +439,15 @@
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 
         e.preventDefault();
+        e.stopPropagation();
 
         // Close drawer first (keeps it feeling premium)
         closeProgrammatic();
 
         // Navigate after close animation completes (matches setOpen(false) timeout)
         window.setTimeout(() => {
-          window.location.assign(productLink.href);
+          const href = productLink.getAttribute("href");
+          if (href) window.location.assign(href);
         }, 240);
 
         return;
