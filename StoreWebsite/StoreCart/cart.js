@@ -291,13 +291,15 @@
 
         return `
           <article class="cart-line ${isAvailable ? "" : "is-unavailable"}" data-id="${esc(line.id)}">
-            <div class="cart-line-media">
+            <a class="cart-line-media" href="../item.html?id=${encodeURIComponent(String(line.id || ""))}" aria-label="View ${esc(title)}">
               <img src="${esc(img)}" alt="${esc(title)}" loading="lazy" />
-            </div>
+            </a>
 
             <div class="cart-line-body">
               <div class="cart-line-top">
-                <div class="cart-line-title">${esc(title)}</div>
+                <a class="cart-line-title" href="../item.html?id=${encodeURIComponent(String(line.id || ""))}">
+                  ${esc(title)}
+                </a>
                 <button class="icon-btn danger" type="button" data-action="remove" aria-label="Remove item">×</button>
               </div>
 
