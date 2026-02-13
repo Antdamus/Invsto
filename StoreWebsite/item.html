@@ -1,10 +1,5 @@
-<!-- JS (Supabase MUST load before initSupabase.js) -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-<script src="initSupabase.js" defer></script>
-
-
-<!-- item.html — OG Jewelers (Product Details) -->
 <!DOCTYPE html>
+<!-- item.html — OG Jewelers (Product Details) -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -22,7 +17,14 @@
   <link rel="stylesheet" href="item.css" />
 
   <!-- Cart drawer styles -->
-  <link rel="stylesheet" href="cart.drawer.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
+
+  <!-- JS (Supabase MUST load before initSupabase.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="initSupabase.js" defer></script>
+
+  <!-- Shared cart badge -->
+  <script src="./StoreCart/cart.shared.js" defer></script>
 
   <!-- Drawer hydration config (same pattern as index.html) -->
   <script>
@@ -36,7 +38,7 @@
   </script>
 
   <!-- Drawer logic -->
-  <script src="cart.drawer.js" defer></script>
+  <script src="./StoreCart/cart.drawer.js" defer></script>
 
   <!-- Cart service bridge (module) -->
   <script type="module" src="./StoreCart/cart.service.global.js"></script>

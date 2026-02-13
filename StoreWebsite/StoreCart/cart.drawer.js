@@ -33,8 +33,11 @@
     return `$${x.toFixed(2)}`;
   };
 
-    // Product details page link (item.html sits in the site root)
-  const itemHrefFor = (id) => `item.html?id=${encodeURIComponent(String(id || ""))}`;
+  // Product details page link (item.html sits in the site root)
+  const itemHrefFor = (id) => {
+    const base = window.location.pathname.includes("/StoreCart/") ? "../item.html" : "item.html";
+    return `${base}?id=${encodeURIComponent(String(id || ""))}`;
+  };
 
   const readCart = () => {
     const raw = localStorage.getItem(CART_KEY);
@@ -312,7 +315,7 @@
                   return `
         <div class="cd-line" data-id="${id}">
           <!-- Clickable product area -->
-          <a class="cd-link" href="item.html?id=${encodeURIComponent(id)}" aria-label="View ${title.replaceAll('"', "&quot;")}">
+          <a class="cd-link" href="${itemHrefFor(id)}" aria-label="View ${title.replaceAll('"', "&quot;")}">
             <div class="cd-thumb">
               ${img ? `<img src="${img}" alt="${title.replaceAll('"', "&quot;")}" loading="lazy">` : ``}
             </div>
