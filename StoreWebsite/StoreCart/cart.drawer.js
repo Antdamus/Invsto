@@ -8,7 +8,6 @@
   "use strict";
 
   const CART_KEY = "og_cart_v1";
-  const VERSION = 1;
 
   // Hydration config: set in HTML before this script loads
   const CFG = window.OG_CART_DRAWER_CFG || {};
@@ -18,7 +17,6 @@
 
   const $ = (sel, root = document) => root.querySelector(sel);
 
-  const safeParse = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
   const toPriceNumber = (v) => {
     if (typeof v === "number" && Number.isFinite(v)) return v;
     const s = String(v ?? "").trim();
@@ -45,30 +43,21 @@
     }
   };
 
-  const readCart = () => {
-    const raw = localStorage.getItem(CART_KEY);
-    if (!raw) return { version: VERSION, items: [], updated_at: new Date().toISOString() };
-    const parsed = safeParse(raw);
-    if (!parsed || parsed.version !== VERSION || !Array.isArray(parsed.items)) {
-      return { version: VERSION, items: [], updated_at: new Date().toISOString() };
+  const getCartService = () => window.ogCartService;
+  const getCartSafe = () => {
+    const svc = getCartService();
+    if (!svc) return { items: [] };
+    try {
+      return svc.getCart();
+    } catch {
+      return { items: [] };
     }
-    return parsed;
   };
 
-  const writeCart = (items) => {
-    localStorage.setItem(CART_KEY, JSON.stringify({
-      version: VERSION,
-      updated_at: new Date().toISOString(),
-      items: Array.isArray(items) ? items : [],
-    }));
-
-    // refresh header badge (cart.shared.js)
-    if (typeof window.ogCartBadgeRefresh === "function") window.ogCartBadgeRefresh();
-
-    // ✅ Phase 6B: same-tab live sync for drawer/pages
+  const emitCartChanged = () => {
+    window.ogCartBadgeRefresh?.();
     window.dispatchEvent(new Event("og-cart-changed"));
   };
-
 
   const clampQty = (q) => {
     const n = Math.floor(Number(q));
@@ -201,55 +190,28 @@
   }
 
 
-  function isExpired(expiresIso) {
-    if (!expiresIso) return false;
-    const t = new Date(expiresIso).getTime();
-    return Number.isFinite(t) ? (Date.now() > t) : false;
-  }
-
-  function makeNewLock(price) {
-    const now = Date.now();
-    const ms = 15 * 60 * 1000;
-    return {
-      price_locked: toPriceNumber(price),
-      price_locked_at: new Date(now).toISOString(),
-      price_lock_expires_at: new Date(now + ms).toISOString(),
-    };
-  }
-
-  async function refreshExpiredLocksIfNeeded() {
-    const cart = readCart();
-    const items = cart.items || [];
-    if (!items.length) return { changed: false };
-
-    // If anything is expired, force-refresh inventory so price can update now.
-    const anyExpired = items.some((l) => isExpired(l?.price_lock_expires_at));
-    if (!anyExpired) return { changed: false };
+  async function refreshExpiredLocksWithService() {
+    const svc = getCartService();
+    if (!svc) return { changed: false, cart: getCartSafe(), refreshedIds: [] };
 
     try { await hydrateInventory(true); } catch { /* ignore */ }
 
-    let changed = false;
-    const next = items.map((line) => {
-      const id = String(line?.id || "");
-      if (!id) return line;
-
-      if (!isExpired(line?.price_lock_expires_at)) return line;
-
-      const meta = invMap.get(id);
-      const newPrice = meta?.price;
-
-      // If we don't have a current price, keep the line as-is (still shows 0:00).
-      if (!Number.isFinite(Number(newPrice)) || Number(newPrice) <= 0) return line;
-
-      changed = true;
-      return { ...line, ...makeNewLock(newPrice) };
+    const res = svc.refreshExpiredPriceLocks((id) => {
+      const meta = invMap.get(String(id));
+      const p = Number(meta?.price);
+      if (!Number.isFinite(p) || p <= 0) return null;
+      return { price: p };
     });
 
-    if (changed) {
-      writeCart(next);
+    if (Array.isArray(res?.refreshedIds) && res.refreshedIds.length) {
+      emitCartChanged();
     }
 
-    return { changed };
+    return {
+      changed: Array.isArray(res?.refreshedIds) && res.refreshedIds.length > 0,
+      cart: res?.cart || getCartSafe(),
+      refreshedIds: Array.isArray(res?.refreshedIds) ? res.refreshedIds : [],
+    };
   }
 
   function showNotice(msg) {
@@ -266,10 +228,10 @@
   function updateCountdownInPlace() {
     const root = refs().list;
     if (!root) return;
+    const cart = getCartSafe();
     const rows = root.querySelectorAll(".cd-line");
     rows.forEach((row) => {
       const id = row.getAttribute("data-id") || "";
-      const cart = readCart();
       const line = (cart.items || []).find((x) => String(x?.id) === String(id));
       const cd = formatCountdown(line?.price_lock_expires_at);
       const node = row.querySelector("[data-ui='lock']") || row.querySelector(".cd-lock");
@@ -289,7 +251,7 @@
     const r = refs();
     if (!r.list || !r.empty || !r.subtotal || !r.count) return;
 
-    const cart = readCart();
+    const cart = getCartSafe();
     const items = cart.items || [];
 
     try { await hydrateInventory(); } catch { /* ignore */ }
@@ -353,7 +315,11 @@
 
     }).join("");
 
-    r.subtotal.textContent = money(computeSubtotal(items));
+    const svc = getCartService();
+    const totals = svc
+      ? svc.computeCartTotals(() => ({ exists: true }))
+      : { subtotal: computeSubtotal(items) };
+    r.subtotal.textContent = money(totals.subtotal);
     if (r.notice) r.notice.hidden = true;
   }
 
@@ -361,20 +327,21 @@
   // Mutations
   // -------------------------
   function updateQty(id, delta) {
-    const cart = readCart();
-    const items = cart.items || [];
-    const idx = items.findIndex((x) => String(x?.id) === String(id));
-    if (idx < 0) return;
-
-    const cur = items[idx];
-    items[idx] = { ...cur, qty: clampQty((Number(cur?.qty) || 1) + delta) };
-    writeCart(items);
+    const svc = getCartService();
+    if (!svc) return;
+    const cart = svc.getCart();
+    const line = (cart.items || []).find((x) => String(x?.id) === String(id));
+    if (!line) return;
+    const nextQty = clampQty((Number(line?.qty) || 1) + delta);
+    svc.setCartQty(id, nextQty);
+    emitCartChanged();
   }
 
   function removeLine(id) {
-    const cart = readCart();
-    const items = (cart.items || []).filter((x) => String(x?.id) !== String(id));
-    writeCart(items);
+    const svc = getCartService();
+    if (!svc) return;
+    svc.removeFromCart(id);
+    emitCartChanged();
   }
 
   // -------------------------
@@ -392,7 +359,7 @@
 
       // If any lock expired, refresh + full rerender (to restart timer + update prices)
       try {
-        const { changed } = await refreshExpiredLocksIfNeeded();
+        const { changed } = await refreshExpiredLocksWithService();
         if (changed) {
           showNotice("Prices updated — lock restarted.");
           await render();
@@ -411,7 +378,7 @@
   async function openProgrammatic() {
     setOpen(true);
     try {
-      const { changed } = await refreshExpiredLocksIfNeeded();
+      const { changed } = await refreshExpiredLocksWithService();
       if (changed) showNotice("Prices updated — lock restarted.");
     } catch {}
     await render();
