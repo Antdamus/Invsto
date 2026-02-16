@@ -10,10 +10,6 @@
   /* -------------------------
      Config
   ------------------------- */
-  const CART_STORAGE_KEY = "og_cart_v1";
-  const CART_VERSION = 1;
-  const PRICE_LOCK_MS = 15 * 60 * 1000;
-
   const SUPABASE_PROJECT_URL =
     window.SUPABASE_URL || "https://byhytmarmigalvawkedi.supabase.co";
   const CHANNEL = "og_main";
@@ -24,7 +20,6 @@
      Helpers
   ------------------------- */
   const nowMs = () => Date.now();
-  const iso = (ms) => new Date(ms).toISOString();
 
   const esc = (s) =>
     String(s ?? "")
@@ -48,87 +43,16 @@
   };
 
   const fiveMinBucket = () => Math.floor(Date.now() / 300000);
+  const getCartService = () => window.ogCartService;
 
-  /* -------------------------
-     Cart core (local)
-  ------------------------- */
-  function createEmptyCart() {
-    return { version: CART_VERSION, updated_at: new Date().toISOString(), items: [] };
-  }
-
-  function normalizeCart(cart) {
-    const items = Array.isArray(cart?.items) ? cart.items : [];
-    const seen = new Set();
-    const out = [];
-
-    for (const line of items) {
-      if (!line || !line.id) continue;
-      const id = String(line.id);
-      if (seen.has(id)) continue;
-
-      const qty = Math.floor(Number(line.qty));
-      const price = Number(line.price_locked);
-
-      if (!Number.isFinite(qty) || qty < 1) continue;
-      if (!Number.isFinite(price)) continue;
-
-      seen.add(id);
-      out.push({
-        id,
-        qty,
-        price_locked: price,
-        price_locked_at: String(line.price_locked_at || ""),
-        price_lock_expires_at: String(line.price_lock_expires_at || ""),
-      });
-    }
-
-    return {
-      version: CART_VERSION,
-      updated_at: String(cart?.updated_at || new Date().toISOString()),
-      items: out,
-    };
-  }
-
-  function loadCart() {
+  function getCartSafe() {
+    const svc = getCartService();
+    if (!svc) return { items: [] };
     try {
-      const raw = localStorage.getItem(CART_STORAGE_KEY);
-      if (!raw) return createEmptyCart();
-      const parsed = JSON.parse(raw);
-      if (!parsed || parsed.version !== CART_VERSION || !Array.isArray(parsed.items)) {
-        return createEmptyCart();
-      }
-      return normalizeCart(parsed);
+      return svc.getCart();
     } catch {
-      return createEmptyCart();
+      return { items: [] };
     }
-  }
-
-  function saveCart(cart) {
-    const safe = normalizeCart(cart);
-    safe.updated_at = new Date().toISOString();
-    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(safe));
-    return safe;
-  }
-
-  function createPriceLock(price) {
-    const p = Number(price);
-    if (!Number.isFinite(p)) throw new Error("Invalid price for lock");
-    const t0 = nowMs();
-    return {
-      price_locked: p,
-      price_locked_at: iso(t0),
-      price_lock_expires_at: iso(t0 + PRICE_LOCK_MS),
-    };
-  }
-
-  function isLockExpired(line) {
-    const exp = new Date(line?.price_lock_expires_at || 0).getTime();
-    if (!Number.isFinite(exp) || exp <= 0) return true;
-    return nowMs() > exp;
-  }
-
-  function cartQtySum(cart) {
-    return (cart.items || []).reduce((s, x) => s + (x.qty || 0), 0);
   }
 
   /* -------------------------
@@ -181,33 +105,14 @@
     }
   }
 
-  async function refreshExpiredLocks(cart) {
-    const expiredIds = (cart.items || []).filter(isLockExpired).map((x) => x.id);
-    if (!expiredIds.length) return { cart, refreshed: [], unavailable: [] };
-
+  async function refreshPriceLocksFromService() {
     const map = await fetchInventoryMap({ force: true });
-
-    const refreshed = [];
-    const unavailable = [];
-
-    for (const line of cart.items) {
-      if (!isLockExpired(line)) continue;
-
-      const it = map.get(String(line.id));
-      if (!it) {
-        unavailable.push(line.id);
-        continue;
-      }
-
-      const lock = createPriceLock(it.price);
-      line.price_locked = lock.price_locked;
-      line.price_locked_at = lock.price_locked_at;
-      line.price_lock_expires_at = lock.price_lock_expires_at;
-      refreshed.push(line.id);
-    }
-
-    const saved = saveCart(cart);
-    return { cart: saved, refreshed, unavailable };
+    const svc = getCartService();
+    if (!svc) return { cart: getCartSafe(), refreshedIds: [], unavailableIds: [] };
+    return svc.refreshExpiredPriceLocks((id) => {
+      const it = map.get(String(id));
+      return it ? { price: Number(it.price) } : null;
+    });
   }
 
   /* -------------------------
@@ -261,7 +166,7 @@
       el.subtotal.textContent = formatUSD(0);
       el.unavail.textContent = "0";
       el.count.textContent = "0";
-      paintBadges(cart);
+      paintBadges();
       return;
     }
 
@@ -333,12 +238,13 @@
     el.unavail.textContent = String(unavailableCount);
     el.count.textContent = String(totalQty);
 
-    paintBadges(cart);
+    paintBadges();
   }
 
-  function paintBadges(cart) {
+  function paintBadges() {
     try {
-      const total = cartQtySum(cart);
+      const svc = getCartService();
+      const total = svc ? svc.getCartBadgeCount() : 0;
       document.querySelectorAll('[data-ui="cart-count"]').forEach((b) => {
         b.textContent = String(total);
         b.hidden = total <= 0;
@@ -349,36 +255,33 @@
   /* -------------------------
      Events
   ------------------------- */
-  function findLine(cart, id) {
-    const idx = cart.items.findIndex((x) => x.id === id);
-    return { idx, line: idx >= 0 ? cart.items[idx] : null };
+  function setQtyWithService(id, qty) {
+    const svc = getCartService();
+    if (!svc) return getCartSafe();
+    return svc.setCartQty(id, qty);
   }
 
-  function setQty(cart, id, qty) {
-    const { idx, line } = findLine(cart, id);
+  function incrementQtyWithService(id, delta) {
+    const svc = getCartService();
+    if (!svc) return getCartSafe();
+    const cart = svc.getCart();
+    const line = (cart.items || []).find((x) => String(x.id) === String(id));
     if (!line) return cart;
-    const q = Math.max(1, Math.floor(Number(qty) || 1));
-    line.qty = q;
-    cart.items[idx] = line;
-    return saveCart(cart);
+    return svc.setCartQty(id, Number(line.qty || 0) + Number(delta || 0));
   }
 
-  function incQty(cart, id, delta) {
-    const { idx, line } = findLine(cart, id);
-    if (!line) return cart;
-    line.qty = Math.max(1, Math.floor((line.qty || 1) + delta));
-    cart.items[idx] = line;
-    return saveCart(cart);
+  function removeLineWithService(id) {
+    const svc = getCartService();
+    if (!svc) return getCartSafe();
+    return svc.removeFromCart(id);
   }
 
-  function removeLine(cart, id) {
-    cart.items = cart.items.filter((x) => x.id !== id);
-    return saveCart(cart);
-  }
-
-  function clearCart() {
-    localStorage.removeItem(CART_STORAGE_KEY);
-    return createEmptyCart();
+  function clearCartWithService() {
+    const svc = getCartService();
+    if (!svc) return getCartSafe();
+    const ids = (svc.getCart().items || []).map((line) => line.id);
+    for (const id of ids) svc.removeFromCart(id);
+    return svc.getCart();
   }
 
   function bindEvents() {
@@ -391,21 +294,19 @@
       const id = row?.dataset?.id;
       if (!id) return;
 
-      let cart = loadCart();
-
       const action = btn.dataset.action;
       if (action === "remove") {
-        cart = removeLine(cart, id);
+        const cart = removeLineWithService(id);
         render(cart);
         return;
       }
       if (action === "inc") {
-        cart = incQty(cart, id, +1);
+        const cart = incrementQtyWithService(id, +1);
         render(cart);
         return;
       }
       if (action === "dec") {
-        cart = incQty(cart, id, -1);
+        const cart = incrementQtyWithService(id, -1);
         render(cart);
         return;
       }
@@ -419,15 +320,14 @@
       const id = row?.dataset?.id;
       if (!id) return;
 
-      let cart = loadCart();
-      cart = setQty(cart, id, input.value);
+      const cart = setQtyWithService(id, input.value);
       render(cart);
     });
 
     // Clear cart
     el.clearBtn.addEventListener("click", (e) => {
       e.preventDefault();
-      const cart = clearCart();
+      const cart = clearCartWithService();
       if (el.banner) el.banner.hidden = true;
       render(cart);
     });
@@ -463,12 +363,14 @@
   }
 
   async function tick() {
-    const cart = loadCart();
-
-    const anyExpired = (cart.items || []).some(isLockExpired);
+    const cart = getCartSafe();
+    const anyExpired = (cart.items || []).some((line) => {
+      const exp = new Date(line?.price_lock_expires_at || 0).getTime();
+      return !Number.isFinite(exp) || exp <= 0 || nowMs() > exp;
+    });
     if (anyExpired) {
-      const res = await refreshExpiredLocks(cart);
-      if (res.refreshed.length && el.banner) el.banner.hidden = false;
+      const res = await refreshPriceLocksFromService();
+      if (res.refreshedIds.length && el.banner) el.banner.hidden = false;
       render(res.cart);
       updateCountdownPills(res.cart);
       return;
@@ -484,15 +386,19 @@
     el = resolveDom();
     if (!el) return; // <- prevents crash, shows console error
 
+    if (!getCartService()) {
+      console.error("❌ window.ogCartService is missing; ensure cart.service.global.js loads first.");
+      return;
+    }
+
     if (el.year) el.year.textContent = String(new Date().getFullYear());
 
     bindEvents();
 
     await fetchInventoryMap({ force: false });
 
-    let cart = loadCart();
-    const res = await refreshExpiredLocks(cart);
-    if (res.refreshed.length && el.banner) el.banner.hidden = false;
+    const res = await refreshPriceLocksFromService();
+    if (res.refreshedIds.length && el.banner) el.banner.hidden = false;
 
     render(res.cart);
 
