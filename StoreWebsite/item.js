@@ -75,60 +75,6 @@
   const STOREFRONT_CHANNEL = "og_main";
 
   /* =========================
-     Cart helpers (aligned with index.js)
-  ========================= */
-  const CART_KEY = "og_cart_v1";
-  const CART_VERSION = 1;
-  const PRICE_LOCK_MS = 15 * 60 * 1000;
-
-  function safeParseJSON(s) { try { return JSON.parse(s); } catch { return null; } }
-
-  function getCart() {
-    const raw = localStorage.getItem(CART_KEY);
-    const cart = safeParseJSON(raw);
-    if (!cart || cart.version !== CART_VERSION || !Array.isArray(cart.items)) {
-      return { version: CART_VERSION, updated_at: new Date().toISOString(), items: [] };
-    }
-    return cart;
-  }
-
-  function setCart(cart) {
-    cart.version = CART_VERSION;
-    cart.updated_at = new Date().toISOString();
-    try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch {}
-    window.dispatchEvent(new Event("og-cart-changed"));
-  }
-
-  function makePriceLock(price) {
-    const p = Number(price);
-    const t0 = Date.now();
-    return {
-      price_locked: Number.isFinite(p) ? p : 0,
-      price_locked_at: new Date(t0).toISOString(),
-      price_lock_expires_at: new Date(t0 + PRICE_LOCK_MS).toISOString(),
-    };
-  }
-
-  function upsertCartItem({ id, qtyDelta = 1, currentPrice }) {
-    const cart = getCart();
-    const sid = String(id);
-    const idx = cart.items.findIndex((x) => String(x.id) === sid);
-
-    const delta = Math.floor(Number(qtyDelta)) || 1;
-    const lock = makePriceLock(currentPrice);
-
-    if (idx >= 0) {
-      const cur = cart.items[idx];
-      const nextQty = Math.max(1, Math.min(99, (Number(cur.qty) || 1) + delta));
-      cart.items[idx] = { ...cur, qty: nextQty, ...lock }; // reset lock on add
-    } else {
-      cart.items.push({ id: sid, qty: Math.max(1, Math.min(99, delta)), ...lock });
-    }
-
-    setCart(cart);
-  }
-
-  /* =========================
      UI helpers
   ========================= */
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -290,10 +236,11 @@
           return;
         }
 
-        upsertCartItem({ id, qtyDelta: 1, currentPrice: price });
+        window.ogCartService.addToCart(id, 1, price);
+        window.ogCartBadgeRefresh?.();
 
         // open cart drawer if available
-        if (typeof window.ogCartDrawerOpen === "function") window.ogCartDrawerOpen();
+        window.ogCartDrawerOpen?.();
 
         toast("Added to cart.");
         return;
