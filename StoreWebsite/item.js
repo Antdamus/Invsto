@@ -248,6 +248,97 @@
       hero.style.removeProperty("--img");
       hero.dataset.inspectSrc = "";
     }
+      /* =========================================================
+     4.4 — Provenance line + Editorial secondary image
+  ========================================================= */
+
+  function setProvenanceLine(item) {
+    const el = document.querySelector('[data-ui="pdp-provenance"]');
+    if (!el) return;
+
+    // “House” style line — calm, confident, non-technical
+    // If you later add real fields (drop_name, release_tag, etc.), plug them in here.
+    const bits = [];
+
+    // Lightly infer “limited” if remaining_count is low
+    const remaining = Number(item?.remaining_count);
+    if (Number.isFinite(remaining) && remaining > 0 && remaining <= 3) bits.push("Limited availability");
+
+    bits.push("Inspected in-house");
+    bits.push("Ships insured");
+
+    el.textContent = bits.join(" • ");
+    el.hidden = false;
+  }
+
+  function pickSecondaryImage(item, primaryUrl) {
+    // Best-effort: support multiple possible field names without breaking anything
+    const candidates = [
+      item?.secondary_image_url,
+      item?.detail_image_url,
+      item?.image_url_2,
+      item?.image2,
+      item?.image_alt,
+      item?.alt_image_url,
+    ];
+
+    // Some projects store arrays (optional)
+    const arr = Array.isArray(item?.images) ? item.images : null;
+    if (arr && arr.length > 1) candidates.unshift(arr[1]);
+
+    const primary = String(primaryUrl || "").trim();
+    for (const c of candidates) {
+      const v = String(c || "").trim();
+      if (!v) continue;
+      if (primary && v === primary) continue;
+      return v;
+    }
+    return primary || "";
+  }
+
+  function applyEditorialImage(imgUrl) {
+    const wrap = document.querySelector('[data-ui="editorial-wrap"]');
+    const img = document.querySelector('[data-ui="editorial-img"]');
+    if (!wrap || !img) return;
+
+    const url = String(imgUrl || "").trim();
+    if (!url) {
+      wrap.hidden = true;
+      img.style.removeProperty("--img");
+      return;
+    }
+
+    img.style.setProperty("--img", `url("${url}")`);
+    wrap.hidden = false;
+  }
+
+  function setEditorialCopy(item) {
+    const titleEl = document.querySelector('[data-ui="editorial-title"]');
+    const subEl = document.querySelector('[data-ui="editorial-sub"]');
+    const capEl = document.querySelector('[data-ui="editorial-cap"]');
+
+    const mat = String(item?.material || "").trim();
+    const stamp = String(item?.stamp || item?.purity || "").trim();
+
+    if (titleEl) titleEl.textContent = mat ? `The Details in ${mat}` : "The Details";
+    if (subEl) {
+      subEl.textContent =
+        "A closer look at finish, proportion, and how the piece holds light — the details that separate ordinary from OG.";
+    }
+
+    if (capEl) {
+      const bits = [];
+      if (stamp) bits.push(stamp);
+      if (mat) bits.push(mat);
+      if (bits.length) {
+        capEl.textContent = bits.join(" • ");
+        capEl.hidden = false;
+      } else {
+        capEl.hidden = true;
+        capEl.textContent = "";
+      }
+    }
+  }
   }
 
   /* =========================================================
@@ -820,6 +911,7 @@
         if (Number.isFinite(remaining) && remaining <= 0) {
           toast("Sold out.");
           return;
+          
         }
 
         // ✅ Ritual microstates
@@ -843,8 +935,6 @@
           window.setTimeout(() => trustChip.classList.remove("is-pulsing"), 950);
         }
 
-        // Open drawer after add (comment out if you want calmer behavior)
-        window.ogCartDrawerOpen?.();
 
         toast("Added — price locked for 15 minutes.");
 

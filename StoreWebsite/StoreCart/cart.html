@@ -23,10 +23,12 @@
 
 
   <!-- cart.html is in /StoreCart/, but catalogue.css is in parent /StoreWebsite/ -->
-  <link rel="stylesheet" href="../catalogue.css" />
-  <link rel="stylesheet" href="./cart.css" />
-    <link rel="stylesheet" href="./cart.drawer.css">
-    <script src="./cart.drawer.js" defer></script>
+ <link rel="stylesheet" href="../catalogue.css" />
+<link rel="stylesheet" href="../og.header.css" />
+<link rel="stylesheet" href="./cart.css" />
+<link rel="stylesheet" href="./cart.drawer.css">
+
+<script src="../og.header.js" defer></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="../initSupabase.js" defer></script>
@@ -45,41 +47,8 @@
 
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header" data-elevate-on-scroll>
-    <div class="container header-inner">
-      <a class="brand" href="../index.html" aria-label="OG Jewelry Home">
-        <span class="brand-mark" aria-hidden="true">OG</span>
-        <span class="brand-name">OG Jewelry</span>
-      </a>
-
-      <nav class="nav" aria-label="Primary navigation">
-        <a class="nav-link" href="../index.html">Home</a>
-        <a class="nav-link" href="../index.html#collections">Collections</a>
-        <a class="nav-link" href="../index.html#contact">Contact</a>
-
-        <div class="spot-ticker" id="spotTicker" aria-live="polite">
-          <span class="spot-dot"></span>
-          <span class="spot-text">Loading spot prices…</span>
-        </div>
-      </nav>
-
-      <div class="header-actions">
-        <a class="btn ghost icon-only cart-icon" href="./cart.html" aria-label="Cart">
-          <span aria-hidden="true">🛒</span>
-          <span class="cart-badge" data-ui="cart-count" hidden>0</span>
-        </a>
-
-        <a class="btn ghost access-btn desktop-only" href="../access.html" data-ui="access-btn" aria-label="Member Access">
-          Member Access
-        </a>
-
-        <button class="btn ghost icon-only nav-toggle" type="button"
-                aria-label="Open menu" aria-expanded="false" aria-controls="navDrawer">
-          <span class="hamburger" aria-hidden="true"></span>
-        </button>
-      </div>
-    </div>
-  </header>
+ <!-- Shared Header Mount -->
+<div id="ogHeaderMount"></div>
 
   <main id="main">
     <div class="container cart-wrap">

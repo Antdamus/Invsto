@@ -1277,3 +1277,45 @@ body{
   45%{ box-shadow: 0 0 0 6px rgba(200,162,74,0.10); border-color: rgba(227, 200, 120, 0.22); }
   100%{ box-shadow: 0 0 0 rgba(200,162,74,0); border-color: rgba(255,255,255,0.12); }
 }
+/* =========================================================
+   Patch — Back to Shop alignment (fix when accordions closed)
+   ========================================================= */
+
+.pdp-back-row{
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Make Back link feel intentional, not “leftover text” */
+.item-back{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 10px 12px;
+  border-radius: 999px;
+
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.02);
+  color: rgba(244, 241, 234, 0.82);
+
+  font-size: 12px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  text-decoration: none;
+
+  transition: transform 160ms ease, border-color 220ms ease, background 220ms ease, color 220ms ease;
+}
+
+.item-back:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227,200,120,0.22);
+  background: rgba(200,162,74,0.08);
+  color: rgba(244, 241, 234, 0.92);
+}
+
+.item-back:active{
+  transform: translateY(0) scale(0.99);
+}

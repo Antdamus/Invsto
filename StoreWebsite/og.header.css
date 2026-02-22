@@ -1,0 +1,531 @@
+/* =========================================================
+   og.header.css — Shared OG Jewelers header
+   MUST match item page header 100%
+   (Based on catalogue.css header base + item.css Phase 3 polish)
+   ========================================================= */
+
+:root{
+  --bg: #070708;
+
+  --ivory: rgba(244, 241, 234, 0.92);
+  --gold: rgba(227, 200, 120, 0.96);
+  --goldSoft: rgba(200, 162, 74, 0.22);
+
+  --text: rgba(255,255,255,0.86);
+  --muted: rgba(255,255,255,0.68);
+  --rim: rgba(255,255,255,0.10);
+  --rim2: rgba(227, 200, 120, 0.20);
+
+  --panel: rgba(10,10,12,0.55);
+  --panel2: rgba(10,10,12,0.62);
+
+  --shadow: 0 22px 60px rgba(0,0,0,0.55);
+
+  --ease: cubic-bezier(.2,.9,.2,1);
+  --dur-fast: 160ms;
+  --dur: 320ms;
+
+  /* Match catalogue system */
+  --header-h: 74px;
+  --serif: "Cormorant Garamond", serif;
+}
+
+*{ box-sizing: border-box; }
+
+/* Keep consistent container sizing used on PDP header */
+.container{
+  width: min(1180px, 92vw);
+  margin: 0 auto;
+}
+
+/* ✅ The header on item page aligns with PDP width */
+.item-container{
+  width: min(1560px, 96vw);
+  margin: 0 auto;
+}
+
+/* Skip link (same behavior as catalogue.css) */
+.skip-link{
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(18,19,22,.92);
+  border: 1px solid rgba(200,162,74,.25);
+  transform: translateY(-140%);
+  transition: transform var(--dur-fast) var(--ease);
+  z-index: 9999;
+}
+.skip-link:focus{
+  transform: translateY(0);
+  outline: none;
+}
+
+/* =========================================================
+   Header / Nav (match item page)
+   ========================================================= */
+.site-header{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(7,7,8,.35);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.site-header.is-elevated{
+  background: rgba(7,7,8,.72);
+  border-bottom-color: rgba(200,162,74,.14);
+}
+.header-inner{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Brand */
+.brand{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 170px;
+  text-decoration: none;
+  color: rgba(244,241,234,.92);
+}
+.brand-mark{
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: radial-gradient(circle at 30% 30%, rgba(227,200,120,.35), rgba(200,162,74,.18));
+  border: 1px solid rgba(200,162,74,.25);
+  box-shadow: 0 10px 30px rgba(0,0,0,.3);
+  font-weight: 600;
+  letter-spacing: .06em;
+}
+.brand-name{
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  letter-spacing: .02em;
+  opacity: .95;
+}
+
+/* Desktop nav */
+.nav{
+  display: none;
+  align-items: center;
+  gap: 22px;
+}
+@media (min-width: 901px){
+  .nav{ display: flex; }
+}
+.nav-link{
+  font-size: .95rem;
+  color: rgba(244,241,234,.82);
+  opacity: .92;
+  padding: 10px 8px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.nav-link:hover{
+  color: rgba(244,241,234,.96);
+  background: rgba(255,255,255,.04);
+  transform: translateY(-1px);
+}
+
+/* Actions row */
+.header-actions{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* =========================================================
+   Buttons (needed because index may not include catalogue.css)
+   Match catalogue.css button system
+   ========================================================= */
+.btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+  transition:
+    transform var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+.btn:active{ transform: translateY(1px) scale(.99); }
+
+.btn.ghost{
+  background: rgba(255,255,255,.03);
+  border-color: rgba(255,255,255,.08);
+  color: rgba(244,241,234,.92);
+}
+.btn.ghost:hover{
+  background: rgba(255,255,255,.05);
+  border-color: rgba(200,162,74,.18);
+  transform: translateY(-1px);
+}
+.btn.icon-only{
+  width: 42px;
+  padding: 0;
+}
+
+/* =========================================================
+   ✅ Item-page icon buttons style (search + cart)
+   This is what was making item page look different.
+   ========================================================= */
+.icon-btn{
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(18,19,22,0.34);
+  color: rgba(227, 200, 120, 0.96);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: transform var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              background var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease);
+}
+.icon-btn:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227, 200, 120, 0.28);
+  background: rgba(200, 162, 74, 0.14);
+  box-shadow: 0 14px 44px rgba(0,0,0,0.45);
+}
+.icon-btn:active{ transform: translateY(0px) scale(0.98); }
+.icon-btn:focus-visible{
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(200, 162, 74, 0.22),
+    0 18px 58px rgba(0,0,0,0.55);
+}
+.icon-btn .ico{
+  width: 20px;
+  height: 20px;
+  stroke: rgba(227, 200, 120, 0.96);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.98;
+  fill: none;
+}
+
+/* Cart badge (works with your cart.shared.js) */
+.og-cartbtn{
+  position: relative;
+}
+.cart-badge{
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(10,10,12,0.92);
+  background: rgba(227, 200, 120, 0.96);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.40);
+}
+
+/* =========================================================
+   Mobile hamburger (item uses <span class="og-hamburger"><i>…</i></span>)
+   ========================================================= */
+.og-navtoggle{ display: inline-flex; }
+@media (min-width: 901px){
+  .og-header .og-navtoggle{ display:none !important; }
+}
+
+.og-hamburger{
+  width: 18px;
+  height: 14px;
+  display: inline-grid;
+  gap: 3px;
+}
+.og-hamburger i{
+  display:block;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(244, 241, 234, 0.86);
+  opacity: 0.95;
+}
+
+/* =========================================================
+   Account chip + menu (same as shared version)
+   ========================================================= */
+.acct-chip{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(10,10,12,0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
+}
+.acct-chip:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227, 200, 120, 0.28);
+  background: rgba(227, 200, 120, 0.08);
+}
+.acct-initials{
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: rgba(244, 241, 234, 0.92);
+  border: 1px solid rgba(227, 200, 120, 0.30);
+  background: radial-gradient(circle at 30% 20%, rgba(227, 200, 120, 0.14), rgba(255,255,255,0.06));
+}
+
+.acct-menu{
+  position: absolute;
+  top: calc(var(--header-h) + 10px);
+  right: max(4vw, 18px);
+  width: 220px;
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 55px rgba(0,0,0,0.55);
+  overflow: hidden;
+  z-index: 3000;
+}
+.acct-menu-item{
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  color: rgba(244, 241, 234, 0.92);
+  font: inherit;
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+}
+.acct-menu-item:hover{
+  background: rgba(200, 162, 74, 0.12);
+  color: rgba(227, 200, 120, 0.98);
+}
+.acct-menu-item.danger{
+  color: rgba(255, 190, 190, 0.98);
+}
+.acct-menu-item.danger:hover{
+  background: rgba(255, 95, 95, 0.12);
+  color: rgba(255, 210, 210, 0.98);
+}
+
+/* =========================================================
+   Mobile Nav Drawer (right slide) — same as item page
+   ========================================================= */
+.og-navbackdrop{
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 1;
+  transition: opacity 240ms ease;
+}
+.og-navbackdrop[hidden]{
+  display: block !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.og-navdrawer{
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(86vw, 360px);
+  z-index: 2300;
+  background: rgba(14, 14, 16, 0.78);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-left: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: -20px 0 70px rgba(0,0,0,0.55);
+  transform: translateX(102%);
+  transition: transform 320ms var(--ease);
+}
+.og-navdrawer[hidden]{
+  display: block !important;
+  pointer-events: none;
+}
+.og-navdrawer.is-open{
+  transform: translateX(0%);
+  pointer-events: auto;
+}
+.og-navdrawer-top{
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+}
+.og-navdrawer-title{
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(244, 241, 234, 0.92);
+}
+.og-navdrawer-close{
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(10,10,12,0.25);
+  color: rgba(244, 241, 234, 0.90);
+  cursor: pointer;
+}
+.nav-drawer{
+  display: grid;
+  gap: 6px;
+  padding: 14px 14px 20px;
+}
+.nav-drawer-link{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 14px;
+  text-decoration:none;
+  color: rgba(244, 241, 234, 0.84);
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(10,10,12,0.20);
+  transition: transform var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.nav-drawer-link:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227, 200, 120, 0.22);
+  background: rgba(227, 200, 120, 0.08);
+}
+.nav-drawer-divider{
+  height: 1px;
+  margin: 8px 2px;
+  background: rgba(255,255,255,0.10);
+}
+.nav-drawer-initials{
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display:grid;
+  place-items:center;
+  font-weight: 800;
+  font-size: 12px;
+  color: rgba(244, 241, 234, 0.92);
+  border: 1px solid rgba(227, 200, 120, 0.28);
+  background: radial-gradient(circle at 30% 20%, rgba(227, 200, 120, 0.14), rgba(255,255,255,0.06));
+}
+
+/* Optional: lock scrolling when drawers are open */
+html.lock, body.lock{
+  overflow: hidden;
+}
+
+/* =========================================================
+   Search Overlay — Hint Chips + Keyboard Pills
+   (Fix: make hint chips legible + luxe)
+   ========================================================= */
+
+.search-hints{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.search-hint{
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid rgba(227, 200, 120, 0.18);
+  background: rgba(10, 10, 12, 0.42);
+  color: rgba(244, 241, 234, 0.92);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow:
+    0 14px 44px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transition: transform 140ms ease, border-color 200ms ease, background 200ms ease, color 200ms ease;
+}
+
+.search-hint:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227, 200, 120, 0.30);
+  background: rgba(200, 162, 74, 0.14);
+  color: rgba(244, 241, 234, 0.98);
+}
+
+.search-hint:active{
+  transform: translateY(0) scale(0.98);
+}
+
+.search-sub{
+  padding-top: 10px;
+  color: rgba(244, 241, 234, 0.70);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.kbd{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(227, 200, 120, 0.18);
+  background: rgba(10, 10, 12, 0.42);
+  color: rgba(244, 241, 234, 0.92);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}

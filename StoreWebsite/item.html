@@ -14,7 +14,8 @@
 
   <!-- Global luxe system -->
   <link rel="stylesheet" href="catalogue.css" />
-  <link rel="stylesheet" href="item.css" />
+<link rel="stylesheet" href="og.header.css" />
+<link rel="stylesheet" href="item.css" />
 
   <!-- Cart drawer styles -->
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
@@ -41,108 +42,19 @@
   <script src="./StoreCart/cart.drawer.js" defer></script>
   <script type="module" src="./StoreCart/cart.service.global.js"></script>
 
+  <script src="og.header.js" defer></script>
+
   <!-- Item page -->
   <script src="item.js" defer></script>
 </head>
 
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
+
 
   <!-- Header -->
-  <header class="site-header og-header" data-elevate-on-scroll>
-    <!-- ✅ Phase 3: use the same wide PDP container so brand + actions align with hero edge -->
-    <div class="item-container header-inner og-header-inner">
-      <!-- Mobile-only menu toggle (hidden on desktop via item.css) -->
-      <button class="btn ghost icon-only og-iconbtn og-navtoggle"
-              type="button"
-              aria-label="Open menu"
-              aria-controls="ogNavDrawer"
-              aria-expanded="false"
-              data-action="open-nav-drawer">
-        <span class="og-hamburger" aria-hidden="true">
-          <i></i><i></i><i></i>
-        </span>
-      </button>
+  <!-- Shared Header Mount (EXACT item header) -->
+<div id="ogHeaderMount"></div>
 
-      <a class="brand og-brand" href="index.html" aria-label="OG Jewelers Home">
-        <span class="brand-mark og-brand-mark" aria-hidden="true">OG</span>
-        <span class="brand-name og-brand-name">OG Jewelers</span>
-      </a>
-
-      <nav class="nav og-nav" aria-label="Primary navigation">
-        <a class="nav-link og-nav-link" href="catalogue.html">Shop</a>
-        <a class="nav-link og-nav-link" href="index.html#collections">Collections</a>
-        <a class="nav-link og-nav-link" href="index.html#story">Story</a>
-        <a class="nav-link og-nav-link" href="index.html#contact">Contact</a>
-      </nav>
-
-      <div class="header-actions">
-        <!-- ✅ Luxe icon system (SVG) so icons remain legible on glass + gold palette -->
-        <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M10.5 18a7.5 7.5 0 1 1 0-15a7.5 7.5 0 0 1 0 15Z" fill="none"/>
-            <path d="M16.6 16.6L21 21" fill="none"/>
-          </svg>
-        </button>
-
-        <a class="btn btn-ghost og-loginbtn" href="join.html" data-ui="access-btn">Login</a>
-
-        <button class="acct-chip" type="button" aria-label="Account" data-ui="acct-chip" hidden>
-          <span class="acct-initials" data-ui="acct-initials">M</span>
-        </button>
-
-        <div class="acct-menu" data-ui="acct-menu" aria-hidden="true" hidden>
-          <a class="acct-menu-item" href="profile.html">Account</a>
-          <button class="acct-menu-item danger" type="button" data-action="signout">Sign out</button>
-        </div>
-
-      <a class="icon-btn og-cartbtn" href="./StoreCart/cart.html" aria-label="Cart">
-  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    <!-- Handles -->
-    <path d="M9 9V7.7a3 3 0 0 1 6 0V9" fill="none"></path>
-
-    <!-- Rim -->
-    <path d="M7.1 9h9.8" fill="none"></path>
-
-    <!-- Tote body -->
-    <path d="M7.6 9.2l-.9 10.8h12.6l-.9-10.8" fill="none"></path>
-
-    <!-- Base line -->
-    <path d="M8.3 20h7.4" fill="none"></path>
-  </svg>
-  <span class="cart-badge" data-ui="cart-count" hidden>0</span>
-</a>
-      </div>
-    </div>
-  </header>
-
-  <!-- Mobile Nav Drawer -->
-  <div class="og-navbackdrop" data-ui="nav-drawer-backdrop" hidden></div>
-
-  <aside class="og-navdrawer" id="ogNavDrawer" data-ui="nav-drawer" aria-hidden="true" hidden>
-    <div class="og-navdrawer-top">
-      <div class="og-navdrawer-title">Menu</div>
-      <button class="og-navdrawer-close" type="button" aria-label="Close menu" data-action="close-nav-drawer">×</button>
-    </div>
-
-    <nav class="nav-drawer" aria-label="Mobile navigation">
-      <a class="nav-drawer-link" href="join.html" data-ui="mobile-access">Login</a>
-
-      <a class="nav-drawer-link" href="profile.html" data-ui="drawer-account" hidden>
-        <span class="nav-drawer-initials" aria-hidden="true"><span data-ui="drawer-initials">M</span></span>
-        <span>Account</span>
-      </a>
-
-      <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
-
-      <a class="nav-drawer-link" href="catalogue.html">Shop</a>
-      <a class="nav-drawer-link" href="index.html#collections">Collections</a>
-      <a class="nav-drawer-link" href="index.html#story">Story</a>
-      <a class="nav-drawer-link" href="index.html#contact">Contact</a>
-    </nav>
-  </aside>
-
-  <!-- ✅ PDP uses a wider container than the rest of the site -->
   <main id="main" class="item-container item-page">
     <div class="item-error" data-ui="item-error" hidden></div>
 
@@ -160,7 +72,6 @@
     <!-- Actual content -->
     <section class="item-wrap" data-ui="item-wrap" hidden>
 
-      <!-- ✅ Sticky-left gallery + scrolling-right content -->
       <section class="item-grid" aria-label="Product details">
 
         <!-- LEFT: Sticky Gallery -->
@@ -175,13 +86,16 @@
           </div>
         </div>
 
-        <!-- RIGHT: Product info (this is what scrolls) -->
+        <!-- RIGHT: Product info -->
         <div class="item-info" data-ui="item-info">
+
           <div class="item-top">
             <span class="item-stock" data-ui="item-stock" data-tone="ok">In Stock</span>
           </div>
 
           <h1 class="item-title" data-ui="item-title">Item</h1>
+
+          <div class="pdp-provenance" data-ui="pdp-provenance" hidden></div>
 
           <div class="price-row">
             <div class="item-price" data-ui="item-price">$0.00</div>
@@ -199,8 +113,6 @@
             <a class="btn ghost item-open-cart" href="./StoreCart/cart.html" data-action="go-cart-page">VIEW CART</a>
           </div>
 
-          <!-- Editorial lead + structured details -->
-                    <!-- Editorial lead + structured details -->
           <div class="desc-block">
             <p class="desc-lead" data-ui="desc-lead"></p>
 
@@ -212,7 +124,7 @@
             </div>
           </div>
 
-          <!-- ✅ 4.3 — Service Accordions (luxe + scannable, no clutter) -->
+          <!-- Service Accordions -->
           <section class="pdp-accordion" aria-label="Shipping and returns">
             <details class="acc-item" open>
               <summary class="acc-sum">
@@ -262,20 +174,28 @@
             </details>
           </section>
 
-          <a class="item-back" href="catalogue.html">← Back to Shop</a>
+          <!-- Back link (always under accordions) -->
+          <div class="pdp-back-row">
+            <a class="item-back" href="catalogue.html">← Back to Shop</a>
+          </div>
 
-      <!-- Related -->
-      <section class="related" data-ui="related-wrap" hidden>
-        <div class="related-divider" aria-hidden="true"></div>
+          <!-- ✅ Related NOW lives INSIDE the right column again -->
+          <section class="related" data-ui="related-wrap" hidden>
+            <div class="related-divider" aria-hidden="true"></div>
 
-        <div class="related-head">
-          <h2 class="related-title">You may also like</h2>
-          <div class="related-sub">Curated picks — similar tone, material, or category.</div>
-        </div>
+            <div class="related-head">
+              <h2 class="related-title">You may also like</h2>
+              <div class="related-sub">Curated picks — similar tone, material, or category.</div>
+            </div>
 
-        <div class="related-grid" data-ui="related-grid"></div>
-      </section>
-    </section>
+            <div class="related-grid" data-ui="related-grid"></div>
+          </section>
+
+        </div><!-- /item-info -->
+
+      </section><!-- /item-grid -->
+
+    </section><!-- /item-wrap -->
   </main>
 
   <!-- Toast -->
@@ -306,12 +226,43 @@
   </section>
 
   <!-- Cart Drawer Mount -->
-  <div id="og-cart-drawer-root"></div>
+   <a class="icon-btn og-cartbtn" href="./StoreCart/cart.html" aria-label="Cart" data-action="open-cart-drawer"></a>
+ <!-- =========================
+     Cart Drawer (mini cart)
+     (Required for cart.drawer.js)
+     ========================= -->
+<div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+<aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+  <div class="cd-topbar">
+    <div class="cd-titlewrap">
+      <div class="cd-title">Cart</div>
+      <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+    </div>
+
+    <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+  </div>
+
+  <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+  <div class="cd-list" data-ui="cart-drawer-list"></div>
+  <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+  <div class="cd-footer">
+    <div class="cd-summary">
+      <div>Subtotal</div>
+      <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+    </div>
+
+    <div class="cd-actionsRow">
+      <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+      <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+    </div>
+  </div>
+</aside>
 </body>
 
-<!-- =========================
-     Search Overlay (Luxe)
-     ========================= -->
+<!-- Search Overlay -->
 <section class="search" data-ui="search" hidden aria-hidden="true">
   <div class="search-shell" role="dialog" aria-modal="true" aria-label="Search">
     <div class="search-top">
