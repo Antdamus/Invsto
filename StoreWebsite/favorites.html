@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Favorites</title>
+  <meta name="description" content="View and manage your favorite OG Jewelers pieces." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="catalogue.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
+  <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="initSupabase.js" defer></script>
+
+  <script src="./StoreCart/cart.shared.js" defer></script>
+
+  <script>
+    (function () {
+      window.OG_CART_DRAWER_CFG = {
+        supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+        channel: "og_main",
+        fn: "storefront-catalog"
+      };
+    })();
+  </script>
+
+  <script src="./StoreCart/cart.drawer.js" defer></script>
+  <script type="module" src="./StoreCart/cart.service.global.js"></script>
+
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-elevate-on-scroll>
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="OG Jewelry Home">
+        <span class="brand-mark" aria-hidden="true">OG</span>
+        <span class="brand-name">OG Jewelry</span>
+      </a>
+
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="nav-link" href="index.html">Home</a>
+        <a class="nav-link" href="catalogue.html">Shop</a>
+        <a class="nav-link" href="index.html#contact">Contact</a>
+      </nav>
+
+      <div class="header-actions">
+        <button class="btn ghost icon-only cart-icon" aria-label="Cart" type="button" data-action="open-cart-drawer">
+          <span aria-hidden="true">🛒</span>
+          <span class="cart-badge" data-ui="cart-count" hidden>0</span>
+        </button>
+
+        <a class="btn ghost access-btn desktop-only" href="access.html" data-ui="access-btn" aria-label="Member Access" hidden style="display:none">
+          Member Access
+        </a>
+
+        <button class="acct-chip desktop-only" type="button" data-ui="acct-chip" aria-label="Your account" aria-haspopup="menu" aria-expanded="false" hidden style="display:none">
+          <span class="acct-dot" data-ui="acct-initials">M</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="shop-hero" aria-label="Favorites header">
+      <div class="container shop-hero-inner">
+        <div class="shop-hero-left">
+          <p class="eyebrow">OG Jewelry • Favorites</p>
+          <h1 class="shop-title">Favorites</h1>
+          <p class="shop-subtitle">Your saved pieces, updated from live inventory.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="results" aria-label="Favorite items">
+      <div class="container">
+        <div class="results-top">
+          <div class="results-left">
+            <h2 class="results-title">Saved Items</h2>
+            <p class="results-subtitle"><span data-ui="favorites-count">0</span> item(s)</p>
+          </div>
+        </div>
+
+        <div class="empty" data-ui="favorites-empty" hidden>
+          <h3>No favorites yet</h3>
+          <p>Tap the star on any item to save it here.</p>
+          <a class="btn primary" href="catalogue.html">Browse Catalogue</a>
+        </div>
+
+        <div class="product-grid" data-ui="favorites-grid" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" aria-live="polite" role="status" hidden></div>
+
+  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+    <div class="cd-topbar">
+      <div class="cd-titlewrap">
+        <div class="cd-title">Cart</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+      </div>
+
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+    </div>
+
+    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+    <div class="cd-list" data-ui="cart-drawer-list"></div>
+    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+    <div class="cd-footer">
+      <div class="cd-summary">
+        <div>Subtotal</div>
+        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+      </div>
+
+      <div class="cd-actionsRow">
+        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+      </div>
+    </div>
+  </aside>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var SUPABASE_FALLBACK_URL = "https://byhytmarmigalvawkedi.supabase.co";
+      var gridEl = document.querySelector('[data-ui="favorites-grid"]');
+      var emptyEl = document.querySelector('[data-ui="favorites-empty"]');
+      var countEl = document.querySelector('[data-ui="favorites-count"]');
+      var toastTimer = null;
+      var catalogById = new Map();
+      var syncingPaint = false;
+
+      function esc(value) {
+        return String(value == null ? "" : value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function money(value) {
+        var n = Number(value);
+        return Number.isFinite(n) ? "$" + n.toFixed(2) : "$0.00";
+      }
+
+      function fiveMinBucket() {
+        return Math.floor(Date.now() / 300000);
+      }
+
+      function toast(msg, ms) {
+        var el = document.querySelector(".toast");
+        if (!el) return;
+        el.textContent = String(msg || "");
+        el.hidden = false;
+        el.classList.add("show");
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(function () {
+          el.classList.remove("show");
+          el.hidden = true;
+        }, Number(ms) || 1400);
+      }
+
+      function getFavIds() {
+        var svc = window.ogFavService;
+        if (!svc || typeof svc.getAllIds !== "function") return [];
+        var ids = svc.getAllIds();
+        if (!Array.isArray(ids)) return [];
+
+        var out = [];
+        var seen = new Set();
+        ids.forEach(function (raw) {
+          var id = String(raw || "").trim();
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          out.push(id);
+        });
+        return out;
+      }
+
+      async function fetchCatalog() {
+        var cfg = window.OG_CART_DRAWER_CFG || {};
+        var supabaseUrl = cfg.supabaseUrl || window.SUPABASE_URL || SUPABASE_FALLBACK_URL;
+        var channel = cfg.channel || "og_main";
+        var fn = cfg.fn || "storefront-catalog";
+        var t = fiveMinBucket();
+
+        var url =
+          String(supabaseUrl).replace(/\/$/, "") +
+          "/functions/v1/" +
+          encodeURIComponent(String(fn)) +
+          "?channel=" +
+          encodeURIComponent(String(channel)) +
+          "&t=" +
+          encodeURIComponent(String(t));
+
+        var res = await fetch(url, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store"
+        });
+
+        if (!res.ok) {
+          var text = await res.text().catch(function () { return ""; });
+          throw new Error("catalog_fetch_failed (" + res.status + ") " + text);
+        }
+
+        var data = await res.json();
+        return Array.isArray(data && data.items) ? data.items : [];
+      }
+
+      function renderCard(item) {
+        var id = String(item && item.item_type_id || "");
+        var title = esc(item && item.title || "Item");
+        var image = esc(item && item.image_url || "");
+        var price = money(item && item.display_price);
+        var stockNum = Number(item && item.remaining_count);
+        var stockText = Number.isFinite(stockNum)
+          ? (stockNum <= 0 ? "Sold Out" : (stockNum < 10 ? "Low Stock" : "In Stock"))
+          : "In Stock";
+
+        return '' +
+          '<article class="product-card" data-id="' + esc(id) + '">' +
+            '<a class="product-hit" href="item.html?id=' + encodeURIComponent(id) + '" aria-label="View details for ' + title + '">' +
+              '<div class="product-media">' +
+                '<img src="' + image + '" alt="' + title + '" loading="lazy" />' +
+              '</div>' +
+              '<div class="product-body">' +
+                '<div class="product-top">' +
+                  '<h3 class="product-title">' + title + '</h3>' +
+                  '<div class="product-price">' + esc(price) + '</div>' +
+                '</div>' +
+                '<div class="product-meta">' +
+                  '<span>' + esc(stockText) + '</span>' +
+                '</div>' +
+              '</div>' +
+            '</a>' +
+            '<div class="product-actions">' +
+              '<button class="fav-toggle" type="button" data-action="toggle-fav" data-id="' + esc(id) + '" aria-pressed="false">⭐</button>' +
+              '<a class="btn ghost" href="item.html?id=' + encodeURIComponent(id) + '">View</a>' +
+              '<button class="btn ghost" type="button" data-action="add-to-cart" data-id="' + esc(id) + '">Add to cart</button>' +
+            '</div>' +
+          '</article>';
+      }
+
+      function paintRequestEvent() {
+        syncingPaint = true;
+        window.dispatchEvent(new CustomEvent("og-favs-changed"));
+        syncingPaint = false;
+      }
+
+      function setCount(n) {
+        if (countEl) countEl.textContent = String(n);
+      }
+
+      function renderFromIds(ids, emitPaint) {
+        if (!gridEl || !emptyEl) return;
+
+        var items = ids
+          .map(function (id) { return catalogById.get(id); })
+          .filter(Boolean);
+
+        setCount(items.length);
+
+        if (!items.length) {
+          gridEl.innerHTML = "";
+          gridEl.hidden = true;
+          emptyEl.hidden = false;
+        } else {
+          gridEl.innerHTML = items.map(renderCard).join("");
+          gridEl.hidden = false;
+          emptyEl.hidden = true;
+        }
+
+        if (emitPaint) paintRequestEvent();
+      }
+
+      async function init() {
+        var ids = getFavIds();
+        if (!ids.length) {
+          renderFromIds([], true);
+          return;
+        }
+
+        try {
+          var items = await fetchCatalog();
+          catalogById = new Map(
+            items
+              .map(function (it) { return [String(it && it.item_type_id || ""), it]; })
+              .filter(function (entry) { return entry[0]; })
+          );
+          renderFromIds(ids, true);
+        } catch (err) {
+          console.error(err);
+          toast("Could not load favorites right now.");
+          renderFromIds([], true);
+        }
+      }
+
+      document.addEventListener("click", function (e) {
+        var el = e.target && e.target.closest ? e.target.closest("[data-action]") : null;
+        if (!el) return;
+
+        var action = el.getAttribute("data-action");
+
+        if (action === "open-cart-drawer") {
+          e.preventDefault();
+          window.ogCartDrawerOpen && window.ogCartDrawerOpen();
+          return;
+        }
+
+        if (action !== "add-to-cart") return;
+
+        e.preventDefault();
+
+        var id = String((el.dataset && el.dataset.id) || "").trim();
+        if (!id) return;
+
+        var item = catalogById.get(id);
+        var price = Number(item && item.display_price);
+        var currentPrice = Number.isFinite(price) ? price : 0;
+
+        if (window.ogCartService && typeof window.ogCartService.addToCart === "function") {
+          window.ogCartService.addToCart(id, 1, currentPrice);
+          window.ogCartBadgeRefresh && window.ogCartBadgeRefresh();
+          window.ogCartDrawerOpen && window.ogCartDrawerOpen();
+          toast("Added to cart.");
+        }
+      });
+
+      window.addEventListener("og-favs-changed", function () {
+        if (syncingPaint) return;
+        renderFromIds(getFavIds(), false);
+      });
+
+      init();
+    })();
+  </script>
+</body>
+</html>
