@@ -18,6 +18,7 @@
 
   <!-- Cart drawer styles -->
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
+  <link rel="stylesheet" href="./Favorites/favorites.shared.css">
 
   <!-- JS (Supabase MUST load before initSupabase.js) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
@@ -42,6 +43,10 @@
 
   <!-- Cart service bridge (module) -->
   <script type="module" src="./StoreCart/cart.service.global.js"></script>
+
+  <!-- Favorites bridge + shared UI -->
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
 
   <!-- Item page logic -->
   <script src="item.js" defer></script>
@@ -167,6 +172,7 @@
 
           <!-- CTAs moved above long text -->
           <div class="item-actions">
+            <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
             <button class="btn ghost item-add og-cta" type="button" data-action="add-to-cart">Add to Cart</button>
             <button class="btn ghost item-open-cart" type="button" data-action="open-cart-drawer">View Cart</button>
           </div>

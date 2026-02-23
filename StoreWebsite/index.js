@@ -237,6 +237,12 @@ function applyInventoryToSlot(slotRoot, itemId) {
   if (!it || !slotRoot) return;
   // stamp the DOM so quickview knows what inventory id it represents
   if (slotRoot && slotRoot.dataset) slotRoot.dataset.itemId = String(itemId);
+  const cardRoot =
+    (typeof slotRoot.matches === "function" && slotRoot.matches(".card") && slotRoot) ||
+    slotRoot.closest?.(".card") ||
+    null;
+  const favBtn = cardRoot?.querySelector('[data-action="toggle-fav"]');
+  if (favBtn) favBtn.dataset.id = String(itemId);
 
   // image
   if (slotRoot.style?.getPropertyValue("--img") !== undefined) {

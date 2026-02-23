@@ -332,6 +332,12 @@
         hero.setAttribute("aria-label", title);
       }
 
+      const itemId = String(item?.item_type_id || "");
+      const addBtn = $('[data-action="add-to-cart"]');
+      const favBtn = $('[data-action="toggle-fav"]');
+      if (addBtn && itemId) addBtn.dataset.id = itemId;
+      if (favBtn && itemId) favBtn.dataset.id = itemId;
+
       // Suggestions
       const rel = buildSuggestions(all, item);
       const relWrap = $('[data-ui="related-wrap"]');

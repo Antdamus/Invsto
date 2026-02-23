@@ -17,6 +17,7 @@
   <!-- CSS -->
   <link rel="stylesheet" href="catalogue.css" />
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css">
+  <link rel="stylesheet" href="./Favorites/favorites.shared.css">
 
   <!-- JS (Supabase MUST load before initSupabase.js) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
@@ -41,6 +42,10 @@
 
   <!-- Cart service bridge (module) -->
   <script type="module" src="./StoreCart/cart.service.global.js"></script>
+
+  <!-- Favorites bridge + shared UI -->
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
 
   <!-- Page logic -->
   <script src="catalogue.js" defer></script>

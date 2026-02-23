@@ -1048,6 +1048,12 @@ const toggleNavDrawer = () => {
       </a>
 
       <div class="product-actions">
+        <button class="fav-toggle" type="button"
+                data-action="toggle-fav"
+                data-id="${esc(p.id)}"
+                aria-pressed="false">
+          ⭐
+        </button>
         <button class="btn ghost" type="button"
                 data-action="add-to-cart"
                 data-id="${esc(p.id)}">
