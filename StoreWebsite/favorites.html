@@ -146,6 +146,38 @@
       var catalogById = new Map();
       var syncingPaint = false;
 
+      function waitForFavService(timeoutMs) {
+        return new Promise(function (resolve) {
+          var timeout = Number(timeoutMs) || 2500;
+          var start = Date.now();
+
+          function ready() {
+            return !!(
+              window.ogFavService &&
+              typeof window.ogFavService.getAllIds === "function"
+            );
+          }
+
+          if (ready()) {
+            resolve(true);
+            return;
+          }
+
+          var timer = window.setInterval(function () {
+            if (ready()) {
+              window.clearInterval(timer);
+              resolve(true);
+              return;
+            }
+
+            if (Date.now() - start >= timeout) {
+              window.clearInterval(timer);
+              resolve(false);
+            }
+          }, 25);
+        });
+      }
+
       function esc(value) {
         return String(value == null ? "" : value)
           .replaceAll("&", "&amp;")
@@ -349,7 +381,17 @@
         renderFromIds(getFavIds(), false);
       });
 
-      init();
+      function boot() {
+        waitForFavService(3000).then(function () {
+          init();
+        });
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", boot, { once: true });
+      } else {
+        boot();
+      }
     })();
   </script>
 </body>
