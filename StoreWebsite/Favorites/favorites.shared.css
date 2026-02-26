@@ -69,6 +69,27 @@
   z-index: 4;
 }
 
+/* Catalogue cards keep non-fav stars hover-only, but favorites remain visible. */
+.product-card .fav-toggle {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease,
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 220ms ease,
+    color 180ms ease;
+}
+
+.product-card:hover .fav-toggle,
+.product-card:focus-within .fav-toggle,
+.product-card .fav-toggle.is-fav {
+  opacity: 1;
+  visibility: visible;
+}
+
 .item-actions .fav-toggle {
   position: static;
   flex: 0 0 42px;
