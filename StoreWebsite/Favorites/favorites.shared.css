@@ -69,6 +69,20 @@
   z-index: 4;
 }
 
+/* Ensure catalogue stars render inside a stable card-local stacking context. */
+.product-card {
+  position: relative;
+}
+
+.product-card .product-hit {
+  position: relative;
+  z-index: 1;
+}
+
+.product-card .fav-toggle {
+  z-index: 6;
+}
+
 /* Catalogue cards keep non-fav stars hover-only, but favorites remain visible. */
 .product-card .fav-toggle {
   opacity: 0;
