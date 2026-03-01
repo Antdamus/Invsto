@@ -7,27 +7,28 @@
   <meta name="theme-color" content="#070708" />
   <title>OG Jewelers — Item</title>
 
-  <!-- Fonts (match your pages) -->
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 
-  <!-- Base styles (match catalogue/index look) -->
+  <!-- Global luxe system -->
   <link rel="stylesheet" href="catalogue.css" />
-  <link rel="stylesheet" href="item.css" />
+<link rel="stylesheet" href="og.header.css" />
+<link rel="stylesheet" href="item.css" />
 
   <!-- Cart drawer styles -->
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
   <link rel="stylesheet" href="./Favorites/favorites.shared.css">
 
-  <!-- JS (Supabase MUST load before initSupabase.js) -->
+  <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="initSupabase.js" defer></script>
 
   <!-- Shared cart badge -->
   <script src="./StoreCart/cart.shared.js" defer></script>
 
-  <!-- Drawer hydration config (same pattern as index.html) -->
+  <!-- Drawer hydration config -->
   <script>
     (function () {
       window.OG_CART_DRAWER_CFG = {
@@ -40,110 +41,30 @@
 
   <!-- Drawer logic -->
   <script src="./StoreCart/cart.drawer.js" defer></script>
-
-  <!-- Cart service bridge (module) -->
   <script type="module" src="./StoreCart/cart.service.global.js"></script>
 
   <!-- Favorites bridge + shared UI -->
   <script type="module" src="./Favorites/favorites.service.global.js"></script>
   <script src="./Favorites/favorites.shared.js" defer></script>
 
-  <!-- Item page logic -->
+  <!-- Favorites bridge + shared UI -->
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
+
+  <script src="og.header.js" defer></script>
+
+  <!-- Item page -->
   <script src="item.js" defer></script>
 </head>
 
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
 
-   <!-- Header -->
-  <header class="site-header og-header" data-elevate-on-scroll>
-    <div class="container header-inner og-header-inner">
-      <!-- Mobile menu button -->
-      <button class="btn ghost icon-only og-iconbtn og-navtoggle"
-              type="button"
-              aria-label="Open menu"
-              aria-controls="ogNavDrawer"
-              aria-expanded="false"
-              data-action="open-nav-drawer">
-        <span class="og-hamburger" aria-hidden="true">
-          <i></i><i></i><i></i>
-        </span>
-      </button>
 
-      <!-- Brand -->
-      <a class="brand og-brand" href="index.html" aria-label="OG Jewelers Home">
-        <span class="brand-mark og-brand-mark" aria-hidden="true">OG</span>
-        <span class="brand-name og-brand-name">OG Jewelers</span>
-      </a>
+  <!-- Header -->
+  <!-- Shared Header Mount (EXACT item header) -->
+<div id="ogHeaderMount"></div>
 
-      <!-- Desktop nav -->
-      <nav class="nav og-nav" aria-label="Primary navigation">
-        <a class="nav-link og-nav-link" href="catalogue.html">Shop</a>
-        <a class="nav-link og-nav-link" href="favorites.html">Favorites</a>
-        <a class="nav-link og-nav-link" href="index.html#collections">Collections</a>
-        <a class="nav-link og-nav-link" href="index.html#story">Story</a>
-        <a class="nav-link og-nav-link" href="index.html#contact">Contact</a>
-      </nav>
-
-      <div class="header-actions">
-  <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
-    <span aria-hidden="true">⌕</span>
-  </button>
-
-  <!-- Logged OUT: show Login -->
-  <a class="btn btn-ghost og-loginbtn" href="join.html" data-ui="access-btn">Login</a>
-
-  <!-- Logged IN: show initials chip -->
-  <button class="acct-chip" type="button" aria-label="Account" data-ui="acct-chip" hidden>
-    <span class="acct-initials" data-ui="acct-initials">M</span>
-  </button>
-
-  <!-- Account menu -->
-  <div class="acct-menu" data-ui="acct-menu" aria-hidden="true" hidden>
-    <a class="acct-menu-item" href="profile.html">Account</a>
-    <button class="acct-menu-item danger" type="button" data-action="signout">Sign out</button>
-  </div>
-
-  <a class="icon-btn" href="./StoreCart/cart.html" aria-label="Cart">
-    <span aria-hidden="true">🛒</span>
-    <span class="cart-badge" data-ui="cart-count" hidden>0</span>
-  </a>
-</div>
-
-  </header>
-
-  <!-- Mobile Nav Drawer -->
-  <div class="og-navbackdrop" data-ui="nav-drawer-backdrop" hidden></div>
-
-  <aside class="og-navdrawer" id="ogNavDrawer" data-ui="nav-drawer" aria-hidden="true" hidden>
-    <div class="og-navdrawer-top">
-      <div class="og-navdrawer-title">Menu</div>
-      <button class="og-navdrawer-close" type="button" aria-label="Close menu" data-action="close-nav-drawer">×</button>
-    </div>
-
-   <nav class="nav-drawer" aria-label="Mobile navigation">
-  <!-- Logged OUT -->
-  <a class="nav-drawer-link" href="join.html" data-ui="mobile-access">Login</a>
-
-  <!-- Logged IN -->
-  <a class="nav-drawer-link" href="profile.html" data-ui="drawer-account" hidden>
-    <span class="nav-drawer-initials" aria-hidden="true"><span data-ui="drawer-initials">M</span></span>
-    <span>Account</span>
-  </a>
-
-  <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
-
-  <!-- Your existing links -->
-  <a class="nav-drawer-link" href="catalogue.html">Shop</a>
-  <a class="nav-drawer-link" href="favorites.html">Favorites</a>
-  <a class="nav-drawer-link" href="index.html#collections">Collections</a>
-  <a class="nav-drawer-link" href="index.html#story">Story</a>
-  <a class="nav-drawer-link" href="index.html#contact">Contact</a>
-</nav>
-
-  </aside>
-
-  <main id="main" class="container item-page">
+  <main id="main" class="item-container item-page">
     <div class="item-error" data-ui="item-error" hidden></div>
 
     <!-- Skeleton -->
@@ -159,84 +80,233 @@
 
     <!-- Actual content -->
     <section class="item-wrap" data-ui="item-wrap" hidden>
-      <div class="item-grid">
-        <div class="item-hero" data-ui="item-hero" role="img" aria-label="Item image"></div>
 
-        <div class="item-info">
-          <!-- Keep stock visible early -->
+      <section class="item-grid" aria-label="Product details">
+
+        <!-- LEFT: Sticky Gallery -->
+        <div class="item-gallery" data-ui="item-gallery">
+          <div class="item-hero" data-ui="item-hero" role="img" aria-label="Item image">
+            <button class="inspect-hit" type="button" data-action="open-inspect" aria-label="Examine craftsmanship"></button>
+
+            <div class="inspect-pill" aria-hidden="true">
+              <span class="inspect-ico" aria-hidden="true">⌕</span>
+              <span>Examine craftsmanship</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Product info -->
+        <div class="item-info" data-ui="item-info">
+
           <div class="item-top">
             <span class="item-stock" data-ui="item-stock" data-tone="ok">In Stock</span>
           </div>
 
-          <!-- Primary hierarchy -->
           <h1 class="item-title" data-ui="item-title">Item</h1>
-          <div class="item-price" data-ui="item-price">$0.00</div>
 
-          <!-- CTAs moved above long text -->
+          <div class="pdp-provenance" data-ui="pdp-provenance" hidden></div>
+
+          <div class="price-row">
+            <div class="item-price" data-ui="item-price">$0.00</div>
+            <div class="item-meta" data-ui="item-meta" hidden>Fine Jewelry • 925</div>
+          </div>
+
+          <div class="trust-row" aria-label="Store assurances">
+            <span class="trust-chip">15-min Price Lock</span>
+            <span class="trust-chip">Secure Checkout</span>
+            <span class="trust-chip">Authenticity Promise</span>
+          </div>
+
           <div class="item-actions">
             <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
-            <button class="btn ghost item-add og-cta" type="button" data-action="add-to-cart">Add to Cart</button>
-            <button class="btn ghost item-open-cart" type="button" data-action="open-cart-drawer">View Cart</button>
+            <button class="btn ghost item-add og-cta" type="button" data-action="add-to-cart">ADD TO CART</button>
+            <a class="btn ghost item-open-cart" href="./StoreCart/cart.html" data-action="go-cart-page">VIEW CART</a>
           </div>
 
-          <div class="item-fineprint">
-            Price locks for 15 minutes after you add to cart.
+          <div class="desc-block">
+            <p class="desc-lead" data-ui="desc-lead"></p>
+
+            <div class="desc-divider" aria-hidden="true"></div>
+
+            <div class="details">
+              <div class="details-title">Details</div>
+              <dl class="details-list" data-ui="details-list"></dl>
+            </div>
           </div>
 
-          <!-- Description moved later -->
-          <p class="item-desc" data-ui="item-desc">Description...</p>
+          <!-- Service Accordions -->
+          <section class="pdp-accordion" aria-label="Shipping and returns">
+            <details class="acc-item" open>
+              <summary class="acc-sum">
+                <span class="acc-title">Shipping</span>
+                <span class="acc-sub">Free insured delivery</span>
+              </summary>
+              <div class="acc-panel">
+                <p class="acc-p">
+                  Orders ship in protective packaging with tracking. Most deliveries arrive in
+                  <strong>2–3 business days</strong> after dispatch.
+                </p>
+                <p class="acc-p subtle">
+                  Need it sooner? Contact us for expedited options.
+                </p>
+              </div>
+            </details>
 
-          <!-- Back link moved to the bottom so it doesn't compete -->
-          <a class="item-back" href="catalogue.html">← Back to Shop</a>
-        </div>
-      </div>
+            <details class="acc-item">
+              <summary class="acc-sum">
+                <span class="acc-title">Returns</span>
+                <span class="acc-sub">Simple & clear</span>
+              </summary>
+              <div class="acc-panel">
+                <p class="acc-p">
+                  Returns accepted within <strong>7 days</strong> of delivery for unworn pieces in
+                  original condition and packaging.
+                </p>
+                <p class="acc-p subtle">
+                  Final sale items are not eligible. We’ll guide you through the process.
+                </p>
+              </div>
+            </details>
 
-      <!-- Related -->
-      <section class="related" data-ui="related-wrap" hidden>
-        <div class="related-head">
-          <h2 class="related-title">You may also like</h2>
-          <div class="related-sub">Curated picks based on similar categories/material.</div>
-        </div>
-        <div class="related-grid" data-ui="related-grid"></div>
-      </section>
-    </section>
+            <details class="acc-item">
+              <summary class="acc-sum">
+                <span class="acc-title">Authenticity</span>
+                <span class="acc-sub">Verified by OG</span>
+              </summary>
+              <div class="acc-panel">
+                <p class="acc-p">
+                  Every piece is inspected for material, finish, and craftsmanship before it ships.
+                </p>
+                <p class="acc-p subtle">
+                  Questions about stamps, purity, or care? Message us — we’ll help.
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <!-- Back link (always under accordions) -->
+          <div class="pdp-back-row">
+            <a class="item-back" href="catalogue.html">← Back to Shop</a>
+          </div>
+
+          <!-- ✅ Related NOW lives INSIDE the right column again -->
+          <section class="related" data-ui="related-wrap" hidden>
+            <div class="related-divider" aria-hidden="true"></div>
+
+            <div class="related-head">
+              <h2 class="related-title">You may also like</h2>
+              <div class="related-sub">Curated picks — similar tone, material, or category.</div>
+            </div>
+
+            <div class="related-grid" data-ui="related-grid"></div>
+          </section>
+
+        </div><!-- /item-info -->
+
+      </section><!-- /item-grid -->
+
+    </section><!-- /item-wrap -->
   </main>
 
   <!-- Toast -->
   <div class="toast" hidden aria-live="polite"></div>
 
-  <!-- =========================
-       Cart Drawer (mini cart)
-       Copied from your index.html
-       ========================= -->
-  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+  <!-- Inspect Viewer -->
+  <div class="inspect-backdrop" data-ui="inspect-backdrop" hidden></div>
 
-  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
-    <div class="cd-topbar">
-      <div class="cd-titlewrap">
-        <div class="cd-title">Cart</div>
-        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+  <section class="inspect-modal" data-ui="inspect-modal" role="dialog" aria-modal="true" aria-hidden="true" hidden>
+    <div class="inspect-stage" role="document">
+      <div class="inspect-topbar">
+        <div class="inspect-title" data-ui="inspect-title">Examine craftsmanship</div>
+        <div class="inspect-controls">
+          <button class="inspect-chip" type="button" data-action="inspect-zoom-out" aria-label="Zoom out">−</button>
+          <button class="inspect-chip" type="button" data-action="inspect-zoom-in" aria-label="Zoom in">+</button>
+          <button class="inspect-chip" type="button" data-action="inspect-reset" aria-label="Reset view">Reset</button>
+          <button class="inspect-chip danger" type="button" data-action="close-inspect" aria-label="Close">×</button>
+        </div>
       </div>
 
-      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+      <div class="inspect-viewport" data-ui="inspect-viewport">
+        <img class="inspect-img" data-ui="inspect-img" alt="" draggable="false" />
+        <div class="inspect-shimmer" data-ui="inspect-shimmer" hidden aria-hidden="true"></div>
+      </div>
+
+      <div class="inspect-hint" data-ui="inspect-hint">Drag to pan • Scroll / Pinch to zoom • Double-tap to zoom</div>
+    </div>
+  </section>
+
+  <!-- Cart Drawer Mount -->
+   <a class="icon-btn og-cartbtn" href="./StoreCart/cart.html" aria-label="Cart" data-action="open-cart-drawer"></a>
+ <!-- =========================
+     Cart Drawer (mini cart)
+     (Required for cart.drawer.js)
+     ========================= -->
+<div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+<aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+  <div class="cd-topbar">
+    <div class="cd-titlewrap">
+      <div class="cd-title">Cart</div>
+      <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
     </div>
 
-    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+    <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+  </div>
 
-    <div class="cd-list" data-ui="cart-drawer-list"></div>
-    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+  <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
 
-    <div class="cd-footer">
-      <div class="cd-summary">
-        <div>Subtotal</div>
-        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
-      </div>
+  <div class="cd-list" data-ui="cart-drawer-list"></div>
+  <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
 
-      <div class="cd-actionsRow">
-        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
-        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
-      </div>
+  <div class="cd-footer">
+    <div class="cd-summary">
+      <div>Subtotal</div>
+      <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
     </div>
-  </aside>
+
+    <div class="cd-actionsRow">
+      <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+      <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+    </div>
+  </div>
+</aside>
 </body>
+
+<!-- Search Overlay -->
+<section class="search" data-ui="search" hidden aria-hidden="true">
+  <div class="search-shell" role="dialog" aria-modal="true" aria-label="Search">
+    <div class="search-top">
+      <div class="search-title">Search</div>
+      <button class="search-close" type="button" data-action="close-search" aria-label="Close search">
+        ✕
+      </button>
+    </div>
+
+    <div class="search-row">
+      <input
+        class="search-input"
+        data-ui="search-input"
+        type="search"
+        inputmode="search"
+        autocomplete="off"
+        placeholder="Search pieces, materials, collections…"
+        aria-label="Search catalogue"
+      />
+      <button class="search-go" type="button" data-action="search-go" aria-label="Search">
+        Go
+      </button>
+    </div>
+
+    <div class="search-hints" aria-label="Suggested searches">
+      <button type="button" class="search-hint" data-action="search-hint" data-search="chain">Chains</button>
+      <button type="button" class="search-hint" data-action="search-hint" data-search="ring">Rings</button>
+      <button type="button" class="search-hint" data-action="search-hint" data-search="bracelet">Bracelets</button>
+      <button type="button" class="search-hint" data-action="search-hint" data-search="diamond">Diamond</button>
+    </div>
+
+    <div class="search-sub">
+      Press <span class="kbd">Enter</span> to search • <span class="kbd">Esc</span> to close
+    </div>
+  </div>
+</section>
 </html>
