@@ -1,0 +1,489 @@
+*   [33me70a5b4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mpagemerge[m[33m, [m[1;31morigin/RO_catalogue[m[33m)[m Merge remote-tracking branch 'origin/item-page-redesign' into RO_catalogue
+[31m|[m[32m\[m  
+[31m|[m * [33m83d5692[m[33m ([m[1;31morigin/item-page-redesign[m[33m)[m Improved item page. universal header files created and implemented across project
+[31m|[m * [33m4b09c60[m Item Page redesign
+* [32m|[m [33mc060504[m[33m ([m[1;32mRO_catalogue[m[33m)[m Favorites: step 8.3 hovering works in catalogue. All favorite functionalities now work in index, catalogue, items and favorite.html. Next steps would be to discuss better desing and eventually implement supabase for user memory.# Please enter the commit message for your changes. Lines starting
+* [32m|[m [33mb69e27b[m Favorite step 8.2: start now persists after refreshing. Catalogue card hovering needs to be fixed.
+* [32m|[m [33m21f9b24[m Fav plan step 7: added navigation links to index, catalogue and item to favorites. Start permanence not working well in these files.
+* [32m|[m [33m2c64e0f[m Favorites Step 6.1: favorites.html init gating to ensure catalog fetch and rendering works.
+* [32m|[m [33m93b47f4[m Favorite step 6 favorite.html - need to fix rendering as favorites are not loading properly
+* [32m|[m [33m04185b6[m Favorites Step 5: Start and style + wired globally + shared scripts on index/catalogue/item and add luxury star styling
+* [32m|[m [33m0868476[m Favorites Step 4: add shared UI delegation + paintStars repaint
+* [32m|[m [33m8e3e433[m Favorites plan step 3 - created service.global.js to make the service functions available globally given static nature of website.
+* [32m|[m [33m3624129[m Favorite plan 2: Favorite.service.js added to wrap core functionality and emit events for future use in the UI.
+* [32m|[m [33m725d4d4[m Favorites Step 1: implement og_favs_v1 core storage contract
+[32m|[m[32m/[m  
+* [33me4183cf[m Drafted techical document for favorite page plan.
+* [33me6d9dc3[m Refactor drawer to use ogCartService exclusively (remove duplicate cart logic)
+* [33m22dbbfe[m Cart Consolidation Step 5: refactor cart.js to delegate all storage and mutations to ogCartService/cart.core; remove duplicated cart logic; preserve lock, resolver, and UI behavior
+* [33m78c6348[m Cart Consolidation Step 4: migrate item.js add-to-cart to ogCartService; remove duplicate cart helpers; preserve drawer + badge behavior
+* [33m175168f[m Cart Consolidation Step 3: migrate catalogue.js add-to-cart to ogCartService; remove duplicate cart helpers; preserve drawer + badge behavior
+* [33m7a091de[m Cart Consolidation Step 2: index.js now routes add-to-cart through window.ogCartService; removed local cart helpers; preserved drawer + badge behavior
+* [33mfa08dcd[m Cart.html items now navigate back to item.html when clicked.
+* [33m243fdca[m drawer in catalogue.html links back to item.html
+* [33ma50369c[m Stabilization: fix catalogue click handler crash
+* [33m1688c08[m Stabilization Step 0: fix item.html structure, drawer asset paths, and navigation anchors
+* [33m17dec0e[m Storewebsite stabilization plan
+* [33m8af56ef[m Step 1: introduce ogCartService global bridge for cart.service (no logic changes)
+* [33m9b18c45[m Codex summary documents - Repo summary, storewebsite audi, cart plan and test
+* [33m3926cd2[m[33m ([m[1;31morigin/JoinPage[m[33m)[m JoinPage
+* [33m4dca039[m improvements to product page header, need to include in index and catalogue too
+* [33m475eced[m Product page
+[32m|[m * [33m2ebf8b6[m[33m ([m[1;31morigin/Admin[m[33m)[m save
+[32m|[m * [33m84a7eab[m save backend so far, need to set up webhook
+[32m|[m * [33m856b911[m save
+[32m|[m * [33m4db02dc[m asve
+[32m|[m * [33m8d97565[m now drawer closes
+[32m|[m * [33m44af1ae[m drawer closes
+[32m|[m * [33m7ec442d[m save
+[32m|[m[32m/[m  
+* [33mcf50290[m stock contract determined for logic
+* [33md43bc31[m price filter operating
+* [33m0a1fb47[m filter improvement
+* [33mcd4782d[m[33m ([m[1;31morigin/RO_storecard_modal[m[33m)[m filter revamped in catalogue
+* [33mdf33074[m acces membership no longer hiding in catalogue
+* [33m4b1ebac[m saved
+* [33m084797c[m fixed bug
+*   [33m1812586[m Merge origin/storecart into JoinPage Merge remote-tracking branch 'origin/storecart' into JoinPage
+[34m|[m[35m\[m  
+[34m|[m * [33md2ce5db[m[33m ([m[1;31morigin/storecart[m[33m)[m Storecart and drawer
+[34m|[m * [33mb76ed8b[m Cart Drawer
+[34m|[m * [33mf4e47df[m Phase 3
+* [35m|[m [33m5346019[m save'
+* [35m|[m [33m484dbee[m latest change
+* [35m|[m [33mccc2e1f[m antispam system operativeg
+* [35m|[m [33mfe7082f[m track
+[35m|[m[35m/[m  
+* [33m5c84ad4[m last save for drawer of the profile to work
+* [33m0be784b[m save" q ;
+* [33maef3866[m save
+* [33mc4eadb8[m portal connection established with right aesthetics
+* [33m19948cd[m saves
+* [33md62dd40[m save
+* [33m5596fc5[m save
+* [33m6fe6fdf[m JoinPage
+* [33m7143139[m save
+* [33mbb0b1da[m save
+* [33mbb03b00[m saves
+* [33m0d25dbb[m JoinPage
+* [33mbc94539[m pubished changes
+* [33m3fc48bc[m save
+* [33m9bd2c43[m admin page
+* [33m939c298[m new store front
+* [33m17ec7b3[m save new storefront
+* [33m8ee94f9[m no show after 10 min now
+* [33m27f7fa5[m service to notify admin of break start
+* [33m48ad440[m save
+* [33m8671ae3[m Save
+* [33m1212889[m changes done
+* [33m800a09b[m access page
+* [33md538299[m save
+* [33m321b9f8[m JoinPage
+* [33mf8f1649[m save
+* [33m1d69c0e[m save
+* [33mdb84fe0[m builded join and profile page
+[35m|[m * [33md76d808[m[33m ([m[1;31morigin/admin-storefront[m[33m)[m add admin
+[35m|[m[35m/[m  
+* [33m8c6ed85[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m, [m[1;32mitem-page-redesign[m[33m, [m[1;32mJoinPage[m[33m, [m[1;32mInvsto[m[33m)[m save
+* [33m1040c8c[m save
+* [33m6c8cd02[m savbe
+* [33ma19ee19[m save
+* [33m2db88e8[m save
+* [33mdd8ea7d[m push
+* [33mfd86829[m moved the file
+* [33mb20a238[m migration of OG website
+* [33m59fd7ed[m save
+* [33macc76fe[m migrations for phase 3
+* [33m55bd290[m supabase connection
+* [33m45aae41[m asthetics for the workers
+* [33mfaa1747[m addinventory
+* [33m9c8e97a[m save
+* [33m267c522[m done
+* [33m788492c[m pushes
+* [33m0b60339[m pushes
+* [33m0d61d4f[m saves needed for better UI
+* [33m9bc1707[m save
+* [33mc56eccd[m save the buttons
+* [33m17a3653[m FICA in place
+* [33m23bbd7c[m taxes witholding calculation
+* [33m6432789[m pdf for employee
+* [33m0a0b409[m saving the inventory
+* [33m3856efc[m mobile schedule rectified
+* [33m2e59089[m saved
+* [33m21647f3[m global show overalp shift on both days
+* [33mf752e6c[m global schedule is working
+* [33m3ac2cb9[m migration of schedule function
+* [33m800c566[m migrated the store tab successfully
+* [33m741b75f[m migration steps
+* [33m187221f[m halfway
+* [33m5399792[m approve no longer showing after waive
+* [33m51a8da7[m unapproval operatingl
+* [33md2a0e6c[m overview operating
+* [33mab19e17[m save
+* [33m2498e0d[m save
+* [33m9fd2f79[m save
+* [33m090d9ba[m overview operating in the phone
+* [33m9638e37[m save checkpoint
+* [33m687f014[m changes
+* [33m60d6da3[m save
+* [33mfd9d599[m new things
+* [33m3c55587[m save
+* [33m0b40225[m calendar working too
+* [33m4cc6f4d[m save' q
+* [33mcea695e[m user working
+* [33m24180f8[m save
+* [33m3e24fae[m save
+* [33mf54c074[m user tab operating
+* [33m023a75a[m user drawer operating
+* [33m162e897[m save checkpoint the user cards are loading
+* [33mf710a2f[m save checkpoint
+* [33m5d527aa[m save
+* [33m67d25fa[m save
+* [33m560faef[m view done
+* [33m153ab0c[m savign file
+* [33m40d44f1[m saving for the w9
+* [33maf1af00[m sfdas
+* [33m33bf142[m sadfsadfq
+* [33m50f6b1a[m new
+* [33m3640fdc[m saves
+* [33me57bc69[m agreement in place
+* [33m56bf96c[m checkpoint on agreement logic
+* [33mad54997[m further clean up
+* [33m85a1618[m progress on the payroll, i still need summary of the hours and everyting
+* [33m1771de0[m save after working now part of the role
+* [33m5973bf1[m payroll logic
+* [33m38ef50d[m schedule back on
+* [33m103c93a[m sfd
+* [33mc94eb1e[m asd
+* [33m59fd2e1[m schedulle
+* [33m9b76b92[m saveee
+*   [33m03f34c0[m Merge branch 'addinventory' of https://github.com/Antdamus/Invsto into addinventory
+[1;31m|[m[1;32m\[m  
+[1;31m|[m * [33medcc2c3[m sadfa
+* [1;32m|[m [33m0cc7b3f[m new save
+[1;32m|[m[1;32m/[m  
+* [33m22ac866[m coding
+* [33mfc332d8[m save
+* [33m7075275[m modal working too
+* [33mab28ffb[m user table operational
+* [33mc5507df[m asdfa
+* [33md4c17ed[m sfdsa
+* [33m6c56e95[m nnow
+* [33m791478f[m save
+* [33m1c0f3fb[m fsdf
+* [33m23ea8a4[m new things
+* [33m34bad33[m save
+* [33m4b44839[m set password token implementation
+* [33mf0fcd16[m  new changes are done
+* [33mcd30a71[m setting password page
+* [33m8f01946[m working on the creation of worker profile dashboard
+* [33m0b432f6[m working service to create users from the dashboard
+* [33mf869bd3[m minor fixes
+* [33m3579d19[m anomalies now showing
+* [33m8a0e7f7[m phase 4 implementation
+* [33m5f573bb[m new functions for store enforcing
+* [33m6a7db9a[m changes
+* [33mecaa652[m new store manager
+* [33m8ed539a[m removal function for schedule
+* [33m9a30f5f[m fixed many bugs
+* [33m3968292[m worker dashboard done
+* [33m4aebf59[m admin page redirect done
+* [33mfb55593[m saving work
+* [33m1d31990[m ability to flag the scheudles
+* [33m957f092[m schedule showing in workers page
+* [33ma469628[m helper function/
+* [33m120b483[m calendar for admin
+* [33mf79d511[m save the work
+* [33m4689dc7[m live views are not available
+* [33mab1e939[m further imporvement to admin page
+* [33mee56479[m revamped version of the admin page
+* [33m39d9247[m break function added
+* [33m1990860[m admin page done
+* [33m24f0c6a[m create pay period is working
+* [33m2e4b365[m work needed
+* [33mee5e56e[m further updates
+* [33m4d0eb87[m bulding of admin page
+* [33m371b39b[m added to the main dashboard
+* [33m6549b9e[m page with workers clock in is working
+* [33m9b42410[m checkpoint
+* [33m65abe09[m save
+* [33m23459db[m checkpoint
+* [33m3a5dcb4[m filter form working on mobile
+* [33me169f2a[m save
+* [33m68b2c8f[m dashboard mobile
+* [33me7493d1[m revamp dash
+* [33m2881d92[m saved
+* [33m0ab5205[m saved changes
+* [33mfb5fa8d[m revamping dashboard
+* [33me34e4ed[m revamping the dashboard
+* [33m0cbfbd6[m filter for store working
+* [33mb63d5fb[m items saved
+* [33m7c131cd[m bracelet code
+* [33m2776180[m add inventory showing zero in inventory bug fixed
+* [33mc3380de[m update of the addinventory page to reuse the previously used locations
+* [33m7704dc0[m transfer locations
+* [33me9e5a61[m checkpoint
+* [33ma15f6d6[m checkpoint
+* [33m629ab4d[m addiventory
+* [33m1eada69[m increasing
+* [33m4583325[m follow
+* [33m5294e00[m save the value
+* [33m183fc35[m saving
+* [33mcef199a[m function to clean the filenames
+* [33m128a978[m saved
+* [33m0d97b9d[m checkout logic done
+* [33ma872e61[m finally credit tiers are saving
+* [33m455eefb[m checkpoint
+* [33mbe7c565[m checkpoint
+* [33mfa00be5[m checkpoint
+* [33m7014fb2[m cache bumping, refreshing specific item
+* [33m53ccfe6[m form does not submit unless platform and sales id are iputted
+* [33m0a20629[m checkpoint
+* [33mcec8c96[m checkpoint
+* [33m75faf76[m checkout table operating
+* [33mc4c57a7[m checkpoint
+* [33m70d7669[m finally
+* [33m4b38626[m locking in place
+* [33m6a4c473[m checkpoint
+* [33m9eadfad[m checkout modal in progres
+* [33mc6d9506[m locking logic when checking out items
+* [33m62da9fd[m nothing
+* [33m6543de3[m amount
+* [33m739662d[m checkpoint
+* [33mc48b5e7[m checkpoint
+* [33m7e3b535[m checkpoint
+* [33m627d3f7[m final changes cart function fully working
+* [33m386e37f[m saving discounts
+* [33m5639407[m credits saving
+* [33mc54674f[m checkpoint
+* [33m3704d57[m checkpoint
+* [33m4368be7[m discount logic
+* [33ma862750[m updated format
+* [33maabbf82[m aesthetic
+* [33m842687b[m working edit function
+* [33m07bd926[m checkpoint
+* [33md36fa80[m plus
+* [33m20ceff4[m reformatting add item page
+* [33md3aee5e[m checkpoint
+* [33mde30774[m the add item type part has been reorganized
+* [33m2f2755d[m checkpoint
+* [33m4229787[m checpoint
+* [33m08f1b06[m operating export function' git commit -m operationg
+* [33mfa01695[m checkpoint
+* [33m27909ee[m checkpoint
+* [33m2276dc3[m checkpoint
+* [33m5123810[m checkpoint
+* [33m55609ec[m checkpoint
+* [33m2df916d[m aesthetic for cart
+* [33m8a3b8ab[m credit system in place
+* [33m2b3ee74[m further improving checkout modal
+* [33md2ba7e1[m now the cart is savinga across refreshes and sessions
+* [33mb4910f2[m checkpoint
+* [33mf0c9e4d[m updating the cart structure
+* [33mf7d1007[m revamping the cart
+* [33m0613b4d[m enhancement of the cart
+* [33mbc32e14[m checkout structure coming along
+* [33mbac8034[m overall modal is operating for checkout
+* [33m0ba42ec[m images are uploading in the cart
+* [33ma51a9cd[m additems changes
+* [33m91bb054[m new items
+* [33m5066fa9[m url cached for images
+* [33m318d6b5[m now the thing refreshes by item
+* [33mbeb1805[m minor change
+* [33m7101339[m cache system is finally operational
+* [33m43d1f6a[m improvements
+* [33mf61bc34[m performance improve
+* [33m403e5ea[m deselector
+* [33me284733[m checkout item
+* [33m88a1ffe[m checkout rendering of items active
+* [33mb957c7b[m cart layout is operating
+* [33mb516aed[m adding the cart settings
+* [33m4ed6094[m adding cart utilility
+* [33m41a7426[m finished asthetic changes
+* [33m50c6978[m added the asthetic to the category
+* [33md095539[m now the stock_Transaction is loading
+* [33m722320d[m user aunthentication
+* [33mf676480[m checkpoint before further modifications
+* [33m32838cb[m submit current batch button in add inventory
+* [33m0ecfc65[m done with the label
+* [33m4f76340[m the item class in the add item form is now working
+* [33m52e15f6[m changed the index
+* [33m5369473[m updated dashboard
+* [33mff9dcac[m label added to the addinventory
+* [33mcbd60df[m fixed the storage location saver
+* [33m4069d20[m changed the photo link structure
+* [33m3652d2e[m added abilitiy to see current stock
+* [33mb41e2a2[m checkpoint
+* [33mcc6078d[m checkpoint
+* [33m2222763[m working confirmation system
+* [33m32e2616[m working version
+* [33m6439ab7[m fixing adding the information to supabase
+* [33mb2db681[m assign location has been revamped
+* [33ma0e4c40[m add location modal is completed
+* [33m4bbff67[m added image preview
+* [33m6cb5ea4[m dropdown available now in add location modal
+* [33m25b4291[m updating further the add locations modal
+* [33mf274951[m improving the add location modal
+* [33m76f38cb[m the modal height overtaking the screen issue is fixed
+* [33mbf410c9[m save progress
+* [33m5d7efeb[m got the add location modal to open finally
+* [33m2e5bebe[m now it glows red after reset
+* [33mfffe2ed[m fixing the modal to show image for the item limit
+* [33mc08672a[m error when count and scanned number does not match
+* [33m4edce66[m displays an error and resets the batch if counts do not match
+* [33m6929851[m modal to count implemented, now missing the error
+* [33m336f6df[m batch limit size and modal pop up implemented
+* [33mf172fe9[m beginning of the item we need to build
+* [33mbdd16d1[m inventory hue when scanned
+* [33mf50bad1[m adding inventory asthetics of jumping and flipping with sound
+* [33ma88a7c7[m update the current stock
+* [33mc0567e4[m spacing of the cards fixed
+* [33maab34de[m card add now next to each other
+* [33mbdc1edd[m reformatted intro page
+* [33m5f2f628[m function added
+* [33mb909ec5[m to add the capacity to hide fields from the card, it will bedone
+* [33m27a9a87[m better card organization preview
+* [33m0d43162[m update
+* [33mf185ae0[m pop up to confirm item addition working
+* [33m4f68a57[m sa
+* [33ma4d0b35[m improving the system
+* [33m7b41b8f[m barcode searcher and card rendering working with necessary features for the car
+* [33md955e9e[m working on the addinventory page
+* [33m667a709[m working on the scanning function
+* [33ma7388ad[m[33m ([m[1;31morigin/shortenedfilter[m[33m)[m working on the adding stock
+* [33md1d9b33[m aligned icons
+* [33m1a4c805[m checkpoint
+* [33m101d5e8[m grid aesthethic work
+* [33m41f4799[m chips and dropwdonwn being fixed
+* [33m1436781[m stock lucide icon added
+* [33ma8e7499[m working on the cards
+* [33m2f0ae8d[m the bars are ready for deployment
+* [33m1cbe9fb[m filtering section aesthetic refinement
+* [33mbee15d4[m grid matching aesthetic feeling
+* [33m8ea3477[m filter form asthetic
+* [33m32d4787[m organizing the css file further
+* [33m27678cc[m filter summary finished
+* [33mf136f55[m filter summary bar aesthetics
+* [33m4000513[m summary filter becomming more aesthetic
+* [33me9b91b5[m the sort select is not working
+* [33m07ef9f0[m now rotating icon is avaible
+* [33m31220ef[m adding the aesthetic buttons to the unified bar
+* [33m537c449[m home button now looks way more beautiful
+* [33mba38b8f[m unifided panel working on it
+* [33mecb2625[m improving unified panel further
+* [33m4b7e9fa[m working on the unified buttons
+* [33m935cc9c[m improve the style of the unified bar
+* [33m1ad2d42[m delete bulk window working appropietedly
+* [33m4cd3347[m safety mechanism for deleting items with GPS tracker added to the system
+* [33m0e32a11[m the dropdown now shows with the card no more hidden behind
+* [33m1e5dff3[m now the select all goes back to nromal state after bulk action
+* [33ma7b5337[m select all button operating
+* [33ma214636[m fixed the problem with the dropdown
+* [33m7327093[m fixed the issue with the URL, for some reason the categories are being updated twice into the form, why? know knows, but the whole system is working
+* [33m1dac709[m add individual category chips now fully operational
+* [33m217a463[m before changing currently dropdown logic
+* [33mdb4fb2b[m in the middle of replacing the chip category dropdown
+* [33m3687bce[m cleaning js further
+* [33m9009896[m took out the select drop down type
+* [33m871d690[m further organization
+* [33m6af7160[m updated logic
+* [33m8e0d28d[m updated finally
+* [33m283f8e3[m about to try to reformat the costum dropdown function
+* [33maceda48[m organizing js
+* [33m7bfd75e[m dropdown now adds item chips and create new ones
+* [33m8b86a2f[m in the development zone the add catgories is fully working now
+* [33m79b87d7[m testing environment is running
+* [33m181af40[m continue working
+* [33m7ac70ab[m developing of testing grounds
+* [33m92ef0b0[m bulk ribbon styled properly
+* [33m401aa96[m toggle button for main console activated
+* [33m79e2bd0[m unified control already styled
+* [33md6114f2[m fixing the alination of the filter
+* [33m1290884[m x is fixed
+* [33m00c844a[m checkpoint
+* [33mda74dd7[m improved posiition
+* [33mfb050c0[m check match all converted to button
+* [33m67cc1f3[m checkpoint
+* [33m1b8b363[m problem with the toggle resolved
+* [33m88bf02d[m filter grid reduced
+* [33m3db1ccf[m[33m ([m[1;31morigin/stockpage[m[33m)[m qr type operation now working
+* [33mf12daf5[m fixed the search bar aesthethic, still polishing though
+* [33m174bec4[m operating
+* [33mb5f4704[m bar to show filtering events operating
+* [33mce9f860[m smooth separation and sticky filter panel
+* [33m3df4075[m enhancement of the fitler container
+* [33ma993621[m search bar of the dropdown function is fully operational
+* [33m54e55a2[m dropdown fully modular
+* [33m944892c[m more generalizable framework
+* [33mfb9588b[m improving the generezability of the functions for now
+* [33m147d029[m further structuring of the css file
+* [33m5e45b60[m further organizing all the files
+* [33m78a63f4[m organizing the css file
+* [33m69fb62f[m took out harsh font
+* [33m06195cd[m took out the extra arrow
+* [33m49f9346[m unified button style set now, next we have to fix the clear page
+* [33md384f6f[m unified control center polished
+* [33m732da29[m beginning of the fix of the unified top control bar
+* [33ma5031fd[m start of the aesthetic stuff
+* [33m1686ef8[m added toast for clearing filters
+* [33m6c1eb7e[m now the drop down works and the clear filter works
+* [33mab7cbf8[m problem with the chips removing and not reloaded saved
+* [33m28c9e92[m pages are now working
+* [33m6c6b17b[m drop down of filter for categories no longer causes the web app to crash
+* [33m31e12b4[m running file, i need to debug the drop down
+* [33m4b93934[m fully modular JS
+* [33mda2b75d[m modularization of js
+* [33mda86663[m improving navigation
+* [33m277e6b3[m animated chip removal
+* [33mb7c9cd2[m now URL also working!
+* [33mf2f972b[m chips are removable for categories
+* [33m0c5b5e9[m finally chips working with drop down logic
+* [33m87fe51c[m filtering by chips using check marks works like wonder
+* [33m132c4de[m i can select multiple chips now
+* [33m91e9006[m filter for the categories is working
+* [33m6c44f54[m enhanced the chip system with colors
+* [33me00d121[m added chip system in place of the categories
+* [33mfde3073[m added loading to bulk favorited, delete, change categories
+* [33m34a29d3[m highlighting and toast function operating appropitedly
+* [33mdf00a7f[m deselect after bulk action
+* [33m2f44ed2[m ability to bulk change categories
+* [33m57db844[m added favorite bulk
+* [33ma48832e[m polished start and select icons
+* [33mfb2f4f3[m both select items and star now working
+* [33mfd352fa[m chip fixed
+* [33me24c166[m cards now highlight glowing yellow when they are favorited, the chips are still disappearing if you press x and then you must reload for them to reappear the ones that i did not delete
+* [33m32d00a2[m favorited files and chips are working
+* [33mc3535b8[m chip system is now implemented
+* [33m25c18de[m issue with 0 in stock are now fixed, you can filter with them, url modus also fully operational
+* [33m94a0186[m added url filter, so you can share with people the filters you used
+* [33m2ef7462[m pagination enabled so system does not crash with many many cards
+* [33m1e9919c[m now we have a sorting option for the items
+* [33m031fd0a[m added the funcitonality to filter by date of last update, polished the export pdf button
+* [33m1fd8f1d[m export as pdf functionality
+* [33m0c189c5[m filtering by barcode, csv file save also available now
+* [33m26aafd5[m filter button fully functional
+* [33mdbacdef[m filter working
+* [33md695f95[m broken filter
+* [33ma2c7f46[m[33m ([m[1;31morigin/supaconnect[m[33m)[m image carousel fully implemented
+* [33medba0a2[m working on the frontend of the stock page
+* [33m1e44efd[m finally all the authentication for the admin role has been successful
+* [33mbe75cc2[m creating edge function to inject role compatability
+* [33m167a927[m trying to fix the isue with auth loading the raw metadata, i have not been successful but i have a way
+* [33m70ecf2f[m the backend for the add items is done
+* [33m892e4ab[m labels in database now, pending images
+* [33m3aa19b3[m backend working on getting files to upload to cloud
+* [33mf004693[m backend is already connected and working but images and dymo label not being stored, needs to be fixed
+* [33m507f14b[m image shows as well now for the add item page
+* [33mda35e69[m front end of add item is fixed
+* [33m26fbe2d[m fixing the add item page, not done
+* [33md4295c7[m added the back end for the add item form but it has not been test
+* [33mfce8318[m created the dashboard
+* [33m333490b[m adding the funcionality of a dashboard
+* [33mc52a8ef[m waiting for the key to the supaconnect to upload, otherwise, overall structure to connect is already in place
+* [33m6c1956b[m[33m ([m[1;31morigin/frontend[m[33m)[m full functionality of the label generator as well as image loader with preview
+* [33mf63b4c7[m label updated for format for the pieces that have a certificate
+* [33m1e862d1[m finally label generator added, you will have to print it manually but it will give you the file you need
+* [33m079cc3a[m still not able to send the label directly to printer
+* [33m1ab4e3f[m added the QR code and label at the same time one after the other, i have to connect it to the dymo printer
+* [33md9ff594[m add item page added with qr code and bar code functionality
+* [33m9e6f056[m fist front end start

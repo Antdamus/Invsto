@@ -13,6 +13,7 @@
   // Match item.html intent (path-adjusted for StoreCart)
   const hrefIndex   = `${base}/index.html`;
   const hrefShop    = `${base}/catalogue.html`;
+  const hrefVault   = `${base}/favorites.html`;
   const hrefJoin    = `${base}/join.html`;
   const hrefProfile = `${base}/profile.html`;
   const hrefCart    = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
@@ -55,7 +56,7 @@
 
         <nav class="nav og-nav" aria-label="Primary navigation">
           <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
-          <a class="nav-link og-nav-link" href="${hrefIndex}#collections">Collections</a>
+          <a class="nav-link og-nav-link" href="${hrefVault}">Vault</a>
           <a class="nav-link og-nav-link" href="${hrefIndex}#story">Story</a>
           <a class="nav-link og-nav-link" href="${hrefIndex}#contact">Contact</a>
         </nav>
@@ -102,7 +103,7 @@
         <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
 
         <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
-        <a class="nav-drawer-link" href="${hrefIndex}#collections">Collections</a>
+        <a class="nav-drawer-link" href="${hrefVault}">Vault</a>
         <a class="nav-drawer-link" href="${hrefIndex}#story">Story</a>
         <a class="nav-drawer-link" href="${hrefIndex}#contact">Contact</a>
       </nav>
@@ -201,8 +202,8 @@
   function searchIconSvg() {
     return `
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M10.5 18a7.5 7.5 0 1 1 0-15a7.5 7.5 0 0 1 0 15Z" fill="none"></path>
-        <path d="M16.6 16.6L21 21" fill="none"></path>
+        <path d="M10.5 18a7.5 7.5 0 1 1 0-15a7.5 7.5 0 0 1 0 15Z"></path>
+        <path d="M16.2 16.2L21 21"></path>
       </svg>
     `;
   }
@@ -210,10 +211,8 @@
   function bagIconSvg() {
     return `
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M9 9V7.7a3 3 0 0 1 6 0V9" fill="none"></path>
-        <path d="M7.1 9h9.8" fill="none"></path>
-        <path d="M7.6 9.2l-.9 10.8h12.6l-.9-10.8" fill="none"></path>
-        <path d="M8.3 20h7.4" fill="none"></path>
+        <path d="M6 8h12l-1 13H7L6 8Z"></path>
+        <path d="M9 8V7a3 3 0 0 1 6 0v1"></path>
       </svg>
     `;
   }

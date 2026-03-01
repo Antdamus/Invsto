@@ -13,6 +13,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="catalogue.css" />
+  <link rel="stylesheet" href="og.header.css" />
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
   <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
 
@@ -36,40 +37,14 @@
 
   <script type="module" src="./Favorites/favorites.service.global.js"></script>
   <script src="./Favorites/favorites.shared.js" defer></script>
+
+  <!-- ✅ Universal header -->
+  <script src="og.header.js" defer></script>
 </head>
 
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
-
-  <header class="site-header" data-elevate-on-scroll>
-    <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="OG Jewelry Home">
-        <span class="brand-mark" aria-hidden="true">OG</span>
-        <span class="brand-name">OG Jewelry</span>
-      </a>
-
-      <nav class="nav" aria-label="Primary navigation">
-        <a class="nav-link" href="index.html">Home</a>
-        <a class="nav-link" href="catalogue.html">Shop</a>
-        <a class="nav-link" href="index.html#contact">Contact</a>
-      </nav>
-
-      <div class="header-actions">
-        <button class="btn ghost icon-only cart-icon" aria-label="Cart" type="button" data-action="open-cart-drawer">
-          <span aria-hidden="true">🛒</span>
-          <span class="cart-badge" data-ui="cart-count" hidden>0</span>
-        </button>
-
-        <a class="btn ghost access-btn desktop-only" href="access.html" data-ui="access-btn" aria-label="Member Access" hidden style="display:none">
-          Member Access
-        </a>
-
-        <button class="acct-chip desktop-only" type="button" data-ui="acct-chip" aria-label="Your account" aria-haspopup="menu" aria-expanded="false" hidden style="display:none">
-          <span class="acct-dot" data-ui="acct-initials">M</span>
-        </button>
-      </div>
-    </div>
-  </header>
+  <!-- ✅ Shared Header Mount -->
+  <div id="ogHeaderMount"></div>
 
   <main id="main">
     <section class="shop-hero" aria-label="Favorites header">
