@@ -58,7 +58,7 @@
           <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
           <a class="nav-link og-nav-link" href="${hrefVault}">Vault</a>
           <a class="nav-link og-nav-link" href="${hrefIndex}#story">Story</a>
-          <a class="nav-link og-nav-link" href="${hrefIndex}#contact">Contact</a>
+          <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
         </nav>
 
         <div class="header-actions">
@@ -105,7 +105,7 @@
         <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
         <a class="nav-drawer-link" href="${hrefVault}">Vault</a>
         <a class="nav-drawer-link" href="${hrefIndex}#story">Story</a>
-        <a class="nav-drawer-link" href="${hrefIndex}#contact">Contact</a>
+        <a class="nav-drawer-link" href="${base}/contact.html">Contact</a>
       </nav>
     </aside>
   `;
