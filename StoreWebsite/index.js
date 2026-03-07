@@ -1092,7 +1092,10 @@ ui.search?.addEventListener("click", (e) => {
 
 const EBAY_LIVE_FN_URL =
   "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
-
+const EBAY_LIVE_DEBUG =
+  location.hostname === "localhost" ||
+  location.hostname === "127.0.0.1" ||
+  location.hostname.endsWith(".local");
 function ebayEsc(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1173,6 +1176,39 @@ function formatDisplayDate(event) {
     hour: "numeric",
     minute: "2-digit"
   }).format(parsed);
+}
+
+function debugEbayLiveEvents(events) {
+  if (!EBAY_LIVE_DEBUG) return;
+
+  const rows = (Array.isArray(events) ? events : []).map((event) => {
+    const parsed = parseSortableEbayDate(event);
+
+    return {
+      title: event?.title || "",
+      status: event?.status || "",
+      sourceDateLabel: event?.dateLabel || "",
+      startsAtIso: event?.startsAtIso || "",
+      sourceTimezone: event?.timezone || "",
+      viewerTimeZone:
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      localDisplay: parsed
+        ? new Intl.DateTimeFormat(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            timeZoneName: "short"
+          }).format(parsed)
+        : "(unparsed)",
+      epochMs: parsed ? parsed.getTime() : null,
+      isLiveNow: event?.status === "live" || isEventLiveNow(event),
+    };
+  });
+
+  console.groupCollapsed("[eBay Live] Event time debug");
+  console.table(rows);
+  console.groupEnd();
 }
 
 function filterAndSortUpcomingEvents(events) {
@@ -1279,10 +1315,12 @@ async function loadEbayLiveEvents() {
       throw new Error(`ebay_live_fetch_failed (${res.status})`);
     }
 
-    const data = await res.json();
-    const items = Array.isArray(data?.items) ? data.items : [];
+   const data = await res.json();
+const items = Array.isArray(data?.items) ? data.items : [];
 
-    renderEbayLiveEvents(items);
+debugEbayLiveEvents(items);
+renderEbayLiveEvents(items);
+
   } catch (err) {
     console.error("Failed to load eBay Live events:", err);
 
