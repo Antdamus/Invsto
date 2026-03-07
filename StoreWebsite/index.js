@@ -1084,6 +1084,10 @@ ui.search?.addEventListener("click", (e) => {
 /* =========================
    eBay Live homepage section
    Dynamic source: Supabase Edge Function
+   - Filters past events
+   - Auto sorts upcoming events
+   - Shows LIVE NOW badge
+   - Limits homepage to 4 cards
 ========================= */
 
 const EBAY_LIVE_FN_URL =
@@ -1098,15 +1102,22 @@ function ebayEsc(value) {
     .replaceAll("'", "&#039;");
 }
 
-function parseSortableEbayDate(label) {
-  const raw = String(label || "").trim();
+function parseSortableEbayDate(eventOrLabel) {
+  if (eventOrLabel && typeof eventOrLabel === "object") {
+    if (eventOrLabel.startsAtIso) {
+      const isoDate = new Date(eventOrLabel.startsAtIso);
+      if (!Number.isNaN(isoDate.getTime())) return isoDate;
+    }
+
+    eventOrLabel = eventOrLabel.dateLabel || "";
+  }
+
+  const raw = String(eventOrLabel || "").trim();
   if (!raw) return null;
 
-  // Expected format from eBay: "Mar 7 6:00 PM"
   const match = raw.match(
     /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i
   );
-
   if (!match) return null;
 
   const [, monRaw, dayStr, hourStr, minStr, ampm] = match;
@@ -1116,8 +1127,7 @@ function parseSortableEbayDate(label) {
     jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
   };
 
-  const mon = monRaw.toLowerCase();
-  const month = monthMap[mon];
+  const month = monthMap[monRaw.toLowerCase()];
   if (month == null) return null;
 
   let hour = Number(hourStr);
@@ -1128,34 +1138,86 @@ function parseSortableEbayDate(label) {
   if (ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
 
   const now = new Date();
-  const dt = new Date(now.getFullYear(), month, day, hour, minute, 0, 0);
+  let year = now.getFullYear();
+
+  let dt = new Date(year, month, day, hour, minute, 0, 0);
+
+  const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
+  if (now.getTime() - dt.getTime() > SIXTY_DAYS_MS) {
+    year += 1;
+    dt = new Date(year, month, day, hour, minute, 0, 0);
+  }
 
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
-function sortUpcomingEvents(events) {
-  return [...events].sort((a, b) => {
-    const da = parseSortableEbayDate(a.dateLabel);
-    const db = parseSortableEbayDate(b.dateLabel);
+function isEventLiveNow(event) {
+  const eventDate = parseSortableEbayDate(event);
+  if (!eventDate) return false;
 
-    if (!da && !db) return 0;
-    if (!da) return 1;
-    if (!db) return -1;
+  const now = new Date();
+  const start = eventDate.getTime();
+  const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
+  const diff = now.getTime() - start;
 
-    return da.getTime() - db.getTime();
+  return diff >= 0 && diff <= LIVE_WINDOW_MS;
+}
+
+function formatDisplayDate(event) {
+  const parsed = parseSortableEbayDate(event);
+  if (!parsed) return String(event?.dateLabel || "");
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(parsed);
+}
+
+function filterAndSortUpcomingEvents(events) {
+  const now = new Date();
+
+  const mapped = (Array.isArray(events) ? events : []).map((event) => {
+    const parsedDate = parseSortableEbayDate(event);
+    const liveNow = event?.status === "live" || isEventLiveNow(event);
+
+    return {
+      ...event,
+      __parsedDate: parsedDate,
+      __isLiveNow: liveNow,
+    };
   });
+
+  const filtered = mapped.filter((event) => {
+    if (event.__isLiveNow) return true;
+    if (!event.__parsedDate) return false;
+    return event.__parsedDate.getTime() >= now.getTime();
+  });
+
+  filtered.sort((a, b) => {
+    if (a.__isLiveNow && !b.__isLiveNow) return -1;
+    if (!a.__isLiveNow && b.__isLiveNow) return 1;
+
+    const aTime = a.__parsedDate ? a.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
+    const bTime = b.__parsedDate ? b.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
+
+    return aTime - bTime;
+  });
+
+  return filtered;
 }
 
 function renderEbayLiveEvents(events) {
   const grid = document.getElementById("ebay-live-grid");
   if (!grid) return;
 
-  const list = Array.isArray(events) ? sortUpcomingEvents(events).slice(0, 5) : [];
+  const list = filterAndSortUpcomingEvents(events).slice(0, 4);
 
   if (!list.length) {
     grid.innerHTML = `
       <div class="ebay-live-empty">
-        Upcoming eBay Live events will appear here soon.
+        No upcoming live shows are scheduled right now.
       </div>
     `;
     return;
@@ -1164,9 +1226,12 @@ function renderEbayLiveEvents(events) {
   grid.innerHTML = list.map((event) => {
     const title = ebayEsc(event.title || "Upcoming eBay Live");
     const seller = ebayEsc(event.seller || "ogjewelers");
-    const dateLabel = ebayEsc(event.dateLabel || "");
+    const dateLabel = ebayEsc(formatDisplayDate(event));
     const image = ebayEsc(event.image || "OG-Jewelers.webp");
     const url = ebayEsc(event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs");
+    const liveBadge = (event.status === "live" || event.__isLiveNow)
+      ? `<span class="ebay-live-now-badge">LIVE NOW</span>`
+      : "";
 
     return `
       <a
@@ -1179,6 +1244,7 @@ function renderEbayLiveEvents(events) {
         <div class="ebay-live-thumb">
           <img src="${image}" alt="${title}" loading="lazy" />
           <span class="ebay-live-date">${dateLabel}</span>
+          ${liveBadge}
         </div>
 
         <div class="ebay-live-body">
