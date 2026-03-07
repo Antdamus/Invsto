@@ -51,7 +51,7 @@ function toast(msg, ms = 1600) {
 const ui = {
   year: $('[data-ui="year"]'),
 
-  notice: $('[data-ui="top-notice"]'),
+
 
   drawer: $('[data-ui="drawer"]'),
   drawerBackdrop: $('[data-ui="drawer-backdrop"]'),
@@ -83,8 +83,7 @@ const state = {
   mood: "noir", // noir | warm
   moodKey: "og_mood_v1",
 
-  noticeDismissedKey: "og_notice_dismissed_v1",
-
+ 
   featured: [
     {
       slot: "featured.1",
@@ -1081,7 +1080,154 @@ ui.search?.addEventListener("click", (e) => {
 
   initAccountDropdown();
 
-
-  // Notice persistence
-  hydrateNoticeDismissed();
 }
+/* =========================
+   eBay Live homepage section
+   Dynamic source: Supabase Edge Function
+========================= */
+
+const EBAY_LIVE_FN_URL =
+  "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
+
+function ebayEsc(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function parseSortableEbayDate(label) {
+  const raw = String(label || "").trim();
+  if (!raw) return null;
+
+  // Expected format from eBay: "Mar 7 6:00 PM"
+  const match = raw.match(
+    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i
+  );
+
+  if (!match) return null;
+
+  const [, monRaw, dayStr, hourStr, minStr, ampm] = match;
+
+  const monthMap = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+  };
+
+  const mon = monRaw.toLowerCase();
+  const month = monthMap[mon];
+  if (month == null) return null;
+
+  let hour = Number(hourStr);
+  const minute = Number(minStr);
+  const day = Number(dayStr);
+
+  if (ampm.toUpperCase() === "PM" && hour !== 12) hour += 12;
+  if (ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
+
+  const now = new Date();
+  const dt = new Date(now.getFullYear(), month, day, hour, minute, 0, 0);
+
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function sortUpcomingEvents(events) {
+  return [...events].sort((a, b) => {
+    const da = parseSortableEbayDate(a.dateLabel);
+    const db = parseSortableEbayDate(b.dateLabel);
+
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+
+    return da.getTime() - db.getTime();
+  });
+}
+
+function renderEbayLiveEvents(events) {
+  const grid = document.getElementById("ebay-live-grid");
+  if (!grid) return;
+
+  const list = Array.isArray(events) ? sortUpcomingEvents(events).slice(0, 5) : [];
+
+  if (!list.length) {
+    grid.innerHTML = `
+      <div class="ebay-live-empty">
+        Upcoming eBay Live events will appear here soon.
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = list.map((event) => {
+    const title = ebayEsc(event.title || "Upcoming eBay Live");
+    const seller = ebayEsc(event.seller || "ogjewelers");
+    const dateLabel = ebayEsc(event.dateLabel || "");
+    const image = ebayEsc(event.image || "OG-Jewelers.webp");
+    const url = ebayEsc(event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs");
+
+    return `
+      <a
+        class="ebay-live-card"
+        href="${url}"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open eBay Live event: ${title}"
+      >
+        <div class="ebay-live-thumb">
+          <img src="${image}" alt="${title}" loading="lazy" />
+          <span class="ebay-live-date">${dateLabel}</span>
+        </div>
+
+        <div class="ebay-live-body">
+          <div class="ebay-live-seller">${seller}</div>
+          <h3 class="ebay-live-title">${title}</h3>
+          <div class="ebay-live-link">
+            Save on eBay <span aria-hidden="true">→</span>
+          </div>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
+async function loadEbayLiveEvents() {
+  const grid = document.getElementById("ebay-live-grid");
+  if (!grid) return;
+
+  try {
+    grid.innerHTML = `
+      <div class="ebay-live-empty">
+        Loading upcoming eBay Live events…
+      </div>
+    `;
+
+    const res = await fetch(EBAY_LIVE_FN_URL, {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error(`ebay_live_fetch_failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    const items = Array.isArray(data?.items) ? data.items : [];
+
+    renderEbayLiveEvents(items);
+  } catch (err) {
+    console.error("Failed to load eBay Live events:", err);
+
+    grid.innerHTML = `
+      <div class="ebay-live-empty">
+        We couldn’t load the upcoming live events right now.
+      </div>
+    `;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  loadEbayLiveEvents();
+});

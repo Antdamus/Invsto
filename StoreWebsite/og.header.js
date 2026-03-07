@@ -13,7 +13,7 @@
   // Match item.html intent (path-adjusted for StoreCart)
   const hrefIndex   = `${base}/index.html`;
   const hrefShop    = `${base}/catalogue.html`;
-  const hrefVault   = `${base}/favorites.html`;
+  const hrefFavorites   = `${base}/favorites.html`;
   const hrefJoin    = `${base}/join.html`;
   const hrefProfile = `${base}/profile.html`;
   const hrefCart    = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
@@ -49,14 +49,25 @@
           <span class="og-hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
         </button>
 
-        <a class="brand og-brand" href="${hrefIndex}" aria-label="OG Jewelers Home">
-          <span class="brand-mark og-brand-mark" aria-hidden="true">OG</span>
-          <span class="brand-name og-brand-name">OG Jewelers</span>
-        </a>
+      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+
+  <span class="brand-mark">
+    <img
+      src="OG-Jewelers.webp"
+      alt="OG Jewelers"
+      class="brand-logo"
+      loading="eager"
+      decoding="async"
+    />
+  </span>
+
+  <span class="brand-name">OG Jewelers</span>
+
+</a>
 
         <nav class="nav og-nav" aria-label="Primary navigation">
           <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
-          <a class="nav-link og-nav-link" href="${hrefVault}">Vault</a>
+          <a class="nav-link og-nav-link" href="${hrefFavorites}">Favorites</a>
           <a class="nav-link og-nav-link" href="${hrefIndex}#story">Story</a>
           <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
         </nav>
@@ -103,7 +114,7 @@
         <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
 
         <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
-        <a class="nav-drawer-link" href="${hrefVault}">Vault</a>
+        <a class="nav-drawer-link" href="${hrefFavorites}">Favorites</a>
         <a class="nav-drawer-link" href="${hrefIndex}#story">Story</a>
         <a class="nav-drawer-link" href="${base}/contact.html">Contact</a>
       </nav>

@@ -35,12 +35,7 @@
     <div class="vignette"></div>
   </div>
 
-  <!-- Top notice (optional; JS can hide) -->
-  <div class="top-notice" role="status" aria-live="polite" data-ui="top-notice">
-    <span class="pill">Live</span>
-    <span class="txt">New drops weekly • Premium pieces • Fast shipping</span>
-    <button class="notice-x" type="button" aria-label="Dismiss notice" data-action="dismiss-notice">×</button>
-  </div>
+ 
 
   <!-- Header -->
 <!-- Shared Header Mount -->
@@ -50,159 +45,170 @@
   <main class="main">
     <!-- HERO (cinematic, with editor slots) -->
     <section class="hero" aria-label="Hero">
-      <div class="hero-media" aria-hidden="true">
-        <!-- Optional: use video later. For now, we keep it image-based and let JS inject. -->
-        <div class="hero-img" data-slot="hero.image" style="--img:url('assets/hero/hero.jpg');"></div>
-        <div class="hero-glow"></div>
-      </div>
+     <div class="hero-media" aria-hidden="true">
+  <video
+    class="hero-video"
+    autoplay
+    muted
+    loop
+    playsinline
+    preload="auto"
+    poster="assets/hero/hero-poster.jpg"
+  >
+    <source src="OG-Placeholder.mp4" type="video/mp4" />
+  </video>
 
-      <div class="hero-inner">
-        <div class="hero-card">
-          <div class="hero-kicker" data-slot="hero.kicker">Signature Pieces</div>
-          <h1 class="hero-title" data-slot="hero.title">Luxury that lands instantly.</h1>
-          <p class="hero-sub" data-slot="hero.subtitle">
-            Curated gold, diamonds, and statement chains — built to shine on camera and in real life.
-          </p>
+  <div class="hero-video-overlay"></div>
+  <div class="hero-glow"></div>
+</div>
 
-          <div class="hero-ctas">
-            <a class="btn btn-primary" href="catalogue.html" data-slot="hero.primary_link">
-              Shop the Drop <span aria-hidden="true">→</span>
-            </a>
-            <button class="btn btn-ghost" type="button" data-action="open-quickview" data-slot="hero.secondary_action">
-              View Featured
-            </button>
-          </div>
+   
 
-          <div class="hero-metrics" aria-label="Highlights">
-            <div class="metric">
-              <div class="metric-top">
-                <span class="metric-dot" aria-hidden="true"></span>
-                <span class="metric-label" data-slot="hero.metric1.label">Ready to ship</span>
-              </div>
-              <div class="metric-val" data-slot="hero.metric1.value">Fast fulfillment</div>
-            </div>
-            <div class="metric">
-              <div class="metric-top">
-                <span class="metric-dot" aria-hidden="true"></span>
-                <span class="metric-label" data-slot="hero.metric2.label">Authenticity</span>
-              </div>
-              <div class="metric-val" data-slot="hero.metric2.value">Trusted sourcing</div>
-            </div>
-            <div class="metric">
-              <div class="metric-top">
-                <span class="metric-dot" aria-hidden="true"></span>
-                <span class="metric-label" data-slot="hero.metric3.label">Curated drops</span>
-              </div>
-              <div class="metric-val" data-slot="hero.metric3.value">Weekly updates</div>
-            </div>
-          </div>
-        </div>
+         
 
-        <!-- Hero side panel (editorial) -->
-        <aside class="hero-side" aria-label="Spotlight">
-          <div class="spotlight" data-slot="hero.spotlight">
-            <div class="spotlight-img" data-slot="hero.spotlight.image" style="--img:url('assets/hero/spotlight.jpg');"></div>
-            <div class="spotlight-body">
-              <div class="spotlight-tag" data-slot="hero.spotlight.tag">Spotlight</div>
-              <div class="spotlight-title" data-slot="hero.spotlight.title">The Gold Edit</div>
-              <div class="spotlight-sub" data-slot="hero.spotlight.subtitle">Polished. Bold. Timeless.</div>
-              <a class="spotlight-link" href="catalogue.html" data-slot="hero.spotlight.link">Explore →</a>
-            </div>
-          </div>
-        </aside>
-      </div>
+    <div class="hero-floating-cta">
+  <a class="btn hero-shop-btn" href="catalogue.html">Explore the Collection</a>
+</div>
 
-      <div class="scroll-hint" aria-hidden="true">
-        <span class="scroll-line"></span>
-        <span class="scroll-text">Scroll</span>
-      </div>
+    
     </section>
 
-    <!-- COLLECTIONS (editorial covers) -->
-    <section class="section" id="collections" aria-label="Signature Collections">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title" data-slot="collections.title">Signature Collections</h2>
-          <p class="section-sub" data-slot="collections.subtitle">Editorial curations — designed to feel like a cover.</p>
+    <!-- The Trust section under the hero video-->
+    <section class="trust-strip">
+  <div class="container trust-inner">
+
+    <div class="trust-item">
+      <span class="trust-number">120,000+</span>
+      <span class="trust-label">Items Sold</span>
+    </div>
+
+    <div class="trust-divider"></div>
+
+    <div class="trust-item">
+      <span class="trust-number">25,000+</span>
+      <span class="trust-label">Positive Reviews</span>
+    </div>
+
+    <div class="trust-divider"></div>
+
+    <div class="trust-item">
+      <span class="trust-number">99%</span>
+      <span class="trust-label">Positive Feedback</span>
+    </div>
+
+  </div>
+</section>
+<!-- EBAY LIVE -->
+<section class="section ebay-live-section" id="ebay-live" aria-label="Upcoming eBay Live auctions">
+  <div class="section-head ebay-live-head">
+    <div>
+      <p class="section-kicker">OG Jewelers × eBay Live</p>
+      <h2 class="section-title">Upcoming Live Auctions</h2>
+      <p class="section-sub">
+        Save upcoming shows and join OG Jewelers live on eBay for exclusive deals,
+        first-access pieces, and real-time bidding.
+      </p>
+    </div>
+
+    <div class="section-actions">
+      <a
+        class="text-link"
+        href="https://www.ebay.com/ebaylive/events"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        View all on eBay →
+      </a>
+    </div>
+  </div>
+
+ <div id="ebay-live-grid" class="ebay-live-grid" aria-live="polite" aria-label="Upcoming eBay Live events"></div>
+  
+    <!-- JS injects event cards here -->
+
+</section>
+
+<!-- SIGNATURE COLLECTIONS (moved lower) -->
+<section class="section" id="collections" aria-label="Signature Collections">
+  <div class="section-head">
+    <div>
+      <h2 class="section-title" data-slot="collections.title">Signature Collections</h2>
+      <p class="section-sub" data-slot="collections.subtitle">Editorial curations — designed to feel like a cover.</p>
+    </div>
+
+    <div class="section-actions">
+      <a class="text-link" href="catalogue.html">Browse all →</a>
+    </div>
+  </div>
+
+  <div class="tiles" role="list">
+    <article class="tile" role="listitem" data-collection="gold" data-slot="collections.gold" style="--img:url('assets/collections/gold.jpg');">
+      <a class="tile-hit" href="catalogue.html" aria-label="Explore Gold">
+        <div class="tile-overlay"></div>
+        <div class="tile-body">
+          <div class="tile-top">
+            <span class="tile-badge" data-slot="collections.gold.badge">Signature</span>
+            <span class="tile-mini" data-slot="collections.gold.mini">Polished Classics</span>
+          </div>
+          <h3 class="tile-title" data-slot="collections.gold.title">Gold</h3>
+          <p class="tile-sub" data-slot="collections.gold.subtitle">Warm glow, bold presence.</p>
+          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
         </div>
+        <div class="tile-shine" aria-hidden="true"></div>
+      </a>
+    </article>
 
-        <div class="section-actions">
-          <button class="chip" type="button" data-action="toggle-mood" aria-pressed="false">
-            <span class="chip-dot" aria-hidden="true"></span>
-            Mood: Noir
-          </button>
-          <a class="text-link" href="catalogue.html">Browse all →</a>
+    <article class="tile" role="listitem" data-collection="diamonds" data-slot="collections.diamonds" style="--img:url('assets/collections/diamonds.jpg');">
+      <a class="tile-hit" href="catalogue.html" aria-label="Explore Diamonds">
+        <div class="tile-overlay"></div>
+        <div class="tile-body">
+          <div class="tile-top">
+            <span class="tile-badge" data-slot="collections.diamonds.badge">Best Sellers</span>
+            <span class="tile-mini" data-slot="collections.diamonds.mini">High Sparkle</span>
+          </div>
+          <h3 class="tile-title" data-slot="collections.diamonds.title">Diamonds</h3>
+          <p class="tile-sub" data-slot="collections.diamonds.subtitle">Light-catching details.</p>
+          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
         </div>
-      </div>
+        <div class="tile-shine" aria-hidden="true"></div>
+      </a>
+    </article>
 
-      <div class="tiles" role="list">
-        <!-- NOTE: data-collection is used by JS to route clicks or load curated sets -->
-        <article class="tile" role="listitem" data-collection="gold" data-slot="collections.gold" style="--img:url('assets/collections/gold.jpg');">
-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Gold">
-            <div class="tile-overlay"></div>
-            <div class="tile-body">
-              <div class="tile-top">
-                <span class="tile-badge" data-slot="collections.gold.badge">Signature</span>
-                <span class="tile-mini" data-slot="collections.gold.mini">Polished Classics</span>
-              </div>
-              <h3 class="tile-title" data-slot="collections.gold.title">Gold</h3>
-              <p class="tile-sub" data-slot="collections.gold.subtitle">Warm glow, bold presence.</p>
-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
-            </div>
-            <div class="tile-shine" aria-hidden="true"></div>
-          </a>
-        </article>
+    <article class="tile" role="listitem" data-collection="chains" data-slot="collections.chains" style="--img:url('assets/collections/chains.jpg');">
+      <a class="tile-hit" href="catalogue.html" aria-label="Explore Chains">
+        <div class="tile-overlay"></div>
+        <div class="tile-body">
+          <div class="tile-top">
+            <span class="tile-badge" data-slot="collections.chains.badge">New</span>
+            <span class="tile-mini" data-slot="collections.chains.mini">Statement Links</span>
+          </div>
+          <h3 class="tile-title" data-slot="collections.chains.title">Chains</h3>
+          <p class="tile-sub" data-slot="collections.chains.subtitle">Heavy energy, clean lines.</p>
+          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+        </div>
+        <div class="tile-shine" aria-hidden="true"></div>
+      </a>
+    </article>
 
-        <article class="tile" role="listitem" data-collection="diamonds" data-slot="collections.diamonds" style="--img:url('assets/collections/diamonds.jpg');">
-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Diamonds">
-            <div class="tile-overlay"></div>
-            <div class="tile-body">
-              <div class="tile-top">
-                <span class="tile-badge" data-slot="collections.diamonds.badge">Best Sellers</span>
-                <span class="tile-mini" data-slot="collections.diamonds.mini">High Sparkle</span>
-              </div>
-              <h3 class="tile-title" data-slot="collections.diamonds.title">Diamonds</h3>
-              <p class="tile-sub" data-slot="collections.diamonds.subtitle">Light-catching details.</p>
-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
-            </div>
-            <div class="tile-shine" aria-hidden="true"></div>
-          </a>
-        </article>
+    <article class="tile tile-wide" role="listitem" data-collection="signature" data-slot="collections.signature" style="--img:url('assets/collections/signature.jpg');">
+      <a class="tile-hit" href="catalogue.html" aria-label="Explore Signature">
+        <div class="tile-overlay"></div>
+        <div class="tile-body">
+          <div class="tile-top">
+            <span class="tile-badge" data-slot="collections.signature.badge">Editor’s Pick</span>
+            <span class="tile-mini" data-slot="collections.signature.mini">Limited Curations</span>
+          </div>
+          <h3 class="tile-title" data-slot="collections.signature.title">Signature</h3>
+          <p class="tile-sub" data-slot="collections.signature.subtitle">The OG pieces that define the brand.</p>
+          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+        </div>
+        <div class="tile-shine" aria-hidden="true"></div>
+      </a>
+    </article>
+  </div>
+</section>
 
-        <article class="tile" role="listitem" data-collection="chains" data-slot="collections.chains" style="--img:url('assets/collections/chains.jpg');">
-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Chains">
-            <div class="tile-overlay"></div>
-            <div class="tile-body">
-              <div class="tile-top">
-                <span class="tile-badge" data-slot="collections.chains.badge">New</span>
-                <span class="tile-mini" data-slot="collections.chains.mini">Statement Links</span>
-              </div>
-              <h3 class="tile-title" data-slot="collections.chains.title">Chains</h3>
-              <p class="tile-sub" data-slot="collections.chains.subtitle">Heavy energy, clean lines.</p>
-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
-            </div>
-            <div class="tile-shine" aria-hidden="true"></div>
-          </a>
-        </article>
-
-        <article class="tile tile-wide" role="listitem" data-collection="signature" data-slot="collections.signature" style="--img:url('assets/collections/signature.jpg');">
-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Signature">
-            <div class="tile-overlay"></div>
-            <div class="tile-body">
-              <div class="tile-top">
-                <span class="tile-badge" data-slot="collections.signature.badge">Editor’s Pick</span>
-                <span class="tile-mini" data-slot="collections.signature.mini">Limited Curations</span>
-              </div>
-              <h3 class="tile-title" data-slot="collections.signature.title">Signature</h3>
-              <p class="tile-sub" data-slot="collections.signature.subtitle">The OG pieces that define the brand.</p>
-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
-            </div>
-            <div class="tile-shine" aria-hidden="true"></div>
-          </a>
-        </article>
-      </div>
-    </section>
-
+</section>
     <!-- FEATURED (dynamic-ready grid) -->
     <section class="section" id="featured" aria-label="Featured Pieces">
       <div class="section-head">

@@ -89,7 +89,15 @@
   gap: 16px;
 }
 
-/* Brand */
+/* =========================================================
+   Brand lockup — luxury refinement
+   ========================================================= */
+
+/* =========================================================
+   Brand lockup — refined luxury version
+   Logo leads, wordmark supports
+   ========================================================= */
+
 .brand{
   display: inline-flex;
   align-items: center;
@@ -97,24 +105,101 @@
   min-width: 170px;
   text-decoration: none;
   color: rgba(244,241,234,.92);
+  padding: 6px 8px;
+  border-radius: 16px;
+  transition:
+    transform var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
 }
+
+.brand:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.03);
+}
+
 .brand-mark{
   width: 38px;
   height: 38px;
+  flex: 0 0 38px;
+  border-radius: 14px;
+  overflow: hidden;
   display: grid;
   place-items: center;
-  border-radius: 14px;
-  background: radial-gradient(circle at 30% 30%, rgba(227,200,120,.35), rgba(200,162,74,.18));
-  border: 1px solid rgba(200,162,74,.25);
-  box-shadow: 0 10px 30px rgba(0,0,0,.3);
-  font-weight: 600;
-  letter-spacing: .06em;
+  background: #080808;
+  border: 1px solid rgba(200,162,74,.24);
+  box-shadow:
+    0 10px 24px rgba(0,0,0,.32),
+    inset 0 1px 0 rgba(255,255,255,.04);
+  position: relative;
 }
+
+.brand-mark::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 42%),
+    radial-gradient(circle at 30% 20%, rgba(227,200,120,.10), transparent 58%);
+  opacity: .9;
+}
+
+.brand-logo{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
 .brand-name{
   font-family: var(--serif);
-  font-size: 1.15rem;
-  letter-spacing: .02em;
-  opacity: .95;
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: .03em;
+  line-height: 1;
+  color: rgba(244,241,234,.90);
+  text-shadow: 0 0 10px rgba(227,200,120,.04);
+  white-space: nowrap;
+  transform: translateY(1px);
+  transition:
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+.brand:hover .brand-mark{
+  border-color: rgba(227,200,120,.34);
+  box-shadow:
+    0 14px 30px rgba(0,0,0,.38),
+    0 0 16px rgba(200,162,74,.14),
+    inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+.brand:hover .brand-name{
+  color: rgba(255,248,235,.96);
+}
+
+/* Slightly tighter / more elegant on smaller screens */
+@media (max-width: 640px){
+  .brand{
+    gap: 8px;
+    min-width: auto;
+    padding: 4px 6px;
+  }
+
+  .brand-mark{
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border-radius: 12px;
+  }
+
+  .brand-name{
+    font-size: .94rem;
+    letter-spacing: .025em;
+  }
 }
 
 /* Desktop nav */
