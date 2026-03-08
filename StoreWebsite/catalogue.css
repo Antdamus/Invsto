@@ -454,15 +454,15 @@ select{
 ========================= */
 .hud-wrap{
   position: sticky;
-  top: var(--header-h);
+  top: 0;
   z-index: 40;
-  padding: 10px 0 0;
+  padding: 0;
   background: linear-gradient(180deg, rgba(7,7,8,.72), rgba(7,7,8,.14));
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 .hud-wrap.is-collapsed{
-  padding-top: 8px;
+  padding-top: 0;
 }
 .hud-shell{
   display: grid;
@@ -474,6 +474,7 @@ select{
 }
 .hud-compact{
   width: fit-content;
+  margin-inline: auto;
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -1291,10 +1292,10 @@ select{
   .container{ width: calc(100% - 26px); }
 
   .hud-wrap{
-    padding-top: 6px;
+    padding-top: 0;
   }
   .hud-wrap.is-collapsed{
-    padding-top: 4px;
+    padding-top: 0;
   }
   .hud-compact{
     min-height: 40px;
@@ -1976,3 +1977,4 @@ body.lock {
   .modal-body{ padding: 14px 14px 18px; }
   .modal-img{ height: 320px; }
 }
+
