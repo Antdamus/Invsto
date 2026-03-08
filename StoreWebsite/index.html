@@ -128,220 +128,129 @@
 
 </section>
 
-<!-- SIGNATURE COLLECTIONS (moved lower) -->
-<section class="section" id="collections" aria-label="Signature Collections">
+
+
+</section>
+   <!-- FEATURED (dynamic-ready grid) -->
+<section class="section featured-section" id="featured" aria-label="Featured Pieces">
   <div class="section-head">
     <div>
-      <h2 class="section-title" data-slot="collections.title">Signature Collections</h2>
-      <p class="section-sub" data-slot="collections.subtitle">Editorial curations — designed to feel like a cover.</p>
+      <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
+      <p class="section-sub" data-slot="featured.subtitle">Curated standouts — save favorites or tap for quick view.</p>
     </div>
 
     <div class="section-actions">
-      <a class="text-link" href="catalogue.html">Browse all →</a>
+      <button class="chip" type="button" data-action="shuffle-featured">
+        Shuffle
+      </button>
+      <a class="text-link" href="catalogue.html">Shop featured →</a>
     </div>
   </div>
 
-  <div class="tiles" role="list">
-    <article class="tile" role="listitem" data-collection="gold" data-slot="collections.gold" style="--img:url('assets/collections/gold.jpg');">
-      <a class="tile-hit" href="catalogue.html" aria-label="Explore Gold">
-        <div class="tile-overlay"></div>
-        <div class="tile-body">
-          <div class="tile-top">
-            <span class="tile-badge" data-slot="collections.gold.badge">Signature</span>
-            <span class="tile-mini" data-slot="collections.gold.mini">Polished Classics</span>
+  <!-- JS will optionally replace these with live featured picks -->
+  <div class="cards" data-ui="featured-grid">
+    <article class="card" data-slot="featured.1" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
+        <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.1.badge">New</span>
+            <span class="price" data-slot="featured.1.price">$2,999</span>
           </div>
-          <h3 class="tile-title" data-slot="collections.gold.title">Gold</h3>
-          <p class="tile-sub" data-slot="collections.gold.subtitle">Warm glow, bold presence.</p>
-          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+          <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
+          <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
         </div>
-        <div class="tile-shine" aria-hidden="true"></div>
-      </a>
+      </button>
+
+      <button
+        class="fav-toggle"
+        type="button"
+        data-action="toggle-fav"
+        aria-pressed="false"
+        aria-label="Add Diamond Ring to favorites"
+        title="Add to favorites"
+      >
+        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
+      </button>
     </article>
 
-    <article class="tile" role="listitem" data-collection="diamonds" data-slot="collections.diamonds" style="--img:url('assets/collections/diamonds.jpg');">
-      <a class="tile-hit" href="catalogue.html" aria-label="Explore Diamonds">
-        <div class="tile-overlay"></div>
-        <div class="tile-body">
-          <div class="tile-top">
-            <span class="tile-badge" data-slot="collections.diamonds.badge">Best Sellers</span>
-            <span class="tile-mini" data-slot="collections.diamonds.mini">High Sparkle</span>
+    <article class="card" data-slot="featured.2" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
+        <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.2.badge">Best Value</span>
+            <span class="price" data-slot="featured.2.price">$1,799</span>
           </div>
-          <h3 class="tile-title" data-slot="collections.diamonds.title">Diamonds</h3>
-          <p class="tile-sub" data-slot="collections.diamonds.subtitle">Light-catching details.</p>
-          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+          <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
+          <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
         </div>
-        <div class="tile-shine" aria-hidden="true"></div>
-      </a>
+      </button>
+
+      <button
+        class="fav-toggle"
+        type="button"
+        data-action="toggle-fav"
+        aria-pressed="false"
+        aria-label="Add Gold Chain to favorites"
+        title="Add to favorites"
+      >
+        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
+      </button>
     </article>
 
-    <article class="tile" role="listitem" data-collection="chains" data-slot="collections.chains" style="--img:url('assets/collections/chains.jpg');">
-      <a class="tile-hit" href="catalogue.html" aria-label="Explore Chains">
-        <div class="tile-overlay"></div>
-        <div class="tile-body">
-          <div class="tile-top">
-            <span class="tile-badge" data-slot="collections.chains.badge">New</span>
-            <span class="tile-mini" data-slot="collections.chains.mini">Statement Links</span>
+    <article class="card" data-slot="featured.3" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
+        <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.3.badge">Limited</span>
+            <span class="price" data-slot="featured.3.price">$9,499</span>
           </div>
-          <h3 class="tile-title" data-slot="collections.chains.title">Chains</h3>
-          <p class="tile-sub" data-slot="collections.chains.subtitle">Heavy energy, clean lines.</p>
-          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+          <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
+          <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
         </div>
-        <div class="tile-shine" aria-hidden="true"></div>
-      </a>
+      </button>
+
+      <button
+        class="fav-toggle"
+        type="button"
+        data-action="toggle-fav"
+        aria-pressed="false"
+        aria-label="Add Luxury Watch to favorites"
+        title="Add to favorites"
+      >
+        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
+      </button>
     </article>
 
-    <article class="tile tile-wide" role="listitem" data-collection="signature" data-slot="collections.signature" style="--img:url('assets/collections/signature.jpg');">
-      <a class="tile-hit" href="catalogue.html" aria-label="Explore Signature">
-        <div class="tile-overlay"></div>
-        <div class="tile-body">
-          <div class="tile-top">
-            <span class="tile-badge" data-slot="collections.signature.badge">Editor’s Pick</span>
-            <span class="tile-mini" data-slot="collections.signature.mini">Limited Curations</span>
+    <article class="card" data-slot="featured.4" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
+        <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.4.badge">OG Pick</span>
+            <span class="price" data-slot="featured.4.price">$4,599</span>
           </div>
-          <h3 class="tile-title" data-slot="collections.signature.title">Signature</h3>
-          <p class="tile-sub" data-slot="collections.signature.subtitle">The OG pieces that define the brand.</p>
-          <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+          <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
+          <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
         </div>
-        <div class="tile-shine" aria-hidden="true"></div>
-      </a>
+      </button>
+
+      <button
+        class="fav-toggle"
+        type="button"
+        data-action="toggle-fav"
+        aria-pressed="false"
+        aria-label="Add Diamond Necklace to favorites"
+        title="Add to favorites"
+      >
+        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
+      </button>
     </article>
   </div>
 </section>
-
-</section>
-    <!-- FEATURED (dynamic-ready grid) -->
-    <section class="section" id="featured" aria-label="Featured Pieces">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
-          <p class="section-sub" data-slot="featured.subtitle">Handpicked shine — tap to quick view.</p>
-        </div>
-
-        <div class="section-actions">
-          <button class="chip" type="button" data-action="shuffle-featured">
-            Shuffle
-          </button>
-          <a class="text-link" href="catalogue.html">Shop featured →</a>
-        </div>
-      </div>
-
-      <!-- JS will optionally replace these with live featured picks -->
-      <div class="cards" data-ui="featured-grid">
-        <article class="card" data-slot="featured.1" data-item-id="">
-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
-            <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
-            <div class="card-body">
-              <div class="card-top">
-                <span class="badge" data-slot="featured.1.badge">New</span>
-                <span class="price" data-slot="featured.1.price">$2,999</span>
-              </div>
-              <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
-              <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
-            </div>
-          </button>
-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
-        </article>
-
-        <article class="card" data-slot="featured.2" data-item-id="">
-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
-            <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
-            <div class="card-body">
-              <div class="card-top">
-                <span class="badge" data-slot="featured.2.badge">Best Value</span>
-                <span class="price" data-slot="featured.2.price">$1,799</span>
-              </div>
-              <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
-              <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
-            </div>
-          </button>
-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
-        </article>
-
-        <article class="card" data-slot="featured.3" data-item-id="">
-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
-            <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
-            <div class="card-body">
-              <div class="card-top">
-                <span class="badge" data-slot="featured.3.badge">Limited</span>
-                <span class="price" data-slot="featured.3.price">$9,499</span>
-              </div>
-              <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
-              <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
-            </div>
-          </button>
-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
-        </article>
-
-        <article class="card" data-slot="featured.4" data-item-id="">
-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
-            <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
-            <div class="card-body">
-              <div class="card-top">
-                <span class="badge" data-slot="featured.4.badge">OG Pick</span>
-                <span class="price" data-slot="featured.4.price">$4,599</span>
-              </div>
-              <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
-              <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
-            </div>
-          </button>
-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
-        </article>
-      </div>
-    </section>
-
-    <!-- STORY (editorial) -->
-    <section class="section story" id="story" aria-label="Our Story">
-      <div class="story-grid">
-        <div class="story-card">
-          <div class="story-kicker" data-slot="story.kicker">Our Story</div>
-          <h2 class="story-title" data-slot="story.title">Curated like art. Worn like power.</h2>
-          <p class="story-sub" data-slot="story.subtitle">
-            OG Jewelers is built around real curation: clean designs, premium materials, and pieces that stand out
-            in person and on camera — without the noise.
-          </p>
-
-          <div class="story-points" aria-label="Brand pillars">
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title" data-slot="story.point1.title">Premium sourcing</div>
-                <div class="point-sub" data-slot="story.point1.subtitle">Only pieces we’d wear ourselves.</div>
-              </div>
-            </div>
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title" data-slot="story.point2.title">Luxury presentation</div>
-                <div class="point-sub" data-slot="story.point2.subtitle">Designed for an elevated experience.</div>
-              </div>
-            </div>
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title" data-slot="story.point3.title">Drops & exclusives</div>
-                <div class="point-sub" data-slot="story.point3.subtitle">Limited runs, curated weekly.</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="story-ctas">
-            <a class="btn btn-primary" href="catalogue.html">Shop now <span aria-hidden="true">→</span></a>
-            <a class="btn btn-ghost" href="#collections">Explore collections</a>
-            <a class="btn btn-ghost" href="./contact.html">Our story</a>
-          </div>
-        </div>
-
-<div class="story-visual" aria-label="Story visual">
-  <div class="story-img" data-slot="story.image" style="--img:url('assets/story/story.jpg');"></div>
-
-  <!-- Quote panel (editable slot) -->
-  <div class="story-glass">
-    <div class="story-quote" data-slot="story.quote">Worn like power.</div>
-  </div>
-</div>
-
-      </div>
-    </section>
+   
 
     <!-- Footer -->
     <footer class="site-footer" id="contact">

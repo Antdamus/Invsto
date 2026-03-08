@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+
+  <title>OG Jewelers — Story</title>
+  <meta
+    name="description"
+    content="Learn the story behind OG Jewelers — curated pieces, premium sourcing, and an elevated luxury experience."
+  />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="catalogue.css" />
+  <link rel="stylesheet" href="og.header.css" />
+  <link rel="stylesheet" href="story.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
+  <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="initSupabase.js" defer></script>
+
+  <script src="./StoreCart/cart.shared.js" defer></script>
+
+  <script>
+    (function () {
+      window.OG_CART_DRAWER_CFG = {
+        supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+        channel: "og_main",
+        fn: "storefront-catalog"
+      };
+    })();
+  </script>
+
+  <script src="./StoreCart/cart.drawer.js" defer></script>
+  <script type="module" src="./StoreCart/cart.service.global.js"></script>
+
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
+
+  <script src="og.header.js" defer></script>
+</head>
+<body>
+  <div id="ogHeaderMount"></div>
+
+  <main id="main">
+    <section class="story-page-hero" aria-label="Story hero">
+      <div class="container story-page-hero-inner">
+        <p class="story-page-kicker">OG Jewelers • Story</p>
+        <h1 class="story-page-title">Curated like art. Worn like power.</h1>
+        <p class="story-page-subtitle">
+          OG Jewelers is built around real curation: clean designs, premium materials,
+          and pieces that stand out in person and on camera — without the noise.
+        </p>
+      </div>
+    </section>
+
+    <section class="section story-page-main" aria-label="Our Story">
+      <div class="container">
+        <div class="story-grid">
+          <div class="story-card">
+            <div class="story-kicker">Our Story</div>
+            <h2 class="story-title">Luxury without excess.</h2>
+            <p class="story-sub">
+              We focus on selection, not clutter. Every piece is chosen to feel sharp,
+              elevated, and wearable — whether it is part of a daily look or the centerpiece
+              of a statement fit.
+            </p>
+
+            <div class="story-points" aria-label="Brand pillars">
+              <div class="point">
+                <div class="point-ic" aria-hidden="true">✦</div>
+                <div>
+                  <div class="point-title">Premium sourcing</div>
+                  <div class="point-sub">Only pieces we’d wear ourselves.</div>
+                </div>
+              </div>
+
+              <div class="point">
+                <div class="point-ic" aria-hidden="true">✦</div>
+                <div>
+                  <div class="point-title">Luxury presentation</div>
+                  <div class="point-sub">Designed for an elevated experience.</div>
+                </div>
+              </div>
+
+              <div class="point">
+                <div class="point-ic" aria-hidden="true">✦</div>
+                <div>
+                  <div class="point-title">Drops & exclusives</div>
+                  <div class="point-sub">Limited runs, curated weekly.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="story-ctas">
+              <a class="btn btn-primary" href="catalogue.html">Shop now <span aria-hidden="true">→</span></a>
+              <a class="btn btn-ghost" href="favorites.html">View favorites</a>
+              <a class="btn btn-ghost" href="contact.html">Contact</a>
+            </div>
+          </div>
+
+          <div class="story-visual" aria-label="Story visual">
+            <div class="story-img" style="--img:url('assets/story/story.jpg');"></div>
+            <div class="story-glass">
+              <div class="story-quote">Worn like power.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section story-page-values" aria-label="What defines OG Jewelers">
+      <div class="container values-grid">
+        <article class="value-card">
+          <div class="value-label">01</div>
+          <h3>Refined curation</h3>
+          <p>We keep the assortment intentional so every piece feels selected, not mass-listed.</p>
+        </article>
+
+        <article class="value-card">
+          <div class="value-label">02</div>
+          <h3>Presence on and off camera</h3>
+          <p>Jewelry should read beautifully in real life and still carry presence in content, live shows, and photography.</p>
+        </article>
+
+        <article class="value-card">
+          <div class="value-label">03</div>
+          <h3>Luxury feel</h3>
+          <p>From the site to the packaging to the presentation, everything should feel polished and memorable.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

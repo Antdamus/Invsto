@@ -123,6 +123,73 @@ const state = {
     },
   ],
 };
+/* =========================
+   Featured favorites UI sync
+========================= */
+function getFavoriteButtonName(btn) {
+  const card = btn?.closest(".card");
+  const title =
+    card?.querySelector(".card-title")?.textContent?.trim() ||
+    card?.getAttribute("data-slot") ||
+    "item";
+  return title;
+}
+
+function syncFavoriteButtonUI(btn) {
+  if (!btn) return;
+
+  const pressed = btn.getAttribute("aria-pressed") === "true";
+  const icon = btn.querySelector(".fav-toggle-icon");
+  const itemName = getFavoriteButtonName(btn);
+
+  if (icon) {
+    icon.textContent = pressed ? "♥" : "♡";
+  } else {
+    btn.textContent = pressed ? "♥" : "♡";
+  }
+
+  btn.setAttribute(
+    "aria-label",
+    pressed
+      ? `Remove ${itemName} from favorites`
+      : `Add ${itemName} to favorites`
+  );
+
+  btn.setAttribute(
+    "title",
+    pressed ? "Remove from favorites" : "Add to favorites"
+  );
+}
+
+function syncAllFavoriteButtons(root = document) {
+  $$('[data-action="toggle-fav"]', root).forEach(syncFavoriteButtonUI);
+}
+
+function initFavoriteButtonsUI() {
+  syncAllFavoriteButtons();
+
+  const favButtons = $$('[data-action="toggle-fav"]');
+
+  favButtons.forEach((btn) => {
+    const observer = new MutationObserver(() => {
+      syncFavoriteButtonUI(btn);
+    });
+
+    observer.observe(btn, {
+      attributes: true,
+      attributeFilter: ["aria-pressed", "class"]
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-action="toggle-fav"]');
+    if (!btn) return;
+
+    requestAnimationFrame(() => {
+      syncFavoriteButtonUI(btn);
+    });
+  });
+}
 
 /* =========================
    Search Backdrop (created in JS)
@@ -1075,7 +1142,7 @@ ui.search?.addEventListener("click", (e) => {
   await loadPublishedStorefrontContent();
 
   hydrateFeaturedQuickviewModel();
-
+initFavoriteButtonsUI();
   initAccountChip();
 
   initAccountDropdown();

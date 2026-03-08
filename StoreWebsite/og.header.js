@@ -68,7 +68,7 @@
         <nav class="nav og-nav" aria-label="Primary navigation">
           <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
           <a class="nav-link og-nav-link" href="${hrefFavorites}">Favorites</a>
-          <a class="nav-link og-nav-link" href="${hrefIndex}#story">Story</a>
+          <a class="nav-link og-nav-link" href="${base}/story.html">Story</a>
           <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
         </nav>
 
@@ -115,7 +115,7 @@
 
         <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
         <a class="nav-drawer-link" href="${hrefFavorites}">Favorites</a>
-        <a class="nav-drawer-link" href="${hrefIndex}#story">Story</a>
+        <a class="nav-drawer-link" href="${base}/story.html">Story</a>
         <a class="nav-drawer-link" href="${base}/contact.html">Contact</a>
       </nav>
     </aside>
