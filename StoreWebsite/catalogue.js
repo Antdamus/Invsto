@@ -442,6 +442,10 @@ const navDrawer = qs("#navDrawer");
 const navBackdrop = qs("#navDrawerBackdrop");
 const navCloseBtn = qs(".nav-drawer-close");
 
+  const hudWrap = qs('[data-ui="catalogue-hud"]');
+  const hudPanel = qs('[data-ui="catalogue-hud-panel"]');
+  const hudToggle = qs('[data-action="toggle-hud"]');
+
 
   const qInput = qs("#q");
   const clearSearchBtn = qs('[data-action="clear-search"]');
@@ -547,6 +551,134 @@ const navCloseBtn = qs(".nav-drawer-close");
     if (!header) return;
     header.classList.toggle("is-elevated", (window.scrollY || 0) > 6);
   };
+
+  /* =========================
+     HUD presentation state
+  ========================= */
+  const HUD_IDLE_MS = 15000;
+  let hudIdleTimer = null;
+  let hudIntroTimer = null;
+  let hudPointerInside = false;
+
+  const isHudExpanded = () => !!hudWrap && hudWrap.classList.contains("is-expanded");
+  const isDrawerOpen = () => !!drawer && !drawer.hidden;
+
+  const hudHasFocus = () => {
+    const active = document.activeElement;
+    if (!active) return false;
+    if (hudPanel && hudPanel.contains(active)) return true;
+    if (hudToggle && hudToggle.contains(active)) return true;
+    return false;
+  };
+
+  const clearHudTimers = () => {
+    window.clearTimeout(hudIdleTimer);
+    window.clearTimeout(hudIntroTimer);
+  };
+
+  const canHudAutoCollapse = () => {
+    if (!isHudExpanded()) return false;
+    if (isDrawerOpen()) return false;
+    if (hudHasFocus()) return false;
+    if (hudPointerInside) return false;
+    return true;
+  };
+
+  const scheduleHudAutoCollapse = (delay = HUD_IDLE_MS) => {
+    window.clearTimeout(hudIdleTimer);
+    if (!hudWrap || !hudPanel || !isHudExpanded()) return;
+
+    hudIdleTimer = window.setTimeout(() => {
+      if (canHudAutoCollapse()) {
+        setHudExpanded(false);
+      } else {
+        scheduleHudAutoCollapse(2200);
+      }
+    }, delay);
+  };
+
+  const setHudExpanded = (expanded, opts = {}) => {
+    const { focusSearch = false, returnFocus = false, idleMs = HUD_IDLE_MS } = opts;
+    if (!hudWrap || !hudPanel || !hudToggle) return;
+
+    hudWrap.classList.toggle("is-expanded", !!expanded);
+    hudWrap.classList.toggle("is-collapsed", !expanded);
+    hudToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    hudPanel.setAttribute("aria-hidden", expanded ? "false" : "true");
+    try { hudPanel.inert = !expanded; } catch {}
+
+    if (expanded) {
+      if (focusSearch && qInput) qInput.focus({ preventScroll: true });
+      scheduleHudAutoCollapse(idleMs);
+      return;
+    }
+
+    window.clearTimeout(hudIdleTimer);
+    if (returnFocus && hudToggle) hudToggle.focus({ preventScroll: true });
+  };
+
+  const recordHudActivity = (delay = HUD_IDLE_MS) => {
+    if (!hudWrap) return;
+
+    if (!isHudExpanded()) {
+      setHudExpanded(true, { idleMs: delay });
+      return;
+    }
+
+    scheduleHudAutoCollapse(delay);
+  };
+
+  const initHudBehavior = () => {
+    if (!hudWrap || !hudPanel || !hudToggle) return;
+
+    // Ensure deterministic initial state classes.
+    hudWrap.classList.add("is-expanded");
+    hudWrap.classList.remove("is-collapsed");
+    hudPanel.setAttribute("aria-hidden", "false");
+    hudToggle.setAttribute("aria-expanded", "true");
+
+    hudToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+
+      if (isHudExpanded()) {
+        if (isDrawerOpen()) return;
+        setHudExpanded(false, { returnFocus: true });
+      } else {
+        setHudExpanded(true, { focusSearch: false });
+      }
+    });
+
+    ["input", "change", "focusin", "keydown", "pointerdown", "click"].forEach((evt) => {
+      hudPanel.addEventListener(evt, () => recordHudActivity());
+    });
+
+    hudPanel.addEventListener("mouseenter", () => {
+      hudPointerInside = true;
+      recordHudActivity();
+    });
+
+    hudPanel.addEventListener("mouseleave", () => {
+      hudPointerInside = false;
+      scheduleHudAutoCollapse(2600);
+    });
+
+    hudWrap.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!hudHasFocus()) scheduleHudAutoCollapse(2600);
+      }, 0);
+    });
+
+    const startCollapsed = window.matchMedia("(max-width: 820px)").matches;
+    setHudExpanded(!startCollapsed);
+
+    if (!startCollapsed) {
+      const introDelay = prefersReducedMotion() ? 900 : 2400;
+      hudIntroTimer = window.setTimeout(() => {
+        if (canHudAutoCollapse()) setHudExpanded(false);
+      }, introDelay);
+    }
+  };
+
 
   /* =========================
      URL <-> State
@@ -853,6 +985,9 @@ const humanize = (key, val) => {
     if (!drawer || !backdrop) return;
     lastFocus = document.activeElement;
 
+    setHudExpanded(true);
+    clearHudTimers();
+
     backdrop.hidden = false;
     drawer.hidden = false;
     document.body.classList.add("drawer-open");
@@ -873,6 +1008,8 @@ const humanize = (key, val) => {
       lastFocus.focus({ preventScroll: true });
     }
     lastFocus = null;
+
+    recordHudActivity();
   };
 
 const handleEscape = (e) => {
@@ -961,54 +1098,53 @@ const toggleNavDrawer = () => {
      Rendering
   ========================= */
   const renderCard = (p) => {
-  const tags = (p.tags || []).slice(0, 2)
-    .map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`)
-    .join("");
-
+  const displayName = String(p.name || "")
+    .replace(/\b925\s*fine\s*silver\b/gi, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s\-|,\/]+|[\s\-|,\/]+$/g, "")
+    .trim() || String(p.name || "");
   const href = `item.html?id=${encodeURIComponent(p.id)}`;
+  const metaBits = [
+    humanize("category", p.category),
+    humanize("material", p.material)
+  ].filter((v) => v && !["Uncategorized", "Unknown"].includes(v));
+  const subtleMeta = metaBits.length ? `<div class="product-meta">${esc(metaBits[0])}</div>` : "";
 
   return `
     <article class="product-card" data-id="${esc(p.id)}">
+      <button class="fav-toggle product-fav" type="button"
+              data-action="toggle-fav"
+              data-id="${esc(p.id)}"
+              aria-pressed="false"
+              aria-label="Add ${esc(displayName)} to favorites"
+              title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+
       <a class="product-hit"
          href="${href}"
-         aria-label="View details for ${esc(p.name)}">
+         aria-label="View details for ${esc(displayName)}">
         <div class="product-media">
-          <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
+          <img src="${esc(p.image)}" alt="${esc(displayName)}" loading="lazy" />
         </div>
         <div class="product-body">
-          <div class="product-top">
-            <h3 class="product-title">${esc(p.name)}</h3>
-            <div class="product-price">${esc(formatUSD(p.price))}</div>
-          </div>
-          <div class="product-meta">
-            <span>${esc(humanize("category", p.category))}</span>
-            <span class="sep" aria-hidden="true">•</span>
-            <span>${esc(humanize("material", p.material))}</span>
-          </div>
-          <div class="product-tags">${tags}</div>
+          <h3 class="product-title">${esc(displayName)}</h3>
+          <div class="product-price">${esc(formatUSD(p.price))}</div>
+          ${subtleMeta}
         </div>
       </a>
 
       <div class="product-actions">
-        <button class="fav-toggle" type="button"
-                data-action="toggle-fav"
-                data-id="${esc(p.id)}"
-                aria-pressed="false"
-                aria-label="Add ${esc(p.name)} to favorites"
-                title="Add to favorites">
-          <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-        </button>
-        <button class="btn ghost" type="button"
+        <button class="product-cta" type="button"
                 data-action="add-to-cart"
                 data-id="${esc(p.id)}">
-          Add to cart
+          Quick add
         </button>
       </div>
     </article>
   `;
 };
-
-
 
   const render = () => {
     // Filters + sort
@@ -1191,6 +1327,10 @@ const wireGlobalClicks = () => {
       closeQuickview();
       return;
     }
+    if (hudWrap && hudWrap.contains(e.target) && !e.target.closest('[data-action="toggle-hud"]')) {
+      recordHudActivity();
+    }
+
 
     // ✅ 1) Active chip removal FIRST (does not use data-action)
     const chip = e.target.closest(".active-chip");
@@ -1529,6 +1669,7 @@ const outsideClickClose = (e) => {
 
     wireHeader();
     wireNavDrawer();
+    initHudBehavior();
 
 
     wireDrawerChips();
