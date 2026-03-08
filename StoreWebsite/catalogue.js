@@ -442,6 +442,10 @@ const navDrawer = qs("#navDrawer");
 const navBackdrop = qs("#navDrawerBackdrop");
 const navCloseBtn = qs(".nav-drawer-close");
 
+  const hudWrap = qs('[data-ui="catalogue-hud"]');
+  const hudPanel = qs('[data-ui="catalogue-hud-panel"]');
+  const hudToggle = qs('[data-action="toggle-hud"]');
+
 
   const qInput = qs("#q");
   const clearSearchBtn = qs('[data-action="clear-search"]');
@@ -547,6 +551,134 @@ const navCloseBtn = qs(".nav-drawer-close");
     if (!header) return;
     header.classList.toggle("is-elevated", (window.scrollY || 0) > 6);
   };
+
+  /* =========================
+     HUD presentation state
+  ========================= */
+  const HUD_IDLE_MS = 15000;
+  let hudIdleTimer = null;
+  let hudIntroTimer = null;
+  let hudPointerInside = false;
+
+  const isHudExpanded = () => !!hudWrap && hudWrap.classList.contains("is-expanded");
+  const isDrawerOpen = () => !!drawer && !drawer.hidden;
+
+  const hudHasFocus = () => {
+    const active = document.activeElement;
+    if (!active) return false;
+    if (hudPanel && hudPanel.contains(active)) return true;
+    if (hudToggle && hudToggle.contains(active)) return true;
+    return false;
+  };
+
+  const clearHudTimers = () => {
+    window.clearTimeout(hudIdleTimer);
+    window.clearTimeout(hudIntroTimer);
+  };
+
+  const canHudAutoCollapse = () => {
+    if (!isHudExpanded()) return false;
+    if (isDrawerOpen()) return false;
+    if (hudHasFocus()) return false;
+    if (hudPointerInside) return false;
+    return true;
+  };
+
+  const scheduleHudAutoCollapse = (delay = HUD_IDLE_MS) => {
+    window.clearTimeout(hudIdleTimer);
+    if (!hudWrap || !hudPanel || !isHudExpanded()) return;
+
+    hudIdleTimer = window.setTimeout(() => {
+      if (canHudAutoCollapse()) {
+        setHudExpanded(false);
+      } else {
+        scheduleHudAutoCollapse(2200);
+      }
+    }, delay);
+  };
+
+  const setHudExpanded = (expanded, opts = {}) => {
+    const { focusSearch = false, returnFocus = false, idleMs = HUD_IDLE_MS } = opts;
+    if (!hudWrap || !hudPanel || !hudToggle) return;
+
+    hudWrap.classList.toggle("is-expanded", !!expanded);
+    hudWrap.classList.toggle("is-collapsed", !expanded);
+    hudToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    hudPanel.setAttribute("aria-hidden", expanded ? "false" : "true");
+    try { hudPanel.inert = !expanded; } catch {}
+
+    if (expanded) {
+      if (focusSearch && qInput) qInput.focus({ preventScroll: true });
+      scheduleHudAutoCollapse(idleMs);
+      return;
+    }
+
+    window.clearTimeout(hudIdleTimer);
+    if (returnFocus && hudToggle) hudToggle.focus({ preventScroll: true });
+  };
+
+  const recordHudActivity = (delay = HUD_IDLE_MS) => {
+    if (!hudWrap) return;
+
+    if (!isHudExpanded()) {
+      setHudExpanded(true, { idleMs: delay });
+      return;
+    }
+
+    scheduleHudAutoCollapse(delay);
+  };
+
+  const initHudBehavior = () => {
+    if (!hudWrap || !hudPanel || !hudToggle) return;
+
+    // Ensure deterministic initial state classes.
+    hudWrap.classList.add("is-expanded");
+    hudWrap.classList.remove("is-collapsed");
+    hudPanel.setAttribute("aria-hidden", "false");
+    hudToggle.setAttribute("aria-expanded", "true");
+
+    hudToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+
+      if (isHudExpanded()) {
+        if (isDrawerOpen()) return;
+        setHudExpanded(false, { returnFocus: true });
+      } else {
+        setHudExpanded(true, { focusSearch: false });
+      }
+    });
+
+    ["input", "change", "focusin", "keydown", "pointerdown", "click"].forEach((evt) => {
+      hudPanel.addEventListener(evt, () => recordHudActivity());
+    });
+
+    hudPanel.addEventListener("mouseenter", () => {
+      hudPointerInside = true;
+      recordHudActivity();
+    });
+
+    hudPanel.addEventListener("mouseleave", () => {
+      hudPointerInside = false;
+      scheduleHudAutoCollapse(2600);
+    });
+
+    hudWrap.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!hudHasFocus()) scheduleHudAutoCollapse(2600);
+      }, 0);
+    });
+
+    const startCollapsed = window.matchMedia("(max-width: 820px)").matches;
+    setHudExpanded(!startCollapsed);
+
+    if (!startCollapsed) {
+      const introDelay = prefersReducedMotion() ? 900 : 2400;
+      hudIntroTimer = window.setTimeout(() => {
+        if (canHudAutoCollapse()) setHudExpanded(false);
+      }, introDelay);
+    }
+  };
+
 
   /* =========================
      URL <-> State
@@ -853,6 +985,9 @@ const humanize = (key, val) => {
     if (!drawer || !backdrop) return;
     lastFocus = document.activeElement;
 
+    setHudExpanded(true);
+    clearHudTimers();
+
     backdrop.hidden = false;
     drawer.hidden = false;
     document.body.classList.add("drawer-open");
@@ -873,6 +1008,8 @@ const humanize = (key, val) => {
       lastFocus.focus({ preventScroll: true });
     }
     lastFocus = null;
+
+    recordHudActivity();
   };
 
 const handleEscape = (e) => {
@@ -1190,6 +1327,10 @@ const wireGlobalClicks = () => {
       closeQuickview();
       return;
     }
+    if (hudWrap && hudWrap.contains(e.target) && !e.target.closest('[data-action="toggle-hud"]')) {
+      recordHudActivity();
+    }
+
 
     // ✅ 1) Active chip removal FIRST (does not use data-action)
     const chip = e.target.closest(".active-chip");
@@ -1528,6 +1669,7 @@ const outsideClickClose = (e) => {
 
     wireHeader();
     wireNavDrawer();
+    initHudBehavior();
 
 
     wireDrawerChips();
@@ -1593,4 +1735,3 @@ try {
     init();
   }
 })();
-
