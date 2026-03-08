@@ -68,7 +68,7 @@
 
         <div class="empty" data-ui="favorites-empty" hidden>
           <h3>No favorites yet</h3>
-          <p>Tap the star on any item to save it here.</p>
+          <p>Tap the heart on any item to save it here.</p>
           <a class="btn primary" href="catalogue.html">Browse Catalogue</a>
         </div>
 
@@ -259,7 +259,7 @@
               '</div>' +
             '</a>' +
             '<div class="product-actions">' +
-              '<button class="fav-toggle" type="button" data-action="toggle-fav" data-id="' + esc(id) + '" aria-pressed="false">⭐</button>' +
+              '<button class="fav-toggle" type="button" data-action="toggle-fav" data-id="' + esc(id) + '" aria-pressed="false" aria-label="Add ' + title + ' to favorites" title="Add to favorites"><span class="fav-toggle-icon" aria-hidden="true">♡</span></button>' +
               '<a class="btn ghost" href="item.html?id=' + encodeURIComponent(id) + '">View</a>' +
               '<button class="btn ghost" type="button" data-action="add-to-cart" data-id="' + esc(id) + '">Add to cart</button>' +
             '</div>' +

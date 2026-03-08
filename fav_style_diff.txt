@@ -1,0 +1,2879 @@
+diff --git a/StoreWebsite/OG-Jewelers.webp b/StoreWebsite/OG-Jewelers.webp
+new file mode 100644
+index 0000000..cf1c076
+Binary files /dev/null and b/StoreWebsite/OG-Jewelers.webp differ
+diff --git a/StoreWebsite/OG-Placeholder.mp4 b/StoreWebsite/OG-Placeholder.mp4
+new file mode 100644
+index 0000000..ecc8f2a
+Binary files /dev/null and b/StoreWebsite/OG-Placeholder.mp4 differ
+diff --git a/StoreWebsite/OG_Logo.jpeg b/StoreWebsite/OG_Logo.jpeg
+new file mode 100644
+index 0000000..dd608da
+Binary files /dev/null and b/StoreWebsite/OG_Logo.jpeg differ
+diff --git a/StoreWebsite/OG_Logo.png b/StoreWebsite/OG_Logo.png
+new file mode 100644
+index 0000000..6576ead
+Binary files /dev/null and b/StoreWebsite/OG_Logo.png differ
+diff --git a/StoreWebsite/index.css b/StoreWebsite/index.css
+index dbb2729..7846f7b 100644
+--- a/StoreWebsite/index.css
++++ b/StoreWebsite/index.css
+@@ -484,56 +484,75 @@ html.lock, body.lock{
+ }
+ 
+ /* =========================
+-   5) Hero
++   5) Hero — full-viewport cinematic video
+ ========================= */
+ .hero{
+-  width:100%;
+-  padding: 26px 0 40px;
+-  position:relative;
++  width: 100%;
++  min-height: calc(100vh - 74px);
++
++  display: flex;
++  align-items: center;
++  justify-content: center;
++
++  padding: 60px 0;
++
++  position: relative;
++  overflow: hidden;
+ }
+ 
+ .hero-media{
+-  position:absolute;
++  position: absolute;
+   inset: 0;
+-  z-index:-1;
+-  overflow:hidden;
++  z-index: -3;
++  overflow: hidden;
+ }
+-.hero-img{
+-  position:absolute;
+-  inset:-2%;
+-  background-image: var(--img);
+-  background-size: cover;
+-  background-position: center;
+-  filter: saturate(1.02) contrast(1.02);
+-  transform: translateZ(0);
++
++.hero-video{
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  object-position: center center;
++  display: block;
++  filter: saturate(1.02) contrast(1.04) brightness(0.62);
++  transform: translateZ(0) scale(1.015);
+ }
+-.hero-img:after{
+-  content:"";
+-  position:absolute;
+-  inset:0;
++
++.hero-video-overlay{
++  position: absolute;
++  inset: 0;
++  z-index: 1;
+   background:
+-    radial-gradient(900px 520px at 18% 8%, rgba(234,195,90,.16), transparent 62%),
+-    radial-gradient(760px 460px at 90% 20%, rgba(120,170,255,.10), transparent 60%),
+-    linear-gradient(180deg, rgba(7,7,8,.30), rgba(7,7,8,.82) 72%, rgba(7,7,8,.95));
++    radial-gradient(900px 520px at 18% 10%, rgba(234,195,90,.14), transparent 62%),
++    radial-gradient(760px 460px at 88% 20%, rgba(120,170,255,.10), transparent 60%),
++    linear-gradient(180deg, rgba(7,7,8,.24), rgba(7,7,8,.56) 48%, rgba(7,7,8,.84) 78%, rgba(7,7,8,.94) 100%);
++  pointer-events: none;
+ }
+ 
+ .hero-glow{
+-  position:absolute;
+-  inset:0;
++  position: absolute;
++  inset: 0;
++  z-index: 2;
+   background:
+-    radial-gradient(closest-side at 25% 35%, rgba(234,195,90,.12), transparent 60%),
+-    radial-gradient(closest-side at 70% 20%, rgba(255,255,255,.06), transparent 60%);
+-  pointer-events:none;
++    radial-gradient(closest-side at 25% 35%, rgba(234,195,90,.10), transparent 60%),
++    radial-gradient(closest-side at 70% 20%, rgba(255,255,255,.05), transparent 60%);
++  pointer-events: none;
+ }
+ 
+ .hero-inner{
+-  width:min(var(--maxW), calc(100% - 2*var(--padX)));
++  width: min(var(--maxW), calc(100% - 2*var(--padX)));
+   margin: 0 auto;
+-  padding: 34px 0 0;
+-  display:grid;
+-  grid-template-columns: 1.35fr .85fr;
+-  gap: 18px;
+-  align-items: stretch;
++
++  display: grid;
++  grid-template-columns: 1.2fr .8fr;
++  gap: 28px;
++
++  align-items: center;
++  justify-content: center;
++
++  position: relative;
++  z-index: 3;
+ }
+ 
+ .hero-card{
+@@ -606,7 +625,474 @@ html.lock, body.lock{
+   margin-top: 18px;
+   flex-wrap:wrap;
+ }
++/* =========================================================
++   HERO CTA — Premium luxury upgrade
++   Purpose:
++   - Give "Shop the Collection" real visual presence
++   - Lower it slightly in the hero
++   - Make it feel like a luxury storefront CTA
++   ========================================================= */
++
++
++
++/* =========================================================
++   HERO CTA — stable mobile-safe placement
++   ========================================================= */
++
++.hero{
++  position: relative;
++  min-height: calc(100svh - 74px);
++  overflow: hidden;
++  isolation: isolate;
++}
++
++.hero-media{
++  position: absolute;
++  inset: 0;
++  z-index: 0;
++  pointer-events: none;
++}
++
++.hero-video,
++.hero-video-overlay,
++.hero-glow{
++  pointer-events: none;
++}
++
++.hero-floating-cta{
++  position: absolute;
++  left: 50%;
++  bottom: clamp(28px, 5vh, 72px);
++  transform: translateX(-50%);
++  z-index: 20;
++
++  width: min(100% - 32px, 720px);
++  display: flex;
++  justify-content: center;
++  align-items: center;
++
++  padding: 0 16px;
++}
++
++.hero-shop-btn{
++  position: relative;
++  z-index: 21;
++  pointer-events: auto;
++
++  width: min(100%, 360px);
++  min-height: 58px;
++  padding: 16px 28px;
++
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 12px;
++
++  border-radius: 999px;
++  border: 1px solid rgba(234,195,90,.30);
++
++  background:
++    radial-gradient(circle at 30% 30%, rgba(255,240,190,.20), rgba(255,240,190,0) 58%),
++    linear-gradient(180deg, rgba(245,214,126,.96), rgba(214,168,70,.94));
++
++  color: #15120d;
++  font-family: var(--sans);
++  font-size: 13px;
++  font-weight: 700;
++  letter-spacing: .14em;
++  text-transform: uppercase;
++
++  box-shadow:
++    0 18px 50px rgba(0,0,0,.42),
++    0 0 0 1px rgba(255,255,255,.08) inset,
++    0 0 28px rgba(234,195,90,.16);
++
++  text-align: center;
++  text-decoration: none;
++  -webkit-tap-highlight-color: transparent;
++  touch-action: manipulation;
++
++  transition:
++    transform 220ms var(--ease),
++    box-shadow 220ms var(--ease),
++    border-color 220ms var(--ease),
++    filter 220ms var(--ease);
++}
++
++
++
++.hero-shop-btn:hover{
++  transform: translateY(-2px);
++  border-color: rgba(245,214,126,.50);
++  filter: brightness(1.03);
++  box-shadow:
++    0 24px 70px rgba(0,0,0,.52),
++    0 0 0 1px rgba(255,255,255,.10) inset,
++    0 0 36px rgba(234,195,90,.22);
++}
++
++.hero-shop-btn:hover::after{
++  transform: translateX(2px);
++}
++
++.hero-shop-btn:active{
++  transform: translateY(0) scale(.992);
++}
++
++.hero-shop-btn:focus-visible{
++  outline: none;
++  box-shadow:
++    0 0 0 4px rgba(234,195,90,.18),
++    0 24px 70px rgba(0,0,0,.52),
++    0 0 0 1px rgba(255,255,255,.10) inset;
++}
++
++@media (max-width: 980px){
++  .hero{
++    min-height: calc(82svh - 74px);
++    padding: 0;
++  }
++
++  .hero-video{
++    object-fit: cover;
++    object-position: center center;
++    transform: none;
++  }
++
++  .hero-floating-cta{
++    bottom: clamp(22px, 4.5vh, 48px);
++    width: calc(100% - 24px);
++    padding: 0 6px;
++  }
++
++  .hero-shop-btn{
++    width: 100%;
++    max-width: 420px;
++  }
++}
++
++@media (max-width: 640px){
++  .hero{
++    min-height: 280px;
++    height: clamp(280px, 42svh, 420px);
++  }
++
++  .hero-media{
++    inset: 0;
++  }
++
++  .hero-video{
++    object-fit: cover;
++    object-position: 58% center;
++    filter: saturate(1.01) contrast(1.03) brightness(0.54);
++  }
++
++  .hero-video-overlay{
++    background:
++      radial-gradient(520px 280px at 50% 18%, rgba(234,195,90,.10), transparent 62%),
++      linear-gradient(180deg, rgba(7,7,8,.18), rgba(7,7,8,.48) 44%, rgba(7,7,8,.78) 76%, rgba(7,7,8,.92) 100%);
++  }
++
++  .hero-glow{
++    background:
++      radial-gradient(closest-side at 50% 26%, rgba(234,195,90,.07), transparent 60%);
++  }
++
++  .hero-floating-cta{
++    bottom: 14px;
++    width: calc(100% - 20px);
++    padding: 0;
++  }
++
++  .hero-shop-btn{
++    min-height: 52px;
++    padding: 14px 18px;
++    font-size: 12px;
++    letter-spacing: .11em;
++  }
++}
++
++/* =========================================================
++   TRUST STRIP + EBAY LIVE SECTION
++   Mobile friendly, luxury noir, eBay-first homepage block
++   ========================================================= */
++
++/* ---------- Trust strip ---------- */
++.trust-strip{
++  position: relative;
++  z-index: 2;
++  padding: 18px 0;
++  border-top: 1px solid rgba(255,255,255,.06);
++  border-bottom: 1px solid rgba(255,255,255,.06);
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015)),
++    rgba(8,9,12,.48);
++  backdrop-filter: blur(14px);
++  -webkit-backdrop-filter: blur(14px);
++}
++
++.trust-strip-inner{
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: 28px;
++  flex-wrap: wrap;
++  padding-top: 0;
++  padding-bottom: 0;
++}
++
++.trust-item{
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  text-align: center;
++  min-width: 140px;
++}
++
++.trust-number{
++  font-family: var(--serif);
++  font-size: clamp(22px, 2.4vw, 30px);
++  font-weight: 600;
++  letter-spacing: .02em;
++  line-height: 1;
++  color: var(--gold1);
++  text-shadow: 0 0 14px rgba(234,195,90,.10);
++}
++
++.trust-label{
++  margin-top: 6px;
++  font-size: 12px;
++  letter-spacing: .12em;
++  text-transform: uppercase;
++  color: var(--muted);
++}
++
++.trust-divider{
++  width: 1px;
++  height: 34px;
++  background: linear-gradient(180deg, transparent, rgba(255,255,255,.16), transparent);
++  flex: 0 0 1px;
++}
++
++/* ---------- eBay Live section ---------- */
++.ebay-live-section{
++  position: relative;
++}
++
++.ebay-live-head{
++  align-items: end;
++}
++
++.section-kicker{
++  margin: 0 0 10px;
++  font-size: 12px;
++  letter-spacing: .16em;
++  text-transform: uppercase;
++  color: rgba(244,242,237,.70);
++}
++
++.ebay-live-grid{
++  display: grid;
++  grid-template-columns: repeat(4, minmax(0, 1fr));
++  gap: 16px;
++  align-items: stretch;
++}
++
++.ebay-live-card{
++  position: relative;
++  display: flex;
++  flex-direction: column;
++  min-height: 100%;
++  border-radius: 24px;
++  overflow: hidden;
++  border: 1px solid rgba(255,255,255,.08);
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
++    rgba(16,18,22,.54);
++  box-shadow: 0 16px 52px rgba(0,0,0,.34);
++  transition:
++    transform .22s var(--ease),
++    border-color .22s var(--ease),
++    box-shadow .22s var(--ease),
++    background .22s var(--ease);
++}
++
++.ebay-live-card:hover{
++  transform: translateY(-4px);
++  border-color: rgba(234,195,90,.22);
++  box-shadow: 0 22px 70px rgba(0,0,0,.42);
++}
++
++.ebay-live-thumb{
++  position: relative;
++  aspect-ratio: 4 / 5;
++  overflow: hidden;
++  background: rgba(255,255,255,.03);
++}
++
++.ebay-live-thumb img{
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  display: block;
++}
++
++.ebay-live-date{
++  position: absolute;
++  top: 12px;
++  left: 12px;
++  z-index: 2;
++  display: inline-flex;
++  align-items: center;
++  min-height: 34px;
++  padding: 0 12px;
++  border-radius: 999px;
++  border: 1px solid rgba(255,255,255,.14);
++  background: rgba(255,255,255,.96);
++  color: #111317;
++  font-size: 12px;
++  font-weight: 600;
++  letter-spacing: .01em;
++  box-shadow: 0 10px 30px rgba(0,0,0,.16);
++}
++
++.ebay-live-body{
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  padding: 14px 14px 16px;
++}
++
++.ebay-live-seller{
++  font-size: 12px;
++  letter-spacing: .10em;
++  text-transform: uppercase;
++  color: var(--gold1);
++}
++
++.ebay-live-title{
++  margin: 0;
++  font-family: var(--sans);
++  font-size: 15px;
++  line-height: 1.45;
++  font-weight: 500;
++  color: var(--ink);
++}
++
++.ebay-live-link{
++  margin-top: auto;
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++  font-size: 13px;
++  color: var(--ink2);
++  transition: gap .18s var(--ease), color .18s var(--ease);
++}
++
++.ebay-live-card:hover .ebay-live-link{
++  gap: 10px;
++  color: var(--gold1);
++}
++
++.ebay-live-empty{
++  grid-column: 1 / -1;
++  padding: 24px;
++  border-radius: 24px;
++  border: 1px solid rgba(255,255,255,.08);
++  background: rgba(255,255,255,.03);
++  color: var(--muted);
++  text-align: center;
++}
++/* eBay live now badge */
++.ebay-live-now-badge{
++  position: absolute;
++  right: 12px;
++  top: 12px;
++  z-index: 3;
++
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 34px;
++  padding: 0 12px;
++
++  border-radius: 999px;
++  border: 1px solid rgba(255, 90, 90, 0.34);
++  background: rgba(140, 12, 20, 0.88);
++  color: rgba(255, 240, 240, 0.96);
++
++  font-size: 11px;
++  font-weight: 700;
++  letter-spacing: .12em;
++  text-transform: uppercase;
++
++  box-shadow:
++    0 10px 30px rgba(0,0,0,.22),
++    0 0 18px rgba(255, 70, 70, .18);
++}
++/* ---------- responsive ---------- */
++@media (max-width: 1100px){
++  .ebay-live-grid{
++    grid-template-columns: repeat(3, minmax(0, 1fr));
++  }
++}
++
++@media (max-width: 820px){
++  .trust-strip-inner{
++    gap: 18px;
++  }
++
++  .trust-item{
++    min-width: 120px;
++  }
++
++  .ebay-live-grid{
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++}
++
++@media (max-width: 640px){
++  .trust-strip{
++    padding: 16px 0;
++  }
++
++  .trust-strip-inner{
++    gap: 14px;
++  }
++
++  .trust-divider{
++    display: none;
++  }
++
++  .trust-item{
++    min-width: 100%;
++  }
++
++  .trust-number{
++    font-size: 24px;
++  }
++
++  .trust-label{
++    font-size: 11px;
++  }
++
++  .ebay-live-grid{
++    grid-template-columns: 1fr;
++    gap: 14px;
++  }
++
++  .ebay-live-thumb{
++    aspect-ratio: 16 / 10;
++  }
++
++  .ebay-live-body{
++    padding: 13px 13px 15px;
++  }
+ 
++  .ebay-live-title{
++    font-size: 14px;
++  }
++}
+ /* Shared buttons */
+ .btn{
+   display:inline-flex;
+@@ -778,220 +1264,81 @@ html.lock, body.lock{
+   width:max-content;
+   align-items:center;
+   gap:10px;
+-  padding: 10px 12px;
+-  border-radius: 14px;
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(255,255,255,.03);
+-  color: var(--ink);
+-  transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+-}
+-.spotlight-link:hover{
+-  transform: translateY(-1px);
+-  background: rgba(255,255,255,.06);
+-  border-color: rgba(255,255,255,.16);
+-}
+-
+-/* scroll hint */
+-.scroll-hint{
+-  width:min(var(--maxW), calc(100% - 2*var(--padX)));
+-  margin: 18px auto 0;
+-  display:flex;
+-  align-items:center;
+-  gap: 10px;
+-  color: rgba(244,242,237,.55);
+-  font-size: 12px;
+-  letter-spacing:.14em;
+-  text-transform: uppercase;
+-}
+-.scroll-line{
+-  width: 44px;
+-  height: 1px;
+-  background: linear-gradient(90deg, rgba(234,195,90,.75), rgba(255,255,255,.10));
+-  opacity:.9;
+-  position:relative;
+-  overflow:hidden;
+-}
+-.scroll-line:after{
+-  content:"";
+-  position:absolute;
+-  left:-40%;
+-  top:0;
+-  width:40%;
+-  height:100%;
+-  background: linear-gradient(90deg, transparent, rgba(234,195,90,.85), transparent);
+-  animation: shimmer 2.2s var(--ease) infinite;
+-}
+-@keyframes shimmer{
+-  0%{ transform: translateX(0); opacity:.0; }
+-  15%{ opacity:.9; }
+-  60%{ opacity:.55; }
+-  100%{ transform: translateX(280%); opacity:0; }
+-}
+-
+-/* =========================
+-   6) Tiles (Collections)
+-========================= */
+-.tiles{
+-  display:grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 14px;
+-}
+-.tile{
+-  border-radius: var(--radius2);
+-  overflow:hidden;
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(255,255,255,.03);
+-  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+-  position:relative;
+-  min-height: 250px;
+-  transform: translateZ(0);
+-}
+-.tile-wide{
+-  grid-column: span 3;
+-  min-height: 240px;
+-}
+-
+-.tile-hit{
+-  display:block;
+-  height:100%;
+-  width:100%;
+-  position:relative;
+-  isolation:isolate;
+-}
+-
+-.tile-hit:before{
+-  content:"";
+-  position:absolute;
+-  inset:0;
+-  background-image: var(--img);
+-  background-size: cover;
+-  background-position: center;
+-  filter: saturate(1.04) contrast(1.04);
+-  transform: scale(1.02);
+-  transition: transform .55s var(--ease2), filter .55s var(--ease2);
+-  z-index:0;
+-}
+-.tile-overlay{
+-  position:absolute;
+-  inset:0;
+-  background:
+-    radial-gradient(900px 380px at 22% 20%, rgba(234,195,90,.16), transparent 60%),
+-    radial-gradient(780px 420px at 82% 15%, rgba(120,170,255,.10), transparent 62%),
+-    linear-gradient(180deg, rgba(0,0,0,.06), rgba(0,0,0,.78));
+-  z-index:1;
+-}
+-.tile-body{
+-  position:absolute;
+-  inset:auto 0 0 0;
+-  padding: 18px 18px 16px;
+-  z-index:3;
+-}
+-.tile-top{
+-  display:flex;
+-  align-items:center;
+-  justify-content:space-between;
+-  gap: 10px;
+-}
+-.tile-badge{
+-  display:inline-flex;
+-  align-items:center;
+-  gap:8px;
+-  padding: 7px 10px;
+-  border-radius: 999px;
+-  border: 1px solid rgba(255,255,255,.14);
+-  background: rgba(0,0,0,.22);
+-  color: rgba(244,242,237,.85);
+-  font-size: 12px;
+-  letter-spacing: .10em;
+-  text-transform: uppercase;
+-  backdrop-filter: blur(10px);
+-  -webkit-backdrop-filter: blur(10px);
+-}
+-.tile-mini{
+-  font-size: 12px;
+-  color: rgba(244,242,237,.70);
+-  letter-spacing:.04em;
+-  text-align:right;
+-}
+-.tile-title{
+-  font-family: var(--serif);
+-  font-size: 34px;
+-  margin: 10px 0 0;
+-  letter-spacing: .01em;
+-  line-height:1.02;
+-}
+-.tile-sub{
+-  margin: 8px 0 0;
+-  color: rgba(244,242,237,.72);
+-  font-size: 14px;
+-  line-height:1.55;
+-  max-width: 52ch;
+-}
+-.tile-cta{
+-  margin-top: 12px;
+-  width:max-content;
+-  display:inline-flex;
+-  align-items:center;
+-  gap:10px;
+-  padding: 10px 12px;
+-  border-radius: 14px;
+-  border: 1px solid rgba(234,195,90,.22);
+-  background:
+-    radial-gradient(circle at 30% 30%, rgba(234,195,90,.14), rgba(0,0,0,0) 62%),
+-    rgba(0,0,0,.20);
+-  color: var(--gold1);
+-  transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
++  padding: 10px 12px;
++  border-radius: 14px;
++  border: 1px solid rgba(255,255,255,.10);
++  background: rgba(255,255,255,.03);
++  color: var(--ink);
++  transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+ }
+-.tile-cta:hover{
++.spotlight-link:hover{
+   transform: translateY(-1px);
+-  border-color: rgba(234,195,90,.38);
+-}
+-
+-.tile-shine{
+-  position:absolute;
+-  inset:-40% -50%;
+-  background: linear-gradient(120deg, transparent 40%, rgba(234,195,90,.12), transparent 60%);
+-  transform: translateX(-40%) rotate(12deg);
+-  opacity:0;
+-  z-index:2;
+-  pointer-events:none;
++  background: rgba(255,255,255,.06);
++  border-color: rgba(255,255,255,.16);
+ }
+ 
+-.tile:hover .tile-hit:before{
+-  transform: scale(1.06);
+-  filter: saturate(1.08) contrast(1.06);
++/* scroll hint */
++.scroll-hint{
++  width:min(var(--maxW), calc(100% - 2*var(--padX)));
++  margin: 18px auto 0;
++  display:flex;
++  align-items:center;
++  gap: 10px;
++  color: rgba(244,242,237,.55);
++  font-size: 12px;
++  letter-spacing:.14em;
++  text-transform: uppercase;
+ }
+-.tile:hover .tile-shine{
+-  opacity:1;
+-  animation: tileShine 1.6s var(--ease2) forwards;
++.scroll-line{
++  width: 44px;
++  height: 1px;
++  background: linear-gradient(90deg, rgba(234,195,90,.75), rgba(255,255,255,.10));
++  opacity:.9;
++  position:relative;
++  overflow:hidden;
+ }
+-@keyframes tileShine{
+-  0%{ transform: translateX(-55%) rotate(12deg); opacity:0; }
+-  18%{ opacity:.9; }
+-  60%{ opacity:.45; }
+-  100%{ transform: translateX(55%) rotate(12deg); opacity:0; }
++.scroll-line:after{
++  content:"";
++  position:absolute;
++  left:-40%;
++  top:0;
++  width:40%;
++  height:100%;
++  background: linear-gradient(90deg, transparent, rgba(234,195,90,.85), transparent);
++  animation: shimmer 2.2s var(--ease) infinite;
+ }
+-.tile:focus-within{
+-  box-shadow: var(--shadow2), var(--ring);
++@keyframes shimmer{
++  0%{ transform: translateX(0); opacity:.0; }
++  15%{ opacity:.9; }
++  60%{ opacity:.55; }
++  100%{ transform: translateX(280%); opacity:0; }
+ }
+ 
++
++
+ /* =========================
+    7) Featured cards
+ ========================= */
+ .cards{
+   display:grid;
+   grid-template-columns: repeat(4, minmax(0, 1fr));
+-  gap: 12px;
++  gap: 14px;
+ }
+ 
+ .card{
+   border-radius: var(--radius2);
+   border: 1px solid rgba(255,255,255,.10);
+-  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+   box-shadow: 0 16px 55px rgba(0,0,0,.32);
+   overflow:hidden;
+   position:relative;
+   transform: translateZ(0);
++  transition:
++    transform .22s var(--ease2),
++    border-color .22s var(--ease2),
++    box-shadow .22s var(--ease2),
++    background .22s var(--ease2);
+ }
+ 
+ .card-hit{
+@@ -1006,246 +1353,216 @@ html.lock, body.lock{
+   display:flex;
+   flex-direction:column;
+ }
+-.card-hit:focus-visible{ outline:none; box-shadow: var(--ring); border-radius: inherit; }
++.card-hit:focus-visible{
++  outline:none;
++  box-shadow: var(--ring);
++  border-radius: inherit;
++}
+ 
+ .card-media{
+   height: 190px;
+   background-image: var(--img);
+   background-size: cover;
++  background-repeat: no-repeat;
+   background-position: center;
+   filter: saturate(1.03) contrast(1.03);
+-  position:relative;
++  position: relative;
++  overflow: hidden;
+ }
++
+ .card-media:after{
+   content:"";
+   position:absolute;
+   inset:0;
+-  background:
+-    radial-gradient(700px 240px at 30% 20%, rgba(234,195,90,.10), transparent 60%),
+-    linear-gradient(180deg, rgba(0,0,0,.10), rgba(0,0,0,.62));
++  background: linear-gradient(
++    180deg,
++    rgba(0,0,0,.02),
++    rgba(0,0,0,.16) 68%,
++    rgba(0,0,0,.26)
++  );
++  pointer-events:none;
+ }
+ 
+ .card-body{
+-  padding: 14px 14px 16px;
++  padding: 14px 15px 16px;
+   display:flex;
+   flex-direction:column;
+-  gap: 10px;
++  gap: 8px;
+ }
++
+ .card-top{
+   display:flex;
+   align-items:center;
+   justify-content:space-between;
+   gap:10px;
++  margin-bottom: 2px;
+ }
+ 
+ .badge{
+   display:inline-flex;
+   align-items:center;
+-  padding: 7px 10px;
++  padding: 5px 10px;
+   border-radius: 999px;
+-  border: 1px solid rgba(234,195,90,.22);
+-  background: rgba(234,195,90,.08);
+-  color: var(--gold1);
+-  font-size: 12px;
+-  letter-spacing:.10em;
++  border: 1px solid rgba(255,255,255,.08);
++  background: rgba(255,255,255,.03);
++  color: rgba(244,242,237,.62);
++  font-size: 10px;
++  font-weight: 600;
++  letter-spacing:.11em;
+   text-transform: uppercase;
++  backdrop-filter: blur(8px);
++  -webkit-backdrop-filter: blur(8px);
+ }
++
+ .price{
+   font-size: 13px;
+-  color: rgba(244,242,237,.86);
+-  letter-spacing:.02em;
+-  padding: 7px 10px;
++  font-weight: 650;
++  color: rgba(244,242,237,.96);
++  letter-spacing:.01em;
++  padding: 7px 12px;
+   border-radius: 999px;
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(0,0,0,.20);
+-  backdrop-filter: blur(10px);
+-  -webkit-backdrop-filter: blur(10px);
++  border: 1px solid rgba(255,255,255,.09);
++  background: rgba(0,0,0,.22);
++  backdrop-filter: blur(12px);
++  -webkit-backdrop-filter: blur(12px);
++  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+ }
+ 
+ .card-title{
+   margin:0;
+   font-family: var(--serif);
+   font-weight: 600;
+-  font-size: 22px;
+-  letter-spacing:.01em;
++  font-size: 20px;
++  line-height: 1.08;
++  letter-spacing:.005em;
++  color: var(--ink);
++  display: -webkit-box;
++-webkit-line-clamp: 2;
++-webkit-box-orient: vertical;
++overflow: hidden;
++min-height: 2.2em;
+ }
++
++
+ .card-sub{
+-  margin:0;
+-  color: var(--muted);
+-  line-height: 1.55;
+-  font-size: 13px;
++  margin: 2px 0 0;
++  color: rgba(244,242,237,.56);
++  line-height: 1.5;
++  font-size: 12px;
+ }
+ 
+ .card:before{
+   content:"";
+   position:absolute;
+   inset:0;
+-  background: radial-gradient(620px 280px at 15% 0%, rgba(234,195,90,.10), transparent 60%);
+-  opacity:.55;
++  background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 30%);
++  opacity:.7;
+   pointer-events:none;
+ }
+ 
+ .card:hover{
+-  transform: translateY(-2px);
+-  transition: transform .20s var(--ease2);
+-  border-color: rgba(255,255,255,.16);
+-  box-shadow: 0 22px 70px rgba(0,0,0,.40);
++  transform: translateY(-3px);
++  border-color: rgba(255,255,255,.14);
++  box-shadow: 0 20px 58px rgba(0,0,0,.38);
++}
+ }
++
+ .card:hover .card-media{
+-  filter: saturate(1.08) contrast(1.06);
++  transform: scale(1.01);
++  filter: saturate(1.03) contrast(1.03);
+ }
+ 
+-/* pulse class used by JS shuffle */
+-.cards.pulse{
+-  animation: pulsePop .42s var(--ease2);
++/* Favorite heart — scoped hard to Featured section so it wins */
++#featured .card .fav-toggle{
++  position:absolute !important;
++  top:14px !important;
++  right:14px !important;
++  width:38px !important;
++  height:38px !important;
++  display:grid !important;
++  place-items:center !important;
++  padding:0 !important;
++  border-radius:999px !important;
++  border:1px solid rgba(255,255,255,.10) !important;
++  background: rgba(10,10,12,.26) !important;
++  backdrop-filter: blur(14px) saturate(118%) !important;
++  -webkit-backdrop-filter: blur(14px) saturate(118%) !important;
++  box-shadow:
++    0 8px 18px rgba(0,0,0,.22),
++    inset 0 1px 0 rgba(255,255,255,.04) !important;
++  color: rgba(244,242,237,.50) !important;
++  z-index: 4 !important;
++  cursor: pointer !important;
++  transition:
++    transform .18s var(--ease2),
++    background .18s var(--ease2),
++    border-color .18s var(--ease2),
++    box-shadow .18s var(--ease2),
++    color .18s var(--ease2),
++    opacity .18s var(--ease2) !important;
++  opacity: .92 !important;
++}
++
++#featured .card .fav-toggle:hover{
++  transform: translateY(-1px) scale(1.015) !important;
++  color: rgba(244,242,237,.74) !important;
++  border-color: rgba(255,255,255,.16) !important;
++  background: rgba(14,14,16,.40) !important;
++  box-shadow:
++    0 10px 22px rgba(0,0,0,.24),
++    inset 0 1px 0 rgba(255,255,255,.055) !important;
+ }
+-@keyframes pulsePop{
+-  0%{ transform: translateZ(0) scale(1); }
+-  35%{ transform: translateZ(0) scale(1.01); }
+-  100%{ transform: translateZ(0) scale(1); }
++
++#featured .card .fav-toggle:active{
++  transform: scale(.97) !important;
+ }
+ 
+-/* =========================
+-   8) Story
+-========================= */
+-.section.story{
+-  padding-top: 68px;
++#featured .card .fav-toggle:focus-visible{
++  outline: none !important;
++  box-shadow:
++    0 0 0 3px rgba(234,195,90,.18),
++    0 14px 30px rgba(0,0,0,.30),
++    inset 0 1px 0 rgba(255,255,255,.08) !important;
+ }
+-.story-grid{
+-  display:grid;
+-  grid-template-columns: 1.25fr .9fr;
+-  gap: 16px;
+-  align-items: stretch;
++
++#featured .card .fav-toggle-icon{
++  display:block !important;
++  font-size: 18px !important;
++  line-height: 1 !important;
++  transform: translateY(1px) !important;
++  transition:
++    transform .18s var(--ease2),
++    color .18s var(--ease2),
++    text-shadow .18s var(--ease2) !important;
+ }
+-.story-card{
+-  border-radius: var(--radius2);
+-  border: 1px solid rgba(255,255,255,.10);
++
++#featured .card .fav-toggle[aria-pressed="true"]{
++  color: #eac35a !important;
++  border-color: rgba(234,195,90,.24) !important;
+   background:
+-    radial-gradient(circle at 18% 18%, rgba(234,195,90,.10), transparent 55%),
+-    linear-gradient(180deg, rgba(16,18,22,.55), rgba(16,18,22,.28));
+-  backdrop-filter: blur(18px);
+-  -webkit-backdrop-filter: blur(18px);
+-  box-shadow: var(--shadow2);
+-  padding: 22px 20px;
+-  position:relative;
+-  overflow:hidden;
+-}
+-.story-card:after{
+-  content:"";
+-  position:absolute;
+-  inset:0;
+-  background: radial-gradient(900px 360px at 55% -10%, rgba(120,170,255,.08), transparent 62%);
+-  opacity:.9;
+-  pointer-events:none;
+-}
+-.story-kicker{
+-  font-size: 12px;
+-  letter-spacing:.14em;
+-  text-transform: uppercase;
+-  color: rgba(244,242,237,.72);
+-  display:inline-flex;
+-  gap:10px;
+-  align-items:center;
+-}
+-.story-kicker:before{
+-  content:"";
+-  width: 18px; height:1px;
+-  background: linear-gradient(90deg, rgba(234,195,90,.75), transparent);
+-}
+-.story-title{
+-  margin: 12px 0 0;
+-  font-family: var(--serif);
+-  font-weight: 600;
+-  font-size: clamp(30px, 3.3vw, 44px);
+-  line-height:1.03;
+-}
+-.story-sub{
+-  margin: 12px 0 0;
+-  color: var(--ink2);
+-  line-height: 1.65;
+-  font-size: 14px;
+-  max-width: 68ch;
+-}
+-.story-points{
+-  margin-top: 16px;
+-  display:grid;
+-  gap: 12px;
+-}
+-.point{
+-  display:flex;
+-  gap:12px;
+-  align-items:flex-start;
+-  padding: 12px 12px;
+-  border-radius: 18px;
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(255,255,255,.03);
+-}
+-.point-ic{
+-  width: 34px;
+-  height: 34px;
+-  border-radius: 14px;
+-  display:grid;
+-  place-items:center;
+-  border: 1px solid rgba(234,195,90,.22);
+-  background: rgba(234,195,90,.08);
+-  color: var(--gold1);
+-  box-shadow: var(--goldGlow);
+-}
+-.point-title{
+-  font-weight: 600;
+-  letter-spacing: .01em;
+-}
+-.point-sub{
+-  margin-top: 4px;
+-  color: var(--muted);
+-  font-size: 13px;
+-  line-height:1.5;
+-}
+-.story-ctas{
+-  margin-top: 16px;
+-  display:flex;
+-  gap: 12px;
+-  flex-wrap:wrap;
++    radial-gradient(circle at 30% 30%, rgba(234,195,90,.10), rgba(18,18,20,.56) 72%) !important;
++  box-shadow:
++    0 10px 24px rgba(0,0,0,.24),
++    0 0 14px rgba(234,195,90,.08),
++    inset 0 1px 0 rgba(255,255,255,.05) !important;
+ }
+ 
+-.story-visual{
+-  border-radius: var(--radius2);
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(255,255,255,.03);
+-  box-shadow: 0 18px 65px rgba(0,0,0,.35);
+-  overflow:hidden;
+-  position:relative;
+-  min-height: 420px;
+-}
+-.story-img{
+-  position:absolute;
+-  inset:0;
+-  background-image: var(--img);
+-  background-size: cover;
+-  background-position: center;
+-  filter: saturate(1.03) contrast(1.03);
+-  transform: translateZ(0);
++#featured .card .fav-toggle[aria-pressed="true"] .fav-toggle-icon{
++  text-shadow: 0 0 10px rgba(234,195,90,.12) !important;
+ }
+-.story-img:after{
+-  content:"";
+-  position:absolute;
+-  inset:0;
+-  background:
+-    radial-gradient(900px 360px at 30% 18%, rgba(234,195,90,.12), transparent 62%),
+-    linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.74));
++
++.cards.pulse{
++  animation: pulsePop .42s var(--ease2);
+ }
+-.story-glass{
+-  position:absolute;
+-  inset:auto 14px 14px 14px;
+-  height: 110px;
+-  border-radius: 22px;
+-  border: 1px solid rgba(255,255,255,.10);
+-  background: rgba(16,18,22,.35);
+-  backdrop-filter: blur(14px);
+-  -webkit-backdrop-filter: blur(14px);
+-  box-shadow: 0 18px 60px rgba(0,0,0,.35);
++
++@keyframes pulsePop{
++  0%{ transform: translateZ(0) scale(1); }
++  35%{ transform: translateZ(0) scale(1.01); }
++  100%{ transform: translateZ(0) scale(1); }
+ }
+ 
++
++
+ /* =========================
+    9) Footer
+ ========================= */
+@@ -1826,6 +2143,32 @@ html.lock, body.lock{
+   }
+ }
+ 
++@media (max-width: 980px){
++  .hero{
++    min-height: auto;
++    padding: 44px 0 40px;
++  }
++
++  .hero-inner{
++    grid-template-columns: 1fr;
++    align-items: stretch;
++  }
++
++.hero-video{
++  object-position: 50% center;
++}
++}
++
++@media (max-width: 640px){
++  .hero{
++    padding: 32px 0 32px;
++  }
++
++  .hero-video{
++    filter: saturate(1.01) contrast(1.03) brightness(0.5);
++  }
++}
++
+ /* =========================
+    15) Reduced motion
+ ========================= */
+@@ -2145,3 +2488,61 @@ html.lock, body.lock{
+   border: 1px solid rgba(255,215,120,.45);
+   box-shadow: 0 10px 24px rgba(0,0,0,.35);
+ }
++/* ===============================
++   TRUST STRIP
++================================ */
++
++.trust-strip{
++  padding: 28px 0;
++  border-top: 1px solid rgba(255,255,255,0.06);
++  border-bottom: 1px solid rgba(255,255,255,0.06);
++  background: rgba(0,0,0,0.35);
++}
++
++.trust-inner{
++  display:flex;
++  align-items:center;
++  justify-content:center;
++  gap:40px;
++  flex-wrap:wrap;
++}
++
++.trust-item{
++  display:flex;
++  flex-direction:column;
++  align-items:center;
++  text-align:center;
++}
++
++.trust-number{
++  font-size:22px;
++  font-weight:600;
++  color:#EAC35A;
++  letter-spacing:.04em;
++}
++
++.trust-label{
++  font-size:12px;
++  color:rgba(255,255,255,0.7);
++  margin-top:4px;
++}
++
++.trust-divider{
++  width:1px;
++  height:28px;
++  background:rgba(255,255,255,0.12);
++}
++
++/* mobile */
++
++@media (max-width:640px){
++
++  .trust-inner{
++    gap:20px;
++  }
++
++  .trust-divider{
++    display:none;
++  }
++
++}
+\ No newline at end of file
+diff --git a/StoreWebsite/index.html b/StoreWebsite/index.html
+index 912c811..0464ed3 100644
+--- a/StoreWebsite/index.html
++++ b/StoreWebsite/index.html
+@@ -35,12 +35,7 @@
+     <div class="vignette"></div>
+   </div>
+ 
+-  <!-- Top notice (optional; JS can hide) -->
+-  <div class="top-notice" role="status" aria-live="polite" data-ui="top-notice">
+-    <span class="pill">Live</span>
+-    <span class="txt">New drops weekly • Premium pieces • Fast shipping</span>
+-    <button class="notice-x" type="button" aria-label="Dismiss notice" data-action="dismiss-notice">×</button>
+-  </div>
++ 
+ 
+   <!-- Header -->
+ <!-- Shared Header Mount -->
+@@ -50,292 +45,212 @@
+   <main class="main">
+     <!-- HERO (cinematic, with editor slots) -->
+     <section class="hero" aria-label="Hero">
+-      <div class="hero-media" aria-hidden="true">
+-        <!-- Optional: use video later. For now, we keep it image-based and let JS inject. -->
+-        <div class="hero-img" data-slot="hero.image" style="--img:url('assets/hero/hero.jpg');"></div>
+-        <div class="hero-glow"></div>
+-      </div>
++     <div class="hero-media" aria-hidden="true">
++  <video
++    class="hero-video"
++    autoplay
++    muted
++    loop
++    playsinline
++    preload="auto"
++    poster="assets/hero/hero-poster.jpg"
++  >
++    <source src="OG-Placeholder.mp4" type="video/mp4" />
++  </video>
++
++  <div class="hero-video-overlay"></div>
++  <div class="hero-glow"></div>
++</div>
+ 
+-      <div class="hero-inner">
+-        <div class="hero-card">
+-          <div class="hero-kicker" data-slot="hero.kicker">Signature Pieces</div>
+-          <h1 class="hero-title" data-slot="hero.title">Luxury that lands instantly.</h1>
+-          <p class="hero-sub" data-slot="hero.subtitle">
+-            Curated gold, diamonds, and statement chains — built to shine on camera and in real life.
+-          </p>
++   
+ 
+-          <div class="hero-ctas">
+-            <a class="btn btn-primary" href="catalogue.html" data-slot="hero.primary_link">
+-              Shop the Drop <span aria-hidden="true">→</span>
+-            </a>
+-            <button class="btn btn-ghost" type="button" data-action="open-quickview" data-slot="hero.secondary_action">
+-              View Featured
+-            </button>
+-          </div>
++         
+ 
+-          <div class="hero-metrics" aria-label="Highlights">
+-            <div class="metric">
+-              <div class="metric-top">
+-                <span class="metric-dot" aria-hidden="true"></span>
+-                <span class="metric-label" data-slot="hero.metric1.label">Ready to ship</span>
+-              </div>
+-              <div class="metric-val" data-slot="hero.metric1.value">Fast fulfillment</div>
+-            </div>
+-            <div class="metric">
+-              <div class="metric-top">
+-                <span class="metric-dot" aria-hidden="true"></span>
+-                <span class="metric-label" data-slot="hero.metric2.label">Authenticity</span>
+-              </div>
+-              <div class="metric-val" data-slot="hero.metric2.value">Trusted sourcing</div>
+-            </div>
+-            <div class="metric">
+-              <div class="metric-top">
+-                <span class="metric-dot" aria-hidden="true"></span>
+-                <span class="metric-label" data-slot="hero.metric3.label">Curated drops</span>
+-              </div>
+-              <div class="metric-val" data-slot="hero.metric3.value">Weekly updates</div>
+-            </div>
+-          </div>
+-        </div>
+-
+-        <!-- Hero side panel (editorial) -->
+-        <aside class="hero-side" aria-label="Spotlight">
+-          <div class="spotlight" data-slot="hero.spotlight">
+-            <div class="spotlight-img" data-slot="hero.spotlight.image" style="--img:url('assets/hero/spotlight.jpg');"></div>
+-            <div class="spotlight-body">
+-              <div class="spotlight-tag" data-slot="hero.spotlight.tag">Spotlight</div>
+-              <div class="spotlight-title" data-slot="hero.spotlight.title">The Gold Edit</div>
+-              <div class="spotlight-sub" data-slot="hero.spotlight.subtitle">Polished. Bold. Timeless.</div>
+-              <a class="spotlight-link" href="catalogue.html" data-slot="hero.spotlight.link">Explore →</a>
+-            </div>
+-          </div>
+-        </aside>
+-      </div>
++    <div class="hero-floating-cta">
++  <a class="btn hero-shop-btn" href="catalogue.html">Explore the Collection</a>
++</div>
+ 
+-      <div class="scroll-hint" aria-hidden="true">
+-        <span class="scroll-line"></span>
+-        <span class="scroll-text">Scroll</span>
+-      </div>
++    
+     </section>
+ 
+-    <!-- COLLECTIONS (editorial covers) -->
+-    <section class="section" id="collections" aria-label="Signature Collections">
+-      <div class="section-head">
+-        <div>
+-          <h2 class="section-title" data-slot="collections.title">Signature Collections</h2>
+-          <p class="section-sub" data-slot="collections.subtitle">Editorial curations — designed to feel like a cover.</p>
+-        </div>
++    <!-- The Trust section under the hero video-->
++    <section class="trust-strip">
++  <div class="container trust-inner">
+ 
+-        <div class="section-actions">
+-          <button class="chip" type="button" data-action="toggle-mood" aria-pressed="false">
+-            <span class="chip-dot" aria-hidden="true"></span>
+-            Mood: Noir
+-          </button>
+-          <a class="text-link" href="catalogue.html">Browse all →</a>
+-        </div>
+-      </div>
++    <div class="trust-item">
++      <span class="trust-number">120,000+</span>
++      <span class="trust-label">Items Sold</span>
++    </div>
+ 
+-      <div class="tiles" role="list">
+-        <!-- NOTE: data-collection is used by JS to route clicks or load curated sets -->
+-        <article class="tile" role="listitem" data-collection="gold" data-slot="collections.gold" style="--img:url('assets/collections/gold.jpg');">
+-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Gold">
+-            <div class="tile-overlay"></div>
+-            <div class="tile-body">
+-              <div class="tile-top">
+-                <span class="tile-badge" data-slot="collections.gold.badge">Signature</span>
+-                <span class="tile-mini" data-slot="collections.gold.mini">Polished Classics</span>
+-              </div>
+-              <h3 class="tile-title" data-slot="collections.gold.title">Gold</h3>
+-              <p class="tile-sub" data-slot="collections.gold.subtitle">Warm glow, bold presence.</p>
+-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+-            </div>
+-            <div class="tile-shine" aria-hidden="true"></div>
+-          </a>
+-        </article>
+-
+-        <article class="tile" role="listitem" data-collection="diamonds" data-slot="collections.diamonds" style="--img:url('assets/collections/diamonds.jpg');">
+-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Diamonds">
+-            <div class="tile-overlay"></div>
+-            <div class="tile-body">
+-              <div class="tile-top">
+-                <span class="tile-badge" data-slot="collections.diamonds.badge">Best Sellers</span>
+-                <span class="tile-mini" data-slot="collections.diamonds.mini">High Sparkle</span>
+-              </div>
+-              <h3 class="tile-title" data-slot="collections.diamonds.title">Diamonds</h3>
+-              <p class="tile-sub" data-slot="collections.diamonds.subtitle">Light-catching details.</p>
+-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+-            </div>
+-            <div class="tile-shine" aria-hidden="true"></div>
+-          </a>
+-        </article>
+-
+-        <article class="tile" role="listitem" data-collection="chains" data-slot="collections.chains" style="--img:url('assets/collections/chains.jpg');">
+-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Chains">
+-            <div class="tile-overlay"></div>
+-            <div class="tile-body">
+-              <div class="tile-top">
+-                <span class="tile-badge" data-slot="collections.chains.badge">New</span>
+-                <span class="tile-mini" data-slot="collections.chains.mini">Statement Links</span>
+-              </div>
+-              <h3 class="tile-title" data-slot="collections.chains.title">Chains</h3>
+-              <p class="tile-sub" data-slot="collections.chains.subtitle">Heavy energy, clean lines.</p>
+-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+-            </div>
+-            <div class="tile-shine" aria-hidden="true"></div>
+-          </a>
+-        </article>
+-
+-        <article class="tile tile-wide" role="listitem" data-collection="signature" data-slot="collections.signature" style="--img:url('assets/collections/signature.jpg');">
+-          <a class="tile-hit" href="catalogue.html" aria-label="Explore Signature">
+-            <div class="tile-overlay"></div>
+-            <div class="tile-body">
+-              <div class="tile-top">
+-                <span class="tile-badge" data-slot="collections.signature.badge">Editor’s Pick</span>
+-                <span class="tile-mini" data-slot="collections.signature.mini">Limited Curations</span>
+-              </div>
+-              <h3 class="tile-title" data-slot="collections.signature.title">Signature</h3>
+-              <p class="tile-sub" data-slot="collections.signature.subtitle">The OG pieces that define the brand.</p>
+-              <div class="tile-cta">Discover <span aria-hidden="true">→</span></div>
+-            </div>
+-            <div class="tile-shine" aria-hidden="true"></div>
+-          </a>
+-        </article>
+-      </div>
+-    </section>
++    <div class="trust-divider"></div>
+ 
+-    <!-- FEATURED (dynamic-ready grid) -->
+-    <section class="section" id="featured" aria-label="Featured Pieces">
+-      <div class="section-head">
+-        <div>
+-          <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
+-          <p class="section-sub" data-slot="featured.subtitle">Handpicked shine — tap to quick view.</p>
+-        </div>
++    <div class="trust-item">
++      <span class="trust-number">25,000+</span>
++      <span class="trust-label">Positive Reviews</span>
++    </div>
+ 
+-        <div class="section-actions">
+-          <button class="chip" type="button" data-action="shuffle-featured">
+-            Shuffle
+-          </button>
+-          <a class="text-link" href="catalogue.html">Shop featured →</a>
+-        </div>
+-      </div>
++    <div class="trust-divider"></div>
+ 
+-      <!-- JS will optionally replace these with live featured picks -->
+-      <div class="cards" data-ui="featured-grid">
+-        <article class="card" data-slot="featured.1" data-item-id="">
+-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
+-            <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
+-            <div class="card-body">
+-              <div class="card-top">
+-                <span class="badge" data-slot="featured.1.badge">New</span>
+-                <span class="price" data-slot="featured.1.price">$2,999</span>
+-              </div>
+-              <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
+-              <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
+-            </div>
+-          </button>
+-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
+-        </article>
+-
+-        <article class="card" data-slot="featured.2" data-item-id="">
+-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
+-            <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
+-            <div class="card-body">
+-              <div class="card-top">
+-                <span class="badge" data-slot="featured.2.badge">Best Value</span>
+-                <span class="price" data-slot="featured.2.price">$1,799</span>
+-              </div>
+-              <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
+-              <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
+-            </div>
+-          </button>
+-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
+-        </article>
+-
+-        <article class="card" data-slot="featured.3" data-item-id="">
+-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
+-            <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
+-            <div class="card-body">
+-              <div class="card-top">
+-                <span class="badge" data-slot="featured.3.badge">Limited</span>
+-                <span class="price" data-slot="featured.3.price">$9,499</span>
+-              </div>
+-              <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
+-              <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
+-            </div>
+-          </button>
+-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
+-        </article>
+-
+-        <article class="card" data-slot="featured.4" data-item-id="">
+-          <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
+-            <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
+-            <div class="card-body">
+-              <div class="card-top">
+-                <span class="badge" data-slot="featured.4.badge">OG Pick</span>
+-                <span class="price" data-slot="featured.4.price">$4,599</span>
+-              </div>
+-              <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
+-              <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
+-            </div>
+-          </button>
+-          <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false">⭐</button>
+-        </article>
+-      </div>
+-    </section>
++    <div class="trust-item">
++      <span class="trust-number">99%</span>
++      <span class="trust-label">Positive Feedback</span>
++    </div>
+ 
+-    <!-- STORY (editorial) -->
+-    <section class="section story" id="story" aria-label="Our Story">
+-      <div class="story-grid">
+-        <div class="story-card">
+-          <div class="story-kicker" data-slot="story.kicker">Our Story</div>
+-          <h2 class="story-title" data-slot="story.title">Curated like art. Worn like power.</h2>
+-          <p class="story-sub" data-slot="story.subtitle">
+-            OG Jewelers is built around real curation: clean designs, premium materials, and pieces that stand out
+-            in person and on camera — without the noise.
+-          </p>
++  </div>
++</section>
++<!-- EBAY LIVE -->
++<section class="section ebay-live-section" id="ebay-live" aria-label="Upcoming eBay Live auctions">
++  <div class="section-head ebay-live-head">
++    <div>
++      <p class="section-kicker">OG Jewelers × eBay Live</p>
++      <h2 class="section-title">Upcoming Live Auctions</h2>
++      <p class="section-sub">
++        Save upcoming shows and join OG Jewelers live on eBay for exclusive deals,
++        first-access pieces, and real-time bidding.
++      </p>
++    </div>
+ 
+-          <div class="story-points" aria-label="Brand pillars">
+-            <div class="point">
+-              <div class="point-ic" aria-hidden="true">✦</div>
+-              <div>
+-                <div class="point-title" data-slot="story.point1.title">Premium sourcing</div>
+-                <div class="point-sub" data-slot="story.point1.subtitle">Only pieces we’d wear ourselves.</div>
+-              </div>
+-            </div>
+-            <div class="point">
+-              <div class="point-ic" aria-hidden="true">✦</div>
+-              <div>
+-                <div class="point-title" data-slot="story.point2.title">Luxury presentation</div>
+-                <div class="point-sub" data-slot="story.point2.subtitle">Designed for an elevated experience.</div>
+-              </div>
+-            </div>
+-            <div class="point">
+-              <div class="point-ic" aria-hidden="true">✦</div>
+-              <div>
+-                <div class="point-title" data-slot="story.point3.title">Drops & exclusives</div>
+-                <div class="point-sub" data-slot="story.point3.subtitle">Limited runs, curated weekly.</div>
+-              </div>
+-            </div>
+-          </div>
++    <div class="section-actions">
++      <a
++        class="text-link"
++        href="https://www.ebay.com/ebaylive/events"
++        target="_blank"
++        rel="noopener noreferrer"
++      >
++        View all on eBay →
++      </a>
++    </div>
++  </div>
++
++ <div id="ebay-live-grid" class="ebay-live-grid" aria-live="polite" aria-label="Upcoming eBay Live events"></div>
++  
++    <!-- JS injects event cards here -->
++
++</section>
+ 
+-          <div class="story-ctas">
+-            <a class="btn btn-primary" href="catalogue.html">Shop now <span aria-hidden="true">→</span></a>
+-            <a class="btn btn-ghost" href="#collections">Explore collections</a>
+-            <a class="btn btn-ghost" href="./contact.html">Our story</a>
+-          </div>
+-        </div>
+ 
+-<div class="story-visual" aria-label="Story visual">
+-  <div class="story-img" data-slot="story.image" style="--img:url('assets/story/story.jpg');"></div>
+ 
+-  <!-- Quote panel (editable slot) -->
+-  <div class="story-glass">
+-    <div class="story-quote" data-slot="story.quote">Worn like power.</div>
++</section>
++   <!-- FEATURED (dynamic-ready grid) -->
++<section class="section featured-section" id="featured" aria-label="Featured Pieces">
++  <div class="section-head">
++    <div>
++      <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
++      <p class="section-sub" data-slot="featured.subtitle">Curated standouts — save favorites or tap for quick view.</p>
++    </div>
++
++    <div class="section-actions">
++      <button class="chip" type="button" data-action="shuffle-featured">
++        Shuffle
++      </button>
++      <a class="text-link" href="catalogue.html">Shop featured →</a>
++    </div>
+   </div>
+-</div>
+ 
+-      </div>
+-    </section>
++  <!-- JS will optionally replace these with live featured picks -->
++  <div class="cards" data-ui="featured-grid">
++    <article class="card" data-slot="featured.1" data-item-id="">
++      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
++        <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
++        <div class="card-body">
++          <div class="card-top">
++            <span class="badge" data-slot="featured.1.badge">New</span>
++            <span class="price" data-slot="featured.1.price">$2,999</span>
++          </div>
++          <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
++          <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
++        </div>
++      </button>
++
++      <button
++        class="fav-toggle"
++        type="button"
++        data-action="toggle-fav"
++        aria-pressed="false"
++        aria-label="Add Diamond Ring to favorites"
++        title="Add to favorites"
++      >
++        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
++      </button>
++    </article>
++
++    <article class="card" data-slot="featured.2" data-item-id="">
++      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
++        <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
++        <div class="card-body">
++          <div class="card-top">
++            <span class="badge" data-slot="featured.2.badge">Best Value</span>
++            <span class="price" data-slot="featured.2.price">$1,799</span>
++          </div>
++          <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
++          <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
++        </div>
++      </button>
++
++      <button
++        class="fav-toggle"
++        type="button"
++        data-action="toggle-fav"
++        aria-pressed="false"
++        aria-label="Add Gold Chain to favorites"
++        title="Add to favorites"
++      >
++        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
++      </button>
++    </article>
++
++    <article class="card" data-slot="featured.3" data-item-id="">
++      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
++        <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
++        <div class="card-body">
++          <div class="card-top">
++            <span class="badge" data-slot="featured.3.badge">Limited</span>
++            <span class="price" data-slot="featured.3.price">$9,499</span>
++          </div>
++          <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
++          <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
++        </div>
++      </button>
++
++      <button
++        class="fav-toggle"
++        type="button"
++        data-action="toggle-fav"
++        aria-pressed="false"
++        aria-label="Add Luxury Watch to favorites"
++        title="Add to favorites"
++      >
++        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
++      </button>
++    </article>
++
++    <article class="card" data-slot="featured.4" data-item-id="">
++      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
++        <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
++        <div class="card-body">
++          <div class="card-top">
++            <span class="badge" data-slot="featured.4.badge">OG Pick</span>
++            <span class="price" data-slot="featured.4.price">$4,599</span>
++          </div>
++          <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
++          <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
++        </div>
++      </button>
++
++      <button
++        class="fav-toggle"
++        type="button"
++        data-action="toggle-fav"
++        aria-pressed="false"
++        aria-label="Add Diamond Necklace to favorites"
++        title="Add to favorites"
++      >
++        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
++      </button>
++    </article>
++  </div>
++</section>
++   
+ 
+     <!-- Footer -->
+     <footer class="site-footer" id="contact">
+diff --git a/StoreWebsite/index.js b/StoreWebsite/index.js
+index ca4ed4f..47da635 100644
+--- a/StoreWebsite/index.js
++++ b/StoreWebsite/index.js
+@@ -51,7 +51,7 @@ function toast(msg, ms = 1600) {
+ const ui = {
+   year: $('[data-ui="year"]'),
+ 
+-  notice: $('[data-ui="top-notice"]'),
++
+ 
+   drawer: $('[data-ui="drawer"]'),
+   drawerBackdrop: $('[data-ui="drawer-backdrop"]'),
+@@ -83,8 +83,7 @@ const state = {
+   mood: "noir", // noir | warm
+   moodKey: "og_mood_v1",
+ 
+-  noticeDismissedKey: "og_notice_dismissed_v1",
+-
++ 
+   featured: [
+     {
+       slot: "featured.1",
+@@ -124,6 +123,73 @@ const state = {
+     },
+   ],
+ };
++/* =========================
++   Featured favorites UI sync
++========================= */
++function getFavoriteButtonName(btn) {
++  const card = btn?.closest(".card");
++  const title =
++    card?.querySelector(".card-title")?.textContent?.trim() ||
++    card?.getAttribute("data-slot") ||
++    "item";
++  return title;
++}
++
++function syncFavoriteButtonUI(btn) {
++  if (!btn) return;
++
++  const pressed = btn.getAttribute("aria-pressed") === "true";
++  const icon = btn.querySelector(".fav-toggle-icon");
++  const itemName = getFavoriteButtonName(btn);
++
++  if (icon) {
++    icon.textContent = pressed ? "♥" : "♡";
++  } else {
++    btn.textContent = pressed ? "♥" : "♡";
++  }
++
++  btn.setAttribute(
++    "aria-label",
++    pressed
++      ? `Remove ${itemName} from favorites`
++      : `Add ${itemName} to favorites`
++  );
++
++  btn.setAttribute(
++    "title",
++    pressed ? "Remove from favorites" : "Add to favorites"
++  );
++}
++
++function syncAllFavoriteButtons(root = document) {
++  $$('[data-action="toggle-fav"]', root).forEach(syncFavoriteButtonUI);
++}
++
++function initFavoriteButtonsUI() {
++  syncAllFavoriteButtons();
++
++  const favButtons = $$('[data-action="toggle-fav"]');
++
++  favButtons.forEach((btn) => {
++    const observer = new MutationObserver(() => {
++      syncFavoriteButtonUI(btn);
++    });
++
++    observer.observe(btn, {
++      attributes: true,
++      attributeFilter: ["aria-pressed", "class"]
++    });
++  });
++
++  document.addEventListener("click", (e) => {
++    const btn = e.target.closest('[data-action="toggle-fav"]');
++    if (!btn) return;
++
++    requestAnimationFrame(() => {
++      syncFavoriteButtonUI(btn);
++    });
++  });
++}
+ 
+ /* =========================
+    Search Backdrop (created in JS)
+@@ -1076,12 +1142,263 @@ ui.search?.addEventListener("click", (e) => {
+   await loadPublishedStorefrontContent();
+ 
+   hydrateFeaturedQuickviewModel();
+-
++initFavoriteButtonsUI();
+   initAccountChip();
+ 
+   initAccountDropdown();
+ 
++}
++/* =========================
++   eBay Live homepage section
++   Dynamic source: Supabase Edge Function
++   - Filters past events
++   - Auto sorts upcoming events
++   - Shows LIVE NOW badge
++   - Limits homepage to 4 cards
++========================= */
+ 
+-  // Notice persistence
+-  hydrateNoticeDismissed();
++const EBAY_LIVE_FN_URL =
++  "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
++const EBAY_LIVE_DEBUG =
++  location.hostname === "localhost" ||
++  location.hostname === "127.0.0.1" ||
++  location.hostname.endsWith(".local");
++function ebayEsc(value) {
++  return String(value ?? "")
++    .replaceAll("&", "&amp;")
++    .replaceAll("<", "&lt;")
++    .replaceAll(">", "&gt;")
++    .replaceAll('"', "&quot;")
++    .replaceAll("'", "&#039;");
+ }
++
++function parseSortableEbayDate(eventOrLabel) {
++  if (eventOrLabel && typeof eventOrLabel === "object") {
++    if (eventOrLabel.startsAtIso) {
++      const isoDate = new Date(eventOrLabel.startsAtIso);
++      if (!Number.isNaN(isoDate.getTime())) return isoDate;
++    }
++
++    eventOrLabel = eventOrLabel.dateLabel || "";
++  }
++
++  const raw = String(eventOrLabel || "").trim();
++  if (!raw) return null;
++
++  const match = raw.match(
++    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i
++  );
++  if (!match) return null;
++
++  const [, monRaw, dayStr, hourStr, minStr, ampm] = match;
++
++  const monthMap = {
++    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
++    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
++  };
++
++  const month = monthMap[monRaw.toLowerCase()];
++  if (month == null) return null;
++
++  let hour = Number(hourStr);
++  const minute = Number(minStr);
++  const day = Number(dayStr);
++
++  if (ampm.toUpperCase() === "PM" && hour !== 12) hour += 12;
++  if (ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
++
++  const now = new Date();
++  let year = now.getFullYear();
++
++  let dt = new Date(year, month, day, hour, minute, 0, 0);
++
++  const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
++  if (now.getTime() - dt.getTime() > SIXTY_DAYS_MS) {
++    year += 1;
++    dt = new Date(year, month, day, hour, minute, 0, 0);
++  }
++
++  return Number.isNaN(dt.getTime()) ? null : dt;
++}
++
++function isEventLiveNow(event) {
++  const eventDate = parseSortableEbayDate(event);
++  if (!eventDate) return false;
++
++  const now = new Date();
++  const start = eventDate.getTime();
++  const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
++  const diff = now.getTime() - start;
++
++  return diff >= 0 && diff <= LIVE_WINDOW_MS;
++}
++
++function formatDisplayDate(event) {
++  const parsed = parseSortableEbayDate(event);
++  if (!parsed) return String(event?.dateLabel || "");
++
++  return new Intl.DateTimeFormat(undefined, {
++    month: "short",
++    day: "numeric",
++    hour: "numeric",
++    minute: "2-digit"
++  }).format(parsed);
++}
++
++function debugEbayLiveEvents(events) {
++  if (!EBAY_LIVE_DEBUG) return;
++
++  const rows = (Array.isArray(events) ? events : []).map((event) => {
++    const parsed = parseSortableEbayDate(event);
++
++    return {
++      title: event?.title || "",
++      status: event?.status || "",
++      sourceDateLabel: event?.dateLabel || "",
++      startsAtIso: event?.startsAtIso || "",
++      sourceTimezone: event?.timezone || "",
++      viewerTimeZone:
++        Intl.DateTimeFormat().resolvedOptions().timeZone || "",
++      localDisplay: parsed
++        ? new Intl.DateTimeFormat(undefined, {
++            month: "short",
++            day: "numeric",
++            hour: "numeric",
++            minute: "2-digit",
++            timeZoneName: "short"
++          }).format(parsed)
++        : "(unparsed)",
++      epochMs: parsed ? parsed.getTime() : null,
++      isLiveNow: event?.status === "live" || isEventLiveNow(event),
++    };
++  });
++
++  console.groupCollapsed("[eBay Live] Event time debug");
++  console.table(rows);
++  console.groupEnd();
++}
++
++function filterAndSortUpcomingEvents(events) {
++  const now = new Date();
++
++  const mapped = (Array.isArray(events) ? events : []).map((event) => {
++    const parsedDate = parseSortableEbayDate(event);
++    const liveNow = event?.status === "live" || isEventLiveNow(event);
++
++    return {
++      ...event,
++      __parsedDate: parsedDate,
++      __isLiveNow: liveNow,
++    };
++  });
++
++  const filtered = mapped.filter((event) => {
++    if (event.__isLiveNow) return true;
++    if (!event.__parsedDate) return false;
++    return event.__parsedDate.getTime() >= now.getTime();
++  });
++
++  filtered.sort((a, b) => {
++    if (a.__isLiveNow && !b.__isLiveNow) return -1;
++    if (!a.__isLiveNow && b.__isLiveNow) return 1;
++
++    const aTime = a.__parsedDate ? a.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
++    const bTime = b.__parsedDate ? b.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
++
++    return aTime - bTime;
++  });
++
++  return filtered;
++}
++
++function renderEbayLiveEvents(events) {
++  const grid = document.getElementById("ebay-live-grid");
++  if (!grid) return;
++
++  const list = filterAndSortUpcomingEvents(events).slice(0, 4);
++
++  if (!list.length) {
++    grid.innerHTML = `
++      <div class="ebay-live-empty">
++        No upcoming live shows are scheduled right now.
++      </div>
++    `;
++    return;
++  }
++
++  grid.innerHTML = list.map((event) => {
++    const title = ebayEsc(event.title || "Upcoming eBay Live");
++    const seller = ebayEsc(event.seller || "ogjewelers");
++    const dateLabel = ebayEsc(formatDisplayDate(event));
++    const image = ebayEsc(event.image || "OG-Jewelers.webp");
++    const url = ebayEsc(event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs");
++    const liveBadge = (event.status === "live" || event.__isLiveNow)
++      ? `<span class="ebay-live-now-badge">LIVE NOW</span>`
++      : "";
++
++    return `
++      <a
++        class="ebay-live-card"
++        href="${url}"
++        target="_blank"
++        rel="noopener noreferrer"
++        aria-label="Open eBay Live event: ${title}"
++      >
++        <div class="ebay-live-thumb">
++          <img src="${image}" alt="${title}" loading="lazy" />
++          <span class="ebay-live-date">${dateLabel}</span>
++          ${liveBadge}
++        </div>
++
++        <div class="ebay-live-body">
++          <div class="ebay-live-seller">${seller}</div>
++          <h3 class="ebay-live-title">${title}</h3>
++          <div class="ebay-live-link">
++            Save on eBay <span aria-hidden="true">→</span>
++          </div>
++        </div>
++      </a>
++    `;
++  }).join("");
++}
++
++async function loadEbayLiveEvents() {
++  const grid = document.getElementById("ebay-live-grid");
++  if (!grid) return;
++
++  try {
++    grid.innerHTML = `
++      <div class="ebay-live-empty">
++        Loading upcoming eBay Live events…
++      </div>
++    `;
++
++    const res = await fetch(EBAY_LIVE_FN_URL, {
++      method: "GET",
++      cache: "no-store",
++    });
++
++    if (!res.ok) {
++      throw new Error(`ebay_live_fetch_failed (${res.status})`);
++    }
++
++   const data = await res.json();
++const items = Array.isArray(data?.items) ? data.items : [];
++
++debugEbayLiveEvents(items);
++renderEbayLiveEvents(items);
++
++  } catch (err) {
++    console.error("Failed to load eBay Live events:", err);
++
++    grid.innerHTML = `
++      <div class="ebay-live-empty">
++        We couldn’t load the upcoming live events right now.
++      </div>
++    `;
++  }
++}
++
++document.addEventListener("DOMContentLoaded", () => {
++  loadEbayLiveEvents();
++});
+\ No newline at end of file
+diff --git a/StoreWebsite/og.header.css b/StoreWebsite/og.header.css
+index 8e5cdef..6c2c867 100644
+--- a/StoreWebsite/og.header.css
++++ b/StoreWebsite/og.header.css
+@@ -89,7 +89,15 @@
+   gap: 16px;
+ }
+ 
+-/* Brand */
++/* =========================================================
++   Brand lockup — luxury refinement
++   ========================================================= */
++
++/* =========================================================
++   Brand lockup — refined luxury version
++   Logo leads, wordmark supports
++   ========================================================= */
++
+ .brand{
+   display: inline-flex;
+   align-items: center;
+@@ -97,24 +105,101 @@
+   min-width: 170px;
+   text-decoration: none;
+   color: rgba(244,241,234,.92);
++  padding: 6px 8px;
++  border-radius: 16px;
++  transition:
++    transform var(--dur-fast) var(--ease),
++    background var(--dur-fast) var(--ease);
+ }
++
++.brand:hover{
++  transform: translateY(-1px);
++  background: rgba(255,255,255,.03);
++}
++
+ .brand-mark{
+   width: 38px;
+   height: 38px;
++  flex: 0 0 38px;
++  border-radius: 14px;
++  overflow: hidden;
+   display: grid;
+   place-items: center;
+-  border-radius: 14px;
+-  background: radial-gradient(circle at 30% 30%, rgba(227,200,120,.35), rgba(200,162,74,.18));
+-  border: 1px solid rgba(200,162,74,.25);
+-  box-shadow: 0 10px 30px rgba(0,0,0,.3);
+-  font-weight: 600;
+-  letter-spacing: .06em;
++  background: #080808;
++  border: 1px solid rgba(200,162,74,.24);
++  box-shadow:
++    0 10px 24px rgba(0,0,0,.32),
++    inset 0 1px 0 rgba(255,255,255,.04);
++  position: relative;
+ }
++
++.brand-mark::after{
++  content: "";
++  position: absolute;
++  inset: 0;
++  border-radius: inherit;
++  pointer-events: none;
++  background:
++    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 42%),
++    radial-gradient(circle at 30% 20%, rgba(227,200,120,.10), transparent 58%);
++  opacity: .9;
++}
++
++.brand-logo{
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++  display: block;
++  position: relative;
++  z-index: 1;
++}
++
+ .brand-name{
+   font-family: var(--serif);
+-  font-size: 1.15rem;
+-  letter-spacing: .02em;
+-  opacity: .95;
++  font-size: 1.02rem;
++  font-weight: 500;
++  letter-spacing: .03em;
++  line-height: 1;
++  color: rgba(244,241,234,.90);
++  text-shadow: 0 0 10px rgba(227,200,120,.04);
++  white-space: nowrap;
++  transform: translateY(1px);
++  transition:
++    color var(--dur-fast) var(--ease),
++    opacity var(--dur-fast) var(--ease);
++}
++
++.brand:hover .brand-mark{
++  border-color: rgba(227,200,120,.34);
++  box-shadow:
++    0 14px 30px rgba(0,0,0,.38),
++    0 0 16px rgba(200,162,74,.14),
++    inset 0 1px 0 rgba(255,255,255,.05);
++}
++
++.brand:hover .brand-name{
++  color: rgba(255,248,235,.96);
++}
++
++/* Slightly tighter / more elegant on smaller screens */
++@media (max-width: 640px){
++  .brand{
++    gap: 8px;
++    min-width: auto;
++    padding: 4px 6px;
++  }
++
++  .brand-mark{
++    width: 34px;
++    height: 34px;
++    flex: 0 0 34px;
++    border-radius: 12px;
++  }
++
++  .brand-name{
++    font-size: .94rem;
++    letter-spacing: .025em;
++  }
+ }
+ 
+ /* Desktop nav */
+diff --git a/StoreWebsite/og.header.js b/StoreWebsite/og.header.js
+index 2bec097..d0b0852 100644
+--- a/StoreWebsite/og.header.js
++++ b/StoreWebsite/og.header.js
+@@ -13,7 +13,7 @@
+   // Match item.html intent (path-adjusted for StoreCart)
+   const hrefIndex   = `${base}/index.html`;
+   const hrefShop    = `${base}/catalogue.html`;
+-  const hrefVault   = `${base}/favorites.html`;
++  const hrefFavorites   = `${base}/favorites.html`;
+   const hrefJoin    = `${base}/join.html`;
+   const hrefProfile = `${base}/profile.html`;
+   const hrefCart    = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
+@@ -49,15 +49,26 @@
+           <span class="og-hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
+         </button>
+ 
+-        <a class="brand og-brand" href="${hrefIndex}" aria-label="OG Jewelers Home">
+-          <span class="brand-mark og-brand-mark" aria-hidden="true">OG</span>
+-          <span class="brand-name og-brand-name">OG Jewelers</span>
+-        </a>
++      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
++
++  <span class="brand-mark">
++    <img
++      src="OG-Jewelers.webp"
++      alt="OG Jewelers"
++      class="brand-logo"
++      loading="eager"
++      decoding="async"
++    />
++  </span>
++
++  <span class="brand-name">OG Jewelers</span>
++
++</a>
+ 
+         <nav class="nav og-nav" aria-label="Primary navigation">
+           <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
+-          <a class="nav-link og-nav-link" href="${hrefVault}">Vault</a>
+-          <a class="nav-link og-nav-link" href="${hrefIndex}#story">Story</a>
++          <a class="nav-link og-nav-link" href="${hrefFavorites}">Favorites</a>
++          <a class="nav-link og-nav-link" href="${base}/story.html">Story</a>
+           <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
+         </nav>
+ 
+@@ -103,8 +114,8 @@
+         <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
+ 
+         <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
+-        <a class="nav-drawer-link" href="${hrefVault}">Vault</a>
+-        <a class="nav-drawer-link" href="${hrefIndex}#story">Story</a>
++        <a class="nav-drawer-link" href="${hrefFavorites}">Favorites</a>
++        <a class="nav-drawer-link" href="${base}/story.html">Story</a>
+         <a class="nav-drawer-link" href="${base}/contact.html">Contact</a>
+       </nav>
+     </aside>
+diff --git a/StoreWebsite/story.css b/StoreWebsite/story.css
+new file mode 100644
+index 0000000..7c135ac
+--- /dev/null
++++ b/StoreWebsite/story.css
+@@ -0,0 +1,308 @@
++:root{
++  --bg: #070708;
++  --ivory: #F4F1EA;
++  --stone: #B8B2A6;
++  --gold: #C8A24A;
++  --gold-2: #E3C878;
++  --panel: rgba(18,19,22,0.62);
++  --rim: rgba(255,255,255,0.10);
++  --serif: "Cormorant Garamond", serif;
++  --sans: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
++  --ease: cubic-bezier(.2,8,2,1);
++  --dur: 320ms;
++  --radius-xl: 26px;
++  --radius-lg: 20px;
++  --radius-md: 16px;
++}
++
++*{ box-sizing: border-box; }
++
++html, body{ height: 100%; }
++
++body{
++  margin: 0;
++  background:
++    radial-gradient(circle at 18% 12%, rgba(200,162,74,0.10), transparent 32%),
++    radial-gradient(circle at 82% 78%, rgba(227,200,120,0.08), transparent 28%),
++    var(--bg);
++  color: var(--ivory);
++  font-family: var(--sans);
++  overflow-x: hidden;
++}
++
++a{
++  color: inherit;
++  text-decoration: none;
++}
++
++.story-page-hero{
++  padding: 52px 0 24px;
++}
++
++.story-page-hero-inner{
++  max-width: 860px;
++}
++
++.story-page-kicker{
++  margin: 0 0 10px;
++  font-size: 12px;
++  letter-spacing: .16em;
++  text-transform: uppercase;
++  color: rgba(244,241,234,0.68);
++}
++
++.story-page-title{
++  margin: 0;
++  font-family: var(--serif);
++  font-size: clamp(42px, 7vw, 78px);
++  line-height: .96;
++  letter-spacing: -.02em;
++}
++
++.story-page-subtitle{
++  margin: 18px 0 0;
++  max-width: 720px;
++  color: rgba(244,241,234,0.76);
++  font-size: 1.05rem;
++  line-height: 1.75;
++}
++
++.section{
++  padding: 52px 0;
++}
++
++.story-grid{
++  display: grid;
++  grid-template-columns: 1.06fr .94fr;
++  gap: 24px;
++  align-items: stretch;
++}
++
++.story-card,
++.value-card{
++  border-radius: var(--radius-xl);
++  border: 1px solid rgba(255,255,255,0.08);
++  background: rgba(18,19,22,0.54);
++  box-shadow: 0 18px 70px rgba(0,0,0,0.40);
++  backdrop-filter: blur(12px);
++  -webkit-backdrop-filter: blur(12px);
++}
++
++.story-card{
++  padding: 28px;
++}
++
++.story-kicker{
++  margin-bottom: 10px;
++  font-size: 12px;
++  letter-spacing: .16em;
++  text-transform: uppercase;
++  color: rgba(244,241,234,0.64);
++}
++
++.story-title{
++  margin: 0;
++  font-family: var(--serif);
++  font-size: clamp(34px, 4vw, 52px);
++  line-height: 1;
++  letter-spacing: -.02em;
++}
++
++.story-sub{
++  margin: 16px 0 0;
++  color: rgba(244,241,234,0.74);
++  line-height: 1.8;
++  max-width: 56ch;
++}
++
++.story-points{
++  display: grid;
++  gap: 16px;
++  margin-top: 28px;
++}
++
++.point{
++  display: flex;
++  gap: 14px;
++  align-items: flex-start;
++}
++
++.point-ic{
++  width: 34px;
++  height: 34px;
++  flex: 0 0 34px;
++  display: grid;
++  place-items: center;
++  border-radius: 999px;
++  border: 1px solid rgba(200,162,74,0.28);
++  background: rgba(200,162,74,0.10);
++  color: rgba(227,200,120,0.96);
++}
++
++.point-title{
++  font-size: 1rem;
++  font-weight: 600;
++  color: var(--ivory);
++}
++
++.point-sub{
++  margin-top: 4px;
++  color: rgba(244,241,234,0.68);
++  line-height: 1.6;
++}
++
++.story-ctas{
++  display: flex;
++  flex-wrap: wrap;
++  gap: 12px;
++  margin-top: 28px;
++}
++
++.btn{
++  min-height: 46px;
++  padding: 0 18px;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 8px;
++  border-radius: 999px;
++  border: 1px solid transparent;
++  transition:
++    transform .18s var(--ease),
++    border-color .18s var(--ease),
++    background .18s var(--ease),
++    color .18s var(--ease),
++    box-shadow .18s var(--ease);
++}
++
++.btn:hover{
++  transform: translateY(-1px);
++}
++
++.btn-primary{
++  background: linear-gradient(180deg, rgba(227,200,120,0.98), rgba(200,162,74,0.94));
++  color: #111317;
++  box-shadow: 0 14px 34px rgba(200,162,74,0.22);
++}
++
++.btn-ghost{
++  border-color: rgba(255,255,255,0.10);
++  background: rgba(255,255,255,0.03);
++  color: rgba(244,241,234,0.88);
++}
++
++.story-visual{
++  position: relative;
++  min-height: 560px;
++  border-radius: var(--radius-xl);
++  overflow: hidden;
++  border: 1px solid rgba(255,255,255,0.08);
++  background: rgba(255,255,255,0.03);
++  box-shadow: 0 18px 70px rgba(0,0,0,0.40);
++}
++
++.story-img{
++  position: absolute;
++  inset: 0;
++  background-image: var(--img);
++  background-size: cover;
++  background-position: center;
++  transform: scale(1.02);
++}
++
++.story-img::after{
++  content: "";
++  position: absolute;
++  inset: 0;
++  background:
++    radial-gradient(900px 360px at 30% 18%, rgba(234,195,90,0.12), transparent 62%),
++    linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.74));
++}
++
++.story-glass{
++  position: absolute;
++  left: 14px;
++  right: 14px;
++  bottom: 14px;
++  min-height: 110px;
++  display: flex;
++  align-items: center;
++  padding: 18px 20px;
++  border-radius: 22px;
++  border: 1px solid rgba(255,255,255,0.10);
++  background: rgba(16,18,22,0.35);
++  backdrop-filter: blur(14px);
++  -webkit-backdrop-filter: blur(14px);
++  box-shadow: 0 18px 60px rgba(0,0,0,0.35);
++}
++
++.story-quote{
++  font-family: var(--serif);
++  font-size: clamp(26px, 4vw, 40px);
++  line-height: 1.04;
++  color: rgba(255,255,255,0.94);
++}
++
++.values-grid{
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 18px;
++}
++
++.value-card{
++  padding: 24px;
++}
++
++.value-label{
++  margin-bottom: 12px;
++  font-size: 12px;
++  letter-spacing: .16em;
++  text-transform: uppercase;
++  color: rgba(227,200,120,0.92);
++}
++
++.value-card h3{
++  margin: 0 0 10px;
++  font-family: var(--serif);
++  font-size: 2rem;
++  line-height: 1;
++}
++
++.value-card p{
++  margin: 0;
++  color: rgba(244,241,234,0.72);
++  line-height: 1.75;
++}
++
++@media (max-width: 980px){
++  .story-grid{
++    grid-template-columns: 1fr;
++  }
++
++  .story-visual{
++    min-height: 360px;
++  }
++
++  .values-grid{
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 640px){
++  .story-page-hero{
++    padding: 34px 0 14px;
++  }
++
++  .section{
++    padding: 38px 0;
++  }
++
++  .story-card{
++    padding: 22px;
++  }
++
++  .story-glass{
++    min-height: 92px;
++    padding: 14px 16px;
++  }
++}
+\ No newline at end of file
+diff --git a/StoreWebsite/story.html b/StoreWebsite/story.html
+new file mode 100644
+index 0000000..3ad2fa2
+--- /dev/null
++++ b/StoreWebsite/story.html
+@@ -0,0 +1,143 @@
++<!DOCTYPE html>
++<html lang="en">
++<head>
++  <meta charset="utf-8" />
++  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
++  <meta name="theme-color" content="#070708" />
++
++  <title>OG Jewelers — Story</title>
++  <meta
++    name="description"
++    content="Learn the story behind OG Jewelers — curated pieces, premium sourcing, and an elevated luxury experience."
++  />
++
++  <link rel="preconnect" href="https://fonts.googleapis.com" />
++  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
++  <link
++    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
++    rel="stylesheet"
++  />
++
++  <link rel="stylesheet" href="catalogue.css" />
++  <link rel="stylesheet" href="og.header.css" />
++  <link rel="stylesheet" href="story.css" />
++  <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
++  <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
++
++  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
++  <script src="initSupabase.js" defer></script>
++
++  <script src="./StoreCart/cart.shared.js" defer></script>
++
++  <script>
++    (function () {
++      window.OG_CART_DRAWER_CFG = {
++        supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
++        channel: "og_main",
++        fn: "storefront-catalog"
++      };
++    })();
++  </script>
++
++  <script src="./StoreCart/cart.drawer.js" defer></script>
++  <script type="module" src="./StoreCart/cart.service.global.js"></script>
++
++  <script type="module" src="./Favorites/favorites.service.global.js"></script>
++  <script src="./Favorites/favorites.shared.js" defer></script>
++
++  <script src="og.header.js" defer></script>
++</head>
++<body>
++  <div id="ogHeaderMount"></div>
++
++  <main id="main">
++    <section class="story-page-hero" aria-label="Story hero">
++      <div class="container story-page-hero-inner">
++        <p class="story-page-kicker">OG Jewelers • Story</p>
++        <h1 class="story-page-title">Curated like art. Worn like power.</h1>
++        <p class="story-page-subtitle">
++          OG Jewelers is built around real curation: clean designs, premium materials,
++          and pieces that stand out in person and on camera — without the noise.
++        </p>
++      </div>
++    </section>
++
++    <section class="section story-page-main" aria-label="Our Story">
++      <div class="container">
++        <div class="story-grid">
++          <div class="story-card">
++            <div class="story-kicker">Our Story</div>
++            <h2 class="story-title">Luxury without excess.</h2>
++            <p class="story-sub">
++              We focus on selection, not clutter. Every piece is chosen to feel sharp,
++              elevated, and wearable — whether it is part of a daily look or the centerpiece
++              of a statement fit.
++            </p>
++
++            <div class="story-points" aria-label="Brand pillars">
++              <div class="point">
++                <div class="point-ic" aria-hidden="true">✦</div>
++                <div>
++                  <div class="point-title">Premium sourcing</div>
++                  <div class="point-sub">Only pieces we’d wear ourselves.</div>
++                </div>
++              </div>
++
++              <div class="point">
++                <div class="point-ic" aria-hidden="true">✦</div>
++                <div>
++                  <div class="point-title">Luxury presentation</div>
++                  <div class="point-sub">Designed for an elevated experience.</div>
++                </div>
++              </div>
++
++              <div class="point">
++                <div class="point-ic" aria-hidden="true">✦</div>
++                <div>
++                  <div class="point-title">Drops & exclusives</div>
++                  <div class="point-sub">Limited runs, curated weekly.</div>
++                </div>
++              </div>
++            </div>
++
++            <div class="story-ctas">
++              <a class="btn btn-primary" href="catalogue.html">Shop now <span aria-hidden="true">→</span></a>
++              <a class="btn btn-ghost" href="favorites.html">View favorites</a>
++              <a class="btn btn-ghost" href="contact.html">Contact</a>
++            </div>
++          </div>
++
++          <div class="story-visual" aria-label="Story visual">
++            <div class="story-img" style="--img:url('assets/story/story.jpg');"></div>
++            <div class="story-glass">
++              <div class="story-quote">Worn like power.</div>
++            </div>
++          </div>
++        </div>
++      </div>
++    </section>
++
++    <section class="section story-page-values" aria-label="What defines OG Jewelers">
++      <div class="container values-grid">
++        <article class="value-card">
++          <div class="value-label">01</div>
++          <h3>Refined curation</h3>
++          <p>We keep the assortment intentional so every piece feels selected, not mass-listed.</p>
++        </article>
++
++        <article class="value-card">
++          <div class="value-label">02</div>
++          <h3>Presence on and off camera</h3>
++          <p>Jewelry should read beautifully in real life and still carry presence in content, live shows, and photography.</p>
++        </article>
++
++        <article class="value-card">
++          <div class="value-label">03</div>
++          <h3>Luxury feel</h3>
++          <p>From the site to the packaging to the presentation, everything should feel polished and memorable.</p>
++        </article>
++      </div>
++    </section>
++  </main>
++</body>
++</html>
+\ No newline at end of file

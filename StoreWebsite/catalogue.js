@@ -1051,8 +1051,10 @@ const toggleNavDrawer = () => {
         <button class="fav-toggle" type="button"
                 data-action="toggle-fav"
                 data-id="${esc(p.id)}"
-                aria-pressed="false">
-          ⭐
+                aria-pressed="false"
+                aria-label="Add ${esc(p.name)} to favorites"
+                title="Add to favorites">
+          <span class="fav-toggle-icon" aria-hidden="true">♡</span>
         </button>
         <button class="btn ghost" type="button"
                 data-action="add-to-cart"
