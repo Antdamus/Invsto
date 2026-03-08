@@ -1,7 +1,6 @@
 /* =========================================================
-   og.header.css — Shared OG Jewelers header
-   MUST match item page header 100%
-   (Based on catalogue.css header base + item.css Phase 3 polish)
+   og.header.css - Shared OG Jewelers header
+   Refined 3-zone luxury layout
    ========================================================= */
 
 :root{
@@ -25,26 +24,22 @@
   --dur-fast: 160ms;
   --dur: 320ms;
 
-  /* Match catalogue system */
   --header-h: 74px;
   --serif: "Cormorant Garamond", serif;
 }
 
 *{ box-sizing: border-box; }
 
-/* Keep consistent container sizing used on PDP header */
 .container{
   width: min(1180px, 92vw);
   margin: 0 auto;
 }
 
-/* ✅ The header on item page aligns with PDP width */
 .item-container{
   width: min(1560px, 96vw);
   margin: 0 auto;
 }
 
-/* Skip link (same behavior as catalogue.css) */
 .skip-link{
   position: absolute;
   left: 12px;
@@ -62,54 +57,75 @@
   outline: none;
 }
 
-/* =========================================================
-   Header / Nav (match item page)
-   ========================================================= */
+.sr-only{
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .site-header{
   position: sticky;
   top: 0;
   z-index: 50;
   height: var(--header-h);
+  margin-top: 0;
   display: flex;
   align-items: center;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  background: rgba(7,7,8,.35);
+  background: rgba(7,7,8,.44);
   border-bottom: 1px solid rgba(255,255,255,.05);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .site-header.is-elevated{
-  background: rgba(7,7,8,.72);
-  border-bottom-color: rgba(200,162,74,.14);
+  background: rgba(7,7,8,.78);
+  border-bottom-color: rgba(200,162,74,.16);
 }
+
 .header-inner{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.header-zone{
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
 }
 
-/* =========================================================
-   Brand lockup — luxury refinement
-   ========================================================= */
+.header-zone-left{
+  justify-self: start;
+}
 
-/* =========================================================
-   Brand lockup — refined luxury version
-   Logo leads, wordmark supports
-   ========================================================= */
+.header-zone-center{
+  justify-self: center;
+  justify-content: center;
+}
+
+.header-zone-right{
+  justify-self: end;
+  justify-content: flex-end;
+}
 
 .brand{
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-width: 170px;
+  justify-content: center;
   text-decoration: none;
   color: rgba(244,241,234,.92);
-  padding: 6px 8px;
+  padding: 4px;
   border-radius: 16px;
-  transition:
-    transform var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
 .brand:hover{
@@ -118,18 +134,16 @@
 }
 
 .brand-mark{
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
   border-radius: 14px;
   overflow: hidden;
   display: grid;
   place-items: center;
   background: #080808;
   border: 1px solid rgba(200,162,74,.24);
-  box-shadow:
-    0 10px 24px rgba(0,0,0,.32),
-    inset 0 1px 0 rgba(255,255,255,.04);
+  box-shadow: 0 10px 24px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.04);
   position: relative;
 }
 
@@ -154,21 +168,6 @@
   z-index: 1;
 }
 
-.brand-name{
-  font-family: var(--serif);
-  font-size: 1.02rem;
-  font-weight: 500;
-  letter-spacing: .03em;
-  line-height: 1;
-  color: rgba(244,241,234,.90);
-  text-shadow: 0 0 10px rgba(227,200,120,.04);
-  white-space: nowrap;
-  transform: translateY(1px);
-  transition:
-    color var(--dur-fast) var(--ease),
-    opacity var(--dur-fast) var(--ease);
-}
-
 .brand:hover .brand-mark{
   border-color: rgba(227,200,120,.34);
   box-shadow:
@@ -177,89 +176,76 @@
     inset 0 1px 0 rgba(255,255,255,.05);
 }
 
-.brand:hover .brand-name{
-  color: rgba(255,248,235,.96);
-}
-
-/* Slightly tighter / more elegant on smaller screens */
 @media (max-width: 640px){
-  .brand{
-    gap: 8px;
-    min-width: auto;
-    padding: 4px 6px;
-  }
-
   .brand-mark{
-    width: 34px;
-    height: 34px;
-    flex: 0 0 34px;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
     border-radius: 12px;
   }
-
-  .brand-name{
-    font-size: .94rem;
-    letter-spacing: .025em;
-  }
 }
 
-/* Desktop nav */
 .nav{
   display: none;
   align-items: center;
-  gap: 22px;
+  gap: 8px;
 }
 @media (min-width: 901px){
-  .nav{ display: flex; }
-}
-.nav-link{
-  font-size: .95rem;
-  color: rgba(244,241,234,.82);
-  opacity: .92;
-  padding: 10px 8px;
-  border-radius: 12px;
-  text-decoration: none;
-  transition: color var(--dur-fast) var(--ease),
-              background var(--dur-fast) var(--ease),
-              transform var(--dur-fast) var(--ease),
-              border-color var(--dur-fast) var(--ease);
-}
-.nav-link:hover{
-  color: rgba(244,241,234,.96);
-  background: rgba(255,255,255,.04);
-  transform: translateY(-1px);
+  .nav{ display: inline-flex; }
 }
 
-/* Actions row */
+.og-utility-nav{
+  align-items: center;
+  gap: 8px;
+}
+
+.utility-link{
+  width: 40px;
+  height: 40px;
+}
+
+.nav-link.story-link{
+  font-size: .84rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: rgba(244,241,234,.74);
+  text-decoration: none;
+  padding: 0 8px;
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.nav-link.story-link:hover,
+.nav-link.story-link:focus-visible{
+  color: rgba(244,241,234,.94);
+}
+
 .header-actions{
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-/* Shared header spot ticker (restored from legacy catalogue header behavior) */
-.spot-ticker{
-  display: none;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: rgba(18, 19, 22, 0.55);
-  border: 1px solid rgba(200, 162, 74, 0.22);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.35);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  color: var(--ivory);
-  font-size: 13px;
-  line-height: 1;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  user-select: none;
-}
-@media (min-width: 1150px){
-  .spot-ticker{
-    display: inline-flex;
+@media (max-width: 900px){
+  .og-utility-nav{
+    display: none;
+  }
+
+  .og-loginbtn{
+    display: none;
+  }
+
+  .header-actions{
+    gap: 6px;
   }
 }
+
+.spot-ticker,
+.spot-ticker[hidden]{
+  display: none !important;
+}
+
 .spot-dot{
   width: 8px;
   height: 8px;
@@ -268,19 +254,33 @@
   box-shadow: 0 0 0 0 rgba(227, 200, 120, 0.55);
   animation: spotPulse 1.6s ease-in-out infinite;
 }
+
 @keyframes spotPulse{
   0%{ box-shadow: 0 0 0 0 rgba(227, 200, 120, 0.55); }
   70%{ box-shadow: 0 0 0 8px rgba(227, 200, 120, 0); }
   100%{ box-shadow: 0 0 0 0 rgba(227, 200, 120, 0); }
 }
+
 .spot-ticker .spot-text b{
   color: rgba(227, 200, 120, 0.96);
   font-weight: 600;
 }
+
 .spot-ticker .spot-text .muted{
   color: rgba(244, 241, 234, 0.65);
 }
 
+@media (prefers-reduced-motion: reduce){
+  .site-header,
+  .brand,
+  .brand-mark,
+  .icon-btn,
+  .nav-link,
+  .acct-chip,
+  .btn{
+    transition: none !important;
+  }
+}
 /* =========================================================
    Buttons (needed because index may not include catalogue.css)
    Match catalogue.css button system
@@ -326,16 +326,16 @@
    This is what was making item page look different.
    ========================================================= */
 .icon-btn{
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(18,19,22,0.34);
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(16,17,20,0.40);
   color: rgba(227, 200, 120, 0.96);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.34);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: transform var(--dur) var(--ease),
@@ -346,8 +346,8 @@
 .icon-btn:hover{
   transform: translateY(-1px);
   border-color: rgba(227, 200, 120, 0.28);
-  background: rgba(200, 162, 74, 0.14);
-  box-shadow: 0 14px 44px rgba(0,0,0,0.45);
+  background: rgba(200, 162, 74, 0.12);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.42);
 }
 .icon-btn:active{ transform: translateY(0px) scale(0.98); }
 .icon-btn:focus-visible{
@@ -357,8 +357,8 @@
     0 18px 58px rgba(0,0,0,0.55);
 }
 .icon-btn .ico{
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   stroke: rgba(227, 200, 120, 0.96);
   stroke-width: 1.5;
   stroke-linecap: round;
@@ -415,8 +415,8 @@
    Account chip + menu (same as shared version)
    ========================================================= */
 .acct-chip{
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(10,10,12,0.35);
@@ -573,6 +573,49 @@
   border-color: rgba(227, 200, 120, 0.22);
   background: rgba(227, 200, 120, 0.08);
 }
+.nav-drawer-utilities{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.nav-drawer-icon{
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(10,10,12,0.22);
+  color: rgba(227, 200, 120, 0.96);
+  text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+
+.nav-drawer-icon .ico{
+  width: 18px;
+  height: 18px;
+  stroke: rgba(227, 200, 120, 0.96);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.nav-drawer-icon:hover{
+  transform: translateY(-1px);
+  border-color: rgba(227, 200, 120, 0.26);
+  background: rgba(200, 162, 74, 0.10);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+}
+
+.nav-drawer-icon:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(200, 162, 74, 0.20), 0 12px 34px rgba(0,0,0,0.42);
+}
 .nav-drawer-divider{
   height: 1px;
   margin: 8px 2px;
@@ -628,7 +671,7 @@ html.lock, body.lock{
 .search-hint:hover{
   transform: translateY(-1px);
   border-color: rgba(227, 200, 120, 0.30);
-  background: rgba(200, 162, 74, 0.14);
+  background: rgba(200, 162, 74, 0.12);
   color: rgba(244, 241, 234, 0.98);
 }
 
@@ -659,3 +702,6 @@ html.lock, body.lock{
   letter-spacing: 0.08em;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
+
+
+
