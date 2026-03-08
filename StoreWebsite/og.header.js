@@ -50,11 +50,11 @@
           <span class="og-hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
         </button>
 
-      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+      <a class="brand" href="${hrefIndex}" aria-label="OG Jewelers Home">
 
   <span class="brand-mark">
     <img
-      src="OG-Jewelers.webp"
+      src="${base}/OG-Jewelers.webp"
       alt="OG Jewelers"
       class="brand-logo"
       loading="eager"
