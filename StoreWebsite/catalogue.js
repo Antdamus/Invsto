@@ -336,64 +336,6 @@ qsa('[data-ui="mobile-signout"]').forEach((btn) => {
 
 
 
-async function fetchSpotSnapshot(){
-  const url = `${SUPABASE_PROJECT_URL}/functions/v1/spot-snapshot`;
-  const res = await fetch(url, { method: "GET", cache: "no-store" });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`spot_snapshot_failed (${res.status}) ${text}`);
-  }
-
-  const json = await res.json();
-  return Array.isArray(json?.rows) ? json.rows : [];
-}
-
-
-function fmtMoney(n){
-  // USD per gram - show 2 decimals (gold), 3 decimals (silver) optional, but we’ll keep it consistent:
-  return Number(n).toFixed(2);
-}
-
-function fmtTime(ts){
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-async function renderSpotTicker(){
-  const el = document.getElementById('spotTicker');
-  if (!el) return;
-
-  try{
-    const rows = await fetchSpotSnapshot();
-    const gold = rows.find(r => r.metal === 'gold');
-    const silver = rows.find(r => r.metal === 'silver');
-
-    if (!gold || !silver){
-      el.querySelector('.spot-text').textContent = 'Spot unavailable';
-      return;
-    }
-
-    const asOf = gold.as_of || silver.as_of;
-    const time = asOf ? fmtTime(asOf) : '';
-
-    el.querySelector('.spot-text').innerHTML =
-      `<b>Gold</b> $${fmtMoney(gold.price_per_gram)}/g
-       <span class="muted">•</span>
-       <b>Silver</b> $${fmtMoney(silver.price_per_gram)}/g
-       <span class="muted">• Updated ${time}</span>`;
-  } catch (e){
-    console.error('Spot ticker error:', e);
-    const txt = el.querySelector('.spot-text');
-    if (txt) txt.textContent = 'Spot unavailable';
-  }
-}
-
-function initSpotTicker(){
-  renderSpotTicker();
-  setInterval(renderSpotTicker, 60 * 1000);
-}
-
   // This becomes the live dataset (replaces demo PRODUCTS)
   let PRODUCTS = [];
 
@@ -1641,8 +1583,6 @@ try {
 
   }
 } catch {}
-
-    initSpotTicker();
 
     render();
   };

@@ -9,6 +9,7 @@
 
   const isStoreCart = /\/StoreCart\/?/i.test(window.location.pathname);
   const base = isStoreCart ? ".." : ".";
+  const SUPABASE_PROJECT_URL = "https://byhytmarmigalvawkedi.supabase.co";
 
   // Match item.html intent (path-adjusted for StoreCart)
   const hrefIndex   = `${base}/index.html`;
@@ -71,6 +72,11 @@
           <a class="nav-link og-nav-link" href="${base}/story.html">Story</a>
           <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
         </nav>
+
+        <div class="spot-ticker" id="spotTicker" aria-live="polite">
+          <span class="spot-dot" aria-hidden="true"></span>
+          <span class="spot-text">Loading spot prices…</span>
+        </div>
 
         <div class="header-actions">
           <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
@@ -209,6 +215,64 @@
       inp.focus();
     }
   });
+
+  async function fetchSpotSnapshot() {
+    const url = `${SUPABASE_PROJECT_URL}/functions/v1/spot-snapshot`;
+    const res = await fetch(url, { method: "GET", cache: "no-store" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`spot_snapshot_failed (${res.status}) ${text}`);
+    }
+    const json = await res.json();
+    return Array.isArray(json?.rows) ? json.rows : [];
+  }
+
+  function fmtMoney(n) {
+    return Number(n).toFixed(2);
+  }
+
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+
+  async function renderSpotTicker() {
+    const el = document.getElementById("spotTicker");
+    if (!el) return;
+
+    try {
+      const rows = await fetchSpotSnapshot();
+      const gold = rows.find((r) => r.metal === "gold");
+      const silver = rows.find((r) => r.metal === "silver");
+      const textEl = el.querySelector(".spot-text");
+
+      if (!textEl) return;
+      if (!gold || !silver) {
+        textEl.textContent = "Spot unavailable";
+        return;
+      }
+
+      const asOf = gold.as_of || silver.as_of;
+      const time = asOf ? fmtTime(asOf) : "";
+      textEl.innerHTML =
+        `<b>Gold</b> $${fmtMoney(gold.price_per_gram)}/g` +
+        ` <span class="muted">•</span> ` +
+        `<b>Silver</b> $${fmtMoney(silver.price_per_gram)}/g` +
+        (time ? ` <span class="muted">• Updated ${time}</span>` : "");
+    } catch (e) {
+      console.error("Spot ticker error:", e);
+      const textEl = el.querySelector(".spot-text");
+      if (textEl) textEl.textContent = "Spot unavailable";
+    }
+  }
+
+  function initSpotTicker() {
+    renderSpotTicker();
+    if (window.__ogSpotTickerTimer) clearInterval(window.__ogSpotTickerTimer);
+    window.__ogSpotTickerTimer = window.setInterval(renderSpotTicker, 60 * 1000);
+  }
+
+  initSpotTicker();
 
   function searchIconSvg() {
     return `
