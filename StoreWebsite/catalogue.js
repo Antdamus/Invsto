@@ -961,6 +961,12 @@ const toggleNavDrawer = () => {
      Rendering
   ========================= */
   const renderCard = (p) => {
+  const displayName = String(p.name || "")
+    .replace(/\b925\s*fine\s*silver\b/gi, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s\-|,\/]+|[\s\-|,\/]+$/g, "")
+    .trim() || String(p.name || "");
   const href = `item.html?id=${encodeURIComponent(p.id)}`;
   const metaBits = [
     humanize("category", p.category),
@@ -974,19 +980,19 @@ const toggleNavDrawer = () => {
               data-action="toggle-fav"
               data-id="${esc(p.id)}"
               aria-pressed="false"
-              aria-label="Add ${esc(p.name)} to favorites"
+              aria-label="Add ${esc(displayName)} to favorites"
               title="Add to favorites">
         <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
       </button>
 
       <a class="product-hit"
          href="${href}"
-         aria-label="View details for ${esc(p.name)}">
+         aria-label="View details for ${esc(displayName)}">
         <div class="product-media">
-          <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
+          <img src="${esc(p.image)}" alt="${esc(displayName)}" loading="lazy" />
         </div>
         <div class="product-body">
-          <h3 class="product-title">${esc(p.name)}</h3>
+          <h3 class="product-title">${esc(displayName)}</h3>
           <div class="product-price">${esc(formatUSD(p.price))}</div>
           ${subtleMeta}
         </div>
@@ -1002,6 +1008,7 @@ const toggleNavDrawer = () => {
     </article>
   `;
 };
+
   const render = () => {
     // Filters + sort
     const filtered = applyFilters(PRODUCTS);
