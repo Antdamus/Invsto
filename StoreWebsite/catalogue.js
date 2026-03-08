@@ -961,14 +961,24 @@ const toggleNavDrawer = () => {
      Rendering
   ========================= */
   const renderCard = (p) => {
-  const tags = (p.tags || []).slice(0, 2)
-    .map((t) => `<span class="tag">${esc(humanize("tag", t))}</span>`)
-    .join("");
-
   const href = `item.html?id=${encodeURIComponent(p.id)}`;
+  const metaBits = [
+    humanize("category", p.category),
+    humanize("material", p.material)
+  ].filter((v) => v && !["Uncategorized", "Unknown"].includes(v));
+  const subtleMeta = metaBits.length ? `<div class="product-meta">${esc(metaBits[0])}</div>` : "";
 
   return `
     <article class="product-card" data-id="${esc(p.id)}">
+      <button class="fav-toggle product-fav" type="button"
+              data-action="toggle-fav"
+              data-id="${esc(p.id)}"
+              aria-pressed="false"
+              aria-label="Add ${esc(p.name)} to favorites"
+              title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+
       <a class="product-hit"
          href="${href}"
          aria-label="View details for ${esc(p.name)}">
@@ -976,40 +986,22 @@ const toggleNavDrawer = () => {
           <img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy" />
         </div>
         <div class="product-body">
-          <div class="product-top">
-            <h3 class="product-title">${esc(p.name)}</h3>
-            <div class="product-price">${esc(formatUSD(p.price))}</div>
-          </div>
-          <div class="product-meta">
-            <span>${esc(humanize("category", p.category))}</span>
-            <span class="sep" aria-hidden="true">•</span>
-            <span>${esc(humanize("material", p.material))}</span>
-          </div>
-          <div class="product-tags">${tags}</div>
+          <h3 class="product-title">${esc(p.name)}</h3>
+          <div class="product-price">${esc(formatUSD(p.price))}</div>
+          ${subtleMeta}
         </div>
       </a>
 
       <div class="product-actions">
-        <button class="fav-toggle" type="button"
-                data-action="toggle-fav"
-                data-id="${esc(p.id)}"
-                aria-pressed="false"
-                aria-label="Add ${esc(p.name)} to favorites"
-                title="Add to favorites">
-          <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-        </button>
-        <button class="btn ghost" type="button"
+        <button class="product-cta" type="button"
                 data-action="add-to-cart"
                 data-id="${esc(p.id)}">
-          Add to cart
+          Quick add
         </button>
       </div>
     </article>
   `;
 };
-
-
-
   const render = () => {
     // Filters + sort
     const filtered = applyFilters(PRODUCTS);
@@ -1594,3 +1586,4 @@ try {
     init();
   }
 })();
+
