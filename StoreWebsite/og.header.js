@@ -108,6 +108,7 @@
         <span class="spot-text">Loading spot prices...</span>
       </div>
     </header>
+    <div class="og-header-spacer" aria-hidden="true"></div>
 
     <div class="og-navbackdrop" data-ui="nav-drawer-backdrop" hidden></div>
 
