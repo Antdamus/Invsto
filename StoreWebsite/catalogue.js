@@ -1116,6 +1116,44 @@ const toggleNavDrawer = () => {
     }, 1600);
   };
 
+  const INQUIRY_MESSAGE =
+    window.ogInquiryMode?.message ||
+    "Due to demand and availability, pieces are currently offered by inquiry through our contact page or during our live shows. Save pieces to your Favorites list to keep track of your interest.";
+
+  const flashFavoriteCta = (btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+
+    const originalLabel = (btn.dataset.restoreLabel || btn.textContent || "Add to Favorites").trim();
+    btn.dataset.restoreLabel = originalLabel;
+
+    btn.classList.add("is-added");
+    btn.textContent = "Saved";
+
+    window.clearTimeout(btn.__restoreTimer__);
+    btn.__restoreTimer__ = window.setTimeout(() => {
+      btn.classList.remove("is-added");
+      btn.textContent = originalLabel;
+    }, 980);
+  };
+
+  const handleFavoriteIntent = (itemId, triggerEl = null) => {
+    const id = String(itemId || "").trim();
+    if (!id) return;
+
+    if (window.ogInquiryMode?.enabled && typeof window.ogInquiryMode.handleFavoriteIntent === "function") {
+      window.ogInquiryMode.handleFavoriteIntent(id, { source: "catalogue" });
+    } else {
+      const svc = window.ogFavService;
+      if (svc && typeof svc.isFav === "function" && !svc.isFav(id)) {
+        if (typeof svc.add === "function") svc.add(id);
+        else if (typeof svc.toggle === "function") svc.toggle(id);
+      }
+      toast(INQUIRY_MESSAGE);
+    }
+
+    flashFavoriteCta(triggerEl);
+  };
+
   /* =========================
      Rendering
   ========================= */
@@ -1159,9 +1197,9 @@ const toggleNavDrawer = () => {
 
       <div class="product-actions">
         <button class="product-cta" type="button"
-                data-action="add-to-cart"
+                data-action="add-to-favorites"
                 data-id="${esc(p.id)}">
-          Quick add
+          Add to Favorites
         </button>
       </div>
     </article>
@@ -1439,17 +1477,12 @@ const wireGlobalClicks = () => {
     }
 
 
-    // Add to cart
-    if (action === "add-to-cart") {
-      const id = el.dataset.id;
-      const item = PRODUCTS.find((p) => p.id === id);
-      const currentPrice = item ? toPriceNumber(item.price) : 0;
+    // Save to favorites (temporary inquiry mode)
+    if (action === "add-to-favorites" || action === "add-to-cart") {
+      const id = String(el.dataset.id || "").trim();
+      if (!id) return;
 
-      if (window.ogCartService && typeof window.ogCartService.addToCart === "function") {
-        window.ogCartService.addToCart(id, 1, currentPrice);
-        window.ogCartBadgeRefresh?.();
-        window.ogCartDrawerOpen?.();
-      }
+      handleFavoriteIntent(id, el);
       return;
     }
 

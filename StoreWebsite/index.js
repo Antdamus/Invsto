@@ -45,6 +45,28 @@ function toast(msg, ms = 1600) {
   }, ms);
 }
 
+const INQUIRY_MESSAGE =
+  window.ogInquiryMode?.message ||
+  "Due to demand and availability, pieces are currently offered by inquiry through our contact page or during our live shows. Save pieces to your Favorites list to keep track of your interest.";
+
+function saveInterestToFavorites(id) {
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) return { ok: false, state: "missing-id" };
+
+  if (window.ogInquiryMode?.enabled && typeof window.ogInquiryMode.handleFavoriteIntent === "function") {
+    return window.ogInquiryMode.handleFavoriteIntent(normalizedId, { source: "index-quickview" });
+  }
+
+  const svc = window.ogFavService;
+  if (svc && typeof svc.isFav === "function" && !svc.isFav(normalizedId)) {
+    if (typeof svc.add === "function") svc.add(normalizedId);
+    else if (typeof svc.toggle === "function") svc.toggle(normalizedId);
+  }
+
+  toast(INQUIRY_MESSAGE, 3400);
+  return { ok: true, state: "added" };
+}
+
 /* =========================
    UI refs (match your HTML)
 ========================= */
@@ -782,35 +804,15 @@ case "close-menu": {
         e.preventDefault();
         openQuickviewFromTrigger(btn);
         return;
+      case "add-to-favorites":
       case "add-to-cart":
         e.preventDefault();
         {
-          // Prefer the inventory-bound id when available
           const id = activeQuickviewId;
-          const addToCart = window.ogCartService?.addToCart;
+          if (!id) return;
 
-          if (!id) {
-            // no crash; just ignore gracefully
-            return;
-          }
-          if (typeof addToCart !== "function") return;
-
-          const it = invState.map.get(String(id));
-          if (!it) {
-            // no crash hydration: show “no longer available” path later on cart hydration
-            addToCart(id, 1, 0);
-            closeQuickview();
-            window.ogCartBadgeRefresh?.();
-            window.ogCartDrawerOpen?.();
-            return;
-          }
-
-          addToCart(it.id, 1, it.price);
-
+          saveInterestToFavorites(id);
           closeQuickview();
-          window.ogCartBadgeRefresh?.();
-          window.ogCartDrawerOpen?.();
-
         }
         return;
 

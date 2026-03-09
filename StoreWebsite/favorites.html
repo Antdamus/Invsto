@@ -14,6 +14,7 @@
 
   <link rel="stylesheet" href="catalogue.css" />
   <link rel="stylesheet" href="og.header.css" />
+  <link rel="stylesheet" href="inquiry.mode.css" />
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
   <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
 
@@ -40,6 +41,7 @@
 
   <!-- ✅ Universal header -->
   <script src="og.header.js" defer></script>
+  <script src="inquiry.mode.js" defer></script>
 </head>
 
 <body>
@@ -261,7 +263,7 @@
             '<div class="product-actions">' +
               '<button class="fav-toggle" type="button" data-action="toggle-fav" data-id="' + esc(id) + '" aria-pressed="false" aria-label="Add ' + title + ' to favorites" title="Add to favorites"><span class="fav-toggle-icon" aria-hidden="true">♡</span></button>' +
               '<a class="btn ghost" href="item.html?id=' + encodeURIComponent(id) + '">View</a>' +
-              '<button class="btn ghost" type="button" data-action="add-to-cart" data-id="' + esc(id) + '">Add to cart</button>' +
+              '<button class="btn ghost" type="button" data-action="add-to-favorites" data-id="' + esc(id) + '">Save to Favorites</button>' +
             '</div>' +
           '</article>';
       }
@@ -332,23 +334,25 @@
           return;
         }
 
-        if (action !== "add-to-cart") return;
+        if (action !== "add-to-favorites" && action !== "add-to-cart") return;
 
         e.preventDefault();
 
         var id = String((el.dataset && el.dataset.id) || "").trim();
         if (!id) return;
 
-        var item = catalogById.get(id);
-        var price = Number(item && item.display_price);
-        var currentPrice = Number.isFinite(price) ? price : 0;
-
-        if (window.ogCartService && typeof window.ogCartService.addToCart === "function") {
-          window.ogCartService.addToCart(id, 1, currentPrice);
-          window.ogCartBadgeRefresh && window.ogCartBadgeRefresh();
-          window.ogCartDrawerOpen && window.ogCartDrawerOpen();
-          toast("Added to cart.");
+        if (window.ogInquiryMode && window.ogInquiryMode.enabled && typeof window.ogInquiryMode.handleFavoriteIntent === "function") {
+          window.ogInquiryMode.handleFavoriteIntent(id, { source: "favorites" });
+          return;
         }
+
+        var svc = window.ogFavService;
+        if (svc && typeof svc.isFav === "function" && !svc.isFav(id)) {
+          if (typeof svc.add === "function") svc.add(id);
+          else if (typeof svc.toggle === "function") svc.toggle(id);
+        }
+
+        toast("Due to demand and availability, pieces are currently offered by inquiry through our contact page or during our live shows. Save pieces to your Favorites list to keep track of your interest.", 3400);
       });
 
       window.addEventListener("og-favs-changed", function () {

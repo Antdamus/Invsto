@@ -17,10 +17,12 @@
   <!-- CSS -->
 <link rel="stylesheet" href="catalogue.css" />
 <link rel="stylesheet" href="og.header.css" />
+<link rel="stylesheet" href="inquiry.mode.css" />
 <link rel="stylesheet" href="./StoreCart/cart.drawer.css">
   <link rel="stylesheet" href="./Favorites/favorites.shared.css">
 
 <script src="og.header.js" defer></script>
+<script src="inquiry.mode.js" defer></script>
 
   <!-- JS (Supabase MUST load before initSupabase.js) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
@@ -357,8 +359,8 @@
             <div class="modal-price" data-ui="qv-price">$0.00</div>
 
             <div class="modal-actions">
-              <button class="btn ghost" type="button" data-ui="qv-add" data-action="add-to-cart">
-                Add to cart
+              <button class="btn ghost" type="button" data-ui="qv-add" data-action="add-to-favorites">
+                Add to Favorites
               </button>
               <a class="btn primary" href="item.html" data-ui="qv-link">View in shop →</a>
             </div>
