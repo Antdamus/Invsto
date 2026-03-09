@@ -187,10 +187,9 @@ This keeps story assets isolated, predictable, and aligned with existing relativ
 7. Keep shared header integration intact (`#ogHeaderMount`, `og.header.js`) and avoid global regressions.
 8. Add the canonical cart drawer DOM block to `StoreWebsite/story.html` (match `index.html`/`catalogue.html` structure and `data-ui`/`data-action` hooks) so shared cart scripts function correctly.
 9. Validate cart icon and drawer behavior on story page; confirm open/close, subtotal/count rendering, and navigation behavior with current shared scripts.
-10. Add the canonical `site-footer` block used in `StoreWebsite/index.html`/`StoreWebsite/catalogue.html` to `StoreWebsite/story.html` (reuse structure, do not redesign), and ensure key links stay consistent with storefront navigation (`contact.html`, shop/catalogue destination) plus copyright line.
-11. Add placeholder image references to proposed story asset paths (without requiring final Miami downloads yet).
-12. Run responsive QA (mobile/tablet/desktop) and reduced-motion QA.
-13. Final content pass for luxury tone consistency and factual messaging.
+10. Add placeholder image references to proposed story asset paths (without requiring final Miami downloads yet).
+11. Run responsive QA (mobile/tablet/desktop) and reduced-motion QA.
+12. Final content pass for luxury tone consistency and factual messaging.
 
 ## Asset Requirements
 - Jewelry images: existing OG inventory visuals or current local story-safe images.
@@ -200,7 +199,7 @@ This keeps story assets isolated, predictable, and aligned with existing relativ
 
 ## Risks / Non-Goals
 ### Risks
-- Current shared cart drawer scripts may not fully function in `story.html` without cart drawer markup; verify behavior during implementation.
+- Story page cart drawer compatibility must be validated after canonical drawer DOM is added.
 - Legacy docs are partially stale; rely on current file behavior first.
 - Missing/placeholder assets can weaken perceived premium tone until replaced.
 
@@ -218,4 +217,3 @@ This keeps story assets isolated, predictable, and aligned with existing relativ
 - Typography and spacing align with OG visual language.
 - Mobile and desktop layouts are stable and readable.
 - Story page planning is complete and implementation-ready.
-- Story page includes the canonical storefront footer structure and consistent core footer links.
