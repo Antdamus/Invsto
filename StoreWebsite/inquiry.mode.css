@@ -1,0 +1,53 @@
+/* =========================================================
+   inquiry.mode.css - OG Jewelers temporary inquiry mode toast
+   ========================================================= */
+
+.og-inquiry-toast {
+  position: fixed;
+  top: calc(var(--header-h, 74px) + 14px);
+  left: 50%;
+  transform: translate(-50%, -10px);
+  width: min(920px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(200, 162, 74, 0.28);
+  background:
+    linear-gradient(180deg, rgba(20, 21, 24, 0.94), rgba(14, 15, 18, 0.9)),
+    radial-gradient(circle at 16% 0%, rgba(227, 200, 120, 0.16), rgba(0, 0, 0, 0) 55%);
+  color: rgba(244, 241, 234, 0.94);
+  box-shadow:
+    0 20px 54px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
+  text-wrap: pretty;
+  z-index: 150;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease, transform 280ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.og-inquiry-toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 640px) {
+  .og-inquiry-toast {
+    top: calc(var(--header-h, 74px) + 10px);
+    width: calc(100vw - 20px);
+    padding: 11px 12px;
+    border-radius: 14px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .og-inquiry-toast {
+    transition: none;
+  }
+}

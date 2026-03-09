@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="catalogue.css" />
 <link rel="stylesheet" href="og.header.css" />
 <link rel="stylesheet" href="item.css" />
+<link rel="stylesheet" href="inquiry.mode.css" />
 
   <!-- Cart drawer styles -->
   <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
@@ -50,6 +51,7 @@
   <script src="./Favorites/favorites.shared.js" defer></script>
 
   <script src="og.header.js" defer></script>
+  <script src="inquiry.mode.js" defer></script>
 
   <!-- Item page -->
   <script src="item.js" defer></script>
@@ -110,17 +112,17 @@
           </div>
 
           <div class="trust-row" aria-label="Store assurances">
-            <span class="trust-chip">15-min Price Lock</span>
-            <span class="trust-chip">Secure Checkout</span>
-            <span class="trust-chip">Authenticity Promise</span>
+            <span class="trust-chip">Inquiry Availability</span>
+            <span class="trust-chip">Live Show Drops</span>
+            <span class="trust-chip">Favorites Tracking</span>
           </div>
 
           <div class="item-actions">
             <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add item to favorites" title="Add to favorites">
               <span class="fav-toggle-icon" aria-hidden="true">♡</span>
             </button>
-            <button class="btn ghost item-add og-cta" type="button" data-action="add-to-cart">ADD TO CART</button>
-            <a class="btn ghost item-open-cart" href="./StoreCart/cart.html" data-action="go-cart-page">VIEW CART</a>
+            <button class="btn ghost item-add og-cta" type="button" data-action="add-to-favorites">ADD TO FAVORITES</button>
+            <a class="btn ghost item-open-cart" href="favorites.html" data-action="go-favorites-page">VIEW FAVORITES</a>
           </div>
 
           <div class="desc-block">

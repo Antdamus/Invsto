@@ -444,8 +444,6 @@ const navCloseBtn = qs(".nav-drawer-close");
 
   const hudWrap = qs('[data-ui="catalogue-hud"]');
   const hudPanel = qs('[data-ui="catalogue-hud-panel"]');
-  const hudToggle = qs('[data-action="toggle-hud"]');
-
 
   const qInput = qs("#q");
   const clearSearchBtn = qs('[data-action="clear-search"]');
@@ -551,13 +549,11 @@ const navCloseBtn = qs(".nav-drawer-close");
     if (!header) return;
     header.classList.toggle("is-elevated", (window.scrollY || 0) > 6);
   };
-
   /* =========================
      HUD presentation state
   ========================= */
   const HUD_IDLE_MS = 15000;
   let hudIdleTimer = null;
-  let hudIntroTimer = null;
   let hudPointerInside = false;
 
   const isHudExpanded = () => !!hudWrap && hudWrap.classList.contains("is-expanded");
@@ -567,13 +563,11 @@ const navCloseBtn = qs(".nav-drawer-close");
     const active = document.activeElement;
     if (!active) return false;
     if (hudPanel && hudPanel.contains(active)) return true;
-    if (hudToggle && hudToggle.contains(active)) return true;
     return false;
   };
 
   const clearHudTimers = () => {
     window.clearTimeout(hudIdleTimer);
-    window.clearTimeout(hudIntroTimer);
   };
 
   const canHudAutoCollapse = () => {
@@ -598,23 +592,24 @@ const navCloseBtn = qs(".nav-drawer-close");
   };
 
   const setHudExpanded = (expanded, opts = {}) => {
-    const { focusSearch = false, returnFocus = false, idleMs = HUD_IDLE_MS } = opts;
-    if (!hudWrap || !hudPanel || !hudToggle) return;
+    const { focusSearch = false, selectSearch = false, idleMs = HUD_IDLE_MS } = opts;
+    if (!hudWrap || !hudPanel) return;
 
     hudWrap.classList.toggle("is-expanded", !!expanded);
     hudWrap.classList.toggle("is-collapsed", !expanded);
-    hudToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
     hudPanel.setAttribute("aria-hidden", expanded ? "false" : "true");
     try { hudPanel.inert = !expanded; } catch {}
 
     if (expanded) {
-      if (focusSearch && qInput) qInput.focus({ preventScroll: true });
+      if (focusSearch && qInput) {
+        qInput.focus({ preventScroll: true });
+        if (selectSearch && typeof qInput.select === "function") qInput.select();
+      }
       scheduleHudAutoCollapse(idleMs);
       return;
     }
 
     window.clearTimeout(hudIdleTimer);
-    if (returnFocus && hudToggle) hudToggle.focus({ preventScroll: true });
   };
 
   const recordHudActivity = (delay = HUD_IDLE_MS) => {
@@ -628,25 +623,59 @@ const navCloseBtn = qs(".nav-drawer-close");
     scheduleHudAutoCollapse(delay);
   };
 
+  const alignHudUnderHeader = () => {
+    if (!hudWrap) return;
+
+    const rootStyles = getComputedStyle(document.documentElement);
+    const headerH = parseFloat(rootStyles.getPropertyValue("--header-h")) || 74;
+    const rect = hudWrap.getBoundingClientRect();
+    const targetTop = headerH;
+
+    if (Math.abs(rect.top - targetTop) <= 6) return;
+
+    const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
+    window.scrollTo({
+      top: nextTop,
+      behavior: prefersReducedMotion() ? "auto" : "smooth"
+    });
+  };
+
+  const openHudFromHeaderSearch = () => {
+    if (!hudWrap || !hudPanel) return;
+
+    clearHudTimers();
+
+    if (isHudExpanded()) {
+      if (isDrawerOpen()) return;
+      setHudExpanded(false);
+      return;
+    }
+
+    setHudExpanded(true, { idleMs: HUD_IDLE_MS });
+    alignHudUnderHeader();
+
+    const focusSearch = () => {
+      if (!qInput) return;
+      qInput.focus({ preventScroll: true });
+      if (typeof qInput.select === "function") qInput.select();
+      recordHudActivity(HUD_IDLE_MS);
+    };
+
+    if (prefersReducedMotion()) focusSearch();
+    else window.setTimeout(focusSearch, 170);
+  };
+
+  const wireHeaderSearchBridge = () => {
+    window.addEventListener("og:catalogue-search-open", openHudFromHeaderSearch);
+  };
+
   const initHudBehavior = () => {
-    if (!hudWrap || !hudPanel || !hudToggle) return;
+    if (!hudWrap || !hudPanel) return;
 
     // Ensure deterministic initial state classes.
-    hudWrap.classList.add("is-expanded");
-    hudWrap.classList.remove("is-collapsed");
-    hudPanel.setAttribute("aria-hidden", "false");
-    hudToggle.setAttribute("aria-expanded", "true");
-
-    hudToggle.addEventListener("click", (e) => {
-      e.preventDefault();
-
-      if (isHudExpanded()) {
-        if (isDrawerOpen()) return;
-        setHudExpanded(false, { returnFocus: true });
-      } else {
-        setHudExpanded(true, { focusSearch: false });
-      }
-    });
+    hudWrap.classList.add("is-collapsed");
+    hudWrap.classList.remove("is-expanded");
+    hudPanel.setAttribute("aria-hidden", "true");
 
     ["input", "change", "focusin", "keydown", "pointerdown", "click"].forEach((evt) => {
       hudPanel.addEventListener(evt, () => recordHudActivity());
@@ -668,15 +697,8 @@ const navCloseBtn = qs(".nav-drawer-close");
       }, 0);
     });
 
-    const startCollapsed = window.matchMedia("(max-width: 820px)").matches;
-    setHudExpanded(!startCollapsed);
-
-    if (!startCollapsed) {
-      const introDelay = prefersReducedMotion() ? 900 : 2400;
-      hudIntroTimer = window.setTimeout(() => {
-        if (canHudAutoCollapse()) setHudExpanded(false);
-      }, introDelay);
-    }
+    // Catalogue HUD is intentionally header-triggered.
+    setHudExpanded(false);
   };
 
 
@@ -1094,6 +1116,44 @@ const toggleNavDrawer = () => {
     }, 1600);
   };
 
+  const INQUIRY_MESSAGE =
+    window.ogInquiryMode?.message ||
+    "Due to demand and availability, pieces are currently offered by inquiry through our contact page or during our live shows. Save pieces to your Favorites list to keep track of your interest.";
+
+  const flashFavoriteCta = (btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+
+    const originalLabel = (btn.dataset.restoreLabel || btn.textContent || "Add to Favorites").trim();
+    btn.dataset.restoreLabel = originalLabel;
+
+    btn.classList.add("is-added");
+    btn.textContent = "Saved";
+
+    window.clearTimeout(btn.__restoreTimer__);
+    btn.__restoreTimer__ = window.setTimeout(() => {
+      btn.classList.remove("is-added");
+      btn.textContent = originalLabel;
+    }, 980);
+  };
+
+  const handleFavoriteIntent = (itemId, triggerEl = null) => {
+    const id = String(itemId || "").trim();
+    if (!id) return;
+
+    if (window.ogInquiryMode?.enabled && typeof window.ogInquiryMode.handleFavoriteIntent === "function") {
+      window.ogInquiryMode.handleFavoriteIntent(id, { source: "catalogue" });
+    } else {
+      const svc = window.ogFavService;
+      if (svc && typeof svc.isFav === "function" && !svc.isFav(id)) {
+        if (typeof svc.add === "function") svc.add(id);
+        else if (typeof svc.toggle === "function") svc.toggle(id);
+      }
+      toast(INQUIRY_MESSAGE);
+    }
+
+    flashFavoriteCta(triggerEl);
+  };
+
   /* =========================
      Rendering
   ========================= */
@@ -1137,9 +1197,9 @@ const toggleNavDrawer = () => {
 
       <div class="product-actions">
         <button class="product-cta" type="button"
-                data-action="add-to-cart"
+                data-action="add-to-favorites"
                 data-id="${esc(p.id)}">
-          Quick add
+          Add to Favorites
         </button>
       </div>
     </article>
@@ -1327,7 +1387,7 @@ const wireGlobalClicks = () => {
       closeQuickview();
       return;
     }
-    if (hudWrap && hudWrap.contains(e.target) && !e.target.closest('[data-action="toggle-hud"]')) {
+    if (hudWrap && hudWrap.contains(e.target)) {
       recordHudActivity();
     }
 
@@ -1417,17 +1477,12 @@ const wireGlobalClicks = () => {
     }
 
 
-    // Add to cart
-    if (action === "add-to-cart") {
-      const id = el.dataset.id;
-      const item = PRODUCTS.find((p) => p.id === id);
-      const currentPrice = item ? toPriceNumber(item.price) : 0;
+    // Save to favorites (temporary inquiry mode)
+    if (action === "add-to-favorites" || action === "add-to-cart") {
+      const id = String(el.dataset.id || "").trim();
+      if (!id) return;
 
-      if (window.ogCartService && typeof window.ogCartService.addToCart === "function") {
-        window.ogCartService.addToCart(id, 1, currentPrice);
-        window.ogCartBadgeRefresh?.();
-        window.ogCartDrawerOpen?.();
-      }
+      handleFavoriteIntent(id, el);
       return;
     }
 
@@ -1669,6 +1724,7 @@ const outsideClickClose = (e) => {
 
     wireHeader();
     wireNavDrawer();
+    wireHeaderSearchBridge();
     initHudBehavior();
 
 

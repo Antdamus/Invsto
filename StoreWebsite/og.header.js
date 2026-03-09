@@ -1,5 +1,5 @@
 /* =========================================================
-   og.header.js — Shared OG Jewelers header (EXACT item header)
+   og.header.js - Shared OG Jewelers header
    + Cart icon opens cart drawer (fallback navigates to cart)
    ========================================================= */
 
@@ -12,18 +12,21 @@
   const SUPABASE_PROJECT_URL = "https://byhytmarmigalvawkedi.supabase.co";
 
   // Match item.html intent (path-adjusted for StoreCart)
-  const hrefIndex   = `${base}/index.html`;
-  const hrefShop    = `${base}/catalogue.html`;
-  const hrefFavorites   = `${base}/favorites.html`;
-  const hrefJoin    = `${base}/join.html`;
+  const hrefIndex = `${base}/index.html`;
+  const hrefShop = `${base}/catalogue.html`;
+  const hrefFavorites = `${base}/favorites.html`;
+  const hrefJoin = `${base}/join.html`;
   const hrefProfile = `${base}/profile.html`;
-  const hrefCart    = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
+  const hrefStory = `${base}/story.html`;
+  const hrefContact = `${base}/contact.html`;
+  const hrefCart = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
 
   const isCartPage = /\/cart\.html$/i.test(window.location.pathname);
+  const isCataloguePage = /(?:^|\/)catalogue\.html$/i.test(window.location.pathname);
+  const searchAction = isCataloguePage ? "open-catalogue-search" : "open-search";
 
-  // ✅ Key fix:
-  // - On NON-cart pages: anchor has BOTH href (fallback) and data-action (drawer open)
-  // - On cart page: plain anchor (no drawer open)
+  // On NON-cart pages: keep href fallback + drawer action
+  // On cart page: plain anchor only
   const cartControl = isCartPage
     ? `<a class="icon-btn og-cartbtn" href="${hrefCart}" aria-label="Cart">
          ${bagIconSvg()}
@@ -37,76 +40,84 @@
   mount.innerHTML = `
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <!-- Header (structure matches item.html) -->
     <header class="site-header og-header" data-elevate-on-scroll>
       <div class="item-container header-inner og-header-inner">
+        <div class="header-zone header-zone-left">
+          <button class="icon-btn og-iconbtn og-navtoggle"
+                  type="button"
+                  aria-label="Open menu"
+                  aria-controls="ogNavDrawer"
+                  aria-expanded="false"
+                  data-action="open-nav-drawer">
+            <span class="og-hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
+          </button>
 
-        <button class="btn ghost icon-only og-iconbtn og-navtoggle"
-                type="button"
-                aria-label="Open menu"
-                aria-controls="ogNavDrawer"
-                aria-expanded="false"
-                data-action="open-nav-drawer">
-          <span class="og-hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
-        </button>
-
-      <a class="brand" href="${hrefIndex}" aria-label="OG Jewelers Home">
-
-  <span class="brand-mark">
-    <img
-      src="${base}/OG-Jewelers.webp"
-      alt="OG Jewelers"
-      class="brand-logo"
-      loading="eager"
-      decoding="async"
-    />
-  </span>
-
-  <span class="brand-name">OG Jewelers</span>
-
-</a>
-
-        <nav class="nav og-nav" aria-label="Primary navigation">
-          <a class="nav-link og-nav-link" href="${hrefShop}">Shop</a>
-          <a class="nav-link og-nav-link" href="${hrefFavorites}">Favorites</a>
-          <a class="nav-link og-nav-link" href="${base}/story.html">Story</a>
-          <a class="nav-link og-nav-link" href="${base}/contact.html">Contact</a>
-        </nav>
-
-        <div class="spot-ticker" id="spotTicker" aria-live="polite">
-          <span class="spot-dot" aria-hidden="true"></span>
-          <span class="spot-text">Loading spot prices…</span>
+          <nav class="nav og-nav og-utility-nav" aria-label="Primary navigation">
+            <a class="icon-btn utility-link" href="${hrefShop}" aria-label="Shop" title="Shop">
+              ${shopIconSvg()}
+              <span class="sr-only">Shop</span>
+            </a>
+            <a class="icon-btn utility-link" href="${hrefFavorites}" aria-label="Favorites" title="Favorites">
+              ${heartIconSvg()}
+              <span class="sr-only">Favorites</span>
+            </a>
+            <a class="icon-btn utility-link" href="${hrefContact}" aria-label="Contact" title="Contact">
+              ${contactIconSvg()}
+              <span class="sr-only">Contact</span>
+            </a>
+            <a class="nav-link story-link" href="${hrefStory}">Story</a>
+          </nav>
         </div>
 
-        <div class="header-actions">
-          <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
-            ${searchIconSvg()}
-          </button>
+        <div class="header-zone header-zone-center">
+          <a class="brand" href="${hrefIndex}" aria-label="OG Jewelry home">
+            <span class="brand-mark">
+              <img
+                src="${base}/OG-Jewelers.webp"
+                alt=""
+                class="brand-logo"
+                loading="eager"
+                decoding="async"
+              />
+            </span>
+          </a>
+        </div>
 
-          <!-- EXACT item: login points to join.html -->
-          <a class="btn btn-ghost og-loginbtn" href="${hrefJoin}" data-ui="access-btn">Login</a>
+        <div class="header-zone header-zone-right">
+          <div class="header-actions">
+            <button class="icon-btn" type="button" aria-label="${isCataloguePage ? "Search catalogue" : "Search"}" data-action="${searchAction}">
+              ${searchIconSvg()}
+            </button>
 
-          <button class="acct-chip" type="button" aria-label="Account" data-ui="acct-chip" hidden>
-            <span class="acct-initials" data-ui="acct-initials">M</span>
-          </button>
+            <a class="btn btn-ghost og-loginbtn" href="${hrefJoin}" data-ui="access-btn">Login</a>
 
-          <div class="acct-menu" data-ui="acct-menu" aria-hidden="true" hidden>
-            <a class="acct-menu-item" href="${hrefProfile}">Account</a>
-            <button class="acct-menu-item danger" type="button" data-action="signout">Sign out</button>
+            <button class="acct-chip" type="button" aria-label="Account" data-ui="acct-chip" hidden>
+              <span class="acct-initials" data-ui="acct-initials">M</span>
+            </button>
+
+            <div class="acct-menu" data-ui="acct-menu" aria-hidden="true" hidden>
+              <a class="acct-menu-item" href="${hrefProfile}">Account</a>
+              <button class="acct-menu-item danger" type="button" data-action="signout">Sign out</button>
+            </div>
+
+            ${cartControl}
           </div>
-
-          ${cartControl}
         </div>
       </div>
-    </header>
 
-    <!-- Mobile Nav Drawer (same as item.html) -->
+      <div class="spot-ticker" id="spotTicker" aria-live="polite" hidden>
+        <span class="spot-dot" aria-hidden="true"></span>
+        <span class="spot-text">Loading spot prices...</span>
+      </div>
+    </header>
+    <div class="og-header-spacer" aria-hidden="true"></div>
+
     <div class="og-navbackdrop" data-ui="nav-drawer-backdrop" hidden></div>
 
     <aside class="og-navdrawer" id="ogNavDrawer" data-ui="nav-drawer" aria-hidden="true" hidden>
       <div class="og-navdrawer-top">
         <div class="og-navdrawer-title">Menu</div>
-        <button class="og-navdrawer-close" type="button" aria-label="Close menu" data-action="close-nav-drawer">×</button>
+        <button class="og-navdrawer-close" type="button" aria-label="Close menu" data-action="close-nav-drawer">&times;</button>
       </div>
 
       <nav class="nav-drawer" aria-label="Mobile navigation">
@@ -119,10 +130,22 @@
 
         <div class="nav-drawer-divider" data-ui="drawer-divider" aria-hidden="true" hidden></div>
 
-        <a class="nav-drawer-link" href="${hrefShop}">Shop</a>
-        <a class="nav-drawer-link" href="${hrefFavorites}">Favorites</a>
-        <a class="nav-drawer-link" href="${base}/story.html">Story</a>
-        <a class="nav-drawer-link" href="${base}/contact.html">Contact</a>
+        <div class="nav-drawer-utilities" role="group" aria-label="Quick links">
+          <a class="nav-drawer-icon" href="${hrefShop}" aria-label="Shop" title="Shop">
+            ${shopIconSvg()}
+            <span class="sr-only">Shop</span>
+          </a>
+          <a class="nav-drawer-icon" href="${hrefFavorites}" aria-label="Favorites" title="Favorites">
+            ${heartIconSvg()}
+            <span class="sr-only">Favorites</span>
+          </a>
+          <a class="nav-drawer-icon" href="${hrefContact}" aria-label="Contact" title="Contact">
+            ${contactIconSvg()}
+            <span class="sr-only">Contact</span>
+          </a>
+        </div>
+
+        <a class="nav-drawer-link" href="${hrefStory}">Story</a>
       </nav>
     </aside>
   `;
@@ -154,7 +177,9 @@
     drawer.setAttribute("aria-hidden", "true");
     openBtn?.setAttribute("aria-expanded", "false");
     backdrop.hidden = true;
-    setTimeout(() => { drawer.hidden = true; }, 320);
+    setTimeout(() => {
+      drawer.hidden = true;
+    }, 320);
     document.documentElement.classList.remove("lock");
     document.body.classList.remove("lock");
   }
@@ -202,10 +227,21 @@
     }
   });
 
-  // Search fallback: focus #searchInput if present
+  // Search behavior
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!(t instanceof Element)) return;
+
+    const catalogueSearchBtn = t.closest('[data-action="open-catalogue-search"]');
+    if (catalogueSearchBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.dispatchEvent(new CustomEvent("og:catalogue-search-open", {
+        detail: { source: "header-search" }
+      }));
+      return;
+    }
+
     const searchBtn = t.closest('[data-action="open-search"]');
     if (!searchBtn) return;
 
@@ -256,9 +292,9 @@
       const time = asOf ? fmtTime(asOf) : "";
       textEl.innerHTML =
         `<b>Gold</b> $${fmtMoney(gold.price_per_gram)}/g` +
-        ` <span class="muted">•</span> ` +
+        ` <span class="muted">&bull;</span> ` +
         `<b>Silver</b> $${fmtMoney(silver.price_per_gram)}/g` +
-        (time ? ` <span class="muted">• Updated ${time}</span>` : "");
+        (time ? ` <span class="muted">&bull; Updated ${time}</span>` : "");
     } catch (e) {
       console.error("Spot ticker error:", e);
       const textEl = el.querySelector(".spot-text");
@@ -283,6 +319,33 @@
     `;
   }
 
+  function shopIconSvg() {
+    return `
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3.5 4.5 7.7v8.6L12 20.5l7.5-4.2V7.7L12 3.5Z"></path>
+        <path d="M12 3.5v17"></path>
+        <path d="M4.5 7.7 12 12l7.5-4.3"></path>
+      </svg>
+    `;
+  }
+
+  function heartIconSvg() {
+    return `
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 20.2S4 14.9 4 9.3a4.3 4.3 0 0 1 7.4-3.1L12 6.8l.6-.6A4.3 4.3 0 0 1 20 9.3c0 5.6-8 10.9-8 10.9Z"></path>
+      </svg>
+    `;
+  }
+
+  function contactIconSvg() {
+    return `
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+        <path d="m4 7 8 6 8-6"></path>
+      </svg>
+    `;
+  }
+
   function bagIconSvg() {
     return `
       <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -292,3 +355,4 @@
     `;
   }
 })();
+

@@ -234,7 +234,29 @@
     }, ms);
   }
 
-  /* =========================================================
+  const INQUIRY_MESSAGE =
+    window.ogInquiryMode?.message ||
+    "Due to demand and availability, pieces are currently offered by inquiry through our contact page or during our live shows. Save pieces to your Favorites list to keep track of your interest.";
+
+  function saveInterestToFavorites(itemId) {
+    const id = String(itemId || "").trim();
+    if (!id) return { ok: false, state: "missing-id" };
+
+    if (window.ogInquiryMode?.enabled && typeof window.ogInquiryMode.handleFavoriteIntent === "function") {
+      return window.ogInquiryMode.handleFavoriteIntent(id, { source: "item" });
+    }
+
+    const svc = window.ogFavService;
+    if (svc && typeof svc.isFav === "function" && !svc.isFav(id)) {
+      if (typeof svc.add === "function") svc.add(id);
+      else if (typeof svc.toggle === "function") svc.toggle(id);
+    }
+
+    toast(INQUIRY_MESSAGE, 3400);
+    return { ok: true, state: "added" };
+  }
+
+/* =========================================================
      Hero image (rail-free)
   ========================================================= */
   function applyHeroImage(imgUrl) {
@@ -882,11 +904,10 @@
         performSearch(input?.value || "");
         return;
       }
-
-            // --- Cart actions
-      if (action === "go-cart-page") {
+      // --- Interest actions (temporary inquiry mode)
+      if (action === "go-favorites-page" || action === "go-cart-page") {
         e.preventDefault();
-        window.location.assign("./StoreCart/cart.html");
+        window.location.assign("favorites.html");
         return;
       }
 
@@ -896,54 +917,37 @@
         return;
       }
 
-      if (action === "add-to-cart") {
+      if (action === "add-to-favorites" || action === "add-to-cart") {
         e.preventDefault();
 
-        const addBtn = btn; // clicked button
-        const prevLabel = (addBtn && addBtn.textContent) ? addBtn.textContent : "ADD TO CART";
-
+        const addBtn = btn;
+        const prevLabel = (addBtn && addBtn.textContent) ? addBtn.textContent : "ADD TO FAVORITES";
         const id = String(currentItem?.item_type_id || "");
-        const price = Number(currentItem?.display_price) || 0;
-        const remaining = Number(currentItem?.remaining_count);
 
         if (!id) return;
 
-        if (Number.isFinite(remaining) && remaining <= 0) {
-          toast("Sold out.");
-          return;
-          
-        }
-
-        // ✅ Ritual microstates
         if (addBtn) {
           addBtn.classList.add("is-busy");
           addBtn.disabled = true;
           addBtn.setAttribute("aria-busy", "true");
-          addBtn.textContent = "ADDING...";
+          addBtn.textContent = "SAVING...";
         }
 
-        // Perform add
-        window.ogCartService?.addToCart?.(id, 1, price);
-        window.ogCartBadgeRefresh?.();
+        saveInterestToFavorites(id);
 
-        // Pulse the first trust chip
         const trustChip = document.querySelector(".trust-row .trust-chip");
         if (trustChip) {
           trustChip.classList.remove("is-pulsing");
-          void trustChip.offsetWidth; // restart animation
+          void trustChip.offsetWidth;
           trustChip.classList.add("is-pulsing");
           window.setTimeout(() => trustChip.classList.remove("is-pulsing"), 950);
         }
 
-
-        toast("Added — price locked for 15 minutes.");
-
-        // Button resolve
         window.setTimeout(() => {
           if (!addBtn) return;
           addBtn.classList.remove("is-busy");
           addBtn.classList.add("is-added");
-          addBtn.textContent = "ADDED ✓";
+          addBtn.textContent = "SAVED";
         }, 140);
 
         window.setTimeout(() => {
@@ -1105,7 +1109,7 @@
       }
 
       const itemId = String(item?.item_type_id || "");
-      const addBtn = $('[data-action="add-to-cart"]');
+      const addBtn = $('[data-action="add-to-favorites"]') || $('[data-action="add-to-cart"]');
       const favBtn = $('[data-action="toggle-fav"]');
       if (addBtn && itemId) addBtn.dataset.id = itemId;
       if (favBtn && itemId) favBtn.dataset.id = itemId;

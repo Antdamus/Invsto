@@ -454,9 +454,10 @@ select{
 ========================= */
 .hud-wrap{
   position: sticky;
-  top: 0;
-  z-index: 40;
+  top: var(--header-h);
+  z-index: 70;
   padding: 0;
+  scroll-margin-top: calc(var(--header-h) + 8px);
   background: linear-gradient(180deg, rgba(7,7,8,.72), rgba(7,7,8,.14));
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -466,73 +467,11 @@ select{
 }
 .hud-shell{
   display: grid;
-  gap: 10px;
+  gap: 0;
   align-items: start;
 }
 .hud-wrap.is-collapsed .hud-shell{
   gap: 0;
-}
-.hud-compact{
-  width: fit-content;
-  margin-inline: auto;
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: linear-gradient(180deg, rgba(18,19,22,.84), rgba(18,19,22,.68));
-  color: rgba(244,241,234,.92);
-  letter-spacing: .06em;
-  font-size: .73rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  box-shadow: 0 12px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06);
-  backdrop-filter: blur(16px) saturate(120%);
-  -webkit-backdrop-filter: blur(16px) saturate(120%);
-  cursor: pointer;
-  transition:
-    transform var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
-}
-.hud-compact:hover{
-  transform: translateY(-1px);
-  border-color: rgba(200,162,74,.34);
-  color: rgba(244,241,234,.98);
-}
-.hud-compact:focus-visible{
-  outline: none;
-  border-color: rgba(200,162,74,.42);
-  box-shadow:
-    0 14px 48px rgba(0,0,0,.46),
-    0 0 0 3px rgba(200,162,74,.18),
-    inset 0 1px 0 rgba(255,255,255,.08);
-}
-.hud-compact-label{
-  white-space: nowrap;
-}
-.hud-compact-icon{
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255,255,255,.16);
-  font-size: .88rem;
-  line-height: 1;
-  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
-.hud-wrap.is-expanded .hud-compact{
-  border-color: rgba(200,162,74,.30);
-  background: linear-gradient(180deg, rgba(18,19,22,.92), rgba(18,19,22,.76));
-}
-.hud-wrap.is-expanded .hud-compact-icon{
-  transform: rotate(45deg);
-  border-color: rgba(200,162,74,.34);
 }
 .hud-panel{
   overflow: hidden;
@@ -1251,17 +1190,6 @@ select{
   .hud-shell{
     gap: 8px;
   }
-  .hud-compact{
-    width: 100%;
-    justify-content: space-between;
-    padding: 0 14px;
-    letter-spacing: .08em;
-    font-size: .7rem;
-  }
-  .hud-compact-label{
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
   .hud-panel{
     max-height: 640px;
   }
@@ -1296,16 +1224,6 @@ select{
   }
   .hud-wrap.is-collapsed{
     padding-top: 0;
-  }
-  .hud-compact{
-    min-height: 40px;
-    padding: 0 12px;
-    font-size: .68rem;
-  }
-  .hud-compact-icon{
-    width: 18px;
-    height: 18px;
-    font-size: .8rem;
   }
 
   .product-grid{ grid-template-columns: 1fr; }
