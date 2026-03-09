@@ -187,9 +187,10 @@ This keeps story assets isolated, predictable, and aligned with existing relativ
 7. Keep shared header integration intact (`#ogHeaderMount`, `og.header.js`) and avoid global regressions.
 8. Add the canonical cart drawer DOM block to `StoreWebsite/story.html` (match `index.html`/`catalogue.html` structure and `data-ui`/`data-action` hooks) so shared cart scripts function correctly.
 9. Validate cart icon and drawer behavior on story page; confirm open/close, subtotal/count rendering, and navigation behavior with current shared scripts.
-10. Add placeholder image references to proposed story asset paths (without requiring final Miami downloads yet).
-11. Run responsive QA (mobile/tablet/desktop) and reduced-motion QA.
-12. Final content pass for luxury tone consistency and factual messaging.
+10. Add the canonical site footer used in other storefront pages: audit `StoreWebsite/index.html` or `StoreWebsite/catalogue.html` footer markup, replicate the same `site-footer` block in `StoreWebsite/story.html`, keep links consistent (`Contact`, shop/catalogue destination, copyright), and do not redesign the footer.
+11. Add placeholder image references to proposed story asset paths (without requiring final Miami downloads yet).
+12. Run responsive QA (mobile/tablet/desktop) and reduced-motion QA.
+13. Final content pass for luxury tone consistency and factual messaging.
 
 ## Asset Requirements
 - Jewelry images: existing OG inventory visuals or current local story-safe images.
