@@ -1,8 +1,8 @@
-﻿// index.js â€” OG Jewelers Storefront (V2)
+// index.js - OG Jewelers Storefront (V2)
 // Matches your provided index.html (data-ui + data-action hooks).
 // Fixes: search backdrop, X close reliability, close-before-navigate to shop.
 
-console.log("âœ… index.js LOADED â€” storefront v2:", new Date().toISOString());
+console.log("index.js LOADED - storefront v2:", new Date().toISOString());
 /* =========================
    Tiny helpers
 ========================= */
@@ -501,7 +501,7 @@ function dismissNotice() {
 }
 
 /* =========================
-   Collections â†’ catalogue routing
+   Collections -> catalogue routing
 ========================= */
 function wireCollectionRouting() {
   const tiles = $$(".tile[data-collection]");
@@ -631,7 +631,7 @@ function initAccountDropdown() {
   };
 
   const toggleMenu = (e) => {
-    e.preventDefault(); // donâ€™t navigate to profile on click; menu takes over
+    e.preventDefault(); // do not navigate to profile on click; menu takes over
     if (menu.hidden) openMenu();
     else closeMenu();
   };
@@ -798,7 +798,7 @@ case "close-menu": {
 
           const it = invState.map.get(String(id));
           if (!it) {
-            // no crash hydration: show â€œno longer availableâ€ path later on cart hydration
+            // no crash hydration: show "no longer available" path later on cart hydration
             addToCart(id, 1, 0);
             closeQuickview();
             window.ogCartBadgeRefresh?.();
@@ -901,7 +901,7 @@ function onKeyDown(e) {
     }
   }
 
-  // Enter inside search input â†’ go to catalogue with query
+  // Enter inside search input -> go to catalogue with query
   if (isSearchOpen() && e.key === "Enter") {
     const val = (ui.searchInput?.value || "").trim();
     closeSearch();
@@ -981,7 +981,7 @@ async function applyAccountChip(sb) {
 
   if (!chip || !initialsEl) return;
 
-  /* âœ… HARD BASELINE (prevents â€œMember Accessâ€ flash)
+  /* HARD BASELINE (prevents "Member Access" flash)
      Hide everything that depends on auth immediately,
      then reveal the correct UI once session is known. */
   chip.hidden = true;
@@ -1248,7 +1248,7 @@ function renderEbayLiveEvents(events) {
   const grid = document.getElementById("ebay-live-grid");
   if (!grid) return;
 
-  const list = filterAndSortUpcomingEvents(events).slice(0, 4);
+  const list = filterAndSortUpcomingEvents(events).slice(0, 3);
 
   if (!list.length) {
     grid.innerHTML = `
@@ -1259,18 +1259,26 @@ function renderEbayLiveEvents(events) {
     return;
   }
 
+  const liveCount = list.filter((event) => event.status === "live" || event.__isLiveNow).length;
+  const nextEvent = list.find((event) => !(event.status === "live" || event.__isLiveNow));
+  const summaryText = liveCount
+    ? `${liveCount} live now`
+    : nextEvent
+      ? `Next show ${ebayEsc(formatDisplayDate(nextEvent))}`
+      : `${list.length} upcoming events`;
+
   const primary = list[0];
   const secondary = list.slice(1);
 
-  const renderEventCard = (event, variant = "secondary") => {
+  const renderCard = (event, variant = "secondary") => {
     const title = ebayEsc(event.title || "Upcoming eBay Live");
     const seller = ebayEsc(event.seller || "ogjewelers");
     const dateLabel = ebayEsc(formatDisplayDate(event));
     const image = ebayEsc(event.image || "OG-Jewelers.webp");
     const url = ebayEsc(event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs");
-    const liveBadge = (event.status === "live" || event.__isLiveNow)
-      ? `<span class="ebay-live-now-badge">LIVE NOW</span>`
-      : "";
+    const isLive = event.status === "live" || event.__isLiveNow;
+    const liveBadge = isLive ? `<span class="ebay-live-now-badge">LIVE NOW</span>` : "";
+    const status = isLive ? "Now streaming" : "Reserve your spot";
 
     return `
       <a
@@ -1289,19 +1297,21 @@ function renderEbayLiveEvents(events) {
         <div class="ebay-live-body">
           <div class="ebay-live-seller">${seller}</div>
           <h3 class="ebay-live-title">${title}</h3>
-          <div class="ebay-live-link">
-            View event <span aria-hidden="true">-></span>
-          </div>
+          <p class="ebay-live-status">${status}</p>
+          <div class="ebay-live-link">View event</div>
         </div>
       </a>
     `;
   };
 
   grid.innerHTML = `
-    <div class="ebay-live-primary-wrap">
-      ${renderEventCard(primary, "primary")}
+    <div class="ebay-live-runway">
+      <div class="ebay-live-state" aria-label="Event summary">${summaryText}</div>
+      <div class="ebay-live-primary-wrap">
+        ${renderCard(primary, "primary")}
+      </div>
+      ${secondary.length ? `<div class="ebay-live-secondary-wrap">${secondary.map((event) => renderCard(event, "secondary")).join("")}</div>` : ""}
     </div>
-    ${secondary.length ? `<div class="ebay-live-secondary-wrap">${secondary.map((event) => renderEventCard(event, "secondary")).join("")}</div>` : ""}
   `;
 }
 async function loadEbayLiveEvents() {
@@ -1311,7 +1321,7 @@ async function loadEbayLiveEvents() {
   try {
     grid.innerHTML = `
       <div class="ebay-live-empty">
-        Loading upcoming eBay Live eventsâ€¦
+        Loading upcoming eBay Live events...
       </div>
     `;
 
@@ -1335,7 +1345,7 @@ renderEbayLiveEvents(items);
 
     grid.innerHTML = `
       <div class="ebay-live-empty">
-        We couldnâ€™t load the upcoming live events right now.
+        We could not load the upcoming live events right now.
       </div>
     `;
   }

@@ -1,4 +1,4 @@
-/* index.css — OG Jewelers Storefront (V2)
+/* index.css - OG Jewelers Storefront (V2)
    Built for: index.html + index.js (Storefront V2)
    Ultra-luxury noir aesthetic with warm toggle (data-mood="warm")
 */
@@ -36,7 +36,7 @@
   --ease: cubic-bezier(.2,.8,.2,1);
   --ease2: cubic-bezier(.16,1,.3,1);
 
-  /* “gold foil” accent */
+  /* gold foil accent */
   --gold1:#F7E7A8;
   --gold2:#EAC35A;
   --gold3:#B9852E;
@@ -483,8 +483,7 @@ html.lock, body.lock{
   box-shadow: 0 0 18px rgba(234,195,90,.25);
 }
 
-/* =========================
-   5) Hero — full-viewport cinematic video
+/* =========================   5) Hero - full-viewport cinematic video
 ========================= */
 .hero{
   width: 100%;
@@ -625,18 +624,14 @@ html.lock, body.lock{
   margin-top: 18px;
   flex-wrap:wrap;
 }
-/* =========================================================
-   HERO CTA — Premium luxury upgrade
+/* =========================================================   HERO CTA - Premium luxury upgrade
    Purpose:
    - Give "Shop the Collection" real visual presence
    - Lower it slightly in the hero
    - Make it feel like a luxury storefront CTA
    ========================================================= */
 
-
-
-/* =========================================================
-   HERO CTA — stable mobile-safe placement
+/* =========================================================   HERO CTA - stable mobile-safe placement
    ========================================================= */
 
 .hero{
@@ -718,8 +713,6 @@ html.lock, body.lock{
     border-color 220ms var(--ease),
     filter 220ms var(--ease);
 }
-
-
 
 .hero-shop-btn:hover{
   transform: translateY(-2px);
@@ -874,15 +867,6 @@ html.lock, body.lock{
   flex: 0 0 1px;
 }
 
-/* ---------- eBay Live section ---------- */
-.ebay-live-section{
-  position: relative;
-}
-
-.ebay-live-head{
-  align-items: end;
-}
-
 .section-kicker{
   margin: 0 0 10px;
   font-size: 12px;
@@ -891,150 +875,8 @@ html.lock, body.lock{
   color: rgba(244,242,237,.70);
 }
 
-.ebay-live-grid{
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  align-items: stretch;
-}
-
-.ebay-live-card{
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  border-radius: 24px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,.08);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
-    rgba(16,18,22,.54);
-  box-shadow: 0 16px 52px rgba(0,0,0,.34);
-  transition:
-    transform .22s var(--ease),
-    border-color .22s var(--ease),
-    box-shadow .22s var(--ease),
-    background .22s var(--ease);
-}
-
-.ebay-live-card:hover{
-  transform: translateY(-4px);
-  border-color: rgba(234,195,90,.22);
-  box-shadow: 0 22px 70px rgba(0,0,0,.42);
-}
-
-.ebay-live-thumb{
-  position: relative;
-  aspect-ratio: 4 / 5;
-  overflow: hidden;
-  background: rgba(255,255,255,.03);
-}
-
-.ebay-live-thumb img{
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.ebay-live-date{
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.96);
-  color: #111317;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .01em;
-  box-shadow: 0 10px 30px rgba(0,0,0,.16);
-}
-
-.ebay-live-body{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 14px 16px;
-}
-
-.ebay-live-seller{
-  font-size: 12px;
-  letter-spacing: .10em;
-  text-transform: uppercase;
-  color: var(--gold1);
-}
-
-.ebay-live-title{
-  margin: 0;
-  font-family: var(--sans);
-  font-size: 15px;
-  line-height: 1.45;
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.ebay-live-link{
-  margin-top: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--ink2);
-  transition: gap .18s var(--ease), color .18s var(--ease);
-}
-
-.ebay-live-card:hover .ebay-live-link{
-  gap: 10px;
-  color: var(--gold1);
-}
-
-.ebay-live-empty{
-  grid-column: 1 / -1;
-  padding: 24px;
-  border-radius: 24px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
-  color: var(--muted);
-  text-align: center;
-}
-/* eBay live now badge */
-.ebay-live-now-badge{
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  z-index: 3;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 12px;
-
-  border-radius: 999px;
-  border: 1px solid rgba(255, 90, 90, 0.34);
-  background: rgba(140, 12, 20, 0.88);
-  color: rgba(255, 240, 240, 0.96);
-
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-
-  box-shadow:
-    0 10px 30px rgba(0,0,0,.22),
-    0 0 18px rgba(255, 70, 70, .18);
-}
 /* ---------- responsive ---------- */
 @media (max-width: 1100px){
-  .ebay-live-grid{
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 820px){
@@ -1046,9 +888,6 @@ html.lock, body.lock{
     min-width: 120px;
   }
 
-  .ebay-live-grid{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 640px){
@@ -1076,22 +915,6 @@ html.lock, body.lock{
     font-size: 11px;
   }
 
-  .ebay-live-grid{
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  .ebay-live-thumb{
-    aspect-ratio: 16 / 10;
-  }
-
-  .ebay-live-body{
-    padding: 13px 13px 15px;
-  }
-
-  .ebay-live-title{
-    font-size: 14px;
-  }
 }
 /* Shared buttons */
 .btn{
@@ -1314,275 +1137,15 @@ html.lock, body.lock{
   100%{ transform: translateX(280%); opacity:0; }
 }
 
-/* =========================================================
-   OG VIP COMMUNITY — refined minimalist luxury version
    ========================================================= */
-
-.vip-section{
-  padding: 28px 0 46px;
-}
-
-.vip-wrap{
-  position: relative;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: clamp(34px, 5vw, 58px) clamp(20px, 4vw, 42px);
-  border-radius: 30px;
-  border: 1px solid rgba(255,255,255,.08);
-  text-align: center;
-  background:
-    radial-gradient(700px 260px at 50% -10%, rgba(234,195,90,.10), transparent 60%),
-    linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015)),
-    rgba(12,14,18,.76);
-  box-shadow:
-    0 24px 80px rgba(0,0,0,.34),
-    inset 0 1px 0 rgba(255,255,255,.04);
-  overflow: hidden;
-}
-
-.vip-wrap::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.04), transparent 22%),
-    linear-gradient(135deg, rgba(234,195,90,.08), transparent 20%, transparent 80%, rgba(234,195,90,.05));
-  opacity:.9;
-}
-
-.vip-eyebrow{
-  position: relative;
-  z-index: 1;
-  margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .24em;
-  text-transform: uppercase;
-  color: rgba(244,242,237,.62);
-}
-
-.vip-heading{
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  font-family: var(--serif);
-  font-size: clamp(34px, 5vw, 56px);
-  line-height: .98;
-  font-weight: 600;
-  letter-spacing: .01em;
-  color: var(--ink);
-  text-wrap: balance;
-}
-
-.vip-subtitle{
-  position: relative;
-  z-index: 1;
-  margin: 14px auto 0;
-  max-width: 620px;
-  font-size: 17px;
-  line-height: 1.5;
-  color: var(--ink2);
-}
-
-.vip-perks{
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 34px;
-}
-
-.vip-perk{
-  min-height: 158px;
-  padding: 24px 16px 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(255,255,255,.08);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)),
-    rgba(255,255,255,.015);
-  box-shadow:
-    0 14px 36px rgba(0,0,0,.18),
-    inset 0 1px 0 rgba(255,255,255,.03);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  transition:
-    transform .22s var(--ease),
-    border-color .22s var(--ease),
-    background .22s var(--ease),
-    box-shadow .22s var(--ease);
-}
-
-.vip-perk:hover{
-  transform: translateY(-4px);
-  border-color: rgba(234,195,90,.18);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.018)),
-    rgba(255,255,255,.02);
-  box-shadow:
-    0 18px 44px rgba(0,0,0,.24),
-    inset 0 1px 0 rgba(255,255,255,.04);
-}
-
-.vip-icon{
-  display: grid;
-  place-items: center;
-  width: 58px;
-  height: 58px;
-  margin-bottom: 18px;
-  border-radius: 50%;
-  border: 1px solid rgba(234,195,90,.22);
-  background:
-    radial-gradient(circle at 30% 30%, rgba(255,240,190,.12), transparent 65%),
-    rgba(234,195,90,.06);
-  color: var(--gold1);
-  font-size: 23px;
-  line-height: 1;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.04),
-    0 10px 24px rgba(0,0,0,.16);
-}
-
-.vip-perk p{
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  font-weight: 500;
-  color: rgba(244,242,237,.88);
-  text-wrap: balance;
-}
-
-.vip-cta-row{
-  position: relative;
-  z-index: 1;
-  margin-top: 30px;
-  display: flex;
-  justify-content: center;
-}
-
-.vip-cta{
-  min-width: 280px;
-  min-height: 56px;
-  padding: 0 28px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  text-decoration: none;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: #15120d;
-  border: 1px solid rgba(234,195,90,.34);
-  background:
-    radial-gradient(circle at 30% 30%, rgba(255,240,190,.22), rgba(255,240,190,0) 58%),
-    linear-gradient(180deg, rgba(245,214,126,.98), rgba(214,168,70,.96));
-  box-shadow:
-    0 18px 44px rgba(0,0,0,.28),
-    0 0 0 1px rgba(255,255,255,.08) inset,
-    0 0 24px rgba(234,195,90,.14);
-  transition:
-    transform .22s var(--ease),
-    box-shadow .22s var(--ease),
-    filter .22s var(--ease),
-    border-color .22s var(--ease);
-}
-
-.vip-cta:hover{
-  transform: translateY(-3px);
-  filter: brightness(1.03);
-  border-color: rgba(245,214,126,.46);
-  box-shadow:
-    0 24px 56px rgba(0,0,0,.34),
-    0 0 0 1px rgba(255,255,255,.10) inset,
-    0 0 34px rgba(234,195,90,.18);
-}
-
-.vip-cta:focus-visible{
-  outline: none;
-  box-shadow: var(--ring);
-}
 
 /* ---------- Tablet ---------- */
 @media (max-width: 980px){
-  .vip-perks{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 /* ---------- Mobile ---------- */
 @media (max-width: 640px){
-  .vip-section{
-    padding: 18px 0 30px;
-  }
 
-  .vip-wrap{
-    border-radius: 24px;
-    padding: 26px 16px 28px;
-  }
-
-  .vip-heading{
-    font-size: clamp(28px, 10vw, 40px);
-  }
-
-  .vip-subtitle{
-    font-size: 15px;
-    max-width: 30ch;
-  }
-
-  .vip-perks{
-    grid-template-columns: 1fr;
-    gap: 12px;
-    margin-top: 24px;
-  }
-
-  .vip-perk{
-    min-height: auto;
-    padding: 18px 14px 16px;
-    border-radius: 20px;
-  }
-
-  .vip-icon{
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  margin-bottom: 20px;
-  border: 0;
-  background: transparent;
-  color: var(--gold1);
-  font-size: 23px;
-  line-height: 1;
-  box-shadow: none;
-}
-.vip-icon-custom{
-  padding: 0;
-  overflow: visible;
-}
-
-.vip-icon-img{
-  display: block;
-  width: 42px;
-  height: 42px;
-  object-fit: contain;
-}
-  .vip-perk p{
-    font-size: 13px;
-  }
-
-  .vip-cta-row{
-    margin-top: 22px;
-  }
-
-  .vip-cta{
-    width: 100%;
-    min-width: 0;
-  }
 }
 
 /* =========================
@@ -1751,8 +1314,6 @@ min-height: 2.2em;
   100%{ transform: translateZ(0) scale(1); }
 }
 
-
-
 /* =========================
    9) Footer
 ========================= */
@@ -1898,10 +1459,9 @@ min-height: 2.2em;
   font-size: 22px;
   letter-spacing:.01em;
 }
-/* ادامه index.css از جایی که قطع شد */
+/* index.css continuation */
 
-/* =========================
-   10) Drawer (mobile menu) — continued
+/* =========================   10) Drawer (mobile menu) - continued
 ========================= */
 
 .drawer-nav{
@@ -2036,7 +1596,7 @@ min-height: 2.2em;
   content:"";
   position:absolute;
   inset:0;
-  /* Neutral vignette + soft highlight — no gold tint */
+  /* Neutral vignette + soft highlight - no gold tint */
   background:
     radial-gradient(900px 340px at 55% 5%, rgba(255,255,255,.06), transparent 60%),
     linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.58));
@@ -2653,8 +2213,6 @@ min-height: 2.2em;
   background: rgba(255,255,255,0.10);
 }
 
-
-
 /* =========================
    Cart badge (Phase 2)
 ========================= */
@@ -2737,47 +2295,9 @@ min-height: 2.2em;
 
 }
 
-/* =========================================================
-   VIP ICON HALO REMOVAL — hard override
    Paste at the VERY BOTTOM of index.css
    ========================================================= */
 
-.vip-icon,
-.vip-icon-custom{
-  width: 64px !important;
-  height: 64px !important;
-  margin-bottom: 20px !important;
-  padding: 0 !important;
-  display: grid !important;
-  place-items: center !important;
-  border: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  outline: none !important;
-  overflow: visible !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
-.vip-icon::before,
-.vip-icon::after,
-.vip-icon-custom::before,
-.vip-icon-custom::after{
-  content: none !important;
-  display: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  border: none !important;
-}
-
-.vip-icon-img{
-  display: block !important;
-  width: 42px !important;
-  height: 42px !important;
-  object-fit: contain !important;
-  filter: none !important;
-}
 /* =========================================================
    Homepage Editorial Flow Overrides
    ========================================================= */
@@ -2915,58 +2435,6 @@ min-height: 2.2em;
   text-decoration: none;
 }
 
-.ebay-live-layout{
-  display: grid;
-  grid-template-columns: minmax(260px, .9fr) minmax(0, 1.35fr);
-  gap: clamp(22px, 3vw, 36px);
-}
-
-.ebay-live-copy{
-  display: grid;
-  gap: 14px;
-}
-
-.ebay-live-points{
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 8px;
-}
-
-.ebay-live-points li{
-  position: relative;
-  padding-left: 16px;
-  color: rgba(244,242,237,.82);
-  font-size: 13px;
-}
-
-.ebay-live-points li::before{
-  content: "";
-  position: absolute;
-  left: 0;
-  top: .56em;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(234,195,90,.92);
-}
-
-.ebay-live-cta{ justify-self: start; }
-
-.ebay-live-grid{ display: grid; gap: 14px; }
-.ebay-live-primary-wrap{ display: grid; }
-.ebay-live-secondary-wrap{ display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-.ebay-live-card.is-primary .ebay-live-thumb{ aspect-ratio: 16/9; }
-.ebay-live-card.is-secondary .ebay-live-thumb{ aspect-ratio: 6/5; }
-
-.ebay-live-link{
-  font-size: 12px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
 @media (max-width: 1100px){
   .featured-signature-grid{
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2978,7 +2446,6 @@ min-height: 2.2em;
 
   .featured-signature-card.is-primary .featured-signature-media{ min-height: 340px; }
 
-  .ebay-live-layout{ grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px){
@@ -3007,6 +2474,617 @@ min-height: 2.2em;
     height: 260px;
   }
 
-  .ebay-live-secondary-wrap{ grid-template-columns: 1fr; }
-  .ebay-live-card.is-secondary .ebay-live-thumb{ aspect-ratio: 16/10; }
+}
+
+
+
+/* =========================================================
+   eBay Live + VIP Final Polish
+   ========================================================= */
+
+.ebay-live-section{
+  position: relative;
+  isolation: isolate;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding: clamp(28px, 6vh, 64px) 0 clamp(12px, 2.8vh, 24px);
+  overflow: clip;
+}
+
+.ebay-live-section::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(85% 70% at 78% 38%, rgba(234,195,90,.16), transparent 64%),
+    url("VIP-Community-Background.svg") center / cover no-repeat;
+  opacity: .34;
+  filter: saturate(.92) contrast(1.04);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: -2;
+}
+
+.ebay-live-section::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(100deg, rgba(5,6,9,.58) 0%, rgba(5,6,9,.36) 48%, rgba(5,6,9,.58) 100%),
+    linear-gradient(180deg, rgba(5,6,9,.10), rgba(5,6,9,.22) 56%, rgba(5,6,9,.14));
+  pointer-events: none;
+  z-index: -1;
+}
+
+.ebay-live-shell{
+  width: min(1180px, calc(100% - 56px));
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+  z-index: 1;
+}
+
+.ebay-live-topbar{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: 18px;
+  row-gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.ebay-live-topbar-copy{
+  max-width: 64ch;
+}
+
+.ebay-live-eyebrow{
+  margin: 0 0 7px;
+  font-size: 11px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: rgba(244,242,237,.63);
+}
+
+.ebay-live-heading{
+  margin: 0;
+  font-size: clamp(30px, 3.2vw, 40px);
+  line-height: 1.04;
+}
+
+.ebay-live-intro{
+  margin: 9px 0 0;
+  max-width: 58ch;
+  color: var(--ink2);
+  line-height: 1.55;
+}
+
+.ebay-live-topbar-actions{
+  align-self: end;
+  justify-self: end;
+}
+
+.ebay-live-toplink{
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: transparent;
+  color: rgba(244,242,237,.84);
+  text-decoration: none;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: .13em;
+  transition: border-color .2s var(--ease), color .2s var(--ease), transform .2s var(--ease);
+}
+
+.ebay-live-toplink:hover{
+  border-color: rgba(234,195,90,.30);
+  color: var(--gold1);
+  transform: translateY(-1px);
+}
+
+.ebay-live-meta-row{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ebay-live-meta-row span{
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 999px;
+  background: rgba(255,255,255,.012);
+  color: rgba(244,242,237,.70);
+  font-size: 10px;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+}
+
+.ebay-live-grid{
+  display: block;
+}
+
+.ebay-live-runway{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "state state"
+    "primary primary"
+    "secondary secondary";
+  gap: 14px;
+  align-items: start;
+}
+
+.ebay-live-state{
+  grid-area: state;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(234,195,90,.24);
+  border-radius: 999px;
+  color: rgba(247,231,168,.90);
+  font-size: 10px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.ebay-live-primary-wrap{
+  grid-area: primary;
+}
+
+.ebay-live-secondary-wrap{
+  grid-area: secondary;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ebay-live-card{
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ebay-live-thumb{
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  background: rgba(255,255,255,.015);
+}
+
+.ebay-live-card.is-primary .ebay-live-thumb{
+  aspect-ratio: 21 / 9;
+}
+
+.ebay-live-card.is-secondary .ebay-live-thumb{
+  aspect-ratio: 16 / 10;
+}
+
+.ebay-live-thumb img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform .32s var(--ease);
+}
+
+.ebay-live-thumb::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.54));
+}
+
+.ebay-live-card:hover .ebay-live-thumb img{
+  transform: scale(1.016);
+}
+
+.ebay-live-date{
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(255,255,255,.92);
+  color: #11151d;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ebay-live-now-badge{
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,115,115,.30);
+  background: rgba(120,16,26,.90);
+  color: rgba(255,244,244,.94);
+  font-size: 10px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.ebay-live-body{
+  padding: 11px 2px 2px;
+  display: grid;
+  gap: 6px;
+}
+
+.ebay-live-card.is-primary .ebay-live-body{
+  gap: 7px;
+  padding-top: 12px;
+}
+
+.ebay-live-seller{
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(234,195,90,.90);
+}
+
+.ebay-live-title{
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.3;
+  font-weight: 560;
+}
+
+.ebay-live-card.is-primary .ebay-live-title{
+  font-family: var(--serif);
+  font-size: clamp(28px, 2.45vw, 38px);
+  line-height: 1.06;
+}
+
+.ebay-live-card.is-secondary .ebay-live-title{
+  font-size: 16px;
+}
+
+.ebay-live-status{
+  margin: 0;
+  color: rgba(244,242,237,.67);
+  font-size: 13px;
+  line-height: 1.42;
+}
+
+.ebay-live-link{
+  margin-top: 4px;
+  color: rgba(244,242,237,.87);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.ebay-live-card:hover .ebay-live-link{
+  color: var(--gold1);
+}
+
+.ebay-live-empty{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.012);
+  border-radius: 18px;
+  padding: 22px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.vip-section{
+  position: relative;
+  isolation: isolate;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  padding: clamp(20px, 3.8vh, 36px) 0 clamp(36px, 6vh, 70px);
+  overflow: clip;
+  margin-top: -1px;
+}
+
+.vip-section::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(85% 70% at 78% 38%, rgba(234,195,90,.18), transparent 64%),
+    url("VIP-Community-Background.svg") center / cover no-repeat;
+  opacity: .44;
+  filter: saturate(.98) contrast(1.08) brightness(1.04);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: -2;
+}
+
+.vip-section::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(100deg, rgba(5,6,9,.58) 0%, rgba(5,6,9,.36) 48%, rgba(5,6,9,.58) 100%),
+    linear-gradient(180deg, rgba(5,6,9,.12), rgba(5,6,9,.24) 56%, rgba(5,6,9,.16));
+  pointer-events: none;
+  z-index: -1;
+}
+
+.vip-wrap{
+  width: min(980px, calc(100% - 56px));
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  position: relative;
+  z-index: 1;
+}
+
+.vip-wrap::before,
+.vip-wrap::after{
+  content: none;
+}
+
+.vip-eyebrow{
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: rgba(244,242,237,.66);
+}
+
+.vip-heading{
+  margin: 8px 0 0;
+  font-size: clamp(30px, 3.1vw, 42px);
+  line-height: 1.04;
+}
+
+.vip-subtitle{
+  margin: 12px 0 0;
+  max-width: 56ch;
+  color: rgba(244,242,237,.80);
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.vip-perks{
+  margin-top: 34px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 170px));
+  justify-content: center;
+  gap: 18px 22px;
+}
+
+.vip-perk{
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 11px;
+  align-content: start;
+  transition: transform .25s var(--ease);
+}
+
+.vip-icon,
+.vip-icon-custom{
+  width: 56px;
+  height: 56px;
+  border-radius: 15px;
+  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(255,255,255,.03);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+.vip-icon-img{
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  display: block;
+}
+
+.vip-perk p{
+  margin: 0;
+  max-width: 16ch;
+  color: rgba(244,242,237,.84);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vip-perk:hover{
+  transform: translateY(-2px);
+}
+
+.vip-cta-row{
+  margin-top: 40px;
+  display: flex;
+  justify-content: center;
+}
+
+.vip-cta{
+  min-height: 50px;
+  min-width: clamp(240px, 34vw, 320px);
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  color: rgba(244,242,237,.95);
+  text-decoration: none;
+  font-size: 11px;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
+}
+
+.vip-cta:hover{
+  transform: translateY(-2px);
+  border-color: rgba(234,195,90,.38);
+  color: var(--gold1);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
+}
+
+.vip-cta:focus-visible{
+  outline: 2px solid rgba(234,195,90,.42);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1100px){
+  .ebay-live-topbar{
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .ebay-live-runway{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "state"
+      "primary"
+      "secondary";
+  }
+
+  .ebay-live-secondary-wrap{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vip-wrap{
+    width: min(900px, calc(100% - 44px));
+  }
+
+  .vip-perks{
+    grid-template-columns: repeat(2, minmax(0, 190px));
+    gap: 18px 20px;
+  }
+}
+
+@media (max-width: 760px){
+  .ebay-live-section{
+    padding: 16px 0 10px;
+  }
+
+  .ebay-live-section::before{
+    inset: 0;
+    background-position: 56% center;
+    opacity: .24;
+    mix-blend-mode: normal;
+  }
+
+  .ebay-live-shell{
+    width: calc(100% - 32px);
+  }
+
+  .ebay-live-intro{
+    font-size: 14px;
+  }
+
+  .ebay-live-meta-row{
+    margin-bottom: 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: center;
+  }
+
+  .ebay-live-meta-row span{
+    width: 100%;
+    min-height: 30px;
+    justify-content: center;
+  }
+
+  .ebay-live-meta-row span:last-child{
+    grid-column: 1 / -1;
+    justify-self: center;
+    max-width: 230px;
+  }
+
+  .ebay-live-secondary-wrap{
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .ebay-live-card.is-primary .ebay-live-thumb{
+    aspect-ratio: 16 / 9;
+  }
+
+  .ebay-live-card.is-secondary .ebay-live-thumb{
+    aspect-ratio: 16 / 10;
+  }
+
+  .vip-section{
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    min-height: 0;
+    padding: 18px 0 34px;
+  }
+
+  .vip-section::before{
+    inset: 0;
+    background-position: 60% center;
+    background-size: cover;
+    opacity: .34;
+    mix-blend-mode: normal;
+  }
+
+  .vip-wrap{
+    width: calc(100% - 28px);
+  }
+
+  .vip-heading{
+    font-size: clamp(38px, 7vw, 46px);
+  }
+
+  .vip-perks{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 12px;
+  }
+
+  .vip-perk p{
+    max-width: 15ch;
+  }
+
+  .vip-cta-row{
+    margin-top: 28px;
+  }
+
+  .vip-cta{
+    width: min(360px, 100%);
+    min-height: 48px;
+    padding-inline: 20px;
+  }
 }
