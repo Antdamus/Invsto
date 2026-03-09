@@ -90,24 +90,14 @@
     </section>
 
     <!-- Sticky filter HUD -->
-    <section class="hud-wrap is-expanded" aria-label="Shop controls" data-ui="catalogue-hud">
+    <section class="hud-wrap is-collapsed" aria-label="Shop controls" data-ui="catalogue-hud">
       <div class="container hud-shell">
-        <button id="catalogueHudToggle"
-                class="hud-compact"
-                type="button"
-                data-action="toggle-hud"
-                aria-controls="catalogueHudPanel"
-                aria-expanded="true">
-          <span class="hud-compact-label">Catalogue &bull; Sort &amp; Filter</span>
-          <span class="hud-compact-icon" aria-hidden="true">+</span>
-        </button>
-
         <div id="catalogueHudPanel"
              class="hud-panel"
              data-ui="catalogue-hud-panel"
              role="region"
              aria-label="Filter and sort controls"
-             aria-hidden="false">
+             aria-hidden="true">
           <div class="hud">
             <!-- Search -->
             <div class="hud-search" role="search">

@@ -22,6 +22,8 @@
   const hrefCart = isStoreCart ? `./cart.html` : `./StoreCart/cart.html`;
 
   const isCartPage = /\/cart\.html$/i.test(window.location.pathname);
+  const isCataloguePage = /(?:^|\/)catalogue\.html$/i.test(window.location.pathname);
+  const searchAction = isCataloguePage ? "open-catalogue-search" : "open-search";
 
   // On NON-cart pages: keep href fallback + drawer action
   // On cart page: plain anchor only
@@ -83,7 +85,7 @@
 
         <div class="header-zone header-zone-right">
           <div class="header-actions">
-            <button class="icon-btn" type="button" aria-label="Search" data-action="open-search">
+            <button class="icon-btn" type="button" aria-label="${isCataloguePage ? "Search catalogue" : "Search"}" data-action="${searchAction}">
               ${searchIconSvg()}
             </button>
 
@@ -225,10 +227,21 @@
     }
   });
 
-  // Search fallback: focus #searchInput if present
+  // Search behavior
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!(t instanceof Element)) return;
+
+    const catalogueSearchBtn = t.closest('[data-action="open-catalogue-search"]');
+    if (catalogueSearchBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.dispatchEvent(new CustomEvent("og:catalogue-search-open", {
+        detail: { source: "header-search" }
+      }));
+      return;
+    }
+
     const searchBtn = t.closest('[data-action="open-search"]');
     if (!searchBtn) return;
 
