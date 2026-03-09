@@ -1,6 +1,6 @@
+﻿
 
-
-<!-- index.html — OG Jewelers (Storefront V2) -->
+<!-- index.html â€” OG Jewelers (Storefront V2) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -8,8 +8,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
 
-  <title>OG Jewelers — Signature Pieces</title>
-  <meta name="description" content="OG Jewelers — curated fine jewelry with a luxury browsing experience." />
+  <title>OG Jewelers â€” Signature Pieces</title>
+  <meta name="description" content="OG Jewelers â€” curated fine jewelry with a luxury browsing experience." />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -73,7 +73,7 @@
     
     </section>
 
-    <!-- The Trust section under the hero video-->
+        <!-- The Trust section under the hero video-->
     <section class="trust-strip">
   <div class="container trust-inner">
 
@@ -98,37 +98,133 @@
 
   </div>
 </section>
-<!-- EBAY LIVE -->
-<section class="section ebay-live-section" id="ebay-live" aria-label="Upcoming eBay Live auctions">
-  <div class="section-head ebay-live-head">
-    <div>
-      <p class="section-kicker">OG Jewelers × eBay Live</p>
-      <h2 class="section-title">Upcoming Live Auctions</h2>
-      <p class="section-sub">
-        Save upcoming shows and join OG Jewelers live on eBay for exclusive deals,
-        first-access pieces, and real-time bidding.
-      </p>
-    </div>
 
-    <div class="section-actions">
-      <a
-        class="text-link"
-        href="https://www.ebay.com/ebaylive/events"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        View all on eBay →
-      </a>
+<section class="section editorial-bridge" aria-label="Editorial bridge">
+  <div class="editorial-bridge-inner">
+    <p class="editorial-bridge-eyebrow">Curated for OG</p>
+    <h2 class="editorial-bridge-title">Signature pieces and live moments</h2>
+    <p class="editorial-bridge-copy">
+      Explore a refined edit from the catalogue, then step into our upcoming eBay Live events for rare finds, first access, and real-time energy.
+    </p>
+  </div>
+</section>
+
+<section class="section featured-section featured-signature" id="featured" aria-label="The OG Edit">
+  <div class="section-head featured-signature-head">
+    <div>
+      <p class="section-kicker featured-signature-eyebrow">Signature Edit</p>
+      <h2 class="section-title featured-signature-title" data-slot="featured.title">The OG Edit</h2>
+      <p class="section-sub featured-signature-sub" data-slot="featured.subtitle">A refined selection from the current drop.</p>
     </div>
   </div>
 
- <div id="ebay-live-grid" class="ebay-live-grid" aria-live="polite" aria-label="Upcoming eBay Live events"></div>
-  
-    <!-- JS injects event cards here -->
+  <div class="featured-signature-actions">
+    <button class="featured-signature-rotate" type="button" data-action="shuffle-featured" aria-label="Rotate featured picks">
+      Rotate picks
+    </button>
+  </div>
 
+  <div class="cards featured-signature-grid" data-ui="featured-grid">
+    <article class="card featured-signature-card is-primary" data-slot="featured.1" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
+        <div class="card-media featured-signature-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
+        <div class="card-body featured-signature-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.1.badge">New</span>
+            <span class="price" data-slot="featured.1.price">$2,999</span>
+          </div>
+          <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
+          <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
+        </div>
+      </button>
+
+      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Diamond Ring to favorites" title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+    </article>
+
+    <article class="card featured-signature-card is-secondary is-secondary-a" data-slot="featured.2" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
+        <div class="card-media featured-signature-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
+        <div class="card-body featured-signature-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.2.badge">Best Value</span>
+            <span class="price" data-slot="featured.2.price">$1,799</span>
+          </div>
+          <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
+          <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
+        </div>
+      </button>
+
+      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Gold Chain to favorites" title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+    </article>
+
+    <article class="card featured-signature-card is-secondary is-secondary-b" data-slot="featured.3" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
+        <div class="card-media featured-signature-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
+        <div class="card-body featured-signature-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.3.badge">Limited</span>
+            <span class="price" data-slot="featured.3.price">$9,499</span>
+          </div>
+          <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
+          <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
+        </div>
+      </button>
+
+      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Luxury Watch to favorites" title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+    </article>
+
+    <article class="card featured-signature-card is-tertiary" data-slot="featured.4" data-item-id="">
+      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
+        <div class="card-media featured-signature-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
+        <div class="card-body featured-signature-body">
+          <div class="card-top">
+            <span class="badge" data-slot="featured.4.badge">OG Pick</span>
+            <span class="price" data-slot="featured.4.price">$4,599</span>
+          </div>
+          <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
+          <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
+        </div>
+      </button>
+
+      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Diamond Necklace to favorites" title="Add to favorites">
+        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
+      </button>
+    </article>
+  </div>
+
+  <div class="featured-clean-footer">
+    <a class="featured-clean-link" href="catalogue.html">Shop the full catalogue</a>
+  </div>
 </section>
 
-<!-- OG VIP COMMUNITY -->
+<section class="section ebay-live-section" id="ebay-live" aria-label="Upcoming eBay Live auctions">
+  <div class="ebay-live-layout">
+    <div class="ebay-live-copy">
+      <p class="section-kicker">OG Jewelers x eBay Live</p>
+      <h2 class="section-title">Live Auction Spotlight</h2>
+      <p class="section-sub">
+        Join OG Jewelers on eBay Live for first-access pieces, fast-moving deals, and one-of-a-kind moments.
+      </p>
+      <ul class="ebay-live-points" aria-label="eBay Live highlights">
+        <li>First-access drops</li>
+        <li>Exclusive live pricing</li>
+        <li>Rare pieces in real time</li>
+      </ul>
+      <a class="btn btn-primary ebay-live-cta" href="https://www.ebay.com/ebaylive/events" target="_blank" rel="noopener noreferrer">
+        Join on eBay
+      </a>
+    </div>
+
+    <div id="ebay-live-grid" class="ebay-live-grid" aria-live="polite" aria-label="Upcoming eBay Live events"></div>
+  </div>
+</section>
+
 <section class="section vip-section" id="vip-community" aria-label="OG VIP Community">
   <div class="vip-wrap">
     <p class="vip-eyebrow">Private Access</p>
@@ -136,7 +232,7 @@
     <h2 class="vip-heading">OG VIP Community</h2>
 
     <p class="vip-subtitle">
-      Only the best, nothing less.
+      Continue your insider experience with private alerts, early access, and concierge support.
     </p>
 
     <div class="vip-perks" aria-label="OG VIP Community perks">
@@ -165,146 +261,18 @@
        <div class="vip-icon vip-icon-custom" aria-hidden="true">
         <img src="VIP-OG.svg" alt="" class="vip-icon-img">
         </div>
-        
-        <p>Personalized service<br>VIP support</p>
+
+       <p>Personalized service<br>VIP support</p>
       </article>
     </div>
 
     <div class="vip-cta-row">
-      <a
-        class="vip-cta"
-        href="https://chat.whatsapp.com/YOUR-LINK-HERE"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
+      <a class="vip-cta" href="https://chat.whatsapp.com/YOUR-LINK-HERE" target="_blank" rel="noopener noreferrer">
         Join the VIP Community!
       </a>
     </div>
   </div>
 </section>
-
-
-
-   <!-- FEATURED (dynamic-ready grid) -->
-<section class="section featured-section" id="featured" aria-label="Featured Pieces">
-  <div class="section-head">
-    <div>
-      <h2 class="section-title" data-slot="featured.title">Featured Pieces</h2>
-      <p class="section-sub" data-slot="featured.subtitle">Curated standouts — save favorites or tap for quick view.</p>
-    </div>
-
-    <div class="section-actions">
-      <button class="chip" type="button" data-action="shuffle-featured">
-        Shuffle
-      </button>
-      <a class="text-link" href="catalogue.html">Shop featured →</a>
-    </div>
-  </div>
-
-  <!-- JS will optionally replace these with live featured picks -->
-  <div class="cards" data-ui="featured-grid">
-    <article class="card" data-slot="featured.1" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
-        <div class="card-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
-        <div class="card-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.1.badge">New</span>
-            <span class="price" data-slot="featured.1.price">$2,999</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
-          <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
-        </div>
-      </button>
-
-      <button
-        class="fav-toggle"
-        type="button"
-        data-action="toggle-fav"
-        aria-pressed="false"
-        aria-label="Add Diamond Ring to favorites"
-        title="Add to favorites"
-      >
-        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-      </button>
-    </article>
-
-    <article class="card" data-slot="featured.2" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
-        <div class="card-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
-        <div class="card-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.2.badge">Best Value</span>
-            <span class="price" data-slot="featured.2.price">$1,799</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
-          <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
-        </div>
-      </button>
-
-      <button
-        class="fav-toggle"
-        type="button"
-        data-action="toggle-fav"
-        aria-pressed="false"
-        aria-label="Add Gold Chain to favorites"
-        title="Add to favorites"
-      >
-        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-      </button>
-    </article>
-
-    <article class="card" data-slot="featured.3" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
-        <div class="card-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
-        <div class="card-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.3.badge">Limited</span>
-            <span class="price" data-slot="featured.3.price">$9,499</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
-          <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
-        </div>
-      </button>
-
-      <button
-        class="fav-toggle"
-        type="button"
-        data-action="toggle-fav"
-        aria-pressed="false"
-        aria-label="Add Luxury Watch to favorites"
-        title="Add to favorites"
-      >
-        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-      </button>
-    </article>
-
-    <article class="card" data-slot="featured.4" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
-        <div class="card-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
-        <div class="card-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.4.badge">OG Pick</span>
-            <span class="price" data-slot="featured.4.price">$4,599</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
-          <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
-        </div>
-      </button>
-
-      <button
-        class="fav-toggle"
-        type="button"
-        data-action="toggle-fav"
-        aria-pressed="false"
-        aria-label="Add Diamond Necklace to favorites"
-        title="Add to favorites"
-      >
-        <span class="fav-toggle-icon" aria-hidden="true">♡</span>
-      </button>
-    </article>
-  </div>
-</section>
-   
 
     <!-- Footer -->
     <footer class="site-footer" id="contact">
@@ -345,7 +313,7 @@
       </div>
 
       <div class="container footer-bottom">
-        <p>© <span id="year">2026</span> OG Jewelry. All rights reserved.</p>
+        <p>Â© <span id="year">2026</span> OG Jewelry. All rights reserved.</p>
         <div class="footer-legal">
           <a href="privacy.html">Privacy</a>
           <a href="terms.html">Terms</a>
@@ -360,7 +328,7 @@
     <div class="modal-shell">
       <div class="modal-top">
         <div class="modal-title" data-ui="qv-title">Quick View</div>
-        <button class="icon-btn" type="button" aria-label="Close" data-action="close-modal">×</button>
+        <button class="icon-btn" type="button" aria-label="Close" data-action="close-modal">Ã—</button>
       </div>
 
       <div class="modal-grid">
@@ -379,13 +347,13 @@
     <button class="btn btn-ghost" type="button" data-action="add-to-cart">
       Add to cart
     </button>
-    <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop →</a>
+    <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop â†’</a>
   </div>
 </div>
 
 
 <div class="modal-note" data-ui="qv-note">
-  Ships fast • Premium sourcing • Limited drops
+  Ships fast â€¢ Premium sourcing â€¢ Limited drops
 </div>
 
         </div>
@@ -398,11 +366,11 @@
     <div class="search-shell">
       <div class="search-top">
         <div class="search-title">Search</div>
-        <button class="icon-btn" type="button" aria-label="Close search" data-action="close-search">×</button>
+        <button class="icon-btn" type="button" aria-label="Close search" data-action="close-search">Ã—</button>
       </div>
       <label class="search-input">
-        <span class="search-ic" aria-hidden="true">⌕</span>
-        <input type="text" placeholder="Search collections, styles, keywords…" autocomplete="off" data-ui="search-input" />
+        <span class="search-ic" aria-hidden="true">âŒ•</span>
+        <input type="text" placeholder="Search collections, styles, keywordsâ€¦" autocomplete="off" data-ui="search-input" />
       </label>
       <div class="search-hints">
         <button class="hint" type="button" data-search="gold">Gold</button>
@@ -411,7 +379,7 @@
         <button class="hint" type="button" data-search="iced">Iced</button>
       </div>
       <div class="search-foot">
-        <a class="text-link" href="catalogue.html">Go to shop →</a>
+        <a class="text-link" href="catalogue.html">Go to shop â†’</a>
       </div>
     </div>
   </div>
@@ -424,7 +392,7 @@
 <!-- Shared cart badge (FIX: correct path) -->
 <script src="./StoreCart/cart.shared.js" defer></script>
 
-<!-- ✅ Phase 6B Step 1: Drawer hydration config MUST be defined before cart.drawer.js -->
+<!-- âœ… Phase 6B Step 1: Drawer hydration config MUST be defined before cart.drawer.js -->
 <script>
   (function () {
     // Hard-code the project URL you already use in cart.js (so hydration works immediately)
@@ -460,10 +428,10 @@
     <div class="cd-topbar">
       <div class="cd-titlewrap">
         <div class="cd-title">Cart</div>
-        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) â€¢ price locked</div>
       </div>
 
-      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">Ã—</button>
     </div>
 
     <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
@@ -486,3 +454,4 @@
 
 </body>
 </html>
+

@@ -2778,3 +2778,235 @@ min-height: 2.2em;
   object-fit: contain !important;
   filter: none !important;
 }
+/* =========================================================
+   Homepage Editorial Flow Overrides
+   ========================================================= */
+.editorial-bridge{
+  padding: 36px 0 30px;
+}
+
+.editorial-bridge-inner{
+  max-width: 760px;
+  margin: 0 auto;
+  text-align: center;
+  display: grid;
+  gap: 12px;
+}
+
+.editorial-bridge-eyebrow{
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: rgba(244,242,237,.64);
+}
+
+.editorial-bridge-title{
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(32px, 4vw, 50px);
+  line-height: 1.02;
+  color: var(--ink);
+}
+
+.editorial-bridge-copy{
+  margin: 0;
+  line-height: 1.65;
+  color: var(--ink2);
+}
+
+.featured-signature{
+  padding-top: 44px;
+}
+
+.featured-signature-head{
+  margin-bottom: 10px;
+}
+
+.featured-signature-eyebrow{
+  margin-bottom: 8px;
+}
+
+.featured-signature-title{
+  text-wrap: balance;
+}
+
+.featured-signature-actions{
+  margin-bottom: 18px;
+}
+
+.featured-signature-rotate{
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255,255,255,.22);
+  background: transparent;
+  color: rgba(244,242,237,.70);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color .2s var(--ease), border-color .2s var(--ease);
+}
+
+.featured-signature-rotate:hover{
+  color: var(--gold1);
+  border-color: rgba(234,195,90,.55);
+}
+
+.featured-signature-grid{
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  grid-template-areas:
+    "primary second"
+    "primary third"
+    "primary fourth";
+  gap: 14px;
+}
+
+.featured-signature-card.is-primary{ grid-area: primary; }
+.featured-signature-card.is-secondary-a{ grid-area: second; }
+.featured-signature-card.is-secondary-b{ grid-area: third; }
+.featured-signature-card.is-tertiary{ grid-area: fourth; }
+
+.featured-signature-card{
+  border-color: rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)), rgba(8,8,10,.86);
+}
+
+.featured-signature-media{
+  background-size: cover;
+}
+
+.featured-signature-card.is-primary .featured-signature-media{ height: 100%; min-height: 560px; }
+.featured-signature-card.is-secondary .featured-signature-media,
+.featured-signature-card.is-tertiary .featured-signature-media{ height: 210px; }
+
+.featured-signature-card .card-body{
+  gap: 8px;
+}
+
+.featured-signature-card.is-primary .card-title{
+  font-size: clamp(26px, 2.7vw, 36px);
+  line-height: 1.04;
+}
+
+.featured-signature-card.is-primary .card-sub{
+  font-size: 13px;
+}
+
+.featured-clean-footer{
+  padding-top: 22px;
+  display: flex;
+  justify-content: center;
+}
+
+.featured-clean-link{
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.02);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(244,242,237,.88);
+  text-decoration: none;
+}
+
+.ebay-live-layout{
+  display: grid;
+  grid-template-columns: minmax(260px, .9fr) minmax(0, 1.35fr);
+  gap: clamp(22px, 3vw, 36px);
+}
+
+.ebay-live-copy{
+  display: grid;
+  gap: 14px;
+}
+
+.ebay-live-points{
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.ebay-live-points li{
+  position: relative;
+  padding-left: 16px;
+  color: rgba(244,242,237,.82);
+  font-size: 13px;
+}
+
+.ebay-live-points li::before{
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .56em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(234,195,90,.92);
+}
+
+.ebay-live-cta{ justify-self: start; }
+
+.ebay-live-grid{ display: grid; gap: 14px; }
+.ebay-live-primary-wrap{ display: grid; }
+.ebay-live-secondary-wrap{ display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.ebay-live-card.is-primary .ebay-live-thumb{ aspect-ratio: 16/9; }
+.ebay-live-card.is-secondary .ebay-live-thumb{ aspect-ratio: 6/5; }
+
+.ebay-live-link{
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1100px){
+  .featured-signature-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "primary primary"
+      "second third"
+      "fourth fourth";
+  }
+
+  .featured-signature-card.is-primary .featured-signature-media{ min-height: 340px; }
+
+  .ebay-live-layout{ grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px){
+  .editorial-bridge{
+    padding: 20px 0 12px;
+  }
+
+  .editorial-bridge-inner{
+    text-align: left;
+  }
+
+  .featured-signature-grid{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "primary"
+      "second"
+      "third"
+      "fourth";
+    gap: 12px;
+  }
+
+  .featured-signature-card.is-primary .featured-signature-media,
+  .featured-signature-card.is-secondary .featured-signature-media,
+  .featured-signature-card.is-tertiary .featured-signature-media{
+    min-height: 0;
+    height: 260px;
+  }
+
+  .ebay-live-secondary-wrap{ grid-template-columns: 1fr; }
+  .ebay-live-card.is-secondary .ebay-live-thumb{ aspect-ratio: 16/10; }
+}

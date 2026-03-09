@@ -1,8 +1,8 @@
-// index.js — OG Jewelers Storefront (V2)
+﻿// index.js â€” OG Jewelers Storefront (V2)
 // Matches your provided index.html (data-ui + data-action hooks).
 // Fixes: search backdrop, X close reliability, close-before-navigate to shop.
 
-console.log("✅ index.js LOADED — storefront v2:", new Date().toISOString());
+console.log("âœ… index.js LOADED â€” storefront v2:", new Date().toISOString());
 /* =========================
    Tiny helpers
 ========================= */
@@ -501,7 +501,7 @@ function dismissNotice() {
 }
 
 /* =========================
-   Collections → catalogue routing
+   Collections â†’ catalogue routing
 ========================= */
 function wireCollectionRouting() {
   const tiles = $$(".tile[data-collection]");
@@ -532,6 +532,7 @@ function shuffleFeatured() {
     .map((x) => x.el);
 
   shuffled.forEach((c) => ui.featuredGrid.appendChild(c));
+  syncFeaturedCardHierarchy();
 
   if (!prefersReducedMotion()) {
     ui.featuredGrid.classList.remove("pulse");
@@ -630,7 +631,7 @@ function initAccountDropdown() {
   };
 
   const toggleMenu = (e) => {
-    e.preventDefault(); // don’t navigate to profile on click; menu takes over
+    e.preventDefault(); // donâ€™t navigate to profile on click; menu takes over
     if (menu.hidden) openMenu();
     else closeMenu();
   };
@@ -797,7 +798,7 @@ case "close-menu": {
 
           const it = invState.map.get(String(id));
           if (!it) {
-            // no crash hydration: show “no longer available” path later on cart hydration
+            // no crash hydration: show â€œno longer availableâ€ path later on cart hydration
             addToCart(id, 1, 0);
             closeQuickview();
             window.ogCartBadgeRefresh?.();
@@ -900,7 +901,7 @@ function onKeyDown(e) {
     }
   }
 
-  // Enter inside search input → go to catalogue with query
+  // Enter inside search input â†’ go to catalogue with query
   if (isSearchOpen() && e.key === "Enter") {
     const val = (ui.searchInput?.value || "").trim();
     closeSearch();
@@ -980,7 +981,7 @@ async function applyAccountChip(sb) {
 
   if (!chip || !initialsEl) return;
 
-  /* ✅ HARD BASELINE (prevents “Member Access” flash)
+  /* âœ… HARD BASELINE (prevents â€œMember Accessâ€ flash)
      Hide everything that depends on auth immediately,
      then reveal the correct UI once session is known. */
   chip.hidden = true;
@@ -1070,9 +1071,10 @@ ui.search?.addEventListener("click", (e) => {
   hydrateMood();
   wireCollectionRouting();
 
-    // Load published storefront content first (so DOM slots reflect live data)
+  // Load published storefront content first (so DOM slots reflect live data)
   await loadPublishedStorefrontContent();
 
+  syncFeaturedCardHierarchy();
   hydrateFeaturedQuickviewModel();
   initAccountChip();
 
@@ -1257,7 +1259,10 @@ function renderEbayLiveEvents(events) {
     return;
   }
 
-  grid.innerHTML = list.map((event) => {
+  const primary = list[0];
+  const secondary = list.slice(1);
+
+  const renderEventCard = (event, variant = "secondary") => {
     const title = ebayEsc(event.title || "Upcoming eBay Live");
     const seller = ebayEsc(event.seller || "ogjewelers");
     const dateLabel = ebayEsc(formatDisplayDate(event));
@@ -1269,7 +1274,7 @@ function renderEbayLiveEvents(events) {
 
     return `
       <a
-        class="ebay-live-card"
+        class="ebay-live-card is-${variant}"
         href="${url}"
         target="_blank"
         rel="noopener noreferrer"
@@ -1285,14 +1290,20 @@ function renderEbayLiveEvents(events) {
           <div class="ebay-live-seller">${seller}</div>
           <h3 class="ebay-live-title">${title}</h3>
           <div class="ebay-live-link">
-            Save on eBay <span aria-hidden="true">→</span>
+            View event <span aria-hidden="true">-></span>
           </div>
         </div>
       </a>
     `;
-  }).join("");
-}
+  };
 
+  grid.innerHTML = `
+    <div class="ebay-live-primary-wrap">
+      ${renderEventCard(primary, "primary")}
+    </div>
+    ${secondary.length ? `<div class="ebay-live-secondary-wrap">${secondary.map((event) => renderEventCard(event, "secondary")).join("")}</div>` : ""}
+  `;
+}
 async function loadEbayLiveEvents() {
   const grid = document.getElementById("ebay-live-grid");
   if (!grid) return;
@@ -1300,7 +1311,7 @@ async function loadEbayLiveEvents() {
   try {
     grid.innerHTML = `
       <div class="ebay-live-empty">
-        Loading upcoming eBay Live events…
+        Loading upcoming eBay Live eventsâ€¦
       </div>
     `;
 
@@ -1324,7 +1335,7 @@ renderEbayLiveEvents(items);
 
     grid.innerHTML = `
       <div class="ebay-live-empty">
-        We couldn’t load the upcoming live events right now.
+        We couldnâ€™t load the upcoming live events right now.
       </div>
     `;
   }
@@ -1333,3 +1344,22 @@ renderEbayLiveEvents(items);
 document.addEventListener("DOMContentLoaded", () => {
   loadEbayLiveEvents();
 });
+
+
+
+
+function syncFeaturedCardHierarchy() {
+  if (!ui.featuredGrid) return;
+
+  const cards = $$(".card", ui.featuredGrid);
+  cards.forEach((card, idx) => {
+    card.classList.remove("is-primary", "is-secondary", "is-secondary-a", "is-secondary-b", "is-tertiary");
+    if (idx === 0) card.classList.add("is-primary");
+    else if (idx === 1) card.classList.add("is-secondary", "is-secondary-a");
+    else if (idx === 2) card.classList.add("is-secondary", "is-secondary-b");
+    else card.classList.add("is-tertiary");
+  });
+}
+
+
+
