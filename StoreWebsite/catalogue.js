@@ -644,6 +644,13 @@ const navCloseBtn = qs(".nav-drawer-close");
     if (!hudWrap || !hudPanel) return;
 
     clearHudTimers();
+
+    if (isHudExpanded()) {
+      if (isDrawerOpen()) return;
+      setHudExpanded(false);
+      return;
+    }
+
     setHudExpanded(true, { idleMs: HUD_IDLE_MS });
     alignHudUnderHeader();
 
