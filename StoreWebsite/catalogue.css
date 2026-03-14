@@ -226,16 +226,20 @@ button, input, select{
 }
 .nav-link{
   font-size: .95rem;
-  color: rgba(244,241,234,.82);
+  color: rgba(244,241,234,.95);
   opacity: .92;
-  padding: 10px 8px;
-  border-radius: 12px;
-  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
 }
 .nav-link:hover{
-  color: rgba(244,241,234,.96);
-  background: rgba(255,255,255,.04);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  color: rgba(234,195,90,.95);
+  border-color: rgba(234,195,90,.38);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 .nav-link.is-active{
   color: rgba(244,241,234,.96);
@@ -256,41 +260,38 @@ button, input, select{
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 42px;
-  padding: 0 16px;
-  border-radius: 14px;
-  border: 1px solid transparent;
+  min-height: 50px;
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  color: rgba(244,242,237,.95);
   cursor: pointer;
   user-select: none;
-  transition:
-    transform var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease),
-    opacity var(--dur-fast) var(--ease);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease), opacity .2s var(--ease);
 }
-.btn:active{ transform: translateY(1px) scale(.99); }
+.btn:hover{
+  transform: translateY(-2px);
+  border-color: rgba(234,195,90,.38);
+  color: rgba(234,195,90,.95);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
+}
+.btn:active{ transform: translateY(0) scale(.99); }
 
-.btn.primary{
-  background: linear-gradient(135deg, rgba(200,162,74,1), rgba(227,200,120,.92));
-  color: #141414;
-  border-color: rgba(255,255,255,.18);
-  box-shadow: 0 14px 40px rgba(200,162,74,.18);
-}
-.btn.primary:hover{
-  box-shadow: 0 18px 58px rgba(200,162,74,.26);
-  transform: translateY(-1px);
-}
-
+.btn.primary,
 .btn.ghost{
-  background: rgba(255,255,255,.03);
-  border-color: rgba(255,255,255,.08);
-  color: rgba(244,241,234,.92);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  border-color: rgba(255,255,255,.22);
+  color: rgba(244,241,234,.95);
 }
+.btn.primary:hover,
 .btn.ghost:hover{
-  background: rgba(255,255,255,.05);
-  border-color: rgba(200,162,74,.18);
-  transform: translateY(-1px);
+  border-color: rgba(234,195,90,.38);
 }
 .btn.icon-only{
   width: 42px;
@@ -595,7 +596,7 @@ select{
 .active-chip-x{
   width: 22px;
   height: 22px;
-  border-radius: 10px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   border: 1px solid rgba(255,255,255,.10);
@@ -747,73 +748,8 @@ select{
   display: none;
 }
 
-.product-actions{
-  min-height: 24px;
-  padding: 0 2px 2px;
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-}
-.product-cta{
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.16);
-  background: rgba(10,10,12,.22);
-  color: rgba(244,241,234,.76);
-  font-size: .7rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0;
-  transform: translateY(4px);
-  pointer-events: none;
-  transition:
-    opacity var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
-}
-.product-card:hover .product-cta,
-.product-card:focus-within .product-cta{
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-.product-cta:hover{
-  color: rgba(244,241,234,.94);
-  border-color: rgba(200,162,74,.34);
-  background: rgba(200,162,74,.12);
-}
-.product-cta:focus-visible{
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(234,195,90,.16);
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
 
-.product-grid .product-card .product-fav{
-  width: 32px;
-  height: 32px;
-  top: 12px;
-  right: 12px;
-  border-color: rgba(255,255,255,.12);
-  background: rgba(10,10,12,.20);
-  color: rgba(244,242,237,.42);
-  box-shadow: 0 6px 16px rgba(0,0,0,.22);
-  opacity: .72;
-}
-.product-grid .product-card .product-fav .fav-toggle-icon{
-  font-size: 14px;
-}
-.product-grid .product-card:hover .product-fav,
-.product-grid .product-card:focus-within .product-fav{
-  opacity: 1;
-  color: rgba(244,242,237,.82);
-  border-color: rgba(255,255,255,.24);
-}
+
 
 .product-grid[data-view="list"] .product-card{
   display: block;
@@ -835,20 +771,7 @@ select{
 .product-grid[data-view="list"] .product-price{
   font-size: .92rem;
 }
-.product-grid[data-view="list"] .product-actions{
-  padding-top: 2px;
-}
 
-@media (hover: none){
-  .product-cta{
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-  }
-  .product-grid .product-card .product-fav{
-    opacity: .9;
-  }
-}
 
 /* =========================
    Empty State
@@ -1567,21 +1490,24 @@ body.lock {
 
 /* Close button (works with your existing .btn.ghost.icon-only) */
 .nav-drawer-close {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
   line-height: 1;
   font-size: 22px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.88);
-  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  color: rgba(244,242,237,.95);
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
 }
 .nav-drawer-close:hover {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-2px);
+  color: rgba(234,195,90,.95);
+  border-color: rgba(234,195,90,.38);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 .nav-drawer-close:active {
   transform: scale(0.96);
@@ -1600,19 +1526,21 @@ body.lock {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 12px;
-  border-radius: 14px;
+  padding: 12px 18px;
+  border-radius: 999px;
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.90);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+  color: rgba(244, 242, 237, 0.95);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  border: 1px solid rgba(255,255,255,.22);
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
 }
 
 .nav-drawer-link:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  color: rgba(234,195,90,.95);
+  border-color: rgba(234,195,90,.38);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 
 .nav-drawer-link:active {
@@ -1895,4 +1823,5 @@ body.lock {
   .modal-body{ padding: 14px 14px 18px; }
   .modal-img{ height: 320px; }
 }
+
 

@@ -315,35 +315,39 @@ html.cd-lock, body.cd-lock{ overflow: hidden; }
 /* Buttons/links in footer (host-proof) */
 .cd-btn{
   appearance:none;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.04);
-  color: var(--cd-ink);
-  border-radius: 14px;
-  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  color: rgba(244,242,237,.95);
+  border-radius: 999px;
+  min-height: 50px;
+  padding: 0 26px;
   cursor: pointer;
-  font-weight: 780;
-  letter-spacing: .15px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .15em;
+  text-transform: uppercase;
   text-align:center;
   text-decoration:none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+  transition: color .2s ease, border-color .2s ease, transform .2s ease, background .2s ease, box-shadow .2s ease;
 }
 .cd-btn:hover{
-  background: rgba(255,255,255,.08);
-  border-color: rgba(255,255,255,.20);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  color: rgba(234,195,90,.95);
+  border-color: rgba(234,195,90,.38);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 
 .cd-btn.primary{
-  border-color: rgba(225,190,120,.32);
-  background: rgba(225,190,120,.10);
+  border-color: rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
 }
 .cd-btn.primary:hover{
-  background: rgba(225,190,120,.16);
-  border-color: rgba(225,190,120,.40);
+  border-color: rgba(234,195,90,.38);
 }
 
 /* Clickable product area spans the first two columns */

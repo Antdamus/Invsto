@@ -349,38 +349,41 @@
 }
 /* =========================================================
    Buttons (needed because index may not include catalogue.css)
-   Match catalogue.css button system
+   Match VIP CTA system
    ========================================================= */
 .btn{
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 42px;
-  padding: 0 16px;
-  border-radius: 14px;
-  border: 1px solid transparent;
+  min-height: 50px;
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.22);
   cursor: pointer;
   user-select: none;
   text-decoration: none;
-  transition:
-    transform var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease),
-    opacity var(--dur-fast) var(--ease);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  color: rgba(244,241,234,.95);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease), opacity .2s var(--ease);
 }
-.btn:active{ transform: translateY(1px) scale(.99); }
+.btn:active{ transform: translateY(0) scale(.99); }
 
 .btn.ghost{
-  background: rgba(255,255,255,.03);
-  border-color: rgba(255,255,255,.08);
-  color: rgba(244,241,234,.92);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  border-color: rgba(255,255,255,.22);
+  color: rgba(244,241,234,.95);
 }
 .btn.ghost:hover{
-  background: rgba(255,255,255,.05);
-  border-color: rgba(200,162,74,.18);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  border-color: rgba(234,195,90,.38);
+  color: rgba(234,195,90,.95);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 .btn.icon-only{
   width: 42px;
@@ -388,7 +391,7 @@
 }
 
 /* =========================================================
-   ✅ Item-page icon buttons style (search + cart)
+   ? Item-page icon buttons style (search + cart)
    This is what was making item page look different.
    ========================================================= */
 .icon-btn{
@@ -483,21 +486,20 @@
 .acct-chip{
   width: var(--header-control-size);
   height: var(--header-control-size);
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(10,10,12,0.35);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease),
-              border-color var(--dur-fast) var(--ease),
-              background var(--dur-fast) var(--ease);
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
 }
 .acct-chip:hover{
-  transform: translateY(-1px);
-  border-color: rgba(227, 200, 120, 0.28);
-  background: rgba(227, 200, 120, 0.08);
+  transform: translateY(-2px);
+  border-color: rgba(234,195,90,.38);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 .acct-initials{
   width: 28px;
@@ -624,20 +626,20 @@
   display:flex;
   align-items:center;
   gap: 12px;
-  padding: 12px 12px;
-  border-radius: 14px;
+  padding: 12px 18px;
+  border-radius: 999px;
   text-decoration:none;
-  color: rgba(244, 241, 234, 0.84);
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(10,10,12,0.20);
-  transition: transform var(--dur-fast) var(--ease),
-              background var(--dur-fast) var(--ease),
-              border-color var(--dur-fast) var(--ease);
+  color: rgba(244, 241, 234, 0.95);
+  border: 1px solid rgba(255,255,255,0.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  transition: color .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease), background .2s var(--ease), box-shadow .2s var(--ease);
 }
 .nav-drawer-link:hover{
-  transform: translateY(-1px);
-  border-color: rgba(227, 200, 120, 0.22);
-  background: rgba(227, 200, 120, 0.08);
+  transform: translateY(-2px);
+  border-color: rgba(234, 195, 90, 0.38);
+  color: rgba(234,195,90,.95);
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  box-shadow: 0 10px 28px rgba(0,0,0,.26);
 }
 .nav-drawer-utilities{
   display: grid;

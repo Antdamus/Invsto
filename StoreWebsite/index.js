@@ -1094,6 +1094,38 @@ ui.search?.addEventListener("click", (e) => {
 
 const EBAY_LIVE_FN_URL =
   "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
+const EBAY_LIVE_FALLBACK_EVENTS = [
+  {
+    title: "Live Auctions on 10K 14k Solid Gold, 925 Silver, Diamonds, Moissanite",
+    seller: "ogjewelers",
+    dateLabel: "Mar 9 8:30 PM",
+    image: "https://i.ebayimg.com/images/g/IrQAAeSwbq9pnz-Z/s-l960.webp",
+    url: "https://www.ebay.com/ebaylive/events/2zPvxPVoQfLJgQUl",
+    startsAtIso: "2026-03-10T03:30:00.000Z",
+    timezone: "America/Phoenix",
+    status: "upcoming",
+  },
+  {
+    title: "Live Auctions on 10K 14k Solid Gold, 925 Silver, Diamonds, Moissanite",
+    seller: "ogjewelers",
+    dateLabel: "Mar 11 5:00 PM",
+    image: "https://i.ebayimg.com/images/g/I5EAAeSwaBppn0AJ/s-l960.webp",
+    url: "https://www.ebay.com/ebaylive/events/2ZEGEMbgZ8gS3SqF",
+    startsAtIso: "2026-03-12T00:00:00.000Z",
+    timezone: "America/Phoenix",
+    status: "upcoming",
+  },
+  {
+    title: "Live Auctions on 10K 14k Solid Gold, 925 Silver, Diamonds, Moissanite",
+    seller: "ogjewelers",
+    dateLabel: "Mar 12 5:00 PM",
+    image: "https://i.ebayimg.com/images/g/suMAAeSwlXNpn0Bb/s-l960.webp",
+    url: "https://www.ebay.com/ebaylive/events/GjSJkwQj5azMqvyO",
+    startsAtIso: "2026-03-13T00:00:00.000Z",
+    timezone: "America/Phoenix",
+    status: "upcoming",
+  },
+];
 const EBAY_LIVE_DEBUG =
   location.hostname === "localhost" ||
   location.hostname === "127.0.0.1" ||
@@ -1345,11 +1377,7 @@ renderEbayLiveEvents(items);
   } catch (err) {
     console.error("Failed to load eBay Live events:", err);
 
-    grid.innerHTML = `
-      <div class="ebay-live-empty">
-        We could not load the upcoming live events right now.
-      </div>
-    `;
+    renderEbayLiveEvents(EBAY_LIVE_FALLBACK_EVENTS);
   }
 }
 

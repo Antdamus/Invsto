@@ -1194,14 +1194,6 @@ const toggleNavDrawer = () => {
           ${subtleMeta}
         </div>
       </a>
-
-      <div class="product-actions">
-        <button class="product-cta" type="button"
-                data-action="add-to-favorites"
-                data-id="${esc(p.id)}">
-          Add to Favorites
-        </button>
-      </div>
     </article>
   `;
 };
@@ -1791,3 +1783,4 @@ try {
     init();
   }
 })();
+

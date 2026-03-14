@@ -41,19 +41,19 @@
 .fav-toggle:focus-visible {
   outline: none;
   box-shadow:
-    0 0 0 3px rgba(234, 195, 90, 0.18),
+    0 0 0 3px rgba(244, 242, 237, 0.18),
     0 14px 30px rgba(0, 0, 0, 0.30),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .fav-toggle.is-fav,
 .fav-toggle[aria-pressed="true"] {
-  color: #eac35a;
-  border-color: rgba(234, 195, 90, 0.24);
-  background: radial-gradient(circle at 30% 30%, rgba(234, 195, 90, 0.10), rgba(18, 18, 20, 0.56) 72%);
+  color: rgba(244, 242, 237, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.10), rgba(18, 18, 20, 0.56) 72%);
   box-shadow:
     0 10px 24px rgba(0, 0, 0, 0.24),
-    0 0 14px rgba(234, 195, 90, 0.08),
+    0 0 14px rgba(255, 255, 255, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -70,7 +70,7 @@
 
 .fav-toggle.is-fav .fav-toggle-icon,
 .fav-toggle[aria-pressed="true"] .fav-toggle-icon {
-  text-shadow: 0 0 10px rgba(234, 195, 90, 0.12);
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
 }
 
 .fav-toggle:not([data-id]),
@@ -100,3 +100,4 @@
   position: static;
   flex: 0 0 38px;
 }
+
