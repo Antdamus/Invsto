@@ -1,20 +1,6 @@
-/* =========================================================
-   join.js — OG Jewelers (Join / Alerts Signup)
-   - Email-only + consent
-   - Passwordless (magic link)
-   - Uses Edge Function proxy (rate-limited) instead of direct signInWithOtp
-   - Client cooldown: 60s (prevents accidental resends)
-   - Neutral messaging (security)
-   - Race-proof Supabase readiness
-   - Reads URL params: ?src=package|social&campaign=...
-   ========================================================= */
-
 (() => {
   "use strict";
 
-  // ---------------------------
-  // DOM
-  // ---------------------------
   const $ = (sel) => document.querySelector(sel);
 
   const form = $("#joinForm");
@@ -26,19 +12,17 @@
   const btnText = submitBtn?.querySelector(".btn-text");
   const srcHidden = $("#src");
   const campaignHidden = $("#campaign");
-  const sourcePill = $("#sourcePill");
   const yearEl = $("#year");
 
-  // VIP modal hooks (kept hidden for now — we’ll use on profile.html later)
   const vipBackdrop = $("#vipBackdrop");
   const vipModal = $("#vipModal");
   const vipCloseBtn = $("#vipCloseBtn");
   const vipNotNowBtn = $("#vipNotNowBtn");
   const vipUpgradeBtn = $("#vipUpgradeBtn");
 
-  // ---------------------------
-  // UI helpers
-  // ---------------------------
+  const COOLDOWN_MS = 60 * 1000;
+  const COOLDOWN_KEY = "og_access_cooldown_until";
+
   function setStatus(message, kind = "info") {
     if (!statusEl) return;
     statusEl.textContent = message || "";
@@ -53,13 +37,11 @@
 
   function setLoading(isLoading) {
     if (!submitBtn) return;
-
-    // If cooldown is active, never re-enable the button here
     if (!isLoading && getCooldownUntil() > Date.now()) return;
 
     submitBtn.disabled = !!isLoading;
     submitBtn.classList.toggle("loading", !!isLoading);
-    if (btnText) btnText.textContent = isLoading ? "Sending Link..." : "Join Free";
+    if (btnText) btnText.textContent = isLoading ? "Sending Link..." : "Get First Access";
   }
 
   function safeLower(s) {
@@ -67,9 +49,9 @@
   }
 
   function validEmail(email) {
-    const e = String(email || "").trim();
-    if (e.length < 5) return false;
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+    const value = String(email || "").trim();
+    if (value.length < 5) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
   function parseParams() {
@@ -85,7 +67,6 @@
       src === "social" ? "social" :
       src ? src : "direct";
 
-    if (sourcePill) sourcePill.textContent = `source: ${pretty}`;
     if (srcHidden) srcHidden.value = pretty;
     if (campaignHidden) campaignHidden.value = campaign || "";
 
@@ -94,13 +75,13 @@
 
     if (pretty === "package") {
       subtitle.textContent =
-        "Welcome back. Join for free — get live alerts + early access reserved for OG customers.";
+        "Welcome back. Stay close to OG with live alerts, early access, and updates reserved for returning clients.";
     } else if (pretty === "social") {
       subtitle.textContent =
-        "Join for free. Get notified before we go live + early access to limited drops. No spam.";
+        "Join the OG Jewelers community for eBay Live alerts, limited-drop updates, and what is coming next.";
     } else {
       subtitle.textContent =
-        "Join for free. We’ll only email you for lives, drops, and important releases.";
+        "Join OG Jewelers for eBay Live alerts, launch updates, and early access to the next phase of the experience.";
     }
   }
 
@@ -109,13 +90,6 @@
     if (vipModal) vipModal.hidden = true;
     document.body.classList.remove("modal-open");
   }
-
-  // ---------------------------
-  // Cooldown (client-side)
-  // ---------------------------
-const COOLDOWN_MS = 60 * 1000;
-const COOLDOWN_KEY = "og_access_cooldown_until";
-
 
   function getCooldownUntil() {
     const n = Number(localStorage.getItem(COOLDOWN_KEY));
@@ -137,7 +111,7 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
       if (left <= 0) {
         submitBtn.disabled = false;
         submitBtn.classList.remove("cooldown");
-        if (btnText) btnText.textContent = "Join Free";
+        if (btnText) btnText.textContent = "Get First Access";
         localStorage.removeItem(COOLDOWN_KEY);
         return;
       }
@@ -158,12 +132,9 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
     if (getCooldownUntil() > Date.now()) startCooldown();
   }
 
-  // ---------------------------
-  // Supabase ready gate (race-proof)
-  // ---------------------------
   function getSupabaseClientIfReady() {
-    const c = window.supabaseClient || window.supabase;
-    if (c && c.auth && typeof c.auth.getSession === "function") return c;
+    const client = window.supabaseClient || window.supabase;
+    if (client && client.auth && typeof client.auth.getSession === "function") return client;
     return null;
   }
 
@@ -176,6 +147,7 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
         document.removeEventListener("supabase-ready", onReady);
         resolve(getSupabaseClientIfReady() || null);
       };
+
       document.addEventListener("supabase-ready", onReady);
 
       const t0 = Date.now();
@@ -199,16 +171,12 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
     return `${base}profile.html`;
   }
 
-  // ---------------------------
-  // Main
-  // ---------------------------
   async function init() {
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
     const { src, campaign } = parseParams();
     applySourceUI(src, campaign);
 
-    // VIP modal close wiring (even though we won't show it here yet)
     vipCloseBtn?.addEventListener("click", hideVipModal);
     vipNotNowBtn?.addEventListener("click", hideVipModal);
     vipBackdrop?.addEventListener("click", hideVipModal);
@@ -225,7 +193,6 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
 
     resumeCooldownIfNeeded();
 
-    // If a session already exists, go straight to profile
     try {
       const { data } = await sb.auth.getSession();
       if (data?.session) {
@@ -236,13 +203,12 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
       console.warn("Session check failed:", e);
     }
 
-    form?.addEventListener("submit", (e) => onSubmit(e, sb));
+    form?.addEventListener("submit", (e) => onSubmit(e));
   }
 
-  async function onSubmit(e, sb) {
+  async function onSubmit(e) {
     e.preventDefault();
 
-    // If cooldown active, keep the countdown fresh and exit
     if (getCooldownUntil() > Date.now()) {
       startCooldown();
       return;
@@ -261,7 +227,7 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
     }
 
     if (!consent) {
-      setStatus("Please check the consent box to join alerts.", "error");
+      setStatus("Please confirm that you want OG Jewelers updates before continuing.", "error");
       consentEl?.focus();
       return;
     }
@@ -272,27 +238,19 @@ const COOLDOWN_KEY = "og_access_cooldown_until";
       const src = String(srcHidden?.value || "direct");
       const campaign = String(campaignHidden?.value || "");
 
-      // Store “pre-auth” context so profile.html can read it after magic-link auth
-const joinContext = {
-  name,
-  email: safeLower(email),
-  src,
-  campaign,
-
-  // NEW: differentiate Join vs Access
-  flow: "join",
-
-  // NEW: explicit marketing consent captured here (Join requires consent)
-  marketing_opt_in: true,
-  marketing_opt_in_at: new Date().toISOString(),
-
-  joined_at: new Date().toISOString()
-};
-localStorage.setItem("og_join_context", JSON.stringify(joinContext));
+      const joinContext = {
+        name,
+        email: safeLower(email),
+        src,
+        campaign,
+        flow: "join",
+        marketing_opt_in: true,
+        marketing_opt_in_at: new Date().toISOString(),
+        joined_at: new Date().toISOString()
+      };
+      localStorage.setItem("og_join_context", JSON.stringify(joinContext));
 
       const redirectTo = computeRedirectToProfile();
-
-      // Call Edge Function proxy (rate limited)
       const fnUrl = `${window.SUPABASE_URL}/functions/v1/og_send_magic_link`;
 
       const res = await fetch(fnUrl, {
@@ -305,8 +263,7 @@ localStorage.setItem("og_join_context", JSON.stringify(joinContext));
       if (res.status === 429) {
         setLoading(false);
         setStatusHTML(
-          `<strong>⏳ Please wait a moment.</strong><br>
-           <span class="muted">Too many requests. Try again shortly.</span>`,
+          `<strong>Please wait a moment.</strong><br><span class="muted">Too many requests. Try again shortly.</span>`,
           "error"
         );
         return;
@@ -317,31 +274,24 @@ localStorage.setItem("og_join_context", JSON.stringify(joinContext));
       const data = await res.json().catch(() => ({}));
       if (!data?.ok) throw new Error("Request failed. Please try again.");
 
-setStatusHTML(
-  `<strong>✅ Secure sign-in link sent.</strong><br>
-   <span class="muted">For the fastest access, open the sign-in link on <strong>this same device</strong>.</span><br>
-   <span class="muted">If you open it on another device, you’ll be signed in there instead.</span><br>
-   <span class="muted">No email? Check spam, then try again in 60 seconds.</span>`,
-  "success"
-);
-
+      setStatusHTML(
+        `<strong>Secure sign-in link sent.</strong><br><span class="muted">Open the link on this same device for the fastest access. No email yet? Check spam, then try again in 60 seconds.</span>`,
+        "success"
+      );
 
       setLoading(false);
       startCooldown();
 
-      // Light UX: lock inputs to prevent repeated submits without intent
       if (emailEl) emailEl.readOnly = true;
       if (nameEl) nameEl.readOnly = true;
       if (consentEl) consentEl.disabled = true;
-
     } catch (err) {
       console.error(err);
       setLoading(false);
-      const msg = (err && err.message) ? err.message : "Something went wrong. Please try again.";
-      setStatus(`❌ ${msg}`, "error");
+      const msg = err && err.message ? err.message : "Something went wrong. Please try again.";
+      setStatus(msg, "error");
     }
   }
 
-  // boot
   init();
 })();

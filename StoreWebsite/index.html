@@ -1,467 +1,183 @@
-
-
-<!-- index.html - OG Jewelers (Storefront V2) -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#070708" />
+  <meta name="theme-color" content="#060606" />
 
-  <title>OG Jewelers - Signature Pieces</title>
-  <meta name="description" content="OG Jewelers - curated fine jewelry with a luxury browsing experience." />
+  <title>OG Jewelers | Brand Arrival</title>
+  <meta
+    name="description"
+    content="OG Jewelers is preparing an elevated digital destination for fine jewelry, custom work, and live discovery."
+  />
 
-  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
 
-  <!-- CSS -->
-<link rel="stylesheet" href="index.css" />
-<link rel="stylesheet" href="og.header.css" />
-<link rel="stylesheet" href="inquiry.mode.css" />
-<link rel="stylesheet" href="./StoreCart/cart.drawer.css">
-  <link rel="stylesheet" href="./Favorites/favorites.shared.css">
+  <link rel="stylesheet" href="index.css" />
+  <link rel="stylesheet" href="og.header.css" />
 
-<script src="og.header.js" defer></script>
-<script src="inquiry.mode.js" defer></script>
+  <script src="og.header.js" defer></script>
+  <script src="index.js" defer></script>
 </head>
 
-<body>
-  <!-- Ambient background -->
-  <div class="ambient" aria-hidden="true">
-    <div class="grain"></div>
-    <div class="orb o1"></div>
-    <div class="orb o2"></div>
-    <div class="orb o3"></div>
-    <div class="vignette"></div>
+<body class="prelaunch-page">
+  <div class="page-atmosphere" aria-hidden="true">
+    <div class="page-grain"></div>
+    <div class="page-vignette"></div>
+    <div class="page-aura page-aura-left"></div>
+    <div class="page-aura page-aura-right"></div>
   </div>
 
- 
+  <div id="ogHeaderMount"></div>
 
-  <!-- Header -->
-<!-- Shared Header Mount -->
-<div id="ogHeaderMount"></div>
+  <main id="main" class="prelaunch-main">
+    <section class="hero-arrival" aria-label="OG Jewelers brand arrival">
+      <div class="hero-media" aria-hidden="true">
+        <video
+          class="hero-video"
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="auto"
+          poster="OG-Jewelers.webp"
+        >
+          <source src="OG-Placeholder.mp4" type="video/mp4" />
+        </video>
+        <div class="hero-media-overlay"></div>
+        <div class="hero-media-sheen"></div>
+      </div>
 
-  <!-- Main -->
-  <main class="main">
-    <!-- HERO (cinematic, with editor slots) -->
-    <section class="hero" aria-label="Hero">
-     <div class="hero-media" aria-hidden="true">
-  <video
-    class="hero-video"
-    autoplay
-    muted
-    loop
-    playsinline
-    preload="auto"
-    poster="assets/hero/hero-poster.jpg"
-  >
-    <source src="OG-Placeholder.mp4" type="video/mp4" />
-  </video>
+      <div class="hero-layout">
+        <div class="hero-copy reveal-up">
+          <p class="hero-kicker">Live on eBay. Building what comes next.</p>
+          <h1 class="hero-title">OG Jewelers</h1>
+          <p class="hero-subtitle">
+            Fine jewelry, custom pieces, luxury watches, and the energy of eBay Live.
+          </p>
+          <p class="hero-description">
+            OG Jewelers is already live on eBay with standout pieces, collector-minded finds,
+            and real-time auction energy. This site is your first look at the brand home we are
+            building next, with early access, updates, and VIP entry along the way.
+          </p>
 
-  <div class="hero-video-overlay"></div>
-  <div class="hero-glow"></div>
-</div>
+          <div class="hero-actions">
+            <a class="primary-cta" href="join.html">Join the VIP Community</a>
+            <a
+              class="secondary-link"
+              href="https://www.ebay.com/ebaylive/sellers/lertro4xscs"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Watch us on eBay Live
+            </a>
+          </div>
+        </div>
+      </div>
 
-   
-
-         
-
-    <div class="hero-floating-cta">
-  <a class="btn hero-shop-btn" href="catalogue.html">Explore the Collection</a>
-</div>
-
-    
+      <div class="hero-bottom-bar reveal-up reveal-delay-2" aria-label="Pre-launch status">
+        <span>Brand preview</span>
+        <span>Custom design</span>
+        <span>Luxury watches</span>
+        <span>eBay Live every week</span>
+      </div>
     </section>
 
-        <!-- The Trust section under the hero video-->
-    <section class="trust-strip">
-  <div class="container trust-inner">
-
-    <div class="trust-item">
-      <span class="trust-number">120,000+</span>
-      <span class="trust-label">Items Sold</span>
-    </div>
-
-    <div class="trust-divider"></div>
-
-    <div class="trust-item">
-      <span class="trust-number">25,000+</span>
-      <span class="trust-label">Positive Reviews</span>
-    </div>
-
-    <div class="trust-divider"></div>
-
-    <div class="trust-item">
-      <span class="trust-number">99%</span>
-      <span class="trust-label">Positive Feedback</span>
-    </div>
-
-  </div>
-</section>
-
-<section class="section editorial-bridge" aria-label="Editorial bridge">
-  <div class="editorial-bridge-inner">
-    <p class="editorial-bridge-eyebrow">Curated for OG</p>
-    <h2 class="editorial-bridge-title">Signature pieces and live moments</h2>
-    <p class="editorial-bridge-copy">
-      Explore a refined edit from the catalogue, then step into our upcoming eBay Live events for rare finds, first access, and real-time energy.
-    </p>
-  </div>
-</section>
-
-<section class="section featured-section featured-signature" id="featured" aria-label="The OG Edit">
-  <div class="section-head featured-signature-head">
-    <div>
-      <p class="section-kicker featured-signature-eyebrow">Signature Edit</p>
-      <h2 class="section-title featured-signature-title" data-slot="featured.title">The OG Edit</h2>
-      <p class="section-sub featured-signature-sub" data-slot="featured.subtitle">A refined selection from the current drop.</p>
-    </div>
-  </div>
-
-  <div class="featured-signature-actions">
-    <button class="featured-signature-rotate" type="button" data-action="shuffle-featured" aria-label="Rotate featured picks">
-      Rotate picks
-    </button>
-  </div>
-
-  <div class="cards featured-signature-grid" data-ui="featured-grid">
-    <article class="card featured-signature-card is-primary" data-slot="featured.1" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 1">
-        <div class="card-media featured-signature-media" style="--img:url('assets/featured/diamond-ring.jpg');" data-slot="featured.1.image"></div>
-        <div class="card-body featured-signature-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.1.badge">New</span>
-            <span class="price" data-slot="featured.1.price">$2,999</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.1.title">Diamond Ring</h3>
-          <p class="card-sub" data-slot="featured.1.subtitle">A statement in every angle.</p>
-        </div>
-      </button>
-
-      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Diamond Ring to favorites" title="Add to favorites">
-        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
-      </button>
-    </article>
-
-    <article class="card featured-signature-card is-secondary is-secondary-a" data-slot="featured.2" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 2">
-        <div class="card-media featured-signature-media" style="--img:url('assets/featured/gold-chain.jpg');" data-slot="featured.2.image"></div>
-        <div class="card-body featured-signature-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.2.badge">Best Value</span>
-            <span class="price" data-slot="featured.2.price">$1,799</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.2.title">Gold Chain</h3>
-          <p class="card-sub" data-slot="featured.2.subtitle">Polished links, premium weight.</p>
-        </div>
-      </button>
-
-      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Gold Chain to favorites" title="Add to favorites">
-        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
-      </button>
-    </article>
-
-    <article class="card featured-signature-card is-secondary is-secondary-b" data-slot="featured.3" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 3">
-        <div class="card-media featured-signature-media" style="--img:url('assets/featured/luxury-watch.jpg');" data-slot="featured.3.image"></div>
-        <div class="card-body featured-signature-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.3.badge">Limited</span>
-            <span class="price" data-slot="featured.3.price">$9,499</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.3.title">Luxury Watch</h3>
-          <p class="card-sub" data-slot="featured.3.subtitle">Timepiece with presence.</p>
-        </div>
-      </button>
-
-      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Luxury Watch to favorites" title="Add to favorites">
-        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
-      </button>
-    </article>
-
-    <article class="card featured-signature-card is-tertiary" data-slot="featured.4" data-item-id="">
-      <button class="card-hit" type="button" data-action="open-quickview" aria-label="Open featured item 4">
-        <div class="card-media featured-signature-media" style="--img:url('assets/featured/diamond-necklace.jpg');" data-slot="featured.4.image"></div>
-        <div class="card-body featured-signature-body">
-          <div class="card-top">
-            <span class="badge" data-slot="featured.4.badge">OG Pick</span>
-            <span class="price" data-slot="featured.4.price">$4,599</span>
-          </div>
-          <h3 class="card-title" data-slot="featured.4.title">Diamond Necklace</h3>
-          <p class="card-sub" data-slot="featured.4.subtitle">Clean sparkle, camera-ready.</p>
-        </div>
-      </button>
-
-      <button class="fav-toggle" type="button" data-action="toggle-fav" aria-pressed="false" aria-label="Add Diamond Necklace to favorites" title="Add to favorites">
-        <span class="fav-toggle-icon" aria-hidden="true">&#9825;</span>
-      </button>
-    </article>
-  </div>
-
-  <div class="featured-clean-footer">
-    <a class="featured-clean-link" href="catalogue.html">Shop the full catalogue</a>
-  </div>
-</section>
-
-<section class="section ebay-live-section" id="ebay-live" aria-label="Upcoming eBay Live auctions">
-  <div class="ebay-live-shell">
-
-    <div class="ebay-live-topbar">
-      <div class="ebay-live-topbar-copy">
-        <p class="section-kicker ebay-live-eyebrow">OG Jewelers &times; eBay Live</p>
-        <h2 class="section-title ebay-live-heading">Live Auction Spotlight</h2>
-        <p class="ebay-live-intro">
-          Join rare drops, live-only pricing, and real-time bidding moments curated by OG Jewelers.
+    <section class="editorial-pillars reveal-section" aria-label="Brand pillars">
+      <div class="section-intro">
+        <p class="section-kicker">Inside the house</p>
+        <h2 class="section-title">An introduction shaped by craft, presence, and discovery.</h2>
+        <p class="section-copy">
+          OG Jewelers blends refined sourcing, custom work, and live selling energy into a luxury
+          experience that feels personal from the first look.
         </p>
       </div>
 
-      <div class="ebay-live-topbar-actions">
-        <a class="ebay-live-toplink" href="https://www.ebay.com/ebaylive/sellers/lertro4xscs" target="_blank" rel="noopener noreferrer">
-          View all events
-        </a>
+      <div class="pillar-grid">
+        <article class="pillar-card">
+          <p class="pillar-name">Craft</p>
+          <p class="pillar-text">
+            Fine jewelry and custom pieces shaped with precision, weight, and lasting elegance.
+          </p>
+        </article>
+
+        <article class="pillar-card">
+          <p class="pillar-name">Presence</p>
+          <p class="pillar-text">
+            A confident point of view built around signature styling, editorial restraint, and
+            personal service.
+          </p>
+        </article>
+
+        <article class="pillar-card">
+          <p class="pillar-name">Discovery</p>
+          <p class="pillar-text">
+            Live first looks, private access, and a growing world for clients who want to arrive
+            before everyone else.
+          </p>
+        </article>
       </div>
-    </div>
+    </section>
 
-    <div class="ebay-live-meta-row" aria-label="eBay Live value points">
-      <span>First-access drops</span>
-      <span>Live-only pricing</span>
-      <span>Rare finds in real time</span>
-    </div>
-
-    <div id="ebay-live-grid" class="ebay-live-grid" aria-live="polite" aria-label="Upcoming eBay Live events"></div>
-
-  </div>
-</section>
-
-<section class="section vip-section" id="vip-community" aria-label="OG VIP Community">
-  <div class="vip-wrap">
-    <p class="vip-eyebrow">Private Access</p>
-
-    <h2 class="vip-heading">OG VIP Community</h2>
-
-    <p class="vip-subtitle">
-      Continue your insider experience with private alerts, early access, and concierge support.
-    </p>
-
-    <div class="vip-perks" aria-label="OG VIP Community perks">
-     <article class="vip-perk">
-  <div class="vip-icon vip-icon-custom" aria-hidden="true">
-    <img src="Diamond-OG.svg" alt="" class="vip-icon-img">
-  </div>
-  <p>First dibs on<br>new pieces</p>
-</article>
-
-     <article class="vip-perk">
-  <div class="vip-icon vip-icon-custom" aria-hidden="true">
-    <img src="Money-OG.svg" alt="" class="vip-icon-img">
-  </div>
-  <p>Exclusive discounts<br>& giveaways</p>
-</article>
-
-      <article class="vip-perk">
-       <div class="vip-icon vip-icon-custom" aria-hidden="true">
-    <img src="Alert-OG.svg" alt="" class="vip-icon-img">
-  </div>
-        <p>Private alerts before<br>eBay Live starts</p>
-      </article>
-
-     <article class="vip-perk">
-       <div class="vip-icon vip-icon-custom" aria-hidden="true">
-        <img src="VIP-OG.svg" alt="" class="vip-icon-img">
-        </div>
-
-       <p>Personalized service<br>VIP support</p>
-      </article>
-    </div>
-
-    <div class="vip-cta-row">
-      <a class="vip-cta" href="https://chat.whatsapp.com/YOUR-LINK-HERE" target="_blank" rel="noopener noreferrer">
-        Join the VIP Community!
-      </a>
-    </div>
-  </div>
-</section>
-
-    <!-- Footer -->
-    <footer class="site-footer" id="contact">
-      <div class="container footer-grid">
-        <div class="footer-brand">
-          <div class="brand-row">
-            <span class="brand-mark" aria-hidden="true">OG</span>
-            <span class="brand-name">OG Jewelry</span>
-          </div>
-          <p class="footer-text">
-            Fine jewelry. Timeless value. Crafted with intention.
+    <section class="live-preview reveal-section" aria-label="Upcoming eBay Live events">
+      <div class="live-preview-head">
+        <div class="section-intro live-preview-intro">
+          <p class="section-kicker">Upcoming on eBay Live</p>
+          <h2 class="section-title">Real OG shows, presented with a sharper brand lens.</h2>
+          <p class="section-copy">
+            Stay with the live rhythm on eBay while getting a more refined preview of each
+            upcoming event here. The schedule is live. The presentation is OG.
           </p>
         </div>
 
-        <div class="footer-col">
-          <h3 class="footer-title">Shop</h3>
-          <a href="shop.html?category=gold">Gold</a>
-          <a href="shop.html?category=diamonds">Diamonds</a>
-          <a href="shop.html?category=chains">Chains</a>
-          <a href="shop.html?category=signature">Signature</a>
-        </div>
-
-        <div class="footer-col">
-          <h3 class="footer-title">Support</h3>
-          <a href="shipping.html">Shipping</a>
-          <a href="returns.html">Returns</a>
-          <a href="care.html">Care</a>
-          <a href="contact.html">Contact</a>
-        </div>
-
-        <div class="footer-col">
-          <h3 class="footer-title">Connect</h3>
-          <a href="#" rel="noopener">Instagram</a>
-          <a href="#" rel="noopener">TikTok</a>
-          <a href="#" rel="noopener">YouTube</a>
-          <a href="mailto:support@your-domain.com">support@your-domain.com</a>
-        </div>
+        <a
+          class="secondary-link live-preview-link"
+          href="https://www.ebay.com/ebaylive/sellers/lertro4xscs"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          View all on eBay Live
+        </a>
       </div>
 
-      <div class="container footer-bottom">
-        <p>&copy; <span id="year">2026</span> OG Jewelry. All rights reserved.</p>
-        <div class="footer-legal">
-          <a href="privacy.html">Privacy</a>
-          <a href="terms.html">Terms</a>
-        </div>
+      <div id="ebay-live-grid" class="live-preview-grid" aria-live="polite">
+        <div class="live-preview-empty">Loading upcoming eBay Live events...</div>
       </div>
-    </footer>
+    </section>
+
+    <section class="prelaunch-invitation reveal-section" aria-label="Early access invitation">
+      <div class="invitation-shell">
+        <p class="section-kicker">The full house opens soon</p>
+        <h2 class="invitation-title">Enter early. Stay close. Be first through the doors.</h2>
+        <p class="invitation-copy">
+          Join the OG community for private updates, launch news, and first access when the full
+          digital experience arrives.
+        </p>
+        <a class="primary-cta invitation-cta" href="join.html">Get First Access</a>
+      </div>
+    </section>
   </main>
 
-  <!-- Quick View Modal (JS will populate) -->
-  <div class="modal-backdrop" data-ui="modal-backdrop" hidden></div>
-  <section class="modal" role="dialog" aria-modal="true" aria-label="Quick view" data-ui="quickview" hidden>
-    <div class="modal-shell">
-      <div class="modal-top">
-        <div class="modal-title" data-ui="qv-title">Quick View</div>
-        <button class="icon-btn" type="button" aria-label="Close" data-action="close-modal">&times;</button>
+  <footer class="prelaunch-footer">
+    <div class="prelaunch-footer-inner">
+      <div>
+        <p class="footer-brand">OG Jewelers</p>
+        <p class="footer-copy">
+          Luxury jewelry, custom design, and live discovery. A new experience is coming.
+        </p>
       </div>
 
-      <div class="modal-grid">
-        <div class="modal-media">
-          <div class="modal-img" data-ui="qv-img" style="--img:url('assets/featured/diamond-ring.jpg');"></div>
-        </div>
-        <div class="modal-body">
-          <div class="modal-badges" data-ui="qv-badges"></div>
-          <h3 class="modal-h" data-ui="qv-h">Diamond Ring</h3>
-          <p class="modal-p" data-ui="qv-p">A statement in every angle.</p>
-
-          <div class="modal-row">
-  <div class="modal-price" data-ui="qv-price">$2,999</div>
-
-  <div class="modal-actions">
-    <button class="btn btn-ghost" type="button" data-action="add-to-favorites">
-      Add to Favorites
-    </button>
-    <a class="btn btn-primary" href="catalogue.html" data-ui="qv-link">View in shop &rarr;</a>
-  </div>
-</div>
-
-
-<div class="modal-note" data-ui="qv-note">
-  Ships fast &bull; Premium sourcing &bull; Limited drops
-</div>
-
-        </div>
+      <div class="footer-links" aria-label="Footer links">
+        <a href="contact.html">Contact</a>
+        <a href="join.html">VIP Access</a>
+        <a href="story.html">Brand Story</a>
       </div>
     </div>
-  </section>
-
-  <!-- Search Overlay (optional; JS controls) -->
-  <div class="search" data-ui="search" hidden>
-    <div class="search-shell">
-      <div class="search-top">
-        <div class="search-title">Search</div>
-        <button class="icon-btn" type="button" aria-label="Close search" data-action="close-search">&times;</button>
-      </div>
-      <label class="search-input">
-        <span class="search-ic" aria-hidden="true">&#8981;</span>
-        <input type="text" placeholder="Search collections, styles, keywords..." autocomplete="off" data-ui="search-input" />
-      </label>
-      <div class="search-hints">
-        <button class="hint" type="button" data-search="gold">Gold</button>
-        <button class="hint" type="button" data-search="diamonds">Diamonds</button>
-        <button class="hint" type="button" data-search="chains">Chains</button>
-        <button class="hint" type="button" data-search="iced">Iced</button>
-      </div>
-      <div class="search-foot">
-        <a class="text-link" href="catalogue.html">Go to shop &rarr;</a>
-      </div>
-    </div>
-  </div>
-
- <!-- JS -->
-<!-- Supabase MUST load before initSupabase.js -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-<script src="initSupabase.js" defer></script>
-
-<!-- Shared cart badge (FIX: correct path) -->
-<script src="./StoreCart/cart.shared.js" defer></script>
-
-<!-- Phase 6B Step 1: Drawer hydration config MUST be defined before cart.drawer.js -->
-<script>
-  (function () {
-    // Hard-code the project URL you already use in cart.js (so hydration works immediately)
-    window.OG_CART_DRAWER_CFG = {
-      supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
-      channel: "og_main",
-      fn: "storefront-catalog"
-    };
-  })();
-</script>
-
-<!-- Drawer logic -->
-<script src="./StoreCart/cart.drawer.js" defer></script>
-
-<!-- Cart service bridge (module) -->
-<script type="module" src="./StoreCart/cart.service.global.js"></script>
-
-<!-- Favorites bridge + shared UI -->
-<script type="module" src="./Favorites/favorites.service.global.js"></script>
-<script src="./Favorites/favorites.shared.js" defer></script>
-
-<!-- Your page logic -->
-<script src="index.js" defer></script>
-
-
-
-  <!-- =========================
-       Cart Drawer (mini cart)
-       ========================= -->
-  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
-
-  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
-    <div class="cd-topbar">
-      <div class="cd-titlewrap">
-        <div class="cd-title">Cart</div>
-        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) &bull; price locked</div>
-      </div>
-
-      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">&times;</button>
-    </div>
-
-    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
-
-    <div class="cd-list" data-ui="cart-drawer-list"></div>
-    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
-
-    <div class="cd-footer">
-      <div class="cd-summary">
-        <div>Subtotal</div>
-        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
-      </div>
-
-      <div class="cd-actionsRow">
-        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
-        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
-      </div>
-    </div>
-  </aside>
-
+  </footer>
 </body>
 </html>
-
