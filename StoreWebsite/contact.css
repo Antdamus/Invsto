@@ -173,6 +173,28 @@
   text-transform: uppercase;
 }
 
+.contact-page .contact-card-kicker {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgba(202, 166, 95, 0.18);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.contact-page .contact-card-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
 .contact-page .contact-card h2 {
   margin: 0;
   font-family: var(--story-serif);
