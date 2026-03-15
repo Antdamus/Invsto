@@ -1,5 +1,5 @@
-/* profile.js — OG Jewelers (Member Profile)
-   Supabase persistence + luxury UX polish:
+/* profile.js - OG Jewelers (Member Profile)
+   Supabase persistence + luxury member portal polish:
    - Uses public.members keyed by auth.user.id
    - RLS privacy enforced (users only see/update their own row)
    - Handles OTP hash errors (otp_expired, etc.) gracefully
@@ -10,12 +10,10 @@
 (() => {
   "use strict";
 
-  // ---------------------------
-  // DOM helpers
-  // ---------------------------
   const $ = (sel) => document.querySelector(sel);
 
   const yearEl = $("#year");
+  const profileTitleEl = $("#profileTitle");
   const subtitleEl = $("#profileSubtitle");
   const statusEl = $("#status");
 
@@ -26,6 +24,7 @@
   const sourceChip = $("#sourceChip");
   const memberPill = $("#memberPill");
   const tierPill = $("#tierPill");
+  const vipChip = $("#vipChip");
 
   const emailAlertsToggle = $("#emailAlertsToggle");
   const earlyAccessToggle = $("#earlyAccessToggle");
@@ -36,32 +35,28 @@
   const vipLearnBtn = $("#vipLearnBtn");
   const vipOpenBtn = $("#vipOpenBtn");
 
-  // VIP modal
   const vipBackdrop = $("#vipBackdrop");
   const vipModal = $("#vipModal");
   const vipCloseBtn = $("#vipCloseBtn");
   const vipNotNowBtn = $("#vipNotNowBtn");
   const vipUpgradeBtn = $("#vipUpgradeBtn");
 
-  // ---------------------------
-  // State keys
-  // ---------------------------
   const LS_JOIN_CTX = "og_join_context";
   const LS_PREFS = "og_member_prefs";
   const LS_VIP_SHOWN = "og_vip_modal_shown_once";
 
-  // ---------------------------
-  // UI helpers
-  // ---------------------------
   function setStatus(message, kind = "info") {
     if (!statusEl) return;
     statusEl.textContent = message || "";
-    statusEl.className = `status ${kind}`.trim();
+    statusEl.className = `status status-panel ${kind}`.trim();
   }
 
   function setSubtitle(text) {
-    if (!subtitleEl) return;
-    subtitleEl.textContent = text || "";
+    if (subtitleEl) subtitleEl.textContent = text || "";
+  }
+
+  function setTitle(text) {
+    if (profileTitleEl) profileTitleEl.textContent = text || "";
   }
 
   function setMemberPill(text) {
@@ -105,40 +100,30 @@
   }
 
   function computeDefaultPrefsFromCtx(ctx) {
-  const flow = String(ctx?.flow || "").toLowerCase();
-  const optedIn = ctx?.marketing_opt_in === true;
+    const flow = String(ctx?.flow || "").toLowerCase();
+    const optedIn = ctx?.marketing_opt_in === true;
 
-  // Join requires consent checkbox, so defaults ON only for Join opt-in.
-  if (flow === "join" && optedIn) {
-    return { emailAlerts: true, earlyAccess: true };
+    if (flow === "join" && optedIn) {
+      return { emailAlerts: true, earlyAccess: true };
+    }
+
+    return { emailAlerts: false, earlyAccess: false };
   }
 
-  // Access flow (or unknown) defaults OFF until explicitly saved.
-  return { emailAlerts: false, earlyAccess: false };
-}
-
-  // NEW vs RETURNING heuristic (works well without extra columns)
   function isNewMemberRow(member) {
     if (!member?.created_at || !member?.updated_at) return false;
 
-    const c = new Date(member.created_at).getTime();
-    const u = new Date(member.updated_at).getTime();
+    const createdAt = new Date(member.created_at).getTime();
+    const updatedAt = new Date(member.updated_at).getTime();
 
-    if (!Number.isFinite(c) || !Number.isFinite(u)) return false;
+    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) return false;
 
-    // New row typically has created_at ≈ updated_at
-    return Math.abs(u - c) < 90_000; // 90 seconds
+    return Math.abs(updatedAt - createdAt) < 90_000;
   }
 
-  // ---------------------------
-  // Supabase ready gate (race-proof)
-  // ---------------------------
   function getSupabaseClientIfReady() {
-    // initSupabase.js should set window.supabaseClient and/or window.supabase to the CLIENT.
-    // BUT the CDN may also create window.supabase as a library namespace.
-    // We only accept an object that has auth.getSession().
-    const c = window.supabaseClient || window.supabase;
-    if (c && c.auth && typeof c.auth.getSession === "function") return c;
+    const client = window.supabaseClient || window.supabase;
+    if (client && client.auth && typeof client.auth.getSession === "function") return client;
     return null;
   }
 
@@ -149,13 +134,11 @@
 
       const onReady = () => {
         document.removeEventListener("supabase-ready", onReady);
-        const client = getSupabaseClientIfReady();
-        resolve(client || null);
+        resolve(getSupabaseClientIfReady() || null);
       };
 
       document.addEventListener("supabase-ready", onReady);
 
-      // Safety: poll briefly in case the event never fires (load race)
       const t0 = Date.now();
       const timer = setInterval(() => {
         const client = getSupabaseClientIfReady();
@@ -172,35 +155,24 @@
     });
   }
 
-  // ---------------------------
-  // Supabase helpers (members table)
-  // ---------------------------
   async function upsertAndFetchMember(sb, { userId, email, ctx }) {
     const src = String(ctx?.src || "direct");
     const campaign = String(ctx?.campaign || "") || null;
     const ctxName = String(ctx?.name || "").trim() || null;
 
-    // local prefs fallback (first-load convenience)
-// local prefs fallback (first-load convenience)
-const localPrefs = getPrefsLocal() || {};
-const localName = String(localPrefs?.name || "").trim() || null;
+    const localPrefs = getPrefsLocal() || {};
+    const localName = String(localPrefs?.name || "").trim() || null;
+    const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
 
-// NEW: choose first-time defaults based on Join vs Access
-const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
-
-const upsertPayload = {
-  id: userId,
-  email,
-  name: localName || ctxName,
-  source: src || "direct",
-  campaign,
-
-  // If local prefs exist, respect them.
-  // Otherwise, use ctx-based defaults (Join opt-in => ON, Access => OFF).
-  email_alerts: (localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts),
-  early_access: (localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess),
-};
-
+    const upsertPayload = {
+      id: userId,
+      email,
+      name: localName || ctxName,
+      source: src || "direct",
+      campaign,
+      email_alerts: localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts,
+      early_access: localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess,
+    };
 
     const { error: upsertError } = await sb
       .from("members")
@@ -227,9 +199,6 @@ const upsertPayload = {
     if (error) throw error;
   }
 
-  // ---------------------------
-  // Auth hash error handler
-  // ---------------------------
   function handleAuthHashErrorsOrNull() {
     const hash = window.location.hash || "";
     if (!hash.includes("error_code=")) return null;
@@ -242,30 +211,54 @@ const upsertPayload = {
 
     const nice =
       code === "otp_expired"
-        ? "That sign-in link has expired (or was already used). Please request a fresh link."
+        ? "That sign-in link has expired or was already used. Please request a fresh link."
         : (desc ? decodeURIComponent(desc.replace(/\+/g, " ")) : "Sign-in failed. Please try again.");
 
-    // Clear hash so it doesn't stick on refresh
     history.replaceState(null, "", window.location.pathname);
-
     return nice;
   }
 
-  // ---------------------------
-  // Main init
-  // ---------------------------
+  function applyMembershipTone({ name, isNew, emailAlerts, earlyAccess, vipStatus }) {
+    const hasName = !!name;
+    const personalName = hasName ? `, ${name}` : "";
+    const isVip = vipStatus === "vip";
+
+    if (isVip) {
+      setMemberPill("VIP Member");
+      if (vipChip) vipChip.textContent = "VIP Active";
+      setTitle(`Welcome back${personalName}. Your VIP lane is open.`);
+      setSubtitle("Your member lounge is active with priority access, private release timing, and collector updates shaped around the OG world.");
+      return;
+    }
+
+    setMemberPill("Private Member");
+
+    if (isNew) {
+      setTitle(hasName ? `Welcome back, ${name}.` : "Welcome back.");
+      if (emailAlerts || earlyAccess) {
+        setSubtitle("Your membership is active, and your alerts are already set to keep you close to lives, drops, and early access moments.");
+      } else {
+        setSubtitle("Your membership is active. Set your alert preferences below to shape how closely you stay connected to upcoming OG moments.");
+      }
+      return;
+    }
+
+    setTitle(hasName ? `Welcome back, ${name}.` : "Welcome back.");
+    setSubtitle("This is your private member access for alerts, live timing, and early access preferences.");
+  }
+
   async function init() {
     const authHashError = handleAuthHashErrorsOrNull();
     if (authHashError) {
-      setSubtitle("Sign-in link issue");
-      setStatus(`⚠️ ${authHashError}`, "error");
+      setTitle("Private access needs a fresh link.");
+      setSubtitle("We could not complete your member sign-in.");
+      setStatus(authHashError, "error");
       setTimeout(() => { window.location.href = "join.html"; }, 1600);
       return;
     }
 
     if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 
-    // Modal wiring
     vipCloseBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
     vipNotNowBtn?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
     vipBackdrop?.addEventListener("click", () => { hideVipModal(); markVipModalShown(); });
@@ -281,23 +274,20 @@ const upsertPayload = {
       window.location.hash = "vip";
       $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       showVipModal();
-      // user expressed interest (we'll persist later when VIP is real)
     });
 
     vipOpenBtn?.addEventListener("click", () => showVipModal());
 
-    // Sign out
     signOutBtn?.addEventListener("click", onSignOut);
 
-    // Ensure Supabase exists (client, not CDN namespace)
     const sb = await waitForSupabaseReady();
     if (!sb) {
-      setSubtitle("Supabase is not initialized.");
+      setTitle("Private member access is not ready.");
+      setSubtitle("The OG lounge could not finish loading.");
       setStatus("Check initSupabase.js loading order.", "error");
       return;
     }
 
-    // Require session
     const { data: { session }, error } = await sb.auth.getSession();
     if (error) console.warn("Session error:", error);
 
@@ -308,11 +298,12 @@ const upsertPayload = {
 
     const user = session.user;
     const userId = user?.id;
-    const email = user?.email || "—";
+    const email = user?.email || "-";
 
     if (!userId) {
-      setSubtitle("Missing user session.");
-      setStatus("Please sign in again.", "error");
+      setTitle("Your member session could not be restored.");
+      setSubtitle("Please sign in again to continue.");
+      setStatus("Missing user session.", "error");
       window.location.href = "join.html";
       return;
     }
@@ -321,7 +312,6 @@ const upsertPayload = {
 
     const ctx = getJoinContext();
 
-    // Upsert + fetch member row
     let member = null;
     let isNew = false;
 
@@ -330,87 +320,80 @@ const upsertPayload = {
       isNew = isNewMemberRow(member);
     } catch (e) {
       console.error("Member upsert/fetch failed:", e);
-      setStatus("⚠️ Could not load your saved profile yet. Using local settings for now.", "error");
+      setStatus("Could not load your saved profile yet. Using local settings for now.", "error");
     }
 
-    // Hydrate UI from member row (preferred), else local
-const localPrefs = getPrefsLocal() || {};
-const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
+    const localPrefs = getPrefsLocal() || {};
+    const ctxDefaults = computeDefaultPrefsFromCtx(ctx);
 
-const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
-const emailAlerts = (member?.email_alerts ?? localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts);
-const earlyAccess = (member?.early_access ?? localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess);
-
+    const name = (member?.name ?? localPrefs?.name ?? ctx?.name ?? "") || "";
+    const emailAlerts = member?.email_alerts ?? localPrefs?.emailAlerts ?? ctxDefaults.emailAlerts;
+    const earlyAccess = member?.early_access ?? localPrefs?.earlyAccess ?? ctxDefaults.earlyAccess;
 
     if (nameInput) nameInput.value = name;
     if (emailAlertsToggle) emailAlertsToggle.checked = !!emailAlerts;
     if (earlyAccessToggle) earlyAccessToggle.checked = !!earlyAccess;
 
-    // Source chip
     const src = member?.source || ctx?.src || "direct";
     const campaign = member?.campaign || ctx?.campaign || "";
     if (sourceChip) {
-      sourceChip.textContent = campaign ? `source: ${src} • ${campaign}` : `source: ${src}`;
+      sourceChip.textContent = campaign ? `source: ${src} | ${campaign}` : `source: ${src}`;
     }
 
-    setMemberPill("Member");
-
-    // Tier pill (future)
     const vipStatus = member?.vip_status || "free";
     if (tierPill) tierPill.textContent = vipStatus === "vip" ? "VIP Member" : "Free Member";
 
-    // Greeting + success moment (NEW vs RETURNING)
-// Greeting + success moment (NEW vs RETURNING)
-if (isNew) {
-  setSubtitle("Welcome to OG. Your membership is active.");
+    applyMembershipTone({
+      name,
+      isNew,
+      emailAlerts: !!emailAlerts,
+      earlyAccess: !!earlyAccess,
+      vipStatus
+    });
 
-  // If they joined via Join with consent, celebrate that they’re opted in.
-  // If they came via Access (or unknown), keep it accurate: account is active, preferences are in their control.
-  if (emailAlerts || earlyAccess) {
-    setStatus("✅ Membership activated. You’re set for alerts and early access — you can fine-tune anytime.", "success");
-  } else {
-    setStatus("✅ Membership activated. Choose your alerts and early access preferences below.", "success");
-  }
-} else {
-  const greet = name ? `Welcome back, ${name}.` : "Welcome back.";
-  setSubtitle(`${greet} Manage your alerts and access here.`);
-  setStatus("", "info");
-}
+    if (isNew) {
+      if (emailAlerts || earlyAccess) {
+        setStatus("Membership activated. Your alerts and early access settings are ready, and you can refine them anytime.", "success");
+      } else {
+        setStatus("Membership activated. Choose how closely you want to stay connected below.", "success");
+      }
+    } else {
+      setStatus("", "info");
+    }
 
-
-    // Save handlers (use sb + userId)
-    saveNameBtn?.addEventListener("click", () => saveName(sb, userId));
+    saveNameBtn?.addEventListener("click", () => saveName(sb, userId, vipStatus));
     savePrefsBtn?.addEventListener("click", () => savePrefs(sb, userId));
-
 
     if (window.location.hash === "#vip") {
       $("#vipPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (isNew && shouldSoftShowVipModal()) {
+      window.setTimeout(() => {
+        showVipModal();
+      }, 500);
     }
   }
 
-  // ---------------------------
-  // Actions
-  // ---------------------------
-  async function saveName(sb, userId) {
+  async function saveName(sb, userId, vipStatus = "free") {
     setStatus("");
 
     const name = String(nameInput?.value || "").trim();
-
-    // Update local immediately
     const local = getPrefsLocal() || {};
     setPrefsLocal({ ...local, name, lastUpdatedAt: new Date().toISOString() });
 
-    // Update subtitle immediately
-    const greet = name ? `Welcome back, ${name}.` : "Welcome back.";
-    setSubtitle(`${greet} Manage your alerts and access here.`);
+    applyMembershipTone({
+      name,
+      isNew: false,
+      emailAlerts: !!emailAlertsToggle?.checked,
+      earlyAccess: !!earlyAccessToggle?.checked,
+      vipStatus
+    });
 
-    // Persist to DB
     try {
       await updateMember(sb, userId, { name: name || null });
-      setStatus("✅ Name saved.", "success");
+      setStatus("Your member name has been saved.", "success");
     } catch (e) {
       console.error("Save name failed:", e);
-      setStatus("⚠️ Name saved locally, but couldn’t sync yet.", "error");
+      setStatus("Your name was saved locally, but could not sync yet.", "error");
     }
   }
 
@@ -420,7 +403,6 @@ if (isNew) {
     const emailAlerts = !!emailAlertsToggle?.checked;
     const earlyAccess = !!earlyAccessToggle?.checked;
 
-    // Update local immediately
     const local = getPrefsLocal() || {};
     setPrefsLocal({
       ...local,
@@ -429,14 +411,15 @@ if (isNew) {
       lastUpdatedAt: new Date().toISOString()
     });
 
-    // Persist to DB
     try {
       await updateMember(sb, userId, { email_alerts: emailAlerts, early_access: earlyAccess });
-      const onOff = emailAlerts ? "ON" : "OFF";
-      setStatus(`✅ Preferences saved. Email alerts are ${onOff}.`, "success");
+      const summary = emailAlerts
+        ? "Preferences saved. You will stay close to lives, drops, and member timing."
+        : "Preferences saved. Live and drop alerts are currently paused.";
+      setStatus(summary, "success");
     } catch (e) {
       console.error("Save prefs failed:", e);
-      setStatus("⚠️ Preferences saved locally, but couldn’t sync yet.", "error");
+      setStatus("Your preferences were saved locally, but could not sync yet.", "error");
     }
   }
 
@@ -452,6 +435,5 @@ if (isNew) {
     }
   }
 
-  // boot
   init();
 })();

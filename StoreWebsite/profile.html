@@ -1,4 +1,3 @@
-<!-- profile.html — OG Jewelers (Member Profile) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,93 +5,100 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
 
-  <title>OG Jewelers — Profile</title>
+  <title>OG Jewelers | Private Member Access</title>
   <meta name="description" content="Your OG Jewelers member profile, alerts, and VIP access." />
 
-  <!-- Fonts (match join + luxury system) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
 
-  <!-- Page CSS -->
   <link rel="stylesheet" href="profile.css" />
 </head>
 
-<body>
-  <!-- Ambient background -->
-  <div class="bg">
+<body class="profile-page">
+  <div class="bg" aria-hidden="true">
     <div class="bg-noise"></div>
     <div class="bg-glow"></div>
   </div>
 
-  <!-- Top bar -->
   <header class="topbar">
-    <a class="brand" href="index.html" aria-label="OG Jewelers Home">
-      <span class="brand-mark">OG</span>
-      <span class="brand-name">OG Jewelers</span>
-    </a>
+    <div class="masthead-shell">
+      <a class="brand" href="index.html" aria-label="OG Jewelers Home">
+        <span class="brand-mark">
+          <img
+            src="OG-Jewelers.webp"
+            alt=""
+            class="brand-logo"
+            loading="eager"
+            decoding="async"
+          />
+        </span>
+        <span class="brand-copy">
+          <span class="brand-kicker">Private Member Access</span>
+          <span class="brand-name">OG Jewelers</span>
+        </span>
+      </a>
 
-    <div class="topbar-right">
-      <span class="pill" id="memberPill">Member</span>
-      <button class="btn small ghost" id="signOutBtn" type="button">Sign out</button>
+      <div class="topbar-right">
+        <span class="pill" id="memberPill">Member</span>
+        <button class="btn small ghost" id="signOutBtn" type="button">Sign out</button>
+      </div>
     </div>
   </header>
 
   <main class="wrap">
-    <!-- Member Card -->
     <section class="card" aria-labelledby="profileTitle">
       <div class="hero">
-        <h1 id="profileTitle" class="title">Your Member Profile</h1>
+        <p class="hero-kicker">OG Member Lounge</p>
+        <h1 id="profileTitle" class="title">Welcome back.</h1>
         <p class="subtitle" id="profileSubtitle">
-          Loading your membership…
+          Loading your membership...
         </p>
-
-        <div class="trust">
-          <span class="trust-item">Secure login</span>
-          <span class="dot"></span>
-          <span class="trust-item">Manage alerts</span>
-          <span class="dot"></span>
-          <span class="trust-item">VIP optional</span>
-        </div>
       </div>
 
-      <!-- Main content grid -->
       <div class="grid">
-        <!-- Left: Profile -->
         <section class="panel" aria-label="Profile details">
           <div class="panel-head">
-            <h2 class="panel-title">Identity</h2>
-            <span class="chip" id="sourceChip">source: —</span>
+            <div>
+              <p class="panel-kicker">Identity</p>
+              <h2 class="panel-title">Member details</h2>
+            </div>
+            <span class="chip subtle">Private profile</span>
           </div>
 
           <div class="row">
             <div class="label">Email</div>
-            <div class="value" id="emailValue">—</div>
+            <div class="value value-static" id="emailValue">-</div>
           </div>
 
-          <div class="row">
+          <div class="row row-input">
             <div class="label">Name</div>
-            <div class="value">
+            <div class="value value-form">
               <input id="nameInput" type="text" placeholder="Add your name (optional)" autocomplete="name" />
               <button class="btn small primary" id="saveNameBtn" type="button">Save</button>
             </div>
           </div>
 
           <div class="row">
-            <div class="label">Status</div>
+            <div class="label">Member tier</div>
             <div class="value">
               <span class="status-pill" id="tierPill">Free Member</span>
             </div>
           </div>
 
-          <div class="status" id="status" role="status" aria-live="polite"></div>
+          <div class="status status-panel" id="status" role="status" aria-live="polite"></div>
         </section>
 
-        <!-- Right: Preferences -->
         <section class="panel" aria-label="Notification preferences">
           <div class="panel-head">
-            <h2 class="panel-title">Alerts</h2>
-            <span class="chip subtle">Email-only (for now)</span>
+            <div>
+              <p class="panel-kicker">Preferences</p>
+              <h2 class="panel-title">Alerts and access timing</h2>
+            </div>
+            <span class="chip subtle">Email delivery</span>
           </div>
 
           <div class="pref">
@@ -100,7 +106,7 @@
               <input type="checkbox" id="emailAlertsToggle" />
               <span>
                 Email me before lives and drops
-                <span class="fine">(you can turn this off anytime)</span>
+                <span class="fine">Keep the live rhythm close without having to watch for every announcement.</span>
               </span>
             </label>
           </div>
@@ -110,88 +116,56 @@
               <input type="checkbox" id="earlyAccessToggle" />
               <span>
                 Enable early access links when available
-                <span class="fine">(recommended)</span>
+                <span class="fine">Recommended for members who want first entry into select releases and private windows.</span>
               </span>
             </label>
           </div>
 
-          <button class="btn primary" id="savePrefsBtn" type="button">
-            Save Preferences
-          </button>
+          <div class="panel-actions">
+            <button class="btn primary" id="savePrefsBtn" type="button">Save Preferences</button>
+          </div>
 
           <div class="mini-note">
-            Tip: early access works best when you check your email close to live time.
-          </div>
-        </section>
-
-        <!-- Full width: VIP -->
-        <section class="panel wide" aria-label="VIP access" id="vipPanel">
-          <div class="panel-head">
-            <h2 class="panel-title">VIP Access</h2>
-            <span class="chip gold" id="vipChip">Optional Upgrade</span>
-          </div>
-
-          <p class="vip-copy">
-            VIP members unlock member-only eBay Live discounts, early drop links, and exclusive perks.
-          </p>
-
-          <div class="vip-grid">
-            <div class="vip-card">
-              <div class="vip-kicker">Exclusive Codes</div>
-              <div class="vip-desc">Members-only discounts during lives.</div>
-            </div>
-            <div class="vip-card">
-              <div class="vip-kicker">Early Drops</div>
-              <div class="vip-desc">First access to limited inventory.</div>
-            </div>
-            <div class="vip-card">
-              <div class="vip-kicker">Raffle Perks</div>
-              <div class="vip-desc">Bonus surprises and raffles.</div>
-            </div>
-          </div>
-
-          <div class="vip-actions">
-            <button class="btn ghost" id="vipLearnBtn" type="button">Learn more</button>
-            <button class="btn primary" id="vipOpenBtn" type="button">See VIP Plans</button>
+            Concierge note: early access works best when you check your inbox close to live time.
           </div>
         </section>
       </div>
     </section>
 
     <footer class="foot">
-      <span>© <span id="year"></span> OG Jewelers</span>
-      <span class="sep">•</span>
-      <a href="shop.html">Shop</a>
-      <span class="sep">•</span>
+      <span>&copy; <span id="year"></span> OG Jewelers</span>
+      <span class="sep">&bull;</span>
+      <a href="catalogue.html">Shop</a>
+      <span class="sep">&bull;</span>
       <a href="privacy.html">Privacy</a>
     </footer>
   </main>
 
-  <!-- VIP Modal (shown softly by profile.js) -->
   <div class="modal-backdrop" id="vipBackdrop" hidden></div>
   <div class="modal" id="vipModal" role="dialog" aria-modal="true" aria-labelledby="vipTitle" hidden>
     <div class="modal-shell">
       <div class="modal-head">
         <h2 id="vipTitle">Unlock VIP Access?</h2>
-        <button class="icon-btn" id="vipCloseBtn" type="button" aria-label="Close">✕</button>
+        <button class="icon-btn" id="vipCloseBtn" type="button" aria-label="Close">&times;</button>
       </div>
 
       <p class="modal-sub">
-        VIP members get exclusive eBay Live discount codes, early access to drops, and special perks.
+        VIP members get exclusive eBay Live discount codes, early access to drops, and collector
+        perks tied to the most private OG moments.
       </p>
 
       <div class="vip-grid modal-grid">
         <div class="vip-card">
           <div class="vip-kicker">Discount Codes</div>
-          <div class="vip-desc">Members-only codes during lives.</div>
+          <div class="vip-desc">Members-only codes during live events.</div>
         </div>
         <div class="vip-card">
           <div class="vip-kicker">Early Drops</div>
-          <div class="vip-desc">Access inventory before public.</div>
+          <div class="vip-desc">Access select inventory before public release windows.</div>
         </div>
         <div class="vip-card">
-          <div class="vip-kicker">Perks</div>
-          <div class="vip-desc">Raffles and surprise bonuses.</div>
+          <div class="vip-kicker">Collector Perks</div>
+          <div class="vip-desc">Raffles, private opportunities, and closer access to OG releases.</div>
         </div>
       </div>
 
@@ -202,11 +176,8 @@
     </div>
   </div>
 
-  <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
-
-  <!-- Page JS -->
   <script src="profile.js"></script>
 </body>
 </html>

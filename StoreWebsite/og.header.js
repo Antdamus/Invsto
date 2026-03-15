@@ -58,6 +58,7 @@
           <a href="${base}/story.html">Brand Story</a>
           <a href="${base}/contact.html">Contact</a>
           <a href="https://www.ebay.com/ebaylive/sellers/lertro4xscs" target="_blank" rel="noopener noreferrer">Live Shows</a>
+          <a href="${base}/profile.html">Account</a>
         </nav>
       </aside>
     `;

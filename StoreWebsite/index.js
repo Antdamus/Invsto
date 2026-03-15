@@ -2,8 +2,31 @@
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const revealTargets = Array.from(document.querySelectorAll(".reveal-section"));
   const hero = document.querySelector(".hero-arrival");
+  const testimonialFeature = document.getElementById("testimonialFeature");
+  const testimonialRail = document.getElementById("testimonialRail");
+  const testimonialPrevBtn = document.getElementById("testimonialPrev");
+  const testimonialNextBtn = document.getElementById("testimonialNext");
   const EBAY_LIVE_FN_URL =
     "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
+  // TODO: Replace with real eBay feedback data when storefront review ingestion is wired up.
+  const TESTIMONIALS = [
+    {
+      quote: "Everything arrived exactly as described, and the communication felt personal from start to finish.",
+      source: "Verified eBay buyer",
+      note: "Fine jewelry order with smooth service, fast shipping, and strong buyer confidence."
+    },
+    {
+      quote: "You can tell they care about the customer experience, not just the sale. I would absolutely buy again.",
+      source: "Recent eBay feedback",
+      note: "Repeat-buyer energy with trust built through responsiveness and follow-through."
+    },
+    {
+      quote: "The live shows are exciting, but the professionalism behind them is what really stands out.",
+      source: "Collector review",
+      note: "Confidence built through presentation, clarity, and real-time support."
+    }
+  ];
+  let activeTestimonialIndex = 0;
   const EBAY_LIVE_FALLBACK_EVENTS = [
     {
       title: "Fine Jewelry and Luxury Watches Live",
@@ -28,6 +51,54 @@
   function markReady() {
     window.requestAnimationFrame(() => {
       document.body.classList.add("is-ready");
+    });
+  }
+
+  function renderTestimonials() {
+    if (!testimonialFeature || !testimonialRail) return;
+
+    const active = TESTIMONIALS[activeTestimonialIndex];
+    testimonialFeature.innerHTML = `
+      <div>
+        <span class="testimonial-rating">5-star feedback</span>
+        <p class="testimonial-quote">"${ebayEsc(active.quote)}"</p>
+      </div>
+      <div class="testimonial-meta">
+        <span class="testimonial-source">${ebayEsc(active.source)}</span>
+        <div class="testimonial-note">${ebayEsc(active.note)}</div>
+      </div>
+    `;
+
+    testimonialRail.innerHTML = TESTIMONIALS.map((item, index) => `
+      <article class="testimonial-mini ${index === activeTestimonialIndex ? "is-active" : ""}" data-testimonial-index="${index}">
+        <span class="testimonial-source">${ebayEsc(item.source)}</span>
+        <p class="testimonial-mini-quote">"${ebayEsc(item.quote)}"</p>
+      </article>
+    `).join("");
+  }
+
+  function setupTestimonials() {
+    if (!testimonialFeature || !testimonialRail) return;
+
+    renderTestimonials();
+
+    testimonialPrevBtn?.addEventListener("click", () => {
+      activeTestimonialIndex = (activeTestimonialIndex - 1 + TESTIMONIALS.length) % TESTIMONIALS.length;
+      renderTestimonials();
+    });
+
+    testimonialNextBtn?.addEventListener("click", () => {
+      activeTestimonialIndex = (activeTestimonialIndex + 1) % TESTIMONIALS.length;
+      renderTestimonials();
+    });
+
+    testimonialRail.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-testimonial-index]");
+      if (!target) return;
+      const index = Number(target.getAttribute("data-testimonial-index"));
+      if (!Number.isFinite(index)) return;
+      activeTestimonialIndex = index;
+      renderTestimonials();
     });
   }
 
@@ -347,6 +418,7 @@
     markReady();
     setupSectionReveal();
     setupHeroParallax();
+    setupTestimonials();
     loadEbayLiveEvents();
   });
 })();
