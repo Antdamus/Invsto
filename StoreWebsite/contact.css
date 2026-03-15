@@ -174,19 +174,15 @@
 }
 
 .contact-page .contact-card-kicker {
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid rgba(202, 166, 95, 0.18);
-  border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.02);
+  justify-content: flex-start;
+  line-height: 1;
 }
 
 .contact-page .contact-card-icon {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 2rem;
+  height: 2rem;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.55;
@@ -253,8 +249,29 @@
 
 .contact-page .contact-card-whatsapp .familia-cta {
   min-width: 0;
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
+  min-height: 0;
+  padding: 0 0 0.5rem;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  justify-content: flex-start;
+  color: rgba(236, 245, 238, 0.92);
+  font-size: 0.82rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(191, 225, 198, 0.32);
+  transition: color 220ms var(--ease), border-color 220ms var(--ease), transform 220ms var(--ease);
+}
+
+.contact-page .contact-card-whatsapp .familia-cta:hover,
+.contact-page .contact-card-whatsapp .familia-cta:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(218, 235, 221, 0.6);
+  box-shadow: none;
+  color: rgba(244, 250, 245, 0.98);
 }
 
 .contact-page .contact-concierge {
