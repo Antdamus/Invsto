@@ -9,22 +9,23 @@
   max-width: min(74rem, 100%);
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
-  gap: clamp(1.4rem, 4vw, 3rem);
+  gap: clamp(1.8rem, 4vw, 3.6rem);
   align-items: end;
 }
 
 .contact-page .contact-hero-copy {
-  max-width: 40rem;
+  max-width: 43rem;
 }
 
 .contact-page .contact-headline {
   margin: 0;
-  max-width: 10ch;
+  max-width: 13ch;
   font-family: var(--story-serif);
   font-weight: 600;
-  font-size: clamp(3.1rem, 9vw, 5.9rem);
-  line-height: 0.92;
+  font-size: clamp(2.95rem, 7vw, 5.2rem);
+  line-height: 0.97;
   letter-spacing: 0.01em;
+  text-wrap: balance;
 }
 
 .contact-page .contact-lead {
@@ -41,15 +42,12 @@
 }
 
 .contact-page .contact-trust-panel {
-  padding: clamp(1.1rem, 2.4vw, 1.45rem);
-  border: 1px solid var(--story-border);
-  background:
-    linear-gradient(180deg, rgba(22, 23, 28, 0.9), rgba(11, 12, 15, 0.9)),
-    radial-gradient(circle at top, rgba(202, 166, 95, 0.12), transparent 54%);
-  box-shadow: var(--story-shadow);
+  position: relative;
+  padding: clamp(0.75rem, 1.8vw, 1rem) 0 0 0;
+  background: radial-gradient(circle at 22% 18%, rgba(202, 166, 95, 0.08), transparent 58%);
   align-self: stretch;
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
   align-content: end;
 }
 
@@ -57,8 +55,9 @@
   margin: 0;
   color: var(--story-gold);
   font-size: 0.72rem;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
+  opacity: 0.92;
 }
 
 .contact-page .contact-trust-list {
@@ -71,9 +70,10 @@
 
 .contact-page .contact-trust-list li {
   display: grid;
-  gap: 0.2rem;
-  padding-bottom: 0.85rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 0.34rem;
+  padding: 0 0 1rem 1.15rem;
+  border-bottom: 1px solid rgba(214, 197, 160, 0.14);
+  position: relative;
 }
 
 .contact-page .contact-trust-list li:last-child {
@@ -81,17 +81,32 @@
   border-bottom: 0;
 }
 
+.contact-page .contact-trust-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.18rem;
+  bottom: 1rem;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(202, 166, 95, 0.52), rgba(202, 166, 95, 0.08));
+}
+
+.contact-page .contact-trust-list li:last-child::before {
+  bottom: 0.08rem;
+}
+
 .contact-page .contact-trust-list strong {
   color: var(--story-text);
   font-size: 0.8rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .contact-page .contact-trust-list span {
   color: var(--story-soft);
-  font-size: 0.94rem;
-  line-height: 1.55;
+  font-size: 0.92rem;
+  line-height: 1.68;
+  max-width: 24rem;
 }
 
 .contact-page .contact-methods {
@@ -416,6 +431,11 @@
 }
 
 @media (min-width: 900px) {
+  .contact-page .contact-trust-panel {
+    max-width: 25rem;
+    justify-self: end;
+  }
+
   .contact-page .contact-concierge-shell {
     grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 0.8fr);
     align-items: start;
@@ -438,6 +458,14 @@
   .contact-page .contact-method-grid,
   .contact-page .contact-hours-list div {
     grid-template-columns: 1fr;
+  }
+
+  .contact-page .contact-headline {
+    max-width: 9ch;
+  }
+
+  .contact-page .contact-trust-panel {
+    padding-top: 0.35rem;
   }
 
   .contact-page .contact-card {
