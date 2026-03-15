@@ -1,0 +1,52 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="160" y1="90" x2="1030" y2="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2B241D"/>
+      <stop offset="0.52" stop-color="#141311"/>
+      <stop offset="1" stop-color="#090909"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(832 214) rotate(122.584) scale(306.165 378.242)">
+      <stop stop-color="#E7C98A" stop-opacity="0.62"/>
+      <stop offset="0.56" stop-color="#C59D52" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#090909" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="steel" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(623 450) rotate(90) scale(206 206)">
+      <stop stop-color="#D8CFBF" stop-opacity="0.34"/>
+      <stop offset="0.48" stop-color="#85786A" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#131313" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <ellipse cx="832" cy="214" rx="292" ry="210" fill="url(#glow)"/>
+  <g opacity="0.9">
+    <rect x="504" y="32" width="190" height="174" rx="58" fill="#0F0F10"/>
+    <rect x="512" y="44" width="174" height="150" rx="48" stroke="#AA8B58" stroke-opacity="0.44" stroke-width="10"/>
+    <rect x="504" y="694" width="190" height="174" rx="58" fill="#0E0E0F"/>
+    <rect x="512" y="706" width="174" height="150" rx="48" stroke="#8D7247" stroke-opacity="0.36" stroke-width="10"/>
+  </g>
+  <circle cx="600" cy="450" r="198" fill="#101010" stroke="#C8A66B" stroke-opacity="0.52" stroke-width="18"/>
+  <circle cx="600" cy="450" r="162" fill="url(#steel)" stroke="#F3E7D0" stroke-opacity="0.18" stroke-width="2"/>
+  <circle cx="600" cy="450" r="8" fill="#D6B06A"/>
+  <g opacity="0.36">
+    <path d="M600 316V348" stroke="#EEDBB8" stroke-width="5" stroke-linecap="round"/>
+    <path d="M666 336L650 364" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M714 384L686 400" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M734 450H702" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M714 516L686 500" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M666 564L650 536" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M600 584V552" stroke="#EEDBB8" stroke-width="5" stroke-linecap="round"/>
+    <path d="M534 564L550 536" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M486 516L514 500" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M466 450H498" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M486 384L514 400" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M534 336L550 364" stroke="#EEDBB8" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <path d="M600 450L600 352" stroke="#E5C17A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M600 450L674 478" stroke="#F0E2C6" stroke-opacity="0.84" stroke-width="8" stroke-linecap="round"/>
+  <g opacity="0.36" filter="url(#blur)">
+    <ellipse cx="874" cy="728" rx="192" ry="110" fill="#9A6D2C"/>
+  </g>
+</svg>

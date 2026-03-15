@@ -1,0 +1,31 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="174" y1="84" x2="1036" y2="790" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2A1C10"/>
+      <stop offset="0.5" stop-color="#17110D"/>
+      <stop offset="1" stop-color="#090909"/>
+    </linearGradient>
+    <radialGradient id="amber" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(826 222) rotate(124.241) scale(354.147 375.496)">
+      <stop stop-color="#E1B561" stop-opacity="0.56"/>
+      <stop offset="0.5" stop-color="#B47D2D" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#090909" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="235" y1="252" x2="957" y2="702" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7D5924"/>
+      <stop offset="0.5" stop-color="#E4B965"/>
+      <stop offset="1" stop-color="#6D4818"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <ellipse cx="826" cy="222" rx="330" ry="220" fill="url(#amber)"/>
+  <g opacity="0.95" stroke="url(#gold)" stroke-width="28">
+    <rect x="290" y="310" width="258" height="150" rx="75" transform="rotate(16 290 310)"/>
+    <rect x="480" y="388" width="258" height="150" rx="75" transform="rotate(16 480 388)"/>
+    <rect x="670" y="466" width="258" height="150" rx="75" transform="rotate(16 670 466)"/>
+  </g>
+  <g opacity="0.24" stroke="#F4E1BE" stroke-width="6">
+    <rect x="328" y="338" width="182" height="94" rx="47" transform="rotate(16 328 338)"/>
+    <rect x="518" y="416" width="182" height="94" rx="47" transform="rotate(16 518 416)"/>
+    <rect x="708" y="494" width="182" height="94" rx="47" transform="rotate(16 708 494)"/>
+  </g>
+</svg>

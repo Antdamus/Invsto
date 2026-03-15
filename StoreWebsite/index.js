@@ -592,16 +592,19 @@
 
         return `
         <article class="live-preview-card" data-theme="${theme}">
-          <div class="live-preview-surface">
-            <div class="live-preview-topline">
-              <span class="live-badge">${status}</span>
-              <span class="live-countdown">${countdown}</span>
-            </div>
-            <div>
-              <p class="live-preview-theme-label">${themeLabel}</p>
-              <span class="live-date-pill">${dateText}</span>
+          <div class="live-preview-media">
+            <div class="live-preview-surface">
+              <div class="live-preview-topline">
+                <span class="live-badge">${status}</span>
+                <span class="live-countdown">${countdown}</span>
+              </div>
+              <div class="live-preview-theme-block">
+                <p class="live-preview-theme-label">${themeLabel}</p>
+                <span class="live-date-pill">${dateText}</span>
+              </div>
             </div>
           </div>
+          <div class="live-preview-transition" aria-hidden="true"></div>
 
           <div class="live-preview-body">
             <h3 class="live-preview-title">${title}</h3>
