@@ -1,74 +1,400 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
 
-  <title>OG Jewelers — Our Story</title>
-  <meta name="description" content="Learn who we are at OG Jewelers and what guides our curation." />
+  <title>Contact OG Jewelers | Concierge Support</title>
+  <meta
+    name="description"
+    content="Contact OG Jewelers for sourcing guidance, custom jewelry questions, appointments, and direct concierge support from our Miami team."
+  />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
 
+  <link rel="stylesheet" href="catalogue.css" />
   <link rel="stylesheet" href="index.css" />
   <link rel="stylesheet" href="og.header.css" />
   <link rel="stylesheet" href="story.css" />
+  <link rel="stylesheet" href="./StoreCart/cart.drawer.css" />
+  <link rel="stylesheet" href="./Favorites/favorites.shared.css" />
+
+  <style>
+    .contact-page .section.story-section.contact-hero {
+      padding-top: clamp(5.8rem, 11vw, 8.5rem);
+      background:
+        linear-gradient(135deg, rgba(16, 17, 20, 0.94) 12%, rgba(7, 8, 10, 0.92) 58%),
+        radial-gradient(circle at 85% 14%, rgba(202, 166, 95, 0.2), transparent 34%);
+    }
+
+    .contact-page .contact-hero-shell {
+      max-width: min(74rem, 100%);
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
+      gap: clamp(1.4rem, 4vw, 3rem);
+      align-items: end;
+    }
+
+    .contact-page .contact-hero-copy {
+      max-width: 40rem;
+    }
+
+    .contact-page .contact-headline {
+      margin: 0;
+      max-width: 10ch;
+      font-family: var(--story-serif);
+      font-weight: 600;
+      font-size: clamp(3.1rem, 9vw, 5.9rem);
+      line-height: 0.92;
+      letter-spacing: 0.01em;
+    }
+
+    .contact-page .contact-lead {
+      margin-top: 1.3rem;
+      max-width: 37rem;
+      color: var(--story-text);
+      font-size: clamp(1.03rem, 1.8vw, 1.2rem);
+      line-height: 1.82;
+    }
+
+    .contact-page .contact-support-copy {
+      margin-top: 1rem;
+      max-width: 35rem;
+    }
+
+    .contact-page .contact-trust-panel {
+      padding: clamp(1.1rem, 2.4vw, 1.45rem);
+      border: 1px solid var(--story-border);
+      background:
+        linear-gradient(180deg, rgba(22, 23, 28, 0.9), rgba(11, 12, 15, 0.9)),
+        radial-gradient(circle at top, rgba(202, 166, 95, 0.12), transparent 54%);
+      box-shadow: var(--story-shadow);
+      align-self: stretch;
+      display: grid;
+      gap: 0.9rem;
+      align-content: end;
+    }
+
+    .contact-page .contact-trust-label {
+      margin: 0;
+      color: var(--story-gold);
+      font-size: 0.72rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .contact-page .contact-trust-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .contact-page .contact-trust-list li {
+      display: grid;
+      gap: 0.2rem;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .contact-page .contact-trust-list li:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .contact-page .contact-trust-list strong {
+      color: var(--story-text);
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .contact-page .contact-trust-list span {
+      color: var(--story-soft);
+      font-size: 0.94rem;
+      line-height: 1.55;
+    }
+
+    .contact-page .contact-methods {
+      background:
+        linear-gradient(180deg, rgba(9, 10, 13, 0.98), rgba(12, 14, 17, 0.96)),
+        radial-gradient(circle at 16% 20%, rgba(202, 166, 95, 0.08), transparent 34%);
+    }
+
+    .contact-page .contact-methods-shell {
+      max-width: min(74rem, 100%);
+      margin: 0 auto;
+    }
+
+    .contact-page .contact-methods-intro {
+      max-width: 36rem;
+      margin-bottom: clamp(1.7rem, 4vw, 2.7rem);
+    }
+
+    .contact-page .contact-methods-title {
+      margin: 0;
+      font-family: var(--story-serif);
+      font-weight: 600;
+      font-size: clamp(2.2rem, 5vw, 3.5rem);
+      line-height: 0.98;
+      letter-spacing: 0.01em;
+    }
+
+    .contact-page .contact-methods-copy {
+      margin: 1rem 0 0;
+      max-width: 34rem;
+      color: var(--story-muted);
+      font-size: 1rem;
+      line-height: 1.8;
+    }
+
+    .contact-page .contact-method-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .contact-page .contact-card {
+      min-height: 100%;
+      padding: 1.35rem;
+      border: 1px solid var(--story-border);
+      background:
+        linear-gradient(180deg, rgba(18, 20, 24, 0.95), rgba(10, 11, 14, 0.96)),
+        radial-gradient(circle at top left, rgba(202, 166, 95, 0.08), transparent 36%);
+      box-shadow: var(--story-shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 0.95rem;
+    }
+
+    .contact-page .contact-card.contact-card-whatsapp {
+      background:
+        linear-gradient(180deg, rgba(18, 30, 22, 0.96), rgba(9, 17, 12, 0.98)),
+        radial-gradient(circle at top left, rgba(152, 214, 166, 0.14), transparent 36%);
+    }
+
+    .contact-page .contact-card-kicker {
+      margin: 0;
+      color: var(--story-gold);
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .contact-page .contact-card h2 {
+      margin: 0;
+      font-family: var(--story-serif);
+      font-size: 2rem;
+      line-height: 1;
+      letter-spacing: 0.01em;
+    }
+
+    .contact-page .contact-card p {
+      margin: 0;
+      color: var(--story-muted);
+      font-size: 0.98rem;
+      line-height: 1.72;
+    }
+
+    .contact-page .contact-card-meta {
+      color: var(--story-text);
+      font-size: 0.88rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .contact-page .contact-card-link,
+    .contact-page .contact-card-address {
+      color: var(--story-text);
+      font-size: 1rem;
+      line-height: 1.65;
+      text-decoration: none;
+    }
+
+    .contact-page .contact-card-link:hover,
+    .contact-page .contact-card-link:focus-visible {
+      color: var(--story-gold);
+    }
+
+    .contact-page .contact-card-address {
+      font-style: normal;
+    }
+
+    .contact-page .contact-card-actions {
+      margin-top: auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      align-items: center;
+    }
+
+    .contact-page .contact-card .secondary-link {
+      width: fit-content;
+    }
+
+    @media (max-width: 1080px) {
+      .contact-page .contact-hero-shell,
+      .contact-page .contact-method-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .contact-page .contact-hero-shell,
+      .contact-page .contact-method-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .contact-page .contact-card {
+        padding: 1.2rem;
+      }
+
+      .contact-page .contact-card h2 {
+        font-size: 1.8rem;
+      }
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="initSupabase.js" defer></script>
+
+  <script src="./StoreCart/cart.shared.js" defer></script>
+
+  <script>
+    (function () {
+      window.OG_CART_DRAWER_CFG = {
+        supabaseUrl: "https://byhytmarmigalvawkedi.supabase.co",
+        channel: "og_main",
+        fn: "storefront-catalog"
+      };
+    })();
+  </script>
+
+  <script src="./StoreCart/cart.drawer.js" defer></script>
+  <script type="module" src="./StoreCart/cart.service.global.js"></script>
+
+  <script type="module" src="./Favorites/favorites.service.global.js"></script>
+  <script src="./Favorites/favorites.shared.js" defer></script>
 
   <script src="og.header.js" defer></script>
 </head>
-<body>
-  <div class="ambient" aria-hidden="true">
-    <div class="grain"></div>
-    <div class="orb o1"></div>
-    <div class="orb o2"></div>
-    <div class="orb o3"></div>
-    <div class="vignette"></div>
-  </div>
-
+<body class="contact-page">
   <div id="ogHeaderMount"></div>
 
-  <main class="main" id="main">
-    <section class="section story" aria-label="Our Story">
-      <div class="story-grid">
-        <div class="story-card">
-          <div class="story-kicker">Our Story</div>
-          <h1 class="story-title">Who we are</h1>
-          <p class="story-sub">
-            OG Jewelers is built around real curation: clean designs, premium materials, and pieces that stand out
-            in person and on camera without the noise.
-          </p>
-
-          <div class="story-points" aria-label="Brand pillars">
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title">Premium sourcing</div>
-                <div class="point-sub">Only pieces we would wear ourselves.</div>
-              </div>
-            </div>
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title">Luxury presentation</div>
-                <div class="point-sub">Designed for an elevated experience.</div>
-              </div>
-            </div>
-            <div class="point">
-              <div class="point-ic" aria-hidden="true">✦</div>
-              <div>
-                <div class="point-title">Drops and exclusives</div>
-                <div class="point-sub">Limited runs, curated weekly.</div>
-              </div>
-            </div>
+  <main id="main">
+    <section class="section story-section contact-hero" aria-labelledby="contact-heading">
+      <div class="container">
+        <div class="story-shell contact-hero-shell">
+          <div class="contact-hero-copy">
+            <p class="story-kicker">Contact OG Jewelers</p>
+            <h1 class="contact-headline" id="contact-heading">Speak with OG directly.</h1>
+            <p class="contact-lead">
+              Reach our team for sourcing guidance, custom jewelry questions, buying support, or a
+              private appointment in Miami.
+            </p>
+            <p class="contact-support-copy">
+              We keep communication direct, discreet, and fast so you can move from question to next
+              step without the usual retail handoff.
+            </p>
           </div>
-        </div>
 
-        <div class="story-visual" aria-label="Story visual">
-          <div class="story-img" style="--img:url('assets/story/story.jpg');"></div>
-          <div class="story-glass">
-            <div class="story-quote">Curated like art. Worn like power.</div>
+          <aside class="contact-trust-panel" aria-label="Concierge trust notes">
+            <p class="contact-trust-label">Concierge standard</p>
+            <ul class="contact-trust-list">
+              <li>
+                <strong>Direct response</strong>
+                <span>Speak with the team handling sourcing, appointments, and client guidance.</span>
+              </li>
+              <li>
+                <strong>Miami based</strong>
+                <span>Local support for in-person visits and real-time coordination.</span>
+              </li>
+              <li>
+                <strong>Luxury guidance</strong>
+                <span>Clear help for custom work, gifting, and high-value buying decisions.</span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section story-section contact-methods" aria-labelledby="contact-methods-heading">
+      <div class="container">
+        <div class="contact-methods-shell">
+          <div class="contact-methods-intro">
+            <p class="story-kicker">Preferred contact methods</p>
+            <h2 class="contact-methods-title" id="contact-methods-heading">Choose the fastest way to reach us.</h2>
+            <p class="contact-methods-copy">
+              Use the channel that fits the moment. Each path goes straight to OG so questions about
+              product availability, custom requests, or appointments do not sit in a generic queue.
+            </p>
+          </div>
+
+          <div class="contact-method-grid" role="list" aria-label="OG Jewelers contact methods">
+            <article class="contact-card" role="listitem" aria-labelledby="contact-email-title">
+              <p class="contact-card-kicker">Email</p>
+              <h2 id="contact-email-title">Email us</h2>
+              <p>Best for detailed sourcing requests, custom references, or questions that need attachments.</p>
+              <div class="contact-card-meta">Direct inbox</div>
+              <a class="contact-card-link" href="mailto:rafa102093@gmail.com">rafa102093@gmail.com</a>
+              <div class="contact-card-actions">
+                <a class="secondary-link" href="mailto:rafa102093@gmail.com">Send an email</a>
+              </div>
+            </article>
+
+            <article class="contact-card contact-card-whatsapp" role="listitem" aria-labelledby="contact-whatsapp-title">
+              <p class="contact-card-kicker">WhatsApp</p>
+              <h2 id="contact-whatsapp-title">Join the chat</h2>
+              <p>Best for quick outreach, community access, and staying close to OG between buying moments.</p>
+              <div class="contact-card-meta">Live community line</div>
+              <div class="contact-card-actions">
+                <a
+                  class="primary-cta familia-cta"
+                  href="https://chat.whatsapp.com/EnxoVssJepu7CRySrvMX02"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Join our WhatsApp Chat
+                </a>
+              </div>
+            </article>
+
+            <article class="contact-card" role="listitem" aria-labelledby="contact-call-title">
+              <p class="contact-card-kicker">Call</p>
+              <h2 id="contact-call-title">Call OG</h2>
+              <p>Best for immediate help with availability, purchase guidance, and appointment coordination.</p>
+              <div class="contact-card-meta">Phone line</div>
+              <a class="contact-card-link" href="tel:+13055550147">(305) 555-0147</a>
+              <div class="contact-card-actions">
+                <a class="secondary-link" href="tel:+13055550147">Call now</a>
+              </div>
+            </article>
+
+            <article class="contact-card" role="listitem" aria-labelledby="contact-visit-title">
+              <p class="contact-card-kicker">Visit Us</p>
+              <h2 id="contact-visit-title">Plan a visit</h2>
+              <p>Best for in-person consultations, private appointments, and reviewing pieces in Miami.</p>
+              <div class="contact-card-meta">Miami location</div>
+              <address class="contact-card-address">123 Diamond Avenue, Miami, FL 33131</address>
+              <div class="contact-card-actions">
+                <a
+                  class="secondary-link"
+                  href="https://maps.google.com/?q=123+Diamond+Avenue,+Miami,+FL+33131"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Get directions
+                </a>
+              </div>
+            </article>
           </div>
         </div>
       </div>
@@ -120,5 +446,35 @@
       </div>
     </footer>
   </main>
+
+  <div class="cd-backdrop" data-ui="cart-drawer-backdrop" hidden></div>
+
+  <aside class="cd-drawer" data-ui="cart-drawer" aria-hidden="true" hidden>
+    <div class="cd-topbar">
+      <div class="cd-titlewrap">
+        <div class="cd-title">Cart</div>
+        <div class="cd-subline"><span data-ui="cart-drawer-count">0</span> item(s) • price locked</div>
+      </div>
+
+      <button class="cd-close" type="button" data-action="close-cart-drawer" aria-label="Close cart drawer">×</button>
+    </div>
+
+    <div class="cd-notice" data-ui="cart-drawer-notice" hidden></div>
+
+    <div class="cd-list" data-ui="cart-drawer-list"></div>
+    <div class="cd-empty" data-ui="cart-drawer-empty" hidden>Your cart is empty.</div>
+
+    <div class="cd-footer">
+      <div class="cd-summary">
+        <div>Subtotal</div>
+        <div class="val" data-ui="cart-drawer-subtotal">$0.00</div>
+      </div>
+
+      <div class="cd-actionsRow">
+        <a class="cd-btn primary" href="./StoreCart/cart.html" data-action="go-cart">View Cart</a>
+        <a class="cd-btn" href="./StoreCart/cart.html" data-action="go-cart">Checkout</a>
+      </div>
+    </div>
+  </aside>
 </body>
 </html>
