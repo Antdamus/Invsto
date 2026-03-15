@@ -90,46 +90,43 @@
 
     <section class="trust-proof reveal-section" aria-label="Trust and customer proof">
       <div class="trust-shell">
-        <div class="trust-intro section-intro">
-          <p class="section-kicker">Trusted reputation</p>
-          <h2 class="section-title">Built on volume, satisfaction, and the kind of service buyers come back for.</h2>
-          <p class="section-copy">
-            OG Jewelers pairs live-show energy with a proven track record, personal attention, and
-            a buyer experience shaped by trust across every channel.
-          </p>
-        </div>
-
-        <div class="trust-metrics" aria-label="Trust metrics">
-          <article class="trust-metric">
-            <span class="trust-metric-value">100,000+</span>
-            <span class="trust-metric-label">Pieces sold across live and online channels</span>
-          </article>
-          <article class="trust-metric">
-            <span class="trust-metric-value">5-Star</span>
-            <span class="trust-metric-label">Buyer satisfaction built through consistency and care</span>
-          </article>
-          <article class="trust-metric">
-            <span class="trust-metric-value">Trusted</span>
-            <span class="trust-metric-label">Chosen by repeat buyers, collectors, and first-time shoppers alike</span>
-          </article>
+        <div class="trust-banner" aria-label="Trust highlights">
+          <span class="trust-banner-item">
+            <strong>120,000+</strong>
+            <span>Items Sold</span>
+          </span>
+          <span class="trust-banner-divider" aria-hidden="true"></span>
+          <span class="trust-banner-item">
+            <strong>25,000+</strong>
+            <span>Positive Reviews</span>
+          </span>
+          <span class="trust-banner-divider" aria-hidden="true"></span>
+          <span class="trust-banner-item">
+            <strong>99%</strong>
+            <span>Positive Feedback</span>
+          </span>
         </div>
 
         <div class="testimonial-shell">
           <div class="testimonial-head">
             <div>
-              <p class="section-kicker">Recent feedback</p>
-              <h3 class="testimonial-title">What buyers are saying now.</h3>
-            </div>
-
-            <div class="testimonial-controls" aria-label="Review controls">
-              <button class="testimonial-control" id="testimonialPrev" type="button" aria-label="Previous review">&larr;</button>
-              <button class="testimonial-control" id="testimonialNext" type="button" aria-label="Next review">&rarr;</button>
+              <p class="section-kicker">Customer reviews</p>
+              <h3 class="testimonial-title">What Our Customers Are Saying</h3>
             </div>
           </div>
 
-          <div class="testimonial-stage">
-            <article class="testimonial-feature" id="testimonialFeature" aria-live="polite"></article>
-            <div class="testimonial-rail" id="testimonialRail"></div>
+          <div class="testimonial-stage" id="testimonialStage" aria-live="polite">
+            <button class="testimonial-control testimonial-control-left" id="testimonialPrev" type="button" aria-label="Previous review">&larr;</button>
+            <div class="testimonial-strip">
+              <div class="testimonial-teaser" id="testimonialTeaser" aria-hidden="true"></div>
+              <div class="testimonial-feature-media" id="testimonialFeatureMedia"></div>
+              <article class="testimonial-copy-panel" id="testimonialCopyPanel"></article>
+            </div>
+            <button class="testimonial-control testimonial-control-right" id="testimonialNext" type="button" aria-label="Next review">&rarr;</button>
+          </div>
+
+          <div class="testimonial-footer">
+            <div class="testimonial-status" id="testimonialStatus">Loading approved reviews...</div>
           </div>
         </div>
       </div>

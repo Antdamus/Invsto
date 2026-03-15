@@ -2,31 +2,98 @@
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const revealTargets = Array.from(document.querySelectorAll(".reveal-section"));
   const hero = document.querySelector(".hero-arrival");
-  const testimonialFeature = document.getElementById("testimonialFeature");
-  const testimonialRail = document.getElementById("testimonialRail");
+  const testimonialStage = document.getElementById("testimonialStage");
+  const testimonialTeaser = document.getElementById("testimonialTeaser");
+  const testimonialFeatureMedia = document.getElementById("testimonialFeatureMedia");
+  const testimonialCopyPanel = document.getElementById("testimonialCopyPanel");
+  const testimonialStatus = document.getElementById("testimonialStatus");
   const testimonialPrevBtn = document.getElementById("testimonialPrev");
   const testimonialNextBtn = document.getElementById("testimonialNext");
+
+  const SUPABASE_PROJECT_URL =
+    window.SUPABASE_URL || "https://byhytmarmigalvawkedi.supabase.co";
+
+  const TESTIMONIALS_FN_URL = `${SUPABASE_PROJECT_URL}/functions/v1/storefront-testimonials`;
   const EBAY_LIVE_FN_URL =
-    "https://byhytmarmigalvawkedi.supabase.co/functions/v1/ebay-live-events";
-  // TODO: Replace with real eBay feedback data when storefront review ingestion is wired up.
-  const TESTIMONIALS = [
+    `${SUPABASE_PROJECT_URL}/functions/v1/ebay-live-events`;
+
+  /*
+    TEMPORARY SWITCH:
+    Keep this true while your eBay developer approval is pending.
+    Later, change it to false when you want to fetch from Supabase / edge function.
+  */
+  const USE_PLACEHOLDER_TESTIMONIALS = false;
+
+  /*
+    These placeholders are shaped like the final Supabase records
+    so your UI logic can stay almost identical later.
+    Replace image URLs below with your real local/site/supabase image URLs if needed.
+  */
+  const PLACEHOLDER_TESTIMONIALS = [
     {
-      quote: "Everything arrived exactly as described, and the communication felt personal from start to finish.",
-      source: "Verified eBay buyer",
-      note: "Fine jewelry order with smooth service, fast shipping, and strong buyer confidence."
+      id: "placeholder-1",
+      source_review_id: "placeholder-1",
+      review_text:
+        "Your pricing is fair and competitive, and it really reflects that you care about giving customers value without sacrificing quality. ",
+      source_buyer_display: "Verified eBay buyer",
+      review_photo_url: null,
+      fallback_item_image_url: "review-1.jpg",
+      item_title: "Rolex",
+      
     },
     {
-      quote: "You can tell they care about the customer experience, not just the sale. I would absolutely buy again.",
-      source: "Recent eBay feedback",
-      note: "Repeat-buyer energy with trust built through responsiveness and follow-through."
+      id: "placeholder-2",
+      source_review_id: "placeholder-2",
+      review_text:
+        "A great jewelry store by The best of the best personalized service, expert craftsmanship, and a welcoming atmosphere.",
+      source_buyer_display: "Recent eBay feedback",
+      review_photo_url: null,
+      fallback_item_image_url: "review-2.jpg",
+      item_title: "Silver bracelet",
+      
     },
     {
-      quote: "The live shows are exciting, but the professionalism behind them is what really stands out.",
-      source: "Collector review",
-      note: "Confidence built through presentation, clarity, and real-time support."
-    }
+      id: "placeholder-3",
+      source_review_id: "placeholder-3",
+      review_text:
+        "I love this Jewelry store and the man behind it all OG the one and only!!!",
+      source_buyer_display: "Verified eBay buyer",
+      review_photo_url: null,
+      fallback_item_image_url: "review-3.jpg",
+      item_title: "Solid Silver Chain",
+      
+    },
+    {
+      id: "placeholder-4",
+      source_review_id: "placeholder-4",
+      review_text:
+        "Item was exactly as advertised. Went through ebay authentication with no issues and was promptly received. Would definitely buy again.",
+      source_buyer_display: "Collector review",
+      review_photo_url: null,
+      fallback_item_image_url: "review-4.jpg",
+      item_title: "14K GOLD MIAMI CUBAN 24 INCH",
+    
+    },
+    {
+      id: "placeholder-5",
+      source_review_id: "placeholder-5",
+      review_text:
+        "I love this guy!!! His Ebay Lives are AWESOME!!!! You have to watch at least one of his Events and you will be HOOKED!!!",
+      source_buyer_display: "Verified eBay buyer",
+      review_photo_url: null,
+      fallback_item_image_url: "review-5.jpg",
+      item_title: "Moissanite Stud Earrings",
+      review_date: "2026-03-10T00:00:00Z",
+    },
   ];
+
+  const FALLBACK_TESTIMONIALS = PLACEHOLDER_TESTIMONIALS.map(normalizeTestimonialRecord);
+
+  let testimonialItems = [...FALLBACK_TESTIMONIALS];
   let activeTestimonialIndex = 0;
+  let testimonialPointerStartX = null;
+  let testimonialsUsingFallback = true;
+
   const EBAY_LIVE_FALLBACK_EVENTS = [
     {
       title: "Fine Jewelry and Luxury Watches Live",
@@ -54,52 +121,185 @@
     });
   }
 
-  function renderTestimonials() {
-    if (!testimonialFeature || !testimonialRail) return;
+  function normalizeTestimonialRecord(record) {
+    const quote = String(record?.review_text || "").trim();
+    return {
+      sourceReviewId: String(record?.source_review_id || record?.id || crypto.randomUUID()),
+      quote: quote || "A trusted OG buyer shared positive feedback.",
+      source: String(record?.source_buyer_display || "Verified eBay buyer"),
+      note: String(
+        record?.review_date
+          ? `Recent verified feedback from ${formatShortDate(record.review_date)}.`
+          : "Recent verified eBay feedback."
+      ),
+      itemTitle: String(record?.item_title || "Featured OG piece"),
+      imageUrl: String(
+        record?.review_photo_url ||
+          record?.fallback_item_image_url ||
+          "OG-Jewelers.webp"
+      ),
+      hasPhoto: Boolean(record?.review_photo_url),
+    };
+  }
 
-    const active = TESTIMONIALS[activeTestimonialIndex];
-    testimonialFeature.innerHTML = `
-      <div>
-        <span class="testimonial-rating">5-star feedback</span>
-        <p class="testimonial-quote">"${ebayEsc(active.quote)}"</p>
-      </div>
-      <div class="testimonial-meta">
-        <span class="testimonial-source">${ebayEsc(active.source)}</span>
-        <div class="testimonial-note">${ebayEsc(active.note)}</div>
-      </div>
+  function formatShortDate(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "recently";
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(parsed);
+  }
+
+  function renderTestimonials() {
+    if (!testimonialStage || !testimonialTeaser || !testimonialFeatureMedia || !testimonialCopyPanel || !testimonialStatus) return;
+
+    if (!testimonialItems.length) {
+      testimonialStage.classList.add("is-empty");
+      testimonialTeaser.innerHTML = "";
+      testimonialFeatureMedia.innerHTML = "";
+      testimonialCopyPanel.innerHTML = "";
+      testimonialStatus.textContent = "No approved reviews are available right now.";
+      return;
+    }
+
+    const active = testimonialItems[activeTestimonialIndex];
+    const previous =
+      testimonialItems[
+        (activeTestimonialIndex - 1 + testimonialItems.length) % testimonialItems.length
+      ];
+
+    testimonialStage.classList.remove("is-empty");
+    testimonialTeaser.innerHTML = `
+      <img
+        src="${ebayEsc(previous.imageUrl)}"
+        alt="${ebayEsc(previous.itemTitle)}"
+        loading="lazy"
+      />
     `;
 
-    testimonialRail.innerHTML = TESTIMONIALS.map((item, index) => `
-      <article class="testimonial-mini ${index === activeTestimonialIndex ? "is-active" : ""}" data-testimonial-index="${index}">
-        <span class="testimonial-source">${ebayEsc(item.source)}</span>
-        <p class="testimonial-mini-quote">"${ebayEsc(item.quote)}"</p>
-      </article>
-    `).join("");
+    testimonialFeatureMedia.innerHTML = `
+      <img
+        src="${ebayEsc(active.imageUrl)}"
+        alt="${ebayEsc(active.itemTitle)}"
+        loading="lazy"
+      />
+    `;
+
+    testimonialCopyPanel.innerHTML = `
+      <span class="testimonial-rating">5-star feedback</span>
+      <p class="testimonial-quote">"${ebayEsc(active.quote)}"</p>
+      <span class="testimonial-source">${ebayEsc(active.source)}</span>
+      <div class="testimonial-note">${ebayEsc(active.note)}</div>
+      <span class="testimonial-item">${ebayEsc(active.itemTitle)}</span>
+    `;
+
+    testimonialStatus.textContent = testimonialsUsingFallback
+      ? ""
+      : "";
+  }
+
+  function moveTestimonial(direction) {
+    if (!testimonialItems.length) return;
+    activeTestimonialIndex =
+      (activeTestimonialIndex + direction + testimonialItems.length) %
+      testimonialItems.length;
+    renderTestimonials();
+  }
+
+  async function loadTestimonials() {
+    if (!testimonialStatus) return;
+
+    if (USE_PLACEHOLDER_TESTIMONIALS) {
+      testimonialItems = [...FALLBACK_TESTIMONIALS];
+      testimonialsUsingFallback = true;
+      activeTestimonialIndex = 0;
+      renderTestimonials();
+      return;
+    }
+
+    testimonialStatus.textContent = "Loading approved reviews...";
+
+    try {
+      const res = await fetch(`${TESTIMONIALS_FN_URL}?limit=7`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`testimonial_fetch_failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      const items = Array.isArray(data?.items)
+        ? data.items.map(normalizeTestimonialRecord)
+        : [];
+
+      testimonialItems = items.length ? items : [...FALLBACK_TESTIMONIALS];
+      testimonialsUsingFallback = !items.length;
+      activeTestimonialIndex = 0;
+      renderTestimonials();
+    } catch (error) {
+      console.error("Failed to load testimonials:", error);
+      testimonialItems = [...FALLBACK_TESTIMONIALS];
+      testimonialsUsingFallback = true;
+      activeTestimonialIndex = 0;
+      renderTestimonials();
+    }
   }
 
   function setupTestimonials() {
-    if (!testimonialFeature || !testimonialRail) return;
+    if (!testimonialStage) return;
 
     renderTestimonials();
 
     testimonialPrevBtn?.addEventListener("click", () => {
-      activeTestimonialIndex = (activeTestimonialIndex - 1 + TESTIMONIALS.length) % TESTIMONIALS.length;
-      renderTestimonials();
+      moveTestimonial(-1);
     });
 
     testimonialNextBtn?.addEventListener("click", () => {
-      activeTestimonialIndex = (activeTestimonialIndex + 1) % TESTIMONIALS.length;
-      renderTestimonials();
+      moveTestimonial(1);
     });
 
-    testimonialRail.addEventListener("click", (event) => {
-      const target = event.target.closest("[data-testimonial-index]");
-      if (!target) return;
-      const index = Number(target.getAttribute("data-testimonial-index"));
-      if (!Number.isFinite(index)) return;
-      activeTestimonialIndex = index;
-      renderTestimonials();
+    testimonialStage.addEventListener("pointerdown", (event) => {
+      testimonialPointerStartX = event.clientX;
     });
+
+    testimonialStage.addEventListener("pointerup", (event) => {
+      if (testimonialPointerStartX == null) return;
+      const delta = event.clientX - testimonialPointerStartX;
+      testimonialPointerStartX = null;
+
+      if (Math.abs(delta) < 40) return;
+      moveTestimonial(delta > 0 ? -1 : 1);
+    });
+
+    testimonialStage.addEventListener("pointercancel", () => {
+      testimonialPointerStartX = null;
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (
+        !testimonialStage.contains(document.activeElement) &&
+        !testimonialPrevBtn?.matches(":focus") &&
+        !testimonialNextBtn?.matches(":focus")
+      ) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        moveTestimonial(-1);
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        moveTestimonial(1);
+      }
+    });
+
+    loadTestimonials();
   }
 
   function setupSectionReveal() {
@@ -170,8 +370,18 @@
 
     const [, monRaw, dayStr, hourStr, minStr, ampm] = match;
     const monthMap = {
-      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11,
     };
 
     const month = monthMap[monRaw.toLowerCase()];
@@ -214,7 +424,7 @@
       month: "short",
       day: "numeric",
       hour: "numeric",
-      minute: "2-digit"
+      minute: "2-digit",
     }).format(parsed);
   }
 
@@ -225,8 +435,10 @@
     return new Intl.DateTimeFormat(undefined, {
       hour: "numeric",
       minute: "2-digit",
-      timeZoneName: "short"
-    }).format(parsed).replace(/^[^,]*,\s*/, "");
+      timeZoneName: "short",
+    })
+      .format(parsed)
+      .replace(/^[^,]*,\s*/, "");
   }
 
   function getCountdownLabel(event) {
@@ -248,7 +460,8 @@
 
   function getThemeFromTitle(title) {
     const value = String(title || "").toLowerCase();
-    if (/(watch|rolex|datejust|ap|audemars|cartier|timepiece)/.test(value)) return "watch";
+    if (/(watch|rolex|datejust|ap|audemars|cartier|timepiece)/.test(value))
+      return "watch";
     if (/(diamond|moissanite|gem|ring|tennis)/.test(value)) return "diamond";
     if (/(gold|chain|bracelet|14k|10k|solid gold)/.test(value)) return "gold";
     if (/(custom|one of one|bespoke)/.test(value)) return "custom";
@@ -315,8 +528,12 @@
       if (a.__isLiveNow && !b.__isLiveNow) return -1;
       if (!a.__isLiveNow && b.__isLiveNow) return 1;
 
-      const aTime = a.__parsedDate ? a.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
-      const bTime = b.__parsedDate ? b.__parsedDate.getTime() : Number.MAX_SAFE_INTEGER;
+      const aTime = a.__parsedDate
+        ? a.__parsedDate.getTime()
+        : Number.MAX_SAFE_INTEGER;
+      const bTime = b.__parsedDate
+        ? b.__parsedDate.getTime()
+        : Number.MAX_SAFE_INTEGER;
       return aTime - bTime;
     });
 
@@ -337,19 +554,22 @@
       return;
     }
 
-    grid.innerHTML = list.map((event) => {
-      const theme = getThemeFromTitle(event.title);
-      const title = ebayEsc(event.title || "Upcoming eBay Live");
-      const url = ebayEsc(event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs");
-      const status = ebayEsc(getEventStatusLabel(event));
-      const dateText = ebayEsc(formatDisplayDate(event));
-      const timeText = ebayEsc(formatTimeZone(event));
-      const countdown = ebayEsc(getCountdownLabel(event));
-      const summary = ebayEsc(getEventSummary(event, theme));
-      const themeLabel = ebayEsc(getThemeLabel(theme));
-      const liveMeta = event.__isLiveNow ? "Now streaming" : "Scheduled event";
+    grid.innerHTML = list
+      .map((event) => {
+        const theme = getThemeFromTitle(event.title);
+        const title = ebayEsc(event.title || "Upcoming eBay Live");
+        const url = ebayEsc(
+          event.url || "https://www.ebay.com/ebaylive/sellers/lertro4xscs"
+        );
+        const status = ebayEsc(getEventStatusLabel(event));
+        const dateText = ebayEsc(formatDisplayDate(event));
+        const timeText = ebayEsc(formatTimeZone(event));
+        const countdown = ebayEsc(getCountdownLabel(event));
+        const summary = ebayEsc(getEventSummary(event, theme));
+        const themeLabel = ebayEsc(getThemeLabel(theme));
+        const liveMeta = event.__isLiveNow ? "Now streaming" : "Scheduled event";
 
-      return `
+        return `
         <article class="live-preview-card" data-theme="${theme}">
           <div class="live-preview-surface">
             <div class="live-preview-topline">
@@ -386,7 +606,8 @@
           </div>
         </article>
       `;
-    }).join("");
+      })
+      .join("");
   }
 
   async function loadEbayLiveEvents() {
