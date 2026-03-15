@@ -3,7 +3,6 @@
   const revealTargets = Array.from(document.querySelectorAll(".reveal-section"));
   const hero = document.querySelector(".hero-arrival");
   const testimonialStage = document.getElementById("testimonialStage");
-  const testimonialTeaser = document.getElementById("testimonialTeaser");
   const testimonialFeatureMedia = document.getElementById("testimonialFeatureMedia");
   const testimonialCopyPanel = document.getElementById("testimonialCopyPanel");
   const testimonialStatus = document.getElementById("testimonialStatus");
@@ -88,11 +87,13 @@
   ];
 
   const FALLBACK_TESTIMONIALS = PLACEHOLDER_TESTIMONIALS.map(normalizeTestimonialRecord);
+  const TESTIMONIAL_AUTOPLAY_MS = 5000;
 
   let testimonialItems = [...FALLBACK_TESTIMONIALS];
   let activeTestimonialIndex = 0;
   let testimonialPointerStartX = null;
   let testimonialsUsingFallback = true;
+  let testimonialAutoplayTimer = null;
 
   const EBAY_LIVE_FALLBACK_EVENTS = [
     {
@@ -153,11 +154,10 @@
   }
 
   function renderTestimonials() {
-    if (!testimonialStage || !testimonialTeaser || !testimonialFeatureMedia || !testimonialCopyPanel || !testimonialStatus) return;
+    if (!testimonialStage || !testimonialFeatureMedia || !testimonialCopyPanel || !testimonialStatus) return;
 
     if (!testimonialItems.length) {
       testimonialStage.classList.add("is-empty");
-      testimonialTeaser.innerHTML = "";
       testimonialFeatureMedia.innerHTML = "";
       testimonialCopyPanel.innerHTML = "";
       testimonialStatus.textContent = "No approved reviews are available right now.";
@@ -165,20 +165,8 @@
     }
 
     const active = testimonialItems[activeTestimonialIndex];
-    const previous =
-      testimonialItems[
-        (activeTestimonialIndex - 1 + testimonialItems.length) % testimonialItems.length
-      ];
 
     testimonialStage.classList.remove("is-empty");
-    testimonialTeaser.innerHTML = `
-      <img
-        src="${ebayEsc(previous.imageUrl)}"
-        alt="${ebayEsc(previous.itemTitle)}"
-        loading="lazy"
-      />
-    `;
-
     testimonialFeatureMedia.innerHTML = `
       <img
         src="${ebayEsc(active.imageUrl)}"
@@ -206,6 +194,26 @@
       (activeTestimonialIndex + direction + testimonialItems.length) %
       testimonialItems.length;
     renderTestimonials();
+  }
+
+  function stopTestimonialAutoplay() {
+    if (testimonialAutoplayTimer) {
+      window.clearInterval(testimonialAutoplayTimer);
+      testimonialAutoplayTimer = null;
+    }
+  }
+
+  function startTestimonialAutoplay() {
+    stopTestimonialAutoplay();
+    if (prefersReducedMotion || testimonialItems.length < 2) return;
+
+    testimonialAutoplayTimer = window.setInterval(() => {
+      moveTestimonial(1);
+    }, TESTIMONIAL_AUTOPLAY_MS);
+  }
+
+  function restartTestimonialAutoplay() {
+    startTestimonialAutoplay();
   }
 
   async function loadTestimonials() {
@@ -256,14 +264,17 @@
 
     testimonialPrevBtn?.addEventListener("click", () => {
       moveTestimonial(-1);
+      restartTestimonialAutoplay();
     });
 
     testimonialNextBtn?.addEventListener("click", () => {
       moveTestimonial(1);
+      restartTestimonialAutoplay();
     });
 
     testimonialStage.addEventListener("pointerdown", (event) => {
       testimonialPointerStartX = event.clientX;
+      stopTestimonialAutoplay();
     });
 
     testimonialStage.addEventListener("pointerup", (event) => {
@@ -273,11 +284,18 @@
 
       if (Math.abs(delta) < 40) return;
       moveTestimonial(delta > 0 ? -1 : 1);
+      restartTestimonialAutoplay();
     });
 
     testimonialStage.addEventListener("pointercancel", () => {
       testimonialPointerStartX = null;
+      restartTestimonialAutoplay();
     });
+
+    testimonialStage.addEventListener("mouseenter", stopTestimonialAutoplay);
+    testimonialStage.addEventListener("mouseleave", restartTestimonialAutoplay);
+    testimonialStage.addEventListener("focusin", stopTestimonialAutoplay);
+    testimonialStage.addEventListener("focusout", restartTestimonialAutoplay);
 
     window.addEventListener("keydown", (event) => {
       if (
@@ -291,15 +309,18 @@
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         moveTestimonial(-1);
+        restartTestimonialAutoplay();
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
         moveTestimonial(1);
+        restartTestimonialAutoplay();
       }
     });
 
     loadTestimonials();
+    startTestimonialAutoplay();
   }
 
   function setupSectionReveal() {
