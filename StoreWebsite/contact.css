@@ -1,0 +1,410 @@
+.contact-page .section.story-section.contact-hero {
+  padding-top: clamp(5.8rem, 11vw, 8.5rem);
+  background:
+    linear-gradient(135deg, rgba(16, 17, 20, 0.94) 12%, rgba(7, 8, 10, 0.92) 58%),
+    radial-gradient(circle at 85% 14%, rgba(202, 166, 95, 0.2), transparent 34%);
+}
+
+.contact-page .contact-hero-shell {
+  max-width: min(74rem, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
+  gap: clamp(1.4rem, 4vw, 3rem);
+  align-items: end;
+}
+
+.contact-page .contact-hero-copy {
+  max-width: 40rem;
+}
+
+.contact-page .contact-headline {
+  margin: 0;
+  max-width: 10ch;
+  font-family: var(--story-serif);
+  font-weight: 600;
+  font-size: clamp(3.1rem, 9vw, 5.9rem);
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+}
+
+.contact-page .contact-lead {
+  margin-top: 1.3rem;
+  max-width: 37rem;
+  color: var(--story-text);
+  font-size: clamp(1.03rem, 1.8vw, 1.2rem);
+  line-height: 1.82;
+}
+
+.contact-page .contact-support-copy {
+  margin-top: 1rem;
+  max-width: 35rem;
+}
+
+.contact-page .contact-trust-panel {
+  padding: clamp(1.1rem, 2.4vw, 1.45rem);
+  border: 1px solid var(--story-border);
+  background:
+    linear-gradient(180deg, rgba(22, 23, 28, 0.9), rgba(11, 12, 15, 0.9)),
+    radial-gradient(circle at top, rgba(202, 166, 95, 0.12), transparent 54%);
+  box-shadow: var(--story-shadow);
+  align-self: stretch;
+  display: grid;
+  gap: 0.9rem;
+  align-content: end;
+}
+
+.contact-page .contact-trust-label {
+  margin: 0;
+  color: var(--story-gold);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.contact-page .contact-trust-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.contact-page .contact-trust-list li {
+  display: grid;
+  gap: 0.2rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.contact-page .contact-trust-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.contact-page .contact-trust-list strong {
+  color: var(--story-text);
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.contact-page .contact-trust-list span {
+  color: var(--story-soft);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.contact-page .contact-methods {
+  background:
+    linear-gradient(180deg, rgba(9, 10, 13, 0.98), rgba(12, 14, 17, 0.96)),
+    radial-gradient(circle at 16% 20%, rgba(202, 166, 95, 0.08), transparent 34%);
+}
+
+.contact-page .contact-methods-shell,
+.contact-page .contact-concierge-shell {
+  max-width: min(74rem, 100%);
+  margin: 0 auto;
+}
+
+.contact-page .contact-methods-intro,
+.contact-page .contact-section-intro {
+  max-width: 36rem;
+}
+
+.contact-page .contact-methods-intro {
+  margin-bottom: clamp(1.7rem, 4vw, 2.7rem);
+}
+
+.contact-page .contact-methods-title,
+.contact-page .contact-section-title {
+  margin: 0;
+  font-family: var(--story-serif);
+  font-weight: 600;
+  font-size: clamp(2.2rem, 5vw, 3.5rem);
+  line-height: 0.98;
+  letter-spacing: 0.01em;
+}
+
+.contact-page .contact-methods-copy,
+.contact-page .contact-section-copy {
+  margin: 1rem 0 0;
+  max-width: 34rem;
+  color: var(--story-muted);
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.contact-page .contact-method-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.contact-page .contact-card,
+.contact-page .contact-form-panel,
+.contact-page .contact-visit-card {
+  border: 1px solid var(--story-border);
+  box-shadow: var(--story-shadow);
+}
+
+.contact-page .contact-card {
+  min-height: 100%;
+  padding: 1.35rem;
+  background:
+    linear-gradient(180deg, rgba(18, 20, 24, 0.95), rgba(10, 11, 14, 0.96)),
+    radial-gradient(circle at top left, rgba(202, 166, 95, 0.08), transparent 36%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+}
+
+.contact-page .contact-card.contact-card-whatsapp {
+  background:
+    linear-gradient(180deg, rgba(18, 30, 22, 0.96), rgba(9, 17, 12, 0.98)),
+    radial-gradient(circle at top left, rgba(152, 214, 166, 0.14), transparent 36%);
+}
+
+.contact-page .contact-card-kicker,
+.contact-page .contact-visit-label {
+  margin: 0;
+  color: var(--story-gold);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.contact-page .contact-card h2 {
+  margin: 0;
+  font-family: var(--story-serif);
+  font-size: 2rem;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.contact-page .contact-card p {
+  margin: 0;
+  color: var(--story-muted);
+  font-size: 0.98rem;
+  line-height: 1.72;
+}
+
+.contact-page .contact-card-meta {
+  color: var(--story-text);
+  font-size: 0.88rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.contact-page .contact-card-link,
+.contact-page .contact-card-address,
+.contact-page .contact-visit-link,
+.contact-page .contact-visit-address {
+  color: var(--story-text);
+  font-size: 1rem;
+  line-height: 1.65;
+  text-decoration: none;
+}
+
+.contact-page .contact-card-link:hover,
+.contact-page .contact-card-link:focus-visible,
+.contact-page .contact-visit-link:hover,
+.contact-page .contact-visit-link:focus-visible {
+  color: var(--story-gold);
+}
+
+.contact-page .contact-card-address,
+.contact-page .contact-visit-address {
+  font-style: normal;
+}
+
+.contact-page .contact-card-actions {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.contact-page .contact-card .secondary-link {
+  width: fit-content;
+}
+
+.contact-page .contact-concierge {
+  background:
+    linear-gradient(180deg, rgba(8, 9, 12, 0.98), rgba(13, 15, 19, 0.96)),
+    radial-gradient(circle at 78% 18%, rgba(202, 166, 95, 0.1), transparent 30%);
+}
+
+.contact-page .contact-concierge-shell {
+  display: grid;
+  gap: 1.35rem;
+}
+
+.contact-page .contact-form-panel {
+  padding: clamp(1.4rem, 3vw, 2rem);
+  background:
+    linear-gradient(180deg, rgba(17, 19, 23, 0.96), rgba(10, 11, 15, 0.97)),
+    radial-gradient(circle at top left, rgba(202, 166, 95, 0.08), transparent 40%);
+}
+
+.contact-page .contact-form {
+  margin-top: clamp(1.6rem, 4vw, 2.3rem);
+  display: grid;
+  gap: 1rem;
+}
+
+.contact-page .contact-field {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.contact-page .contact-field label {
+  color: var(--story-text);
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.contact-page .contact-field input,
+.contact-page .contact-field textarea {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 10, 13, 0.78);
+  color: var(--story-text);
+  font: inherit;
+  line-height: 1.6;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.contact-page .contact-field textarea {
+  min-height: 11rem;
+  resize: vertical;
+}
+
+.contact-page .contact-field input::placeholder,
+.contact-page .contact-field textarea::placeholder {
+  color: rgba(242, 238, 230, 0.34);
+}
+
+.contact-page .contact-field input:focus-visible,
+.contact-page .contact-field textarea:focus-visible {
+  outline: none;
+  border-color: rgba(202, 166, 95, 0.7);
+  box-shadow: 0 0 0 3px rgba(202, 166, 95, 0.14);
+  background: rgba(12, 13, 17, 0.92);
+}
+
+.contact-page .contact-form-actions {
+  display: grid;
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.contact-page .contact-submit {
+  justify-self: start;
+}
+
+.contact-page .contact-form-note {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--story-soft);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.contact-page .contact-visit-panel {
+  display: grid;
+  gap: 1.35rem;
+}
+
+.contact-page .contact-visit-card {
+  padding: clamp(1.4rem, 3vw, 2rem);
+  background:
+    linear-gradient(180deg, rgba(16, 18, 22, 0.96), rgba(10, 11, 14, 0.98)),
+    radial-gradient(circle at top right, rgba(202, 166, 95, 0.1), transparent 42%);
+  display: grid;
+  gap: 1.2rem;
+}
+
+.contact-page .contact-visit-block {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.contact-page .contact-hours-list {
+  margin: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.contact-page .contact-hours-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.contact-page .contact-hours-list div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.contact-page .contact-hours-list dt,
+.contact-page .contact-hours-list dd {
+  margin: 0;
+  color: var(--story-text);
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+.contact-page .contact-hours-list dt {
+  color: var(--story-muted);
+}
+
+.contact-page .contact-visit-note {
+  margin: 0;
+  color: var(--story-soft);
+  font-size: 0.96rem;
+  line-height: 1.76;
+}
+
+@media (min-width: 900px) {
+  .contact-page .contact-concierge-shell {
+    grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 0.8fr);
+    align-items: start;
+  }
+
+  .contact-page .contact-visit-panel {
+    padding-top: 1rem;
+  }
+}
+
+@media (max-width: 1080px) {
+  .contact-page .contact-hero-shell,
+  .contact-page .contact-method-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .contact-page .contact-hero-shell,
+  .contact-page .contact-method-grid,
+  .contact-page .contact-hours-list div {
+    grid-template-columns: 1fr;
+  }
+
+  .contact-page .contact-card {
+    padding: 1.2rem;
+  }
+
+  .contact-page .contact-card h2 {
+    font-size: 1.8rem;
+  }
+
+  .contact-page .contact-hours-list div {
+    display: grid;
+    gap: 0.2rem;
+  }
+}
