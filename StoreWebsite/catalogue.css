@@ -1006,76 +1006,6 @@ select{
 }
 
 /* =========================
-   Footer (match frontpage)
-========================= */
-.site-footer{
-  padding: 44px 0 30px;
-  border-top: 1px solid rgba(255,255,255,.06);
-  background: rgba(7,7,8,.62);
-}
-.footer-grid{
-  display: grid;
-  grid-template-columns: 1.2fr repeat(3, .8fr);
-  gap: 18px;
-  padding-bottom: 22px;
-}
-.footer-brand .brand-row{
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.footer-text{
-  margin: 0;
-  color: rgba(244,241,234,.74);
-  line-height: 1.6;
-  max-width: 50ch;
-}
-.footer-col{
-  display: grid;
-  gap: 8px;
-  align-content: start;
-}
-.footer-title{
-  margin: 0 0 6px;
-  font-size: .95rem;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: rgba(184,178,166,.86);
-}
-.footer-col a{
-  color: rgba(244,241,234,.76);
-  padding: 6px 0;
-  transition: color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-}
-.footer-col a:hover{
-  color: rgba(227,200,120,.96);
-  transform: translateX(2px);
-}
-.footer-bottom{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(255,255,255,.06);
-  color: rgba(184,178,166,.86);
-  font-size: .92rem;
-}
-.footer-legal{
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-}
-.footer-legal a{
-  color: rgba(184,178,166,.92);
-  transition: color var(--dur-fast) var(--ease);
-}
-.footer-legal a:hover{
-  color: rgba(227,200,120,.96);
-}
-
-/* =========================
    Toast
 ========================= */
 .toast{
@@ -1131,8 +1061,6 @@ select{
 
   .product-grid{ grid-template-columns: repeat(2, 1fr); }
 
-  .footer-grid{ grid-template-columns: 1fr 1fr; }
-
   .drawer{
     right: 12px;
     top: calc(var(--header-h) + 12px);
@@ -1159,12 +1087,6 @@ select{
   }
   .product-grid[data-view="list"] .product-media{
     aspect-ratio: 4 / 5;
-  }
-
-  .footer-grid{ grid-template-columns: 1fr; }
-  .footer-bottom{
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .range-grid{ grid-template-columns: 1fr; }
@@ -1823,5 +1745,4 @@ body.lock {
   .modal-body{ padding: 14px 14px 18px; }
   .modal-img{ height: 320px; }
 }
-
 

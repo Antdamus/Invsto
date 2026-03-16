@@ -19,6 +19,7 @@
   />
 
   <link rel="stylesheet" href="join.css" />
+  <link rel="stylesheet" href="og.footer.css" />
 </head>
 
 <body class="join-page">
@@ -35,7 +36,7 @@
     </a>
   </header>
 
-  <main class="join-shell">
+  <main id="main" class="join-shell">
     <section class="join-hero">
       <div class="join-copy">
         <p class="join-eyebrow">Private access for the OG community</p>
@@ -91,7 +92,7 @@
               </span>
             </label>
             <p class="fineprint">
-              By joining, you agree to our <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
+              By joining, you agree to the OG Jewelers privacy policy.
             </p>
           </div>
 
@@ -108,8 +109,10 @@
         </p>
       </section>
     </section>
+    <div id="ogFooterMount"></div>
+  </main>
 
-    
+  <script src="og.footer.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="initSupabase.js"></script>
   <script src="join.js"></script>

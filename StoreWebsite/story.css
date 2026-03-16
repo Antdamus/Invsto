@@ -316,10 +316,6 @@ body {
   color: var(--story-text);
 }
 
-.site-footer {
-  margin-top: 0;
-}
-
 @media (max-width: 1080px) {
   .story-miami-layout,
   .story-founder-layout {

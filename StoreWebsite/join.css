@@ -462,22 +462,6 @@ select {
   font-size: 0.96rem;
 }
 
-.join-footer {
-  margin-top: 30px;
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: rgba(244, 237, 225, 0.5);
-  font-size: 0.78rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.join-footer a:hover {
-  color: var(--gold);
-}
-
 .modal[hidden],
 .modal-backdrop[hidden] {
   display: none !important;
