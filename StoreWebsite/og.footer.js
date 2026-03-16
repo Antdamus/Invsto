@@ -11,7 +11,7 @@
     brandName: "OG Jewelers",
     brandCopy: "Luxury jewelry, custom design, and live discovery. Stay close to OG as the next experience takes shape.",
     contactId: "contact",
-    contactEmail: "rafa102093@gmail.com",
+    contactEmail: "ogjewelers@hotmail.com",
     social: {
       instagram: "https://www.instagram.com/ogjewelers?igsh=MWIyejVvZzR6ZzE2ag==",
       whatsapp: "https://chat.whatsapp.com/EnxoVssJepu7CRySrvMX02",
@@ -69,7 +69,7 @@
         },
         {
           label: "Email",
-          href: "mailto:rafa102093@gmail.com"
+          href: "mailto:ogjewelers@hotmail.com"
         }
       ]
     },
