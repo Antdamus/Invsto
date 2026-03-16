@@ -14,7 +14,9 @@
     contactEmail: "rafa102093@gmail.com",
     social: {
       instagram: "https://www.instagram.com/ogjewelers?igsh=MWIyejVvZzR6ZzE2ag==",
-      whatsapp: "https://chat.whatsapp.com/EnxoVssJepu7CRySrvMX02"
+      whatsapp: "https://chat.whatsapp.com/EnxoVssJepu7CRySrvMX02",
+      tiktok: "https://www.tiktok.com/@og.jewelers",
+      facebook: "https://www.facebook.com/people/OG-Jewelers/61587108306052/?sk=about"
     },
     columns: {
       shop: [
@@ -47,6 +49,20 @@
         {
           label: "WhatsApp",
           hrefKey: "whatsapp",
+          external: true,
+          rel: "noopener noreferrer",
+          target: "_blank"
+        },
+        {
+          label: "TikTok",
+          hrefKey: "tiktok",
+          external: true,
+          rel: "noopener noreferrer",
+          target: "_blank"
+        },
+        {
+          label: "Facebook",
+          hrefKey: "facebook",
           external: true,
           rel: "noopener noreferrer",
           target: "_blank"
