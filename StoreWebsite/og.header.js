@@ -5,9 +5,11 @@
   const pathname = window.location.pathname.replace(/\\/g, "/");
   const isStoreCart = /\/StoreCart\/?/i.test(pathname);
   const isHomePage = /(?:^|\/)index\.html$/i.test(pathname) || pathname.endsWith("/StoreWebsite/") || pathname.endsWith("/StoreWebsite");
+  const requestedHeaderVariant = document.body?.dataset?.headerVariant || mount.dataset?.headerVariant || "";
+  const useHomeHeaderVariant = isHomePage || requestedHeaderVariant === "home";
   const base = isStoreCart ? ".." : ".";
 
-  if (isHomePage) {
+  if (useHomeHeaderVariant) {
     renderHomeHeader();
     return;
   }
