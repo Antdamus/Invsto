@@ -700,11 +700,12 @@ input[type="file"].add-input::file-selector-button {
   inset: 0;
   z-index: 10000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 24px;
   background: rgba(2, 2, 4, 0.68);
   backdrop-filter: blur(16px);
+  overflow-y: auto;
 }
 
 .modal.hidden {
@@ -713,16 +714,26 @@ input[type="file"].add-input::file-selector-button {
 
 .modal-content-assign-location {
   width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
   padding: 28px;
   border-radius: 30px;
   animation: modalLiftIn 0.35s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: auto 0;
 }
 
 .modal-content-addlocation {
   width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
   padding: 28px;
   border-radius: 30px;
   animation: modalLiftIn 0.35s ease;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: auto 0;
 }
 
 .modal-header-assign-location {
@@ -735,13 +746,27 @@ input[type="file"].add-input::file-selector-button {
   flex-direction: column;
   gap: 16px;
   margin-top: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .modal-content-addlocation form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   margin-top: 18px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.modal-body-addlocation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .modal-body-assign-location label {
@@ -767,7 +792,9 @@ input[type="file"].add-input::file-selector-button {
   justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+  flex: 0 0 auto;
 }
 
 .generate-barcode-btn {
@@ -812,6 +839,17 @@ input[type="file"].add-input::file-selector-button {
   object-fit: cover;
   border-radius: 16px;
   border: 1px solid rgba(244, 224, 190, 0.12);
+}
+
+.modal-body-assign-location::-webkit-scrollbar,
+.modal-body-addlocation::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body-assign-location::-webkit-scrollbar-thumb,
+.modal-body-addlocation::-webkit-scrollbar-thumb {
+  background: rgba(244, 224, 190, 0.18);
+  border-radius: 999px;
 }
 
 #admin-stock-quantity[type="number"] {
@@ -961,6 +999,12 @@ input[type="file"].add-input::file-selector-button {
 
   .modal-actions {
     flex-direction: column-reverse;
+  }
+
+  .modal-content-assign-location,
+  .modal-content-addlocation {
+    max-height: calc(100vh - 28px);
+    margin: 0;
   }
 
   .back-button,

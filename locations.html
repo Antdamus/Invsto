@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry Locations</title>
+
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="locations.css" />
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">OG Locations</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="locations.html">Locations</a>
+      <a href="add-item.html">Add Item</a>
+      <a href="add-inventory.html">Add Inventory</a>
+      <a href="stock.html">Stock</a>
+      <a href="timeclock.html">Timesheet</a>
+      <a href="admin.html">Admin</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+
+        <nav class="nav-links">
+          <a class="nav-link" href="admin.html">
+            <i class="ti ti-settings"></i>
+            <span class="link-text">Admin</span>
+          </a>
+
+          <a class="nav-link" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+
+          <a class="nav-link" href="locations.html">
+            <i class="ti ti-map-pin"></i>
+            <span class="link-text">Locations</span>
+          </a>
+
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i>
+            <span class="link-text">Add Item</span>
+          </a>
+
+          <a class="nav-link" href="add-inventory.html">
+            <i class="ti ti-box-seam"></i>
+            <span class="link-text">Add Inventory</span>
+          </a>
+
+          <a class="nav-link" href="stock.html">
+            <i class="ti ti-archive"></i>
+            <span class="link-text">Stock</span>
+          </a>
+
+          <a class="nav-link" href="timeclock.html">
+            <i class="ti ti-clock"></i>
+            <span class="link-text">Timesheet</span>
+          </a>
+
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="admin-greeting">Welcome, Admin</strong>
+            <div class="sub" id="header-subtitle">Location oversight • Inventory placement intelligence</div>
+          </div>
+
+          <div class="header-pills" aria-label="Quick stats">
+            <div class="pill">Scope: <b>Locations</b></div>
+            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill" id="pill-date">Date: <b>—</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content locations-content">
+        <section class="locations-hero section">
+          <div class="section-head locations-hero-head">
+            <div>
+              <h2 class="page-title">Locations</h2>
+              <div class="section-sub">
+                Monitor storage destinations, track item density, review label assets, and maintain location metadata from one central control surface.
+              </div>
+            </div>
+            <button type="button" id="locations-refresh" class="locations-toolbar-button">
+              Refresh Data
+            </button>
+          </div>
+
+          <div class="metrics-grid" id="locations-metric-cards"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Search and Filters</h3>
+              <div class="section-sub">Search by location name, code, or notes, then filter and sort the list.</div>
+            </div>
+          </div>
+
+          <div class="locations-toolbar">
+            <label class="locations-control">
+              <span class="locations-control-label">Search</span>
+              <input type="search" id="locations-search" class="locations-input" placeholder="Search name, code, barcode, or notes" />
+            </label>
+
+            <label class="locations-control">
+              <span class="locations-control-label">Type</span>
+              <select id="locations-type-filter" class="locations-select">
+                <option value="">All types</option>
+              </select>
+            </label>
+
+            <label class="locations-control">
+              <span class="locations-control-label">Status</span>
+              <select id="locations-active-filter" class="locations-select">
+                <option value="">All statuses</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </label>
+
+            <label class="locations-control">
+              <span class="locations-control-label">Sort</span>
+              <select id="locations-sort" class="locations-select">
+                <option value="recent">Recently updated</option>
+                <option value="name">Name</option>
+                <option value="quantity">Total quantity</option>
+                <option value="items">Distinct item types</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Location Registry</h3>
+              <div class="section-sub">View storage metadata, asset readiness, and the live item footprint in each location.</div>
+            </div>
+          </div>
+
+          <div id="locations-list-status" class="locations-list-status">Loading locations…</div>
+
+          <div class="locations-table-wrap">
+            <table class="locations-table">
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Assets</th>
+                  <th>Distinct Items</th>
+                  <th>Total Qty</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="locations-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <aside id="location-detail-drawer" class="location-detail-drawer hidden" aria-hidden="true">
+    <div class="location-detail-shell">
+      <div class="location-detail-head">
+        <div>
+          <div class="locations-detail-kicker">Location Detail</div>
+          <h3 id="location-detail-title" class="location-detail-title">Select a location</h3>
+          <div id="location-detail-subtitle" class="location-detail-subtitle">Choose a row to inspect inventory and metadata.</div>
+        </div>
+        <button type="button" id="location-detail-close" class="location-detail-close" aria-label="Close details">
+          Close
+        </button>
+      </div>
+
+      <div id="location-detail-body" class="location-detail-body">
+        <div class="location-detail-empty">
+          Choose a location to review barcode assets, notes, item placement, and editable metadata.
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="locations.js"></script>
+</body>
+</html>
