@@ -2,34 +2,49 @@ import SwiftUI
 
 struct AuthenticatedView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @EnvironmentObject private var stationViewModel: StationViewModel
 
     let employee: AuthenticatedEmployee
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Authenticated")
-                    .font(.title2.weight(.semibold))
-
-                Text(employee.email)
-                    .foregroundStyle(.secondary)
-
-                if let role = employee.role, !role.isEmpty {
-                    Text("Role: \(role)")
-                        .foregroundStyle(.secondary)
+            Group {
+                if let selectedStation = stationViewModel.selectedStation {
+                    ReadyView(
+                        employee: employee,
+                        station: selectedStation,
+                        onChangeStation: {
+                            stationViewModel.clearSelection()
+                        },
+                        onRefreshStations: {
+                            await stationViewModel.refreshStations()
+                        },
+                        onSignOut: {
+                            await authViewModel.signOut()
+                        }
+                    )
+                } else {
+                    StationSelectionView(
+                        employee: employee,
+                        stations: stationViewModel.stations,
+                        isLoading: stationViewModel.isLoading,
+                        errorMessage: stationViewModel.errorMessage,
+                        onSelectStation: { station in
+                            stationViewModel.selectStation(station)
+                        },
+                        onRetry: {
+                            await stationViewModel.refreshStations()
+                        },
+                        onSignOut: {
+                            await authViewModel.signOut()
+                        }
+                    )
                 }
-
-                Button("Log Out") {
-                    Task {
-                        await authViewModel.signOut()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-
-                Spacer()
             }
-            .padding()
             .navigationTitle("OG Capture")
+        }
+        .task {
+            await stationViewModel.bootstrap()
         }
     }
 }
@@ -37,10 +52,13 @@ struct AuthenticatedView: View {
 #Preview {
     AuthenticatedView(
         employee: AuthenticatedEmployee(
+            employeeID: UUID(),
             userID: UUID(),
             email: "employee@example.com",
+            displayName: "OG Employee",
             role: "employee"
         )
     )
     .environmentObject(AuthViewModel())
+    .environmentObject(StationViewModel())
 }

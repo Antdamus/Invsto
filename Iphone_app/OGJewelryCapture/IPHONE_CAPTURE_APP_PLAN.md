@@ -437,6 +437,12 @@ Keep v1 lean.
 - Add any helper RPCs needed for claim/start/complete/fail transitions
 - Validate Realtime eligibility for the chosen tables
 
+Phase 2 implementation note:
+
+- The iPhone app now treats `capture_stations` as a selection-only routing entity fetched from Supabase and persisted locally after login/session restore.
+- `capture_jobs` includes only the metadata needed for single-photo capture routing and storage-path-first completion, plus light file metadata (`file_size_bytes`, `mime_type`) for Phase 3 upload completion.
+- RLS currently allows active employees to read stations/jobs, while write access is limited to active admins/managers. Device heartbeat and job lifecycle mutation paths are intentionally deferred until Phase 3 so the app does not rely on premature write rules or RPCs.
+
 ### Step 6. Implement ready/listening experience
 
 - Subscribe to assigned job rows with Supabase Realtime

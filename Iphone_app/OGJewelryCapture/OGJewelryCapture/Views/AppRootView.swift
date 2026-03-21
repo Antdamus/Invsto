@@ -25,4 +25,5 @@ struct AppRootView: View {
 #Preview {
     AppRootView()
         .environmentObject(AuthViewModel())
+        .environmentObject(StationViewModel())
 }

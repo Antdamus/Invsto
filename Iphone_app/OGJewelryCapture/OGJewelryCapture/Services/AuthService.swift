@@ -56,7 +56,7 @@ struct AuthService {
 
         let employees: [EmployeeProfile] = try await client
             .from("employees")
-            .select("role, active")
+            .select("id, display_name, role, active")
             .eq("user_id", value: session.user.id)
             .limit(1)
             .execute()
@@ -73,8 +73,10 @@ struct AuthService {
         }
 
         return AuthenticatedEmployee(
+            employeeID: employee.id,
             userID: session.user.id,
             email: email,
+            displayName: employee.displayName,
             role: employee.role
         )
     }
