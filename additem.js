@@ -11,6 +11,8 @@ console.log("Loaded JS")
 // === GLOBALS ===
 let latestDymoXml = "";
 let typeqr = "";
+let latestLocationDymoXml = null;
+let latestLocationDymoUrl = null;
 
 
 // === DOM ELEMENTS ===
@@ -334,8 +336,7 @@ let uploadedImages = [];
       qtyEl.value = ""; // keep empty if nothing set yet
     }
 
-    document.getElementById("admin-location-name").value = "";
-    document.getElementById("admin-location-dropdown-toggle").innerText = "Select Location";
+    setSelectedAdminLocation("");
     modal.dataset.itemId = itemId;
     modal.classList.remove("hidden");
 
@@ -357,6 +358,388 @@ let uploadedImages = [];
 
     const unique = [...new Set(data.map(loc => loc.location_name).filter(Boolean))];
     return unique.sort((a, b) => a.localeCompare(b));
+  }
+
+  async function fetchUniqueLocationTypes() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("type")
+      .neq("type", null);
+
+    if (error) {
+      console.error("Error fetching location types:", error.message);
+      return [];
+    }
+
+    const unique = [...new Set(data.map((loc) => loc.type).filter(Boolean))];
+    return unique.sort((a, b) => a.localeCompare(b));
+  }
+
+  function setSelectedAdminLocation(locationName = "") {
+    document.getElementById("admin-location-name").value = locationName;
+    document.getElementById("admin-location-dropdown-toggle").innerText = locationName || "Select Location";
+  }
+
+  function clearAddLocationForm() {
+    const nameInput = document.getElementById("location-name");
+    const barcodeInput = document.getElementById("location-barcode");
+    const capacityInput = document.getElementById("location-capacity");
+    const photoInput = document.getElementById("location-photo");
+    const previewWrapper = document.getElementById("photo-preview-wrapper");
+    const previewImage = document.getElementById("photo-preview-image");
+    const notesInput = document.getElementById("location-notes");
+    const typeButton = document.getElementById("location-type-dropdown-toggle");
+    const typeMenu = document.getElementById("location-type-dropdown-menu");
+    const dymoPreview = document.getElementById("dymo-link-preview");
+    const barcodeCanvas = document.getElementById("barcode-canvas-location");
+
+    if (nameInput) nameInput.value = "";
+    if (barcodeInput) barcodeInput.value = "";
+    if (capacityInput) capacityInput.value = "";
+    if (photoInput) photoInput.value = "";
+    if (notesInput) notesInput.value = "";
+    if (previewWrapper) previewWrapper.classList.add("hidden");
+    if (previewImage) previewImage.src = "";
+    if (dymoPreview) dymoPreview.innerHTML = "";
+    if (typeButton) typeButton.innerText = "Select Location Type";
+    if (typeMenu) {
+      typeMenu.dataset.populated = "";
+      typeMenu.innerHTML = "";
+      typeMenu.classList.remove("show");
+    }
+    document.getElementById("location-type").value = "";
+    latestLocationDymoXml = null;
+    latestLocationDymoUrl = null;
+
+    if (barcodeCanvas) {
+      const ctx = barcodeCanvas.getContext("2d");
+      ctx.clearRect(0, 0, barcodeCanvas.width, barcodeCanvas.height);
+    }
+  }
+
+  function toggleAddLocationModal(show = true, prefilledName = "") {
+    const modal = document.getElementById("modal-add-location");
+    const nameInput = document.getElementById("location-name");
+
+    if (!modal) return;
+
+    if (show) {
+      clearAddLocationForm();
+      modal.classList.remove("hidden");
+      if (prefilledName) {
+        nameInput.value = prefilledName;
+      }
+      generateAndRenderLocationBarcode();
+      nameInput.focus();
+      return;
+    }
+
+    modal.classList.add("hidden");
+    clearAddLocationForm();
+  }
+
+  function generateAndRenderLocationBarcode() {
+    const barcodeInput = document.getElementById("location-barcode");
+    if (!barcodeInput) return;
+
+    const generatedCode = `LOC-${Date.now().toString().slice(-6)}`;
+    JsBarcode("#barcode-canvas-location", generatedCode, {
+      format: "CODE128",
+      displayValue: true,
+      fontSize: 16,
+      height: 60
+    });
+
+    barcodeInput.value = generatedCode;
+
+    latestLocationDymoXml = `<?xml version="1.0" encoding="utf-8"?>
+    <DesktopLabel Version="1">
+      <DYMOLabel Version="4">
+        <Description>DYMO Label</Description>
+        <Orientation>Landscape</Orientation>
+        <LabelName>Small30346</LabelName>
+        <InitialLength>0</InitialLength>
+        <BorderStyle>SolidLine</BorderStyle>
+        <DYMORect>
+          <DYMOPoint>
+            <X>0.22666666</X>
+            <Y>0.056666665</Y>
+          </DYMOPoint>
+          <Size>
+            <Width>1.59</Width>
+            <Height>0.4033333</Height>
+          </Size>
+        </DYMORect>
+        <BorderColor>
+          <SolidColorBrush>
+            <Color A="1" R="0" G="0" B="0"></Color>
+          </SolidColorBrush>
+        </BorderColor>
+        <BorderThickness>1</BorderThickness>
+        <Show_Border>False</Show_Border>
+        <HasFixedLength>False</HasFixedLength>
+        <FixedLengthValue>0</FixedLengthValue>
+        <DynamicLayoutManager>
+          <RotationBehavior>ClearObjects</RotationBehavior>
+          <LabelObjects>
+            <BarcodeObject>
+              <Name>BarcodeObject0</Name>
+              <Brushes>
+                <BackgroundBrush>
+                  <SolidColorBrush>
+                    <Color A="1" R="1" G="1" B="1"></Color>
+                  </SolidColorBrush>
+                </BackgroundBrush>
+                <BorderBrush>
+                  <SolidColorBrush>
+                    <Color A="1" R="0" G="0" B="0"></Color>
+                  </SolidColorBrush>
+                </BorderBrush>
+                <StrokeBrush>
+                  <SolidColorBrush>
+                    <Color A="1" R="0" G="0" B="0"></Color>
+                  </SolidColorBrush>
+                </StrokeBrush>
+                <FillBrush>
+                  <SolidColorBrush>
+                    <Color A="1" R="0" G="0" B="0"></Color>
+                  </SolidColorBrush>
+                </FillBrush>
+              </Brushes>
+              <Rotation>Rotation0</Rotation>
+              <OutlineThickness>1</OutlineThickness>
+              <IsOutlined>False</IsOutlined>
+              <BorderStyle>SolidLine</BorderStyle>
+              <Margin>
+                <DYMOThickness Left="0" Top="0" Right="0" Bottom="0" />
+              </Margin>
+              <BarcodeFormat>Code128Auto</BarcodeFormat>
+              <Data>
+                <DataString>${generatedCode}</DataString>
+              </Data>
+              <HorizontalAlignment>Center</HorizontalAlignment>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <Size>AutoFit</Size>
+              <TextPosition>Bottom</TextPosition>
+              <FontInfo>
+                <FontName>Arial</FontName>
+                <FontSize>8</FontSize>
+                <IsBold>False</IsBold>
+                <IsItalic>False</IsItalic>
+                <IsUnderline>False</IsUnderline>
+                <FontBrush>
+                  <SolidColorBrush>
+                    <Color A="1" R="0" G="0" B="0"></Color>
+                  </SolidColorBrush>
+                </FontBrush>
+              </FontInfo>
+              <ObjectLayout>
+                <DYMOPoint>
+                  <X>0.22666667</X>
+                  <Y>0.06666668</Y>
+                </DYMOPoint>
+                <Size>
+                  <Width>1.3885133</Width>
+                  <Height>0.39078796</Height>
+                </Size>
+              </ObjectLayout>
+            </BarcodeObject>
+          </LabelObjects>
+        </DynamicLayoutManager>
+      </DYMOLabel>
+      <LabelApplication>Blank</LabelApplication>
+      <DataTable>
+        <Columns></Columns>
+        <Rows></Rows>
+      </DataTable>
+    </DesktopLabel>`;
+
+    (async () => {
+      const labelPath = `labels/location_${Date.now()}.dymo`;
+      const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+
+      const { error: uploadError } = await supabase.storage
+        .from("dymo-labels")
+        .upload(labelPath, blob, { upsert: true });
+
+      if (uploadError) {
+        console.error("Failed to upload location DYMO file early:", uploadError);
+        return;
+      }
+
+      const { data: signedData, error: urlError } = await supabase.storage
+        .from("dymo-labels")
+        .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10);
+
+      if (urlError) {
+        console.error("Failed to get signed URL for location DYMO file:", urlError);
+        return;
+      }
+
+      latestLocationDymoUrl = signedData.signedUrl;
+
+      const linkContainer = document.getElementById("dymo-link-preview");
+      if (linkContainer) {
+        linkContainer.innerHTML = `<a href="${latestLocationDymoUrl}" target="_blank">View DYMO Label</a>`;
+      }
+    })();
+  }
+
+  function setupAddLocationModalListeners() {
+    const modal = document.getElementById("modal-add-location");
+    const form = document.getElementById("form-add-location");
+    const cancelBtn = document.getElementById("btn-cancel-location");
+    const nameInput = document.getElementById("location-name");
+    const barcodeInput = document.getElementById("location-barcode");
+    const capacityInput = document.getElementById("location-capacity");
+    const photoInput = document.getElementById("location-photo");
+    const previewWrapper = document.getElementById("photo-preview-wrapper");
+    const previewImage = document.getElementById("photo-preview-image");
+    const notesInput = document.getElementById("location-notes");
+    const generateBtn = document.getElementById("btn-generate-location-barcode");
+
+    if (!modal || !form || form.dataset.bound === "true") return;
+    form.dataset.bound = "true";
+
+    photoInput?.addEventListener("change", () => {
+      const file = photoInput.files?.[0];
+      if (!file) {
+        previewWrapper.classList.add("hidden");
+        previewImage.src = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        previewImage.src = event.target.result;
+        previewWrapper.classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+    });
+
+    let activeTypeDropdown = null;
+    document.addEventListener("click", async (event) => {
+      if (event.target.id !== "location-type-dropdown-toggle") return;
+
+      const button = event.target;
+      const menu = document.getElementById("location-type-dropdown-menu");
+
+      if (activeTypeDropdown && activeTypeDropdown !== menu) {
+        activeTypeDropdown.classList.remove("show");
+      }
+
+      if (!menu.dataset.populated) {
+        const types = await fetchUniqueLocationTypes();
+        renderDropdownOptionsCustom({
+          menuId: "location-type-dropdown-menu",
+          toggleButtonId: "location-type-dropdown-toggle",
+          hiddenInputId: "location-type",
+          options: types,
+          searchId: "location-type-search",
+          placeholder: "Search or create location type...",
+          optionClass: "dropdown-option",
+          dataAttribute: "type",
+          optionsContainerClass: "location-type-dropdown-container",
+          onClick: (value, isNew) => {
+            document.getElementById("location-type").value = value;
+            button.innerText = value;
+            showToast(isNew ? `Created new type: ${value}` : `Selected type: ${value}`);
+            menu.classList.remove("show");
+            activeTypeDropdown = null;
+          }
+        });
+        menu.dataset.populated = "true";
+      }
+
+      menu.classList.toggle("show");
+      activeTypeDropdown = menu.classList.contains("show") ? menu : null;
+    });
+
+    generateBtn?.addEventListener("click", generateAndRenderLocationBarcode);
+    cancelBtn?.addEventListener("click", () => toggleAddLocationModal(false));
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const location_name = nameInput.value.trim();
+      const location_code = barcodeInput.value.trim();
+      const max_capacity = capacityInput.value.trim();
+      const notes = notesInput.value.trim();
+      const photoFile = photoInput.files?.[0] || null;
+
+      if (!location_name || !location_code) {
+        showToast("Name and barcode are required.");
+        return;
+      }
+
+      showToast("Uploading...");
+
+      let photo_url = null;
+      let dymo_label_url = null;
+
+      if (latestLocationDymoXml) {
+        const labelPath = `labels/location_${Date.now()}.dymo`;
+        const blob = new Blob([latestLocationDymoXml], { type: "application/octet-stream" });
+
+        const { error: uploadError } = await supabase.storage
+          .from("dymo-labels")
+          .upload(labelPath, blob, { upsert: true });
+
+        if (!uploadError) {
+          const { data: signedData, error: urlError } = await supabase.storage
+            .from("dymo-labels")
+            .createSignedUrl(labelPath, 60 * 60 * 24 * 365 * 10);
+
+          if (!urlError) {
+            dymo_label_url = signedData.signedUrl;
+          }
+        }
+      }
+
+      if (photoFile) {
+        const { data, error } = await supabase.storage
+          .from("location-assets")
+          .upload(`photos/${Date.now()}_${photoFile.name}`, photoFile);
+
+        if (error) {
+          showToast("Failed to upload photo.");
+          return;
+        }
+
+        photo_url = data.path;
+      }
+
+      const { data: insertedLocation, error: insertError } = await supabase
+        .from("locations")
+        .insert({
+          location_name,
+          location_code,
+          max_capacity: max_capacity ? parseInt(max_capacity, 10) : null,
+          notes,
+          active: true,
+          photo_url,
+          dymo_label_url,
+          type: document.getElementById("location-type").value || null,
+          created_at: new Date().toISOString()
+        })
+        .select("id, location_name")
+        .single();
+
+      if (insertError || !insertedLocation) {
+        console.error("Error inserting location:", insertError);
+        showToast("Failed to save location.");
+        return;
+      }
+
+      showToast("Location saved!");
+      toggleAddLocationModal(false);
+      await populateAdminLocationDropdown(insertedLocation.location_name);
+      setSelectedAdminLocation(insertedLocation.location_name);
+
+      const quantityInput = document.getElementById("admin-stock-quantity");
+      quantityInput?.focus();
+      quantityInput?.select?.();
+    });
   }
 
   //event listeners for the modal and other logic
@@ -410,10 +793,9 @@ let uploadedImages = [];
   }
 
   //location dropdown only opening for admins
-  async function populateAdminLocationDropdown() {
-    const menu = document.getElementById("admin-location-dropdown-menu");
-    const button = document.getElementById("admin-location-dropdown-toggle");
+  async function populateAdminLocationDropdown(selectedValue = "") {
     const options = await fetchUniqueLocationNames();
+    const previousSelection = document.getElementById("admin-location-name").value.trim();
 
     renderDropdownOptionsCustom({
       menuId: "admin-location-dropdown-menu",
@@ -425,11 +807,21 @@ let uploadedImages = [];
       optionClass: "dropdown-option",
       optionsContainerClass: "dropdown-options-container",
       searchId: "admin-location-dropdown-search",
-      onClick: (value, isNew, el) => {
-        document.getElementById("admin-location-name").value = value;
-        button.innerText = value;
+      onClick: (value, isNew) => {
+        if (isNew) {
+          setSelectedAdminLocation(previousSelection);
+          toggleAddLocationModal(true, value);
+          return;
+        }
+
+        setSelectedAdminLocation(value);
+        showToast(`Selected location: ${value}`);
       }
     });
+
+    if (selectedValue) {
+      setSelectedAdminLocation(selectedValue);
+    }
   }
 
   //allow the thing to be opened
@@ -653,6 +1045,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.currentUser = user;
     document.getElementById("btn-open-admin-stock")?.classList.remove("hidden");
     setupAdminLocationModalListeners();
+    setupAddLocationModalListeners();
   } catch (err) {
     alert("Authentication error. Please try logging in again.");
     console.error("❌ Auth error:", err);

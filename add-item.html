@@ -529,6 +529,61 @@
     </div>
   </div>
 
+  <div id="modal-add-location" class="modal hidden">
+    <div class="modal-content-addlocation">
+      <div class="modal-kicker">Create Location</div>
+      <div class="modal-header-assign-location">Add New Location</div>
+      <p class="modal-copy-assign-location">
+        Create a new stock destination, then return directly to the assignment flow with that location selected.
+      </p>
+
+      <form id="form-add-location" enctype="multipart/form-data">
+        <label for="location-name">Location Name</label>
+        <input type="text" id="location-name" name="location_name" class="add-input" required />
+
+        <label for="location-type">Location Type</label>
+        <div id="location-type-dropdown-container" class="custom-dropdown">
+          <button id="location-type-dropdown-toggle" type="button" class="dropdown-toggle">
+            Select Location Type
+          </button>
+          <div id="location-type-dropdown-menu" class="dropdown-menu"></div>
+        </div>
+        <input type="hidden" id="location-type" name="type" />
+
+        <label for="location-barcode">Barcode</label>
+        <input type="text" id="location-barcode" name="location_barcode" class="add-input" readonly />
+
+        <button type="button" id="btn-generate-location-barcode" class="add-button-secondary generate-barcode-btn">
+          Generate New Barcode
+        </button>
+
+        <div class="barcode-preview-wrapper">
+          <canvas id="barcode-canvas-location"></canvas>
+        </div>
+
+        <div id="dymo-link-preview" class="dymo-link-preview"></div>
+
+        <label for="location-capacity">Max Capacity</label>
+        <input type="number" id="location-capacity" name="max_capacity" min="0" class="add-input" />
+
+        <label for="location-photo">Photo</label>
+        <input type="file" id="location-photo" name="photo" accept="image/*" class="add-input" />
+
+        <div id="photo-preview-wrapper" class="photo-preview-wrapper hidden">
+          <img id="photo-preview-image" alt="Location preview" />
+        </div>
+
+        <label for="location-notes">Notes</label>
+        <textarea id="location-notes" name="notes" rows="3" class="add-input add-textarea"></textarea>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-location" class="add-button-secondary">Cancel</button>
+          <button type="submit" id="btn-submit-location" class="add-button">Add Location</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="toast-container" class="toast-container"></div>
 
   <div id="modal-bulk-bag" class="modal hidden">

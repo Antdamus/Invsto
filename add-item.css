@@ -90,7 +90,8 @@ body.modal-open {
 .workflow-shell,
 .form-section,
 .preview-panel,
-.modal-content-assign-location {
+.modal-content-assign-location,
+.modal-content-addlocation {
   background:
     linear-gradient(180deg, rgba(26, 22, 25, 0.92) 0%, rgba(15, 13, 17, 0.94) 100%);
   border: 1px solid var(--border);
@@ -717,6 +718,13 @@ input[type="file"].add-input::file-selector-button {
   animation: modalLiftIn 0.35s ease;
 }
 
+.modal-content-addlocation {
+  width: min(680px, 100%);
+  padding: 28px;
+  border-radius: 30px;
+  animation: modalLiftIn 0.35s ease;
+}
+
 .modal-header-assign-location {
   font-size: 2rem;
   margin-bottom: 10px;
@@ -729,7 +737,19 @@ input[type="file"].add-input::file-selector-button {
   margin-top: 18px;
 }
 
+.modal-content-addlocation form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .modal-body-assign-location label {
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.modal-content-addlocation label {
   color: var(--text-soft);
   font-weight: 700;
 }
@@ -740,6 +760,58 @@ input[type="file"].add-input::file-selector-button {
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 24px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.generate-barcode-btn {
+  align-self: flex-start;
+}
+
+.barcode-preview-wrapper,
+.photo-preview-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(244, 224, 190, 0.12);
+  background:
+    radial-gradient(circle at top, rgba(244, 224, 190, 0.08), transparent 36%),
+    rgba(4, 4, 6, 0.38);
+}
+
+.barcode-preview-wrapper canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+
+.dymo-link-preview a {
+  color: var(--gold-strong);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.dymo-link-preview a:hover {
+  text-decoration: underline;
+}
+
+.photo-preview-wrapper img {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(244, 224, 190, 0.12);
 }
 
 #admin-stock-quantity[type="number"] {
@@ -860,7 +932,8 @@ input[type="file"].add-input::file-selector-button {
   .header,
   .workflow-shell,
   .form-section,
-  .modal-content-assign-location {
+  .modal-content-assign-location,
+  .modal-content-addlocation {
     padding: 20px;
     border-radius: 24px;
   }
@@ -886,11 +959,16 @@ input[type="file"].add-input::file-selector-button {
     flex-direction: column-reverse;
   }
 
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+
   .back-button,
   .add-button,
   .add-button-secondary,
   .btn-location-confirm,
-  .btn-location-cancel {
+  .btn-location-cancel,
+  .generate-barcode-btn {
     width: 100%;
   }
 }
