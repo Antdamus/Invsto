@@ -14,6 +14,7 @@
   <!-- Styles -->
   <link rel="stylesheet" href="add-item.css" />
   <link rel="stylesheet" href="additembulk.css" />
+  <link rel="stylesheet" href="additem-assisted.css" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
 </head>
 
@@ -30,6 +31,105 @@
 
     <main class="add-main">
       <h1 class="add-heading">Add Item Type</h1>
+      <section class="workflow-shell" aria-labelledby="workflow-shell-title">
+        <div class="workflow-shell-header">
+          <p id="workflow-shell-title" class="workflow-shell-kicker">Choose Intake Workflow</p>
+          <div class="workflow-tabs" role="tablist" aria-label="Add item workflows">
+            <button
+              type="button"
+              id="workflow-tab-manual"
+              class="workflow-tab is-active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="workflow-panel-manual"
+              data-workflow-target="manual"
+            >
+              Manual
+            </button>
+            <button
+              type="button"
+              id="workflow-tab-assisted"
+              class="workflow-tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="workflow-panel-assisted"
+              data-workflow-target="assisted"
+            >
+              Assisted
+            </button>
+          </div>
+        </div>
+
+        <section
+          id="workflow-panel-manual"
+          class="workflow-panel"
+          role="tabpanel"
+          aria-labelledby="workflow-tab-manual"
+          data-workflow-panel="manual"
+        >
+          <h2 class="workflow-panel-title">Existing Manual Add Item Flow</h2>
+          <p class="workflow-panel-copy">
+            Use the current Add Item form below for direct entry. Barcode generation, QR handling, DYMO labels, photo upload, and the final item creation pipeline remain unchanged.
+          </p>
+        </section>
+
+        <section
+          id="workflow-panel-assisted"
+          class="workflow-panel workflow-panel-assisted"
+          role="tabpanel"
+          aria-labelledby="workflow-tab-assisted"
+          data-workflow-panel="assisted"
+          hidden
+        >
+          <div class="assisted-intake">
+            <div class="assisted-copy">
+              <h2 class="workflow-panel-title">Assisted Weight and Photo Intake</h2>
+              <p class="workflow-panel-copy">
+                Use this guided path to choose material and purity, read a stable weight from a future scale integration point, and trigger a placeholder capture signal for the iPhone workflow before continuing with the existing Add Item form.
+              </p>
+            </div>
+
+            <div class="assisted-grid">
+              <label class="assisted-field" for="assisted-material">
+                <span class="assisted-label">Material</span>
+                <select id="assisted-material" class="assisted-select">
+                  <option value="">Select material</option>
+                </select>
+              </label>
+
+              <label class="assisted-field" for="assisted-purity">
+                <span class="assisted-label">Purity</span>
+                <select id="assisted-purity" class="assisted-select" disabled>
+                  <option value="">Select purity</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="assisted-actions">
+              <button type="button" id="assisted-read-weight" class="assisted-read-button">
+                Read Weight
+              </button>
+              <span id="assisted-scale-state" class="assisted-scale-state" aria-live="polite">
+                Waiting for a material and purity selection.
+              </span>
+            </div>
+
+            <div class="assisted-results">
+              <div class="assisted-result-card">
+                <span class="assisted-result-label">Stable Weight</span>
+                <strong id="assisted-weight-display" class="assisted-result-value">—</strong>
+                <p class="assisted-result-note">When a stable reading is captured, it syncs into the existing Weight field below.</p>
+              </div>
+
+              <div class="assisted-result-card">
+                <span class="assisted-result-label">iPhone Capture Placeholder</span>
+                <strong id="assisted-capture-state" class="assisted-result-value assisted-result-value-small">Idle</strong>
+                <p class="assisted-result-note">This is a clean placeholder for future phone signaling and image capture transport.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
       <form id="add-item-form" class="add-form">
         <input type="text" id="title" placeholder="Item Title" class="add-input" required />
         <textarea id="description" placeholder="Item Description" class="add-input add-textarea" required></textarea>
@@ -204,6 +304,7 @@
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
   <script src="additem.js"></script>
+  <script src="additem-assisted.js"></script>
   
 </body>
 </html>

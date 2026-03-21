@@ -43,6 +43,8 @@ let uploadedImages = [];
     }, 4000);
   }
 
+  window.showToast = showToast;
+
   //obtain unique categories to display in the tab
   async function fetchUniqueCategories() {
     const { data, error } = await supabase
@@ -617,6 +619,7 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   alert("✅ Item successfully added!");
 
   document.getElementById("add-item-form").reset();
+  document.dispatchEvent(new Event("add-item-form:reset"));
   previewContainer.innerHTML = "";
   uploadedImages = [];
   latestDymoXml = "";

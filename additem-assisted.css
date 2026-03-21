@@ -1,0 +1,228 @@
+.workflow-shell {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
+  border: 1px solid #d9e6f5;
+}
+
+.workflow-shell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.workflow-shell-kicker {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  color: #52606d;
+}
+
+.workflow-tabs {
+  display: inline-flex;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.workflow-tab {
+  border: 0;
+  background: transparent;
+  color: #334155;
+  padding: 0.7rem 1.1rem;
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.workflow-tab:hover,
+.workflow-tab:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.workflow-tab.is-active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.08);
+}
+
+.workflow-panel {
+  padding: 1.1rem 1.15rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.workflow-panel-title {
+  margin: 0 0 0.45rem;
+  font-size: 1.2rem;
+  color: #1e293b;
+}
+
+.workflow-panel-copy {
+  margin: 0;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.workflow-panel-assisted {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(243, 248, 255, 0.98) 100%);
+}
+
+.assisted-intake {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.assisted-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.assisted-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.assisted-label {
+  font-size: 0.95rem;
+  color: #334155;
+}
+
+.assisted-select {
+  padding: 14px;
+  font-size: 1rem;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1c1c1e;
+  font-family: inherit;
+}
+
+.assisted-select:focus {
+  outline: none;
+  border-color: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
+}
+
+.assisted-select:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.assisted-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.assisted-read-button {
+  border: none;
+  border-radius: 12px;
+  padding: 0.9rem 1.25rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: #0f766e;
+  color: #ffffff;
+  transition: transform 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
+}
+
+.assisted-read-button:hover,
+.assisted-read-button:focus-visible {
+  outline: none;
+  background: #0b5f59;
+}
+
+.assisted-read-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.assisted-scale-state {
+  min-height: 1.5rem;
+  color: #475569;
+}
+
+.assisted-scale-state.is-waiting {
+  color: #9a3412;
+}
+
+.assisted-scale-state.is-success {
+  color: #166534;
+}
+
+.assisted-scale-state.is-error {
+  color: #b91c1c;
+}
+
+.assisted-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.assisted-result-card {
+  padding: 1rem;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.assisted-result-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.assisted-result-value {
+  display: block;
+  font-size: 1.75rem;
+  color: #0f172a;
+}
+
+.assisted-result-value-small {
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.assisted-result-note {
+  margin: 0.65rem 0 0;
+  line-height: 1.45;
+  color: #475569;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .workflow-shell-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workflow-tabs {
+    width: 100%;
+  }
+
+  .workflow-tab {
+    flex: 1 1 0;
+    text-align: center;
+  }
+
+  .assisted-grid,
+  .assisted-results {
+    grid-template-columns: 1fr;
+  }
+}
