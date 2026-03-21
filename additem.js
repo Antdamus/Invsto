@@ -494,6 +494,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
 
   const photoFiles = photoInput.files;
   const photoUrls = [];
+  const assistedUploadedPhotoPaths = window.addItemAssistedModule?.getSelectedUploadedImagePathsForSave?.() || [];
   const photoStatus = document.getElementById("photo-status");
   photoStatus.innerHTML = ""; // Clear previous messages
 
@@ -515,6 +516,13 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     photoUrls.push(path);
     photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
   }
+
+  if (assistedUploadedPhotoPaths.length > 0) {
+    const assistedPlural = assistedUploadedPhotoPaths.length === 1 ? "image" : "images";
+    photoStatus.innerHTML += `âœ… Included <strong>${assistedUploadedPhotoPaths.length}</strong> uploaded phone ${assistedPlural}<br>`;
+  }
+
+  const finalPhotoPaths = [...new Set([...photoUrls, ...assistedUploadedPhotoPaths].filter(Boolean))];
 
   let finalDymoPath;
   try {
@@ -541,7 +549,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       qr_type: typeqr,
       qr_code,
       barcode,
-      photos: photoUrls,
+      photos: finalPhotoPaths,
       dymo_label_url: window.latestDymoUrl || "",
       added_by: currentUser.id,              // ✅ NEW: track user ID
       added_by_email: currentUser.email      // ✅ NEW: track user email

@@ -153,9 +153,9 @@
             <section class="assisted-section" aria-labelledby="assisted-upload-title">
               <div class="assisted-section-header">
                 <div>
-                  <h3 id="assisted-upload-title" class="assisted-section-title">Select Uploaded Phone Image</h3>
+                  <h3 id="assisted-upload-title" class="assisted-section-title">Uploaded Phone Images</h3>
                   <p class="assisted-section-copy">
-                    Recent images are loaded from the <code>InventoryUpload</code> bucket. The newest upload is selected automatically, and you can click a different image if needed.
+                    Choose 1 image for AI copy generation and choose any number of uploaded phone images to save with this item.
                   </p>
                 </div>
                 <button type="button" id="assisted-refresh-images" class="assisted-secondary-button">
@@ -168,30 +168,57 @@
               </p>
 
               <div class="assisted-image-layout">
-                <div class="assisted-selected-image-card">
-                  <div class="assisted-selected-image-frame">
-                    <img
-                      id="assisted-selected-image-preview"
-                      class="assisted-selected-image-preview"
-                      alt="Selected InventoryUpload preview"
-                      hidden
-                    />
-                    <div id="assisted-selected-image-empty" class="assisted-selected-image-empty">
-                      No uploaded image selected yet.
+                <div class="assisted-image-sidebar">
+                  <div class="assisted-selected-image-card assisted-ai-image-card">
+                    <div class="assisted-card-head">
+                      <span class="assisted-card-kicker">AI Description Image</span>
+                      <span class="assisted-card-helper">Exactly one uploaded image is used for title and description generation.</span>
+                    </div>
+                    <div class="assisted-selected-image-frame">
+                      <img
+                        id="assisted-selected-image-preview"
+                        class="assisted-selected-image-preview"
+                        alt="Selected AI description image preview"
+                        hidden
+                      />
+                      <div id="assisted-selected-image-empty" class="assisted-selected-image-empty">
+                        No AI image selected yet.
+                      </div>
+                    </div>
+                    <div class="assisted-selected-image-meta">
+                      <strong id="assisted-selected-image-name">No AI image selected</strong>
+                      <span id="assisted-selected-image-path">Refresh after the phone upload finishes.</span>
                     </div>
                   </div>
-                  <div class="assisted-selected-image-meta">
-                    <strong id="assisted-selected-image-name">No uploaded image selected</strong>
-                    <span id="assisted-selected-image-path">Refresh after the phone upload finishes.</span>
+
+                  <div class="assisted-save-summary-card">
+                    <div class="assisted-card-head">
+                      <span class="assisted-card-kicker">Images That Will Be Saved</span>
+                      <span class="assisted-card-helper">Toggle save on any uploaded image to include it in the final item photos.</span>
+                    </div>
+                    <strong id="assisted-save-selection-count" class="assisted-save-count">
+                      0 images will be saved with this item.
+                    </strong>
+                    <p id="assisted-save-selection-summary" class="assisted-save-summary-copy">
+                      No uploaded phone images are selected for final item save yet.
+                    </p>
                   </div>
                 </div>
 
-                <div
-                  id="assisted-uploaded-image-strip"
-                  class="assisted-uploaded-image-strip"
-                  role="listbox"
-                  aria-label="Recent uploaded inventory images"
-                ></div>
+                <div class="assisted-upload-browser">
+                  <div class="assisted-upload-browser-head">
+                    <span class="assisted-card-kicker">Recent Uploaded Images</span>
+                    <span class="assisted-card-helper">
+                      Click the image to set the AI image. Use the save toggle to include it with the final item.
+                    </span>
+                  </div>
+                  <div
+                    id="assisted-uploaded-image-strip"
+                    class="assisted-uploaded-image-strip"
+                    role="list"
+                    aria-label="Recent uploaded inventory images"
+                  ></div>
+                </div>
               </div>
             </section>
 
@@ -200,7 +227,7 @@
                 <div>
                   <h3 id="assisted-ai-title" class="assisted-section-title">AI-Generated Inventory Copy</h3>
                   <p class="assisted-section-copy">
-                    Generation uses the selected image, measured weight, and entered assisted metadata. Review and edit the result before using it in the existing Add Item form.
+                    Generation uses the selected AI image, measured weight, and entered assisted metadata. Review and edit the result before using it in the existing Add Item form.
                   </p>
                 </div>
                 <button type="button" id="assisted-generate-copy" class="assisted-read-button assisted-generate-button">
@@ -209,7 +236,7 @@
               </div>
 
               <p id="assisted-generate-status" class="assisted-inline-status" aria-live="polite">
-                Ready when you have a selected uploaded image and a stable weight.
+                Ready when you have an AI image selected and a stable weight.
               </p>
 
               <div class="assisted-generated-fields">
