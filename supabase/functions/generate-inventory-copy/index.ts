@@ -197,22 +197,30 @@ async function tryGenerateWithOpenAI(
   debug.openaiAttempted = true;
   debug.openaiStatus = "request_started";
 
-  const prompt = [
-    "Generate strict JSON with keys generatedTitle and generatedDescription.",
-    "Use known metadata as source of truth and do not invent missing facts.",
-    "Do not invent brand names, gemstone authenticity, dimensions, designer, or unsupported metal details.",
-    "Title must be concise, searchable, and inventory-friendly.",
-    "Description must be polished, commercially useful, and factually restrained.",
-    `Known metadata: ${JSON.stringify({
-      material: body.material,
-      purity: body.purity,
-      weight: body.weight,
-      stoneType: body.stoneType,
-      notes: body.notes,
-      category: body.category,
-      qrType: body.qrType,
-    })}`,
-  ].join("\n");
+const userPrompt = `
+Known metadata:
+- Material: ${body.material ?? ""}
+- Purity: ${body.purity ?? ""}
+- Weight: ${body.weight ?? ""}
+- Stone type: ${body.stoneType ?? ""}
+- Notes: ${body.notes ?? ""}
+- Category: ${body.category ?? ""}
+- QR type: ${body.qrType ?? ""}
+
+Write:
+1. a concise, searchable jewelry listing title
+2. a polished buyer-facing product description
+
+Use the structured metadata as source of truth.
+Use the selected image to identify visible style, shape, finish, setting, and item type.
+Make the description feel premium, elegant, and commercially appealing, while remaining factually restrained.
+
+Return valid JSON only with exactly:
+{
+  "generatedTitle": "string",
+  "generatedDescription": "string"
+}
+`.trim();
 
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
@@ -224,19 +232,156 @@ async function tryGenerateWithOpenAI(
       body: JSON.stringify({
         model,
         input: [
-          {
-            role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: "You write safe inventory copy for jewelry intake. Return JSON only.",
-              },
-            ],
-          },
+{
+  role: "system",
+  content: [
+    {
+      type: "input_text",
+      text: `
+You are writing polished product copy for a jewelry seller.
+
+Your task is to generate:
+1. a concise, searchable product title
+2. a polished product description that sounds appealing to a buyer
+
+You will receive:
+- a selected product photo
+- measured weight from the scale
+- structured item metadata entered by the user
+
+Your job is to combine all of that into clean, attractive, commercially useful jewelry listing copy.
+
+Core writing goal:
+Write like refined ecommerce jewelry copy intended to help sell the item.
+The result should feel elegant, professional, and desirable, while remaining factually grounded.
+
+Use these sources correctly:
+- The structured metadata entered by the user is the source of truth.
+- The selected image should be used to identify visible style, shape, item type, silhouette, finish, setting, and overall visual appeal.
+- The measured weight should be used as supporting context only.
+- If the item type is visually clear, name it specifically.
+- If the item type is not fully clear, use safe but still appealing wording.
+
+Style requirements:
+- polished
+- elegant
+- commercially useful
+- refined
+- natural
+- buyer-facing
+- suitable for a jewelry product listing
+- attractive without sounding fake or exaggerated
+
+The title should be:
+- concise
+- searchable
+- inventory-friendly
+- suitable for a product listing
+- specific when the visual item type is clear
+
+The description should be:
+- 2 to 4 polished sentences
+- written like real jewelry listing copy
+- attractive to a buyer
+- based on visible design and known metadata
+- natural and confident in tone
+- refined, not robotic
+- commercially appealing, not internal or technical
+
+The description should focus on:
+- visible design
+- overall look and presence
+- finish
+- silhouette
+- styling versatility
+- sparkle or texture if clearly visible
+- craftsmanship language only when visually supported
+- weight in a natural way when helpful
+
+Important truthfulness rules:
+- Do not invent brand names
+- Do not invent designer associations
+- Do not invent provenance, rarity, or exclusivity
+- Do not assert gemstone authenticity unless explicitly provided
+- Do not invent metal or purity if not provided
+- Do not invent dimensions if not known
+- Do not invent stone type if not provided
+- Do not overstate what can be concluded from weight alone
+- Do not make unsupported luxury claims
+- Do not describe details that are not visible or not provided
+
+Important tone rules:
+Do NOT sound like:
+- an inventory database
+- an appraisal report
+- a compliance document
+- a generic AI assistant
+- a placeholder text generator
+
+Do NOT use phrases like:
+- "suitable for inventory entry"
+- "review and edit as needed"
+- "jewelry item"
+- "product shown"
+
+Instead, sound like:
+- polished ecommerce jewelry copy
+- refined product listing language
+- elegant selling copy
+- strong but believable commercial writing
+
+Weight usage rule:
+- Use the measured weight as helpful supporting detail when appropriate
+- Integrate it naturally if it improves the listing
+- Do not force the weight into the title unless it truly helps
+- Do not make unsupported conclusions from the weight
+
+Metadata priority rule:
+If material, purity, stone type, or other structured fields are provided by the user, treat them as authoritative.
+Do not contradict them.
+Do not replace them with guesses from the image.
+
+Image usage rule:
+Use the image mainly to determine:
+- item category
+- visual style
+- shape
+- structure
+- finish
+- setting/look
+- overall aesthetic presence
+
+If the image clearly shows a specific item type, prefer that over vague wording.
+Examples of specific item-type language when visually justified:
+- pendant
+- cross pendant
+- ring
+- bracelet
+- chain
+- earrings
+- necklace
+- charm
+
+If the exact item type is unclear, use safe but polished wording.
+
+Output format:
+Return valid JSON only.
+Do not include markdown.
+Do not include commentary outside the JSON.
+
+Return exactly this structure:
+{
+  "generatedTitle": "string",
+  "generatedDescription": "string"
+}
+      `.trim(),
+    },
+  ],
+},
           {
             role: "user",
             content: [
-              { type: "input_text", text: prompt },
+              { type: "input_text", text: userPrompt },
               { type: "input_image", image_url: signedImageUrl },
             ],
           },
