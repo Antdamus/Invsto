@@ -354,11 +354,57 @@ body {
   line-height: 1.9;
 }
 
-.story-founder-signature {
-  margin: 2rem auto 0;
-  padding-top: 1.25rem;
+.story-founder-signoff {
+  position: relative;
+  margin: 2.2rem auto 0;
+  width: min(26rem, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1rem, 2vw, 1.4rem);
+}
+
+.story-founder-signoff::before,
+.story-founder-signoff::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  min-width: 2.5rem;
+  background: linear-gradient(90deg, rgba(208, 169, 99, 0), rgba(208, 169, 99, 0.28) 22%, rgba(208, 169, 99, 0.32) 100%);
+}
+
+.story-founder-signoff::after {
+  background: linear-gradient(90deg, rgba(208, 169, 99, 0.32) 0%, rgba(208, 169, 99, 0.28) 78%, rgba(208, 169, 99, 0) 100%);
+}
+
+.story-founder-signoff-mark {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
+  background: transparent;
+}
+
+.story-founder-signature-image {
+  width: clamp(10.5rem, 24vw, 13.5rem);
+  height: auto;
+  display: block;
+  object-fit: contain;
+  mix-blend-mode: screen;
+  opacity: 0.94;
+  filter:
+    grayscale(1)
+    contrast(1.24)
+    brightness(1.1)
+    drop-shadow(0 8px 18px rgba(0, 0, 0, 0.22))
+    drop-shadow(0 0 12px rgba(208, 169, 99, 0.08));
+}
+
+.story-founder-signature-note {
+  margin: 1.3rem auto 0;
   max-width: fit-content;
-  border-top: 1px solid rgba(208, 169, 99, 0.22);
   text-align: center;
   font-family: var(--story-serif);
   font-size: clamp(1.35rem, 2.2vw, 1.7rem);
@@ -527,7 +573,21 @@ body {
     line-height: 1.8;
   }
 
-  .story-founder-signature {
+  .story-founder-signoff {
+    width: min(20rem, 100%);
+    margin-top: 1.9rem;
+    gap: 0.8rem;
+  }
+
+  .story-founder-signoff-mark {
+    padding: 0 0.25rem;
+  }
+
+  .story-founder-signature-image {
+    width: clamp(8.8rem, 42vw, 10.8rem);
+  }
+
+  .story-founder-signature-note {
     font-size: 1.45rem;
   }
 
