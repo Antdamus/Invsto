@@ -5,35 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Add Item - OG Jewelry</title>
 
-  <!-- SDKs -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <script src="https://qajavascriptsdktests.azurewebsites.net/JavaScript/dymo.connect.framework.js"></script>
 
-  <!-- Styles -->
   <link rel="stylesheet" href="add-item.css" />
   <link rel="stylesheet" href="additembulk.css" />
   <link rel="stylesheet" href="additem-assisted.css" />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 
 <body class="add-body">
   <div class="page">
     <header class="header">
+      <div class="header-copy">
+        <p class="page-kicker">OG Jewelry Atelier Console</p>
+        <h1 class="add-heading">Add Item Type</h1>
+        <p class="header-subcopy">
+          Move from intake to labeling, imagery, and stock preparation inside one calm, premium item-creation workspace.
+        </p>
+      </div>
+
       <div class="header-actions">
-        <a href="dashboard.html" class="back-button">← Back to Dashboard</a>
-        <button type="button" id="open-bulk-modal" class="add-button-secondary">
-          ➕ Add Bulk Bag
+        <a href="dashboard.html" class="back-button">Back to Dashboard</a>
+        <button type="button" id="open-bulk-modal" class="add-button-secondary add-button-secondary-strong">
+          Add Bulk Bag
         </button>
       </div>
     </header>
 
     <main class="add-main">
-      <h1 class="add-heading">Add Item Type</h1>
       <section class="workflow-shell" aria-labelledby="workflow-shell-title">
         <div class="workflow-shell-header">
-          <p id="workflow-shell-title" class="workflow-shell-kicker">Choose Intake Workflow</p>
+          <div>
+            <p id="workflow-shell-title" class="workflow-shell-kicker">Choose Intake Workflow</p>
+            <p class="workflow-shell-copy">
+              Switch between the standard manual entry flow and the guided assisted intake path without leaving the same item-creation system.
+            </p>
+          </div>
+
           <div class="workflow-tabs" role="tablist" aria-label="Add item workflows">
             <button
               type="button"
@@ -69,7 +80,7 @@
         >
           <h2 class="workflow-panel-title">Existing Manual Add Item Flow</h2>
           <p class="workflow-panel-copy">
-            Use the current Add Item form below for direct entry. Barcode generation, QR handling, DYMO labels, photo upload, and the final item creation pipeline remain unchanged.
+            Direct entry remains fully intact, including category selection, barcode generation, QR handling, DYMO labels, photo upload, and the final item creation pipeline.
           </p>
         </section>
 
@@ -139,7 +150,7 @@
             <div class="assisted-results">
               <div class="assisted-result-card">
                 <span class="assisted-result-label">Stable Weight</span>
-                <strong id="assisted-weight-display" class="assisted-result-value">—</strong>
+                <strong id="assisted-weight-display" class="assisted-result-value">--</strong>
                 <p class="assisted-result-note">When a stable reading is captured, it syncs into the existing Weight field below.</p>
               </div>
 
@@ -273,181 +284,384 @@
           </div>
         </section>
       </section>
+
       <form id="add-item-form" class="add-form">
-        <input type="text" id="title" placeholder="Item Title" class="add-input" required />
-        <textarea id="description" placeholder="Item Description" class="add-input add-textarea" required></textarea>
-        <input type="number" step="0.01" id="weight" placeholder="Weight (g)" class="add-input" required />
-        <!-- 💎 Price Per Weight -->
-        <input type="number" step="0.01" id="price-per-weight" placeholder="Price per Weight ($/g or $/ct)" class="add-input" />
-
-        <!-- ✅ Toggle: Auto-calculate Cost or Manual -->
-        <div class="auto-cost-toggle">
-          <label style="display: flex; align-items: center; gap: 0.5rem;">
-            <input type="checkbox" id="auto-cost-checkbox" checked />
-            Auto-calculate cost from weight × price per weight
-          </label>
-        </div>
-        <label for="category">Category</label>
-        <div id="category-dropdown-container" class="custom-dropdown">
-          <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
-            Select or Create Category
-          </button>
-          <div id="category-dropdown-menu" class="dropdown-menu"></div>
-        </div>
-        <input type="hidden" id="category" name="category" />
-
-        <input type="number" step="0.01" id="cost" placeholder="Cost of Item ($)" class="add-input" required />
-        <input type="text" id="sale-price" placeholder="Sale Price (auto)" class="add-input" readonly />
-
-        <input type="text" id="distributor-name" placeholder="Distributor Name (optional)" class="add-input" />
-        <input type="tel" id="distributor-phone" placeholder="Distributor Phone" class="add-input" />
-        <textarea id="distributor-notes" placeholder="Distributor Notes (optional)" class="add-input add-textarea"></textarea>
-
-        <select id="qr-type" class="add-input" required>
-          <option value="" disabled selected>Type of QR code</option>
-          <option value="website">Website</option>
-          <option value="CGL ID">CGL Certificate</option>
-        </select>
-
-        <input type="url" id="qr-code" placeholder="External QR Code" class="add-input" />
-
-        <div class="add-barcode-section">
-          <label class="add-label">1D Code</label>
-          <div class="add-barcode-options">
-            <button type="button" id="generate-barcode" class="add-button-secondary">Generate Barcode</button>
-            <span>or</span>
-            <input type="text" id="scanned-barcode" placeholder="Paste or Scan Barcode" class="add-input" />
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">Core Item Details</p>
+            <h2 class="section-title">Foundational Inventory Information</h2>
+            <p class="section-copy">
+              Capture the item identity first. Assisted intake can prefill the title, description, and weight without interrupting the manual flow.
+            </p>
           </div>
 
-          <div id="combined-label" class="combined-label-preview">
-            <canvas id="qr-canvas" width="180" height="180"></canvas>
-            <canvas id="barcode-canvas" width="300" height="80"></canvas>
+          <div class="form-grid form-grid-2">
+            <label class="form-field form-field-wide" for="title">
+              <span class="form-label">Item Title</span>
+              <input type="text" id="title" placeholder="Enter the primary inventory title" class="add-input" required />
+            </label>
+
+            <label class="form-field form-field-wide" for="description">
+              <span class="form-label">Item Description</span>
+              <textarea id="description" placeholder="Describe the item for inventory and sales context" class="add-input add-textarea" required></textarea>
+            </label>
+
+            <label class="form-field" for="weight">
+              <span class="form-label">Weight</span>
+              <input type="number" step="0.01" id="weight" placeholder="Weight (g)" class="add-input" required />
+            </label>
+
+            <div class="form-field">
+              <span class="form-label">Category</span>
+              <div id="category-dropdown-container" class="custom-dropdown">
+                <button id="category-dropdown-toggle" type="button" class="dropdown-toggle">
+                  Select or Create Category
+                </button>
+                <div id="category-dropdown-menu" class="dropdown-menu"></div>
+              </div>
+              <input type="hidden" id="category" name="category" />
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">Pricing and Supplier</p>
+            <h2 class="section-title">Costing, Margin, and Source Details</h2>
+            <p class="section-copy">
+              Keep pricing clean and traceable. Auto-cost can still derive cost from weight and price per weight whenever you want.
+            </p>
           </div>
 
-          <button id="generate-dymo-label" type="button" class="add-button-secondary">Generate DYMO Label</button>
-          <div id="dymo-status" style="text-align:center; margin-top: 10px; font-weight: 500;"></div>
-        </div>
+          <div class="form-grid form-grid-2">
+            <label class="form-field" for="price-per-weight">
+              <span class="form-label">Price Per Weight</span>
+              <input type="number" step="0.01" id="price-per-weight" placeholder="Price per Weight ($/g or $/ct)" class="add-input" />
+            </label>
 
-        <!-- 👤 Admin-only Stock/Location Button -->
-        <button type="button" id="btn-open-admin-stock" class="add-button-secondary hidden">
-          ➕ Assign Location & Quantity
-        </button>
+            <div class="form-field form-field-toggle">
+              <span class="form-label">Costing Mode</span>
+              <div class="auto-cost-toggle">
+                <label class="toggle-label" for="auto-cost-checkbox">
+                  <input type="checkbox" id="auto-cost-checkbox" checked />
+                  <span>Auto-calculate cost from weight x price per weight</span>
+                </label>
+              </div>
+            </div>
 
-        <!-- NEW MULTI-PHOTO SUPPORT -->
-        <input type="file" id="item-photo" class="add-input" accept="image/*" multiple />
-        <div id="carousel-preview" class="carousel-preview"></div>
-        <div id="photo-status" style="margin-top: 0.5rem; font-size: 0.9rem; color: #444;"></div>
+            <label class="form-field" for="cost">
+              <span class="form-label">Cost</span>
+              <input type="number" step="0.01" id="cost" placeholder="Cost of Item ($)" class="add-input" required />
+            </label>
 
-        <!-- 🧾 Pending Stock Assignment Preview -->
-        <div id="assignment-preview-box" class="pending-stock-preview hidden">
-          <p><strong>📋 This item will be stocked as follows:</strong></p>
-          <p id="assignment-location">📍 Location: —</p>
-          <p id="assignment-quantity">📦 Quantity: —</p>
-        </div>
+            <label class="form-field" for="sale-price">
+              <span class="form-label">Sale Price</span>
+              <input type="text" id="sale-price" placeholder="Sale Price (auto)" class="add-input" readonly />
+            </label>
 
-        <button type="submit" class="add-button">Add Item</button>
+            <label class="form-field" for="distributor-name">
+              <span class="form-label">Distributor Name</span>
+              <input type="text" id="distributor-name" placeholder="Distributor Name (optional)" class="add-input" />
+            </label>
+
+            <label class="form-field" for="distributor-phone">
+              <span class="form-label">Distributor Phone</span>
+              <input type="tel" id="distributor-phone" placeholder="Distributor Phone" class="add-input" />
+            </label>
+
+            <label class="form-field form-field-wide" for="distributor-notes">
+              <span class="form-label">Distributor Notes</span>
+              <textarea id="distributor-notes" placeholder="Supplier notes, sourcing context, or intake reminders" class="add-input add-textarea"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">QR, Barcode, and Labeling</p>
+            <h2 class="section-title">Identity and Print Assets</h2>
+            <p class="section-copy">
+              Generate or scan a 1D barcode, attach a QR destination, and stage the DYMO label from the same production panel.
+            </p>
+          </div>
+
+          <div class="barcode-shell">
+            <div class="barcode-controls">
+              <label class="form-field" for="qr-type">
+                <span class="form-label">QR Type</span>
+                <select id="qr-type" class="add-input" required>
+                  <option value="" disabled selected>Type of QR code</option>
+                  <option value="website">Website</option>
+                  <option value="CGL ID">CGL Certificate</option>
+                </select>
+              </label>
+
+              <label class="form-field" for="qr-code">
+                <span class="form-label">External QR Code</span>
+                <input type="url" id="qr-code" placeholder="Paste the external QR destination" class="add-input" />
+              </label>
+
+              <div class="barcode-actions-card">
+                <div class="barcode-actions-head">
+                  <span class="form-label">1D Barcode</span>
+                  <p class="field-helper">Generate a new barcode or scan an existing one before creating the DYMO label.</p>
+                </div>
+
+                <div class="add-barcode-options">
+                  <button type="button" id="generate-barcode" class="add-button-secondary">Generate Barcode</button>
+                  <span class="barcode-divider">or</span>
+                  <input type="text" id="scanned-barcode" placeholder="Paste or Scan Barcode" class="add-input" />
+                </div>
+
+                <button id="generate-dymo-label" type="button" class="add-button-secondary">
+                  Generate DYMO Label
+                </button>
+              </div>
+            </div>
+
+            <aside class="preview-panel">
+              <div class="preview-panel-head">
+                <p class="section-kicker">Preview</p>
+                <h3 class="preview-panel-title">Barcode and QR Output</h3>
+              </div>
+
+              <div id="combined-label" class="combined-label-preview">
+                <canvas id="qr-canvas" width="180" height="180"></canvas>
+                <canvas id="barcode-canvas" width="300" height="80"></canvas>
+              </div>
+
+              <div id="dymo-status" class="inline-status inline-status-muted" aria-live="polite"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">Photos and Media</p>
+            <h2 class="section-title">Manual Uploads and Visual Review</h2>
+            <p class="section-copy">
+              Manual uploads continue to save into the main photos bucket. Assisted phone uploads can be chosen in the Assisted workflow and will merge into the final saved item photos.
+            </p>
+          </div>
+
+          <div class="form-grid">
+            <label class="form-field" for="item-photo">
+              <span class="form-label">Manual Item Photos</span>
+              <input type="file" id="item-photo" class="add-input" accept="image/*" multiple />
+              <span class="field-helper">Select one or more images from this device.</span>
+            </label>
+
+            <div class="preview-panel preview-panel-photos">
+              <div class="preview-panel-head">
+                <p class="section-kicker">Preview</p>
+                <h3 class="preview-panel-title">Uploaded Image Strip</h3>
+              </div>
+              <div id="carousel-preview" class="carousel-preview"></div>
+              <div id="photo-status" class="inline-status" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">Stock and Location</p>
+            <h2 class="section-title">Placement Before Save</h2>
+            <p class="section-copy">
+              If needed, attach the incoming item type to a location and quantity assignment before final creation.
+            </p>
+          </div>
+
+          <div class="stock-actions">
+            <button type="button" id="btn-open-admin-stock" class="add-button-secondary hidden">
+              Assign Location and Quantity
+            </button>
+          </div>
+
+          <div id="assignment-preview-box" class="pending-stock-preview hidden">
+            <p class="assignment-preview-title">Pending Stock Assignment</p>
+            <p id="assignment-location">Location: --</p>
+            <p id="assignment-quantity">Quantity: --</p>
+          </div>
+        </section>
+
+        <section class="form-section form-section-final">
+          <div class="form-section-head">
+            <p class="section-kicker">Final Action</p>
+            <h2 class="section-title">Create the Item Type</h2>
+            <p class="section-copy">
+              Submit the item once the copy, imagery, labeling, and stock details are ready. The current add-item pipeline remains unchanged underneath this redesigned surface.
+            </p>
+          </div>
+
+          <div class="final-action-bar">
+            <button type="submit" class="add-button">Add Item</button>
+            <p class="final-action-note">Barcode generation, DYMO upload, photos, and stock writes continue to use the existing save pipeline.</p>
+          </div>
+        </section>
       </form>
     </main>
   </div>
 
-  <!-- 🔐 Modal: Assign Location + Quantity for Admin -->
-    <div id="modal-admin-assign-location" class="modal hidden">
-      <div class="modal-content-assign-location">
-        <div class="modal-header-assign-location">Assign Location and Quantity</div>
-        <div class="modal-body-assign-location">
+  <div id="modal-admin-assign-location" class="modal hidden">
+    <div class="modal-content-assign-location">
+      <div class="modal-kicker">Stock Placement</div>
+      <div class="modal-header-assign-location">Assign Location and Quantity</div>
+      <p class="modal-copy-assign-location">
+        Choose where the item should land and how much stock should be attached before the final save.
+      </p>
 
-          <!-- 🔹 Location Name Dropdown -->
-          <label for="admin-location-name">Location</label>
-          <div class="custom-dropdown">
-            <button id="admin-location-dropdown-toggle" type="button" class="dropdown-toggle">Select Location</button>
-            <div id="admin-location-dropdown-menu" class="dropdown-menu"></div>
-          </div>
-          <input type="hidden" id="admin-location-name" />
-
-          <!-- 🔢 Quantity Input -->
-          <label for="admin-stock-quantity">Stock Quantity</label>
-          <input type="number" id="admin-stock-quantity" placeholder="Enter quantity" min="0" />
-
+      <div class="modal-body-assign-location">
+        <label for="admin-location-name">Location</label>
+        <div class="custom-dropdown">
+          <button id="admin-location-dropdown-toggle" type="button" class="dropdown-toggle">Select Location</button>
+          <div id="admin-location-dropdown-menu" class="dropdown-menu"></div>
         </div>
+        <input type="hidden" id="admin-location-name" />
 
-        <div class="modal-footer-assign-location">
-          <button id="btn-confirm-admin-stock" class="btn-location-confirm">Confirm</button>
-          <button id="btn-cancel-admin-stock" class="btn-location-cancel">Cancel</button>
-        </div>
-      </div>
-    </div>
-    <div id="toast-container" class="toast-container"></div>
-
-  <!-- 🧪 Modal: Create Bulk Bag -->
-  <div id="modal-bulk-bag" class="modal hidden">
-    <div class="modal-content modal-content-bulk">
-      <div class="modal-header-bulk">
-        <h2>Create Bulk Bag</h2>
-        <button type="button" id="close-bulk-modal" class="bulk-close-btn" aria-label="Close">✕</button>
+        <label for="admin-stock-quantity">Stock Quantity</label>
+        <input type="number" id="admin-stock-quantity" placeholder="Enter quantity" min="0" />
       </div>
 
-      <div class="modal-body-bulk">
-        <div class="bulk-field">
-          <label for="bulk-item-title">Item name</label>
-          <input id="bulk-item-title" type="text" class="bulk-input" placeholder="(auto-filled from Item Title)" />
-        </div>
-
-        <div class="bulk-row-2">
-          <div class="bulk-field">
-            <label for="bulk-tare">Tare (bag/plastic) – g</label>
-            <input id="bulk-tare" type="number" step="0.01" min="0" class="bulk-input" />
-          </div>
-          <div class="bulk-field">
-            <label for="bulk-gross">Gross (bag + contents) – g</label>
-            <input id="bulk-gross" type="number" step="0.01" min="0" class="bulk-input" />
-          </div>
-        </div>
-
-        <div class="bulk-samples">
-          <div class="bulk-field">
-            <label>Sample 5 items (g each)</label>
-            <div class="bulk-sample-grid">
-              <input id="bulk-s1" type="number" step="0.01" min="0" class="bulk-input" />
-              <input id="bulk-s2" type="number" step="0.01" min="0" class="bulk-input" />
-              <input id="bulk-s3" type="number" step="0.01" min="0" class="bulk-input" />
-              <input id="bulk-s4" type="number" step="0.01" min="0" class="bulk-input" />
-              <input id="bulk-s5" type="number" step="0.01" min="0" class="bulk-input" />
-            </div>
-          </div>
-          <div class="bulk-field">
-            <label for="bulk-unit-override">Override unit weight (g) — optional</label>
-            <input id="bulk-unit-override" type="number" step="0.01" min="0" class="bulk-input" />
-          </div>
-        </div>
-
-        <div class="bulk-computed">
-          <div>
-            <div class="bulk-kv"><span>Avg unit (from samples)</span><strong id="bulk-unit-avg">—</strong></div>
-            <div class="bulk-kv"><span>Unit in use</span><strong id="bulk-unit-used">—</strong></div>
-          </div>
-          <div>
-            <div class="bulk-kv"><span>Net = Gross − Tare</span><strong id="bulk-net">—</strong></div>
-            <div class="bulk-kv big"><span>Estimated Qty</span><strong id="bulk-estimated-qty">—</strong></div>
-            <div class="bulk-kv"><span>Residual (g)</span><strong id="bulk-residual">—</strong></div>
-          </div>
-        </div>
-
-        <p class="bulk-note">Tip: enter at least 3 samples, or provide an override. We’ll use floor(Net ÷ Unit).</p>
-      </div>
-
-      <div class="modal-footer-bulk">
-        <button type="button" id="bulk-save" class="btn-bulk-primary" disabled>Save Bulk Registry</button>
-        <button type="button" id="bulk-cancel" class="btn-bulk-secondary">Cancel</button>
+      <div class="modal-footer-assign-location">
+        <button id="btn-confirm-admin-stock" class="btn-location-confirm">Confirm</button>
+        <button id="btn-cancel-admin-stock" class="btn-location-cancel">Cancel</button>
       </div>
     </div>
   </div>
 
+  <div id="toast-container" class="toast-container"></div>
+
+  <div id="modal-bulk-bag" class="modal hidden">
+    <div class="modal-content modal-content-bulk">
+      <div class="modal-header-bulk">
+        <div class="bulk-header-copy">
+          <p class="bulk-kicker">Bulk Bag Registry</p>
+          <h2>Create Bulk Bag</h2>
+          <p class="bulk-intro">
+            Capture tare, gross weight, sampling, and optional media so this bag can be attached cleanly to the item type and printed immediately.
+          </p>
+        </div>
+        <button type="button" id="close-bulk-modal" class="bulk-close-btn" aria-label="Close">X</button>
+      </div>
+
+      <div class="modal-body-bulk">
+        <section class="bulk-block">
+          <label class="bulk-field" for="bulk-item-title">
+            <span class="bulk-label">Item Name</span>
+            <input id="bulk-item-title" type="text" class="bulk-input" placeholder="Auto-filled from Item Title when available" />
+          </label>
+        </section>
+
+        <section class="bulk-block">
+          <div class="bulk-block-head">
+            <p class="bulk-section-kicker">Mass Intake</p>
+            <h3 class="bulk-section-title">Bag and Contents Weights</h3>
+          </div>
+
+          <div class="bulk-row-2">
+            <label class="bulk-field bulk-input-card" for="bulk-tare">
+              <span class="bulk-label">Tare Weight</span>
+              <span class="bulk-helper">Empty bag, plastic, or packaging weight in grams.</span>
+              <input id="bulk-tare" type="number" step="0.01" min="0" class="bulk-input" placeholder="0.00" />
+            </label>
+
+            <label class="bulk-field bulk-input-card" for="bulk-gross">
+              <span class="bulk-label">Gross Weight</span>
+              <span class="bulk-helper">Total bag plus contents in grams.</span>
+              <input id="bulk-gross" type="number" step="0.01" min="0" class="bulk-input" placeholder="0.00" />
+            </label>
+          </div>
+        </section>
+
+        <section class="bulk-block">
+          <div class="bulk-block-head">
+            <p class="bulk-section-kicker">Sampling</p>
+            <h3 class="bulk-section-title">Reference Piece Weights</h3>
+            <p class="bulk-note">Enter at least 3 sample weights, or set an override unit weight if you already know the exact reference value.</p>
+          </div>
+
+          <div class="bulk-samples">
+            <div class="bulk-field">
+              <span class="bulk-label">Sample 5 Items (g each)</span>
+              <div class="bulk-sample-grid">
+                <input id="bulk-s1" type="number" step="0.01" min="0" class="bulk-input" placeholder="S1" />
+                <input id="bulk-s2" type="number" step="0.01" min="0" class="bulk-input" placeholder="S2" />
+                <input id="bulk-s3" type="number" step="0.01" min="0" class="bulk-input" placeholder="S3" />
+                <input id="bulk-s4" type="number" step="0.01" min="0" class="bulk-input" placeholder="S4" />
+                <input id="bulk-s5" type="number" step="0.01" min="0" class="bulk-input" placeholder="S5" />
+              </div>
+            </div>
+
+            <label class="bulk-field bulk-input-card" for="bulk-unit-override">
+              <span class="bulk-label">Override Unit Weight</span>
+              <span class="bulk-helper">Optional manual unit weight in grams.</span>
+              <input id="bulk-unit-override" type="number" step="0.01" min="0" class="bulk-input" placeholder="0.00" />
+            </label>
+          </div>
+        </section>
+
+        <section class="bulk-block bulk-block-results">
+          <div class="bulk-block-head">
+            <p class="bulk-section-kicker">Computed Output</p>
+            <h3 class="bulk-section-title">Bag Metrics</h3>
+          </div>
+
+          <div class="bulk-computed">
+            <div class="bulk-kv">
+              <span>Avg Unit (from samples)</span>
+              <strong id="bulk-unit-avg">--</strong>
+            </div>
+            <div class="bulk-kv">
+              <span>Unit in Use</span>
+              <strong id="bulk-unit-used">--</strong>
+            </div>
+            <div class="bulk-kv">
+              <span>Net = Gross - Tare</span>
+              <strong id="bulk-net">--</strong>
+            </div>
+            <div class="bulk-kv bulk-kv-hero">
+              <span>Estimated Qty</span>
+              <strong id="bulk-estimated-qty">--</strong>
+            </div>
+            <div class="bulk-kv">
+              <span>Residual (g)</span>
+              <strong id="bulk-residual">--</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="bulk-block">
+          <div class="bulk-block-head">
+            <p class="bulk-section-kicker">Media and Labeling</p>
+            <h3 class="bulk-section-title">Optional Bag Photo</h3>
+          </div>
+
+          <div class="bulk-media-grid">
+            <label class="bulk-field bulk-input-card" for="bulk-bag-photo">
+              <span class="bulk-label">Bag Photo</span>
+              <span class="bulk-helper">Optional reference image for the physical bag.</span>
+              <input id="bulk-bag-photo" type="file" class="bulk-input" accept="image/*" />
+            </label>
+
+            <div class="bulk-media-panel">
+              <div id="bulk-bag-photo-preview" class="bulk-bag-photo-preview"></div>
+              <div id="bulk-dymo-status" class="bulk-inline-status" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-footer-bulk">
+        <button type="button" id="bulk-cancel" class="btn-bulk-secondary">Cancel</button>
+        <button type="button" id="bulk-save" class="btn-bulk-primary" disabled>Save Bulk Registry</button>
+      </div>
+    </div>
+  </div>
 
   <script src="initSupabase.js"></script>
   <script src="additem-dymolabel.js"></script>
   <script src="additembulk.js"></script>
   <script src="additem.js"></script>
   <script src="additem-assisted.js"></script>
-  
 </body>
 </html>
