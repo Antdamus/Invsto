@@ -29,6 +29,14 @@ type CopyResult = {
   generatedDescription: string;
 };
 
+type OpenAIDebugInfo = {
+  openaiAttempted: boolean;
+  openaiStatus: string;
+  openaiErrorSummary: string;
+  parseFailure: boolean;
+  rawOutputPreview: string;
+};
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -45,6 +53,17 @@ function normalizePath(value: string) {
 
 function asTrimmedString(value: unknown) {
   return String(value || "").trim();
+}
+
+function truncateForPreview(value: unknown, maxLength = 400) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function summarizeError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return truncateForPreview(error, 200);
 }
 
 function sentenceCase(value: string) {
@@ -149,13 +168,34 @@ async function tryGenerateWithOpenAI(
   body: RequestBody,
   signedImageUrl: string,
   fallback: CopyResult
-): Promise<CopyResult | null> {
+): Promise<{ result: CopyResult | null; debug: OpenAIDebugInfo }> {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   const model = Deno.env.get("OPENAI_MODEL");
+  const debug: OpenAIDebugInfo = {
+    openaiAttempted: false,
+    openaiStatus: "not_attempted",
+    openaiErrorSummary: "",
+    parseFailure: false,
+    rawOutputPreview: "",
+  };
+
+  console.log("[generate-inventory-copy] OpenAI config check", {
+    hasOpenAIKey: Boolean(apiKey),
+    model: model || "(missing)",
+  });
 
   if (!apiKey || !model) {
-    return null;
+    debug.openaiStatus = "missing_config";
+    debug.openaiErrorSummary = !apiKey && !model
+      ? "OPENAI_API_KEY and OPENAI_MODEL are missing"
+      : !apiKey
+        ? "OPENAI_API_KEY is missing"
+        : "OPENAI_MODEL is missing";
+    return { result: null, debug };
   }
+
+  debug.openaiAttempted = true;
+  debug.openaiStatus = "request_started";
 
   const prompt = [
     "Generate strict JSON with keys generatedTitle and generatedDescription.",
@@ -174,54 +214,92 @@ async function tryGenerateWithOpenAI(
     })}`,
   ].join("\n");
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: "You write safe inventory copy for jewelry intake. Return JSON only.",
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: prompt },
+              { type: "input_image", image_url: signedImageUrl },
+            ],
+          },
+        ],
+      }),
+    });
+
+    debug.openaiStatus = `http_${response.status}`;
+    console.log("[generate-inventory-copy] OpenAI HTTP status", {
+      status: response.status,
+      ok: response.ok,
       model,
-      input: [
+    });
+
+    if (!response.ok) {
+      const failedBody = await response.text();
+      const failedBodyPreview = truncateForPreview(failedBody);
+      debug.openaiErrorSummary = `OpenAI request failed (${response.status})`;
+      debug.rawOutputPreview = failedBodyPreview;
+      console.error("[generate-inventory-copy] OpenAI request failed", {
+        status: response.status,
+        bodyPreview: failedBodyPreview,
+      });
+      return { result: null, debug };
+    }
+
+    const payload = await response.json();
+    const outputText = extractOutputText(payload);
+    debug.rawOutputPreview = truncateForPreview(outputText || JSON.stringify(payload));
+
+    const parsed = tryParseJsonObject(outputText);
+    if (!parsed) {
+      debug.parseFailure = true;
+      debug.openaiStatus = "parse_failed";
+      debug.openaiErrorSummary = "Model output could not be parsed as JSON";
+      console.error("[generate-inventory-copy] Failed to parse OpenAI output as JSON", {
+        rawOutputPreview: debug.rawOutputPreview,
+      });
+      return { result: null, debug };
+    }
+
+    debug.openaiStatus = "success";
+
+    return {
+      result: sanitizeGeneratedCopy(
         {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text: "You write safe inventory copy for jewelry intake. Return JSON only.",
-            },
-          ],
+          mode: "openai",
+          generatedTitle: parsed.generatedTitle,
+          generatedDescription: parsed.generatedDescription,
         },
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: prompt },
-            { type: "input_image", image_url: signedImageUrl },
-          ],
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenAI request failed (${response.status})`);
+        fallback
+      ),
+      debug,
+    };
+  } catch (error) {
+    debug.openaiStatus = "request_exception";
+    debug.openaiErrorSummary = summarizeError(error);
+    console.error("[generate-inventory-copy] OpenAI request exception", {
+      error: debug.openaiErrorSummary,
+      model,
+    });
+    return { result: null, debug };
   }
-
-  const payload = await response.json();
-  const outputText = extractOutputText(payload);
-  const parsed = tryParseJsonObject(outputText);
-  if (!parsed) {
-    return null;
-  }
-
-  return sanitizeGeneratedCopy(
-    {
-      mode: "openai",
-      generatedTitle: parsed.generatedTitle,
-      generatedDescription: parsed.generatedDescription,
-    },
-    fallback
-  );
 }
 
 serve(async (req) => {
@@ -276,14 +354,25 @@ serve(async (req) => {
     });
 
     let generated = fallback;
+    let openAIDebug: OpenAIDebugInfo = {
+      openaiAttempted: false,
+      openaiStatus: "not_attempted",
+      openaiErrorSummary: "",
+      parseFailure: false,
+      rawOutputPreview: "",
+    };
 
     try {
-      const openAIResult = await tryGenerateWithOpenAI(body, signedData.signedUrl, fallback);
-      if (openAIResult) {
-        generated = openAIResult;
+      const { result, debug } = await tryGenerateWithOpenAI(body, signedData.signedUrl, fallback);
+      openAIDebug = debug;
+      if (result) {
+        generated = result;
       }
     } catch (error) {
       console.error("OpenAI generation failed, falling back to placeholder:", error);
+      openAIDebug.openaiAttempted = true;
+      openAIDebug.openaiStatus = "unexpected_wrapper_exception";
+      openAIDebug.openaiErrorSummary = summarizeError(error);
     }
 
     return json(200, {
@@ -291,6 +380,11 @@ serve(async (req) => {
       mode: generated.mode,
       generatedTitle: generated.generatedTitle,
       generatedDescription: generated.generatedDescription,
+      openaiAttempted: openAIDebug.openaiAttempted,
+      openaiStatus: openAIDebug.openaiStatus,
+      openaiErrorSummary: openAIDebug.openaiErrorSummary,
+      parseFailure: openAIDebug.parseFailure,
+      rawOutputPreview: openAIDebug.rawOutputPreview,
       selectedImagePath: imagePath,
       selectedImageSignedUrl: signedData.signedUrl,
     });
