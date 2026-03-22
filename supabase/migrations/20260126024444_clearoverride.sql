@@ -88,14 +88,11 @@ begin
   return old;
 end;
 $$;
-
 drop trigger if exists trg_wso_sms_cancelled on public.work_schedule_overrides;
-
 create trigger trg_wso_sms_cancelled
 after delete on public.work_schedule_overrides
 for each row
 execute function public.enqueue_work_schedule_override_cancelled_sms();
-
 create unique index if not exists sms_outbox_unique_work_override_cancelled
 on public.sms_outbox ((meta->>'type'), (meta->>'override_id'))
 where meta->>'type' = 'work_schedule_override_cancelled';

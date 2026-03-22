@@ -1,7 +1,6 @@
 alter table public.item_types
   add column if not exists metal text,
   add column if not exists purity_basis_points integer;
-
 create or replace function public.sync_metal_weight_g()
     returns trigger
     language plpgsql
@@ -22,13 +21,11 @@ create or replace function public.sync_metal_weight_g()
     return new;
     end;
 $$;
-
 -- Optional: if your existing it.weight is total piece weight, keep using it.
 -- If you want “metal-only weight” separate from stone weight, add this instead:
 alter table public.item_types
   add column if not exists metal_weight_g numeric;
-
-  create or replace function public.calc_display_price(
+create or replace function public.calc_display_price(
   p_pricing_mode text,
   p_fixed_price numeric,
   p_metal text,
@@ -61,19 +58,15 @@ as $$
   from public.metal_spot_prices sp
   where sp.metal = p_metal
 $$;
-
 -- 0) Drop the old RPC (must match the exact signature)
 drop function if exists public.rpc_storefront_catalog(text);
-
 -- 1) (If you want the trigger, you forgot to create it)
 drop trigger if exists trg_sync_metal_weight_g on public.item_types;
 create trigger trg_sync_metal_weight_g
 before insert or update on public.item_types
 for each row execute function public.sync_metal_weight_g();
-
 -- Replace the function with a new return shape
 drop function if exists public.rpc_storefront_catalog(text);
-
 create function public.rpc_storefront_catalog(p_channel_id text default 'og_main')
 returns table(
   channel_id text,
@@ -190,7 +183,6 @@ select
 from priced
 order by sort_rank asc nulls last, title asc;
 $$;
-
 -- Public-safe snapshot for UI (works for anon storefront)
 create or replace function public.rpc_spot_snapshot()
 returns table(
@@ -209,8 +201,6 @@ as $$
   where m.metal in ('gold','silver')
   order by case when m.metal='gold' then 1 else 2 end;
 $$;
-
 -- Allow storefront callers to execute this RPC
 grant execute on function public.rpc_spot_snapshot() to anon;
 grant execute on function public.rpc_spot_snapshot() to authenticated;
-

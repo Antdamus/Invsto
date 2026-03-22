@@ -12,7 +12,6 @@ create table if not exists public.og_rl_ip_minute (
   updated_at timestamptz not null default now(),
   primary key (ip_key, bucket_epoch)
 );
-
 create table if not exists public.og_rl_email_minute (
   email_key text not null,
   bucket_epoch bigint not null,           -- unix epoch rounded down to 60s
@@ -20,7 +19,6 @@ create table if not exists public.og_rl_email_minute (
   updated_at timestamptz not null default now(),
   primary key (email_key, bucket_epoch)
 );
-
 create table if not exists public.og_rl_burst_30s (
   ip_key text not null,
   email_key text not null,
@@ -29,16 +27,12 @@ create table if not exists public.og_rl_burst_30s (
   updated_at timestamptz not null default now(),
   primary key (ip_key, email_key, bucket_epoch)
 );
-
 create index if not exists og_rl_ip_minute_bucket_idx
   on public.og_rl_ip_minute (bucket_epoch desc);
-
 create index if not exists og_rl_email_minute_bucket_idx
   on public.og_rl_email_minute (bucket_epoch desc);
-
 create index if not exists og_rl_burst_30s_bucket_idx
   on public.og_rl_burst_30s (bucket_epoch desc);
-
 /* =========================================================
    OG Jewelers — Cleanup old buckets (Retention)
    ========================================================= */
@@ -52,7 +46,6 @@ begin
   delete from public.og_rl_email_minute where bucket_epoch < cutoff;
   delete from public.og_rl_burst_30s where bucket_epoch < cutoff;
 end $$;
-
 /* =========================================================
    OG Jewelers — RPC helpers for atomic increments
    ========================================================= */
@@ -69,7 +62,6 @@ as $$
   where ip_key = p_ip_key
     and bucket_epoch = p_bucket_epoch;
 $$;
-
 create or replace function public.increment_og_rl_email_minute(
   p_email_key text,
   p_bucket_epoch bigint
@@ -82,7 +74,6 @@ as $$
   where email_key = p_email_key
     and bucket_epoch = p_bucket_epoch;
 $$;
-
 create or replace function public.increment_og_rl_burst_30s(
   p_ip_key text,
   p_email_key text,

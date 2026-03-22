@@ -16,7 +16,6 @@ create table if not exists public.members (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
 -- 2) Keep updated_at fresh automatically
 create or replace function public.set_updated_at()
 returns trigger
@@ -27,29 +26,24 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_members_set_updated_at on public.members;
 create trigger trg_members_set_updated_at
 before update on public.members
 for each row execute function public.set_updated_at();
-
 -- 3) RLS
 alter table public.members enable row level security;
-
 -- Read own row
 drop policy if exists "members_select_own" on public.members;
 create policy "members_select_own"
 on public.members
 for select
 using (auth.uid() = id);
-
 -- Insert own row
 drop policy if exists "members_insert_own" on public.members;
 create policy "members_insert_own"
 on public.members
 for insert
 with check (auth.uid() = id);
-
 -- Update own row
 drop policy if exists "members_update_own" on public.members;
 create policy "members_update_own"

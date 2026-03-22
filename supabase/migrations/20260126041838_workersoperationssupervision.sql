@@ -11,16 +11,12 @@ create table if not exists public.employee_watchers (
   constraint employee_watchers_pkey primary key (watched_employee_id, watcher_employee_id),
   constraint employee_watchers_no_self check (watched_employee_id <> watcher_employee_id)
 );
-
 create index if not exists idx_employee_watchers_watched
 on public.employee_watchers (watched_employee_id)
 where active = true;
-
 create index if not exists idx_employee_watchers_watcher
 on public.employee_watchers (watcher_employee_id)
 where active = true;
-
-
 -- ============================================================
 -- 2) Exception alert log (dedupe so we never spam)
 -- ============================================================
@@ -43,17 +39,14 @@ create table if not exists public.time_exception_alerts (
     ])
   )
 );
-
 -- Dedupe: event-row based alerts
 create unique index if not exists uq_time_exception_alerts_ref
 on public.time_exception_alerts (alert_type, ref_table, ref_id)
 where ref_id is not null;
-
 -- Dedupe: schedule/shift based alerts
 create unique index if not exists uq_time_exception_alerts_shift
 on public.time_exception_alerts (alert_type, shift_key)
 where shift_key is not null;
-
 -- ============================================================
 -- Helper: recipients for a watched employee (watchers or admin fallback)
 -- Returns phone_e164 values
@@ -88,8 +81,6 @@ as $$
   select phone_e164 from admin_phones
   where not exists (select 1 from watcher_phones);
 $$;
-
-
 -- ============================================================
 -- Helper: build stable shift_key for split shifts
 -- ============================================================
@@ -112,8 +103,6 @@ as $$
     _end_local::text || '|' ||
     coalesce(_store_id::text, 'null');
 $$;
-
-
 -- ============================================================
 -- Helper: match scheduled shift using Rule A (nearest start time)
 -- Finds effective shifts on the event's local date (store tz),
@@ -189,7 +178,6 @@ begin
   limit 1;
 end;
 $$;
-
 -- ============================================================
 -- Helper: enqueue SMS to all recipients for an employee
 -- (watchers OR admin fallback) with meta payload
@@ -216,8 +204,6 @@ begin
   end loop;
 end;
 $$;
-
-
 -- ============================================================
 -- Trigger: time_entries AFTER INSERT (clock-in) → late clock-in alert
 -- Uses store grace_in + scheduled shift start.
@@ -286,13 +272,10 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_time_entries_exceptions_ai on public.time_entries;
 create trigger trg_time_entries_exceptions_ai
 after insert on public.time_entries
 for each row execute function public.tr_time_entries_exceptions_ai();
-
-
 -- ============================================================
 -- Trigger: time_entries AFTER UPDATE (clock-out set) → early/out + overtime
 -- Thresholds: 5 minutes for early and 5 minutes for overtime
@@ -398,13 +381,10 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_time_entries_exceptions_au on public.time_entries;
 create trigger trg_time_entries_exceptions_au
 after update on public.time_entries
 for each row execute function public.tr_time_entries_exceptions_au();
-
-
 -- ============================================================
 -- Trigger: time_breaks AFTER UPDATE when ended_at becomes non-null → break_long
 -- Uses store_locations.paid_break_cap_min + 5 minutes
@@ -473,13 +453,10 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_time_breaks_exceptions_au on public.time_breaks;
 create trigger trg_time_breaks_exceptions_au
 after update on public.time_breaks
 for each row execute function public.tr_time_breaks_exceptions_au();
-
-
 create or replace function public.scan_no_show_exceptions()
 returns void
 language plpgsql
@@ -570,7 +547,6 @@ begin
   end loop;
 end;
 $$;
-
 create or replace function public.scan_open_break_too_long_exceptions()
 returns void
 language plpgsql
@@ -641,4 +617,3 @@ begin
   end loop;
 end;
 $$;
-

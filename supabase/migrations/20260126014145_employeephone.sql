@@ -8,7 +8,6 @@ create table if not exists public.employee_phones (
   can_sms boolean not null default true,
   updated_at timestamptz not null default now()
 );
-
 -- optional: keep updated_at fresh
 create or replace function public.set_updated_at()
 returns trigger
@@ -19,14 +18,11 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_employee_phones_updated_at on public.employee_phones;
 create trigger trg_employee_phones_updated_at
 before update on public.employee_phones
 for each row execute function public.set_updated_at();
-
 alter table public.employee_phones enable row level security;
-
 -- Admin-only access (assumes you already have is_admin() like the rest of your admin area)
 drop policy if exists "employee_phones_admin_all" on public.employee_phones;
 create policy "employee_phones_admin_all"
@@ -35,7 +31,6 @@ for all
 to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
 -- Admin upsert employee phone by employees.id
 create or replace function public.admin_upsert_employee_phone(
   _employee_id uuid,
@@ -61,6 +56,5 @@ begin
     updated_at = now();
 end;
 $$;
-
 revoke all on function public.admin_upsert_employee_phone(uuid, text, boolean) from public;
 grant execute on function public.admin_upsert_employee_phone(uuid, text, boolean) to authenticated;

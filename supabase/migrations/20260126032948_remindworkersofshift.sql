@@ -47,7 +47,6 @@ regular_shifts as (
 select * from override_shifts
 union all
 select * from regular_shifts;
-
 -- ============================================================
 -- TABLE: shift_sms_reminders
 -- ============================================================
@@ -71,7 +70,6 @@ create table if not exists public.shift_sms_reminders (
     reminder_type
   )
 );
-
 -- ============================================================
 -- FUNCTION: enqueue_upcoming_shift_reminders
 -- ============================================================
@@ -197,4 +195,3 @@ begin
   end loop;
 end;
 $$;
-

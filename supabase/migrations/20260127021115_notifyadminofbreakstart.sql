@@ -14,7 +14,6 @@
 
 alter table public.time_exception_alerts
   drop constraint if exists time_exception_alerts_type_check;
-
 alter table public.time_exception_alerts
   add constraint time_exception_alerts_type_check
   check (
@@ -30,8 +29,6 @@ alter table public.time_exception_alerts
       ]
     )
   );
-
-
 -- ============================================================
 -- 2) Update notify_break_started() (trigger calls this on INSERT)
 -- ============================================================

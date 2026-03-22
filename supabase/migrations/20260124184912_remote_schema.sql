@@ -1,27 +1,17 @@
 create extension if not exists "pgjwt" with schema "extensions";
-
 drop extension if exists "pg_net";
-
 create type "public"."tax_doc_access_action" as enum ('uploaded', 'signed_url_issued', 'downloaded', 'viewed', 'status_changed', 'deleted');
-
 create type "public"."tax_doc_status" as enum ('pending', 'received', 'verified', 'rejected', 'replaced');
-
 create type "public"."tax_doc_type" as enum ('w9', 'w4');
-
 create sequence "public"."tax_doc_access_logs_id_seq";
-
-
-  create table "public"."agreement_versions" (
+create table "public"."agreement_versions" (
     "version" text not null,
     "bucket" text not null default 'agreements'::text,
     "path" text not null,
     "active" boolean not null default true,
     "created_at" timestamp with time zone not null default now()
       );
-
-
-
-  create table "public"."batch_confirmations" (
+create table "public"."batch_confirmations" (
     "id" uuid not null default gen_random_uuid(),
     "user_id" uuid,
     "item_id" uuid,
@@ -32,10 +22,7 @@ create sequence "public"."tax_doc_access_logs_id_seq";
     "latitude" numeric,
     "longitude" numeric
       );
-
-
-
-  create table "public"."bulk_batches" (
+create table "public"."bulk_batches" (
     "id" uuid not null default gen_random_uuid(),
     "item_type_id" uuid not null,
     "bag_barcode" text not null,
@@ -60,12 +47,8 @@ create sequence "public"."tax_doc_access_logs_id_seq";
     "bag_label_url" text,
     "bag_photo_url" text
       );
-
-
 alter table "public"."bulk_batches" enable row level security;
-
-
-  create table "public"."contractor_agreements" (
+create table "public"."contractor_agreements" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "user_id" uuid not null,
@@ -75,10 +58,7 @@ alter table "public"."bulk_batches" enable row level security;
     "ip" text,
     "user_agent" text
       );
-
-
-
-  create table "public"."contractor_payments" (
+create table "public"."contractor_payments" (
     "id" uuid not null default gen_random_uuid(),
     "pay_period_id" uuid not null,
     "employee_id" uuid not null,
@@ -93,21 +73,14 @@ alter table "public"."bulk_batches" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "created_by" uuid not null default auth.uid()
       );
-
-
 alter table "public"."contractor_payments" enable row level security;
-
-
-  create table "public"."credit_tiers" (
+create table "public"."credit_tiers" (
     "id" text not null,
     "label" text not null,
     "emoji" text not null,
     "unit_value" numeric not null
       );
-
-
-
-  create table "public"."deletion_log" (
+create table "public"."deletion_log" (
     "id" uuid not null default extensions.uuid_generate_v4(),
     "user_id" uuid,
     "deleted_ids" uuid[],
@@ -116,10 +89,7 @@ alter table "public"."contractor_payments" enable row level security;
     "location_lng" double precision,
     "deleted_data" jsonb
       );
-
-
-
-  create table "public"."employee_legal_addresses" (
+create table "public"."employee_legal_addresses" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "line1" text not null,
@@ -133,21 +103,13 @@ alter table "public"."contractor_payments" enable row level security;
     "created_by" uuid default auth.uid(),
     "updated_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."employee_legal_addresses" enable row level security;
-
-
-  create table "public"."employee_managers" (
+create table "public"."employee_managers" (
     "employee_id" uuid not null,
     "manager_employee_id" uuid not null
       );
-
-
 alter table "public"."employee_managers" enable row level security;
-
-
-  create table "public"."employee_rates" (
+create table "public"."employee_rates" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "hourly_rate" numeric not null,
@@ -157,12 +119,8 @@ alter table "public"."employee_managers" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "created_by" uuid not null default auth.uid()
       );
-
-
 alter table "public"."employee_rates" enable row level security;
-
-
-  create table "public"."employee_tax_docs" (
+create table "public"."employee_tax_docs" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "doc_type" public.tax_doc_type not null default 'w9'::public.tax_doc_type,
@@ -177,12 +135,8 @@ alter table "public"."employee_rates" enable row level security;
     "updated_at" timestamp with time zone not null default now(),
     "is_active" boolean not null default true
       );
-
-
 alter table "public"."employee_tax_docs" enable row level security;
-
-
-  create table "public"."employees" (
+create table "public"."employees" (
     "id" uuid not null default gen_random_uuid(),
     "user_id" uuid not null,
     "display_name" text not null,
@@ -196,21 +150,14 @@ alter table "public"."employee_tax_docs" enable row level security;
     "worker_type" text not null default 'employee'::text,
     "agreement_version_required" text
       );
-
-
 alter table "public"."employees" enable row level security;
-
-
-  create table "public"."favorites" (
+create table "public"."favorites" (
     "id" uuid not null default gen_random_uuid(),
     "user_id" uuid,
     "item_id" uuid,
     "created_at" timestamp with time zone default now()
       );
-
-
-
-  create table "public"."item_stock_locations" (
+create table "public"."item_stock_locations" (
     "id" uuid not null default gen_random_uuid(),
     "item_id" uuid,
     "quantity" integer not null default 0,
@@ -224,10 +171,7 @@ alter table "public"."employees" enable row level security;
     "locked_at" timestamp with time zone,
     "batch_id" uuid
       );
-
-
-
-  create table "public"."item_types" (
+create table "public"."item_types" (
     "id" uuid not null default gen_random_uuid(),
     "title" text not null,
     "description" text,
@@ -251,12 +195,8 @@ alter table "public"."employees" enable row level security;
     "added_by" uuid,
     "added_by_email" text
       );
-
-
 alter table "public"."item_types" enable row level security;
-
-
-  create table "public"."locations" (
+create table "public"."locations" (
     "id" uuid not null default gen_random_uuid(),
     "location_name" text not null,
     "location_code" text not null,
@@ -269,28 +209,19 @@ alter table "public"."item_types" enable row level security;
     "created_at" timestamp without time zone default now(),
     "updated_at" timestamp without time zone default now()
       );
-
-
-
-  create table "public"."metadata" (
+create table "public"."metadata" (
     "id" text not null,
     "inventory_version" text not null,
     "updated_at" timestamp with time zone default now(),
     "changed_item_ids" text[]
       );
-
-
-
-  create table "public"."metal_spot_prices" (
+create table "public"."metal_spot_prices" (
     "metal" text not null,
     "price_per_gram" numeric not null,
     "as_of" timestamp with time zone not null default now(),
     "source" text
       );
-
-
-
-  create table "public"."pay_periods" (
+create table "public"."pay_periods" (
     "id" uuid not null default gen_random_uuid(),
     "start_date" date not null,
     "end_date" date not null,
@@ -301,12 +232,8 @@ alter table "public"."item_types" enable row level security;
     "note" text,
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."pay_periods" enable row level security;
-
-
-  create table "public"."payroll_run_lines" (
+create table "public"."payroll_run_lines" (
     "id" uuid not null default gen_random_uuid(),
     "payroll_run_id" uuid not null,
     "employee_id" uuid not null,
@@ -334,12 +261,8 @@ alter table "public"."pay_periods" enable row level security;
     "fica_year" integer,
     "fica_params" jsonb
       );
-
-
 alter table "public"."payroll_run_lines" enable row level security;
-
-
-  create table "public"."payroll_runs" (
+create table "public"."payroll_runs" (
     "id" uuid not null default gen_random_uuid(),
     "pay_period_id" uuid not null,
     "status" text not null default 'draft'::text,
@@ -353,12 +276,8 @@ alter table "public"."payroll_run_lines" enable row level security;
     "finalized_at" timestamp with time zone,
     "finalized_by" uuid
       );
-
-
 alter table "public"."payroll_runs" enable row level security;
-
-
-  create table "public"."payroll_statements" (
+create table "public"."payroll_statements" (
     "id" uuid not null default gen_random_uuid(),
     "payroll_run_id" uuid not null,
     "pay_period_id" uuid not null,
@@ -380,28 +299,18 @@ alter table "public"."payroll_runs" enable row level security;
     "hours_paid" numeric not null default 0,
     "details" jsonb not null default '{}'::jsonb
       );
-
-
 alter table "public"."payroll_statements" enable row level security;
-
-
-  create table "public"."payroll_tax_constants" (
+create table "public"."payroll_tax_constants" (
     "tax_year" integer not null,
     "ss_wage_base" numeric not null,
     "addl_medicare_threshold" numeric not null default 200000
       );
-
-
-
-  create table "public"."sale_item_categories" (
+create table "public"."sale_item_categories" (
     "id" uuid not null default gen_random_uuid(),
     "sale_item_id" uuid not null,
     "category" text not null
       );
-
-
-
-  create table "public"."sale_items" (
+create table "public"."sale_items" (
     "id" uuid not null default gen_random_uuid(),
     "sale_id" uuid not null,
     "item_id" uuid not null,
@@ -416,10 +325,7 @@ alter table "public"."payroll_statements" enable row level security;
     "photo_path" text,
     "created_at" timestamp with time zone default now()
       );
-
-
-
-  create table "public"."sales" (
+create table "public"."sales" (
     "id" uuid not null default gen_random_uuid(),
     "external_sales_id" text,
     "user_id" uuid,
@@ -437,10 +343,7 @@ alter table "public"."payroll_statements" enable row level security;
     "verified_method" text,
     "verified_at" timestamp with time zone
       );
-
-
-
-  create table "public"."sales_audit" (
+create table "public"."sales_audit" (
     "id" uuid not null default extensions.uuid_generate_v4(),
     "external_sales_id" text,
     "subtotal" numeric,
@@ -464,10 +367,7 @@ alter table "public"."payroll_statements" enable row level security;
     "user_id" uuid,
     "credits_breakdown" jsonb
       );
-
-
-
-  create table "public"."sales_channels" (
+create table "public"."sales_channels" (
     "id" text not null,
     "name" text not null,
     "active" boolean not null default true,
@@ -475,10 +375,7 @@ alter table "public"."payroll_statements" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "updated_at" timestamp with time zone not null default now()
       );
-
-
-
-  create table "public"."shift_adjustments" (
+create table "public"."shift_adjustments" (
     "id" uuid not null default gen_random_uuid(),
     "time_entry_id" uuid not null,
     "editor_user_id" uuid not null,
@@ -488,24 +385,16 @@ alter table "public"."payroll_statements" enable row level security;
     "old_value" jsonb not null,
     "new_value" jsonb not null
       );
-
-
 alter table "public"."shift_adjustments" enable row level security;
-
-
-  create table "public"."shift_approvals" (
+create table "public"."shift_approvals" (
     "time_entry_id" uuid not null,
     "status" text not null default 'approved'::text,
     "note" text,
     "approved_by" uuid not null,
     "approved_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."shift_approvals" enable row level security;
-
-
-  create table "public"."sms_outbox" (
+create table "public"."sms_outbox" (
     "id" uuid not null default gen_random_uuid(),
     "to_phone" text not null,
     "body" text not null,
@@ -517,12 +406,8 @@ alter table "public"."shift_approvals" enable row level security;
     "last_error" text,
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."sms_outbox" enable row level security;
-
-
-  create table "public"."stock_transactions" (
+create table "public"."stock_transactions" (
     "id" uuid not null default gen_random_uuid(),
     "item_id" uuid not null,
     "location_id" uuid not null,
@@ -536,10 +421,7 @@ alter table "public"."sms_outbox" enable row level security;
     "email" text,
     "timestamp" timestamp with time zone default now()
       );
-
-
-
-  create table "public"."store_locations" (
+create table "public"."store_locations" (
     "id" uuid not null default gen_random_uuid(),
     "name" text not null,
     "lat" numeric(9,6) not null,
@@ -553,12 +435,8 @@ alter table "public"."sms_outbox" enable row level security;
     "schedule_enforce" boolean not null default false,
     "paid_break_cap_min" integer not null default 30
       );
-
-
 alter table "public"."store_locations" enable row level security;
-
-
-  create table "public"."storefront_listings" (
+create table "public"."storefront_listings" (
     "id" uuid not null default gen_random_uuid(),
     "channel_id" text not null,
     "item_type_id" uuid not null,
@@ -579,10 +457,7 @@ alter table "public"."store_locations" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "updated_at" timestamp with time zone not null default now()
       );
-
-
-
-  create table "public"."tax_doc_access_logs" (
+create table "public"."tax_doc_access_logs" (
     "id" bigint not null default nextval('public.tax_doc_access_logs_id_seq'::regclass),
     "employee_tax_doc_id" uuid not null,
     "actor_user_id" uuid,
@@ -592,12 +467,8 @@ alter table "public"."store_locations" enable row level security;
     "meta" jsonb,
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."tax_doc_access_logs" enable row level security;
-
-
-  create table "public"."time_breaks" (
+create table "public"."time_breaks" (
     "id" uuid not null default gen_random_uuid(),
     "time_entry_id" uuid not null,
     "started_at" timestamp with time zone not null default now(),
@@ -615,12 +486,8 @@ alter table "public"."tax_doc_access_logs" enable row level security;
     "photo_end_path" text,
     "break_codes" text[] not null default '{}'::text[]
       );
-
-
 alter table "public"."time_breaks" enable row level security;
-
-
-  create table "public"."time_entries" (
+create table "public"."time_entries" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "clock_in" timestamp with time zone not null,
@@ -646,12 +513,8 @@ alter table "public"."time_breaks" enable row level security;
     "schedule_codes" text[] not null default '{}'::text[],
     "schedule_note" text
       );
-
-
 alter table "public"."time_entries" enable row level security;
-
-
-  create table "public"."timeclock_day_exceptions" (
+create table "public"."timeclock_day_exceptions" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "work_date" date not null,
@@ -663,12 +526,8 @@ alter table "public"."time_entries" enable row level security;
     "created_by" uuid not null default auth.uid(),
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."timeclock_day_exceptions" enable row level security;
-
-
-  create table "public"."timeclock_store_exceptions" (
+create table "public"."timeclock_store_exceptions" (
     "id" uuid not null default gen_random_uuid(),
     "store_id" uuid not null,
     "work_date" date not null,
@@ -680,24 +539,16 @@ alter table "public"."timeclock_day_exceptions" enable row level security;
     "created_by" uuid not null default auth.uid(),
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."timeclock_store_exceptions" enable row level security;
-
-
-  create table "public"."user_phones" (
+create table "public"."user_phones" (
     "user_id" uuid not null,
     "phone_e164" text not null,
     "verified_at" timestamp with time zone,
     "can_sms" boolean not null default true,
     "created_at" timestamp with time zone not null default now()
       );
-
-
 alter table "public"."user_phones" enable row level security;
-
-
-  create table "public"."work_schedule_overrides" (
+create table "public"."work_schedule_overrides" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "work_date" date not null,
@@ -709,12 +560,8 @@ alter table "public"."user_phones" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "created_by" uuid default auth.uid()
       );
-
-
 alter table "public"."work_schedule_overrides" enable row level security;
-
-
-  create table "public"."work_schedules" (
+create table "public"."work_schedules" (
     "id" uuid not null default gen_random_uuid(),
     "employee_id" uuid not null,
     "store_id" uuid,
@@ -728,746 +575,375 @@ alter table "public"."work_schedule_overrides" enable row level security;
     "created_at" timestamp with time zone not null default now(),
     "created_by" uuid default auth.uid()
       );
-
-
 alter table "public"."work_schedules" enable row level security;
-
 alter sequence "public"."tax_doc_access_logs_id_seq" owned by "public"."tax_doc_access_logs"."id";
-
 CREATE UNIQUE INDEX agreement_versions_one_active ON public.agreement_versions USING btree (active) WHERE (active = true);
-
 CREATE UNIQUE INDEX agreement_versions_pkey ON public.agreement_versions USING btree (version);
-
 CREATE UNIQUE INDEX batch_confirmations_pkey ON public.batch_confirmations USING btree (id);
-
 CREATE UNIQUE INDEX bulk_batches_bag_barcode_key ON public.bulk_batches USING btree (bag_barcode);
-
 CREATE UNIQUE INDEX bulk_batches_pkey ON public.bulk_batches USING btree (id);
-
 CREATE UNIQUE INDEX contractor_agreements_employee_id_version_key ON public.contractor_agreements USING btree (employee_id, version);
-
 CREATE UNIQUE INDEX contractor_agreements_pkey ON public.contractor_agreements USING btree (id);
-
 CREATE INDEX contractor_payments_emp_idx ON public.contractor_payments USING btree (employee_id, created_at DESC);
-
 CREATE INDEX contractor_payments_period_idx ON public.contractor_payments USING btree (pay_period_id, created_at DESC);
-
 CREATE UNIQUE INDEX contractor_payments_pkey ON public.contractor_payments USING btree (id);
-
 CREATE INDEX contractor_payments_run_emp_idx ON public.contractor_payments USING btree (payroll_run_id, employee_id);
-
 CREATE UNIQUE INDEX contractor_payments_unique_active ON public.contractor_payments USING btree (pay_period_id, employee_id) WHERE (status <> 'void'::text);
-
 CREATE UNIQUE INDEX credit_tiers_pkey ON public.credit_tiers USING btree (id);
-
 CREATE UNIQUE INDEX deletion_log_pkey ON public.deletion_log USING btree (id);
-
 CREATE INDEX employee_legal_addresses_emp_created ON public.employee_legal_addresses USING btree (employee_id, created_at DESC);
-
 CREATE UNIQUE INDEX employee_legal_addresses_one_current ON public.employee_legal_addresses USING btree (employee_id) WHERE (is_current = true);
-
 CREATE UNIQUE INDEX employee_legal_addresses_pkey ON public.employee_legal_addresses USING btree (id);
-
 CREATE UNIQUE INDEX employee_managers_pkey ON public.employee_managers USING btree (employee_id, manager_employee_id);
-
 CREATE INDEX employee_rates_employee_from_idx ON public.employee_rates USING btree (employee_id, effective_from DESC);
-
 CREATE INDEX employee_rates_employee_to_idx ON public.employee_rates USING btree (employee_id, effective_to);
-
 CREATE UNIQUE INDEX employee_rates_pkey ON public.employee_rates USING btree (id);
-
 CREATE UNIQUE INDEX employee_rates_unique_exact ON public.employee_rates USING btree (employee_id, effective_from, hourly_rate);
-
 CREATE INDEX employee_tax_docs_active_idx ON public.employee_tax_docs USING btree (employee_id, is_active);
-
 CREATE INDEX employee_tax_docs_employee_id_idx ON public.employee_tax_docs USING btree (employee_id);
-
 CREATE UNIQUE INDEX employee_tax_docs_pkey ON public.employee_tax_docs USING btree (id);
-
 CREATE INDEX employees_accepted_at_idx ON public.employees USING btree (accepted_at);
-
 CREATE UNIQUE INDEX employees_email_lower_uidx ON public.employees USING btree (lower(email));
-
 CREATE UNIQUE INDEX employees_email_unique ON public.employees USING btree (email);
-
 CREATE INDEX employees_invited_at_idx ON public.employees USING btree (invited_at);
-
 CREATE UNIQUE INDEX employees_pkey ON public.employees USING btree (id);
-
 CREATE UNIQUE INDEX employees_user_id_key ON public.employees USING btree (user_id);
-
 CREATE UNIQUE INDEX favorites_pkey ON public.favorites USING btree (id);
-
 CREATE UNIQUE INDEX favorites_user_id_item_id_key ON public.favorites USING btree (user_id, item_id);
-
 CREATE INDEX idx_bulk_batches_active ON public.bulk_batches USING btree (((retired_at IS NULL)));
-
 CREATE INDEX idx_bulk_batches_created_at ON public.bulk_batches USING btree (created_at DESC);
-
 CREATE INDEX idx_bulk_batches_item_type ON public.bulk_batches USING btree (item_type_id);
-
 CREATE INDEX idx_bulk_batches_location ON public.bulk_batches USING btree (location_id);
-
 CREATE INDEX idx_item_stock_locations_batch ON public.item_stock_locations USING btree (batch_id);
-
 CREATE INDEX idx_sa_edited_at ON public.shift_adjustments USING btree (edited_at DESC);
-
 CREATE INDEX idx_sa_editor_user ON public.shift_adjustments USING btree (editor_user_id);
-
 CREATE INDEX idx_sa_time_entry ON public.shift_adjustments USING btree (time_entry_id);
-
 CREATE INDEX idx_stock_transactions_item_location ON public.stock_transactions USING btree (item_id, location_id);
-
 CREATE INDEX idx_stock_transactions_item_time ON public.stock_transactions USING btree (item_id, confirmed_at DESC);
-
 CREATE INDEX idx_storefront_listings_channel_pub ON public.storefront_listings USING btree (channel_id, published, sort_rank);
-
 CREATE INDEX idx_storefront_listings_item ON public.storefront_listings USING btree (item_type_id);
-
 CREATE INDEX idx_time_entries_clock_in ON public.time_entries USING btree (clock_in);
-
 CREATE INDEX idx_time_entries_emp_month ON public.time_entries USING btree (employee_id, clock_in) WHERE (clock_out IS NOT NULL);
-
 CREATE INDEX idx_time_entries_employee ON public.time_entries USING btree (employee_id);
-
 CREATE INDEX idx_ws_emp_range ON public.work_schedules USING btree (employee_id, effective_from, COALESCE(effective_to, 'infinity'::date));
-
 CREATE INDEX idx_ws_emp_weekday ON public.work_schedules USING btree (employee_id, weekday);
-
 CREATE INDEX idx_wso_emp_date ON public.work_schedule_overrides USING btree (employee_id, work_date);
-
 CREATE UNIQUE INDEX item_stock_locations_pkey ON public.item_stock_locations USING btree (id);
-
 CREATE UNIQUE INDEX items_barcode_key ON public.item_types USING btree (barcode);
-
 CREATE UNIQUE INDEX items_pkey ON public.item_types USING btree (id);
-
 CREATE UNIQUE INDEX locations_location_code_key ON public.locations USING btree (location_code);
-
 CREATE UNIQUE INDEX locations_pkey ON public.locations USING btree (id);
-
 CREATE UNIQUE INDEX metadata_pkey ON public.metadata USING btree (id);
-
 CREATE UNIQUE INDEX metal_spot_prices_pkey ON public.metal_spot_prices USING btree (metal);
-
 CREATE UNIQUE INDEX pay_periods_pkey ON public.pay_periods USING btree (id);
-
 CREATE INDEX payroll_run_lines_emp_idx ON public.payroll_run_lines USING btree (employee_id, created_at DESC);
-
 CREATE UNIQUE INDEX payroll_run_lines_pkey ON public.payroll_run_lines USING btree (id);
-
 CREATE INDEX payroll_run_lines_run_idx ON public.payroll_run_lines USING btree (payroll_run_id);
-
 CREATE UNIQUE INDEX payroll_run_lines_unique_emp ON public.payroll_run_lines USING btree (payroll_run_id, employee_id);
-
 CREATE UNIQUE INDEX payroll_runs_one_final_per_period ON public.payroll_runs USING btree (pay_period_id) WHERE (status = 'final'::text);
-
 CREATE INDEX payroll_runs_period_idx ON public.payroll_runs USING btree (pay_period_id, created_at DESC);
-
 CREATE UNIQUE INDEX payroll_runs_pkey ON public.payroll_runs USING btree (id);
-
 CREATE UNIQUE INDEX payroll_statements_payroll_run_id_employee_id_key ON public.payroll_statements USING btree (payroll_run_id, employee_id);
-
 CREATE UNIQUE INDEX payroll_statements_pkey ON public.payroll_statements USING btree (id);
-
 CREATE UNIQUE INDEX payroll_tax_constants_pkey ON public.payroll_tax_constants USING btree (tax_year);
-
 CREATE UNIQUE INDEX sale_item_categories_pkey ON public.sale_item_categories USING btree (id);
-
 CREATE UNIQUE INDEX sale_items_pkey ON public.sale_items USING btree (id);
-
 CREATE UNIQUE INDEX sales_audit_pkey ON public.sales_audit USING btree (id);
-
 CREATE UNIQUE INDEX sales_channels_pkey ON public.sales_channels USING btree (id);
-
 CREATE UNIQUE INDEX sales_pkey ON public.sales USING btree (id);
-
 CREATE UNIQUE INDEX shift_adjustments_pkey ON public.shift_adjustments USING btree (id);
-
 CREATE UNIQUE INDEX shift_approvals_pkey ON public.shift_approvals USING btree (time_entry_id);
-
 CREATE UNIQUE INDEX sms_outbox_pkey ON public.sms_outbox USING btree (id);
-
 CREATE UNIQUE INDEX stock_transactions_pkey ON public.stock_transactions USING btree (id);
-
 CREATE UNIQUE INDEX store_locations_pkey ON public.store_locations USING btree (id);
-
 CREATE UNIQUE INDEX storefront_listings_channel_item_unique ON public.storefront_listings USING btree (channel_id, item_type_id);
-
 CREATE UNIQUE INDEX storefront_listings_pkey ON public.storefront_listings USING btree (id);
-
 CREATE INDEX tax_doc_access_logs_actor_idx ON public.tax_doc_access_logs USING btree (actor_user_id);
-
 CREATE INDEX tax_doc_access_logs_doc_idx ON public.tax_doc_access_logs USING btree (employee_tax_doc_id);
-
 CREATE UNIQUE INDEX tax_doc_access_logs_pkey ON public.tax_doc_access_logs USING btree (id);
-
 CREATE UNIQUE INDEX time_breaks_pkey ON public.time_breaks USING btree (id);
-
 CREATE UNIQUE INDEX time_entries_pkey ON public.time_entries USING btree (id);
-
 CREATE UNIQUE INDEX timeclock_day_exceptions_pkey ON public.timeclock_day_exceptions USING btree (id);
-
 CREATE UNIQUE INDEX timeclock_day_exceptions_unique ON public.timeclock_day_exceptions USING btree (employee_id, work_date);
-
 CREATE UNIQUE INDEX timeclock_store_exceptions_pkey ON public.timeclock_store_exceptions USING btree (id);
-
 CREATE UNIQUE INDEX timeclock_store_exceptions_unique ON public.timeclock_store_exceptions USING btree (store_id, work_date);
-
 CREATE UNIQUE INDEX uq_time_breaks_open ON public.time_breaks USING btree (time_entry_id) WHERE (ended_at IS NULL);
-
 CREATE UNIQUE INDEX uq_time_entries_open ON public.time_entries USING btree (employee_id) WHERE (clock_out IS NULL);
-
 CREATE UNIQUE INDEX user_phones_phone_e164_key ON public.user_phones USING btree (phone_e164);
-
 CREATE UNIQUE INDEX user_phones_pkey ON public.user_phones USING btree (user_id);
-
 CREATE UNIQUE INDEX work_schedule_overrides_employee_id_work_date_key ON public.work_schedule_overrides USING btree (employee_id, work_date);
-
 CREATE UNIQUE INDEX work_schedule_overrides_pkey ON public.work_schedule_overrides USING btree (id);
-
 CREATE UNIQUE INDEX work_schedules_pkey ON public.work_schedules USING btree (id);
-
 alter table "public"."agreement_versions" add constraint "agreement_versions_pkey" PRIMARY KEY using index "agreement_versions_pkey";
-
 alter table "public"."batch_confirmations" add constraint "batch_confirmations_pkey" PRIMARY KEY using index "batch_confirmations_pkey";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_pkey" PRIMARY KEY using index "bulk_batches_pkey";
-
 alter table "public"."contractor_agreements" add constraint "contractor_agreements_pkey" PRIMARY KEY using index "contractor_agreements_pkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_pkey" PRIMARY KEY using index "contractor_payments_pkey";
-
 alter table "public"."credit_tiers" add constraint "credit_tiers_pkey" PRIMARY KEY using index "credit_tiers_pkey";
-
 alter table "public"."deletion_log" add constraint "deletion_log_pkey" PRIMARY KEY using index "deletion_log_pkey";
-
 alter table "public"."employee_legal_addresses" add constraint "employee_legal_addresses_pkey" PRIMARY KEY using index "employee_legal_addresses_pkey";
-
 alter table "public"."employee_managers" add constraint "employee_managers_pkey" PRIMARY KEY using index "employee_managers_pkey";
-
 alter table "public"."employee_rates" add constraint "employee_rates_pkey" PRIMARY KEY using index "employee_rates_pkey";
-
 alter table "public"."employee_tax_docs" add constraint "employee_tax_docs_pkey" PRIMARY KEY using index "employee_tax_docs_pkey";
-
 alter table "public"."employees" add constraint "employees_pkey" PRIMARY KEY using index "employees_pkey";
-
 alter table "public"."favorites" add constraint "favorites_pkey" PRIMARY KEY using index "favorites_pkey";
-
 alter table "public"."item_stock_locations" add constraint "item_stock_locations_pkey" PRIMARY KEY using index "item_stock_locations_pkey";
-
 alter table "public"."item_types" add constraint "items_pkey" PRIMARY KEY using index "items_pkey";
-
 alter table "public"."locations" add constraint "locations_pkey" PRIMARY KEY using index "locations_pkey";
-
 alter table "public"."metadata" add constraint "metadata_pkey" PRIMARY KEY using index "metadata_pkey";
-
 alter table "public"."metal_spot_prices" add constraint "metal_spot_prices_pkey" PRIMARY KEY using index "metal_spot_prices_pkey";
-
 alter table "public"."pay_periods" add constraint "pay_periods_pkey" PRIMARY KEY using index "pay_periods_pkey";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_pkey" PRIMARY KEY using index "payroll_run_lines_pkey";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_pkey" PRIMARY KEY using index "payroll_runs_pkey";
-
 alter table "public"."payroll_statements" add constraint "payroll_statements_pkey" PRIMARY KEY using index "payroll_statements_pkey";
-
 alter table "public"."payroll_tax_constants" add constraint "payroll_tax_constants_pkey" PRIMARY KEY using index "payroll_tax_constants_pkey";
-
 alter table "public"."sale_item_categories" add constraint "sale_item_categories_pkey" PRIMARY KEY using index "sale_item_categories_pkey";
-
 alter table "public"."sale_items" add constraint "sale_items_pkey" PRIMARY KEY using index "sale_items_pkey";
-
 alter table "public"."sales" add constraint "sales_pkey" PRIMARY KEY using index "sales_pkey";
-
 alter table "public"."sales_audit" add constraint "sales_audit_pkey" PRIMARY KEY using index "sales_audit_pkey";
-
 alter table "public"."sales_channels" add constraint "sales_channels_pkey" PRIMARY KEY using index "sales_channels_pkey";
-
 alter table "public"."shift_adjustments" add constraint "shift_adjustments_pkey" PRIMARY KEY using index "shift_adjustments_pkey";
-
 alter table "public"."shift_approvals" add constraint "shift_approvals_pkey" PRIMARY KEY using index "shift_approvals_pkey";
-
 alter table "public"."sms_outbox" add constraint "sms_outbox_pkey" PRIMARY KEY using index "sms_outbox_pkey";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_pkey" PRIMARY KEY using index "stock_transactions_pkey";
-
 alter table "public"."store_locations" add constraint "store_locations_pkey" PRIMARY KEY using index "store_locations_pkey";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_pkey" PRIMARY KEY using index "storefront_listings_pkey";
-
 alter table "public"."tax_doc_access_logs" add constraint "tax_doc_access_logs_pkey" PRIMARY KEY using index "tax_doc_access_logs_pkey";
-
 alter table "public"."time_breaks" add constraint "time_breaks_pkey" PRIMARY KEY using index "time_breaks_pkey";
-
 alter table "public"."time_entries" add constraint "time_entries_pkey" PRIMARY KEY using index "time_entries_pkey";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_pkey" PRIMARY KEY using index "timeclock_day_exceptions_pkey";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_pkey" PRIMARY KEY using index "timeclock_store_exceptions_pkey";
-
 alter table "public"."user_phones" add constraint "user_phones_pkey" PRIMARY KEY using index "user_phones_pkey";
-
 alter table "public"."work_schedule_overrides" add constraint "work_schedule_overrides_pkey" PRIMARY KEY using index "work_schedule_overrides_pkey";
-
 alter table "public"."work_schedules" add constraint "work_schedules_pkey" PRIMARY KEY using index "work_schedules_pkey";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_bag_barcode_key" UNIQUE using index "bulk_batches_bag_barcode_key";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_estimated_qty_check" CHECK ((estimated_qty >= 0)) not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_estimated_qty_check";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_gross_weight_g_check" CHECK ((gross_weight_g > (0)::numeric)) not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_gross_weight_g_check";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_item_type_id_fkey" FOREIGN KEY (item_type_id) REFERENCES public.item_types(id) ON DELETE CASCADE not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_item_type_id_fkey";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_location_id_fkey" FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_location_id_fkey";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_tare_weight_g_check" CHECK ((tare_weight_g >= (0)::numeric)) not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_tare_weight_g_check";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_unit_source_check" CHECK ((unit_source = ANY (ARRAY['samples'::text, 'override'::text]))) not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_unit_source_check";
-
 alter table "public"."bulk_batches" add constraint "bulk_batches_unit_weight_g_check" CHECK ((unit_weight_g > (0)::numeric)) not valid;
-
 alter table "public"."bulk_batches" validate constraint "bulk_batches_unit_weight_g_check";
-
 alter table "public"."contractor_agreements" add constraint "contractor_agreements_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."contractor_agreements" validate constraint "contractor_agreements_employee_id_fkey";
-
 alter table "public"."contractor_agreements" add constraint "contractor_agreements_employee_id_version_key" UNIQUE using index "contractor_agreements_employee_id_version_key";
-
 alter table "public"."contractor_agreements" add constraint "contractor_agreements_version_fkey" FOREIGN KEY (version) REFERENCES public.agreement_versions(version) not valid;
-
 alter table "public"."contractor_agreements" validate constraint "contractor_agreements_version_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_amount_check" CHECK ((amount >= (0)::numeric)) not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_amount_check";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_created_by_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE RESTRICT not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_employee_id_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_paid_by_fkey" FOREIGN KEY (paid_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_paid_by_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_pay_period_id_fkey" FOREIGN KEY (pay_period_id) REFERENCES public.pay_periods(id) ON DELETE RESTRICT not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_pay_period_id_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_payroll_run_id_fkey" FOREIGN KEY (payroll_run_id) REFERENCES public.payroll_runs(id) ON DELETE SET NULL not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_payroll_run_id_fkey";
-
 alter table "public"."contractor_payments" add constraint "contractor_payments_status_check" CHECK ((status = ANY (ARRAY['draft'::text, 'paid'::text, 'void'::text]))) not valid;
-
 alter table "public"."contractor_payments" validate constraint "contractor_payments_status_check";
-
 alter table "public"."deletion_log" add constraint "deletion_log_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) not valid;
-
 alter table "public"."deletion_log" validate constraint "deletion_log_user_id_fkey";
-
 alter table "public"."employee_legal_addresses" add constraint "employee_legal_addresses_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employee_legal_addresses" validate constraint "employee_legal_addresses_employee_id_fkey";
-
 alter table "public"."employee_managers" add constraint "employee_managers_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employee_managers" validate constraint "employee_managers_employee_id_fkey";
-
 alter table "public"."employee_managers" add constraint "employee_managers_manager_employee_id_fkey" FOREIGN KEY (manager_employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employee_managers" validate constraint "employee_managers_manager_employee_id_fkey";
-
 alter table "public"."employee_rates" add constraint "employee_rates_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."employee_rates" validate constraint "employee_rates_created_by_fkey";
-
 alter table "public"."employee_rates" add constraint "employee_rates_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employee_rates" validate constraint "employee_rates_employee_id_fkey";
-
 alter table "public"."employee_rates" add constraint "employee_rates_hourly_rate_check" CHECK ((hourly_rate >= (0)::numeric)) not valid;
-
 alter table "public"."employee_rates" validate constraint "employee_rates_hourly_rate_check";
-
 alter table "public"."employee_rates" add constraint "employee_rates_range_chk" CHECK (((effective_to IS NULL) OR (effective_to >= effective_from))) not valid;
-
 alter table "public"."employee_rates" validate constraint "employee_rates_range_chk";
-
 alter table "public"."employee_tax_docs" add constraint "employee_tax_docs_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employee_tax_docs" validate constraint "employee_tax_docs_employee_id_fkey";
-
 alter table "public"."employees" add constraint "employees_agreement_version_required_fkey" FOREIGN KEY (agreement_version_required) REFERENCES public.agreement_versions(version) not valid;
-
 alter table "public"."employees" validate constraint "employees_agreement_version_required_fkey";
-
 alter table "public"."employees" add constraint "employees_email_unique" UNIQUE using index "employees_email_unique";
-
 alter table "public"."employees" add constraint "employees_hourly_rate_nonneg" CHECK (((hourly_rate IS NULL) OR (hourly_rate >= (0)::numeric))) not valid;
-
 alter table "public"."employees" validate constraint "employees_hourly_rate_nonneg";
-
 alter table "public"."employees" add constraint "employees_role_check" CHECK ((role = ANY (ARRAY['admin'::text, 'manager'::text, 'employee'::text]))) not valid;
-
 alter table "public"."employees" validate constraint "employees_role_check";
-
 alter table "public"."employees" add constraint "employees_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE not valid;
-
 alter table "public"."employees" validate constraint "employees_user_id_fkey";
-
 alter table "public"."employees" add constraint "employees_user_id_key" UNIQUE using index "employees_user_id_key";
-
 alter table "public"."employees" add constraint "employees_worker_type_check" CHECK ((worker_type = ANY (ARRAY['employee'::text, 'contractor'::text]))) not valid;
-
 alter table "public"."employees" validate constraint "employees_worker_type_check";
-
 alter table "public"."favorites" add constraint "favorites_item_id_fkey" FOREIGN KEY (item_id) REFERENCES public.item_types(id) ON DELETE CASCADE not valid;
-
 alter table "public"."favorites" validate constraint "favorites_item_id_fkey";
-
 alter table "public"."favorites" add constraint "favorites_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE not valid;
-
 alter table "public"."favorites" validate constraint "favorites_user_id_fkey";
-
 alter table "public"."favorites" add constraint "favorites_user_id_item_id_key" UNIQUE using index "favorites_user_id_item_id_key";
-
 alter table "public"."item_stock_locations" add constraint "item_stock_locations_batch_id_fkey" FOREIGN KEY (batch_id) REFERENCES public.bulk_batches(id) ON DELETE SET NULL not valid;
-
 alter table "public"."item_stock_locations" validate constraint "item_stock_locations_batch_id_fkey";
-
 alter table "public"."item_stock_locations" add constraint "item_stock_locations_item_id_fkey" FOREIGN KEY (item_id) REFERENCES public.item_types(id) not valid;
-
 alter table "public"."item_stock_locations" validate constraint "item_stock_locations_item_id_fkey";
-
 alter table "public"."item_stock_locations" add constraint "item_stock_locations_location_id_fkey" FOREIGN KEY (location_id) REFERENCES public.locations(id) not valid;
-
 alter table "public"."item_stock_locations" validate constraint "item_stock_locations_location_id_fkey";
-
 alter table "public"."item_stock_locations" add constraint "item_stock_locations_locked_by_fkey" FOREIGN KEY (locked_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."item_stock_locations" validate constraint "item_stock_locations_locked_by_fkey";
-
 alter table "public"."item_types" add constraint "items_barcode_key" UNIQUE using index "items_barcode_key";
-
 alter table "public"."locations" add constraint "locations_location_code_key" UNIQUE using index "locations_location_code_key";
-
 alter table "public"."metal_spot_prices" add constraint "metal_spot_prices_metal_check" CHECK ((metal = ANY (ARRAY['gold'::text, 'silver'::text]))) not valid;
-
 alter table "public"."metal_spot_prices" validate constraint "metal_spot_prices_metal_check";
-
 alter table "public"."metal_spot_prices" add constraint "metal_spot_prices_price_per_gram_check" CHECK ((price_per_gram > (0)::numeric)) not valid;
-
 alter table "public"."metal_spot_prices" validate constraint "metal_spot_prices_price_per_gram_check";
-
 alter table "public"."pay_periods" add constraint "pay_periods_check" CHECK ((end_date > start_date)) not valid;
-
 alter table "public"."pay_periods" validate constraint "pay_periods_check";
-
 alter table "public"."pay_periods" add constraint "pay_periods_locked_by_fkey" FOREIGN KEY (locked_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."pay_periods" validate constraint "pay_periods_locked_by_fkey";
-
 alter table "public"."pay_periods" add constraint "pay_periods_status_check" CHECK ((status = ANY (ARRAY['open'::text, 'locked'::text]))) not valid;
-
 alter table "public"."pay_periods" validate constraint "pay_periods_status_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_anomaly_count_check" CHECK ((anomaly_count >= 0)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_anomaly_count_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE RESTRICT not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_employee_id_fkey";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_gross_pay_check" CHECK ((gross_pay >= (0)::numeric)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_gross_pay_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_hourly_rate_check" CHECK ((hourly_rate >= (0)::numeric)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_hourly_rate_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_paid_hours_check" CHECK ((paid_hours >= (0)::numeric)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_paid_hours_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_paid_seconds_check" CHECK ((paid_seconds >= 0)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_paid_seconds_check";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_payroll_run_id_fkey" FOREIGN KEY (payroll_run_id) REFERENCES public.payroll_runs(id) ON DELETE CASCADE not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_payroll_run_id_fkey";
-
 alter table "public"."payroll_run_lines" add constraint "payroll_run_lines_shift_count_check" CHECK ((shift_count >= 0)) not valid;
-
 alter table "public"."payroll_run_lines" validate constraint "payroll_run_lines_shift_count_check";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_break_policy_check" CHECK ((break_policy = ANY (ARRAY['subtract_all_breaks'::text, 'paid_cap_per_day'::text]))) not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_break_policy_check";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_created_by_fkey";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_finalized_by_fkey" FOREIGN KEY (finalized_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_finalized_by_fkey";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_pay_period_id_fkey" FOREIGN KEY (pay_period_id) REFERENCES public.pay_periods(id) ON DELETE CASCADE not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_pay_period_id_fkey";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_rounding_mode_check" CHECK ((rounding_mode = ANY (ARRAY['none'::text, 'nearest_minute'::text, 'nearest_5'::text, 'nearest_15'::text]))) not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_rounding_mode_check";
-
 alter table "public"."payroll_runs" add constraint "payroll_runs_status_check" CHECK ((status = ANY (ARRAY['draft'::text, 'final'::text, 'void'::text]))) not valid;
-
 alter table "public"."payroll_runs" validate constraint "payroll_runs_status_check";
-
 alter table "public"."payroll_statements" add constraint "payroll_statements_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."payroll_statements" validate constraint "payroll_statements_employee_id_fkey";
-
 alter table "public"."payroll_statements" add constraint "payroll_statements_pay_period_id_fkey" FOREIGN KEY (pay_period_id) REFERENCES public.pay_periods(id) ON DELETE CASCADE not valid;
-
 alter table "public"."payroll_statements" validate constraint "payroll_statements_pay_period_id_fkey";
-
 alter table "public"."payroll_statements" add constraint "payroll_statements_payroll_run_id_employee_id_key" UNIQUE using index "payroll_statements_payroll_run_id_employee_id_key";
-
 alter table "public"."payroll_statements" add constraint "payroll_statements_payroll_run_id_fkey" FOREIGN KEY (payroll_run_id) REFERENCES public.payroll_runs(id) ON DELETE CASCADE not valid;
-
 alter table "public"."payroll_statements" validate constraint "payroll_statements_payroll_run_id_fkey";
-
 alter table "public"."sale_item_categories" add constraint "sale_item_categories_sale_item_id_fkey" FOREIGN KEY (sale_item_id) REFERENCES public.sale_items(id) ON DELETE CASCADE not valid;
-
 alter table "public"."sale_item_categories" validate constraint "sale_item_categories_sale_item_id_fkey";
-
 alter table "public"."sale_items" add constraint "sale_items_quantity_check" CHECK ((quantity > 0)) not valid;
-
 alter table "public"."sale_items" validate constraint "sale_items_quantity_check";
-
 alter table "public"."sale_items" add constraint "sale_items_sale_id_fkey" FOREIGN KEY (sale_id) REFERENCES public.sales(id) ON DELETE CASCADE not valid;
-
 alter table "public"."sale_items" validate constraint "sale_items_sale_id_fkey";
-
 alter table "public"."sales" add constraint "sales_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) not valid;
-
 alter table "public"."sales" validate constraint "sales_user_id_fkey";
-
 alter table "public"."shift_adjustments" add constraint "shift_adjustments_editor_user_id_fkey" FOREIGN KEY (editor_user_id) REFERENCES auth.users(id) not valid;
-
 alter table "public"."shift_adjustments" validate constraint "shift_adjustments_editor_user_id_fkey";
-
 alter table "public"."shift_adjustments" add constraint "shift_adjustments_reason_check" CHECK ((length(TRIM(BOTH FROM reason)) >= 3)) not valid;
-
 alter table "public"."shift_adjustments" validate constraint "shift_adjustments_reason_check";
-
 alter table "public"."shift_adjustments" add constraint "shift_adjustments_time_entry_id_fkey" FOREIGN KEY (time_entry_id) REFERENCES public.time_entries(id) ON DELETE CASCADE not valid;
-
 alter table "public"."shift_adjustments" validate constraint "shift_adjustments_time_entry_id_fkey";
-
 alter table "public"."shift_approvals" add constraint "shift_approvals_approved_by_fkey" FOREIGN KEY (approved_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."shift_approvals" validate constraint "shift_approvals_approved_by_fkey";
-
 alter table "public"."shift_approvals" add constraint "shift_approvals_status_check" CHECK ((status = ANY (ARRAY['approved'::text, 'waived'::text]))) not valid;
-
 alter table "public"."shift_approvals" validate constraint "shift_approvals_status_check";
-
 alter table "public"."shift_approvals" add constraint "shift_approvals_time_entry_id_fkey" FOREIGN KEY (time_entry_id) REFERENCES public.time_entries(id) ON DELETE CASCADE not valid;
-
 alter table "public"."shift_approvals" validate constraint "shift_approvals_time_entry_id_fkey";
-
 alter table "public"."sms_outbox" add constraint "sms_outbox_body_check" CHECK (((length(body) > 0) AND (length(body) <= 480))) not valid;
-
 alter table "public"."sms_outbox" validate constraint "sms_outbox_body_check";
-
 alter table "public"."sms_outbox" add constraint "sms_outbox_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'cancelled'::text]))) not valid;
-
 alter table "public"."sms_outbox" validate constraint "sms_outbox_status_check";
-
 alter table "public"."sms_outbox" add constraint "sms_outbox_to_phone_check" CHECK ((to_phone ~ '^\+\d{7,15}$'::text)) not valid;
-
 alter table "public"."sms_outbox" validate constraint "sms_outbox_to_phone_check";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_action_type_check" CHECK ((action_type = ANY (ARRAY['checkin'::text, 'checkout'::text, 'correction'::text, 'transfer'::text]))) not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_action_type_check";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_item_id_fkey" FOREIGN KEY (item_id) REFERENCES public.item_types(id) ON DELETE CASCADE not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_item_id_fkey";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_location_id_fkey" FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_location_id_fkey";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_quantity_check" CHECK ((quantity <> 0)) not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_quantity_check";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_source_transaction_id_fkey" FOREIGN KEY (source_transaction_id) REFERENCES public.stock_transactions(id) ON DELETE SET NULL not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_source_transaction_id_fkey";
-
 alter table "public"."stock_transactions" add constraint "stock_transactions_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE SET NULL not valid;
-
 alter table "public"."stock_transactions" validate constraint "stock_transactions_user_id_fkey";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_channel_id_fkey" FOREIGN KEY (channel_id) REFERENCES public.sales_channels(id) ON DELETE CASCADE not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_channel_id_fkey";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_channel_item_unique" UNIQUE using index "storefront_listings_channel_item_unique";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_item_type_id_fkey" FOREIGN KEY (item_type_id) REFERENCES public.item_types(id) ON DELETE CASCADE not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_item_type_id_fkey";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_metal_check" CHECK ((metal = ANY (ARRAY['gold'::text, 'silver'::text]))) not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_metal_check";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_premium_basis_points_check" CHECK (((premium_basis_points >= 0) AND (premium_basis_points <= 10000))) not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_premium_basis_points_check";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_pricing_mode_check" CHECK ((pricing_mode = ANY (ARRAY['fixed'::text, 'metal_spot'::text]))) not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_pricing_mode_check";
-
 alter table "public"."storefront_listings" add constraint "storefront_listings_purity_basis_points_check" CHECK (((purity_basis_points >= 0) AND (purity_basis_points <= 10000))) not valid;
-
 alter table "public"."storefront_listings" validate constraint "storefront_listings_purity_basis_points_check";
-
 alter table "public"."tax_doc_access_logs" add constraint "tax_doc_access_logs_employee_tax_doc_id_fkey" FOREIGN KEY (employee_tax_doc_id) REFERENCES public.employee_tax_docs(id) ON DELETE CASCADE not valid;
-
 alter table "public"."tax_doc_access_logs" validate constraint "tax_doc_access_logs_employee_tax_doc_id_fkey";
-
 alter table "public"."time_breaks" add constraint "time_breaks_time_entry_id_fkey" FOREIGN KEY (time_entry_id) REFERENCES public.time_entries(id) ON DELETE CASCADE not valid;
-
 alter table "public"."time_breaks" validate constraint "time_breaks_time_entry_id_fkey";
-
 alter table "public"."time_entries" add constraint "time_entries_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."time_entries" validate constraint "time_entries_employee_id_fkey";
-
 alter table "public"."time_entries" add constraint "time_entries_store_id_fkey" FOREIGN KEY (store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."time_entries" validate constraint "time_entries_store_id_fkey";
-
 alter table "public"."time_entries" add constraint "time_order_ok" CHECK (((clock_out IS NULL) OR (clock_out >= clock_in))) not valid;
-
 alter table "public"."time_entries" validate constraint "time_order_ok";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_clock_in_store_id_fkey" FOREIGN KEY (clock_in_store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_clock_in_store_id_fkey";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_clock_out_store_id_fkey" FOREIGN KEY (clock_out_store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_clock_out_store_id_fkey";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_created_by_fkey";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_employee_id_fkey";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_in_check" CHECK ((NOT (allow_clock_in_any_store AND (clock_in_store_id IS NOT NULL)))) not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_in_check";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_out_check" CHECK ((NOT (allow_clock_out_any_store AND (clock_out_store_id IS NOT NULL)))) not valid;
-
 alter table "public"."timeclock_day_exceptions" validate constraint "timeclock_day_exceptions_out_check";
-
 alter table "public"."timeclock_day_exceptions" add constraint "timeclock_day_exceptions_unique" UNIQUE using index "timeclock_day_exceptions_unique";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_clock_in_store_id_fkey" FOREIGN KEY (clock_in_store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_clock_in_store_id_fkey";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_clock_out_store_id_fkey" FOREIGN KEY (clock_out_store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_clock_out_store_id_fkey";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_created_by_fkey" FOREIGN KEY (created_by) REFERENCES auth.users(id) not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_created_by_fkey";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_in_check" CHECK ((NOT (allow_clock_in_any_store AND (clock_in_store_id IS NOT NULL)))) not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_in_check";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_out_check" CHECK ((NOT (allow_clock_out_any_store AND (clock_out_store_id IS NOT NULL)))) not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_out_check";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_store_id_fkey" FOREIGN KEY (store_id) REFERENCES public.store_locations(id) ON DELETE CASCADE not valid;
-
 alter table "public"."timeclock_store_exceptions" validate constraint "timeclock_store_exceptions_store_id_fkey";
-
 alter table "public"."timeclock_store_exceptions" add constraint "timeclock_store_exceptions_unique" UNIQUE using index "timeclock_store_exceptions_unique";
-
 alter table "public"."user_phones" add constraint "user_phones_phone_e164_check" CHECK ((phone_e164 ~ '^\+\d{7,15}$'::text)) not valid;
-
 alter table "public"."user_phones" validate constraint "user_phones_phone_e164_check";
-
 alter table "public"."user_phones" add constraint "user_phones_phone_e164_key" UNIQUE using index "user_phones_phone_e164_key";
-
 alter table "public"."user_phones" add constraint "user_phones_user_id_fkey" FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE not valid;
-
 alter table "public"."user_phones" validate constraint "user_phones_user_id_fkey";
-
 alter table "public"."work_schedule_overrides" add constraint "work_schedule_overrides_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."work_schedule_overrides" validate constraint "work_schedule_overrides_employee_id_fkey";
-
 alter table "public"."work_schedule_overrides" add constraint "work_schedule_overrides_employee_id_work_date_key" UNIQUE using index "work_schedule_overrides_employee_id_work_date_key";
-
 alter table "public"."work_schedule_overrides" add constraint "work_schedule_overrides_store_id_fkey" FOREIGN KEY (store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."work_schedule_overrides" validate constraint "work_schedule_overrides_store_id_fkey";
-
 alter table "public"."work_schedules" add constraint "work_schedules_employee_id_fkey" FOREIGN KEY (employee_id) REFERENCES public.employees(id) ON DELETE CASCADE not valid;
-
 alter table "public"."work_schedules" validate constraint "work_schedules_employee_id_fkey";
-
 alter table "public"."work_schedules" add constraint "work_schedules_store_id_fkey" FOREIGN KEY (store_id) REFERENCES public.store_locations(id) not valid;
-
 alter table "public"."work_schedules" validate constraint "work_schedules_store_id_fkey";
-
 alter table "public"."work_schedules" add constraint "work_schedules_weekday_check" CHECK (((weekday >= 0) AND (weekday <= 6))) not valid;
-
 alter table "public"."work_schedules" validate constraint "work_schedules_weekday_check";
-
 set check_function_bodies = off;
-
 CREATE OR REPLACE FUNCTION public.admin_get_employee_exception_history(_employee_id uuid, _limit integer DEFAULT 50)
  RETURNS TABLE(time_entry_id uuid, work_date date, clock_in timestamp with time zone, note text)
  LANGUAGE plpgsql
@@ -1502,9 +978,7 @@ begin
   order by te.clock_in desc
   limit greatest(1, least(coalesce(_limit, 50), 200));
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.admin_get_monthly_exception_counts(_month_start date)
  RETURNS TABLE(employee_id uuid, waived_count integer)
  LANGUAGE plpgsql
@@ -1542,9 +1016,7 @@ begin
     and te.clock_in <  v_end
   group by te.employee_id;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.admin_set_employee_rate(_employee_id uuid, _hourly_rate numeric, _effective_from date, _note text DEFAULT NULL::text)
  RETURNS public.employee_rates
  LANGUAGE plpgsql
@@ -1620,9 +1092,7 @@ begin
 
   return v_new;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.admin_set_override(_employee_id uuid, _work_date date, _off boolean, _start_local time without time zone DEFAULT NULL::time without time zone, _end_local time without time zone DEFAULT NULL::time without time zone, _store_id uuid DEFAULT NULL::uuid, _note text DEFAULT NULL::text)
  RETURNS public.work_schedule_overrides
  LANGUAGE plpgsql
@@ -1644,9 +1114,7 @@ begin
   returning * into v_row;
 
   return v_row;
-end; $function$
-;
-
+end; $function$;
 CREATE OR REPLACE FUNCTION public.admin_set_weekday_slot(_employee_id uuid, _weekday smallint, _start_local time without time zone, _end_local time without time zone, _effective_from date DEFAULT CURRENT_DATE, _effective_to date DEFAULT NULL::date, _store_id uuid DEFAULT NULL::uuid, _note text DEFAULT NULL::text)
  RETURNS public.work_schedules
  LANGUAGE plpgsql
@@ -1662,9 +1130,7 @@ begin
   returning * into v_row;
 
   return v_row;
-end; $function$
-;
-
+end; $function$;
 CREATE OR REPLACE FUNCTION public.admin_update_shift_time(_time_entry_id uuid, _new_clock_in timestamp with time zone DEFAULT NULL::timestamp with time zone, _new_clock_out timestamp with time zone DEFAULT NULL::timestamp with time zone, _reason text DEFAULT NULL::text)
  RETURNS public.time_entries
  LANGUAGE plpgsql
@@ -1771,9 +1237,7 @@ begin
 
   return v_row_after;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.apply_fica_deductions_to_run(_run_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -1941,9 +1405,7 @@ begin
   where l.id = c.line_id;
 
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.approve_shift(_time_entry_id uuid, _status text DEFAULT 'approved'::text, _note text DEFAULT NULL::text)
  RETURNS public.shift_approvals
  LANGUAGE plpgsql
@@ -1968,9 +1430,7 @@ begin
   returning * into r;
 
   return r;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.assert_unlocked_for_range(_start_ts timestamp with time zone, _end_ts timestamp with time zone, _context text DEFAULT NULL::text)
  RETURNS void
  LANGUAGE plpgsql
@@ -1982,9 +1442,7 @@ begin
       using errcode = '22023';
   end if;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.assert_unlocked_for_ts(_ts timestamp with time zone, _context text DEFAULT NULL::text)
  RETURNS void
  LANGUAGE plpgsql
@@ -1996,9 +1454,7 @@ begin
       using errcode = '22023';
   end if;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.attach_break_photo(_break_id uuid, _phase text, _photo_path text)
  RETURNS public.time_breaks
  LANGUAGE plpgsql
@@ -2043,9 +1499,7 @@ begin
 
   return v_row;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.attach_punch_photo(_entry_id uuid, _kind text, _photo_path text)
  RETURNS public.time_entries
  LANGUAGE plpgsql
@@ -2117,9 +1571,7 @@ begin
   returning * into v_row;
 
   return v_row;
-end; $function$
-;
-
+end; $function$;
 CREATE OR REPLACE FUNCTION public.build_payroll_run_lines(_payroll_run_id uuid)
  RETURNS integer
  LANGUAGE plpgsql
@@ -2320,9 +1772,7 @@ begin
 
   return v_rows;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.clock_in_now_geo(_employee_id uuid, _lat numeric, _lng numeric, _accuracy_m numeric, _photo_path text, _store_id uuid DEFAULT NULL::uuid)
  RETURNS public.time_entries
  LANGUAGE plpgsql
@@ -2424,9 +1874,7 @@ begin
 
   return v_row;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.clock_out_now_geo(_employee_id uuid, _lat numeric, _lng numeric, _accuracy_m numeric, _photo_path text, _store_id uuid DEFAULT NULL::uuid)
  RETURNS public.time_entries
  LANGUAGE plpgsql
@@ -2545,9 +1993,7 @@ perform public.sync_shift_anomalies(v_entry.id);
   return v_entry;
 end;
 
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.compute_schedule_flags(_employee_id uuid, _store_id uuid, _ts timestamp with time zone, _event text)
  RETURNS TABLE(codes text[], note text)
  LANGUAGE plpgsql
@@ -2607,9 +2053,7 @@ begin
 
   return query select v_codes, v_note;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.create_pay_period(p_start_date date, p_end_date date, p_timezone text DEFAULT public.org_timezone(), p_note text DEFAULT NULL::text)
  RETURNS public.pay_periods
  LANGUAGE plpgsql
@@ -2624,9 +2068,7 @@ declare r public.pay_periods; begin
   then raise exception 'Overlaps an existing pay period' using errcode='22023'; end if;
   insert into public.pay_periods (start_date,end_date,timezone,note)
   values (p_start_date,p_end_date,p_timezone,p_note) returning * into r; return r;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.create_payroll_run(_pay_period_id uuid, _rounding_mode text DEFAULT 'nearest_15'::text, _note text DEFAULT NULL::text)
  RETURNS public.payroll_runs
  LANGUAGE plpgsql
@@ -2671,9 +2113,7 @@ begin
 
   return v_run;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.create_weekly_pay_period(week_start date, weeks integer DEFAULT 1, p_timezone text DEFAULT public.org_timezone(), p_note text DEFAULT NULL::text)
  RETURNS public.pay_periods
  LANGUAGE plpgsql
@@ -2681,9 +2121,7 @@ CREATE OR REPLACE FUNCTION public.create_weekly_pay_period(week_start date, week
  SET search_path TO 'public'
 AS $function$
 declare s date:=week_start; e date:=week_start + (weeks*7 - 1); r public.pay_periods;
-begin r := public.create_pay_period(s,e,p_timezone,p_note); return r; end $function$
-;
-
+begin r := public.create_pay_period(s,e,p_timezone,p_note); return r; end $function$;
 CREATE OR REPLACE FUNCTION public.decrement_bag_stock(p_batch_id uuid, p_delta integer)
  RETURNS TABLE(batch_id uuid, new_quantity integer)
  LANGUAGE plpgsql
@@ -2718,9 +2156,7 @@ BEGIN
   -- Trigger will sync bulk_batches
   RETURN;
 END;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.delete_pay_period(_period_id uuid, _force boolean DEFAULT false)
  RETURNS void
  LANGUAGE plpgsql
@@ -2792,9 +2228,7 @@ begin
   delete from public.pay_periods
   where id = _period_id;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.delete_payroll_run(_run_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -2857,9 +2291,7 @@ begin
   where id = _run_id;
 
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.employee_legal_addresses_make_current()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -2877,9 +2309,7 @@ begin
 
   return new;
 end;
-$function$
-;
-
+$function$;
 create or replace view "public"."employee_tax_compliance" as  SELECT e.id AS employee_id,
     e.worker_type,
     (EXISTS ( SELECT 1
@@ -2889,8 +2319,6 @@ create or replace view "public"."employee_tax_compliance" as  SELECT e.id AS emp
            FROM public.employee_tax_docs d
           WHERE ((d.employee_id = e.id) AND (d.doc_type = 'w4'::public.tax_doc_type) AND (d.status = 'verified'::public.tax_doc_status) AND (d.is_active = true)))) AS has_verified_w4
    FROM public.employees e;
-
-
 CREATE OR REPLACE FUNCTION public.end_break_now_geo(_employee_id uuid, _lat numeric, _lng numeric, _accuracy_m numeric, _photo_path text, _store_id uuid DEFAULT NULL::uuid)
  RETURNS public.time_breaks
  LANGUAGE plpgsql
@@ -3088,9 +2516,7 @@ begin
 
   return v_break;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.enforce_contractor_agreement_required()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -3110,9 +2536,7 @@ begin
 
   return new;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.enqueue_sms(_to_phone text, _body text, _send_after timestamp with time zone DEFAULT now(), _meta jsonb DEFAULT '{}'::jsonb)
  RETURNS uuid
  LANGUAGE plpgsql
@@ -3125,9 +2549,7 @@ begin
   values (_to_phone, _body, coalesce(_send_after, now()), coalesce(_meta, '{}'::jsonb))
   returning id into v_id;
   return v_id;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.finalize_payroll_run(_payroll_run_id uuid, _note text DEFAULT NULL::text)
  RETURNS public.payroll_runs
  LANGUAGE plpgsql
@@ -3171,9 +2593,7 @@ begin
 
   return v_run;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.generate_payroll_statements_for_run(_run_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -3290,9 +2710,7 @@ begin
       details = excluded.details;
   end loop;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_active_agreement_version()
  RETURNS text
  LANGUAGE sql
@@ -3303,9 +2721,7 @@ AS $function$
   where av.active = true
   order by av.created_at desc
   limit 1;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_active_contractor_agreement_version()
  RETURNS text
  LANGUAGE sql
@@ -3316,9 +2732,7 @@ AS $function$
   where active = true
   order by created_at desc
   limit 1
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_employee_schedule(_employee_id uuid, _start date, _end date)
  RETURNS TABLE(work_date date, start_ts timestamp with time zone, end_ts timestamp with time zone, source text, store_id uuid)
  LANGUAGE sql
@@ -3378,9 +2792,7 @@ AS $function$
   left join public.store_locations sl on sl.id = m.store_id
   where m.start_local is not null and m.end_local is not null
   order by m.work_date, start_ts;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_manager_phones(_employee_id uuid)
  RETURNS TABLE(phone_e164 text)
  LANGUAGE sql
@@ -3394,9 +2806,7 @@ AS $function$
   where m.employee_id = _employee_id
     and up.can_sms is true
     and up.verified_at is not null;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_open_shift_id(_employee_id uuid)
  RETURNS uuid
  LANGUAGE sql
@@ -3408,9 +2818,7 @@ AS $function$
   where t.employee_id = _employee_id and t.clock_out is null
   order by t.clock_in desc
   limit 1
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_schedule_range_all(_start date, _end date)
  RETURNS TABLE(work_date date, employee_id uuid, display_name text, start_ts timestamp with time zone, end_ts timestamp with time zone, source text, store_id uuid)
  LANGUAGE sql
@@ -3476,9 +2884,7 @@ AS $function$
   where m.start_local is not null and m.end_local is not null
     and public.is_admin()
   order by m.work_date, e.display_name;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_schedule_slot_for_ts(_employee_id uuid, _ts timestamp with time zone)
  RETURNS TABLE(start_ts timestamp with time zone, end_ts timestamp with time zone, source text, store_id uuid)
  LANGUAGE sql
@@ -3489,9 +2895,7 @@ AS $function$
   from public.get_employee_schedule(_employee_id, (_ts at time zone 'utc')::date, (_ts at time zone 'utc')::date) s
   order by s.start_ts
   limit 1
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.get_store_inventory(show_out_of_stock boolean DEFAULT false)
  RETURNS TABLE(id uuid, title text, description text, sale_price numeric, barcode text, qr_code text, photo_url text, photos text[], categories text[], qr_type text, created_at timestamp with time zone, total_stock bigint, in_stock boolean)
  LANGUAGE sql
@@ -3520,9 +2924,7 @@ AS $function$
     it.photo_url, it.photos, it.categories, it.qr_type, it.created_at
   having (show_out_of_stock = true) or (coalesce(sum(isl.quantity), 0) > 0)
   order by it.created_at desc;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.haversine_meters(lat1 numeric, lng1 numeric, lat2 numeric, lng2 numeric)
  RETURNS numeric
  LANGUAGE sql
@@ -3535,9 +2937,7 @@ AS $function$
         cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians((lng2 - lng1) / 2)), 2)
       )
     );
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.is_admin()
  RETURNS boolean
  LANGUAGE sql
@@ -3550,9 +2950,7 @@ AS $function$
     where e.user_id = auth.uid()
       and e.role = 'admin'
   );
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.mark_invite_accepted()
  RETURNS void
  LANGUAGE plpgsql
@@ -3564,9 +2962,7 @@ begin
   set accepted_at = coalesce(accepted_at, now())
   where user_id = auth.uid();
 end;
-$function$
-;
-
+$function$;
 create materialized view "public"."mv_monthly_hours" as  SELECT e.id AS employee_id,
     (date_trunc('month'::text, (t.clock_in AT TIME ZONE 'America/New_York'::text)))::date AS month_start,
     e.display_name,
@@ -3576,17 +2972,13 @@ create materialized view "public"."mv_monthly_hours" as  SELECT e.id AS employee
      JOIN public.employees e ON ((e.id = t.employee_id)))
   WHERE (t.clock_out IS NOT NULL)
   GROUP BY e.id, ((date_trunc('month'::text, (t.clock_in AT TIME ZONE 'America/New_York'::text)))::date), e.display_name;
-
-
 CREATE OR REPLACE FUNCTION public.next_week_start(ts timestamp with time zone, tz text DEFAULT public.org_timezone(), week_start_dow integer DEFAULT public.org_week_start_dow())
  RETURNS timestamp with time zone
  LANGUAGE sql
  STABLE
 AS $function$
   select public.week_start(ts, tz, week_start_dow) + interval '7 days'
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.notify_break_ended(_time_break_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -3617,9 +3009,7 @@ begin
   loop
     perform public.enqueue_sms(v_phone, v_msg, now(), jsonb_build_object('type','break_over','time_break_id',_time_break_id));
   end loop;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.notify_break_started(_time_break_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -3655,9 +3045,7 @@ begin
     v_phone, v_msg, v_send_at,
     jsonb_build_object('type','break_5_left','time_break_id',_time_break_id)
   );
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.notify_shift_flags(_time_entry_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -3710,39 +3098,29 @@ begin
   loop
     perform public.enqueue_sms(v_phone, v_msg, now(), jsonb_build_object('type','shift_flag','time_entry_id',_time_entry_id));
   end loop;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.org_paid_break_minutes_per_day()
  RETURNS integer
  LANGUAGE sql
  STABLE
-AS $function$ select 30::int $function$
-;
-
+AS $function$ select 30::int $function$;
 CREATE OR REPLACE FUNCTION public.org_timezone()
  RETURNS text
  LANGUAGE sql
  STABLE
-AS $function$ select 'America/New_York'::text; $function$
-;
-
+AS $function$ select 'America/New_York'::text; $function$;
 CREATE OR REPLACE FUNCTION public.org_today_date()
  RETURNS date
  LANGUAGE sql
  STABLE
 AS $function$
   select (now() at time zone 'America/New_York')::date;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.org_week_start_dow()
  RETURNS integer
  LANGUAGE sql
  STABLE
-AS $function$ select 0::int; $function$
-;
-
+AS $function$ select 0::int; $function$;
 CREATE OR REPLACE FUNCTION public.payroll_lock_period(_period_id uuid, _note text DEFAULT NULL::text, _force boolean DEFAULT false)
  RETURNS public.pay_periods
  LANGUAGE plpgsql
@@ -3852,9 +3230,7 @@ begin
 
   return v_p;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.payroll_unlock_period(_period_id uuid, _note text DEFAULT NULL::text)
  RETURNS public.pay_periods
  LANGUAGE plpgsql
@@ -3883,9 +3259,7 @@ begin
 
   return v_p;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.pick_store_by_geo(_lat numeric, _lng numeric)
  RETURNS TABLE(store_id uuid, distance_m numeric)
  LANGUAGE sql
@@ -3899,9 +3273,7 @@ AS $function$
     and haversine_meters(_lat, _lng, s.lat, s.lng) <= s.radius_m
   order by haversine_meters(_lat, _lng, s.lat, s.lng) asc
   limit 1;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.preview_payroll_statement(_run_id uuid, _employee_id uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -4084,9 +3456,7 @@ begin
     'flags', v_flags
   );
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.range_overlaps_locked_period(_start_ts timestamp with time zone, _end_ts timestamp with time zone)
  RETURNS boolean
  LANGUAGE sql
@@ -4103,9 +3473,7 @@ AS $function$
                '[]'
              )
   );
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.record_contractor_payment(_payroll_run_id uuid, _employee_id uuid, _amount numeric, _method text DEFAULT 'other'::text, _reference text DEFAULT NULL::text, _note text DEFAULT NULL::text, _paid_at timestamp with time zone DEFAULT now())
  RETURNS public.contractor_payments
  LANGUAGE plpgsql
@@ -4149,9 +3517,7 @@ begin
 
   return v_row;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.refresh_monthly_hours_all()
  RETURNS void
  LANGUAGE sql
@@ -4159,9 +3525,7 @@ CREATE OR REPLACE FUNCTION public.refresh_monthly_hours_all()
  SET search_path TO 'public'
 AS $function$
   refresh materialized view concurrently public.mv_monthly_hours;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.refresh_monthly_hours_month(p_month_start date)
  RETURNS void
  LANGUAGE plpgsql
@@ -4172,9 +3536,7 @@ begin
   -- You can later optimize to only touch one month; for now we reuse the full refresh.
   perform public.refresh_monthly_hours_all();
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.refresh_payroll_period_hours()
  RETURNS void
  LANGUAGE plpgsql
@@ -4186,9 +3548,7 @@ begin
 exception when feature_not_supported then
   refresh materialized view public.mv_payroll_period_hours;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.refresh_weekly_hours()
  RETURNS void
  LANGUAGE plpgsql
@@ -4200,9 +3560,7 @@ begin
 exception when feature_not_supported then
   refresh materialized view public.mv_weekly_hours;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.resolve_expected_window(_employee_id uuid, _ts timestamp with time zone, _store_id uuid DEFAULT NULL::uuid)
  RETURNS TABLE(expected_start_ts timestamp with time zone, expected_end_ts timestamp with time zone)
  LANGUAGE sql
@@ -4272,9 +3630,7 @@ select
        else end_ts
   end                                                          as expected_end_ts
 from built;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.resolve_hourly_rate(_employee_id uuid, _work_date date)
  RETURNS numeric
  LANGUAGE sql
@@ -4294,9 +3650,7 @@ AS $function$
       ),
       (select e.hourly_rate from public.employees e where e.id = _employee_id)
     ) as hourly_rate;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.round_seconds(_seconds bigint, _mode text)
  RETURNS bigint
  LANGUAGE plpgsql
@@ -4321,9 +3675,7 @@ begin
   -- nearest step (half-up)
   return ((v_s + (v_step/2)) / v_step) * v_step;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.round_up_to_increment(p numeric, inc numeric)
  RETURNS numeric
  LANGUAGE sql
@@ -4333,10 +3685,106 @@ AS $function$
     when inc is null or inc <= 0 then p
     else ceil(p / inc) * inc
   end;
-$function$
-;
+$function$;
+CREATE OR REPLACE FUNCTION public.rpc_storefront_catalog(p_channel_id text DEFAULT 'og_main'::text)
+ RETURNS TABLE(channel_id text, item_type_id uuid, title text, description text, display_price numeric, pricing_mode text, badge_flags text[], photo_keys text[], categories text[], qr_type text, weight_g numeric, stock_label text, remaining_count integer)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  with base as (
+    select
+      l.channel_id,
+      l.sort_rank, -- ✅ FIX: include sort_rank so ORDER BY works
+      it.id as item_type_id,
 
+      -- text fallbacks
+      coalesce(nullif(l.public_title, ''), it.title) as title,
+      coalesce(nullif(l.public_description, ''), it.description) as description,
 
+      -- photo selection: listing keys if provided, else item_types.photos
+      case
+        when array_length(l.public_photo_keys, 1) is not null
+         and array_length(l.public_photo_keys, 1) > 0
+          then l.public_photo_keys
+        else it.photos
+      end as photo_keys,
+
+      it.categories::text[] as categories,
+      it.qr_type,
+      it.weight as weight_g,
+
+      l.pricing_mode,
+      l.public_price_override,
+      it.sale_price,
+
+      l.metal,
+      l.purity_basis_points,
+      l.premium_basis_points,
+      l.labor_fee,
+      l.rounding_increment,
+
+      l.badge_flags,
+
+      -- total stock from central truth
+      coalesce(s.qty, 0) as qty
+    from public.storefront_listings l
+    join public.sales_channels c
+      on c.id = l.channel_id
+     and c.active = true
+    join public.item_types it
+      on it.id = l.item_type_id
+    left join lateral (
+      select sum(isl.quantity)::int as qty
+      from public.item_stock_locations isl
+      where isl.item_id = it.id
+    ) s on true
+    where l.published = true
+      and l.channel_id = p_channel_id
+  ),
+  priced as (
+    select
+      b.*,
+      case
+        when b.pricing_mode = 'metal_spot' then (
+          public.round_up_to_increment(
+            (
+              (sp.price_per_gram * b.weight_g)
+              * (coalesce(b.purity_basis_points, 10000)::numeric / 10000)
+              * (1 + (coalesce(b.premium_basis_points, 0)::numeric / 10000))
+              + coalesce(b.labor_fee, 0)
+            ),
+            coalesce(b.rounding_increment, 1)
+          )
+        )
+        else coalesce(b.public_price_override, b.sale_price)
+      end as display_price
+    from base b
+    left join public.metal_spot_prices sp
+      on sp.metal = b.metal
+  )
+  select
+    channel_id,
+    item_type_id,
+    title,
+    description,
+    display_price,
+    pricing_mode,
+    badge_flags,
+    photo_keys,
+    categories,
+    qr_type,
+    weight_g,
+    case
+      when qty <= 0 then 'Sold out'
+      when qty <= 3 then 'Only ' || qty::text || ' left'
+      when qty <= 10 then 'Low stock'
+      else 'In stock'
+    end as stock_label,
+    case when qty between 1 and 3 then qty else null end as remaining_count
+  from priced
+  order by sort_rank asc nulls last, title asc;
+$function$;
 CREATE OR REPLACE FUNCTION public.set_updated_at()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4345,9 +3793,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.sms_outbox_claim(_batch integer DEFAULT 25)
  RETURNS SETOF public.sms_outbox
  LANGUAGE sql
@@ -4366,9 +3812,7 @@ AS $function$
     for update skip locked
   )
   returning o.*;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.start_break_now_geo(_employee_id uuid, _lat numeric, _lng numeric, _accuracy_m numeric, _photo_path text, _store_id uuid DEFAULT NULL::uuid)
  RETURNS public.time_breaks
  LANGUAGE plpgsql
@@ -4541,9 +3985,7 @@ begin
 
   return v_break;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.subtract_quantity(loc_id uuid, delta integer)
  RETURNS void
  LANGUAGE plpgsql
@@ -4551,9 +3993,7 @@ AS $function$begin
   update item_stock_locations
   set quantity = quantity - delta
   where id = loc_id;
-end;$function$
-;
-
+end;$function$;
 CREATE OR REPLACE FUNCTION public.sync_batch_qty_from_stock()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4575,9 +4015,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.sync_shift_anomalies(_time_entry_id uuid DEFAULT NULL::uuid)
  RETURNS integer
  LANGUAGE plpgsql
@@ -4597,9 +4035,7 @@ begin
   get diagnostics v_count = row_count;
   return v_count;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.tg_set_updated_at()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4608,9 +4044,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.tr_time_breaks_ai()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4620,9 +4054,7 @@ AS $function$
 begin
   perform public.notify_break_started(new.id);
   return new;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.tr_time_breaks_au()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4634,9 +4066,7 @@ begin
     perform public.notify_break_ended(new.id);
   end if;
   return new;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.tr_time_entries_alert_ai()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4646,9 +4076,7 @@ AS $function$
 begin
   perform public.notify_shift_flags(new.id);
   return new;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.tr_time_entries_alert_au()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4660,27 +4088,21 @@ begin
     perform public.notify_shift_flags(new.id);
   end if;
   return new;
-end $function$
-;
-
+end $function$;
 CREATE OR REPLACE FUNCTION public.ts_local_date(_ts timestamp with time zone, _tz text)
  RETURNS date
  LANGUAGE sql
  STABLE
 AS $function$
   select (_ts at time zone coalesce(nullif(_tz,''), 'America/New_York'))::date;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.ts_overlaps_locked_period(_ts timestamp with time zone)
  RETURNS boolean
  LANGUAGE sql
  STABLE
 AS $function$
   select public.range_overlaps_locked_period(_ts, _ts);
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.unapprove_shift(_time_entry_id uuid)
  RETURNS void
  LANGUAGE plpgsql
@@ -4736,9 +4158,7 @@ begin
   where sa.time_entry_id = _time_entry_id;
 
 end;
-$function$
-;
-
+$function$;
 CREATE OR REPLACE FUNCTION public.update_timestamp()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -4747,9 +4167,7 @@ BEGIN
   NEW.updated_at = now();
   RETURN NEW;
 END;
-$function$
-;
-
+$function$;
 create or replace view "public"."v_monthly_hours" as  SELECT e.id AS employee_id,
     e.display_name,
     (date_trunc('month'::text, (t.clock_in AT TIME ZONE 'America/New_York'::text)))::date AS month_start,
@@ -4759,8 +4177,6 @@ create or replace view "public"."v_monthly_hours" as  SELECT e.id AS employee_id
      JOIN public.employees e ON ((e.id = t.employee_id)))
   WHERE (t.clock_out IS NOT NULL)
   GROUP BY e.id, e.display_name, ((date_trunc('month'::text, (t.clock_in AT TIME ZONE 'America/New_York'::text)))::date);
-
-
 create or replace view "public"."v_shift_adjustments" as  SELECT sa.id,
     sa.time_entry_id,
     sa.editor_user_id,
@@ -4773,8 +4189,6 @@ create or replace view "public"."v_shift_adjustments" as  SELECT sa.id,
    FROM ((public.shift_adjustments sa
      LEFT JOIN public.employees e ON ((e.user_id = sa.editor_user_id)))
      LEFT JOIN auth.users u ON ((u.id = sa.editor_user_id)));
-
-
 create or replace view "public"."v_shift_anomalies" as  WITH base AS (
          SELECT t.id AS time_entry_id,
             t.employee_id,
@@ -4839,8 +4253,6 @@ create or replace view "public"."v_shift_anomalies" as  WITH base AS (
      LEFT JOIN win w ON ((w.time_entry_id = b.time_entry_id)))
      LEFT JOIN cfg c ON ((c.time_entry_id = b.time_entry_id)))
      LEFT JOIN public.shift_approvals sa ON ((sa.time_entry_id = b.time_entry_id)));
-
-
 CREATE OR REPLACE FUNCTION public.week_start(ts timestamp with time zone, tz text DEFAULT public.org_timezone(), week_start_dow integer DEFAULT public.org_week_start_dow())
  RETURNS timestamp with time zone
  LANGUAGE sql
@@ -4851,9 +4263,7 @@ AS $function$
       date_trunc('day', timezone(tz, ts))::timestamp
       - make_interval(days => ((extract(dow from timezone(tz, ts))::int - week_start_dow + 7) % 7))
     ) at time zone tz
-$function$
-;
-
+$function$;
 create materialized view "public"."mv_weekly_hours" as  WITH closed_shifts AS (
          SELECT t.id AS time_entry_id,
             t.employee_id,
@@ -4890,8 +4300,6 @@ create materialized view "public"."mv_weekly_hours" as  WITH closed_shifts AS (
     (sum(EXTRACT(epoch FROM (weekly_overlap.seg_end - weekly_overlap.seg_start))) / 3600.0) AS work_hours
    FROM weekly_overlap
   GROUP BY weekly_overlap.employee_id, weekly_overlap.week_start_date;
-
-
 create or replace view "public"."v_payroll_period_hours" as  WITH cfg AS (
          SELECT public.org_timezone() AS tz,
             public.org_week_start_dow() AS wdow
@@ -5036,8 +4444,6 @@ create or replace view "public"."v_payroll_period_hours" as  WITH cfg AS (
      JOIN public.employees e ON ((e.id = p.employee_id)))
      LEFT JOIN shift_counts sc ON (((sc.period_id = p.period_id) AND (sc.employee_id = p.employee_id))))
   ORDER BY p.start_date DESC, e.display_name;
-
-
 create or replace view "public"."v_weekly_hours" as  WITH cfg AS (
          SELECT public.org_timezone() AS tz,
             public.org_week_start_dow() AS wdow
@@ -5099,8 +4505,6 @@ create or replace view "public"."v_weekly_hours" as  WITH cfg AS (
    FROM (weekly w
      JOIN public.employees e ON ((e.id = w.employee_id)))
   ORDER BY w.week_start, e.display_name;
-
-
 create materialized view "public"."mv_payroll_period_hours" as  WITH weeks AS (
          SELECT w.employee_id,
             w.week_start_date,
@@ -5137,1772 +4541,895 @@ create materialized view "public"."mv_payroll_period_hours" as  WITH weeks AS (
    FROM (period_weeks pw
      JOIN public.employees e ON ((e.id = pw.employee_id)))
   GROUP BY pw.pay_period_id, pw.start_date, pw.end_date, pw.status, pw.timezone, pw.employee_id, e.display_name, e.hourly_rate;
-
-
 CREATE INDEX mv_monthly_hours_name ON public.mv_monthly_hours USING btree (display_name);
-
 CREATE UNIQUE INDEX mv_monthly_hours_unique ON public.mv_monthly_hours USING btree (employee_id, month_start);
-
 CREATE INDEX mv_payroll_period_hours_period_idx ON public.mv_payroll_period_hours USING btree (pay_period_id);
-
 CREATE INDEX mv_weekly_hours_employee_week_idx ON public.mv_weekly_hours USING btree (employee_id, week_start_date);
-
 grant delete on table "public"."agreement_versions" to "anon";
-
 grant insert on table "public"."agreement_versions" to "anon";
-
 grant references on table "public"."agreement_versions" to "anon";
-
 grant select on table "public"."agreement_versions" to "anon";
-
 grant trigger on table "public"."agreement_versions" to "anon";
-
 grant truncate on table "public"."agreement_versions" to "anon";
-
 grant update on table "public"."agreement_versions" to "anon";
-
 grant delete on table "public"."agreement_versions" to "authenticated";
-
 grant insert on table "public"."agreement_versions" to "authenticated";
-
 grant references on table "public"."agreement_versions" to "authenticated";
-
 grant select on table "public"."agreement_versions" to "authenticated";
-
 grant trigger on table "public"."agreement_versions" to "authenticated";
-
 grant truncate on table "public"."agreement_versions" to "authenticated";
-
 grant update on table "public"."agreement_versions" to "authenticated";
-
 grant delete on table "public"."agreement_versions" to "service_role";
-
 grant insert on table "public"."agreement_versions" to "service_role";
-
 grant references on table "public"."agreement_versions" to "service_role";
-
 grant select on table "public"."agreement_versions" to "service_role";
-
 grant trigger on table "public"."agreement_versions" to "service_role";
-
 grant truncate on table "public"."agreement_versions" to "service_role";
-
 grant update on table "public"."agreement_versions" to "service_role";
-
 grant delete on table "public"."batch_confirmations" to "anon";
-
 grant insert on table "public"."batch_confirmations" to "anon";
-
 grant references on table "public"."batch_confirmations" to "anon";
-
 grant select on table "public"."batch_confirmations" to "anon";
-
 grant trigger on table "public"."batch_confirmations" to "anon";
-
 grant truncate on table "public"."batch_confirmations" to "anon";
-
 grant update on table "public"."batch_confirmations" to "anon";
-
 grant delete on table "public"."batch_confirmations" to "authenticated";
-
 grant insert on table "public"."batch_confirmations" to "authenticated";
-
 grant references on table "public"."batch_confirmations" to "authenticated";
-
 grant select on table "public"."batch_confirmations" to "authenticated";
-
 grant trigger on table "public"."batch_confirmations" to "authenticated";
-
 grant truncate on table "public"."batch_confirmations" to "authenticated";
-
 grant update on table "public"."batch_confirmations" to "authenticated";
-
 grant delete on table "public"."batch_confirmations" to "service_role";
-
 grant insert on table "public"."batch_confirmations" to "service_role";
-
 grant references on table "public"."batch_confirmations" to "service_role";
-
 grant select on table "public"."batch_confirmations" to "service_role";
-
 grant trigger on table "public"."batch_confirmations" to "service_role";
-
 grant truncate on table "public"."batch_confirmations" to "service_role";
-
 grant update on table "public"."batch_confirmations" to "service_role";
-
 grant delete on table "public"."bulk_batches" to "anon";
-
 grant insert on table "public"."bulk_batches" to "anon";
-
 grant references on table "public"."bulk_batches" to "anon";
-
 grant select on table "public"."bulk_batches" to "anon";
-
 grant trigger on table "public"."bulk_batches" to "anon";
-
 grant truncate on table "public"."bulk_batches" to "anon";
-
 grant update on table "public"."bulk_batches" to "anon";
-
 grant delete on table "public"."bulk_batches" to "authenticated";
-
 grant insert on table "public"."bulk_batches" to "authenticated";
-
 grant references on table "public"."bulk_batches" to "authenticated";
-
 grant select on table "public"."bulk_batches" to "authenticated";
-
 grant trigger on table "public"."bulk_batches" to "authenticated";
-
 grant truncate on table "public"."bulk_batches" to "authenticated";
-
 grant update on table "public"."bulk_batches" to "authenticated";
-
 grant delete on table "public"."bulk_batches" to "service_role";
-
 grant insert on table "public"."bulk_batches" to "service_role";
-
 grant references on table "public"."bulk_batches" to "service_role";
-
 grant select on table "public"."bulk_batches" to "service_role";
-
 grant trigger on table "public"."bulk_batches" to "service_role";
-
 grant truncate on table "public"."bulk_batches" to "service_role";
-
 grant update on table "public"."bulk_batches" to "service_role";
-
 grant delete on table "public"."contractor_agreements" to "anon";
-
 grant insert on table "public"."contractor_agreements" to "anon";
-
 grant references on table "public"."contractor_agreements" to "anon";
-
 grant select on table "public"."contractor_agreements" to "anon";
-
 grant trigger on table "public"."contractor_agreements" to "anon";
-
 grant truncate on table "public"."contractor_agreements" to "anon";
-
 grant update on table "public"."contractor_agreements" to "anon";
-
 grant delete on table "public"."contractor_agreements" to "authenticated";
-
 grant insert on table "public"."contractor_agreements" to "authenticated";
-
 grant references on table "public"."contractor_agreements" to "authenticated";
-
 grant select on table "public"."contractor_agreements" to "authenticated";
-
 grant trigger on table "public"."contractor_agreements" to "authenticated";
-
 grant truncate on table "public"."contractor_agreements" to "authenticated";
-
 grant update on table "public"."contractor_agreements" to "authenticated";
-
 grant delete on table "public"."contractor_agreements" to "service_role";
-
 grant insert on table "public"."contractor_agreements" to "service_role";
-
 grant references on table "public"."contractor_agreements" to "service_role";
-
 grant select on table "public"."contractor_agreements" to "service_role";
-
 grant trigger on table "public"."contractor_agreements" to "service_role";
-
 grant truncate on table "public"."contractor_agreements" to "service_role";
-
 grant update on table "public"."contractor_agreements" to "service_role";
-
 grant delete on table "public"."contractor_payments" to "anon";
-
 grant insert on table "public"."contractor_payments" to "anon";
-
 grant references on table "public"."contractor_payments" to "anon";
-
 grant select on table "public"."contractor_payments" to "anon";
-
 grant trigger on table "public"."contractor_payments" to "anon";
-
 grant truncate on table "public"."contractor_payments" to "anon";
-
 grant update on table "public"."contractor_payments" to "anon";
-
 grant delete on table "public"."contractor_payments" to "authenticated";
-
 grant insert on table "public"."contractor_payments" to "authenticated";
-
 grant references on table "public"."contractor_payments" to "authenticated";
-
 grant select on table "public"."contractor_payments" to "authenticated";
-
 grant trigger on table "public"."contractor_payments" to "authenticated";
-
 grant truncate on table "public"."contractor_payments" to "authenticated";
-
 grant update on table "public"."contractor_payments" to "authenticated";
-
 grant delete on table "public"."contractor_payments" to "service_role";
-
 grant insert on table "public"."contractor_payments" to "service_role";
-
 grant references on table "public"."contractor_payments" to "service_role";
-
 grant select on table "public"."contractor_payments" to "service_role";
-
 grant trigger on table "public"."contractor_payments" to "service_role";
-
 grant truncate on table "public"."contractor_payments" to "service_role";
-
 grant update on table "public"."contractor_payments" to "service_role";
-
 grant delete on table "public"."credit_tiers" to "anon";
-
 grant insert on table "public"."credit_tiers" to "anon";
-
 grant references on table "public"."credit_tiers" to "anon";
-
 grant select on table "public"."credit_tiers" to "anon";
-
 grant trigger on table "public"."credit_tiers" to "anon";
-
 grant truncate on table "public"."credit_tiers" to "anon";
-
 grant update on table "public"."credit_tiers" to "anon";
-
 grant delete on table "public"."credit_tiers" to "authenticated";
-
 grant insert on table "public"."credit_tiers" to "authenticated";
-
 grant references on table "public"."credit_tiers" to "authenticated";
-
 grant select on table "public"."credit_tiers" to "authenticated";
-
 grant trigger on table "public"."credit_tiers" to "authenticated";
-
 grant truncate on table "public"."credit_tiers" to "authenticated";
-
 grant update on table "public"."credit_tiers" to "authenticated";
-
 grant delete on table "public"."credit_tiers" to "service_role";
-
 grant insert on table "public"."credit_tiers" to "service_role";
-
 grant references on table "public"."credit_tiers" to "service_role";
-
 grant select on table "public"."credit_tiers" to "service_role";
-
 grant trigger on table "public"."credit_tiers" to "service_role";
-
 grant truncate on table "public"."credit_tiers" to "service_role";
-
 grant update on table "public"."credit_tiers" to "service_role";
-
 grant delete on table "public"."deletion_log" to "anon";
-
 grant insert on table "public"."deletion_log" to "anon";
-
 grant references on table "public"."deletion_log" to "anon";
-
 grant select on table "public"."deletion_log" to "anon";
-
 grant trigger on table "public"."deletion_log" to "anon";
-
 grant truncate on table "public"."deletion_log" to "anon";
-
 grant update on table "public"."deletion_log" to "anon";
-
 grant delete on table "public"."deletion_log" to "authenticated";
-
 grant insert on table "public"."deletion_log" to "authenticated";
-
 grant references on table "public"."deletion_log" to "authenticated";
-
 grant select on table "public"."deletion_log" to "authenticated";
-
 grant trigger on table "public"."deletion_log" to "authenticated";
-
 grant truncate on table "public"."deletion_log" to "authenticated";
-
 grant update on table "public"."deletion_log" to "authenticated";
-
 grant delete on table "public"."deletion_log" to "service_role";
-
 grant insert on table "public"."deletion_log" to "service_role";
-
 grant references on table "public"."deletion_log" to "service_role";
-
 grant select on table "public"."deletion_log" to "service_role";
-
 grant trigger on table "public"."deletion_log" to "service_role";
-
 grant truncate on table "public"."deletion_log" to "service_role";
-
 grant update on table "public"."deletion_log" to "service_role";
-
 grant delete on table "public"."employee_legal_addresses" to "anon";
-
 grant insert on table "public"."employee_legal_addresses" to "anon";
-
 grant references on table "public"."employee_legal_addresses" to "anon";
-
 grant select on table "public"."employee_legal_addresses" to "anon";
-
 grant trigger on table "public"."employee_legal_addresses" to "anon";
-
 grant truncate on table "public"."employee_legal_addresses" to "anon";
-
 grant update on table "public"."employee_legal_addresses" to "anon";
-
 grant delete on table "public"."employee_legal_addresses" to "authenticated";
-
 grant insert on table "public"."employee_legal_addresses" to "authenticated";
-
 grant references on table "public"."employee_legal_addresses" to "authenticated";
-
 grant select on table "public"."employee_legal_addresses" to "authenticated";
-
 grant trigger on table "public"."employee_legal_addresses" to "authenticated";
-
 grant truncate on table "public"."employee_legal_addresses" to "authenticated";
-
 grant update on table "public"."employee_legal_addresses" to "authenticated";
-
 grant delete on table "public"."employee_legal_addresses" to "service_role";
-
 grant insert on table "public"."employee_legal_addresses" to "service_role";
-
 grant references on table "public"."employee_legal_addresses" to "service_role";
-
 grant select on table "public"."employee_legal_addresses" to "service_role";
-
 grant trigger on table "public"."employee_legal_addresses" to "service_role";
-
 grant truncate on table "public"."employee_legal_addresses" to "service_role";
-
 grant update on table "public"."employee_legal_addresses" to "service_role";
-
 grant delete on table "public"."employee_managers" to "anon";
-
 grant insert on table "public"."employee_managers" to "anon";
-
 grant references on table "public"."employee_managers" to "anon";
-
 grant select on table "public"."employee_managers" to "anon";
-
 grant trigger on table "public"."employee_managers" to "anon";
-
 grant truncate on table "public"."employee_managers" to "anon";
-
 grant update on table "public"."employee_managers" to "anon";
-
 grant delete on table "public"."employee_managers" to "authenticated";
-
 grant insert on table "public"."employee_managers" to "authenticated";
-
 grant references on table "public"."employee_managers" to "authenticated";
-
 grant select on table "public"."employee_managers" to "authenticated";
-
 grant trigger on table "public"."employee_managers" to "authenticated";
-
 grant truncate on table "public"."employee_managers" to "authenticated";
-
 grant update on table "public"."employee_managers" to "authenticated";
-
 grant delete on table "public"."employee_managers" to "service_role";
-
 grant insert on table "public"."employee_managers" to "service_role";
-
 grant references on table "public"."employee_managers" to "service_role";
-
 grant select on table "public"."employee_managers" to "service_role";
-
 grant trigger on table "public"."employee_managers" to "service_role";
-
 grant truncate on table "public"."employee_managers" to "service_role";
-
 grant update on table "public"."employee_managers" to "service_role";
-
 grant delete on table "public"."employee_rates" to "anon";
-
 grant insert on table "public"."employee_rates" to "anon";
-
 grant references on table "public"."employee_rates" to "anon";
-
 grant select on table "public"."employee_rates" to "anon";
-
 grant trigger on table "public"."employee_rates" to "anon";
-
 grant truncate on table "public"."employee_rates" to "anon";
-
 grant update on table "public"."employee_rates" to "anon";
-
 grant delete on table "public"."employee_rates" to "authenticated";
-
 grant insert on table "public"."employee_rates" to "authenticated";
-
 grant references on table "public"."employee_rates" to "authenticated";
-
 grant select on table "public"."employee_rates" to "authenticated";
-
 grant trigger on table "public"."employee_rates" to "authenticated";
-
 grant truncate on table "public"."employee_rates" to "authenticated";
-
 grant update on table "public"."employee_rates" to "authenticated";
-
 grant delete on table "public"."employee_rates" to "service_role";
-
 grant insert on table "public"."employee_rates" to "service_role";
-
 grant references on table "public"."employee_rates" to "service_role";
-
 grant select on table "public"."employee_rates" to "service_role";
-
 grant trigger on table "public"."employee_rates" to "service_role";
-
 grant truncate on table "public"."employee_rates" to "service_role";
-
 grant update on table "public"."employee_rates" to "service_role";
-
 grant delete on table "public"."employee_tax_docs" to "anon";
-
 grant insert on table "public"."employee_tax_docs" to "anon";
-
 grant references on table "public"."employee_tax_docs" to "anon";
-
 grant select on table "public"."employee_tax_docs" to "anon";
-
 grant trigger on table "public"."employee_tax_docs" to "anon";
-
 grant truncate on table "public"."employee_tax_docs" to "anon";
-
 grant update on table "public"."employee_tax_docs" to "anon";
-
 grant delete on table "public"."employee_tax_docs" to "authenticated";
-
 grant insert on table "public"."employee_tax_docs" to "authenticated";
-
 grant references on table "public"."employee_tax_docs" to "authenticated";
-
 grant select on table "public"."employee_tax_docs" to "authenticated";
-
 grant trigger on table "public"."employee_tax_docs" to "authenticated";
-
 grant truncate on table "public"."employee_tax_docs" to "authenticated";
-
 grant update on table "public"."employee_tax_docs" to "authenticated";
-
 grant delete on table "public"."employee_tax_docs" to "service_role";
-
 grant insert on table "public"."employee_tax_docs" to "service_role";
-
 grant references on table "public"."employee_tax_docs" to "service_role";
-
 grant select on table "public"."employee_tax_docs" to "service_role";
-
 grant trigger on table "public"."employee_tax_docs" to "service_role";
-
 grant truncate on table "public"."employee_tax_docs" to "service_role";
-
 grant update on table "public"."employee_tax_docs" to "service_role";
-
 grant delete on table "public"."employees" to "anon";
-
 grant insert on table "public"."employees" to "anon";
-
 grant references on table "public"."employees" to "anon";
-
 grant select on table "public"."employees" to "anon";
-
 grant trigger on table "public"."employees" to "anon";
-
 grant truncate on table "public"."employees" to "anon";
-
 grant update on table "public"."employees" to "anon";
-
 grant delete on table "public"."employees" to "authenticated";
-
 grant insert on table "public"."employees" to "authenticated";
-
 grant references on table "public"."employees" to "authenticated";
-
 grant select on table "public"."employees" to "authenticated";
-
 grant trigger on table "public"."employees" to "authenticated";
-
 grant truncate on table "public"."employees" to "authenticated";
-
 grant update on table "public"."employees" to "authenticated";
-
 grant delete on table "public"."employees" to "service_role";
-
 grant insert on table "public"."employees" to "service_role";
-
 grant references on table "public"."employees" to "service_role";
-
 grant select on table "public"."employees" to "service_role";
-
 grant trigger on table "public"."employees" to "service_role";
-
 grant truncate on table "public"."employees" to "service_role";
-
 grant update on table "public"."employees" to "service_role";
-
 grant delete on table "public"."favorites" to "anon";
-
 grant insert on table "public"."favorites" to "anon";
-
 grant references on table "public"."favorites" to "anon";
-
 grant select on table "public"."favorites" to "anon";
-
 grant trigger on table "public"."favorites" to "anon";
-
 grant truncate on table "public"."favorites" to "anon";
-
 grant update on table "public"."favorites" to "anon";
-
 grant delete on table "public"."favorites" to "authenticated";
-
 grant insert on table "public"."favorites" to "authenticated";
-
 grant references on table "public"."favorites" to "authenticated";
-
 grant select on table "public"."favorites" to "authenticated";
-
 grant trigger on table "public"."favorites" to "authenticated";
-
 grant truncate on table "public"."favorites" to "authenticated";
-
 grant update on table "public"."favorites" to "authenticated";
-
 grant delete on table "public"."favorites" to "service_role";
-
 grant insert on table "public"."favorites" to "service_role";
-
 grant references on table "public"."favorites" to "service_role";
-
 grant select on table "public"."favorites" to "service_role";
-
 grant trigger on table "public"."favorites" to "service_role";
-
 grant truncate on table "public"."favorites" to "service_role";
-
 grant update on table "public"."favorites" to "service_role";
-
 grant delete on table "public"."item_stock_locations" to "anon";
-
 grant insert on table "public"."item_stock_locations" to "anon";
-
 grant references on table "public"."item_stock_locations" to "anon";
-
 grant select on table "public"."item_stock_locations" to "anon";
-
 grant trigger on table "public"."item_stock_locations" to "anon";
-
 grant truncate on table "public"."item_stock_locations" to "anon";
-
 grant update on table "public"."item_stock_locations" to "anon";
-
 grant delete on table "public"."item_stock_locations" to "authenticated";
-
 grant insert on table "public"."item_stock_locations" to "authenticated";
-
 grant references on table "public"."item_stock_locations" to "authenticated";
-
 grant select on table "public"."item_stock_locations" to "authenticated";
-
 grant trigger on table "public"."item_stock_locations" to "authenticated";
-
 grant truncate on table "public"."item_stock_locations" to "authenticated";
-
 grant update on table "public"."item_stock_locations" to "authenticated";
-
 grant delete on table "public"."item_stock_locations" to "service_role";
-
 grant insert on table "public"."item_stock_locations" to "service_role";
-
 grant references on table "public"."item_stock_locations" to "service_role";
-
 grant select on table "public"."item_stock_locations" to "service_role";
-
 grant trigger on table "public"."item_stock_locations" to "service_role";
-
 grant truncate on table "public"."item_stock_locations" to "service_role";
-
 grant update on table "public"."item_stock_locations" to "service_role";
-
 grant delete on table "public"."item_types" to "anon";
-
 grant insert on table "public"."item_types" to "anon";
-
 grant references on table "public"."item_types" to "anon";
-
 grant select on table "public"."item_types" to "anon";
-
 grant trigger on table "public"."item_types" to "anon";
-
 grant truncate on table "public"."item_types" to "anon";
-
 grant update on table "public"."item_types" to "anon";
-
 grant delete on table "public"."item_types" to "authenticated";
-
 grant insert on table "public"."item_types" to "authenticated";
-
 grant references on table "public"."item_types" to "authenticated";
-
 grant select on table "public"."item_types" to "authenticated";
-
 grant trigger on table "public"."item_types" to "authenticated";
-
 grant truncate on table "public"."item_types" to "authenticated";
-
 grant update on table "public"."item_types" to "authenticated";
-
 grant delete on table "public"."item_types" to "service_role";
-
 grant insert on table "public"."item_types" to "service_role";
-
 grant references on table "public"."item_types" to "service_role";
-
 grant select on table "public"."item_types" to "service_role";
-
 grant trigger on table "public"."item_types" to "service_role";
-
 grant truncate on table "public"."item_types" to "service_role";
-
 grant update on table "public"."item_types" to "service_role";
-
 grant delete on table "public"."locations" to "anon";
-
 grant insert on table "public"."locations" to "anon";
-
 grant references on table "public"."locations" to "anon";
-
 grant select on table "public"."locations" to "anon";
-
 grant trigger on table "public"."locations" to "anon";
-
 grant truncate on table "public"."locations" to "anon";
-
 grant update on table "public"."locations" to "anon";
-
 grant delete on table "public"."locations" to "authenticated";
-
 grant insert on table "public"."locations" to "authenticated";
-
 grant references on table "public"."locations" to "authenticated";
-
 grant select on table "public"."locations" to "authenticated";
-
 grant trigger on table "public"."locations" to "authenticated";
-
 grant truncate on table "public"."locations" to "authenticated";
-
 grant update on table "public"."locations" to "authenticated";
-
 grant delete on table "public"."locations" to "service_role";
-
 grant insert on table "public"."locations" to "service_role";
-
 grant references on table "public"."locations" to "service_role";
-
 grant select on table "public"."locations" to "service_role";
-
 grant trigger on table "public"."locations" to "service_role";
-
 grant truncate on table "public"."locations" to "service_role";
-
 grant update on table "public"."locations" to "service_role";
-
 grant delete on table "public"."metadata" to "anon";
-
 grant insert on table "public"."metadata" to "anon";
-
 grant references on table "public"."metadata" to "anon";
-
 grant select on table "public"."metadata" to "anon";
-
 grant trigger on table "public"."metadata" to "anon";
-
 grant truncate on table "public"."metadata" to "anon";
-
 grant update on table "public"."metadata" to "anon";
-
 grant delete on table "public"."metadata" to "authenticated";
-
 grant insert on table "public"."metadata" to "authenticated";
-
 grant references on table "public"."metadata" to "authenticated";
-
 grant select on table "public"."metadata" to "authenticated";
-
 grant trigger on table "public"."metadata" to "authenticated";
-
 grant truncate on table "public"."metadata" to "authenticated";
-
 grant update on table "public"."metadata" to "authenticated";
-
 grant delete on table "public"."metadata" to "service_role";
-
 grant insert on table "public"."metadata" to "service_role";
-
 grant references on table "public"."metadata" to "service_role";
-
 grant select on table "public"."metadata" to "service_role";
-
 grant trigger on table "public"."metadata" to "service_role";
-
 grant truncate on table "public"."metadata" to "service_role";
-
 grant update on table "public"."metadata" to "service_role";
-
 grant delete on table "public"."metal_spot_prices" to "anon";
-
 grant insert on table "public"."metal_spot_prices" to "anon";
-
 grant references on table "public"."metal_spot_prices" to "anon";
-
 grant select on table "public"."metal_spot_prices" to "anon";
-
 grant trigger on table "public"."metal_spot_prices" to "anon";
-
 grant truncate on table "public"."metal_spot_prices" to "anon";
-
 grant update on table "public"."metal_spot_prices" to "anon";
-
 grant delete on table "public"."metal_spot_prices" to "authenticated";
-
 grant insert on table "public"."metal_spot_prices" to "authenticated";
-
 grant references on table "public"."metal_spot_prices" to "authenticated";
-
 grant select on table "public"."metal_spot_prices" to "authenticated";
-
 grant trigger on table "public"."metal_spot_prices" to "authenticated";
-
 grant truncate on table "public"."metal_spot_prices" to "authenticated";
-
 grant update on table "public"."metal_spot_prices" to "authenticated";
-
 grant delete on table "public"."metal_spot_prices" to "service_role";
-
 grant insert on table "public"."metal_spot_prices" to "service_role";
-
 grant references on table "public"."metal_spot_prices" to "service_role";
-
 grant select on table "public"."metal_spot_prices" to "service_role";
-
 grant trigger on table "public"."metal_spot_prices" to "service_role";
-
 grant truncate on table "public"."metal_spot_prices" to "service_role";
-
 grant update on table "public"."metal_spot_prices" to "service_role";
-
 grant references on table "public"."pay_periods" to "anon";
-
 grant select on table "public"."pay_periods" to "anon";
-
 grant trigger on table "public"."pay_periods" to "anon";
-
 grant truncate on table "public"."pay_periods" to "anon";
-
 grant references on table "public"."pay_periods" to "authenticated";
-
 grant select on table "public"."pay_periods" to "authenticated";
-
 grant trigger on table "public"."pay_periods" to "authenticated";
-
 grant truncate on table "public"."pay_periods" to "authenticated";
-
 grant delete on table "public"."pay_periods" to "service_role";
-
 grant insert on table "public"."pay_periods" to "service_role";
-
 grant references on table "public"."pay_periods" to "service_role";
-
 grant select on table "public"."pay_periods" to "service_role";
-
 grant trigger on table "public"."pay_periods" to "service_role";
-
 grant truncate on table "public"."pay_periods" to "service_role";
-
 grant update on table "public"."pay_periods" to "service_role";
-
 grant delete on table "public"."payroll_run_lines" to "anon";
-
 grant insert on table "public"."payroll_run_lines" to "anon";
-
 grant references on table "public"."payroll_run_lines" to "anon";
-
 grant select on table "public"."payroll_run_lines" to "anon";
-
 grant trigger on table "public"."payroll_run_lines" to "anon";
-
 grant truncate on table "public"."payroll_run_lines" to "anon";
-
 grant update on table "public"."payroll_run_lines" to "anon";
-
 grant delete on table "public"."payroll_run_lines" to "authenticated";
-
 grant insert on table "public"."payroll_run_lines" to "authenticated";
-
 grant references on table "public"."payroll_run_lines" to "authenticated";
-
 grant select on table "public"."payroll_run_lines" to "authenticated";
-
 grant trigger on table "public"."payroll_run_lines" to "authenticated";
-
 grant truncate on table "public"."payroll_run_lines" to "authenticated";
-
 grant update on table "public"."payroll_run_lines" to "authenticated";
-
 grant delete on table "public"."payroll_run_lines" to "service_role";
-
 grant insert on table "public"."payroll_run_lines" to "service_role";
-
 grant references on table "public"."payroll_run_lines" to "service_role";
-
 grant select on table "public"."payroll_run_lines" to "service_role";
-
 grant trigger on table "public"."payroll_run_lines" to "service_role";
-
 grant truncate on table "public"."payroll_run_lines" to "service_role";
-
 grant update on table "public"."payroll_run_lines" to "service_role";
-
 grant delete on table "public"."payroll_runs" to "anon";
-
 grant insert on table "public"."payroll_runs" to "anon";
-
 grant references on table "public"."payroll_runs" to "anon";
-
 grant select on table "public"."payroll_runs" to "anon";
-
 grant trigger on table "public"."payroll_runs" to "anon";
-
 grant truncate on table "public"."payroll_runs" to "anon";
-
 grant update on table "public"."payroll_runs" to "anon";
-
 grant delete on table "public"."payroll_runs" to "authenticated";
-
 grant insert on table "public"."payroll_runs" to "authenticated";
-
 grant references on table "public"."payroll_runs" to "authenticated";
-
 grant select on table "public"."payroll_runs" to "authenticated";
-
 grant trigger on table "public"."payroll_runs" to "authenticated";
-
 grant truncate on table "public"."payroll_runs" to "authenticated";
-
 grant update on table "public"."payroll_runs" to "authenticated";
-
 grant delete on table "public"."payroll_runs" to "service_role";
-
 grant insert on table "public"."payroll_runs" to "service_role";
-
 grant references on table "public"."payroll_runs" to "service_role";
-
 grant select on table "public"."payroll_runs" to "service_role";
-
 grant trigger on table "public"."payroll_runs" to "service_role";
-
 grant truncate on table "public"."payroll_runs" to "service_role";
-
 grant update on table "public"."payroll_runs" to "service_role";
-
 grant delete on table "public"."payroll_statements" to "anon";
-
 grant insert on table "public"."payroll_statements" to "anon";
-
 grant references on table "public"."payroll_statements" to "anon";
-
 grant select on table "public"."payroll_statements" to "anon";
-
 grant trigger on table "public"."payroll_statements" to "anon";
-
 grant truncate on table "public"."payroll_statements" to "anon";
-
 grant update on table "public"."payroll_statements" to "anon";
-
 grant delete on table "public"."payroll_statements" to "authenticated";
-
 grant insert on table "public"."payroll_statements" to "authenticated";
-
 grant references on table "public"."payroll_statements" to "authenticated";
-
 grant select on table "public"."payroll_statements" to "authenticated";
-
 grant trigger on table "public"."payroll_statements" to "authenticated";
-
 grant truncate on table "public"."payroll_statements" to "authenticated";
-
 grant update on table "public"."payroll_statements" to "authenticated";
-
 grant delete on table "public"."payroll_statements" to "service_role";
-
 grant insert on table "public"."payroll_statements" to "service_role";
-
 grant references on table "public"."payroll_statements" to "service_role";
-
 grant select on table "public"."payroll_statements" to "service_role";
-
 grant trigger on table "public"."payroll_statements" to "service_role";
-
 grant truncate on table "public"."payroll_statements" to "service_role";
-
 grant update on table "public"."payroll_statements" to "service_role";
-
 grant delete on table "public"."payroll_tax_constants" to "anon";
-
 grant insert on table "public"."payroll_tax_constants" to "anon";
-
 grant references on table "public"."payroll_tax_constants" to "anon";
-
 grant select on table "public"."payroll_tax_constants" to "anon";
-
 grant trigger on table "public"."payroll_tax_constants" to "anon";
-
 grant truncate on table "public"."payroll_tax_constants" to "anon";
-
 grant update on table "public"."payroll_tax_constants" to "anon";
-
 grant delete on table "public"."payroll_tax_constants" to "authenticated";
-
 grant insert on table "public"."payroll_tax_constants" to "authenticated";
-
 grant references on table "public"."payroll_tax_constants" to "authenticated";
-
 grant select on table "public"."payroll_tax_constants" to "authenticated";
-
 grant trigger on table "public"."payroll_tax_constants" to "authenticated";
-
 grant truncate on table "public"."payroll_tax_constants" to "authenticated";
-
 grant update on table "public"."payroll_tax_constants" to "authenticated";
-
 grant delete on table "public"."payroll_tax_constants" to "service_role";
-
 grant insert on table "public"."payroll_tax_constants" to "service_role";
-
 grant references on table "public"."payroll_tax_constants" to "service_role";
-
 grant select on table "public"."payroll_tax_constants" to "service_role";
-
 grant trigger on table "public"."payroll_tax_constants" to "service_role";
-
 grant truncate on table "public"."payroll_tax_constants" to "service_role";
-
 grant update on table "public"."payroll_tax_constants" to "service_role";
-
 grant delete on table "public"."sale_item_categories" to "anon";
-
 grant insert on table "public"."sale_item_categories" to "anon";
-
 grant references on table "public"."sale_item_categories" to "anon";
-
 grant select on table "public"."sale_item_categories" to "anon";
-
 grant trigger on table "public"."sale_item_categories" to "anon";
-
 grant truncate on table "public"."sale_item_categories" to "anon";
-
 grant update on table "public"."sale_item_categories" to "anon";
-
 grant delete on table "public"."sale_item_categories" to "authenticated";
-
 grant insert on table "public"."sale_item_categories" to "authenticated";
-
 grant references on table "public"."sale_item_categories" to "authenticated";
-
 grant select on table "public"."sale_item_categories" to "authenticated";
-
 grant trigger on table "public"."sale_item_categories" to "authenticated";
-
 grant truncate on table "public"."sale_item_categories" to "authenticated";
-
 grant update on table "public"."sale_item_categories" to "authenticated";
-
 grant delete on table "public"."sale_item_categories" to "service_role";
-
 grant insert on table "public"."sale_item_categories" to "service_role";
-
 grant references on table "public"."sale_item_categories" to "service_role";
-
 grant select on table "public"."sale_item_categories" to "service_role";
-
 grant trigger on table "public"."sale_item_categories" to "service_role";
-
 grant truncate on table "public"."sale_item_categories" to "service_role";
-
 grant update on table "public"."sale_item_categories" to "service_role";
-
 grant delete on table "public"."sale_items" to "anon";
-
 grant insert on table "public"."sale_items" to "anon";
-
 grant references on table "public"."sale_items" to "anon";
-
 grant select on table "public"."sale_items" to "anon";
-
 grant trigger on table "public"."sale_items" to "anon";
-
 grant truncate on table "public"."sale_items" to "anon";
-
 grant update on table "public"."sale_items" to "anon";
-
 grant delete on table "public"."sale_items" to "authenticated";
-
 grant insert on table "public"."sale_items" to "authenticated";
-
 grant references on table "public"."sale_items" to "authenticated";
-
 grant select on table "public"."sale_items" to "authenticated";
-
 grant trigger on table "public"."sale_items" to "authenticated";
-
 grant truncate on table "public"."sale_items" to "authenticated";
-
 grant update on table "public"."sale_items" to "authenticated";
-
 grant delete on table "public"."sale_items" to "service_role";
-
 grant insert on table "public"."sale_items" to "service_role";
-
 grant references on table "public"."sale_items" to "service_role";
-
 grant select on table "public"."sale_items" to "service_role";
-
 grant trigger on table "public"."sale_items" to "service_role";
-
 grant truncate on table "public"."sale_items" to "service_role";
-
 grant update on table "public"."sale_items" to "service_role";
-
 grant delete on table "public"."sales" to "anon";
-
 grant insert on table "public"."sales" to "anon";
-
 grant references on table "public"."sales" to "anon";
-
 grant select on table "public"."sales" to "anon";
-
 grant trigger on table "public"."sales" to "anon";
-
 grant truncate on table "public"."sales" to "anon";
-
 grant update on table "public"."sales" to "anon";
-
 grant delete on table "public"."sales" to "authenticated";
-
 grant insert on table "public"."sales" to "authenticated";
-
 grant references on table "public"."sales" to "authenticated";
-
 grant select on table "public"."sales" to "authenticated";
-
 grant trigger on table "public"."sales" to "authenticated";
-
 grant truncate on table "public"."sales" to "authenticated";
-
 grant update on table "public"."sales" to "authenticated";
-
 grant delete on table "public"."sales" to "service_role";
-
 grant insert on table "public"."sales" to "service_role";
-
 grant references on table "public"."sales" to "service_role";
-
 grant select on table "public"."sales" to "service_role";
-
 grant trigger on table "public"."sales" to "service_role";
-
 grant truncate on table "public"."sales" to "service_role";
-
 grant update on table "public"."sales" to "service_role";
-
 grant delete on table "public"."sales_audit" to "anon";
-
 grant insert on table "public"."sales_audit" to "anon";
-
 grant references on table "public"."sales_audit" to "anon";
-
 grant select on table "public"."sales_audit" to "anon";
-
 grant trigger on table "public"."sales_audit" to "anon";
-
 grant truncate on table "public"."sales_audit" to "anon";
-
 grant update on table "public"."sales_audit" to "anon";
-
 grant delete on table "public"."sales_audit" to "authenticated";
-
 grant insert on table "public"."sales_audit" to "authenticated";
-
 grant references on table "public"."sales_audit" to "authenticated";
-
 grant select on table "public"."sales_audit" to "authenticated";
-
 grant trigger on table "public"."sales_audit" to "authenticated";
-
 grant truncate on table "public"."sales_audit" to "authenticated";
-
 grant update on table "public"."sales_audit" to "authenticated";
-
 grant delete on table "public"."sales_audit" to "service_role";
-
 grant insert on table "public"."sales_audit" to "service_role";
-
 grant references on table "public"."sales_audit" to "service_role";
-
 grant select on table "public"."sales_audit" to "service_role";
-
 grant trigger on table "public"."sales_audit" to "service_role";
-
 grant truncate on table "public"."sales_audit" to "service_role";
-
 grant update on table "public"."sales_audit" to "service_role";
-
 grant delete on table "public"."sales_channels" to "anon";
-
 grant insert on table "public"."sales_channels" to "anon";
-
 grant references on table "public"."sales_channels" to "anon";
-
 grant select on table "public"."sales_channels" to "anon";
-
 grant trigger on table "public"."sales_channels" to "anon";
-
 grant truncate on table "public"."sales_channels" to "anon";
-
 grant update on table "public"."sales_channels" to "anon";
-
 grant delete on table "public"."sales_channels" to "authenticated";
-
 grant insert on table "public"."sales_channels" to "authenticated";
-
 grant references on table "public"."sales_channels" to "authenticated";
-
 grant select on table "public"."sales_channels" to "authenticated";
-
 grant trigger on table "public"."sales_channels" to "authenticated";
-
 grant truncate on table "public"."sales_channels" to "authenticated";
-
 grant update on table "public"."sales_channels" to "authenticated";
-
 grant delete on table "public"."sales_channels" to "service_role";
-
 grant insert on table "public"."sales_channels" to "service_role";
-
 grant references on table "public"."sales_channels" to "service_role";
-
 grant select on table "public"."sales_channels" to "service_role";
-
 grant trigger on table "public"."sales_channels" to "service_role";
-
 grant truncate on table "public"."sales_channels" to "service_role";
-
 grant update on table "public"."sales_channels" to "service_role";
-
 grant references on table "public"."shift_adjustments" to "anon";
-
 grant select on table "public"."shift_adjustments" to "anon";
-
 grant trigger on table "public"."shift_adjustments" to "anon";
-
 grant truncate on table "public"."shift_adjustments" to "anon";
-
 grant references on table "public"."shift_adjustments" to "authenticated";
-
 grant select on table "public"."shift_adjustments" to "authenticated";
-
 grant trigger on table "public"."shift_adjustments" to "authenticated";
-
 grant truncate on table "public"."shift_adjustments" to "authenticated";
-
 grant delete on table "public"."shift_adjustments" to "service_role";
-
 grant insert on table "public"."shift_adjustments" to "service_role";
-
 grant references on table "public"."shift_adjustments" to "service_role";
-
 grant select on table "public"."shift_adjustments" to "service_role";
-
 grant trigger on table "public"."shift_adjustments" to "service_role";
-
 grant truncate on table "public"."shift_adjustments" to "service_role";
-
 grant update on table "public"."shift_adjustments" to "service_role";
-
 grant references on table "public"."shift_approvals" to "anon";
-
 grant select on table "public"."shift_approvals" to "anon";
-
 grant trigger on table "public"."shift_approvals" to "anon";
-
 grant truncate on table "public"."shift_approvals" to "anon";
-
 grant references on table "public"."shift_approvals" to "authenticated";
-
 grant select on table "public"."shift_approvals" to "authenticated";
-
 grant trigger on table "public"."shift_approvals" to "authenticated";
-
 grant truncate on table "public"."shift_approvals" to "authenticated";
-
 grant delete on table "public"."shift_approvals" to "service_role";
-
 grant insert on table "public"."shift_approvals" to "service_role";
-
 grant references on table "public"."shift_approvals" to "service_role";
-
 grant select on table "public"."shift_approvals" to "service_role";
-
 grant trigger on table "public"."shift_approvals" to "service_role";
-
 grant truncate on table "public"."shift_approvals" to "service_role";
-
 grant update on table "public"."shift_approvals" to "service_role";
-
 grant delete on table "public"."sms_outbox" to "anon";
-
 grant insert on table "public"."sms_outbox" to "anon";
-
 grant references on table "public"."sms_outbox" to "anon";
-
 grant select on table "public"."sms_outbox" to "anon";
-
 grant trigger on table "public"."sms_outbox" to "anon";
-
 grant truncate on table "public"."sms_outbox" to "anon";
-
 grant update on table "public"."sms_outbox" to "anon";
-
 grant delete on table "public"."sms_outbox" to "authenticated";
-
 grant insert on table "public"."sms_outbox" to "authenticated";
-
 grant references on table "public"."sms_outbox" to "authenticated";
-
 grant select on table "public"."sms_outbox" to "authenticated";
-
 grant trigger on table "public"."sms_outbox" to "authenticated";
-
 grant truncate on table "public"."sms_outbox" to "authenticated";
-
 grant update on table "public"."sms_outbox" to "authenticated";
-
 grant delete on table "public"."sms_outbox" to "service_role";
-
 grant insert on table "public"."sms_outbox" to "service_role";
-
 grant references on table "public"."sms_outbox" to "service_role";
-
 grant select on table "public"."sms_outbox" to "service_role";
-
 grant trigger on table "public"."sms_outbox" to "service_role";
-
 grant truncate on table "public"."sms_outbox" to "service_role";
-
 grant update on table "public"."sms_outbox" to "service_role";
-
 grant delete on table "public"."stock_transactions" to "anon";
-
 grant insert on table "public"."stock_transactions" to "anon";
-
 grant references on table "public"."stock_transactions" to "anon";
-
 grant select on table "public"."stock_transactions" to "anon";
-
 grant trigger on table "public"."stock_transactions" to "anon";
-
 grant truncate on table "public"."stock_transactions" to "anon";
-
 grant update on table "public"."stock_transactions" to "anon";
-
 grant delete on table "public"."stock_transactions" to "authenticated";
-
 grant insert on table "public"."stock_transactions" to "authenticated";
-
 grant references on table "public"."stock_transactions" to "authenticated";
-
 grant select on table "public"."stock_transactions" to "authenticated";
-
 grant trigger on table "public"."stock_transactions" to "authenticated";
-
 grant truncate on table "public"."stock_transactions" to "authenticated";
-
 grant update on table "public"."stock_transactions" to "authenticated";
-
 grant delete on table "public"."stock_transactions" to "service_role";
-
 grant insert on table "public"."stock_transactions" to "service_role";
-
 grant references on table "public"."stock_transactions" to "service_role";
-
 grant select on table "public"."stock_transactions" to "service_role";
-
 grant trigger on table "public"."stock_transactions" to "service_role";
-
 grant truncate on table "public"."stock_transactions" to "service_role";
-
 grant update on table "public"."stock_transactions" to "service_role";
-
 grant delete on table "public"."store_locations" to "anon";
-
 grant insert on table "public"."store_locations" to "anon";
-
 grant references on table "public"."store_locations" to "anon";
-
 grant select on table "public"."store_locations" to "anon";
-
 grant trigger on table "public"."store_locations" to "anon";
-
 grant truncate on table "public"."store_locations" to "anon";
-
 grant update on table "public"."store_locations" to "anon";
-
 grant delete on table "public"."store_locations" to "authenticated";
-
 grant insert on table "public"."store_locations" to "authenticated";
-
 grant references on table "public"."store_locations" to "authenticated";
-
 grant select on table "public"."store_locations" to "authenticated";
-
 grant trigger on table "public"."store_locations" to "authenticated";
-
 grant truncate on table "public"."store_locations" to "authenticated";
-
 grant update on table "public"."store_locations" to "authenticated";
-
 grant delete on table "public"."store_locations" to "service_role";
-
 grant insert on table "public"."store_locations" to "service_role";
-
 grant references on table "public"."store_locations" to "service_role";
-
 grant select on table "public"."store_locations" to "service_role";
-
 grant trigger on table "public"."store_locations" to "service_role";
-
 grant truncate on table "public"."store_locations" to "service_role";
-
 grant update on table "public"."store_locations" to "service_role";
-
 grant delete on table "public"."storefront_listings" to "anon";
-
 grant insert on table "public"."storefront_listings" to "anon";
-
 grant references on table "public"."storefront_listings" to "anon";
-
 grant select on table "public"."storefront_listings" to "anon";
-
 grant trigger on table "public"."storefront_listings" to "anon";
-
 grant truncate on table "public"."storefront_listings" to "anon";
-
 grant update on table "public"."storefront_listings" to "anon";
-
 grant delete on table "public"."storefront_listings" to "authenticated";
-
 grant insert on table "public"."storefront_listings" to "authenticated";
-
 grant references on table "public"."storefront_listings" to "authenticated";
-
 grant select on table "public"."storefront_listings" to "authenticated";
-
 grant trigger on table "public"."storefront_listings" to "authenticated";
-
 grant truncate on table "public"."storefront_listings" to "authenticated";
-
 grant update on table "public"."storefront_listings" to "authenticated";
-
 grant delete on table "public"."storefront_listings" to "service_role";
-
 grant insert on table "public"."storefront_listings" to "service_role";
-
 grant references on table "public"."storefront_listings" to "service_role";
-
 grant select on table "public"."storefront_listings" to "service_role";
-
 grant trigger on table "public"."storefront_listings" to "service_role";
-
 grant truncate on table "public"."storefront_listings" to "service_role";
-
 grant update on table "public"."storefront_listings" to "service_role";
-
 grant delete on table "public"."tax_doc_access_logs" to "anon";
-
 grant insert on table "public"."tax_doc_access_logs" to "anon";
-
 grant references on table "public"."tax_doc_access_logs" to "anon";
-
 grant select on table "public"."tax_doc_access_logs" to "anon";
-
 grant trigger on table "public"."tax_doc_access_logs" to "anon";
-
 grant truncate on table "public"."tax_doc_access_logs" to "anon";
-
 grant update on table "public"."tax_doc_access_logs" to "anon";
-
 grant delete on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant insert on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant references on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant select on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant trigger on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant truncate on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant update on table "public"."tax_doc_access_logs" to "authenticated";
-
 grant delete on table "public"."tax_doc_access_logs" to "service_role";
-
 grant insert on table "public"."tax_doc_access_logs" to "service_role";
-
 grant references on table "public"."tax_doc_access_logs" to "service_role";
-
 grant select on table "public"."tax_doc_access_logs" to "service_role";
-
 grant trigger on table "public"."tax_doc_access_logs" to "service_role";
-
 grant truncate on table "public"."tax_doc_access_logs" to "service_role";
-
 grant update on table "public"."tax_doc_access_logs" to "service_role";
-
 grant delete on table "public"."time_breaks" to "anon";
-
 grant insert on table "public"."time_breaks" to "anon";
-
 grant references on table "public"."time_breaks" to "anon";
-
 grant select on table "public"."time_breaks" to "anon";
-
 grant trigger on table "public"."time_breaks" to "anon";
-
 grant truncate on table "public"."time_breaks" to "anon";
-
 grant update on table "public"."time_breaks" to "anon";
-
 grant delete on table "public"."time_breaks" to "authenticated";
-
 grant insert on table "public"."time_breaks" to "authenticated";
-
 grant references on table "public"."time_breaks" to "authenticated";
-
 grant select on table "public"."time_breaks" to "authenticated";
-
 grant trigger on table "public"."time_breaks" to "authenticated";
-
 grant truncate on table "public"."time_breaks" to "authenticated";
-
 grant update on table "public"."time_breaks" to "authenticated";
-
 grant delete on table "public"."time_breaks" to "service_role";
-
 grant insert on table "public"."time_breaks" to "service_role";
-
 grant references on table "public"."time_breaks" to "service_role";
-
 grant select on table "public"."time_breaks" to "service_role";
-
 grant trigger on table "public"."time_breaks" to "service_role";
-
 grant truncate on table "public"."time_breaks" to "service_role";
-
 grant update on table "public"."time_breaks" to "service_role";
-
 grant references on table "public"."time_entries" to "anon";
-
 grant select on table "public"."time_entries" to "anon";
-
 grant trigger on table "public"."time_entries" to "anon";
-
 grant truncate on table "public"."time_entries" to "anon";
-
 grant references on table "public"."time_entries" to "authenticated";
-
 grant select on table "public"."time_entries" to "authenticated";
-
 grant trigger on table "public"."time_entries" to "authenticated";
-
 grant truncate on table "public"."time_entries" to "authenticated";
-
 grant delete on table "public"."time_entries" to "service_role";
-
 grant insert on table "public"."time_entries" to "service_role";
-
 grant references on table "public"."time_entries" to "service_role";
-
 grant select on table "public"."time_entries" to "service_role";
-
 grant trigger on table "public"."time_entries" to "service_role";
-
 grant truncate on table "public"."time_entries" to "service_role";
-
 grant update on table "public"."time_entries" to "service_role";
-
 grant delete on table "public"."timeclock_day_exceptions" to "anon";
-
 grant insert on table "public"."timeclock_day_exceptions" to "anon";
-
 grant references on table "public"."timeclock_day_exceptions" to "anon";
-
 grant select on table "public"."timeclock_day_exceptions" to "anon";
-
 grant trigger on table "public"."timeclock_day_exceptions" to "anon";
-
 grant truncate on table "public"."timeclock_day_exceptions" to "anon";
-
 grant update on table "public"."timeclock_day_exceptions" to "anon";
-
 grant delete on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant insert on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant references on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant select on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant trigger on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant truncate on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant update on table "public"."timeclock_day_exceptions" to "authenticated";
-
 grant delete on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant insert on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant references on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant select on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant trigger on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant truncate on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant update on table "public"."timeclock_day_exceptions" to "service_role";
-
 grant delete on table "public"."timeclock_store_exceptions" to "anon";
-
 grant insert on table "public"."timeclock_store_exceptions" to "anon";
-
 grant references on table "public"."timeclock_store_exceptions" to "anon";
-
 grant select on table "public"."timeclock_store_exceptions" to "anon";
-
 grant trigger on table "public"."timeclock_store_exceptions" to "anon";
-
 grant truncate on table "public"."timeclock_store_exceptions" to "anon";
-
 grant update on table "public"."timeclock_store_exceptions" to "anon";
-
 grant delete on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant insert on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant references on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant select on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant trigger on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant truncate on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant update on table "public"."timeclock_store_exceptions" to "authenticated";
-
 grant delete on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant insert on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant references on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant select on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant trigger on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant truncate on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant update on table "public"."timeclock_store_exceptions" to "service_role";
-
 grant delete on table "public"."user_phones" to "anon";
-
 grant insert on table "public"."user_phones" to "anon";
-
 grant references on table "public"."user_phones" to "anon";
-
 grant select on table "public"."user_phones" to "anon";
-
 grant trigger on table "public"."user_phones" to "anon";
-
 grant truncate on table "public"."user_phones" to "anon";
-
 grant update on table "public"."user_phones" to "anon";
-
 grant delete on table "public"."user_phones" to "authenticated";
-
 grant insert on table "public"."user_phones" to "authenticated";
-
 grant references on table "public"."user_phones" to "authenticated";
-
 grant select on table "public"."user_phones" to "authenticated";
-
 grant trigger on table "public"."user_phones" to "authenticated";
-
 grant truncate on table "public"."user_phones" to "authenticated";
-
 grant update on table "public"."user_phones" to "authenticated";
-
 grant delete on table "public"."user_phones" to "service_role";
-
 grant insert on table "public"."user_phones" to "service_role";
-
 grant references on table "public"."user_phones" to "service_role";
-
 grant select on table "public"."user_phones" to "service_role";
-
 grant trigger on table "public"."user_phones" to "service_role";
-
 grant truncate on table "public"."user_phones" to "service_role";
-
 grant update on table "public"."user_phones" to "service_role";
-
 grant delete on table "public"."work_schedule_overrides" to "anon";
-
 grant insert on table "public"."work_schedule_overrides" to "anon";
-
 grant references on table "public"."work_schedule_overrides" to "anon";
-
 grant select on table "public"."work_schedule_overrides" to "anon";
-
 grant trigger on table "public"."work_schedule_overrides" to "anon";
-
 grant truncate on table "public"."work_schedule_overrides" to "anon";
-
 grant update on table "public"."work_schedule_overrides" to "anon";
-
 grant delete on table "public"."work_schedule_overrides" to "authenticated";
-
 grant insert on table "public"."work_schedule_overrides" to "authenticated";
-
 grant references on table "public"."work_schedule_overrides" to "authenticated";
-
 grant select on table "public"."work_schedule_overrides" to "authenticated";
-
 grant trigger on table "public"."work_schedule_overrides" to "authenticated";
-
 grant truncate on table "public"."work_schedule_overrides" to "authenticated";
-
 grant update on table "public"."work_schedule_overrides" to "authenticated";
-
 grant delete on table "public"."work_schedule_overrides" to "service_role";
-
 grant insert on table "public"."work_schedule_overrides" to "service_role";
-
 grant references on table "public"."work_schedule_overrides" to "service_role";
-
 grant select on table "public"."work_schedule_overrides" to "service_role";
-
 grant trigger on table "public"."work_schedule_overrides" to "service_role";
-
 grant truncate on table "public"."work_schedule_overrides" to "service_role";
-
 grant update on table "public"."work_schedule_overrides" to "service_role";
-
 grant delete on table "public"."work_schedules" to "anon";
-
 grant insert on table "public"."work_schedules" to "anon";
-
 grant references on table "public"."work_schedules" to "anon";
-
 grant select on table "public"."work_schedules" to "anon";
-
 grant trigger on table "public"."work_schedules" to "anon";
-
 grant truncate on table "public"."work_schedules" to "anon";
-
 grant update on table "public"."work_schedules" to "anon";
-
 grant delete on table "public"."work_schedules" to "authenticated";
-
 grant insert on table "public"."work_schedules" to "authenticated";
-
 grant references on table "public"."work_schedules" to "authenticated";
-
 grant select on table "public"."work_schedules" to "authenticated";
-
 grant trigger on table "public"."work_schedules" to "authenticated";
-
 grant truncate on table "public"."work_schedules" to "authenticated";
-
 grant update on table "public"."work_schedules" to "authenticated";
-
 grant delete on table "public"."work_schedules" to "service_role";
-
 grant insert on table "public"."work_schedules" to "service_role";
-
 grant references on table "public"."work_schedules" to "service_role";
-
 grant select on table "public"."work_schedules" to "service_role";
-
 grant trigger on table "public"."work_schedules" to "service_role";
-
 grant truncate on table "public"."work_schedules" to "service_role";
-
 grant update on table "public"."work_schedules" to "service_role";
-
-
-  create policy "bulk_batches_insert_admin_only"
+create policy "bulk_batches_insert_admin_only"
   on "public"."bulk_batches"
   as permissive
   for insert
   to authenticated
 with check ((public.is_admin() AND (created_by = auth.uid())));
-
-
-
-  create policy "bulk_batches_select"
+create policy "bulk_batches_select"
   on "public"."bulk_batches"
   as permissive
   for select
   to authenticated
 using (true);
-
-
-
-  create policy "bulk_batches_update_admin_only"
+create policy "bulk_batches_update_admin_only"
   on "public"."bulk_batches"
   as permissive
   for update
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "contractor_payments_admin_all"
+create policy "contractor_payments_admin_all"
   on "public"."contractor_payments"
   as permissive
   for all
   to public
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "contractor_payments_self_read"
+create policy "contractor_payments_self_read"
   on "public"."contractor_payments"
   as permissive
   for select
@@ -6910,67 +5437,46 @@ with check (public.is_admin());
 using ((EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = contractor_payments.employee_id) AND (e.user_id = auth.uid())))));
-
-
-
-  create policy "admin_insert_addresses"
+create policy "admin_insert_addresses"
   on "public"."employee_legal_addresses"
   as permissive
   for insert
   to public
 with check (public.is_admin());
-
-
-
-  create policy "admin_select_addresses"
+create policy "admin_select_addresses"
   on "public"."employee_legal_addresses"
   as permissive
   for select
   to public
 using (public.is_admin());
-
-
-
-  create policy "admin_update_addresses"
+create policy "admin_update_addresses"
   on "public"."employee_legal_addresses"
   as permissive
   for update
   to public
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "em_select_admin"
+create policy "em_select_admin"
   on "public"."employee_managers"
   as permissive
   for select
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "em_write_admin"
+create policy "em_write_admin"
   on "public"."employee_managers"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "employee_rates_admin_all"
+create policy "employee_rates_admin_all"
   on "public"."employee_rates"
   as permissive
   for all
   to public
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "employee_rates_self_read"
+create policy "employee_rates_self_read"
   on "public"."employee_rates"
   as permissive
   for select
@@ -6978,94 +5484,64 @@ with check (public.is_admin());
 using ((EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = employee_rates.employee_id) AND (e.user_id = auth.uid())))));
-
-
-
-  create policy "tax_docs_admin_all"
+create policy "tax_docs_admin_all"
   on "public"."employee_tax_docs"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "employees_select_self_or_admin"
+create policy "employees_select_self_or_admin"
   on "public"."employees"
   as permissive
   for select
   to authenticated
 using (((auth.uid() = user_id) OR public.is_admin()));
-
-
-
-  create policy "Allow delete for admin"
+create policy "Allow delete for admin"
   on "public"."item_types"
   as permissive
   for delete
   to public
 using ((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text));
-
-
-
-  create policy "Allow insert for admins"
+create policy "Allow insert for admins"
   on "public"."item_types"
   as permissive
   for insert
   to public
 with check ((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text));
-
-
-
-  create policy "Allow select for admins only"
+create policy "Allow select for admins only"
   on "public"."item_types"
   as permissive
   for select
   to public
 using ((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text));
-
-
-
-  create policy "Allow update for admin"
+create policy "Allow update for admin"
   on "public"."item_types"
   as permissive
   for update
   to public
 using ((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text));
-
-
-
-  create policy "pp_admin_write"
+create policy "pp_admin_write"
   on "public"."pay_periods"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "pp_select_all"
+create policy "pp_select_all"
   on "public"."pay_periods"
   as permissive
   for select
   to authenticated
 using (true);
-
-
-
-  create policy "payroll_run_lines_admin_all"
+create policy "payroll_run_lines_admin_all"
   on "public"."payroll_run_lines"
   as permissive
   for all
   to public
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "payroll_run_lines_self_read"
+create policy "payroll_run_lines_self_read"
   on "public"."payroll_run_lines"
   as permissive
   for select
@@ -7075,38 +5551,26 @@ using (((EXISTS ( SELECT 1
   WHERE ((e.id = payroll_run_lines.employee_id) AND (e.user_id = auth.uid())))) AND (EXISTS ( SELECT 1
    FROM public.payroll_runs pr
   WHERE ((pr.id = payroll_run_lines.payroll_run_id) AND (pr.status = 'final'::text))))));
-
-
-
-  create policy "payroll_runs_admin_all"
+create policy "payroll_runs_admin_all"
   on "public"."payroll_runs"
   as permissive
   for all
   to public
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "payroll_runs_employee_final_read"
+create policy "payroll_runs_employee_final_read"
   on "public"."payroll_runs"
   as permissive
   for select
   to authenticated
 using ((status = 'final'::text));
-
-
-
-  create policy "admin read payroll_statements"
+create policy "admin read payroll_statements"
   on "public"."payroll_statements"
   as permissive
   for select
   to public
 using (public.is_admin());
-
-
-
-  create policy "worker read own payroll_statements"
+create policy "worker read own payroll_statements"
   on "public"."payroll_statements"
   as permissive
   for select
@@ -7114,28 +5578,19 @@ using (public.is_admin());
 using ((EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = payroll_statements.employee_id) AND (e.user_id = auth.uid())))));
-
-
-
-  create policy "sa_insert_admin_only"
+create policy "sa_insert_admin_only"
   on "public"."shift_adjustments"
   as permissive
   for insert
   to authenticated
 with check (public.is_admin());
-
-
-
-  create policy "sa_select_admin_all"
+create policy "sa_select_admin_all"
   on "public"."shift_adjustments"
   as permissive
   for select
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "sa_select_employee_own"
+create policy "sa_select_employee_own"
   on "public"."shift_adjustments"
   as permissive
   for select
@@ -7144,38 +5599,26 @@ using ((EXISTS ( SELECT 1
    FROM (public.time_entries t
      JOIN public.employees e ON ((e.id = t.employee_id)))
   WHERE ((t.id = shift_adjustments.time_entry_id) AND (e.user_id = auth.uid())))));
-
-
-
-  create policy "sa_admin_write"
+create policy "sa_admin_write"
   on "public"."shift_approvals"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "sa_select_all"
+create policy "sa_select_all"
   on "public"."shift_approvals"
   as permissive
   for select
   to authenticated
 using (true);
-
-
-
-  create policy "sms_select_admin"
+create policy "sms_select_admin"
   on "public"."sms_outbox"
   as permissive
   for select
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "sl_admin_write"
+create policy "sl_admin_write"
   on "public"."store_locations"
   as permissive
   for all
@@ -7186,46 +5629,31 @@ using ((EXISTS ( SELECT 1
 with check ((EXISTS ( SELECT 1
    FROM public.employees me
   WHERE ((me.user_id = auth.uid()) AND (me.role = 'admin'::text)))));
-
-
-
-  create policy "sl_select_active"
+create policy "sl_select_active"
   on "public"."store_locations"
   as permissive
   for select
   to authenticated
 using ((active IS TRUE));
-
-
-
-  create policy "tax_doc_logs_admin_select"
+create policy "tax_doc_logs_admin_select"
   on "public"."tax_doc_access_logs"
   as permissive
   for select
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "time_breaks_delete_admin_only"
+create policy "time_breaks_delete_admin_only"
   on "public"."time_breaks"
   as permissive
   for delete
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "time_breaks_insert_admin_only"
+create policy "time_breaks_insert_admin_only"
   on "public"."time_breaks"
   as permissive
   for insert
   to authenticated
 with check (public.is_admin());
-
-
-
-  create policy "time_breaks_select"
+create policy "time_breaks_select"
   on "public"."time_breaks"
   as permissive
   for select
@@ -7234,30 +5662,21 @@ using ((EXISTS ( SELECT 1
    FROM (public.time_entries t
      JOIN public.employees e ON ((e.id = t.employee_id)))
   WHERE ((t.id = time_breaks.time_entry_id) AND ((e.user_id = auth.uid()) OR public.is_admin())))));
-
-
-
-  create policy "time_breaks_update_admin_only"
+create policy "time_breaks_update_admin_only"
   on "public"."time_breaks"
   as permissive
   for update
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "te_admin_update"
+create policy "te_admin_update"
   on "public"."time_entries"
   as permissive
   for update
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "te_select_own_or_admin"
+create policy "te_select_own_or_admin"
   on "public"."time_entries"
   as permissive
   for select
@@ -7267,20 +5686,14 @@ using (((EXISTS ( SELECT 1
   WHERE ((e.id = time_entries.employee_id) AND (e.user_id = auth.uid())))) OR (EXISTS ( SELECT 1
    FROM public.employees me
   WHERE ((me.user_id = auth.uid()) AND (me.role = 'admin'::text))))));
-
-
-
-  create policy "exceptions_admin_write"
+create policy "exceptions_admin_write"
   on "public"."timeclock_day_exceptions"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "exceptions_select_own_or_admin"
+create policy "exceptions_select_own_or_admin"
   on "public"."timeclock_day_exceptions"
   as permissive
   for select
@@ -7288,48 +5701,33 @@ with check (public.is_admin());
 using ((public.is_admin() OR (EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = timeclock_day_exceptions.employee_id) AND (e.user_id = auth.uid()))))));
-
-
-
-  create policy "store_exceptions_admin_select"
+create policy "store_exceptions_admin_select"
   on "public"."timeclock_store_exceptions"
   as permissive
   for select
   to authenticated
 using (public.is_admin());
-
-
-
-  create policy "store_exceptions_admin_write"
+create policy "store_exceptions_admin_write"
   on "public"."timeclock_store_exceptions"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "up_select_own_or_admin"
+create policy "up_select_own_or_admin"
   on "public"."user_phones"
   as permissive
   for select
   to authenticated
 using (((auth.uid() = user_id) OR public.is_admin()));
-
-
-
-  create policy "up_write_own"
+create policy "up_write_own"
   on "public"."user_phones"
   as permissive
   for all
   to authenticated
 using ((auth.uid() = user_id))
 with check ((auth.uid() = user_id));
-
-
-
-  create policy "wso_select"
+create policy "wso_select"
   on "public"."work_schedule_overrides"
   as permissive
   for select
@@ -7337,20 +5735,14 @@ with check ((auth.uid() = user_id));
 using ((public.is_admin() OR (EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = work_schedule_overrides.employee_id) AND (e.user_id = auth.uid()))))));
-
-
-
-  create policy "wso_write"
+create policy "wso_write"
   on "public"."work_schedule_overrides"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
-
-  create policy "ws_select"
+create policy "ws_select"
   on "public"."work_schedules"
   as permissive
   for select
@@ -7358,116 +5750,74 @@ with check (public.is_admin());
 using ((public.is_admin() OR (EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.id = work_schedules.employee_id) AND (e.user_id = auth.uid()))))));
-
-
-
-  create policy "ws_write"
+create policy "ws_write"
   on "public"."work_schedules"
   as permissive
   for all
   to authenticated
 using (public.is_admin())
 with check (public.is_admin());
-
-
 CREATE TRIGGER trg_employee_legal_addresses_make_current AFTER INSERT ON public.employee_legal_addresses FOR EACH ROW EXECUTE FUNCTION public.employee_legal_addresses_make_current();
-
 CREATE TRIGGER trg_employee_legal_addresses_updated_at BEFORE UPDATE ON public.employee_legal_addresses FOR EACH ROW EXECUTE FUNCTION public.tg_set_updated_at();
-
 CREATE TRIGGER trg_employee_tax_docs_updated_at BEFORE UPDATE ON public.employee_tax_docs FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
 CREATE TRIGGER trg_enforce_contractor_agreement_required BEFORE INSERT OR UPDATE OF worker_type, agreement_version_required ON public.employees FOR EACH ROW EXECUTE FUNCTION public.enforce_contractor_agreement_required();
-
 CREATE TRIGGER trg_sync_batch_qty_from_stock AFTER INSERT OR UPDATE OF quantity ON public.item_stock_locations FOR EACH ROW EXECUTE FUNCTION public.sync_batch_qty_from_stock();
-
 CREATE TRIGGER set_timestamp BEFORE UPDATE ON public.metadata FOR EACH ROW EXECUTE FUNCTION public.update_timestamp();
-
 CREATE TRIGGER trg_sales_channels_updated_at BEFORE UPDATE ON public.sales_channels FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
 CREATE TRIGGER trg_storefront_listings_updated_at BEFORE UPDATE ON public.storefront_listings FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
 CREATE TRIGGER trg_time_breaks_ai AFTER INSERT ON public.time_breaks FOR EACH ROW EXECUTE FUNCTION public.tr_time_breaks_ai();
-
 CREATE TRIGGER trg_time_breaks_au AFTER UPDATE ON public.time_breaks FOR EACH ROW EXECUTE FUNCTION public.tr_time_breaks_au();
-
 CREATE TRIGGER trg_time_entries_alert_ai AFTER INSERT ON public.time_entries FOR EACH ROW EXECUTE FUNCTION public.tr_time_entries_alert_ai();
-
 CREATE TRIGGER trg_time_entries_alert_au AFTER UPDATE ON public.time_entries FOR EACH ROW EXECUTE FUNCTION public.tr_time_entries_alert_au();
-
-
-  create policy "Admin Permission to upload 1w8qixh_0"
+create policy "Admin Permission to upload 1w8qixh_0"
   on "storage"."objects"
   as permissive
   for insert
   to public
 with check (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'public-ebay-photos'::text)));
-
-
-
-  create policy "Admin label upload dymo"
+create policy "Admin label upload dymo"
   on "storage"."objects"
   as permissive
   for insert
   to public
 with check (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'dymo-labels'::text)));
-
-
-
-  create policy "Admin label upload photos"
+create policy "Admin label upload photos"
   on "storage"."objects"
   as permissive
   for insert
   to public
 with check (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'photos'::text)));
-
-
-
-  create policy "Admin location-assets upload photos"
+create policy "Admin location-assets upload photos"
   on "storage"."objects"
   as permissive
   for insert
   to public
 with check (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'location-assets'::text)));
-
-
-
-  create policy "Deleting Items for Photos 1io9m69_0"
+create policy "Deleting Items for Photos 1io9m69_0"
   on "storage"."objects"
   as permissive
   for delete
   to public
 using (((((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text) = 'admin'::text) AND (bucket_id = 'photos'::text)));
-
-
-
-  create policy "Read labels via signed URL dymo"
+create policy "Read labels via signed URL dymo"
   on "storage"."objects"
   as permissive
   for select
   to public
 using (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'dymo-labels'::text)));
-
-
-
-  create policy "Read labels via signed URL photos"
+create policy "Read labels via signed URL photos"
   on "storage"."objects"
   as permissive
   for select
   to public
 using (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'photos'::text)));
-
-
-
-  create policy "Read location-assets via signed URL photos"
+create policy "Read location-assets via signed URL photos"
   on "storage"."objects"
   as permissive
   for select
   to public
 using (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'location-assets'::text)));
-
-
-
-  create policy "photos_admin_delete"
+create policy "photos_admin_delete"
   on "storage"."objects"
   as permissive
   for delete
@@ -7475,10 +5825,7 @@ using (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'a
 using (((bucket_id = 'timeclock-photos'::text) AND (EXISTS ( SELECT 1
    FROM public.employees me
   WHERE ((me.user_id = auth.uid()) AND (me.role = 'admin'::text))))));
-
-
-
-  create policy "photos_employee_insert"
+create policy "photos_employee_insert"
   on "storage"."objects"
   as permissive
   for insert
@@ -7486,10 +5833,7 @@ using (((bucket_id = 'timeclock-photos'::text) AND (EXISTS ( SELECT 1
 with check (((bucket_id = 'timeclock-photos'::text) AND (EXISTS ( SELECT 1
    FROM public.employees e
   WHERE ((e.user_id = auth.uid()) AND (split_part(objects.name, '/'::text, 1) = (e.id)::text))))));
-
-
-
-  create policy "photos_employee_read"
+create policy "photos_employee_read"
   on "storage"."objects"
   as permissive
   for select
@@ -7499,15 +5843,9 @@ using (((bucket_id = 'timeclock-photos'::text) AND ((EXISTS ( SELECT 1
   WHERE ((e.user_id = auth.uid()) AND (split_part(objects.name, '/'::text, 1) = (e.id)::text)))) OR (EXISTS ( SELECT 1
    FROM public.employees me
   WHERE ((me.user_id = auth.uid()) AND (me.role = 'admin'::text)))))));
-
-
-
-  create policy "select 1w8qixh_0"
+create policy "select 1w8qixh_0"
   on "storage"."objects"
   as permissive
   for select
   to public
 using (((( SELECT ((auth.jwt() -> 'user_metadata'::text) ->> 'role'::text)) = 'admin'::text) AND (bucket_id = 'public-ebay-photos'::text)));
-
-
-

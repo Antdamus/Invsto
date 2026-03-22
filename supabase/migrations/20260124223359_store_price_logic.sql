@@ -1,7 +1,6 @@
 alter table public.item_types
   add column if not exists metal text,
   add column if not exists purity_basis_points integer;
-
 create or replace function public.sync_metal_weight_g()
     returns trigger
     language plpgsql
@@ -22,13 +21,11 @@ create or replace function public.sync_metal_weight_g()
     return new;
     end;
 $$;
-
 -- Optional: if your existing it.weight is total piece weight, keep using it.
 -- If you want “metal-only weight” separate from stone weight, add this instead:
 alter table public.item_types
   add column if not exists metal_weight_g numeric;
-
-  create or replace function public.calc_display_price(
+create or replace function public.calc_display_price(
   p_pricing_mode text,
   p_fixed_price numeric,
   p_metal text,
@@ -61,19 +58,14 @@ as $$
   from public.metal_spot_prices sp
   where sp.metal = p_metal
 $$;
-
 -- 0) Drop the old RPC (must match the exact signature)
 drop function if exists public.rpc_storefront_catalog(text);
-
 -- 1) (If you want the trigger, you forgot to create it)
 drop trigger if exists trg_sync_metal_weight_g on public.item_types;
 create trigger trg_sync_metal_weight_g
 before insert or update on public.item_types
 for each row execute function public.sync_metal_weight_g();
-
--- Replace the function with a new return shape
-drop function if exists public.rpc_storefront_catalog(text);
-
+-- 2) Recreate the RPC with the new return shape + no qr_type
 create function public.rpc_storefront_catalog(p_channel_id text default 'og_main')
 returns table(
   channel_id text,
@@ -85,7 +77,6 @@ returns table(
   badge_flags text[],
   photo_keys text[],
   categories text[],
-  material text,          -- ✅ NEW (for your UI filters)
   weight_g numeric,
   stock_label text,
   remaining_count integer
@@ -100,36 +91,26 @@ with base as (
     l.channel_id,
     l.sort_rank,
     it.id as item_type_id,
-
     coalesce(nullif(l.public_title, ''), it.title) as title,
     coalesce(nullif(l.public_description, ''), it.description) as description,
-
     case
       when array_length(l.public_photo_keys, 1) is not null
        and array_length(l.public_photo_keys, 1) > 0
       then l.public_photo_keys
       else it.photos
     end as photo_keys,
-
     it.categories::text[] as categories,
-
-    it.metal as material,              -- ✅ Material for filter UI
-    it.metal_weight_g as weight_g,     -- uses your synced metal_weight_g
-
+    it.metal_weight_g as weight_g,
     case
       when coalesce(it.metal,'') <> '' and coalesce(it.metal_weight_g, 0) > 0 then 'metal_spot'
       else 'fixed'
     end as pricing_mode,
-
     it.metal,
     it.purity_basis_points,
-
     coalesce(l.labor_fee, 0) as labor_fee,
     coalesce(l.rounding_increment, 1) as rounding_increment,
-
     l.badge_flags,
     coalesce(s.qty, 0) as qty,
-
     it.sale_price as fixed_price
   from public.storefront_listings l
   join public.sales_channels c
@@ -178,7 +159,6 @@ select
   badge_flags,
   photo_keys,
   categories,
-  material,
   weight_g,
   case
     when qty <= 0 then 'Sold out'

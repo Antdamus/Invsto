@@ -36,7 +36,6 @@ begin
     end;
 end;
 $$;
-
 -- lock it down
 revoke all on function public.admin_upsert_user_phone(uuid, text, boolean) from public;
 grant execute on function public.admin_upsert_user_phone(uuid, text, boolean) to service_role;

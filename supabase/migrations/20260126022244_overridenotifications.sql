@@ -97,15 +97,12 @@ begin
   return new;
 end;
 $$;
-
 -- Attach trigger
 drop trigger if exists trg_wso_sms on public.work_schedule_overrides;
-
 create trigger trg_wso_sms
 after insert on public.work_schedule_overrides
 for each row
 execute function public.enqueue_work_schedule_override_sms();
-
 -- Prevent duplicate SMS for same override
 create unique index if not exists sms_outbox_unique_work_override
 on public.sms_outbox (
