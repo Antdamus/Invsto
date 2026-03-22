@@ -441,6 +441,7 @@ Phase 2 implementation note:
 
 - The iPhone app now treats `capture_stations` as a selection-only routing entity fetched from Supabase and persisted locally after login/session restore.
 - `capture_jobs` includes only the metadata needed for single-photo capture routing and storage-path-first completion, plus light file metadata (`file_size_bytes`, `mime_type`) for Phase 3 upload completion.
+- Phase 3A implementation note: the ready screen now uses a lean `capture_jobs` Realtime listener filtered by `station_id`, does an initial pending-job fetch to avoid missing pre-existing requests, and keeps job dedupe local in-app for now because employee-level RLS does not yet allow the capture client to persist lifecycle claims. Native capture uses `AVCaptureSession` plus `AVCapturePhotoOutput` with a small configurable stabilization delay and a DEBUG-only simulator trigger/fallback for manual validation before Phase 3B upload/state finalization.
 - RLS currently allows active employees to read stations/jobs, while write access is limited to active admins/managers. Device heartbeat and job lifecycle mutation paths are intentionally deferred until Phase 3 so the app does not rely on premature write rules or RPCs.
 
 ### Step 6. Implement ready/listening experience
