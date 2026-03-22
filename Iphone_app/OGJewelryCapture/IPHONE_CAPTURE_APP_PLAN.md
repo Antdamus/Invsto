@@ -471,6 +471,10 @@ Phase 2 implementation note:
 - mark completed or failed
 - verify state transitions from both app and database side
 
+Phase 3B implementation note:
+- Use a dedicated `capture-photos` bucket with object keys shaped like `{station_id}/{job_id}/{captured_at_utc}-capture.jpg`.
+- Keep employee clients on read-only table access and use a constrained lifecycle RPC for `capturing -> uploading -> completed|failed` so claim/start is atomic enough for this phase without opening broad direct writes.
+
 ### Step 10. Add basic operational UX hardening
 
 - offline/reconnect handling

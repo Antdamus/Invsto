@@ -47,28 +47,45 @@ struct ReadyView: View {
                 }
             }
 
-            if let latestResult = viewModel.latestResult {
-                Section("Latest Capture") {
-                    if let image = latestResult.previewImage {
+            if let latestUploadResult = viewModel.latestUploadResult {
+                Section("Latest Result") {
+                    if let image = latestUploadResult.previewImage {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
 
-                    LabeledContent("Job", value: String(latestResult.jobID.uuidString.prefix(8)).uppercased())
-                    LabeledContent("Captured", value: latestResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                    LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestResult.fileSizeBytes), countStyle: .file))
+                    LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
+                    LabeledContent("Captured", value: latestUploadResult.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    LabeledContent("Uploaded", value: latestUploadResult.uploadedAt.formatted(date: .abbreviated, time: .standard))
+                    LabeledContent("Bucket", value: latestUploadResult.storageBucket)
+                    LabeledContent("Path", value: latestUploadResult.storagePathSummary)
+                    LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestUploadResult.fileSizeBytes, countStyle: .file))
+                    LabeledContent("Type", value: latestUploadResult.mimeType)
 
-                    if latestResult.isSimulatorFallback {
+                    if latestUploadResult.isSimulatorFallback {
                         Text("Captured using the simulator fallback path.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
+            } else if let latestLocalResult = viewModel.latestLocalResult {
+                Section("Latest Capture") {
+                    if let image = latestLocalResult.previewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                    }
+
+                    LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
+                    LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
+                    LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
+                }
             }
 
-            if case let .captureFailed(jobID, message) = viewModel.captureState {
+            if case let .failed(jobID, message) = viewModel.captureState {
                 Section("Capture Error") {
                     if let jobID {
                         LabeledContent("Job", value: String(jobID.uuidString.prefix(8)).uppercased())
@@ -121,7 +138,7 @@ struct ReadyView: View {
         switch viewModel.captureState {
         case .captureRequested, .capturing:
             true
-        case .idle, .listening, .captureComplete, .captureFailed:
+        case .idle, .listening, .uploading, .completed, .failed:
             false
         }
     }

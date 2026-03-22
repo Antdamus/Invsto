@@ -9,8 +9,9 @@ final class ReadyViewModel: ObservableObject {
         case listening
         case captureRequested(CaptureJob)
         case capturing(CaptureJob)
-        case captureComplete(LocalCaptureResult)
-        case captureFailed(jobID: UUID?, message: String)
+        case uploading(CaptureJob)
+        case completed(CaptureUploadResult)
+        case failed(jobID: UUID?, message: String)
 
         var label: String {
             switch self {
@@ -22,10 +23,12 @@ final class ReadyViewModel: ObservableObject {
                 "Capture requested"
             case .capturing:
                 "Capturing"
-            case .captureComplete:
-                "Capture complete"
-            case .captureFailed:
-                "Capture failed"
+            case .uploading:
+                "Uploading"
+            case .completed:
+                "Completed"
+            case .failed:
+                "Failed"
             }
         }
     }
@@ -33,7 +36,8 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var listenerState: CaptureListenerState = .idle
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var cameraAvailability: CameraAvailability = .unknown
-    @Published private(set) var latestResult: LocalCaptureResult?
+    @Published private(set) var latestLocalResult: LocalCaptureResult?
+    @Published private(set) var latestUploadResult: CaptureUploadResult?
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -41,6 +45,7 @@ final class ReadyViewModel: ObservableObject {
     private let repository: CaptureJobRepository
     private let listener: CaptureJobListener
     private let cameraService: CameraCaptureService
+    private let uploadService: CapturePhotoUploadService
     private let stabilizationDelay: TimeInterval
 
     private var handledJobIDs = Set<UUID>()
@@ -53,6 +58,7 @@ final class ReadyViewModel: ObservableObject {
         repository: CaptureJobRepository = CaptureJobRepository(),
         listener: CaptureJobListener = CaptureJobListener(),
         cameraService: CameraCaptureService = CameraCaptureService(),
+        uploadService: CapturePhotoUploadService = CapturePhotoUploadService(),
         stabilizationDelay: TimeInterval = 1.2
     ) {
         self.employee = employee
@@ -60,6 +66,7 @@ final class ReadyViewModel: ObservableObject {
         self.repository = repository
         self.listener = listener
         self.cameraService = cameraService
+        self.uploadService = uploadService
         self.stabilizationDelay = stabilizationDelay
     }
 
@@ -125,29 +132,15 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func simulateCaptureRequest() async {
-        let job = CaptureJob(
-            id: UUID(),
-            requestedBy: employee.employeeID,
-            stationID: station.id,
-            status: .queued,
-            requestedAt: Date(),
-            claimedAt: nil,
-            captureStartedAt: nil,
-            captureCompletedAt: nil,
-            uploadCompletedAt: nil,
-            storageBucket: nil,
-            storagePath: nil,
-            fileSizeBytes: nil,
-            mimeType: nil,
-            failureCode: nil,
-            failureMessage: nil,
-            controlPayload: nil,
-            resultPayload: nil,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
+        guard activeJobID == nil else { return }
 
-        await handleIncomingJob(job)
+        do {
+            if let job = try await repository.fetchNextPendingJob(for: station.id) {
+                await handleIncomingJob(job)
+            }
+        } catch {
+            captureState = .failed(jobID: nil, message: error.localizedDescription)
+        }
     }
 
     private func handleIncomingJob(_ job: CaptureJob) async {
@@ -159,7 +152,19 @@ final class ReadyViewModel: ObservableObject {
         activeJobID = job.id
         captureState = .captureRequested(job)
 
-        await performCapture(for: job)
+        do {
+            let claimed = try await repository.claimJobForCapture(id: job.id)
+            guard claimed else {
+                captureState = .listening
+                activeJobID = nil
+                return
+            }
+
+            await performCapture(for: job)
+        } catch {
+            captureState = .failed(jobID: job.id, message: error.localizedDescription)
+            activeJobID = nil
+        }
     }
 
     private func performCapture(for job: CaptureJob) async {
@@ -177,13 +182,58 @@ final class ReadyViewModel: ObservableObject {
                 for: job.id,
                 stabilizationDelay: stabilizationDelay
             )
-            handledJobIDs.insert(job.id)
-            latestResult = result
-            captureState = .captureComplete(result)
+            latestLocalResult = result
+            try await uploadCaptureResult(result, for: job)
         } catch {
-            captureState = .captureFailed(jobID: job.id, message: error.localizedDescription)
+            await failJob(jobID: job.id, code: "capture_failed", message: error.localizedDescription)
         }
 
         activeJobID = nil
+    }
+
+    private func uploadCaptureResult(_ result: LocalCaptureResult, for job: CaptureJob) async throws {
+        let markedUploading = try await repository.markUploading(id: job.id, captureCompletedAt: result.capturedAt)
+        guard markedUploading else {
+            throw CaptureJobRepository.RepositoryError.transitionRejected
+        }
+
+        captureState = .uploading(job)
+
+        do {
+            let upload = try await uploadService.uploadCapture(result, stationID: station.id)
+            let markedCompleted = try await repository.markCompleted(id: job.id, uploadResult: upload)
+
+            guard markedCompleted else {
+                throw CaptureJobRepository.RepositoryError.transitionRejected
+            }
+
+            handledJobIDs.insert(job.id)
+            let completedResult = CaptureUploadResult(
+                jobID: job.id,
+                capturedAt: result.capturedAt,
+                uploadedAt: upload.uploadedAt,
+                imageData: result.imageData,
+                isSimulatorFallback: result.isSimulatorFallback,
+                storageBucket: upload.bucket,
+                storagePath: upload.path,
+                fileSizeBytes: upload.fileSizeBytes,
+                mimeType: upload.mimeType
+            )
+            latestUploadResult = completedResult
+            captureState = .completed(completedResult)
+        } catch {
+            await failJob(jobID: job.id, code: "upload_failed", message: error.localizedDescription)
+        }
+    }
+
+    private func failJob(jobID: UUID, code: String, message: String) async {
+        do {
+            _ = try await repository.markFailed(id: jobID, code: code, message: message)
+        } catch {
+            captureState = .failed(jobID: jobID, message: error.localizedDescription)
+            return
+        }
+
+        captureState = .failed(jobID: jobID, message: message)
     }
 }
