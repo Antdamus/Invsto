@@ -37,6 +37,7 @@ temp/
 
 # Supabase local state
 .supabase/
+supabase/.temp/
 
 # Xcode user-specific files
 xcuserdata/
