@@ -2124,18 +2124,32 @@ body.is-ready .reveal-section.is-visible {
 }
 
 @media (min-width: 961px) {
+  .testimonial-shell {
+    width: min(1180px, calc(100vw - 120px));
+  }
+
+  .testimonial-head {
+    width: min(980px, 100%);
+    margin-inline: auto;
+  }
+
   .testimonial-stage {
-    width: min(1380px, calc(100vw - 96px));
+    width: min(980px, 100%);
     grid-template-columns: 1fr;
     justify-items: center;
     row-gap: 0;
     min-height: 0;
+    margin-inline: auto;
   }
 
   .testimonial-strip {
-    grid-template-columns: minmax(300px, 360px) minmax(320px, 520px);
-    gap: clamp(30px, 4vw, 68px);
+    width: fit-content;
+    max-width: 100%;
+    grid-template-columns: minmax(300px, 360px) minmax(320px, 460px);
+    gap: clamp(28px, 3.5vw, 54px);
     min-height: 440px;
+    justify-content: center;
+    margin-inline: auto;
   }
 
   .testimonial-feature-media {
@@ -2144,7 +2158,13 @@ body.is-ready .reveal-section.is-visible {
   }
 
   .testimonial-copy-panel {
-    max-width: 520px;
+    max-width: 460px;
+  }
+
+  .testimonial-footer,
+  .testimonial-status {
+    width: min(980px, 100%);
+    margin-inline: auto;
   }
 }
 

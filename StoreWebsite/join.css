@@ -187,6 +187,7 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  justify-content: center;
 }
 
 .join-trust span {
@@ -578,6 +579,8 @@ body.modal-open {
 
   .join-copy {
     padding-bottom: 8px;
+    margin: 0 auto;
+    text-align: center;
   }
 
   .benefits-grid,

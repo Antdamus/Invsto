@@ -29,12 +29,13 @@
       <div class="og-footer-inner">
         <div class="og-footer-block">
           <a class="og-footer-brand" href="${base}/index.html" aria-label="OG Jewelers home">
-            <span class="og-footer-brand-mark">
-              <img src="${base}/OG_Logo.png" alt="OG Jewelers" loading="lazy" decoding="async" />
-            </span>
-            <span class="og-footer-brand-copy">
+            <span class="og-footer-brand-row">
+              <span class="og-footer-brand-mark">
+                <img src="${base}/OG_Logo.png" alt="OG Jewelers" loading="lazy" decoding="async" />
+              </span>
               <span class="og-footer-brand-name">OG Jewelers</span>
             </span>
+            <span class="og-footer-brand-note">Fine Jewelry. Timeless Value. Crafted with Intention.</span>
           </a>
         </div>
 

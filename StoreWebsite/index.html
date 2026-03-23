@@ -13,6 +13,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preload" as="image" href="OG_Logo.png" />
   <link
     href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
     rel="stylesheet"
@@ -21,6 +22,36 @@
   <link rel="stylesheet" href="index.css" />
   <link rel="stylesheet" href="og.header.css" />
   <link rel="stylesheet" href="og.footer.css" />
+  <style>
+    #ogHeaderMount {
+      position: relative;
+      z-index: 80;
+      min-height: 74px;
+    }
+
+    #ogHeaderMount .og-home-header-center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 74px;
+    }
+
+    #ogHeaderMount .og-home-brand {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: clamp(92px, 11vw, 132px);
+      min-width: 92px;
+      line-height: 0;
+    }
+
+    #ogHeaderMount .og-home-brand-logo {
+      display: block;
+      width: 100%;
+      max-width: 132px;
+      height: auto;
+    }
+  </style>
 
   <script src="og.header.js" defer></script>
   <script src="og.footer.js" defer></script>
