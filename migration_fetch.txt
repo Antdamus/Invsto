@@ -1,7 +1,0 @@
-ro2093@RAFAELs-MacBook-Air Invsto % ./node_modules/.bin/supabase migration fetch
-Initialising login role...
-Do you want to overwrite existing files in supabase/migrations directory? [Y/n] Y
-Connecting to remote database...
-A new version of Supabase CLI is available: v2.78.1 (currently installed v2.72.8)
-We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
-ro2093@RAFAELs-MacBook-Air Invsto % 
