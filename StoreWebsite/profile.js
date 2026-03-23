@@ -31,6 +31,7 @@
   const savePrefsBtn = $("#savePrefsBtn");
 
   const signOutBtn = $("#signOutBtn");
+  const inlineSignOutBtn = $('[data-action="profile-signout"]');
 
   const vipLearnBtn = $("#vipLearnBtn");
   const vipOpenBtn = $("#vipOpenBtn");
@@ -279,6 +280,7 @@
     vipOpenBtn?.addEventListener("click", () => showVipModal());
 
     signOutBtn?.addEventListener("click", onSignOut);
+    inlineSignOutBtn?.addEventListener("click", onSignOut);
 
     const sb = await waitForSupabaseReady();
     if (!sb) {

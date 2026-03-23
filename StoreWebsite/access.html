@@ -14,8 +14,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet" />
 
+  <link rel="stylesheet" href="og.header.css" />
+  <link rel="stylesheet" href="og.footer.css" />
   <!-- Page CSS -->
   <link rel="stylesheet" href="access.css" />
+
+  <script src="og.header.js" defer></script>
+  <script src="og.footer.js" defer></script>
 </head>
 
 <body>
@@ -25,8 +30,8 @@
     <div class="bg-glow"></div>
   </div>
 
-  <!-- Top brand bar -->
-  <header class="topbar">
+  <div id="ogHeaderMount"></div>
+  <header class="topbar" hidden>
     <a class="brand" href="index.html" aria-label="OG Jewelers Home">
       <span class="brand-mark">OG</span>
       <span class="brand-name">OG Jewelers</span>
@@ -37,7 +42,7 @@
     </div>
   </header>
 
-  <main class="wrap">
+  <main id="main" class="wrap">
     <section class="card" aria-labelledby="accessTitle">
       <div class="hero">
         <div class="kicker">Member Access</div>

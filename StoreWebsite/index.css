@@ -1862,11 +1862,21 @@ body.is-ready .reveal-section.is-visible {
 
   .hero-actions {
     flex-direction: column;
-    align-items: start;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
   }
 
   .primary-cta {
     width: 100%;
+  }
+
+  .hero-actions .secondary-link {
+    display: inline-flex;
+    justify-content: center;
+    align-self: center;
+    margin-inline: auto;
+    text-align: center;
   }
 
   .testimonial-shell,
@@ -1878,9 +1888,11 @@ body.is-ready .reveal-section.is-visible {
   }
 
   .hero-bottom-bar {
+    justify-content: center;
     gap: 10px 18px;
     padding-inline: 0;
     font-size: 0.68rem;
+    text-align: center;
   }
 
   .trust-proof,
@@ -2137,18 +2149,38 @@ body.is-ready .reveal-section.is-visible {
 }
 
 @media (max-width: 960px) {
+  .trust-proof {
+    width: 100%;
+    margin: 0;
+    padding-inline: 0;
+  }
+
+  .trust-shell {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    justify-items: center;
+  }
+
   .testimonial-shell {
-    padding-top: clamp(18px, 5vw, 28px);
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(18px, 5vw, 28px) 14px 0;
+    box-sizing: border-box;
   }
 
   .testimonial-head {
+    width: 100%;
+    max-width: 30rem;
+    margin-inline: auto;
     justify-items: center;
     text-align: center;
     margin-bottom: clamp(24px, 6vw, 34px);
   }
 
   .testimonial-stage {
-    width: min(calc(100vw - 28px), 640px);
+    width: 100%;
     grid-template-columns: 1fr;
     justify-items: center;
     gap: 0;
@@ -2161,6 +2193,7 @@ body.is-ready .reveal-section.is-visible {
     min-height: 0;
     width: 100%;
     justify-items: center;
+    align-items: center;
   }
 
   .testimonial-feature-media {
@@ -2168,37 +2201,55 @@ body.is-ready .reveal-section.is-visible {
     height: clamp(240px, 58vw, 320px);
     margin: 0 auto;
     justify-self: center;
+    align-self: center;
   }
 
   .testimonial-copy-panel {
     width: 100%;
-    max-width: 32rem;
+    max-width: 34rem;
     margin: 0 auto;
     justify-items: center;
     text-align: center;
     padding: 0;
-    gap: 12px;
+    gap: 0.72rem;
+    align-content: start;
   }
 
   .testimonial-rating,
   .testimonial-source,
   .testimonial-item {
     justify-self: center;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .testimonial-quote {
-    font-size: clamp(1.55rem, 6vw, 2.2rem);
-    line-height: 1.04;
-    max-width: 12ch;
+    font-size: clamp(1.7rem, 6.1vw, 2.28rem);
+    line-height: 1.06;
+    max-width: 15.5ch;
     margin: 0 auto;
     text-align: center;
+    position: relative;
+    padding-top: 1.4rem;
+  }
+
+  .testimonial-quote::before {
+    content: "\201C";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(244, 237, 225, 0.72);
+    font-size: 1.45rem;
+    line-height: 1;
   }
 
   .testimonial-note {
-    max-width: 30ch;
+    max-width: 34ch;
     margin: 0 auto;
     text-align: center;
-    font-size: 0.94rem;
+    font-size: 0.95rem;
+    line-height: 1.64;
   }
 
   .testimonial-item {
@@ -2223,5 +2274,86 @@ body.is-ready .reveal-section.is-visible {
 
   .testimonial-status {
     text-align: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .trust-shell {
+    gap: 22px;
+  }
+
+  .testimonial-shell {
+    width: 100%;
+    max-width: 380px;
+    padding-inline: 14px;
+  }
+
+  .testimonial-head {
+    margin-bottom: 1.4rem;
+  }
+
+  .testimonial-title {
+    max-width: 11ch;
+    margin-inline: auto;
+    font-size: clamp(1.95rem, 9vw, 2.55rem);
+  }
+
+  .testimonial-stage {
+    width: 100%;
+  }
+
+  .testimonial-strip {
+    gap: 1rem;
+  }
+
+  .testimonial-feature-media {
+    width: min(100%, 286px);
+    height: clamp(230px, 66vw, 286px);
+  }
+
+  .testimonial-copy-panel {
+    max-width: 20.5rem;
+    gap: 0.68rem;
+  }
+
+  .testimonial-rating {
+    margin-bottom: 0.1rem;
+  }
+
+  .testimonial-quote {
+    font-size: clamp(1.7rem, 8.2vw, 2.15rem);
+    line-height: 1.05;
+    max-width: 15ch;
+    padding-top: 1.2rem;
+  }
+
+  .testimonial-quote::before {
+    font-size: 1.3rem;
+  }
+
+  .testimonial-source {
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+  }
+
+  .testimonial-note {
+    max-width: 28ch;
+    font-size: 0.92rem;
+    line-height: 1.62;
+  }
+
+  .testimonial-item {
+    font-size: 0.68rem;
+    letter-spacing: 0.11em;
+  }
+
+  .testimonial-controls-row {
+    margin-top: 12px;
+  }
+
+  .testimonial-status {
+    width: 100%;
+    max-width: 22rem;
+    margin-inline: auto;
   }
 }

@@ -15,7 +15,12 @@
     rel="stylesheet"
   />
 
+  <link rel="stylesheet" href="og.header.css" />
+  <link rel="stylesheet" href="og.footer.css" />
   <link rel="stylesheet" href="profile.css" />
+
+  <script src="og.header.js" defer></script>
+  <script src="og.footer.js" defer></script>
 </head>
 
 <body class="profile-page">
@@ -24,7 +29,8 @@
     <div class="bg-glow"></div>
   </div>
 
-  <header class="topbar">
+  <div id="ogHeaderMount"></div>
+  <header class="topbar" hidden>
     <div class="masthead-shell">
       <a class="brand" href="index.html" aria-label="OG Jewelers Home">
         <span class="brand-mark">
@@ -49,7 +55,7 @@
     </div>
   </header>
 
-  <main class="wrap">
+  <main id="main" class="wrap">
     <section class="card" aria-labelledby="profileTitle">
       <div class="hero">
         <p class="hero-kicker">OG Member Lounge</p>
@@ -57,6 +63,9 @@
         <p class="subtitle" id="profileSubtitle">
           Loading your membership...
         </p>
+        <div class="hero-actions">
+          <button class="btn small ghost" type="button" data-action="profile-signout">Sign out</button>
+        </div>
       </div>
 
       <div class="grid">

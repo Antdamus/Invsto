@@ -177,7 +177,7 @@
 
     testimonialCopyPanel.innerHTML = `
       <span class="testimonial-rating">5-star feedback</span>
-      <p class="testimonial-quote">"${ebayEsc(active.quote)}"</p>
+      <p class="testimonial-quote">${ebayEsc(active.quote)}</p>
       <span class="testimonial-source">${ebayEsc(active.source)}</span>
       <div class="testimonial-note">${ebayEsc(active.note)}</div>
       <span class="testimonial-item">${ebayEsc(active.itemTitle)}</span>
