@@ -22,43 +22,13 @@
   <link rel="stylesheet" href="index.css" />
   <link rel="stylesheet" href="og.header.css?v=f60264c" />
   <link rel="stylesheet" href="og.footer.css" />
-  <style>
-    #ogHeaderMount {
-      position: relative;
-      z-index: 80;
-      min-height: 74px;
-    }
-
-    #ogHeaderMount .og-home-header-center {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 74px;
-    }
-
-    #ogHeaderMount .og-home-brand {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: clamp(92px, 11vw, 132px);
-      min-width: 92px;
-      line-height: 0;
-    }
-
-    #ogHeaderMount .og-home-brand-logo {
-      display: block;
-      width: 100%;
-      max-width: 132px;
-      height: auto;
-    }
-  </style>
 
   <script src="og.header.js?v=f60264c" defer></script>
   <script src="og.footer.js" defer></script>
   <script src="index.js" defer></script>
 </head>
 
-<body class="prelaunch-page">
+<body class="prelaunch-page" data-header-variant="home">
   <div class="page-atmosphere" aria-hidden="true">
     <div class="page-grain"></div>
     <div class="page-vignette"></div>

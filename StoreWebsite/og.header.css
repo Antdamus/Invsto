@@ -789,6 +789,13 @@ html.lock, body.lock{
   align-items: center;
 }
 
+.og-home-header-center{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--header-h);
+}
+
 .og-home-header-side{
   display: flex;
   align-items: center;
@@ -803,6 +810,9 @@ html.lock, body.lock{
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: clamp(92px, 11vw, 132px);
+  min-width: 92px;
+  line-height: 0;
   padding: 0;
   background: transparent;
   border: 0;
@@ -811,7 +821,8 @@ html.lock, body.lock{
 }
 
 .og-home-brand-logo{
-  width: clamp(92px, 11vw, 132px);
+  width: 100%;
+  max-width: 132px;
   height: auto;
   display: block;
   filter: brightness(1.04) contrast(1.02) drop-shadow(0 10px 24px rgba(0, 0, 0, 0.22));

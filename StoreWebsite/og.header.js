@@ -40,7 +40,6 @@
               class="og-home-brand"
               href="${base}/index.html"
               aria-label="OG Jewelers home"
-              style="display:inline-flex;align-items:center;justify-content:center;width:clamp(92px,11vw,132px);min-width:92px;line-height:0;"
             >
               <img
                 src="${base}/OG_Logo.png"
@@ -50,7 +49,6 @@
                 height="132"
                 fetchpriority="high"
                 decoding="async"
-                style="display:block;width:100%;height:auto;max-width:132px;"
               />
             </a>
           </div>
