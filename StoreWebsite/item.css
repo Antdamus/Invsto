@@ -71,64 +71,6 @@ body{
    ========================================================= */
 
 /* ✅ Make header match PDP width so OG Jewelers aligns with hero left edge */
-.site-header .container{
-  width: min(1560px, 96vw);
-}
-
-/* Mobile menu button should not exist on desktop when nav links are visible */
-@media (min-width: 901px){
-  .og-header .og-navtoggle{ display:none !important; }
-}
-
-/* Tighten header actions vertical alignment on PDP */
-.og-header .header-inner{
-  align-items: center;
-}
-
-/* Luxe icon buttons (search + cart) */
-.og-header .icon-btn{
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(18,19,22,0.34);
-  color: rgba(227, 200, 120, 0.96);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  transition: transform var(--dur) var(--ease),
-              border-color var(--dur) var(--ease),
-              background var(--dur) var(--ease),
-              box-shadow var(--dur) var(--ease);
-}
-.og-header .icon-btn:hover{
-  transform: translateY(-1px);
-  border-color: rgba(227, 200, 120, 0.28);
-  background: rgba(200, 162, 74, 0.14);
-  box-shadow: 0 14px 44px rgba(0,0,0,0.45);
-}
-.og-header .icon-btn:active{ transform: translateY(0px) scale(0.98); }
-.og-header .icon-btn:focus-visible{
-  outline: none;
-  box-shadow:
-    0 0 0 3px rgba(200, 162, 74, 0.22),
-    0 18px 58px rgba(0,0,0,0.55);
-}
-
-/* If your icons are inline SVGs with class="ico" */
-.og-header .icon-btn .ico{
-  width: 20px;
-  height: 20px;
-  stroke: rgba(227, 200, 120, 0.96);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  opacity: 0.98;
-}
-
 /* =========================
    Error + Skeleton
 ========================= */
@@ -1039,50 +981,6 @@ body{
 /* =========================================================
    Header compatibility tweaks (kept)
    ========================================================= */
-.site-header{
-  background: rgba(7, 7, 8, 0.72);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.site-header .acct-menu{
-  background: rgba(10, 10, 12, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 14px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 18px 55px rgba(0,0,0,0.55);
-  overflow: hidden;
-}
-
-.site-header .acct-menu .acct-menu-item{
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: transparent;
-  border: 0;
-  color: rgba(244, 241, 234, 0.92);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.site-header .acct-menu .acct-menu-item:hover{
-  background: rgba(200, 162, 74, 0.12);
-  color: rgba(227, 200, 120, 0.98);
-}
-
-.site-header .acct-menu .acct-menu-item.danger{
-  color: rgba(255, 190, 190, 0.98);
-}
-.site-header .acct-menu .acct-menu-item.danger:hover{
-  background: rgba(255, 95, 95, 0.12);
-  color: rgba(255, 210, 210, 0.98);
-}
-
 /* =========================================================
    Search Overlay (Luxe)
    - Opens from header search icon
