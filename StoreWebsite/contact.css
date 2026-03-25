@@ -3,9 +3,9 @@
   --contact-panel: rgba(12, 12, 14, 0.62);
   --contact-panel-strong: rgba(14, 14, 16, 0.82);
   --contact-text: rgba(244, 239, 229, 0.94);
-  --contact-muted: rgba(244, 239, 229, 0.7);
-  --contact-gold: rgba(208, 169, 99, 0.95);
-  --contact-gold-soft: rgba(208, 169, 99, 0.16);
+  --contact-muted: rgba(12, 12, 14, 0.62);
+  --contact-gold: rgba(12, 12, 14, 0.62);
+  --contact-gold-soft: rgba(12, 12, 14, 0.62);
   --contact-border: rgba(244, 239, 229, 0.1);
   --contact-shadow: 0 30px 90px rgba(0, 0, 0, 0.36);
   --contact-serif: "Cormorant Garamond", serif;
@@ -114,7 +114,7 @@ select {
 .page-aura-left {
   top: -14rem;
   left: -13rem;
-  background: radial-gradient(circle, rgba(208, 169, 99, 0.74) 0%, transparent 58%);
+  background: radial-gradient(circle, rgba(208, 169, 99, 0.74) 0%, transparent 100%);
 }
 
 .page-aura-right {
