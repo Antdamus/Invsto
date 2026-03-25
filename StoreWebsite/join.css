@@ -98,29 +98,6 @@ select {
   background: radial-gradient(circle, rgba(244,237,225,0.28) 0%, transparent 54%);
 }
 
-.join-topbar {
-  width: min(1240px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 24px 0 8px;
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
-}
-
-.join-brand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-}
-
-.join-brand-logo {
-  width: clamp(92px, 10vw, 122px);
-  height: auto;
-  display: block;
-  filter: brightness(1.04) contrast(1.02) drop-shadow(0 10px 24px rgba(0, 0, 0, 0.22));
-}
-
 .join-shell {
   width: min(1240px, calc(100vw - 32px));
   margin: 0 auto;
@@ -594,13 +571,8 @@ body.modal-open {
 }
 
 @media (max-width: 640px) {
-  .join-topbar,
   .join-shell {
     width: calc(100vw - 28px);
-  }
-
-  .join-topbar {
-    padding-top: 18px;
   }
 
   .join-panel {

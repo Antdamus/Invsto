@@ -44,12 +44,6 @@ body {
   overflow-x: hidden;
 }
 
-#ogHeaderMount {
-  position: relative;
-  z-index: 80;
-  min-height: 74px;
-}
-
 a {
   color: inherit;
   text-decoration: none;

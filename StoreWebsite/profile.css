@@ -77,82 +77,6 @@ a:hover {
   opacity: 0.9;
 }
 
-.topbar {
-  position: relative;
-  z-index: 2;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 20px 18px 8px;
-}
-
-.masthead-shell {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 16px 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
-    rgba(10, 10, 12, 0.42);
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.26);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.brand:hover {
-  text-decoration: none;
-}
-
-.brand-mark {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  border-radius: 14px;
-  overflow: hidden;
-  display: grid;
-  place-items: center;
-  background: #080808;
-  border: 1px solid rgba(200, 162, 74, 0.24);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  position: relative;
-}
-
-.brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 42%),
-    radial-gradient(circle at 30% 20%, rgba(227, 200, 120, 0.1), transparent 58%);
-  opacity: 0.9;
-}
-
-.brand-logo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  position: relative;
-  z-index: 1;
-}
-
-.brand-copy {
-  display: grid;
-  gap: 2px;
-}
-
-.brand-kicker,
 .hero-kicker,
 .panel-kicker,
 .vip-kicker {
@@ -162,25 +86,12 @@ a:hover {
   text-transform: uppercase;
 }
 
-.brand-name,
 .title,
 .panel-title,
 .modal-head h2 {
   font-family: var(--serif);
   font-weight: 600;
   letter-spacing: 0.01em;
-}
-
-.brand-name {
-  font-size: 1.55rem;
-  line-height: 1;
-  color: rgba(244, 241, 234, 0.96);
-}
-
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .pill,
@@ -593,12 +504,6 @@ body.modal-open {
 }
 
 @media (max-width: 760px) {
-  .masthead-shell,
-  .topbar-right {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
   .panel-head {
     flex-direction: column;
   }
