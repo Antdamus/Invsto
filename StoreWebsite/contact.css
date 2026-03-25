@@ -375,6 +375,10 @@ select {
     background: #000;
   }
 
+  .contact-hero {
+    background: #000;
+  }
+
   .contact-page .page-vignette {
     background:
       radial-gradient(circle at center, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.74) 68%, #000 100%);
