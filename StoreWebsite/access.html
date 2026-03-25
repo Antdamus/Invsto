@@ -1,4 +1,4 @@
-<!-- access.html — OG Jewelers (Member Access) -->
+<!-- access.html - OG Jewelers (Member Access) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,136 +6,148 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
 
-  <title>OG Jewelers — Member Access</title>
+  <title>OG Jewelers - Member Access</title>
   <meta name="description" content="Secure member access for OG Jewelers. Sign in with a magic link." />
 
-  <!-- Fonts (match your luxury system) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
 
   <link rel="stylesheet" href="og.header.css" />
   <link rel="stylesheet" href="og.footer.css" />
-  <!-- Page CSS -->
   <link rel="stylesheet" href="access.css" />
 
   <script src="og.header.js" defer></script>
   <script src="og.footer.js" defer></script>
 </head>
 
-<body>
-  <!-- Ambient background -->
-  <div class="bg">
+<body class="access-page" data-header-variant="home">
+  <div class="bg" aria-hidden="true">
     <div class="bg-noise"></div>
     <div class="bg-glow"></div>
+    <div class="bg-vignette"></div>
   </div>
 
   <div id="ogHeaderMount"></div>
-  <header class="topbar" hidden>
-    <a class="brand" href="index.html" aria-label="OG Jewelers Home">
-      <span class="brand-mark">OG</span>
-      <span class="brand-name">OG Jewelers</span>
-    </a>
-
-    <div class="topbar-right">
-      <span class="pill" id="sourcePill" title="Access source">source: —</span>
-    </div>
-  </header>
+  <div id="ogFooterMount" hidden aria-hidden="true"></div>
 
   <main id="main" class="wrap">
-    <section class="card" aria-labelledby="accessTitle">
+    <section class="card access-card" aria-labelledby="accessTitle">
       <div class="hero">
-        <div class="kicker">Member Access</div>
-        <h1 id="accessTitle" class="title">Enter Your Private Profile</h1>
-        <p class="subtitle" id="subtitleText">
-          Secure sign-in with a one-time link. No passwords. No friction.
-        </p>
+        <div class="hero-shell">
+          <div class="hero-copy">
+            <p class="hero-kicker">Member Access</p>
+            <h1 id="accessTitle" class="title">Enter Your Private Profile</h1>
+            <p class="subtitle" id="subtitleText">
+              Secure sign-in with a one-time link. No passwords. No friction.
+            </p>
+          </div>
 
-        <div class="trust">
+          <div class="hero-meta">
+            <span class="pill" id="sourcePill" title="Access source">source: -</span>
+          </div>
+        </div>
+
+        <div class="trust" aria-label="Access benefits">
           <span class="trust-item">Secure link</span>
-          <span class="dot"></span>
+          <span class="dot" aria-hidden="true"></span>
           <span class="trust-item">No passwords</span>
-          <span class="dot"></span>
+          <span class="dot" aria-hidden="true"></span>
           <span class="trust-item">Takes 10 seconds</span>
         </div>
       </div>
 
-      <!-- Form -->
-      <form id="accessForm" class="form" autocomplete="on" novalidate>
-        <!-- Context (so profile can understand where they came from if needed) -->
-        <input type="hidden" id="src" name="src" value="" />
-        <input type="hidden" id="campaign" name="campaign" value="" />
+      <div class="access-grid">
+        <form id="accessForm" class="form" autocomplete="on" novalidate>
+          <input type="hidden" id="src" name="src" value="" />
+          <input type="hidden" id="campaign" name="campaign" value="" />
 
-        <div class="field">
-          <label for="email">Email <span class="req">*</span></label>
-          <input id="email" name="email" type="email" placeholder="you@email.com" autocomplete="email" inputmode="email" required />
-          <div class="hint">We’ll send a secure sign-in link to this email.</div>
-          <div class="access-disclaimer" role="note" aria-label="Email notice">
-  <span class="access-disclaimer-strong">By continuing, you’ll receive a one-time email to sign in.</span>
-  <span class="access-disclaimer-muted">Marketing emails require separate opt-in.</span>
-</div>
-
-        </div>
-
-        <button id="submitBtn" class="btn primary" type="submit">
-          <span class="btn-text">Send Sign-In Link</span>
-          <span class="btn-spinner" aria-hidden="true"></span>
-        </button>
-
-        <div id="status" class="status" role="status" aria-live="polite"></div>
-
-        <div class="alt">
-          <span class="alt-text">New here?</span>
-          <a class="alt-link" href="join.html">Join OG alerts + early access</a>
-        </div>
-      </form>
-
-      <!-- Divider -->
-      <div class="divider"><span>What you’ll see inside</span></div>
-
-      <div class="next">
-        <div class="next-item">
-          <div class="icon">🪪</div>
-          <div class="next-text">
-            <div class="next-title">Your profile</div>
-            <div class="next-sub">Update your name and preferences.</div>
+          <div class="field">
+            <label for="email">Email <span class="req">*</span></label>
+            <input id="email" name="email" type="email" placeholder="you@email.com" autocomplete="email" inputmode="email" required />
+            <div class="hint">We'll send a secure sign-in link to this email.</div>
+            <div class="access-disclaimer" role="note" aria-label="Email notice">
+              <span class="access-disclaimer-strong">By continuing, you'll receive a one-time email to sign in.</span>
+              <span class="access-disclaimer-muted">Marketing emails require separate opt-in.</span>
+            </div>
           </div>
-        </div>
 
-        <div class="next-item">
-          <div class="icon">🔔</div>
-          <div class="next-text">
-            <div class="next-title">Alerts</div>
-            <div class="next-sub">Lives, drops, and important releases.</div>
-          </div>
-        </div>
+          <button id="submitBtn" class="btn primary" type="submit">
+            <span class="btn-text">Send Sign-In Link</span>
+            <span class="btn-spinner" aria-hidden="true"></span>
+          </button>
 
-        <div class="next-item">
-          <div class="icon">⚡</div>
-          <div class="next-text">
-            <div class="next-title">Early access</div>
-            <div class="next-sub">First shot at limited inventory.</div>
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+
+          <div class="alt">
+            <span class="alt-text">New here?</span>
+            <a class="alt-link" href="join.html">Join OG alerts + early access</a>
           </div>
-        </div>
+        </form>
+
+        <aside class="access-preview" aria-labelledby="accessPreviewTitle">
+          <div class="divider"><span id="accessPreviewTitle">What you'll see inside</span></div>
+
+          <div class="next">
+            <div class="next-item">
+              <div class="icon" aria-hidden="true">
+                <span class="icon-core"></span>
+              </div>
+              <div class="next-text">
+                <div class="next-title">Your profile</div>
+                <div class="next-sub">Update your name and preferences.</div>
+              </div>
+            </div>
+
+            <div class="next-item">
+              <div class="icon" aria-hidden="true">
+                <span class="icon-core"></span>
+              </div>
+              <div class="next-text">
+                <div class="next-title">Alerts</div>
+                <div class="next-sub">Lives, drops, and important releases.</div>
+              </div>
+            </div>
+
+            <div class="next-item">
+              <div class="icon" aria-hidden="true">
+                <span class="icon-core"></span>
+              </div>
+              <div class="next-text">
+                <div class="next-title">Early access</div>
+                <div class="next-sub">First shot at limited inventory.</div>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
 
-    <footer class="foot">
-      <span>© <span id="year"></span> OG Jewelers</span>
-      <span class="sep">•</span>
-      <a href="shop.html">Shop</a>
-      <span class="sep">•</span>
-      <a href="privacy.html">Privacy</a>
+    <footer class="access-footer" aria-label="Access footer">
+      <div class="access-footer-inner">
+        <div class="access-footer-brand">
+          <span class="access-footer-mark">
+            <img src="OG_Logo.png" alt="OG Jewelers" loading="lazy" decoding="async" />
+          </span>
+          <span class="access-footer-name">OG Jewelers</span>
+        </div>
+
+        <div class="access-footer-links">
+          <a href="shop.html">Shop</a>
+          <span class="sep" aria-hidden="true">•</span>
+          <a href="privacy.html">Privacy</a>
+        </div>
+
+        <div class="access-footer-meta">© <span id="year"></span> OG Jewelers</div>
+      </div>
     </footer>
   </main>
 
-  <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Shared init -->
   <script src="initSupabase.js"></script>
-
-  <!-- Page JS -->
   <script src="access.js"></script>
 </body>
 </html>
