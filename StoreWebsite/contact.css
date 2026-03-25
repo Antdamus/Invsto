@@ -370,19 +370,50 @@ select {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   body.contact-page {
     background: #000;
   }
 
-  .contact-hero {
+  .contact-page .page-atmosphere {
+    background: #000;
+  }
+
+  .contact-page .page-grain {
+    opacity: 0.06;
+  }
+
+  .contact-page .page-aura-left,
+  .contact-page .page-aura-right {
+    opacity: 0.06;
+    filter: blur(110px);
+  }
+
+  .contact-page .contact-hero {
     background: #000;
   }
 
   .contact-page .page-vignette {
     background:
-      radial-gradient(circle at center, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.74) 68%, #000 100%);
+      radial-gradient(circle at center, rgba(0, 0, 0, 0.02) 0%, rgba(0, 0, 0, 0.86) 62%, #000 100%);
   }
+
+  .contact-page .contact-shell::before {
+    background:
+      radial-gradient(circle at 50% 18%, rgba(208, 169, 99, 0.08), transparent 38%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0));
+    opacity: 0.72;
+  }
+
+  .contact-page .contact-shell::after {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(255, 255, 255, 0)),
+      radial-gradient(circle at 50% 14%, rgba(208, 169, 99, 0.035), transparent 46%);
+    opacity: 0.58;
+  }
+}
+
+@media (max-width: 640px) {
 
   .contact-hero {
     padding-top: calc(var(--header-h) + 3.4rem);
