@@ -2,6 +2,10 @@
   const INVENTORY_UPLOAD_BUCKET = "InventoryUpload";
   const INVENTORY_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
   const AI_COPY_FUNCTION_NAME = "generate-inventory-copy";
+  const CAPTURE_JOB_TABLE = "capture_jobs";
+  const CAPTURE_STATION_TABLE = "capture_stations";
+  const CAPTURE_POLL_INTERVAL_MS = 1500;
+  const CAPTURE_POLL_TIMEOUT_MS = 120000;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
     Silver: ["925", "950", "Fine Silver"],
@@ -21,6 +25,7 @@
     isReadingWeight: false,
     isGeneratingCopy: false,
     hasLoadedImagesOnce: false,
+    activeCaptureJobId: "",
   };
 
   function waitForSupabaseInit() {
@@ -165,13 +170,175 @@
     elements.mainWeightInput.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function triggerIPhoneCapture(payload) {
-    console.log("triggerIPhoneCapture placeholder", payload);
+  function delay(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function getPreferredCaptureStationHints() {
+    const stationId = asTrimmedString(
+      window.OG_CAPTURE_STATION_ID || window.localStorage?.getItem("og.captureStationId")
+    );
+    const stationName = asTrimmedString(
+      window.OG_CAPTURE_STATION_NAME || window.localStorage?.getItem("og.captureStationName")
+    );
+
+    return { stationId, stationName };
+  }
+
+  async function resolveCaptureStation() {
+    const { data, error } = await window.supabase
+      .from(CAPTURE_STATION_TABLE)
+      .select("id, name, active")
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message || "Failed to resolve capture station.");
+    }
+
+    const activeStations = Array.isArray(data) ? data : [];
+    if (!activeStations.length) {
+      throw new Error("No active capture stations are available.");
+    }
+
+    const { stationId, stationName } = getPreferredCaptureStationHints();
+
+    let selectedStation = null;
+    if (stationId) {
+      selectedStation = activeStations.find((station) => station.id === stationId) || null;
+    }
+
+    if (!selectedStation && stationName) {
+      selectedStation = activeStations.find((station) => {
+        return asTrimmedString(station.name).toLowerCase() === stationName.toLowerCase();
+      }) || null;
+    }
+
+    if (!selectedStation) {
+      selectedStation = activeStations[0];
+      if (activeStations.length > 1) {
+        console.warn("Multiple active capture stations found. Defaulting to the first active station.", activeStations);
+      }
+    }
+
+    try {
+      window.localStorage?.setItem("og.captureStationId", selectedStation.id);
+      window.localStorage?.setItem("og.captureStationName", selectedStation.name || "");
+    } catch (_) {}
+
+    return selectedStation;
+  }
+
+  async function createCaptureJob(stationId) {
+    const { data, error } = await window.supabase
+      .from(CAPTURE_JOB_TABLE)
+      .insert({
+        station_id: stationId,
+        status: "queued",
+        requested_at: new Date().toISOString(),
+      })
+      .select("id, station_id, status, requested_at")
+      .single();
+
+    if (error || !data) {
+      throw new Error(error?.message || "Failed to create capture job.");
+    }
+
+    return data;
+  }
+
+  function getCaptureStatusLabel(jobStatus, stationName = "") {
+    const stationLabel = stationName ? ` on ${stationName}` : "";
+
+    if (jobStatus === "queued") return `Capture queued${stationLabel}. Waiting for device...`;
+    if (jobStatus === "capturing") return `Capture in progress${stationLabel}.`;
+    if (jobStatus === "uploading") return `Photo captured${stationLabel}. Uploading file...`;
+    if (jobStatus === "completed") return `Photo captured${stationLabel}.`;
+    if (jobStatus === "failed") return `Capture failed${stationLabel}.`;
+    return `Capture status: ${jobStatus || "unknown"}.`;
+  }
+
+  async function pollCaptureJob(jobId, stationName = "") {
+    const startedAt = Date.now();
+
+    while ((Date.now() - startedAt) < CAPTURE_POLL_TIMEOUT_MS) {
+      const { data, error } = await window.supabase
+        .from(CAPTURE_JOB_TABLE)
+        .select(`
+          id,
+          status,
+          storage_bucket,
+          storage_path,
+          capture_completed_at,
+          upload_completed_at,
+          mime_type,
+          file_size_bytes,
+          failure_code,
+          failure_message
+        `)
+        .eq("id", jobId)
+        .single();
+
+      if (error || !data) {
+        throw new Error(error?.message || "Failed to poll capture job.");
+      }
+
+      if (data.status === "completed" || data.status === "failed") {
+        return data;
+      }
+
+      const captureState = document.getElementById("assisted-capture-state");
+      if (captureState) {
+        captureState.textContent = getCaptureStatusLabel(data.status, stationName);
+      }
+
+      await delay(CAPTURE_POLL_INTERVAL_MS);
+    }
+
+    throw new Error("Timed out waiting for capture completion.");
+  }
+
+  async function triggerIPhoneCapture(payload, elements) {
+    console.log("triggerIPhoneCapture request", payload);
+
+    const station = await resolveCaptureStation();
+    elements.captureState.textContent = `Routing capture to ${station.name || station.id}...`;
+
+    const createdJob = await createCaptureJob(station.id);
+    state.activeCaptureJobId = createdJob.id;
+
     window.dispatchEvent(
       new CustomEvent("assisted:iphone-capture-requested", {
-        detail: payload,
+        detail: {
+          ...payload,
+          stationId: station.id,
+          stationName: station.name || "",
+          jobId: createdJob.id,
+        },
       })
     );
+
+    const completedJob = await pollCaptureJob(createdJob.id, station.name || "");
+    state.activeCaptureJobId = "";
+
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || completedJob.failure_code || "Capture failed.");
+    }
+
+    elements.captureState.textContent = completedJob.storage_bucket
+      ? `Photo captured and uploaded to ${completedJob.storage_bucket}.`
+      : "Photo captured and uploaded.";
+
+    if (state.hasLoadedImagesOnce) {
+      await loadRecentInventoryUploadImages(elements, { refreshNotice: true });
+    }
+
+    return {
+      station,
+      job: completedJob,
+    };
   }
 
   function updatePurityOptions(elements, materialValue, preserveValue = "") {
@@ -518,14 +685,21 @@
       state.stableWeight = stableWeight;
       elements.weightDisplay.textContent = formatWeight(stableWeight);
       elements.scaleState.textContent = `Stable weight locked at ${formatWeight(stableWeight)}.`;
-      elements.captureState.textContent = "Placeholder signal sent";
       syncWeightIntoMainForm(elements, stableWeight);
 
-      triggerIPhoneCapture({
+      const captureResult = await triggerIPhoneCapture({
         material: asTrimmedString(elements.materialSelect?.value),
         purity: asTrimmedString(elements.puritySelect?.value),
         weight: stableWeight,
-      });
+      }, elements);
+
+      if (captureResult?.job?.storage_path) {
+        setInlineStatus(
+          elements.imageStatus,
+          `Capture completed. Refresh ready for ${captureResult.job.storage_path}.`,
+          "is-success"
+        );
+      }
 
       markGeneratedCopyNeedsRefresh(
         elements,
@@ -534,8 +708,9 @@
     } catch (error) {
       console.error("Scale placeholder failed:", error);
       elements.scaleState.textContent = "Unable to get a stable weight reading right now.";
-      elements.captureState.textContent = "Capture not triggered";
+      elements.captureState.textContent = error?.message || "Capture not triggered";
     } finally {
+      state.activeCaptureJobId = "";
       state.isReadingWeight = false;
       setButtonBusy(elements.readWeightButton, "Reading Weight...", "Read Weight", false);
     }
