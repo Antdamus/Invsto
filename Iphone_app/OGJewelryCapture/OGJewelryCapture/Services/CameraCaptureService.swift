@@ -85,20 +85,14 @@ final class CameraCaptureService: NSObject {
 #endif
     }
 
-    func capturePhoto(for jobID: UUID, stabilizationDelay: TimeInterval) async throws -> LocalCaptureResult {
+    func capturePhoto(for jobID: UUID) async throws -> LocalCaptureResult {
         let availability = await prepareIfNeeded()
 
         switch availability {
         case .ready:
             await startSessionIfNeeded()
-            if stabilizationDelay > 0 {
-                try await Task.sleep(for: .seconds(stabilizationDelay))
-            }
             return try await captureFromDevice(jobID: jobID)
         case .simulatorFallback:
-            if stabilizationDelay > 0 {
-                try await Task.sleep(for: .seconds(stabilizationDelay))
-            }
             return try await simulateCapture(jobID: jobID)
         case let .unavailable(message):
             throw NSError(domain: "CameraCaptureService", code: 1, userInfo: [

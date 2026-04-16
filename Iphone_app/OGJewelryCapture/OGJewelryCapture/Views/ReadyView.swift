@@ -28,6 +28,7 @@ struct ReadyView: View {
                 LabeledContent("Connection", value: viewModel.listenerState.label)
                 LabeledContent("Capture State", value: viewModel.captureState.label)
                 LabeledContent("Camera", value: viewModel.cameraAvailability.label)
+                LabeledContent("Mode", value: viewModel.captureMode.label)
 
                 if let role = viewModel.employee.role, !role.isEmpty {
                     LabeledContent("Role", value: role)
@@ -38,12 +39,50 @@ struct ReadyView: View {
                 }
             }
 
+            Section("Capture Controls") {
+                Picker("Capture Mode", selection: captureModeBinding) {
+                    ForEach(ReadyViewModel.CaptureMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if viewModel.captureMode == .auto {
+                    Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 5.0, step: 0.5) {
+                        LabeledContent(
+                            "Auto Delay",
+                            value: "\(viewModel.autoCaptureDelay.formatted(.number.precision(.fractionLength(1)))) sec"
+                        )
+                    }
+                }
+
+                switch viewModel.captureState {
+                case .captureRequested:
+                    Text("Preview is live. Auto capture will trigger after the configured delay.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                case .waitingForManualCapture:
+                    Text("Preview is live. Tap the shutter when framing and focus look right.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                default:
+                    EmptyView()
+                }
+            }
+
             if shouldShowPreview, let session = viewModel.previewSession {
                 Section("Live Preview") {
                     CameraPreviewView(session: session)
                         .frame(height: 320)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+
+                    if case .waitingForManualCapture = viewModel.captureState {
+                        Button("Capture Photo") {
+                            viewModel.triggerManualCapture()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
             }
 
@@ -136,11 +175,25 @@ struct ReadyView: View {
 
     private var shouldShowPreview: Bool {
         switch viewModel.captureState {
-        case .captureRequested, .capturing:
+        case .captureRequested, .waitingForManualCapture, .capturing:
             true
         case .idle, .listening, .uploading, .completed, .failed:
             false
         }
+    }
+
+    private var captureModeBinding: Binding<ReadyViewModel.CaptureMode> {
+        Binding(
+            get: { viewModel.captureMode },
+            set: { viewModel.updateCaptureMode($0) }
+        )
+    }
+
+    private var autoCaptureDelayBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.autoCaptureDelay },
+            set: { viewModel.updateAutoCaptureDelay($0) }
+        )
     }
 }
 

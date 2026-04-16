@@ -4,10 +4,27 @@ import Foundation
 
 @MainActor
 final class ReadyViewModel: ObservableObject {
+    enum CaptureMode: String, CaseIterable, Identifiable {
+        case auto
+        case manual
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .auto:
+                "Auto"
+            case .manual:
+                "Manual"
+            }
+        }
+    }
+
     enum CaptureState: Equatable {
         case idle
         case listening
         case captureRequested(CaptureJob)
+        case waitingForManualCapture(CaptureJob)
         case capturing(CaptureJob)
         case uploading(CaptureJob)
         case completed(CaptureUploadResult)
@@ -20,7 +37,9 @@ final class ReadyViewModel: ObservableObject {
             case .listening:
                 "Listening"
             case .captureRequested:
-                "Capture requested"
+                "Preview ready"
+            case .waitingForManualCapture:
+                "Waiting for shutter"
             case .capturing:
                 "Capturing"
             case .uploading:
@@ -38,6 +57,8 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var cameraAvailability: CameraAvailability = .unknown
     @Published private(set) var latestLocalResult: LocalCaptureResult?
     @Published private(set) var latestUploadResult: CaptureUploadResult?
+    @Published private(set) var captureMode: CaptureMode
+    @Published private(set) var autoCaptureDelay: TimeInterval
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -46,11 +67,18 @@ final class ReadyViewModel: ObservableObject {
     private let listener: CaptureJobListener
     private let cameraService: CameraCaptureService
     private let uploadService: CapturePhotoUploadService
-    private let stabilizationDelay: TimeInterval
+    private let userDefaults: UserDefaults
+
+    private var pendingJob: CaptureJob?
+    private var pendingAutoCaptureTask: Task<Void, Never>?
 
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
     private var hasStarted = false
+
+    private static let captureModeKey = "ready.captureMode"
+    private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
+    private static let defaultAutoCaptureDelay: TimeInterval = 1.2
 
     init(
         employee: AuthenticatedEmployee,
@@ -59,7 +87,7 @@ final class ReadyViewModel: ObservableObject {
         listener: CaptureJobListener = CaptureJobListener(),
         cameraService: CameraCaptureService = CameraCaptureService(),
         uploadService: CapturePhotoUploadService = CapturePhotoUploadService(),
-        stabilizationDelay: TimeInterval = 1.2
+        userDefaults: UserDefaults = .standard
     ) {
         self.employee = employee
         self.station = station
@@ -67,12 +95,18 @@ final class ReadyViewModel: ObservableObject {
         self.listener = listener
         self.cameraService = cameraService
         self.uploadService = uploadService
-        self.stabilizationDelay = stabilizationDelay
+        self.userDefaults = userDefaults
+        self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
+
+        let storedDelay = userDefaults.object(forKey: Self.autoCaptureDelayKey) as? Double
+        let resolvedDelay = storedDelay ?? Self.defaultAutoCaptureDelay
+        self.autoCaptureDelay = Self.clampedDelay(resolvedDelay)
     }
 
     deinit {
         let listener = listener
         let cameraService = cameraService
+        pendingAutoCaptureTask?.cancel()
 
         Task {
             await listener.stopListening()
@@ -116,9 +150,38 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func stop() async {
+        pendingAutoCaptureTask?.cancel()
         await listener.stopListening()
         cameraService.stopSession()
+        pendingJob = nil
+        activeJobID = nil
         hasStarted = false
+    }
+
+    func updateCaptureMode(_ mode: CaptureMode) {
+        guard captureMode != mode else { return }
+        captureMode = mode
+        userDefaults.set(mode.rawValue, forKey: Self.captureModeKey)
+        reconfigurePendingCaptureIfNeeded()
+    }
+
+    func updateAutoCaptureDelay(_ delay: TimeInterval) {
+        let clampedDelay = Self.clampedDelay(delay)
+        guard autoCaptureDelay != clampedDelay else { return }
+        autoCaptureDelay = clampedDelay
+        userDefaults.set(clampedDelay, forKey: Self.autoCaptureDelayKey)
+        reconfigurePendingCaptureIfNeeded()
+    }
+
+    func triggerManualCapture() {
+        guard captureMode == .manual else { return }
+        guard let job = pendingJob else { return }
+        guard case .waitingForManualCapture = captureState else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        pendingAutoCaptureTask = Task { [weak self] in
+            await self?.performCapture(for: job)
+        }
     }
 
     func refreshPendingJob() async {
@@ -149,25 +212,66 @@ final class ReadyViewModel: ObservableObject {
         guard !handledJobIDs.contains(job.id) else { return }
         guard activeJobID == nil else { return }
 
+        pendingAutoCaptureTask?.cancel()
         activeJobID = job.id
-        captureState = .captureRequested(job)
+        pendingJob = job
 
         do {
             let claimed = try await repository.claimJobForCapture(id: job.id)
             guard claimed else {
                 captureState = .listening
                 activeJobID = nil
+                pendingJob = nil
                 return
             }
 
-            await performCapture(for: job)
+            cameraAvailability = await cameraService.prepareIfNeeded()
+
+            switch cameraAvailability {
+            case .ready, .simulatorFallback:
+                switch captureMode {
+                case .auto:
+                    captureState = .captureRequested(job)
+                    scheduleAutoCapture(for: job)
+                case .manual:
+                    captureState = .waitingForManualCapture(job)
+                }
+            case let .unavailable(message):
+                await failJob(jobID: job.id, code: "camera_unavailable", message: message)
+                activeJobID = nil
+                pendingJob = nil
+            case .unknown:
+                await failJob(jobID: job.id, code: "camera_unavailable", message: CameraCaptureServiceError.cameraUnavailable.localizedDescription)
+                activeJobID = nil
+                pendingJob = nil
+            }
         } catch {
             captureState = .failed(jobID: job.id, message: error.localizedDescription)
             activeJobID = nil
+            pendingJob = nil
+        }
+    }
+
+    private func scheduleAutoCapture(for job: CaptureJob) {
+        pendingAutoCaptureTask?.cancel()
+        pendingAutoCaptureTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                if autoCaptureDelay > 0 {
+                    try await Task.sleep(for: .seconds(autoCaptureDelay))
+                }
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await performCapture(for: job)
         }
     }
 
     private func performCapture(for job: CaptureJob) async {
+        pendingAutoCaptureTask = nil
         captureState = .capturing(job)
 
         switch cameraAvailability {
@@ -178,10 +282,7 @@ final class ReadyViewModel: ObservableObject {
         }
 
         do {
-            let result = try await cameraService.capturePhoto(
-                for: job.id,
-                stabilizationDelay: stabilizationDelay
-            )
+            let result = try await cameraService.capturePhoto(for: job.id)
             latestLocalResult = result
             try await uploadCaptureResult(result, for: job)
         } catch {
@@ -189,6 +290,7 @@ final class ReadyViewModel: ObservableObject {
         }
 
         activeJobID = nil
+        pendingJob = nil
     }
 
     private func uploadCaptureResult(_ result: LocalCaptureResult, for job: CaptureJob) async throws {
@@ -235,5 +337,27 @@ final class ReadyViewModel: ObservableObject {
         }
 
         captureState = .failed(jobID: jobID, message: message)
+    }
+
+    private static func clampedDelay(_ delay: TimeInterval) -> TimeInterval {
+        min(max(delay, 0.5), 5.0)
+    }
+
+    private func reconfigurePendingCaptureIfNeeded() {
+        guard let job = pendingJob else { return }
+
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture:
+            switch captureMode {
+            case .auto:
+                captureState = .captureRequested(job)
+                scheduleAutoCapture(for: job)
+            case .manual:
+                pendingAutoCaptureTask?.cancel()
+                captureState = .waitingForManualCapture(job)
+            }
+        case .idle, .listening, .capturing, .uploading, .completed, .failed:
+            break
+        }
     }
 }
