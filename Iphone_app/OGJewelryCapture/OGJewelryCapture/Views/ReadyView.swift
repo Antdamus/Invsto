@@ -74,10 +74,10 @@ struct ReadyView: View {
                 Section("Live Preview") {
                     CameraPreviewView(
                         session: session,
-                        isTapToFocusEnabled: isManualTapToFocusEnabled,
+                        isTapToFocusEnabled: viewModel.isTapToFocusEnabledForCurrentState,
                         isPinchToZoomEnabled: isPreviewZoomEnabled,
                         zoomFactor: viewModel.zoomFactor,
-                        onTapToFocus: isManualTapToFocusEnabled ? { devicePoint in
+                        onTapToFocus: viewModel.isTapToFocusEnabledForCurrentState ? { devicePoint in
                             _ = Task {
                                 await viewModel.focusPreview(at: devicePoint)
                             }
@@ -100,8 +100,8 @@ struct ReadyView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
-                    if isManualTapToFocusEnabled {
-                        Text("Tap the preview to focus and pinch to adjust framing before taking the photo.")
+                    if viewModel.isTapToFocusEnabledForCurrentState {
+                        Text(previewInteractionHint)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
@@ -215,14 +215,12 @@ struct ReadyView: View {
         }
     }
 
-    private var isManualTapToFocusEnabled: Bool {
-        guard viewModel.captureMode == .manual else { return false }
-
-        return switch viewModel.captureState {
-        case .waitingForManualCapture:
-            true
-        case .idle, .listening, .captureRequested, .capturing, .uploading, .completed, .failed:
-            false
+    private var previewInteractionHint: String {
+        switch viewModel.captureMode {
+        case .auto:
+            "Tap the preview to refocus and pinch to adjust framing before auto capture fires."
+        case .manual:
+            "Tap the preview to focus and pinch to adjust framing before taking the photo."
         }
     }
 

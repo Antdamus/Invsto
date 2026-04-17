@@ -241,6 +241,44 @@ final class CameraCaptureService: NSObject {
         }
     }
 
+    func enableContinuousPreviewAutoFocus() async {
+        guard availability != .simulatorFallback else { return }
+
+        await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                guard let device = self.activeDevice else {
+                    continuation.resume()
+                    return
+                }
+
+                do {
+                    try device.lockForConfiguration()
+                    defer { device.unlockForConfiguration() }
+
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    } else if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    }
+
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    } else if device.isExposureModeSupported(.autoExpose) {
+                        device.exposureMode = .autoExpose
+                    }
+
+                    if device.isSubjectAreaChangeMonitoringEnabled != true {
+                        device.isSubjectAreaChangeMonitoringEnabled = true
+                    }
+                } catch {
+                    // Ignore preview autofocus configuration failures so capture flow remains unaffected.
+                }
+
+                continuation.resume()
+            }
+        }
+    }
+
     func zoomState() async -> CameraZoomState {
         guard availability != .simulatorFallback else { return .unavailable }
 

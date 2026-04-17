@@ -192,8 +192,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func focusPreview(at devicePoint: CGPoint) async {
-        guard captureMode == .manual else { return }
-        guard case .waitingForManualCapture = captureState else { return }
+        guard isTapToFocusEnabledForCurrentState else { return }
         await cameraService.focusAndExpose(at: devicePoint)
     }
 
@@ -258,6 +257,7 @@ final class ReadyViewModel: ObservableObject {
             case .ready, .simulatorFallback:
                 switch captureMode {
                 case .auto:
+                    await cameraService.enableContinuousPreviewAutoFocus()
                     captureState = .captureRequested(job)
                     scheduleAutoCapture(for: job)
                 case .manual:
@@ -377,6 +377,9 @@ final class ReadyViewModel: ObservableObject {
         case .captureRequested, .waitingForManualCapture:
             switch captureMode {
             case .auto:
+                Task {
+                    await cameraService.enableContinuousPreviewAutoFocus()
+                }
                 captureState = .captureRequested(job)
                 scheduleAutoCapture(for: job)
             case .manual:
@@ -394,6 +397,21 @@ final class ReadyViewModel: ObservableObject {
             true
         case .idle, .listening, .capturing, .uploading, .completed, .failed:
             false
+        }
+    }
+
+    var isTapToFocusEnabledForCurrentState: Bool {
+        switch captureMode {
+        case .auto:
+            if case .captureRequested = captureState {
+                return true
+            }
+            return false
+        case .manual:
+            if case .waitingForManualCapture = captureState {
+                return true
+            }
+            return false
         }
     }
 
