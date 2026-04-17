@@ -72,10 +72,24 @@ struct ReadyView: View {
 
             if shouldShowPreview, let session = viewModel.previewSession {
                 Section("Live Preview") {
-                    CameraPreviewView(session: session)
+                    CameraPreviewView(
+                        session: session,
+                        isTapToFocusEnabled: isManualTapToFocusEnabled,
+                        onTapToFocus: isManualTapToFocusEnabled ? { devicePoint in
+                            _ = Task {
+                                await viewModel.focusPreview(at: devicePoint)
+                            }
+                        } : nil
+                    )
                         .frame(height: 320)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+
+                    if isManualTapToFocusEnabled {
+                        Text("Tap the preview to focus on the subject before taking the photo.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     if case .waitingForManualCapture = viewModel.captureState {
                         Button("Capture Photo") {
@@ -178,6 +192,17 @@ struct ReadyView: View {
         case .captureRequested, .waitingForManualCapture, .capturing:
             true
         case .idle, .listening, .uploading, .completed, .failed:
+            false
+        }
+    }
+
+    private var isManualTapToFocusEnabled: Bool {
+        guard viewModel.captureMode == .manual else { return false }
+
+        return switch viewModel.captureState {
+        case .waitingForManualCapture:
+            true
+        case .idle, .listening, .captureRequested, .capturing, .uploading, .completed, .failed:
             false
         }
     }

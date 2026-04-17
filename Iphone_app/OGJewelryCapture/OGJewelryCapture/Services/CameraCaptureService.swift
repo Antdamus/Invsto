@@ -47,6 +47,7 @@ final class CameraCaptureService: NSObject {
 
     private let sessionQueue = DispatchQueue(label: "og.capture.camera.session")
     private let photoOutput = AVCapturePhotoOutput()
+    private var activeDevice: AVCaptureDevice?
 
     private var isConfigured = false
     private var isRunning = false
@@ -153,6 +154,7 @@ final class CameraCaptureService: NSObject {
                     self.previewSession.addInput(input)
                     self.previewSession.addOutput(self.photoOutput)
                     self.photoOutput.maxPhotoQualityPrioritization = .quality
+                    self.activeDevice = camera
 
                     self.previewSession.commitConfiguration()
                     self.isConfigured = true
@@ -177,6 +179,50 @@ final class CameraCaptureService: NSObject {
 
                 self.previewSession.startRunning()
                 self.isRunning = true
+                continuation.resume()
+            }
+        }
+    }
+
+    func focusAndExpose(at devicePoint: CGPoint) async {
+        guard availability != .simulatorFallback else { return }
+
+        await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                guard let device = self.activeDevice else {
+                    continuation.resume()
+                    return
+                }
+
+                do {
+                    try device.lockForConfiguration()
+                    defer { device.unlockForConfiguration() }
+
+                    if device.isFocusPointOfInterestSupported {
+                        device.focusPointOfInterest = devicePoint
+                    }
+
+                    if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    } else if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    }
+
+                    if device.isExposurePointOfInterestSupported {
+                        device.exposurePointOfInterest = devicePoint
+                    }
+
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    }
+
+                    if device.isSubjectAreaChangeMonitoringEnabled != true {
+                        device.isSubjectAreaChangeMonitoringEnabled = true
+                    }
+                } catch {
+                    // Ignore focus configuration failures so capture flow remains unaffected.
+                }
+
                 continuation.resume()
             }
         }

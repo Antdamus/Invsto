@@ -184,6 +184,12 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
+    func focusPreview(at devicePoint: CGPoint) async {
+        guard captureMode == .manual else { return }
+        guard case .waitingForManualCapture = captureState else { return }
+        await cameraService.focusAndExpose(at: devicePoint)
+    }
+
     func refreshPendingJob() async {
         do {
             if let job = try await repository.fetchNextPendingJob(for: station.id) {
