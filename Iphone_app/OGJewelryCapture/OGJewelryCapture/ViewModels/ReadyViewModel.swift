@@ -367,7 +367,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     private static func clampedDelay(_ delay: TimeInterval) -> TimeInterval {
-        min(max(delay, 0.5), 5.0)
+        min(max(delay, 0.5), 15.0)
     }
 
     private func reconfigurePendingCaptureIfNeeded() {

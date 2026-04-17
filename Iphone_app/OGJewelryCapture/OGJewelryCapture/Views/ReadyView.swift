@@ -48,7 +48,7 @@ struct ReadyView: View {
                 .pickerStyle(.segmented)
 
                 if viewModel.captureMode == .auto {
-                    Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 5.0, step: 0.5) {
+                    Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 15.0, step: 0.5) {
                         LabeledContent(
                             "Auto Delay",
                             value: "\(viewModel.autoCaptureDelay.formatted(.number.precision(.fractionLength(1)))) sec"
