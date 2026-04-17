@@ -75,18 +75,37 @@ struct ReadyView: View {
                     CameraPreviewView(
                         session: session,
                         isTapToFocusEnabled: isManualTapToFocusEnabled,
+                        isPinchToZoomEnabled: isPreviewZoomEnabled,
+                        zoomFactor: viewModel.zoomFactor,
                         onTapToFocus: isManualTapToFocusEnabled ? { devicePoint in
                             _ = Task {
                                 await viewModel.focusPreview(at: devicePoint)
                             }
+                        } : nil,
+                        onPinchToZoom: isPreviewZoomEnabled ? { zoomFactor in
+                            viewModel.updatePreviewZoom(to: zoomFactor)
                         } : nil
                     )
                         .frame(height: 320)
+                        .overlay(alignment: .topTrailing) {
+                            if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
+                                Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                                    .padding(12)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
                     if isManualTapToFocusEnabled {
-                        Text("Tap the preview to focus on the subject before taking the photo.")
+                        Text("Tap the preview to focus and pinch to adjust framing before taking the photo.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
+                        Text("Pinch the preview to adjust framing before capture.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -203,6 +222,17 @@ struct ReadyView: View {
         case .waitingForManualCapture:
             true
         case .idle, .listening, .captureRequested, .capturing, .uploading, .completed, .failed:
+            false
+        }
+    }
+
+    private var isPreviewZoomEnabled: Bool {
+        guard viewModel.zoomRange.upperBound > 1.0 else { return false }
+
+        return switch viewModel.captureState {
+        case .captureRequested, .waitingForManualCapture:
+            true
+        case .idle, .listening, .capturing, .uploading, .completed, .failed:
             false
         }
     }

@@ -4,20 +4,30 @@ import SwiftUI
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let isTapToFocusEnabled: Bool
+    let isPinchToZoomEnabled: Bool
+    let zoomFactor: CGFloat
     let onTapToFocus: ((CGPoint) -> Void)?
+    let onPinchToZoom: ((CGFloat) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.videoPreviewLayer.videoGravity = .resizeAspectFill
         view.videoPreviewLayer.session = session
+        view.isTapToFocusEnabled = isTapToFocusEnabled
+        view.isPinchToZoomEnabled = isPinchToZoomEnabled
+        view.zoomFactor = zoomFactor
         view.onTapToFocus = onTapToFocus
+        view.onPinchToZoom = onPinchToZoom
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.videoPreviewLayer.session = session
         uiView.isTapToFocusEnabled = isTapToFocusEnabled
+        uiView.isPinchToZoomEnabled = isPinchToZoomEnabled
+        uiView.zoomFactor = zoomFactor
         uiView.onTapToFocus = onTapToFocus
+        uiView.onPinchToZoom = onPinchToZoom
     }
 }
 
@@ -26,9 +36,17 @@ final class PreviewView: UIView {
         didSet { tapGestureRecognizer.isEnabled = isTapToFocusEnabled }
     }
 
+    var isPinchToZoomEnabled = false {
+        didSet { pinchGestureRecognizer.isEnabled = isPinchToZoomEnabled }
+    }
+
+    var zoomFactor: CGFloat = 1.0
+
     var onTapToFocus: ((CGPoint) -> Void)?
+    var onPinchToZoom: ((CGFloat) -> Void)?
 
     private let tapGestureRecognizer = UITapGestureRecognizer()
+    private let pinchGestureRecognizer = UIPinchGestureRecognizer()
     private let focusIndicatorView: UIView = {
         let view = UIView(frame: CGRect(x: 0, y: 0, width: 84, height: 84))
         view.layer.borderColor = UIColor.systemYellow.cgColor
@@ -39,6 +57,7 @@ final class PreviewView: UIView {
         view.isUserInteractionEnabled = false
         return view
     }()
+    private var pinchStartZoomFactor: CGFloat = 1.0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -65,6 +84,11 @@ final class PreviewView: UIView {
         tapGestureRecognizer.addTarget(self, action: #selector(handleTap(_:)))
         tapGestureRecognizer.isEnabled = false
         addGestureRecognizer(tapGestureRecognizer)
+
+        pinchGestureRecognizer.addTarget(self, action: #selector(handlePinch(_:)))
+        pinchGestureRecognizer.isEnabled = false
+        addGestureRecognizer(pinchGestureRecognizer)
+
         addSubview(focusIndicatorView)
     }
 
@@ -76,6 +100,20 @@ final class PreviewView: UIView {
         let devicePoint = videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: point)
         showFocusIndicator(at: point)
         onTapToFocus?(devicePoint)
+    }
+
+    @objc
+    private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard isPinchToZoomEnabled else { return }
+
+        switch gesture.state {
+        case .began:
+            pinchStartZoomFactor = max(zoomFactor, 1.0)
+        case .changed:
+            onPinchToZoom?(pinchStartZoomFactor * gesture.scale)
+        default:
+            break
+        }
     }
 
     private func showFocusIndicator(at point: CGPoint) {

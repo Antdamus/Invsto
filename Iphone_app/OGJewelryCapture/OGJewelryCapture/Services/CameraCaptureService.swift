@@ -2,6 +2,17 @@ import AVFoundation
 import Foundation
 import UIKit
 
+struct CameraZoomState: Equatable {
+    let factor: CGFloat
+    let range: ClosedRange<CGFloat>
+
+    static let unavailable = CameraZoomState(factor: 1.0, range: 1.0 ... 1.0)
+
+    var isAvailable: Bool {
+        range.upperBound > range.lowerBound
+    }
+}
+
 enum CameraAvailability: Equatable {
     case unknown
     case ready
@@ -54,6 +65,8 @@ final class CameraCaptureService: NSObject {
     private var isCapturingPhoto = false
     private var availability: CameraAvailability = .unknown
     private var activeProcessor: PhotoCaptureProcessor?
+
+    private let preferredMaximumZoomFactor: CGFloat = 3.0
 
     func prepareIfNeeded() async -> CameraAvailability {
         if case .ready = availability {
@@ -228,6 +241,51 @@ final class CameraCaptureService: NSObject {
         }
     }
 
+    func zoomState() async -> CameraZoomState {
+        guard availability != .simulatorFallback else { return .unavailable }
+
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                guard let device = self.activeDevice else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                let range = self.zoomRange(for: device)
+                let factor = min(max(device.videoZoomFactor, range.lowerBound), range.upperBound)
+                continuation.resume(returning: CameraZoomState(factor: factor, range: range))
+            }
+        }
+    }
+
+    func setZoomFactor(_ requestedFactor: CGFloat) async -> CameraZoomState {
+        guard availability != .simulatorFallback else { return .unavailable }
+
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                guard let device = self.activeDevice else {
+                    continuation.resume(returning: .unavailable)
+                    return
+                }
+
+                let range = self.zoomRange(for: device)
+                let clampedFactor = min(max(requestedFactor, range.lowerBound), range.upperBound)
+
+                do {
+                    try device.lockForConfiguration()
+                    device.videoZoomFactor = clampedFactor
+                    device.unlockForConfiguration()
+                } catch {
+                    let currentFactor = min(max(device.videoZoomFactor, range.lowerBound), range.upperBound)
+                    continuation.resume(returning: CameraZoomState(factor: currentFactor, range: range))
+                    return
+                }
+
+                continuation.resume(returning: CameraZoomState(factor: clampedFactor, range: range))
+            }
+        }
+    }
+
     private func captureFromDevice(jobID: UUID) async throws -> LocalCaptureResult {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
@@ -311,6 +369,12 @@ final class CameraCaptureService: NSObject {
             imageData: data,
             isSimulatorFallback: true
         )
+    }
+
+    private func zoomRange(for device: AVCaptureDevice) -> ClosedRange<CGFloat> {
+        let supportedMaximum = min(device.activeFormat.videoMaxZoomFactor, preferredMaximumZoomFactor)
+        let resolvedMaximum = max(1.0, supportedMaximum)
+        return 1.0 ... resolvedMaximum
     }
 }
 

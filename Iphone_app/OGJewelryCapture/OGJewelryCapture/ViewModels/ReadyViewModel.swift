@@ -59,6 +59,8 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var latestUploadResult: CaptureUploadResult?
     @Published private(set) var captureMode: CaptureMode
     @Published private(set) var autoCaptureDelay: TimeInterval
+    @Published private(set) var zoomFactor: CGFloat
+    @Published private(set) var zoomRange: ClosedRange<CGFloat>
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -97,6 +99,8 @@ final class ReadyViewModel: ObservableObject {
         self.uploadService = uploadService
         self.userDefaults = userDefaults
         self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
+        self.zoomFactor = CameraZoomState.unavailable.factor
+        self.zoomRange = CameraZoomState.unavailable.range
 
         let storedDelay = userDefaults.object(forKey: Self.autoCaptureDelayKey) as? Double
         let resolvedDelay = storedDelay ?? Self.defaultAutoCaptureDelay
@@ -130,6 +134,7 @@ final class ReadyViewModel: ObservableObject {
         hasStarted = true
 
         cameraAvailability = await cameraService.prepareIfNeeded()
+        await refreshZoomState(resetToDefault: true)
         captureState = .listening
 
         await listener.startListening(
@@ -155,6 +160,8 @@ final class ReadyViewModel: ObservableObject {
         cameraService.stopSession()
         pendingJob = nil
         activeJobID = nil
+        zoomFactor = CameraZoomState.unavailable.factor
+        zoomRange = CameraZoomState.unavailable.range
         hasStarted = false
     }
 
@@ -188,6 +195,19 @@ final class ReadyViewModel: ObservableObject {
         guard captureMode == .manual else { return }
         guard case .waitingForManualCapture = captureState else { return }
         await cameraService.focusAndExpose(at: devicePoint)
+    }
+
+    func updatePreviewZoom(to factor: CGFloat) {
+        guard canAdjustPreviewZoom else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let zoomState = await cameraService.setZoomFactor(factor)
+            await MainActor.run {
+                self.zoomFactor = zoomState.factor
+                self.zoomRange = zoomState.range
+            }
+        }
     }
 
     func refreshPendingJob() async {
@@ -232,6 +252,7 @@ final class ReadyViewModel: ObservableObject {
             }
 
             cameraAvailability = await cameraService.prepareIfNeeded()
+            await refreshZoomState(resetToDefault: true)
 
             switch cameraAvailability {
             case .ready, .simulatorFallback:
@@ -364,6 +385,33 @@ final class ReadyViewModel: ObservableObject {
             }
         case .idle, .listening, .capturing, .uploading, .completed, .failed:
             break
+        }
+    }
+
+    private var canAdjustPreviewZoom: Bool {
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture:
+            true
+        case .idle, .listening, .capturing, .uploading, .completed, .failed:
+            false
+        }
+    }
+
+    private func refreshZoomState(resetToDefault: Bool) async {
+        switch cameraAvailability {
+        case .ready:
+            let zoomState: CameraZoomState
+            if resetToDefault {
+                zoomState = await cameraService.setZoomFactor(1.0)
+            } else {
+                zoomState = await cameraService.zoomState()
+            }
+
+            zoomFactor = zoomState.factor
+            zoomRange = zoomState.range
+        case .simulatorFallback, .unavailable, .unknown:
+            zoomFactor = CameraZoomState.unavailable.factor
+            zoomRange = CameraZoomState.unavailable.range
         }
     }
 }
