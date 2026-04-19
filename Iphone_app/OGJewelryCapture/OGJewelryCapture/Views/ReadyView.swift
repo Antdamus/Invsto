@@ -22,7 +22,7 @@ struct ReadyView: View {
 
     var body: some View {
         List {
-            if !viewModel.isShowingPersistentResult {
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto {
                 Section("Listener") {
                     LabeledContent("Station", value: viewModel.station.name)
                     LabeledContent("Employee", value: viewModel.employee.displayName)
@@ -121,6 +121,42 @@ struct ReadyView: View {
                 }
             }
 
+            if viewModel.isReviewingCapturedPhoto {
+                Section("Review Capture") {
+                    if let image = resultPreviewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                    }
+
+                    LabeledContent("Station", value: viewModel.station.name)
+                    LabeledContent("Connection", value: viewModel.listenerState.label)
+                    LabeledContent("Capture State", value: viewModel.captureState.label)
+                    LabeledContent("Mode", value: viewModel.captureMode.label)
+
+                    if let latestLocalResult = viewModel.latestLocalResult {
+                        LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
+                        LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
+                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
+                    }
+
+                    Text("Keep uploads and finalizes this capture. Discard clears it and returns to the same job without leaving capture mode.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button("Keep") {
+                        viewModel.keepCapturedPhoto()
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Discard / Retake", role: .destructive) {
+                        viewModel.discardCapturedPhoto()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
             if viewModel.isShowingPersistentResult {
                 Section("Result") {
                     if let image = resultPreviewImage {
@@ -213,7 +249,7 @@ struct ReadyView: View {
         switch viewModel.captureState {
         case .captureRequested, .waitingForManualCapture, .capturing:
             true
-        case .idle, .listening, .uploading, .completed, .failed:
+        case .idle, .listening, .reviewingCapture, .uploading, .completed, .failed:
             false
         }
     }
@@ -233,7 +269,7 @@ struct ReadyView: View {
         return switch viewModel.captureState {
         case .captureRequested, .waitingForManualCapture:
             true
-        case .idle, .listening, .capturing, .uploading, .completed, .failed:
+        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
             false
         }
     }

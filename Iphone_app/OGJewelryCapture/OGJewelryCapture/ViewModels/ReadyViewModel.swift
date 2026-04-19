@@ -26,6 +26,7 @@ final class ReadyViewModel: ObservableObject {
         case captureRequested(CaptureJob)
         case waitingForManualCapture(CaptureJob)
         case capturing(CaptureJob)
+        case reviewingCapture(CaptureJob, LocalCaptureResult)
         case uploading(CaptureJob)
         case completed(CaptureUploadResult)
         case failed(jobID: UUID?, message: String)
@@ -42,6 +43,8 @@ final class ReadyViewModel: ObservableObject {
                 "Waiting for shutter"
             case .capturing:
                 "Capturing"
+            case .reviewingCapture:
+                "Review Capture"
             case .uploading:
                 "Uploading"
             case .completed:
@@ -73,6 +76,7 @@ final class ReadyViewModel: ObservableObject {
 
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
+    private var pendingUploadTask: Task<Void, Never>?
 
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
@@ -111,6 +115,7 @@ final class ReadyViewModel: ObservableObject {
         let listener = listener
         let cameraService = cameraService
         pendingAutoCaptureTask?.cancel()
+        pendingUploadTask?.cancel()
 
         Task {
             await listener.stopListening()
@@ -156,6 +161,7 @@ final class ReadyViewModel: ObservableObject {
 
     func stop() async {
         pendingAutoCaptureTask?.cancel()
+        pendingUploadTask?.cancel()
         await listener.stopListening()
         cameraService.stopSession()
         pendingJob = nil
@@ -236,6 +242,7 @@ final class ReadyViewModel: ObservableObject {
         guard isShowingPersistentResult else { return }
 
         pendingAutoCaptureTask?.cancel()
+        pendingUploadTask?.cancel()
         pendingJob = nil
         activeJobID = nil
         latestLocalResult = nil
@@ -331,13 +338,54 @@ final class ReadyViewModel: ObservableObject {
         do {
             let result = try await cameraService.capturePhoto(for: job.id)
             latestLocalResult = result
-            try await uploadCaptureResult(result, for: job)
+            latestUploadResult = nil
+            captureState = .reviewingCapture(job, result)
         } catch {
             await failJob(jobID: job.id, code: "capture_failed", message: error.localizedDescription)
+            activeJobID = nil
+            pendingJob = nil
         }
+    }
 
-        activeJobID = nil
-        pendingJob = nil
+    func keepCapturedPhoto() {
+        guard case let .reviewingCapture(job, result) = captureState else { return }
+
+        pendingUploadTask?.cancel()
+        pendingUploadTask = Task { [weak self] in
+            guard let self else { return }
+
+            do {
+                try await self.uploadCaptureResult(result, for: job)
+            } catch {
+                await self.failJob(jobID: job.id, code: "upload_failed", message: error.localizedDescription)
+            }
+
+            await MainActor.run {
+                self.pendingUploadTask = nil
+                self.activeJobID = nil
+                self.pendingJob = nil
+            }
+        }
+    }
+
+    func discardCapturedPhoto() {
+        guard case let .reviewingCapture(job, _) = captureState else { return }
+
+        pendingUploadTask?.cancel()
+        latestLocalResult = nil
+        latestUploadResult = nil
+
+        switch captureMode {
+        case .auto:
+            Task {
+                await cameraService.enableContinuousPreviewAutoFocus()
+            }
+            captureState = .captureRequested(job)
+            scheduleAutoCapture(for: job)
+        case .manual:
+            pendingAutoCaptureTask?.cancel()
+            captureState = .waitingForManualCapture(job)
+        }
     }
 
     private func uploadCaptureResult(_ result: LocalCaptureResult, for job: CaptureJob) async throws {
@@ -406,7 +454,7 @@ final class ReadyViewModel: ObservableObject {
                 pendingAutoCaptureTask?.cancel()
                 captureState = .waitingForManualCapture(job)
             }
-        case .idle, .listening, .capturing, .uploading, .completed, .failed:
+        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
             break
         }
     }
@@ -415,7 +463,7 @@ final class ReadyViewModel: ObservableObject {
         switch captureState {
         case .captureRequested, .waitingForManualCapture:
             true
-        case .idle, .listening, .capturing, .uploading, .completed, .failed:
+        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
             false
         }
     }
@@ -457,16 +505,24 @@ final class ReadyViewModel: ObservableObject {
         switch captureState {
         case .completed, .failed:
             true
-        case .idle, .listening, .captureRequested, .waitingForManualCapture, .capturing, .uploading:
+        case .idle, .listening, .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .uploading:
             false
         }
+    }
+
+    var isReviewingCapturedPhoto: Bool {
+        if case .reviewingCapture = captureState {
+            return true
+        }
+
+        return false
     }
 
     private var canAcceptIncomingJobs: Bool {
         switch captureState {
         case .idle, .listening:
             true
-        case .captureRequested, .waitingForManualCapture, .capturing, .uploading, .completed, .failed:
+        case .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .uploading, .completed, .failed:
             false
         }
     }
