@@ -221,6 +221,7 @@ final class ReadyViewModel: ObservableObject {
 
     func simulateCaptureRequest() async {
         guard activeJobID == nil else { return }
+        guard canAcceptIncomingJobs else { return }
 
         do {
             if let job = try await repository.fetchNextPendingJob(for: station.id) {
@@ -231,11 +232,30 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
+    func resetResult() {
+        guard isShowingPersistentResult else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        pendingJob = nil
+        activeJobID = nil
+        latestLocalResult = nil
+        latestUploadResult = nil
+        captureState = .listening
+
+        Task { [weak self] in
+            guard let self else { return }
+            self.cameraAvailability = await self.cameraService.prepareIfNeeded()
+            await self.refreshZoomState(resetToDefault: true)
+            await self.refreshPendingJob()
+        }
+    }
+
     private func handleIncomingJob(_ job: CaptureJob) async {
         guard job.stationID == station.id else { return }
         guard job.isCaptureRequestCandidate else { return }
         guard !handledJobIDs.contains(job.id) else { return }
         guard activeJobID == nil else { return }
+        guard canAcceptIncomingJobs else { return }
 
         pendingAutoCaptureTask?.cancel()
         activeJobID = job.id
@@ -430,6 +450,24 @@ final class ReadyViewModel: ObservableObject {
         case .simulatorFallback, .unavailable, .unknown:
             zoomFactor = CameraZoomState.unavailable.factor
             zoomRange = CameraZoomState.unavailable.range
+        }
+    }
+
+    var isShowingPersistentResult: Bool {
+        switch captureState {
+        case .completed, .failed:
+            true
+        case .idle, .listening, .captureRequested, .waitingForManualCapture, .capturing, .uploading:
+            false
+        }
+    }
+
+    private var canAcceptIncomingJobs: Bool {
+        switch captureState {
+        case .idle, .listening:
+            true
+        case .captureRequested, .waitingForManualCapture, .capturing, .uploading, .completed, .failed:
+            false
         }
     }
 }

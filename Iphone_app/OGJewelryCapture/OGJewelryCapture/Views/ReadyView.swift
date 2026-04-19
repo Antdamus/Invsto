@@ -22,51 +22,53 @@ struct ReadyView: View {
 
     var body: some View {
         List {
-            Section("Listener") {
-                LabeledContent("Station", value: viewModel.station.name)
-                LabeledContent("Employee", value: viewModel.employee.displayName)
-                LabeledContent("Connection", value: viewModel.listenerState.label)
-                LabeledContent("Capture State", value: viewModel.captureState.label)
-                LabeledContent("Camera", value: viewModel.cameraAvailability.label)
-                LabeledContent("Mode", value: viewModel.captureMode.label)
+            if !viewModel.isShowingPersistentResult {
+                Section("Listener") {
+                    LabeledContent("Station", value: viewModel.station.name)
+                    LabeledContent("Employee", value: viewModel.employee.displayName)
+                    LabeledContent("Connection", value: viewModel.listenerState.label)
+                    LabeledContent("Capture State", value: viewModel.captureState.label)
+                    LabeledContent("Camera", value: viewModel.cameraAvailability.label)
+                    LabeledContent("Mode", value: viewModel.captureMode.label)
 
-                if let role = viewModel.employee.role, !role.isEmpty {
-                    LabeledContent("Role", value: role)
-                }
-
-                if let deviceLabel = viewModel.station.deviceLabel, !deviceLabel.isEmpty {
-                    LabeledContent("Device", value: deviceLabel)
-                }
-            }
-
-            Section("Capture Controls") {
-                Picker("Capture Mode", selection: captureModeBinding) {
-                    ForEach(ReadyViewModel.CaptureMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+                    if let role = viewModel.employee.role, !role.isEmpty {
+                        LabeledContent("Role", value: role)
                     }
-                }
-                .pickerStyle(.segmented)
 
-                if viewModel.captureMode == .auto {
-                    Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 15.0, step: 0.5) {
-                        LabeledContent(
-                            "Auto Delay",
-                            value: "\(viewModel.autoCaptureDelay.formatted(.number.precision(.fractionLength(1)))) sec"
-                        )
+                    if let deviceLabel = viewModel.station.deviceLabel, !deviceLabel.isEmpty {
+                        LabeledContent("Device", value: deviceLabel)
                     }
                 }
 
-                switch viewModel.captureState {
-                case .captureRequested:
-                    Text("Preview is live. Auto capture will trigger after the configured delay.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                case .waitingForManualCapture:
-                    Text("Preview is live. Tap the shutter when framing and focus look right.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                default:
-                    EmptyView()
+                Section("Capture Controls") {
+                    Picker("Capture Mode", selection: captureModeBinding) {
+                        ForEach(ReadyViewModel.CaptureMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if viewModel.captureMode == .auto {
+                        Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 15.0, step: 0.5) {
+                            LabeledContent(
+                                "Auto Delay",
+                                value: "\(viewModel.autoCaptureDelay.formatted(.number.precision(.fractionLength(1)))) sec"
+                            )
+                        }
+                    }
+
+                    switch viewModel.captureState {
+                    case .captureRequested:
+                        Text("Preview is live. Auto capture will trigger after the configured delay.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    case .waitingForManualCapture:
+                        Text("Preview is live. Tap the shutter when framing and focus look right.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    default:
+                        EmptyView()
+                    }
                 }
             }
 
@@ -119,53 +121,54 @@ struct ReadyView: View {
                 }
             }
 
-            if let latestUploadResult = viewModel.latestUploadResult {
-                Section("Latest Result") {
-                    if let image = latestUploadResult.previewImage {
+            if viewModel.isShowingPersistentResult {
+                Section("Result") {
+                    if let image = resultPreviewImage {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
                             .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
 
-                    LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
-                    LabeledContent("Captured", value: latestUploadResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                    LabeledContent("Uploaded", value: latestUploadResult.uploadedAt.formatted(date: .abbreviated, time: .standard))
-                    LabeledContent("Bucket", value: latestUploadResult.storageBucket)
-                    LabeledContent("Path", value: latestUploadResult.storagePathSummary)
-                    LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestUploadResult.fileSizeBytes, countStyle: .file))
-                    LabeledContent("Type", value: latestUploadResult.mimeType)
+                    LabeledContent("Station", value: viewModel.station.name)
+                    LabeledContent("Connection", value: viewModel.listenerState.label)
+                    LabeledContent("Capture State", value: viewModel.captureState.label)
+                    LabeledContent("Mode", value: viewModel.captureMode.label)
 
-                    if latestUploadResult.isSimulatorFallback {
-                        Text("Captured using the simulator fallback path.")
+                    if let latestUploadResult = viewModel.latestUploadResult {
+                        LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
+                        LabeledContent("Captured", value: latestUploadResult.capturedAt.formatted(date: .abbreviated, time: .standard))
+                        LabeledContent("Uploaded", value: latestUploadResult.uploadedAt.formatted(date: .abbreviated, time: .standard))
+                        LabeledContent("Bucket", value: latestUploadResult.storageBucket)
+                        LabeledContent("Path", value: latestUploadResult.storagePathSummary)
+                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestUploadResult.fileSizeBytes, countStyle: .file))
+                        LabeledContent("Type", value: latestUploadResult.mimeType)
+
+                        if latestUploadResult.isSimulatorFallback {
+                            Text("Captured using the simulator fallback path.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let latestLocalResult = viewModel.latestLocalResult {
+                        LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
+                        LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
+                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
+                    }
+
+                    if case let .failed(jobID, message) = viewModel.captureState {
+                        if viewModel.latestLocalResult == nil, let jobID {
+                            LabeledContent("Job", value: String(jobID.uuidString.prefix(8)).uppercased())
+                        }
+
+                        Text(message)
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else if let latestLocalResult = viewModel.latestLocalResult {
-                Section("Latest Capture") {
-                    if let image = latestLocalResult.previewImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .foregroundStyle(.red)
                     }
 
-                    LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
-                    LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                    LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
-                }
-            }
-
-            if case let .failed(jobID, message) = viewModel.captureState {
-                Section("Capture Error") {
-                    if let jobID {
-                        LabeledContent("Job", value: String(jobID.uuidString.prefix(8)).uppercased())
+                    Button("Reset") {
+                        viewModel.resetResult()
                     }
-
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
+                    .buttonStyle(.borderedProminent)
                 }
             }
 
@@ -247,6 +250,10 @@ struct ReadyView: View {
             get: { viewModel.autoCaptureDelay },
             set: { viewModel.updateAutoCaptureDelay($0) }
         )
+    }
+
+    private var resultPreviewImage: UIImage? {
+        viewModel.latestUploadResult?.previewImage ?? viewModel.latestLocalResult?.previewImage
     }
 }
 
