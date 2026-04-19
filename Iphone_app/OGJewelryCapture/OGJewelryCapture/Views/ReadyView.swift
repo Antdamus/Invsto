@@ -30,10 +30,6 @@ struct ReadyView: View {
                             .font(.system(.title2, design: .serif).weight(.bold))
                             .foregroundStyle(OGVisualStyle.textPrimary)
 
-                        Text("Ready for assigned capture work with a calmer OG-style shell. Workflow and job behavior remain unchanged.")
-                            .font(.subheadline)
-                            .foregroundStyle(OGVisualStyle.textSecondary)
-
                         HStack(spacing: 10) {
                             Label(viewModel.listenerState.label, systemImage: "dot.radiowaves.left.and.right")
                             Label(viewModel.captureMode.label, systemImage: "camera.aperture")
@@ -230,11 +226,13 @@ struct ReadyView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Button(activeSession.keptPhotos.isEmpty ? "Capture First Photo" : "Add Another Photo") {
-                        viewModel.addAnotherPhoto()
+                    if !activeSession.keptPhotos.isEmpty {
+                        Button("Add Another Photo") {
+                            viewModel.addAnotherPhoto()
+                        }
+                        .buttonStyle(OGActionButtonStyle(role: .primary))
+                        .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
                     }
-                    .buttonStyle(OGActionButtonStyle(role: .primary))
-                    .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
 
                     Button("Finish Job") {
                         viewModel.finishJob()

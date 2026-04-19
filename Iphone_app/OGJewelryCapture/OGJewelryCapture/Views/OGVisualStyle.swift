@@ -66,6 +66,8 @@ enum OGActionRole {
 }
 
 struct OGActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     let role: OGActionRole
 
     func makeBody(configuration: Configuration) -> some View {
@@ -81,12 +83,18 @@ struct OGActionButtonStyle: ButtonStyle {
                     .stroke(borderColor, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .scaleEffect(configuration.isPressed ? 0.99 : 1)
-            .shadow(color: shadowColor.opacity(configuration.isPressed ? 0.18 : 0.3), radius: 18, y: 10)
+            .opacity(isEnabled ? 1 : 0.58)
+            .saturation(isEnabled ? 1 : 0.2)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.99 : 1)
+            .shadow(color: shadowColor.opacity(shadowOpacity(isPressed: configuration.isPressed)), radius: 18, y: 10)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }
 
     private var foregroundColor: Color {
+        if !isEnabled {
+            return OGVisualStyle.textSecondary.opacity(0.9)
+        }
+
         switch role {
         case .primary:
             return Color.black.opacity(0.88)
@@ -96,6 +104,10 @@ struct OGActionButtonStyle: ButtonStyle {
     }
 
     private var borderColor: Color {
+        if !isEnabled {
+            return OGVisualStyle.strokeStrong.opacity(0.6)
+        }
+
         switch role {
         case .primary:
             return OGVisualStyle.goldSoft.opacity(0.4)
@@ -119,6 +131,16 @@ struct OGActionButtonStyle: ButtonStyle {
 
     @ViewBuilder
     private func background(_ isPressed: Bool) -> some View {
+        if !isEnabled {
+            LinearGradient(
+                colors: [
+                    OGVisualStyle.panelElevated.opacity(0.72),
+                    OGVisualStyle.panel.opacity(0.84)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
         switch role {
         case .primary:
             LinearGradient(
@@ -148,6 +170,12 @@ struct OGActionButtonStyle: ButtonStyle {
                 endPoint: .bottomTrailing
             )
         }
+        }
+    }
+
+    private func shadowOpacity(isPressed: Bool) -> Double {
+        guard isEnabled else { return 0 }
+        return isPressed ? 0.18 : 0.3
     }
 }
 
