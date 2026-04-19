@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReadyView: View {
     @StateObject private var viewModel: ReadyViewModel
+    @State private var isShowingCancelConfirmation = false
 
     let onChangeStation: () -> Void
     let onRefreshStations: () async -> Void
@@ -106,6 +107,25 @@ struct ReadyView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+
+            if viewModel.hasActiveJob && !viewModel.isShowingPersistentResult {
+                Section("Active Job") {
+                    LabeledContent("Job", value: viewModel.activeJobReference)
+                    LabeledContent("State", value: viewModel.captureState.label)
+
+                    if let cancelJobAvailabilityMessage = viewModel.cancelJobAvailabilityMessage {
+                        Text(cancelJobAvailabilityMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Cancel Job", role: .destructive) {
+                        isShowingCancelConfirmation = true
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canCancelActiveJob)
                 }
             }
 
@@ -338,14 +358,6 @@ struct ReadyView: View {
                     }
                 }
 
-#if DEBUG
-                Button("Simulate Capture Request") {
-                    Task {
-                        await viewModel.simulateCaptureRequest()
-                    }
-                }
-#endif
-
                 Button("Change Station") {
                     onChangeStation()
                 }
@@ -365,6 +377,14 @@ struct ReadyView: View {
                 await viewModel.stop()
             }
         }
+        .alert("Cancel this job?", isPresented: $isShowingCancelConfirmation) {
+            Button("Keep Working", role: .cancel) {}
+            Button("Cancel Job", role: .destructive) {
+                viewModel.cancelActiveJob()
+            }
+        } message: {
+            Text("Are you sure you want to cancel this job? The capture will be failed, local session photos will be cleared, and the station will return to listening.")
+        }
     }
 
     private var activeResolutionLabel: String {
@@ -372,7 +392,7 @@ struct ReadyView: View {
     }
 
     private var pendingJobReference: String {
-        viewModel.activeSession.map { String($0.jobID.uuidString.prefix(8)).uppercased() } ?? "None"
+        viewModel.activeSession.map { String($0.jobID.uuidString.prefix(8)).uppercased() } ?? viewModel.activeJobReference
     }
 
     private var shouldShowPreview: Bool {

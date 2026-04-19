@@ -92,6 +92,8 @@ final class ReadyViewModel: ObservableObject {
     private static let captureResolutionModeKey = "ready.captureResolutionMode"
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
+    private static let operatorCancelledFailureCode = "cancelled_by_operator"
+    private static let operatorCancelledFailureMessage = "Operator cancelled capture"
 
     init(
         employee: AuthenticatedEmployee,
@@ -263,19 +265,6 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    func simulateCaptureRequest() async {
-        guard activeJobID == nil else { return }
-        guard canAcceptIncomingJobs else { return }
-
-        do {
-            if let job = try await repository.fetchNextPendingJob(for: station.id) {
-                await handleIncomingJob(job)
-            }
-        } catch {
-            captureState = .failed(jobID: nil, message: error.localizedDescription)
-        }
-    }
-
     func resetResult() {
         guard isShowingPersistentResult else { return }
 
@@ -293,6 +282,15 @@ final class ReadyViewModel: ObservableObject {
             self.cameraAvailability = await self.cameraService.prepareIfNeeded()
             await self.refreshZoomState(resetToDefault: true)
             await self.refreshPendingJob()
+        }
+    }
+
+    func cancelActiveJob() {
+        guard let job = pendingJob else { return }
+        guard !isUploadingFinalSet else { return }
+
+        Task { [weak self] in
+            await self?.performCancelActiveJob(job)
         }
     }
 
@@ -666,6 +664,36 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
+    private func performCancelActiveJob(_ job: CaptureJob) async {
+        pendingAutoCaptureTask?.cancel()
+        finishJobMessage = nil
+
+        do {
+            _ = try await repository.markFailed(
+                id: job.id,
+                code: Self.operatorCancelledFailureCode,
+                message: Self.operatorCancelledFailureMessage
+            )
+        } catch {
+            captureState = .failed(jobID: job.id, message: error.localizedDescription)
+            return
+        }
+
+        cameraService.stopSession()
+        latestLocalResult = nil
+        latestUploadResult = nil
+        clearLocalSession(jobID: job.id)
+        pendingJob = nil
+        activeJobID = nil
+        finishJobMessage = nil
+        captureState = .listening
+
+        cameraAvailability = await cameraService.prepareIfNeeded()
+        await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        await refreshZoomState(resetToDefault: true)
+        await refreshPendingJob()
+    }
+
     private func clearLocalSession(jobID: UUID?) {
         guard let jobID else {
             activeSession = nil
@@ -770,6 +798,37 @@ final class ReadyViewModel: ObservableObject {
         }
 
         return false
+    }
+
+    var hasActiveJob: Bool {
+        pendingJob != nil
+    }
+
+    var activeJobReference: String {
+        pendingJob?.shortReference ?? "None"
+    }
+
+    var isUploadingFinalSet: Bool {
+        if case .uploadingFinalSet = captureState {
+            return true
+        }
+
+        return false
+    }
+
+    var canCancelActiveJob: Bool {
+        guard hasActiveJob else { return false }
+        return !isUploadingFinalSet
+    }
+
+    var cancelJobAvailabilityMessage: String? {
+        guard hasActiveJob else { return nil }
+
+        if isUploadingFinalSet {
+            return "Cancel Job is disabled while Finish Job is actively uploading and finalizing to avoid interrupting the in-flight multi-photo completion."
+        }
+
+        return "Cancel Job fails the active capture request, clears local session photos, and returns this station to listening."
     }
 
     private var canAcceptIncomingJobs: Bool {
