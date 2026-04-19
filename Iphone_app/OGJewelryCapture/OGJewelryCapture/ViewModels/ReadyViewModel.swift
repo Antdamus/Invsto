@@ -94,6 +94,8 @@ final class ReadyViewModel: ObservableObject {
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
     private static let operatorCancelledFailureCode = "cancelled_by_operator"
     private static let operatorCancelledFailureMessage = "Operator cancelled capture"
+    private static let cancelRejectedMessage = "Cancel Job was not accepted. This job is still active on this station."
+    private static let failureRejectedMessage = "The job could not be marked failed. It is still active on this station."
 
     init(
         employee: AuthenticatedEmployee,
@@ -419,18 +421,27 @@ final class ReadyViewModel: ObservableObject {
             case .ready, .simulatorFallback:
                 transitionToCapture(for: job)
             case let .unavailable(message):
-                await failJob(jobID: job.id, code: "camera_unavailable", message: message, clearLocalSession: true)
-                activeJobID = nil
-                pendingJob = nil
+                let failureAccepted = await failJob(
+                    jobID: job.id,
+                    code: "camera_unavailable",
+                    message: message,
+                    clearLocalSession: true
+                )
+                if failureAccepted {
+                    activeJobID = nil
+                    pendingJob = nil
+                }
             case .unknown:
-                await failJob(
+                let failureAccepted = await failJob(
                     jobID: job.id,
                     code: "camera_unavailable",
                     message: CameraCaptureServiceError.cameraUnavailable.localizedDescription,
                     clearLocalSession: true
                 )
-                activeJobID = nil
-                pendingJob = nil
+                if failureAccepted {
+                    activeJobID = nil
+                    pendingJob = nil
+                }
             }
         } catch {
             captureState = .failed(jobID: job.id, message: error.localizedDescription)
@@ -476,9 +487,16 @@ final class ReadyViewModel: ObservableObject {
             latestUploadResult = nil
             captureState = .reviewingCapture(job, result)
         } catch {
-            await failJob(jobID: job.id, code: "capture_failed", message: error.localizedDescription, clearLocalSession: true)
-            activeJobID = nil
-            pendingJob = nil
+            let failureAccepted = await failJob(
+                jobID: job.id,
+                code: "capture_failed",
+                message: error.localizedDescription,
+                clearLocalSession: true
+            )
+            if failureAccepted {
+                activeJobID = nil
+                pendingJob = nil
+            }
         }
     }
 
@@ -675,7 +693,8 @@ final class ReadyViewModel: ObservableObject {
                 message: Self.operatorCancelledFailureMessage
             )
         } catch {
-            captureState = .failed(jobID: job.id, message: error.localizedDescription)
+            finishJobMessage = Self.cancelRejectedMessage
+            reconfigurePendingCaptureIfNeeded()
             return
         }
 
@@ -704,26 +723,66 @@ final class ReadyViewModel: ObservableObject {
         activeSession = nil
     }
 
+    @discardableResult
     private func failJob(
         jobID: UUID,
         code: String,
         message: String,
         clearLocalSession: Bool
-    ) async {
+    ) async -> Bool {
+        do {
+            _ = try await repository.markFailed(id: jobID, code: code, message: message)
+        } catch {
+            finishJobMessage = Self.failureRejectedMessage
+            restoreActiveStateAfterFailedLifecycleRejection(for: jobID)
+            return false
+        }
+
         if clearLocalSession {
             self.clearLocalSession(jobID: jobID)
         }
 
-        do {
-            _ = try await repository.markFailed(id: jobID, code: code, message: message)
-        } catch {
-            captureState = .failed(jobID: jobID, message: error.localizedDescription)
-            finishJobMessage = nil
+        captureState = .failed(jobID: jobID, message: message)
+        finishJobMessage = nil
+        return true
+    }
+
+    private func restoreActiveStateAfterFailedLifecycleRejection(for jobID: UUID) {
+        latestUploadResult = nil
+
+        guard let job = pendingJob, job.id == jobID else {
             return
         }
 
-        captureState = .failed(jobID: jobID, message: message)
-        finishJobMessage = nil
+        if let activeSession {
+            let restoredSession = LocalCaptureSession(
+                jobID: activeSession.jobID,
+                resolutionMode: activeSession.resolutionMode,
+                keptPhotos: activeSession.keptPhotos,
+                isUploadingFinalSet: false
+            )
+
+            self.activeSession = restoredSession
+
+            if restoredSession.keptPhotos.isEmpty {
+                switch cameraAvailability {
+                case .ready, .simulatorFallback:
+                    transitionToCapture(for: job)
+                case .unavailable, .unknown:
+                    captureState = .listening
+                }
+            } else {
+                captureState = .sessionReady(job, restoredSession)
+            }
+            return
+        }
+
+        switch cameraAvailability {
+        case .ready, .simulatorFallback:
+            transitionToCapture(for: job)
+        case .unavailable, .unknown:
+            captureState = .listening
+        }
     }
 
     private static func clampedDelay(_ delay: TimeInterval) -> TimeInterval {
@@ -819,6 +878,19 @@ final class ReadyViewModel: ObservableObject {
     var canCancelActiveJob: Bool {
         guard hasActiveJob else { return false }
         return !isUploadingFinalSet
+    }
+
+    var canChangeStation: Bool {
+        !hasActiveJob
+    }
+
+    var canLogOut: Bool {
+        !hasActiveJob
+    }
+
+    var activeJobExitSafetyMessage: String? {
+        guard hasActiveJob else { return nil }
+        return "Change Station and Log Out are disabled while a job is active. Cancel or finish the job first."
     }
 
     var cancelJobAvailabilityMessage: String? {

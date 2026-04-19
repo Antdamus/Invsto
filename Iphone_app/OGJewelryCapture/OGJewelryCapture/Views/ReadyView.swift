@@ -361,11 +361,19 @@ struct ReadyView: View {
                 Button("Change Station") {
                     onChangeStation()
                 }
+                .disabled(!viewModel.canChangeStation)
 
                 Button("Log Out", role: .destructive) {
                     Task {
                         await onSignOut()
                     }
+                }
+                .disabled(!viewModel.canLogOut)
+
+                if let activeJobExitSafetyMessage = viewModel.activeJobExitSafetyMessage {
+                    Text(activeJobExitSafetyMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

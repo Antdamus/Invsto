@@ -5,6 +5,7 @@ struct CaptureJobRepository {
     enum RepositoryError: LocalizedError {
         case transitionRejected
         case invalidUploadingState
+        case lifecycleRejected(targetStatus: CaptureJobStatus)
 
         var errorDescription: String? {
             switch self {
@@ -12,6 +13,8 @@ struct CaptureJobRepository {
                 "The capture job lifecycle update was rejected."
             case .invalidUploadingState:
                 "The capture job is not in a retryable uploading state for this multi-photo finalization attempt."
+            case let .lifecycleRejected(targetStatus):
+                "The server rejected the \(targetStatus.rawValue) lifecycle update for this capture job."
             }
         }
     }
@@ -116,12 +119,18 @@ struct CaptureJobRepository {
     }
 
     func markFailed(id: UUID, code: String, message: String) async throws -> Bool {
-        return try await updateLifecycle(
+        let accepted = try await updateLifecycle(
             jobID: id,
             targetStatus: .failed,
             failureCode: code,
             failureMessage: message
         )
+
+        guard accepted else {
+            throw RepositoryError.lifecycleRejected(targetStatus: .failed)
+        }
+
+        return true
     }
 
     func ensureUploadingForMultiPhotoRetry(id: UUID, captureCompletedAt: Date) async throws -> Bool {
