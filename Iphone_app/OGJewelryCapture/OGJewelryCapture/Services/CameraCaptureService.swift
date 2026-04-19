@@ -53,6 +53,22 @@ enum CameraCaptureServiceError: LocalizedError {
     }
 }
 
+enum CaptureResolutionMode: String, CaseIterable, Identifiable {
+    case standard
+    case highResolution
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard:
+            "Standard"
+        case .highResolution:
+            "High Resolution"
+        }
+    }
+}
+
 final class CameraCaptureService: NSObject {
     let previewSession = AVCaptureSession()
 
@@ -65,6 +81,7 @@ final class CameraCaptureService: NSObject {
     private var isCapturingPhoto = false
     private var availability: CameraAvailability = .unknown
     private var activeProcessor: PhotoCaptureProcessor?
+    private var captureResolutionMode: CaptureResolutionMode = .standard
 
     private let preferredMaximumZoomFactor: CGFloat = 3.0
 
@@ -114,6 +131,20 @@ final class CameraCaptureService: NSObject {
             ])
         case .unknown:
             throw CameraCaptureServiceError.cameraUnavailable
+        }
+    }
+
+    func updateCaptureResolutionMode(_ mode: CaptureResolutionMode) async {
+        captureResolutionMode = mode
+
+        guard availability != .simulatorFallback else { return }
+        guard isConfigured else { return }
+
+        await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                self.applyCaptureResolutionModeToPhotoOutput()
+                continuation.resume()
+            }
         }
     }
 
@@ -168,6 +199,7 @@ final class CameraCaptureService: NSObject {
                     self.previewSession.addOutput(self.photoOutput)
                     self.photoOutput.maxPhotoQualityPrioritization = .quality
                     self.activeDevice = camera
+                    self.applyCaptureResolutionModeToPhotoOutput()
 
                     self.previewSession.commitConfiguration()
                     self.isConfigured = true
@@ -336,6 +368,13 @@ final class CameraCaptureService: NSObject {
 
                 let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 settings.photoQualityPrioritization = .quality
+
+                if self.captureResolutionMode == .highResolution,
+                   let maxPhotoDimensions = self.maximumSupportedPhotoDimensions()
+                {
+                    settings.maxPhotoDimensions = maxPhotoDimensions
+                }
+
                 let processor = PhotoCaptureProcessor(jobID: jobID) { result in
                     self.sessionQueue.async {
                         self.isCapturingPhoto = false
@@ -413,6 +452,42 @@ final class CameraCaptureService: NSObject {
         let supportedMaximum = min(device.activeFormat.videoMaxZoomFactor, preferredMaximumZoomFactor)
         let resolvedMaximum = max(1.0, supportedMaximum)
         return 1.0 ... resolvedMaximum
+    }
+
+    private func applyCaptureResolutionModeToPhotoOutput() {
+        guard let photoDimensions = resolvedPhotoDimensions(for: captureResolutionMode) else { return }
+        photoOutput.maxPhotoDimensions = photoDimensions
+    }
+
+    private func maximumSupportedPhotoDimensions() -> CMVideoDimensions? {
+        guard let device = activeDevice else { return nil }
+        return maximumDimensions(in: device.activeFormat.supportedMaxPhotoDimensions)
+    }
+
+    private func resolvedPhotoDimensions(for mode: CaptureResolutionMode) -> CMVideoDimensions? {
+        guard let device = activeDevice else { return nil }
+
+        let supportedDimensions = device.activeFormat.supportedMaxPhotoDimensions
+        guard !supportedDimensions.isEmpty else { return nil }
+
+        switch mode {
+        case .standard:
+            return minimumDimensions(in: supportedDimensions)
+        case .highResolution:
+            return maximumDimensions(in: supportedDimensions)
+        }
+    }
+
+    private func maximumDimensions(in supportedDimensions: [CMVideoDimensions]) -> CMVideoDimensions? {
+        supportedDimensions.max(by: { photoDimensionArea($0) < photoDimensionArea($1) })
+    }
+
+    private func minimumDimensions(in supportedDimensions: [CMVideoDimensions]) -> CMVideoDimensions? {
+        supportedDimensions.min(by: { photoDimensionArea($0) < photoDimensionArea($1) })
+    }
+
+    private func photoDimensionArea(_ dimensions: CMVideoDimensions) -> Int64 {
+        Int64(dimensions.width) * Int64(dimensions.height)
     }
 }
 

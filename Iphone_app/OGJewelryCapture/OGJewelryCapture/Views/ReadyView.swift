@@ -30,6 +30,7 @@ struct ReadyView: View {
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Camera", value: viewModel.cameraAvailability.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
+                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
 
                     if let role = viewModel.employee.role, !role.isEmpty {
                         LabeledContent("Role", value: role)
@@ -43,6 +44,13 @@ struct ReadyView: View {
                 Section("Capture Controls") {
                     Picker("Capture Mode", selection: captureModeBinding) {
                         ForEach(ReadyViewModel.CaptureMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Resolution", selection: captureResolutionModeBinding) {
+                        ForEach(CaptureResolutionMode.allCases) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }
@@ -68,6 +76,12 @@ struct ReadyView: View {
                             .foregroundStyle(.secondary)
                     default:
                         EmptyView()
+                    }
+
+                    if viewModel.captureResolutionMode == .highResolution {
+                        Text("High Resolution requests the largest processed still-photo dimensions supported by the active camera format on this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -134,6 +148,7 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
+                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
 
                     if let latestLocalResult = viewModel.latestLocalResult {
                         LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
@@ -170,6 +185,7 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
+                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
 
                     if let latestUploadResult = viewModel.latestUploadResult {
                         LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
@@ -278,6 +294,13 @@ struct ReadyView: View {
         Binding(
             get: { viewModel.captureMode },
             set: { viewModel.updateCaptureMode($0) }
+        )
+    }
+
+    private var captureResolutionModeBinding: Binding<CaptureResolutionMode> {
+        Binding(
+            get: { viewModel.captureResolutionMode },
+            set: { viewModel.updateCaptureResolutionMode($0) }
         )
     }
 

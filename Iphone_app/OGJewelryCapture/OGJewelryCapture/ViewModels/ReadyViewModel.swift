@@ -61,6 +61,7 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var latestLocalResult: LocalCaptureResult?
     @Published private(set) var latestUploadResult: CaptureUploadResult?
     @Published private(set) var captureMode: CaptureMode
+    @Published private(set) var captureResolutionMode: CaptureResolutionMode
     @Published private(set) var autoCaptureDelay: TimeInterval
     @Published private(set) var zoomFactor: CGFloat
     @Published private(set) var zoomRange: ClosedRange<CGFloat>
@@ -83,6 +84,7 @@ final class ReadyViewModel: ObservableObject {
     private var hasStarted = false
 
     private static let captureModeKey = "ready.captureMode"
+    private static let captureResolutionModeKey = "ready.captureResolutionMode"
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
 
@@ -103,6 +105,7 @@ final class ReadyViewModel: ObservableObject {
         self.uploadService = uploadService
         self.userDefaults = userDefaults
         self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
+        self.captureResolutionMode = CaptureResolutionMode(rawValue: userDefaults.string(forKey: Self.captureResolutionModeKey) ?? "") ?? .standard
         self.zoomFactor = CameraZoomState.unavailable.factor
         self.zoomRange = CameraZoomState.unavailable.range
 
@@ -139,6 +142,7 @@ final class ReadyViewModel: ObservableObject {
         hasStarted = true
 
         cameraAvailability = await cameraService.prepareIfNeeded()
+        await cameraService.updateCaptureResolutionMode(captureResolutionMode)
         await refreshZoomState(resetToDefault: true)
         captureState = .listening
 
@@ -184,6 +188,17 @@ final class ReadyViewModel: ObservableObject {
         autoCaptureDelay = clampedDelay
         userDefaults.set(clampedDelay, forKey: Self.autoCaptureDelayKey)
         reconfigurePendingCaptureIfNeeded()
+    }
+
+    func updateCaptureResolutionMode(_ mode: CaptureResolutionMode) {
+        guard captureResolutionMode != mode else { return }
+        captureResolutionMode = mode
+        userDefaults.set(mode.rawValue, forKey: Self.captureResolutionModeKey)
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.cameraService.updateCaptureResolutionMode(mode)
+        }
     }
 
     func triggerManualCapture() {
