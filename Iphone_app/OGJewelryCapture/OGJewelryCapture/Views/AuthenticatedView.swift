@@ -42,6 +42,7 @@ struct AuthenticatedView: View {
                 }
             }
             .navigationTitle("OG Capture")
+            .navigationBarTitleDisplayMode(.inline)
         }
         .task {
             await stationViewModel.bootstrap()

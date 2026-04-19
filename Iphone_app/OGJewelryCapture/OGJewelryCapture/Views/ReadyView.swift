@@ -24,6 +24,31 @@ struct ReadyView: View {
     var body: some View {
         List {
             if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(viewModel.station.name)
+                            .font(.system(.title2, design: .serif).weight(.bold))
+                            .foregroundStyle(OGVisualStyle.textPrimary)
+
+                        Text("Ready for assigned capture work with a calmer OG-style shell. Workflow and job behavior remain unchanged.")
+                            .font(.subheadline)
+                            .foregroundStyle(OGVisualStyle.textSecondary)
+
+                        HStack(spacing: 10) {
+                            Label(viewModel.listenerState.label, systemImage: "dot.radiowaves.left.and.right")
+                            Label(viewModel.captureMode.label, systemImage: "camera.aperture")
+                            Label(activeResolutionLabel, systemImage: "photo")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(OGVisualStyle.goldSoft)
+                    }
+                    .ogCard(elevated: true, padding: 20)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto {
                 Section("Listener") {
                     LabeledContent("Station", value: viewModel.station.name)
                     LabeledContent("Employee", value: viewModel.employee.displayName)
@@ -51,6 +76,7 @@ struct ReadyView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .listRowBackground(OGVisualStyle.panel)
 
                 Section("Capture Controls") {
                     Picker("Capture Mode", selection: captureModeBinding) {
@@ -108,6 +134,7 @@ struct ReadyView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             if viewModel.hasActiveJob && !viewModel.isShowingPersistentResult {
@@ -124,9 +151,10 @@ struct ReadyView: View {
                     Button("Cancel Job", role: .destructive) {
                         isShowingCancelConfirmation = true
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(OGActionButtonStyle(role: .destructive))
                     .disabled(!viewModel.canCancelActiveJob)
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             if let activeSession = viewModel.activeSession, !viewModel.isShowingPersistentResult {
@@ -162,7 +190,8 @@ struct ReadyView: View {
                                             .font(.caption.weight(.semibold))
                                             .padding(.horizontal, 8)
                                             .padding(.vertical, 4)
-                                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                                            .background(OGVisualStyle.gold.opacity(0.18), in: Capsule())
+                                            .foregroundStyle(OGVisualStyle.goldSoft)
                                     }
                                 }
 
@@ -180,9 +209,18 @@ struct ReadyView: View {
                                 Button("Delete Photo", role: .destructive) {
                                     viewModel.deleteKeptPhoto(photo)
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(OGActionButtonStyle(role: .destructive))
                             }
                             .padding(.vertical, 4)
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(OGVisualStyle.panelElevated)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .stroke(OGVisualStyle.strokeStrong, lineWidth: 1)
+                                    )
+                            )
                         }
                     }
 
@@ -195,13 +233,13 @@ struct ReadyView: View {
                     Button(activeSession.keptPhotos.isEmpty ? "Capture First Photo" : "Add Another Photo") {
                         viewModel.addAnotherPhoto()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(OGActionButtonStyle(role: .primary))
                     .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
 
                     Button("Finish Job") {
                         viewModel.finishJob()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(OGActionButtonStyle(role: .primary))
                     .disabled(!viewModel.canFinishJob)
 
                     if let finishJobMessage = viewModel.finishJobMessage {
@@ -210,6 +248,7 @@ struct ReadyView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             if shouldShowPreview, let session = viewModel.previewSession {
@@ -256,9 +295,10 @@ struct ReadyView: View {
                         Button("Capture Photo") {
                             viewModel.triggerManualCapture()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(OGActionButtonStyle(role: .primary))
                     }
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             if viewModel.isReviewingCapturedPhoto {
@@ -289,13 +329,14 @@ struct ReadyView: View {
                     Button("Keep") {
                         viewModel.keepCapturedPhoto()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(OGActionButtonStyle(role: .primary))
 
                     Button("Discard / Retake", role: .destructive) {
                         viewModel.discardCapturedPhoto()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(OGActionButtonStyle(role: .destructive))
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             if viewModel.isShowingPersistentResult {
@@ -346,8 +387,9 @@ struct ReadyView: View {
                     Button("Reset") {
                         viewModel.resetResult()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(OGActionButtonStyle(role: .secondary))
                 }
+                .listRowBackground(OGVisualStyle.panel)
             }
 
             Section {
@@ -357,10 +399,12 @@ struct ReadyView: View {
                         await viewModel.refreshPendingJob()
                     }
                 }
+                .buttonStyle(OGActionButtonStyle(role: .secondary))
 
                 Button("Change Station") {
                     onChangeStation()
                 }
+                .buttonStyle(OGActionButtonStyle(role: .secondary))
                 .disabled(!viewModel.canChangeStation)
 
                 Button("Log Out", role: .destructive) {
@@ -368,6 +412,7 @@ struct ReadyView: View {
                         await onSignOut()
                     }
                 }
+                .buttonStyle(OGActionButtonStyle(role: .destructive))
                 .disabled(!viewModel.canLogOut)
 
                 if let activeJobExitSafetyMessage = viewModel.activeJobExitSafetyMessage {
@@ -377,6 +422,8 @@ struct ReadyView: View {
                 }
             }
         }
+        .ogListChrome()
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await viewModel.start()
         }
