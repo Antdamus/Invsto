@@ -4,11 +4,14 @@ import Supabase
 struct CaptureJobRepository {
     enum RepositoryError: LocalizedError {
         case transitionRejected
+        case invalidUploadingState
 
         var errorDescription: String? {
             switch self {
             case .transitionRejected:
                 "The capture job lifecycle update was rejected."
+            case .invalidUploadingState:
+                "The capture job is not in a retryable uploading state for this multi-photo finalization attempt."
             }
         }
     }
@@ -121,6 +124,66 @@ struct CaptureJobRepository {
         )
     }
 
+    func ensureUploadingForMultiPhotoRetry(id: UUID, captureCompletedAt: Date) async throws -> Bool {
+        if try await markUploading(id: id, captureCompletedAt: captureCompletedAt) {
+            return true
+        }
+
+        guard let job = try await fetchJob(id: id), job.status == .uploading else {
+            throw RepositoryError.invalidUploadingState
+        }
+
+        return true
+    }
+
+    func recordCaptureJobPhoto(
+        jobID: UUID,
+        sortOrder: Int,
+        isPrimary: Bool,
+        storageBucket: String,
+        storagePath: String,
+        fileSizeBytes: Int64,
+        imageWidth: Int?,
+        imageHeight: Int?,
+        mimeType: String,
+        label: String? = nil
+    ) async throws -> Bool {
+        let params = RecordCaptureJobPhotoParams(
+            jobID: jobID,
+            sortOrder: sortOrder,
+            isPrimary: isPrimary,
+            storageBucket: storageBucket,
+            storagePath: storagePath,
+            fileSizeBytes: fileSizeBytes,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            mimeType: mimeType,
+            label: label
+        )
+
+        return try await client
+            .rpc("record_capture_job_photo", params: params)
+            .execute()
+            .value
+    }
+
+    func completeCaptureJobMultiPhoto(
+        jobID: UUID,
+        expectedPhotoCount: Int,
+        uploadCompletedAt: Date
+    ) async throws -> Bool {
+        let params = CompleteCaptureJobMultiPhotoParams(
+            jobID: jobID,
+            expectedPhotoCount: expectedPhotoCount,
+            uploadCompletedAt: uploadCompletedAt
+        )
+
+        return try await client
+            .rpc("complete_capture_job_multi_photo", params: params)
+            .execute()
+            .value
+    }
+
     private func updateLifecycle(
         jobID: UUID,
         targetStatus: CaptureJobStatus,
@@ -190,5 +253,64 @@ private struct UpdateCaptureJobLifecycleParams: Encodable, Sendable {
         try container.encodeIfPresent(mimeType, forKey: .mimeType)
         try container.encodeIfPresent(captureCompletedAt, forKey: .captureCompletedAt)
         try container.encodeIfPresent(uploadCompletedAt, forKey: .uploadCompletedAt)
+    }
+}
+
+private struct RecordCaptureJobPhotoParams: Encodable, Sendable {
+    let jobID: UUID
+    let sortOrder: Int
+    let isPrimary: Bool
+    let storageBucket: String
+    let storagePath: String
+    let fileSizeBytes: Int64
+    let imageWidth: Int?
+    let imageHeight: Int?
+    let mimeType: String
+    let label: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "_job_id"
+        case sortOrder = "_sort_order"
+        case isPrimary = "_is_primary"
+        case storageBucket = "_storage_bucket"
+        case storagePath = "_storage_path"
+        case fileSizeBytes = "_file_size_bytes"
+        case imageWidth = "_image_width"
+        case imageHeight = "_image_height"
+        case mimeType = "_mime_type"
+        case label = "_label"
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(sortOrder, forKey: .sortOrder)
+        try container.encode(isPrimary, forKey: .isPrimary)
+        try container.encode(storageBucket, forKey: .storageBucket)
+        try container.encode(storagePath, forKey: .storagePath)
+        try container.encode(fileSizeBytes, forKey: .fileSizeBytes)
+        try container.encodeIfPresent(imageWidth, forKey: .imageWidth)
+        try container.encodeIfPresent(imageHeight, forKey: .imageHeight)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encodeIfPresent(label, forKey: .label)
+    }
+}
+
+private struct CompleteCaptureJobMultiPhotoParams: Encodable, Sendable {
+    let jobID: UUID
+    let expectedPhotoCount: Int
+    let uploadCompletedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "_job_id"
+        case expectedPhotoCount = "_expected_photo_count"
+        case uploadCompletedAt = "_upload_completed_at"
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(expectedPhotoCount, forKey: .expectedPhotoCount)
+        try container.encode(uploadCompletedAt, forKey: .uploadCompletedAt)
     }
 }

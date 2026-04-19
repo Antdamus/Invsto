@@ -2,6 +2,17 @@ import Foundation
 import Supabase
 
 struct CapturePhotoUploadService {
+    enum UploadError: LocalizedError {
+        case failedToReadLocalPhoto
+
+        var errorDescription: String? {
+            switch self {
+            case .failedToReadLocalPhoto:
+                "The app could not read one of the kept local photos for upload."
+            }
+        }
+    }
+
     struct UploadResult: Equatable {
         let bucket: String
         let path: String
@@ -52,9 +63,45 @@ struct CapturePhotoUploadService {
         )
     }
 
+    func uploadSessionPhoto(_ photo: LocalSessionPhoto, stationID: UUID) async throws -> UploadResult {
+        let objectPath = makeObjectPath(for: photo, stationID: stationID)
+        let uploadTimestamp = Date()
+
+        let imageData: Data
+        do {
+            imageData = try Data(contentsOf: photo.localFileURL)
+        } catch {
+            throw UploadError.failedToReadLocalPhoto
+        }
+
+        _ = try await client.storage
+            .from(Self.captureBucket)
+            .upload(
+                objectPath,
+                data: imageData,
+                options: FileOptions(
+                    cacheControl: "3600",
+                    contentType: photo.mimeType,
+                    upsert: true
+                )
+            )
+
+        return UploadResult(
+            bucket: Self.captureBucket,
+            path: objectPath,
+            fileSizeBytes: photo.fileSizeBytes,
+            mimeType: photo.mimeType,
+            uploadedAt: uploadTimestamp
+        )
+    }
+
     private func makeObjectPath(for capture: LocalCaptureResult, stationID: UUID) -> String {
         let timestamp = formatter.string(from: capture.capturedAt)
         return "\(stationID.uuidString.lowercased())/\(capture.jobID.uuidString.lowercased())/\(timestamp)-capture.jpg"
     }
-}
 
+    private func makeObjectPath(for photo: LocalSessionPhoto, stationID: UUID) -> String {
+        let timestamp = formatter.string(from: photo.capturedAt)
+        return "\(stationID.uuidString.lowercased())/\(photo.jobID.uuidString.lowercased())/\(photo.sortOrder)-\(timestamp)-capture.jpg"
+    }
+}

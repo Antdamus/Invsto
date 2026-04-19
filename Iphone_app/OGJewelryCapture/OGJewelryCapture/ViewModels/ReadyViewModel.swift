@@ -77,6 +77,7 @@ final class ReadyViewModel: ObservableObject {
     private let repository: CaptureJobRepository
     private let listener: CaptureJobListener
     private let cameraService: CameraCaptureService
+    private let uploadService: CapturePhotoUploadService
     private let photoStore: LocalCapturePhotoStore
     private let userDefaults: UserDefaults
 
@@ -98,6 +99,7 @@ final class ReadyViewModel: ObservableObject {
         repository: CaptureJobRepository = CaptureJobRepository(),
         listener: CaptureJobListener = CaptureJobListener(),
         cameraService: CameraCaptureService = CameraCaptureService(),
+        uploadService: CapturePhotoUploadService = CapturePhotoUploadService(),
         photoStore: LocalCapturePhotoStore = LocalCapturePhotoStore(),
         userDefaults: UserDefaults = .standard
     ) {
@@ -106,6 +108,7 @@ final class ReadyViewModel: ObservableObject {
         self.repository = repository
         self.listener = listener
         self.cameraService = cameraService
+        self.uploadService = uploadService
         self.photoStore = photoStore
         self.userDefaults = userDefaults
         self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
@@ -357,9 +360,29 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func finishJob() {
-        guard canFinishJob else { return }
+        guard let job = pendingJob else {
+            finishJobMessage = "No active capture job is available to finish right now."
+            return
+        }
 
-        finishJobMessage = "Final upload orchestration is intentionally deferred to Phase 5B.4. The local multi-photo session is preserved so the upload/complete flow can be added on top of it."
+        guard let session = activeSession, session.jobID == job.id else {
+            finishJobMessage = "The active multi-photo session is missing. Capture and keep at least one photo before finishing the job."
+            return
+        }
+
+        guard session.keptPhotoCount > 0 else {
+            finishJobMessage = "Keep at least one photo before finishing the job."
+            return
+        }
+
+        guard !session.isUploadingFinalSet else {
+            finishJobMessage = "Upload and finalization are already in progress for this job."
+            return
+        }
+
+        Task { [weak self] in
+            await self?.performFinishJob(for: job, session: session)
+        }
     }
 
     private func handleIncomingJob(_ job: CaptureJob) async {
@@ -538,6 +561,108 @@ final class ReadyViewModel: ObservableObject {
         case .manual:
             pendingAutoCaptureTask?.cancel()
             captureState = .waitingForManualCapture(job)
+        }
+    }
+
+    private func performFinishJob(for job: CaptureJob, session: LocalCaptureSession) async {
+        pendingAutoCaptureTask?.cancel()
+
+        let uploadingSession = LocalCaptureSession(
+            jobID: session.jobID,
+            resolutionMode: session.resolutionMode,
+            keptPhotos: session.keptPhotos,
+            isUploadingFinalSet: true
+        )
+
+        activeSession = uploadingSession
+        latestLocalResult = nil
+        latestUploadResult = nil
+        finishJobMessage = "Uploading \(uploadingSession.keptPhotoCount) kept photo\(uploadingSession.keptPhotoCount == 1 ? "" : "s") and finalizing the job."
+        captureState = .uploadingFinalSet(job, uploadingSession)
+
+        do {
+            _ = try await repository.ensureUploadingForMultiPhotoRetry(
+                id: job.id,
+                captureCompletedAt: Date()
+            )
+
+            let sortedPhotos = uploadingSession.keptPhotos.sorted { $0.sortOrder < $1.sortOrder }
+            var mostRecentUploadResult: CapturePhotoUploadService.UploadResult?
+            var uploadResultsByPhotoID = [UUID: CapturePhotoUploadService.UploadResult]()
+
+            for photo in sortedPhotos {
+                let uploadResult = try await uploadService.uploadSessionPhoto(photo, stationID: station.id)
+                let recorded = try await repository.recordCaptureJobPhoto(
+                    jobID: job.id,
+                    sortOrder: photo.sortOrder,
+                    isPrimary: photo.isPrimary,
+                    storageBucket: uploadResult.bucket,
+                    storagePath: uploadResult.path,
+                    fileSizeBytes: photo.fileSizeBytes,
+                    imageWidth: photo.imageWidth > 0 ? photo.imageWidth : nil,
+                    imageHeight: photo.imageHeight > 0 ? photo.imageHeight : nil,
+                    mimeType: photo.mimeType
+                )
+
+                guard recorded else {
+                    throw CaptureJobRepository.RepositoryError.transitionRejected
+                }
+
+                mostRecentUploadResult = uploadResult
+                uploadResultsByPhotoID[photo.id] = uploadResult
+            }
+
+            let finalized = try await repository.completeCaptureJobMultiPhoto(
+                jobID: job.id,
+                expectedPhotoCount: sortedPhotos.count,
+                uploadCompletedAt: mostRecentUploadResult?.uploadedAt ?? Date()
+            )
+
+            guard finalized else {
+                throw CaptureJobRepository.RepositoryError.transitionRejected
+            }
+
+            let primaryPhoto = sortedPhotos.first(where: \.isPrimary) ?? sortedPhotos.first
+            if let primaryPhoto {
+                let imageData = try Data(contentsOf: primaryPhoto.localFileURL)
+                let primaryUploadResult = uploadResultsByPhotoID[primaryPhoto.id] ?? mostRecentUploadResult
+
+                if let primaryUploadResult {
+                    latestUploadResult = CaptureUploadResult(
+                        jobID: job.id,
+                        capturedAt: primaryPhoto.capturedAt,
+                        uploadedAt: primaryUploadResult.uploadedAt,
+                        imageData: imageData,
+                        isSimulatorFallback: primaryPhoto.isSimulatorFallback,
+                        storageBucket: primaryUploadResult.bucket,
+                        storagePath: primaryUploadResult.path,
+                        fileSizeBytes: primaryPhoto.fileSizeBytes,
+                        mimeType: primaryPhoto.mimeType
+                    )
+                }
+            }
+
+            photoStore.clearSession(jobID: job.id)
+            activeSession = nil
+            activeJobID = nil
+            pendingJob = nil
+            latestLocalResult = nil
+            finishJobMessage = "Job \(job.shortReference) uploaded and completed successfully."
+            captureState = .listening
+
+            await refreshPendingJob()
+        } catch {
+            let recoveredSession = LocalCaptureSession(
+                jobID: session.jobID,
+                resolutionMode: session.resolutionMode,
+                keptPhotos: session.keptPhotos,
+                isUploadingFinalSet: false
+            )
+
+            activeSession = recoveredSession
+            latestUploadResult = nil
+            finishJobMessage = "Finish Job failed: \(error.localizedDescription) Retry is available and the kept photo session was preserved."
+            captureState = .sessionReady(job, recoveredSession)
         }
     }
 

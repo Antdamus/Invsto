@@ -43,6 +43,12 @@ struct ReadyView: View {
                     if viewModel.activeSession != nil {
                         LabeledContent("Kept Photos", value: "\(viewModel.sessionPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
                     }
+
+                    if let finishJobMessage = viewModel.finishJobMessage {
+                        Text(finishJobMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Capture Controls") {
@@ -80,7 +86,11 @@ struct ReadyView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     case .sessionReady:
-                        Text("Kept photos stay local to this job until the later multi-photo upload/finalize flow runs.")
+                        Text("Kept photos stay local until Finish Job uploads them sequentially and the backend finalizer completes the parent job.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    case .uploadingFinalSet:
+                        Text("Finish Job is uploading the kept photos in order and will complete the parent job only after the backend finalizer succeeds.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     default:
