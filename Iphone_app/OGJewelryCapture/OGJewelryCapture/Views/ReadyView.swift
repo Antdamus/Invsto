@@ -30,7 +30,7 @@ struct ReadyView: View {
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Camera", value: viewModel.cameraAvailability.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
+                    LabeledContent("Resolution", value: activeResolutionLabel)
 
                     if let role = viewModel.employee.role, !role.isEmpty {
                         LabeledContent("Role", value: role)
@@ -38,6 +38,10 @@ struct ReadyView: View {
 
                     if let deviceLabel = viewModel.station.deviceLabel, !deviceLabel.isEmpty {
                         LabeledContent("Device", value: deviceLabel)
+                    }
+
+                    if viewModel.activeSession != nil {
+                        LabeledContent("Kept Photos", value: "\(viewModel.sessionPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
                     }
                 }
 
@@ -55,6 +59,7 @@ struct ReadyView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .disabled(viewModel.isResolutionSelectionLocked)
 
                     if viewModel.captureMode == .auto {
                         Stepper(value: autoCaptureDelayBinding, in: 0.5 ... 15.0, step: 0.5) {
@@ -74,12 +79,103 @@ struct ReadyView: View {
                         Text("Preview is live. Tap the shutter when framing and focus look right.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    case .sessionReady:
+                        Text("Kept photos stay local to this job until the later multi-photo upload/finalize flow runs.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     default:
                         EmptyView()
                     }
 
-                    if viewModel.captureResolutionMode == .highResolution {
+                    if viewModel.isResolutionSelectionLocked {
+                        Text("Resolution is locked for the active capture session and applies to every kept photo in this job.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if viewModel.captureResolutionMode == .highResolution {
                         Text("High Resolution requests the largest processed still-photo dimensions supported by the active camera format on this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let activeSession = viewModel.activeSession, !viewModel.isShowingPersistentResult {
+                Section("Active Session") {
+                    LabeledContent("Job", value: pendingJobReference)
+                    LabeledContent("Kept Photos", value: "\(activeSession.keptPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
+                    LabeledContent("Resolution", value: activeSession.resolutionMode.label)
+
+                    if let primaryPhoto = activeSession.primaryPhoto {
+                        LabeledContent("Primary", value: "Photo \(primaryPhoto.sortOrder + 1)")
+                    }
+
+                    if activeSession.keptPhotos.isEmpty {
+                        Text("No kept photos yet. Capture and keep at least one photo to enable Finish Job.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(activeSession.keptPhotos) { photo in
+                            VStack(alignment: .leading, spacing: 12) {
+                                if let image = photo.previewImage {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                }
+
+                                HStack {
+                                    Text("Photo \(photo.sortOrder + 1)")
+                                        .font(.headline)
+
+                                    if photo.isPrimary {
+                                        Text("Primary")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                                    }
+                                }
+
+                                LabeledContent("Captured", value: photo.capturedAt.formatted(date: .abbreviated, time: .standard))
+                                LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: photo.fileSizeBytes, countStyle: .file))
+                                LabeledContent("Dimensions", value: photoDimensionsLabel(photo))
+                                LabeledContent("Type", value: photo.mimeType)
+
+                                if photo.isSimulatorFallback {
+                                    Text("Captured using the simulator fallback path.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Button("Delete Photo", role: .destructive) {
+                                    viewModel.deleteKeptPhoto(photo)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+
+                    if !viewModel.canAddMoreSessionPhotos {
+                        Text("Soft max reached. Delete a kept photo before capturing another one.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button(activeSession.keptPhotos.isEmpty ? "Capture First Photo" : "Add Another Photo") {
+                        viewModel.addAnotherPhoto()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
+
+                    Button("Finish Job") {
+                        viewModel.finishJob()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.canFinishJob)
+
+                    if let finishJobMessage = viewModel.finishJobMessage {
+                        Text(finishJobMessage)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -102,19 +198,19 @@ struct ReadyView: View {
                             viewModel.updatePreviewZoom(to: zoomFactor)
                         } : nil
                     )
-                        .frame(height: 320)
-                        .overlay(alignment: .topTrailing) {
-                            if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
-                                Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(.ultraThinMaterial, in: Capsule())
-                                    .padding(12)
-                            }
+                    .frame(height: 320)
+                    .overlay(alignment: .topTrailing) {
+                        if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
+                            Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .padding(12)
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
 
                     if viewModel.isTapToFocusEnabledForCurrentState {
                         Text(previewInteractionHint)
@@ -148,15 +244,15 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
+                    LabeledContent("Resolution", value: activeResolutionLabel)
 
                     if let latestLocalResult = viewModel.latestLocalResult {
                         LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
                         LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
+                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestLocalResult.fileSizeBytes, countStyle: .file))
                     }
 
-                    Text("Keep uploads and finalizes this capture. Discard clears it and returns to the same job without leaving capture mode.")
+                    Text("Keep stores this photo locally in the active session. Discard clears only this new capture and returns to the same job without uploading.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -185,7 +281,7 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: viewModel.captureResolutionMode.label)
+                    LabeledContent("Resolution", value: activeResolutionLabel)
 
                     if let latestUploadResult = viewModel.latestUploadResult {
                         LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
@@ -204,7 +300,7 @@ struct ReadyView: View {
                     } else if let latestLocalResult = viewModel.latestLocalResult {
                         LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
                         LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: Int64(latestLocalResult.fileSizeBytes), countStyle: .file))
+                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestLocalResult.fileSizeBytes, countStyle: .file))
                     }
 
                     if case let .failed(jobID, message) = viewModel.captureState {
@@ -261,11 +357,19 @@ struct ReadyView: View {
         }
     }
 
+    private var activeResolutionLabel: String {
+        viewModel.activeSession?.resolutionMode.label ?? viewModel.captureResolutionMode.label
+    }
+
+    private var pendingJobReference: String {
+        viewModel.activeSession.map { String($0.jobID.uuidString.prefix(8)).uppercased() } ?? "None"
+    }
+
     private var shouldShowPreview: Bool {
         switch viewModel.captureState {
         case .captureRequested, .waitingForManualCapture, .capturing:
             true
-        case .idle, .listening, .reviewingCapture, .uploading, .completed, .failed:
+        case .idle, .listening, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             false
         }
     }
@@ -285,9 +389,17 @@ struct ReadyView: View {
         return switch viewModel.captureState {
         case .captureRequested, .waitingForManualCapture:
             true
-        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
+        case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             false
         }
+    }
+
+    private var isReadyToAddAnotherPhoto: Bool {
+        if case .sessionReady = viewModel.captureState {
+            return true
+        }
+
+        return false
     }
 
     private var captureModeBinding: Binding<ReadyViewModel.CaptureMode> {
@@ -314,6 +426,11 @@ struct ReadyView: View {
     private var resultPreviewImage: UIImage? {
         viewModel.latestUploadResult?.previewImage ?? viewModel.latestLocalResult?.previewImage
     }
+
+    private func photoDimensionsLabel(_ photo: LocalSessionPhoto) -> String {
+        guard photo.imageWidth > 0, photo.imageHeight > 0 else { return "Unknown" }
+        return "\(photo.imageWidth) × \(photo.imageHeight)"
+    }
 }
 
 #Preview {
@@ -322,15 +439,15 @@ struct ReadyView: View {
             employeeID: UUID(),
             userID: UUID(),
             email: "employee@example.com",
-            displayName: "OG Employee",
-            role: "employee"
+            displayName: "Taylor Kim",
+            role: "manager"
         ),
         station: CaptureStation(
             id: UUID(),
-            name: "Photo Table 1",
+            name: "Preview Station",
             active: true,
             assignedEmployeeID: nil,
-            deviceLabel: "Front iPhone",
+            deviceLabel: "iPhone 16 Pro",
             iosDeviceIdentifier: nil,
             lastSeenAt: nil
         ),

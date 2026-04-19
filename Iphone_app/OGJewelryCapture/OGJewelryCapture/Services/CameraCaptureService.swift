@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import ImageIO
 import UIKit
 
 struct CameraZoomState: Equatable {
@@ -70,6 +71,8 @@ enum CaptureResolutionMode: String, CaseIterable, Identifiable {
 }
 
 final class CameraCaptureService: NSObject {
+    fileprivate static let jpegMimeType = "image/jpeg"
+
     let previewSession = AVCaptureSession()
 
     private let sessionQueue = DispatchQueue(label: "og.capture.camera.session")
@@ -440,10 +443,15 @@ final class CameraCaptureService: NSObject {
             throw CameraCaptureServiceError.missingImageData
         }
 
+        let dimensions = Self.extractPixelDimensions(from: data)
         return LocalCaptureResult(
             jobID: jobID,
             capturedAt: Date(),
             imageData: data,
+            fileSizeBytes: Int64(data.count),
+            imageWidth: dimensions.width,
+            imageHeight: dimensions.height,
+            mimeType: Self.jpegMimeType,
             isSimulatorFallback: true
         )
     }
@@ -489,6 +497,19 @@ final class CameraCaptureService: NSObject {
     private func photoDimensionArea(_ dimensions: CMVideoDimensions) -> Int64 {
         Int64(dimensions.width) * Int64(dimensions.height)
     }
+
+    fileprivate static func extractPixelDimensions(from imageData: Data) -> (width: Int, height: Int) {
+        guard
+            let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else {
+            return (0, 0)
+        }
+
+        return (width, height)
+    }
 }
 
 private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelegate {
@@ -517,12 +538,19 @@ private final class PhotoCaptureProcessor: NSObject, AVCapturePhotoCaptureDelega
 
         completion(
             .success(
-                LocalCaptureResult(
-                jobID: jobID,
-                capturedAt: Date(),
-                imageData: data,
-                isSimulatorFallback: false
-            )
+                {
+                    let dimensions = CameraCaptureService.extractPixelDimensions(from: data)
+                    return LocalCaptureResult(
+                        jobID: jobID,
+                        capturedAt: Date(),
+                        imageData: data,
+                        fileSizeBytes: Int64(data.count),
+                        imageWidth: dimensions.width,
+                        imageHeight: dimensions.height,
+                        mimeType: CameraCaptureService.jpegMimeType,
+                        isSimulatorFallback: false
+                    )
+                }()
             )
         )
     }

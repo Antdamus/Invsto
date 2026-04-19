@@ -6,13 +6,13 @@ struct LocalCaptureResult: Identifiable, Equatable {
     let jobID: UUID
     let capturedAt: Date
     let imageData: Data
+    let fileSizeBytes: Int64
+    let imageWidth: Int
+    let imageHeight: Int
+    let mimeType: String
     let isSimulatorFallback: Bool
 
     var previewImage: UIImage? {
         UIImage(data: imageData)
-    }
-
-    var fileSizeBytes: Int {
-        imageData.count
     }
 }

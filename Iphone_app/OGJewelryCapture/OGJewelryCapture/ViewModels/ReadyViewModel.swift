@@ -27,7 +27,8 @@ final class ReadyViewModel: ObservableObject {
         case waitingForManualCapture(CaptureJob)
         case capturing(CaptureJob)
         case reviewingCapture(CaptureJob, LocalCaptureResult)
-        case uploading(CaptureJob)
+        case sessionReady(CaptureJob, LocalCaptureSession)
+        case uploadingFinalSet(CaptureJob, LocalCaptureSession)
         case completed(CaptureUploadResult)
         case failed(jobID: UUID?, message: String)
 
@@ -45,8 +46,10 @@ final class ReadyViewModel: ObservableObject {
                 "Capturing"
             case .reviewingCapture:
                 "Review Capture"
-            case .uploading:
-                "Uploading"
+            case .sessionReady:
+                "Session ready"
+            case .uploadingFinalSet:
+                "Finishing job"
             case .completed:
                 "Completed"
             case .failed:
@@ -60,11 +63,13 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var cameraAvailability: CameraAvailability = .unknown
     @Published private(set) var latestLocalResult: LocalCaptureResult?
     @Published private(set) var latestUploadResult: CaptureUploadResult?
+    @Published private(set) var activeSession: LocalCaptureSession?
     @Published private(set) var captureMode: CaptureMode
     @Published private(set) var captureResolutionMode: CaptureResolutionMode
     @Published private(set) var autoCaptureDelay: TimeInterval
     @Published private(set) var zoomFactor: CGFloat
     @Published private(set) var zoomRange: ClosedRange<CGFloat>
+    @Published private(set) var finishJobMessage: String?
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -72,12 +77,11 @@ final class ReadyViewModel: ObservableObject {
     private let repository: CaptureJobRepository
     private let listener: CaptureJobListener
     private let cameraService: CameraCaptureService
-    private let uploadService: CapturePhotoUploadService
+    private let photoStore: LocalCapturePhotoStore
     private let userDefaults: UserDefaults
 
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
-    private var pendingUploadTask: Task<Void, Never>?
 
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
@@ -94,7 +98,7 @@ final class ReadyViewModel: ObservableObject {
         repository: CaptureJobRepository = CaptureJobRepository(),
         listener: CaptureJobListener = CaptureJobListener(),
         cameraService: CameraCaptureService = CameraCaptureService(),
-        uploadService: CapturePhotoUploadService = CapturePhotoUploadService(),
+        photoStore: LocalCapturePhotoStore = LocalCapturePhotoStore(),
         userDefaults: UserDefaults = .standard
     ) {
         self.employee = employee
@@ -102,7 +106,7 @@ final class ReadyViewModel: ObservableObject {
         self.repository = repository
         self.listener = listener
         self.cameraService = cameraService
-        self.uploadService = uploadService
+        self.photoStore = photoStore
         self.userDefaults = userDefaults
         self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
         self.captureResolutionMode = CaptureResolutionMode(rawValue: userDefaults.string(forKey: Self.captureResolutionModeKey) ?? "") ?? .standard
@@ -118,7 +122,6 @@ final class ReadyViewModel: ObservableObject {
         let listener = listener
         let cameraService = cameraService
         pendingAutoCaptureTask?.cancel()
-        pendingUploadTask?.cancel()
 
         Task {
             await listener.stopListening()
@@ -135,6 +138,23 @@ final class ReadyViewModel: ObservableObject {
         default:
             nil
         }
+    }
+
+    var isResolutionSelectionLocked: Bool {
+        activeJobID != nil
+    }
+
+    var sessionPhotoCount: Int {
+        activeSession?.keptPhotoCount ?? 0
+    }
+
+    var canAddMoreSessionPhotos: Bool {
+        activeSession?.canAddMorePhotos ?? true
+    }
+
+    var canFinishJob: Bool {
+        guard let activeSession else { return false }
+        return activeSession.keptPhotoCount > 0 && !activeSession.isUploadingFinalSet
     }
 
     func start() async {
@@ -165,7 +185,6 @@ final class ReadyViewModel: ObservableObject {
 
     func stop() async {
         pendingAutoCaptureTask?.cancel()
-        pendingUploadTask?.cancel()
         await listener.stopListening()
         cameraService.stopSession()
         pendingJob = nil
@@ -191,6 +210,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func updateCaptureResolutionMode(_ mode: CaptureResolutionMode) {
+        guard !isResolutionSelectionLocked else { return }
         guard captureResolutionMode != mode else { return }
         captureResolutionMode = mode
         userDefaults.set(mode.rawValue, forKey: Self.captureResolutionModeKey)
@@ -257,11 +277,12 @@ final class ReadyViewModel: ObservableObject {
         guard isShowingPersistentResult else { return }
 
         pendingAutoCaptureTask?.cancel()
-        pendingUploadTask?.cancel()
         pendingJob = nil
         activeJobID = nil
+        activeSession = nil
         latestLocalResult = nil
         latestUploadResult = nil
+        finishJobMessage = nil
         captureState = .listening
 
         Task { [weak self] in
@@ -270,6 +291,75 @@ final class ReadyViewModel: ObservableObject {
             await self.refreshZoomState(resetToDefault: true)
             await self.refreshPendingJob()
         }
+    }
+
+    func keepCapturedPhoto() {
+        guard case let .reviewingCapture(job, result) = captureState else { return }
+
+        do {
+            let updatedSession = try appendKeptPhoto(result)
+            latestLocalResult = nil
+            latestUploadResult = nil
+            finishJobMessage = nil
+            captureState = .sessionReady(job, updatedSession)
+        } catch {
+            Task { [weak self] in
+                await self?.failJob(
+                    jobID: job.id,
+                    code: "local_session_store_failed",
+                    message: error.localizedDescription,
+                    clearLocalSession: true
+                )
+            }
+        }
+    }
+
+    func discardCapturedPhoto() {
+        guard case let .reviewingCapture(job, _) = captureState else { return }
+
+        latestLocalResult = nil
+        latestUploadResult = nil
+        finishJobMessage = nil
+        transitionToCapture(for: job)
+    }
+
+    func addAnotherPhoto() {
+        guard let job = pendingJob else { return }
+        guard canAddMoreSessionPhotos else { return }
+        guard case .sessionReady = captureState else { return }
+
+        transitionToCapture(for: job)
+    }
+
+    func deleteKeptPhoto(_ photo: LocalSessionPhoto) {
+        guard let job = pendingJob else { return }
+        guard let session = activeSession else { return }
+        guard session.jobID == photo.jobID else { return }
+
+        photoStore.deletePhotoFile(at: photo.localFileURL)
+
+        let remainingPhotos = session.keptPhotos.filter { $0.id != photo.id }
+        let updatedSession = sessionWithReindexedPhotos(
+            jobID: session.jobID,
+            resolutionMode: session.resolutionMode,
+            keptPhotos: remainingPhotos,
+            isUploadingFinalSet: false
+        )
+
+        activeSession = updatedSession
+        finishJobMessage = nil
+
+        if updatedSession.keptPhotos.isEmpty {
+            transitionToCapture(for: job)
+        } else {
+            captureState = .sessionReady(job, updatedSession)
+        }
+    }
+
+    func finishJob() {
+        guard canFinishJob else { return }
+
+        finishJobMessage = "Final upload orchestration is intentionally deferred to Phase 5B.4. The local multi-photo session is preserved so the upload/complete flow can be added on top of it."
     }
 
     private func handleIncomingJob(_ job: CaptureJob) async {
@@ -282,6 +372,13 @@ final class ReadyViewModel: ObservableObject {
         pendingAutoCaptureTask?.cancel()
         activeJobID = job.id
         pendingJob = job
+        activeSession = LocalCaptureSession(
+            jobID: job.id,
+            resolutionMode: captureResolutionMode,
+            keptPhotos: [],
+            isUploadingFinalSet: false
+        )
+        finishJobMessage = nil
 
         do {
             let claimed = try await repository.claimJobForCapture(id: job.id)
@@ -289,33 +386,34 @@ final class ReadyViewModel: ObservableObject {
                 captureState = .listening
                 activeJobID = nil
                 pendingJob = nil
+                activeSession = nil
                 return
             }
 
             cameraAvailability = await cameraService.prepareIfNeeded()
+            await cameraService.updateCaptureResolutionMode(captureResolutionMode)
             await refreshZoomState(resetToDefault: true)
 
             switch cameraAvailability {
             case .ready, .simulatorFallback:
-                switch captureMode {
-                case .auto:
-                    await cameraService.enableContinuousPreviewAutoFocus()
-                    captureState = .captureRequested(job)
-                    scheduleAutoCapture(for: job)
-                case .manual:
-                    captureState = .waitingForManualCapture(job)
-                }
+                transitionToCapture(for: job)
             case let .unavailable(message):
-                await failJob(jobID: job.id, code: "camera_unavailable", message: message)
+                await failJob(jobID: job.id, code: "camera_unavailable", message: message, clearLocalSession: true)
                 activeJobID = nil
                 pendingJob = nil
             case .unknown:
-                await failJob(jobID: job.id, code: "camera_unavailable", message: CameraCaptureServiceError.cameraUnavailable.localizedDescription)
+                await failJob(
+                    jobID: job.id,
+                    code: "camera_unavailable",
+                    message: CameraCaptureServiceError.cameraUnavailable.localizedDescription,
+                    clearLocalSession: true
+                )
                 activeJobID = nil
                 pendingJob = nil
             }
         } catch {
             captureState = .failed(jobID: job.id, message: error.localizedDescription)
+            clearLocalSession(jobID: job.id)
             activeJobID = nil
             pendingJob = nil
         }
@@ -341,6 +439,7 @@ final class ReadyViewModel: ObservableObject {
 
     private func performCapture(for job: CaptureJob) async {
         pendingAutoCaptureTask = nil
+        finishJobMessage = nil
         captureState = .capturing(job)
 
         switch cameraAvailability {
@@ -356,37 +455,76 @@ final class ReadyViewModel: ObservableObject {
             latestUploadResult = nil
             captureState = .reviewingCapture(job, result)
         } catch {
-            await failJob(jobID: job.id, code: "capture_failed", message: error.localizedDescription)
+            await failJob(jobID: job.id, code: "capture_failed", message: error.localizedDescription, clearLocalSession: true)
             activeJobID = nil
             pendingJob = nil
         }
     }
 
-    func keepCapturedPhoto() {
-        guard case let .reviewingCapture(job, result) = captureState else { return }
+    private func appendKeptPhoto(_ result: LocalCaptureResult) throws -> LocalCaptureSession {
+        let currentSession = activeSession ?? LocalCaptureSession(
+            jobID: result.jobID,
+            resolutionMode: captureResolutionMode,
+            keptPhotos: [],
+            isUploadingFinalSet: false
+        )
 
-        pendingUploadTask?.cancel()
-        pendingUploadTask = Task { [weak self] in
-            guard let self else { return }
+        let storedPhoto = try photoStore.persistKeptPhoto(
+            result,
+            sortOrder: currentSession.keptPhotos.count,
+            isPrimary: currentSession.keptPhotos.isEmpty
+        )
 
-            do {
-                try await self.uploadCaptureResult(result, for: job)
-            } catch {
-                await self.failJob(jobID: job.id, code: "upload_failed", message: error.localizedDescription)
-            }
-
-            await MainActor.run {
-                self.pendingUploadTask = nil
-                self.activeJobID = nil
-                self.pendingJob = nil
-            }
-        }
+        let updatedSession = sessionWithReindexedPhotos(
+            jobID: currentSession.jobID,
+            resolutionMode: currentSession.resolutionMode,
+            keptPhotos: currentSession.keptPhotos + [storedPhoto],
+            isUploadingFinalSet: false
+        )
+        activeSession = updatedSession
+        return updatedSession
     }
 
-    func discardCapturedPhoto() {
-        guard case let .reviewingCapture(job, _) = captureState else { return }
+    private func sessionWithReindexedPhotos(
+        jobID: UUID,
+        resolutionMode: CaptureResolutionMode,
+        keptPhotos: [LocalSessionPhoto],
+        isUploadingFinalSet: Bool
+    ) -> LocalCaptureSession {
+        let sortedPhotos = keptPhotos
+            .sorted { lhs, rhs in
+                if lhs.sortOrder == rhs.sortOrder {
+                    return lhs.capturedAt < rhs.capturedAt
+                }
 
-        pendingUploadTask?.cancel()
+                return lhs.sortOrder < rhs.sortOrder
+            }
+            .enumerated()
+            .map { index, photo in
+                LocalSessionPhoto(
+                    id: photo.id,
+                    jobID: photo.jobID,
+                    capturedAt: photo.capturedAt,
+                    localFileURL: photo.localFileURL,
+                    fileSizeBytes: photo.fileSizeBytes,
+                    imageWidth: photo.imageWidth,
+                    imageHeight: photo.imageHeight,
+                    mimeType: photo.mimeType,
+                    sortOrder: index,
+                    isPrimary: index == 0,
+                    isSimulatorFallback: photo.isSimulatorFallback
+                )
+            }
+
+        return LocalCaptureSession(
+            jobID: jobID,
+            resolutionMode: resolutionMode,
+            keptPhotos: sortedPhotos,
+            isUploadingFinalSet: isUploadingFinalSet
+        )
+    }
+
+    private func transitionToCapture(for job: CaptureJob) {
         latestLocalResult = nil
         latestUploadResult = nil
 
@@ -403,50 +541,36 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    private func uploadCaptureResult(_ result: LocalCaptureResult, for job: CaptureJob) async throws {
-        let markedUploading = try await repository.markUploading(id: job.id, captureCompletedAt: result.capturedAt)
-        guard markedUploading else {
-            throw CaptureJobRepository.RepositoryError.transitionRejected
+    private func clearLocalSession(jobID: UUID?) {
+        guard let jobID else {
+            activeSession = nil
+            return
         }
 
-        captureState = .uploading(job)
-
-        do {
-            let upload = try await uploadService.uploadCapture(result, stationID: station.id)
-            let markedCompleted = try await repository.markCompleted(id: job.id, uploadResult: upload)
-
-            guard markedCompleted else {
-                throw CaptureJobRepository.RepositoryError.transitionRejected
-            }
-
-            handledJobIDs.insert(job.id)
-            let completedResult = CaptureUploadResult(
-                jobID: job.id,
-                capturedAt: result.capturedAt,
-                uploadedAt: upload.uploadedAt,
-                imageData: result.imageData,
-                isSimulatorFallback: result.isSimulatorFallback,
-                storageBucket: upload.bucket,
-                storagePath: upload.path,
-                fileSizeBytes: upload.fileSizeBytes,
-                mimeType: upload.mimeType
-            )
-            latestUploadResult = completedResult
-            captureState = .completed(completedResult)
-        } catch {
-            await failJob(jobID: job.id, code: "upload_failed", message: error.localizedDescription)
-        }
+        photoStore.clearSession(jobID: jobID)
+        activeSession = nil
     }
 
-    private func failJob(jobID: UUID, code: String, message: String) async {
+    private func failJob(
+        jobID: UUID,
+        code: String,
+        message: String,
+        clearLocalSession: Bool
+    ) async {
+        if clearLocalSession {
+            self.clearLocalSession(jobID: jobID)
+        }
+
         do {
             _ = try await repository.markFailed(id: jobID, code: code, message: message)
         } catch {
             captureState = .failed(jobID: jobID, message: error.localizedDescription)
+            finishJobMessage = nil
             return
         }
 
         captureState = .failed(jobID: jobID, message: message)
+        finishJobMessage = nil
     }
 
     private static func clampedDelay(_ delay: TimeInterval) -> TimeInterval {
@@ -458,18 +582,8 @@ final class ReadyViewModel: ObservableObject {
 
         switch captureState {
         case .captureRequested, .waitingForManualCapture:
-            switch captureMode {
-            case .auto:
-                Task {
-                    await cameraService.enableContinuousPreviewAutoFocus()
-                }
-                captureState = .captureRequested(job)
-                scheduleAutoCapture(for: job)
-            case .manual:
-                pendingAutoCaptureTask?.cancel()
-                captureState = .waitingForManualCapture(job)
-            }
-        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
+            transitionToCapture(for: job)
+        case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             break
         }
     }
@@ -478,7 +592,7 @@ final class ReadyViewModel: ObservableObject {
         switch captureState {
         case .captureRequested, .waitingForManualCapture:
             true
-        case .idle, .listening, .capturing, .reviewingCapture, .uploading, .completed, .failed:
+        case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             false
         }
     }
@@ -520,7 +634,7 @@ final class ReadyViewModel: ObservableObject {
         switch captureState {
         case .completed, .failed:
             true
-        case .idle, .listening, .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .uploading:
+        case .idle, .listening, .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet:
             false
         }
     }
@@ -536,9 +650,9 @@ final class ReadyViewModel: ObservableObject {
     private var canAcceptIncomingJobs: Bool {
         switch captureState {
         case .idle, .listening:
-            true
-        case .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .uploading, .completed, .failed:
-            false
+            return activeJobID == nil
+        case .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
+            return false
         }
     }
 }
