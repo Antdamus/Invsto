@@ -90,6 +90,7 @@ final class CameraCaptureService: NSObject {
 
     func prepareIfNeeded() async -> CameraAvailability {
         if case .ready = availability {
+            await startSessionIfNeeded()
             return availability
         }
 
