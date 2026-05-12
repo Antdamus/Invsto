@@ -86,9 +86,11 @@ function setupNavigation() {
 
 const state = {
   locations: [],
+  stores: [],
   selectedLocationId: null,
   filters: {
     search: "",
+    store: "",
     type: "",
     active: "",
     sort: "recent",
@@ -141,6 +143,21 @@ function compareRecent(a, b) {
   return new Date(getLocationDisplayDate(b) || 0).getTime() - new Date(getLocationDisplayDate(a) || 0).getTime();
 }
 
+function getStoreLabel(location) {
+  return asTrimmedString(location?.store_name) || "Unassigned";
+}
+
+function buildStoreOptionsMarkup(selectedValue = "", emptyLabel = "All stores") {
+  return [`<option value="">${escapeHtml(emptyLabel)}</option>`]
+    .concat(
+      state.stores.map((store) => {
+        const selected = store.id === selectedValue ? ' selected' : "";
+        return `<option value="${escapeHtml(store.id)}"${selected}>${escapeHtml(store.name)}</option>`;
+      })
+    )
+    .join("");
+}
+
 function setListStatus(message, tone = "") {
   const statusEl = document.getElementById("locations-list-status");
   if (!statusEl) return;
@@ -185,9 +202,10 @@ async function resolveDymoUrl(location) {
   return createSignedStorageUrl("dymo-labels", location.dymo_label_url, state.dymoUrls, 60 * 60 * 24);
 }
 
-function normalizeLocationsData(locations, stockRows, itemTypes) {
+function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
   const itemMap = new Map((itemTypes || []).map((item) => [item.id, item]));
   const stockByLocation = new Map();
+  const storeMap = new Map((stores || []).map((store) => [store.id, store]));
 
   for (const row of stockRows || []) {
     const locationId = row.location_id;
@@ -241,6 +259,7 @@ function normalizeLocationsData(locations, stockRows, itemTypes) {
 
     return {
       ...location,
+      store_name: storeMap.get(location.store_id)?.name || "",
       itemRows,
       distinctItemTypes: itemRows.length,
       totalQuantity,
@@ -255,21 +274,25 @@ async function loadLocationsData() {
 
   const [
     { data: locations, error: locationsError },
+    { data: stores, error: storesError },
     { data: stockRows, error: stockError },
     { data: itemTypes, error: itemTypesError },
   ] = await Promise.all([
     supabase.from("locations").select("*"),
+    supabase.from("store_locations").select("id, name, active").order("name", { ascending: true }),
     supabase.from("item_stock_locations").select("*"),
     supabase.from("item_types").select("id, title, barcode, photos"),
   ]);
 
-  if (locationsError || stockError || itemTypesError) {
-    console.error("Failed to load locations data:", locationsError || stockError || itemTypesError);
+  if (locationsError || storesError || stockError || itemTypesError) {
+    console.error("Failed to load locations data:", locationsError || storesError || stockError || itemTypesError);
     setListStatus("Could not load locations data.", "error");
     return;
   }
 
-  state.locations = normalizeLocationsData(locations, stockRows, itemTypes);
+  state.stores = Array.isArray(stores) ? stores : [];
+  state.locations = normalizeLocationsData(locations, stockRows, itemTypes, state.stores);
+  populateStoreFilter();
   populateTypeFilter();
   renderSummaryCards();
   renderLocationsTable();
@@ -280,6 +303,14 @@ async function loadLocationsData() {
   } else {
     closeLocationDetail();
   }
+}
+
+function populateStoreFilter() {
+  const storeFilter = document.getElementById("locations-store-filter");
+  if (!storeFilter) return;
+
+  storeFilter.innerHTML = buildStoreOptionsMarkup(state.filters.store, "All stores");
+  storeFilter.value = state.filters.store;
 }
 
 function populateTypeFilter() {
@@ -306,15 +337,17 @@ function getFilteredLocations() {
       location.location_code,
       location.notes,
       location.type,
+      location.store_name,
     ].some((value) => asTrimmedString(value).toLowerCase().includes(searchTerm));
 
+    const matchesStore = !state.filters.store || asTrimmedString(location.store_id) === state.filters.store;
     const matchesType = !state.filters.type || asTrimmedString(location.type) === state.filters.type;
     const isActive = location.active !== false;
     const matchesActive = !state.filters.active
       || (state.filters.active === "active" && isActive)
       || (state.filters.active === "inactive" && !isActive);
 
-    return matchesSearch && matchesType && matchesActive;
+    return matchesSearch && matchesStore && matchesType && matchesActive;
   });
 
   filtered.sort((a, b) => {
@@ -340,6 +373,7 @@ function renderSummaryCards() {
   const totalLocations = state.locations.length;
   const activeLocations = state.locations.filter((location) => location.active !== false).length;
   const totalStockUnits = state.locations.reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0);
+  const representedStores = new Set(state.locations.map((location) => asTrimmedString(location.store_id)).filter(Boolean)).size;
   const recentThreshold = Date.now() - (1000 * 60 * 60 * 24 * 14);
   const recentUpdates = state.locations.filter((location) => {
     const timestamp = new Date(getLocationDisplayDate(location) || 0).getTime();
@@ -376,11 +410,11 @@ function renderSummaryCards() {
 
     <div class="metric-card">
       <div class="metric-top">
-        <div class="metric-label">Recent Updates</div>
+        <div class="metric-label">Stores Covered</div>
         <div class="metric-icon">🕰️</div>
       </div>
-      <div class="metric-value">${recentUpdates.toLocaleString()}</div>
-      <div class="metric-foot">Locations updated or created in the last 14 days</div>
+      <div class="metric-value">${representedStores.toLocaleString()}</div>
+      <div class="metric-foot">${recentUpdates.toLocaleString()} locations updated or created in the last 14 days</div>
     </div>
   `;
 }
@@ -394,7 +428,7 @@ function renderLocationsTable() {
   if (!filtered.length) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8">
+        <td colspan="9">
           <div class="location-detail-empty">No locations match the current filters.</div>
         </td>
       </tr>
@@ -412,6 +446,9 @@ function renderLocationsTable() {
           <span class="location-row-title">${escapeHtml(location.location_name || "Unnamed Location")}</span>
           <span class="location-row-sub">${escapeHtml(location.location_code || "No barcode")} • ${escapeHtml(location.notesPreview || "No notes recorded.")}</span>
         </button>
+      </td>
+      <td>
+        <span class="locations-pill is-store">${escapeHtml(getStoreLabel(location))}</span>
       </td>
       <td>
         <span class="locations-pill is-type">${escapeHtml(location.type || "Uncategorized")}</span>
@@ -573,6 +610,13 @@ async function renderLocationDetail(locationId) {
           </label>
 
           <label class="location-edit-label">
+            <span>Store</span>
+            <select id="location-edit-store" class="location-edit-select">
+              ${buildStoreOptionsMarkup(asTrimmedString(location.store_id), "Unassigned")}
+            </select>
+          </label>
+
+          <label class="location-edit-label">
             <span>Type</span>
             <input type="text" id="location-edit-type" class="location-edit-input" value="${escapeHtml(location.type || "")}" placeholder="Shelf, safe, tray, bin" />
           </label>
@@ -634,6 +678,7 @@ async function saveLocationEdits(locationId) {
 
   const statusEl = document.getElementById("location-edit-status");
   const name = asTrimmedString(document.getElementById("location-edit-name")?.value);
+  const storeId = asTrimmedString(document.getElementById("location-edit-store")?.value);
   const type = asTrimmedString(document.getElementById("location-edit-type")?.value);
   const capacityValue = asTrimmedString(document.getElementById("location-edit-capacity")?.value);
   const notes = asTrimmedString(document.getElementById("location-edit-notes")?.value);
@@ -668,6 +713,7 @@ async function saveLocationEdits(locationId) {
 
   const updatePayload = {
     location_name: name,
+    store_id: storeId || null,
     type: type || null,
     notes: notes || null,
     active,
@@ -701,6 +747,11 @@ function bindEvents() {
 
   document.getElementById("locations-type-filter")?.addEventListener("change", (event) => {
     state.filters.type = event.target.value;
+    renderLocationsTable();
+  });
+
+  document.getElementById("locations-store-filter")?.addEventListener("change", (event) => {
+    state.filters.store = event.target.value;
     renderLocationsTable();
   });
 

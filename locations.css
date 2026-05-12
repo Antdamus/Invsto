@@ -47,7 +47,7 @@
 
 .locations-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(160px, 1fr));
+  grid-template-columns: minmax(220px, 1.5fr) repeat(4, minmax(160px, 1fr));
   gap: 14px;
   padding: 16px;
 }
@@ -109,7 +109,7 @@
 
 .locations-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1080px;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -207,6 +207,12 @@
 .locations-pill.is-type,
 .locations-pill.is-asset {
   color: rgba(242,243,245,.84);
+}
+
+.locations-pill.is-store {
+  color: #f2e3c4;
+  border-color: rgba(214,178,94,.22);
+  background: rgba(214,178,94,.08);
 }
 
 .locations-assets {

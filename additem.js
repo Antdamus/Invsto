@@ -13,6 +13,7 @@ let latestDymoXml = "";
 let typeqr = "";
 let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
+let activeStoreOptions = [];
 
 
 // === DOM ELEMENTS ===
@@ -422,6 +423,37 @@ let uploadedImages = [];
     return unique.sort((a, b) => a.localeCompare(b));
   }
 
+  async function fetchActiveStores() {
+    const { data, error } = await supabase
+      .from("store_locations")
+      .select("id, name, active")
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching stores:", error.message);
+      return [];
+    }
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  async function populateLocationStoreSelect() {
+    const select = document.getElementById("location-store");
+    if (!select) return [];
+
+    activeStoreOptions = await fetchActiveStores();
+    select.innerHTML = ['<option value="">Select Store</option>']
+      .concat(
+        activeStoreOptions.map((store) => {
+          return `<option value="${store.id}">${store.name}</option>`;
+        })
+      )
+      .join("");
+
+    return activeStoreOptions;
+  }
+
   function setSelectedAdminLocation(locationName = "") {
     document.getElementById("admin-location-name").value = locationName;
     document.getElementById("admin-location-dropdown-toggle").innerText = locationName || "Select Location";
@@ -435,6 +467,7 @@ let uploadedImages = [];
     const previewWrapper = document.getElementById("photo-preview-wrapper");
     const previewImage = document.getElementById("photo-preview-image");
     const notesInput = document.getElementById("location-notes");
+    const storeSelect = document.getElementById("location-store");
     const typeButton = document.getElementById("location-type-dropdown-toggle");
     const typeMenu = document.getElementById("location-type-dropdown-menu");
     const dymoPreview = document.getElementById("dymo-link-preview");
@@ -445,6 +478,7 @@ let uploadedImages = [];
     if (capacityInput) capacityInput.value = "";
     if (photoInput) photoInput.value = "";
     if (notesInput) notesInput.value = "";
+    if (storeSelect) storeSelect.value = "";
     if (previewWrapper) previewWrapper.classList.add("hidden");
     if (previewImage) previewImage.src = "";
     if (dymoPreview) dymoPreview.innerHTML = "";
@@ -473,6 +507,7 @@ let uploadedImages = [];
     if (show) {
       clearAddLocationForm();
       modal.classList.remove("hidden");
+      populateLocationStoreSelect();
       if (prefilledName) {
         nameInput.value = prefilledName;
       }
@@ -643,10 +678,12 @@ let uploadedImages = [];
     const previewWrapper = document.getElementById("photo-preview-wrapper");
     const previewImage = document.getElementById("photo-preview-image");
     const notesInput = document.getElementById("location-notes");
+    const storeSelect = document.getElementById("location-store");
     const generateBtn = document.getElementById("btn-generate-location-barcode");
 
     if (!modal || !form || form.dataset.bound === "true") return;
     form.dataset.bound = "true";
+    populateLocationStoreSelect();
 
     photoInput?.addEventListener("change", () => {
       const file = photoInput.files?.[0];
@@ -713,9 +750,15 @@ let uploadedImages = [];
       const max_capacity = capacityInput.value.trim();
       const notes = notesInput.value.trim();
       const photoFile = photoInput.files?.[0] || null;
+      const store_id = storeSelect?.value?.trim() || null;
 
       if (!location_name || !location_code) {
         showToast("Name and barcode are required.");
+        return;
+      }
+
+      if (activeStoreOptions.length > 0 && !store_id) {
+        showToast("Select a store for this location.");
         return;
       }
 
@@ -766,6 +809,7 @@ let uploadedImages = [];
           active: true,
           photo_url,
           dymo_label_url,
+          store_id,
           type: document.getElementById("location-type").value || null,
           created_at: new Date().toISOString()
         })

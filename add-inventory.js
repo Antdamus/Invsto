@@ -4,6 +4,7 @@ let currentBatch = {};
 let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 let pendingBulkItem = null; // item selected for a bulk bag
+let activeStoreOptions = [];
 
 //update the inventory after adding items
 async function bumpInventoryVersion(changedIds = null) {
@@ -90,6 +91,33 @@ async function bumpInventoryVersion(changedIds = null) {
 
     const unique = [...new Set(data.map(row => row.location_name).filter(Boolean))];
     return unique.sort((a, b) => a.localeCompare(b)); // alphabetical
+  }
+
+  async function fetchActiveStores() {
+    const { data, error } = await supabase
+      .from("store_locations")
+      .select("id, name, active")
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Failed to fetch stores:", error);
+      return [];
+    }
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  async function populateLocationStoreSelect() {
+    const select = document.getElementById("location-store");
+    if (!select) return [];
+
+    activeStoreOptions = await fetchActiveStores();
+    select.innerHTML = ['<option value="">Select Store</option>']
+      .concat(activeStoreOptions.map((store) => `<option value="${store.id}">${store.name}</option>`))
+      .join("");
+
+    return activeStoreOptions;
   }
 
   //function to transform the inputs into selected in case it is needed
@@ -259,6 +287,7 @@ async function bumpInventoryVersion(changedIds = null) {
     if (show) {
       modal.classList.remove("hidden");
       updateBarcodeInputStateBasedOnModals();
+      populateLocationStoreSelect();
       nameInput.focus();
       generateAndRenderLocationBarcode();
     } else {
@@ -689,6 +718,7 @@ async function bumpInventoryVersion(changedIds = null) {
         capacityInput.value = "";
         notesInput.value = "";
         photoInput.value = "";
+        const storeSelect = document.getElementById("location-store");
         // Optionally clear canvas too:
         const canvas = document.getElementById("barcode-canvas-location");
         const ctx = canvas.getContext("2d");
@@ -696,6 +726,7 @@ async function bumpInventoryVersion(changedIds = null) {
         const typeBtn = document.getElementById("location-type-dropdown-toggle");
         const typeMenu = document.getElementById("location-type-dropdown-menu");
         document.getElementById("location-type").value = "";
+        if (storeSelect) storeSelect.value = "";
         typeBtn.innerText = "Select Location Type";
         typeMenu.dataset.populated = "";
         typeMenu.innerHTML = ""; // fully reset menu
@@ -703,6 +734,7 @@ async function bumpInventoryVersion(changedIds = null) {
       }
     
       // 🧲 Generate on button click
+      populateLocationStoreSelect();
       generateBtn.addEventListener("click", generateAndRenderLocationBarcode);
     
       cancelBtn.addEventListener("click", () => toggleModal(false));
@@ -715,6 +747,12 @@ async function bumpInventoryVersion(changedIds = null) {
         const max_capacity = capacityInput.value.trim();
         const notes = notesInput.value.trim();
         const photoFile = photoInput.files?.[0] || null;
+        const store_id = document.getElementById("location-store")?.value?.trim() || null;
+
+        if (activeStoreOptions.length > 0 && !store_id) {
+          showToast("Select a store for this location.");
+          return;
+        }
     
         if (!location_name || !location_code) {
           showToast("⚠️ Name and barcode are required.");
@@ -768,6 +806,7 @@ async function bumpInventoryVersion(changedIds = null) {
           active: true,
           photo_url,
           dymo_label_url,
+          store_id,
           type: document.getElementById("location-type").value || null,
           created_at: new Date().toISOString()
         });
