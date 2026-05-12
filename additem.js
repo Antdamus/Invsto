@@ -30,6 +30,8 @@ let typeqr = "";
 let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 let activeStoreOptions = [];
+let activeAdminLocationOptions = [];
+let selectedAdminLocation = null;
 
 
 // === DOM ELEMENTS ===
@@ -75,8 +77,12 @@ let uploadedImages = [];
       return [];
     }
 
-    const flat = data.flatMap(row => Array.isArray(row.categories) ? row.categories : []);
-    const unique = [...new Set(flat.filter(Boolean))];
+    const flat = data.flatMap((row) => {
+      if (Array.isArray(row.categories)) return row.categories;
+      if (typeof row.categories === "string") return row.categories.split(",").map((category) => category.trim());
+      return [];
+    });
+    const unique = [...new Set(flat.map((category) => String(category || "").trim()).filter(Boolean))];
     return unique.sort((a, b) => a.localeCompare(b));
   }
 
@@ -424,6 +430,35 @@ let uploadedImages = [];
     return unique.sort((a, b) => a.localeCompare(b));
   }
 
+  async function fetchAdminLocationOptions() {
+    const { data, error } = await supabase
+      .from("locations")
+      .select("id, location_name, location_code, type, store_id, max_capacity, active")
+      .eq("active", true)
+      .order("location_name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching assignable locations:", error.message);
+      return [];
+    }
+
+    const stores = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
+    const storeNameById = new Map(stores.map((store) => [String(store.id), store.name]));
+
+    return (Array.isArray(data) ? data : [])
+      .map((location) => ({
+        id: String(location.id || ""),
+        name: String(location.location_name || "").trim(),
+        code: String(location.location_code || "").trim(),
+        type: String(location.type || "").trim(),
+        storeId: String(location.store_id || "").trim(),
+        storeName: storeNameById.get(String(location.store_id || "")) || "No store assigned",
+        maxCapacity: Number(location.max_capacity) || null,
+      }))
+      .filter((location) => location.id && location.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   async function fetchUniqueLocationTypes() {
     const { data, error } = await supabase
       .from("locations")
@@ -470,9 +505,340 @@ let uploadedImages = [];
     return activeStoreOptions;
   }
 
-  function setSelectedAdminLocation(locationName = "") {
+  function getAdminLocationLabel(location) {
+    if (!location) return "Select Location";
+    return location.code ? `${location.name} (${location.code})` : location.name;
+  }
+
+  function setSelectedAdminLocation(location = null) {
+    const locationObject = typeof location === "string"
+      ? activeAdminLocationOptions.find((entry) => entry.name === location || entry.id === location || entry.code === location) || null
+      : location;
+    const locationName = locationObject?.name || "";
+    const locationId = locationObject?.id || "";
+    const locationCode = locationObject?.code || "";
+    const storeName = locationObject?.storeName || "";
+    const typeName = locationObject?.type || "";
+    const summary = document.getElementById("admin-location-selection-summary");
+
+    selectedAdminLocation = locationObject || null;
     document.getElementById("admin-location-name").value = locationName;
-    document.getElementById("admin-location-dropdown-toggle").innerText = locationName || "Select Location";
+    document.getElementById("admin-location-id").value = locationId;
+    document.getElementById("admin-location-dropdown-toggle").innerText = locationObject
+      ? getAdminLocationLabel(locationObject)
+      : "Select Location";
+
+    if (summary) {
+      summary.textContent = locationObject
+        ? [
+            locationCode ? `Barcode: ${locationCode}` : "",
+            storeName ? `Store: ${storeName}` : "",
+            typeName ? `Type: ${typeName}` : "",
+          ].filter(Boolean).join(" | ")
+        : "Search by location name, barcode, type, or store.";
+    }
+
+    const referenceWeight = Number(document.getElementById("weight")?.value);
+    if (locationId) {
+      renderLocationIntelligence("admin-location-intelligence", locationId, {
+        referenceWeight: Number.isFinite(referenceWeight) ? referenceWeight : null,
+        referenceLabel: "this item",
+      });
+    } else {
+      renderLocationIntelligenceEmpty("admin-location-intelligence");
+    }
+  }
+
+  function populateAdminLocationStoreFilter(locations) {
+    const select = document.getElementById("admin-location-store-filter");
+    if (!select) return;
+
+    const currentValue = select.value;
+    const storeOptions = activeStoreOptions
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+    select.innerHTML = ['<option value="">All Stores</option>']
+      .concat(storeOptions.map((store) => `<option value="${store.id}">${store.name}</option>`))
+      .join("");
+
+    if (currentValue && storeOptions.some((store) => String(store.id) === currentValue)) {
+      select.value = currentValue;
+    }
+  }
+
+  function escapeDropdownHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function formatLocationWeight(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)} g` : "--";
+  }
+
+  function renderLocationIntelligenceEmpty(containerId, message = "Select a location to see current contents and similar-weight items.") {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = `<div class="location-intelligence-empty">${escapeDropdownHtml(message)}</div>`;
+  }
+
+  async function fetchLocationIntelligence(locationId, referenceWeight = null) {
+    const { data: location, error: locationError } = await supabase
+      .from("locations")
+      .select("id, location_name, location_code, max_capacity")
+      .eq("id", locationId)
+      .maybeSingle();
+
+    if (locationError) throw locationError;
+
+    const { data: rows, error: rowsError } = await supabase
+      .from("item_stock_locations")
+      .select("quantity, item_types(id, title, weight, barcode)")
+      .eq("location_id", locationId)
+      .gt("quantity", 0);
+
+    if (rowsError) throw rowsError;
+
+    const itemMap = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const item = row.item_types || {};
+      const weight = Number(item.weight);
+      const quantity = Number(row.quantity) || 0;
+      const key = String(item.id || item.barcode || item.title || Math.random());
+      const existing = itemMap.get(key);
+      if (existing) {
+        existing.quantity += quantity;
+        return;
+      }
+      itemMap.set(key, {
+        id: item.id,
+        title: String(item.title || item.barcode || "Untitled item"),
+        barcode: String(item.barcode || ""),
+        quantity,
+        weight: Number.isFinite(weight) ? weight : null,
+      });
+    });
+
+    const items = [...itemMap.values()]
+      .filter((item) => item.quantity > 0)
+      .sort((a, b) => a.title.localeCompare(b.title));
+
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+    const approximateWeight = items.reduce((sum, item) => {
+      return sum + (Number.isFinite(item.weight) ? item.weight * item.quantity : 0);
+    }, 0);
+    const hasReferenceWeight = Number.isFinite(Number(referenceWeight));
+    const numericReferenceWeight = Number(referenceWeight);
+    const similarItems = hasReferenceWeight
+      ? items
+          .map((item) => ({
+            ...item,
+            delta: Number.isFinite(item.weight) ? Math.abs(item.weight - numericReferenceWeight) : null,
+          }))
+          .filter((item) => Number.isFinite(item.delta) && item.delta <= 2)
+          .sort((a, b) => a.delta - b.delta || a.title.localeCompare(b.title))
+      : [];
+
+    return {
+      location: location || null,
+      items,
+      totalQuantity,
+      approximateWeight,
+      similarItems,
+    };
+  }
+
+  async function renderLocationIntelligence(containerId, locationId, { referenceWeight = null, referenceLabel = "this item" } = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!locationId) {
+      renderLocationIntelligenceEmpty(containerId);
+      return;
+    }
+
+    container.innerHTML = '<div class="location-intelligence-empty">Checking location contents...</div>';
+
+    try {
+      const data = await fetchLocationIntelligence(locationId, referenceWeight);
+      const capacity = Number(data.location?.max_capacity) || null;
+      const capacityText = capacity ? `${data.totalQuantity}/${capacity}` : `${data.totalQuantity}`;
+      const similarHtml = data.similarItems.length
+        ? data.similarItems.slice(0, 6).map((item) => `
+            <div class="location-intelligence-row is-similar">
+              <div>
+                <strong>${escapeDropdownHtml(item.title)}</strong>
+                <span>${escapeDropdownHtml(item.barcode || "No barcode")} | Qty ${item.quantity}</span>
+              </div>
+              <div class="location-intelligence-weight">
+                ${escapeDropdownHtml(formatLocationWeight(item.weight))}
+                <small>${escapeDropdownHtml(item.delta.toFixed(2))} g off</small>
+              </div>
+            </div>
+          `).join("")
+        : `<div class="location-intelligence-muted">No items within 2 g of ${escapeDropdownHtml(referenceLabel)}.</div>`;
+      const contentsHtml = data.items.length
+        ? data.items.slice(0, 8).map((item) => `
+            <div class="location-intelligence-row">
+              <div>
+                <strong>${escapeDropdownHtml(item.title)}</strong>
+                <span>${escapeDropdownHtml(item.barcode || "No barcode")}</span>
+              </div>
+              <div class="location-intelligence-weight">
+                Qty ${item.quantity}
+                <small>${escapeDropdownHtml(formatLocationWeight(item.weight))}</small>
+              </div>
+            </div>
+          `).join("")
+        : '<div class="location-intelligence-muted">This location is currently empty.</div>';
+
+      container.innerHTML = `
+        <div class="location-intelligence-header">
+          <div>
+            <span>Storage Snapshot</span>
+            <strong>${escapeDropdownHtml(data.location?.location_name || "Selected location")}</strong>
+          </div>
+          ${data.location?.location_code ? `<span class="location-intelligence-badge">${escapeDropdownHtml(data.location.location_code)}</span>` : ""}
+        </div>
+        <div class="location-intelligence-stats">
+          <div><span>Unique Items</span><strong>${data.items.length}</strong></div>
+          <div><span>Total Qty</span><strong>${data.totalQuantity}</strong></div>
+          <div><span>Capacity</span><strong>${escapeDropdownHtml(capacityText)}</strong></div>
+          <div><span>Est. Weight</span><strong>${escapeDropdownHtml(formatLocationWeight(data.approximateWeight))}</strong></div>
+        </div>
+        <div class="location-intelligence-section">
+          <div class="location-intelligence-section-title">Similar Weight (±2 g)</div>
+          <div class="location-intelligence-list">${similarHtml}</div>
+        </div>
+        <div class="location-intelligence-section">
+          <div class="location-intelligence-section-title">Current Contents</div>
+          <div class="location-intelligence-list">${contentsHtml}</div>
+        </div>
+      `;
+    } catch (error) {
+      console.error("Failed to load location intelligence:", error);
+      renderLocationIntelligenceEmpty(containerId, "Could not load location contents.");
+    }
+  }
+
+  function renderAdminLocationDropdownOptions(searchTerm = "") {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    if (!menu) return;
+
+    const container = menu.querySelector(".dropdown-options-container");
+    if (!container) return;
+
+    const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
+    const selectedStoreId = String(document.getElementById("admin-location-store-filter")?.value || "").trim();
+    const filteredLocations = activeAdminLocationOptions.filter((location) => {
+      if (selectedStoreId && location.storeId !== selectedStoreId) return false;
+
+      const haystack = [
+        location.name,
+        location.code,
+        location.type,
+        location.storeName,
+      ].join(" ").toLowerCase();
+
+      return !normalizedSearch || haystack.includes(normalizedSearch);
+    });
+
+    const exactMatch = activeAdminLocationOptions.some((location) => {
+      return location.name.toLowerCase() === normalizedSearch || location.code.toLowerCase() === normalizedSearch;
+    });
+
+    let html = filteredLocations.map((location) => {
+      const meta = [
+        location.storeName,
+        location.type,
+      ].filter(Boolean).join(" | ");
+      const selectedClass = selectedAdminLocation?.id === location.id ? " is-selected" : "";
+
+      return `
+        <div class="dropdown-option${selectedClass}" data-location-id="${escapeDropdownHtml(location.id)}">
+          <div class="location-option-main">
+            <span>${escapeDropdownHtml(location.name)}</span>
+            ${location.code ? `<span class="location-option-code">${escapeDropdownHtml(location.code)}</span>` : ""}
+          </div>
+          ${meta ? `<div class="location-option-meta">${escapeDropdownHtml(meta)}</div>` : ""}
+        </div>
+      `;
+    }).join("");
+
+    if (!filteredLocations.length) {
+      html = '<div class="location-option-meta">No matching locations found.</div>';
+    }
+
+    if (normalizedSearch && !exactMatch) {
+      html += `
+        <div class="dropdown-option new-entry" data-new-location="${escapeDropdownHtml(searchTerm)}">
+          Create "${escapeDropdownHtml(searchTerm)}"
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
+  }
+
+  function bindAdminLocationDropdownEvents() {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    const input = document.getElementById("admin-location-dropdown-search");
+    const container = menu?.querySelector(".dropdown-options-container");
+    if (!menu || !container || menu.dataset.bound === "true") return;
+
+    menu.dataset.bound = "true";
+
+    input?.addEventListener("input", (event) => {
+      renderAdminLocationDropdownOptions(event.target.value);
+    });
+
+    container.addEventListener("click", (event) => {
+      const newLocationEl = event.target.closest("[data-new-location]");
+      if (newLocationEl) {
+        const previousSelection = selectedAdminLocation;
+        setSelectedAdminLocation(previousSelection);
+        toggleAddLocationModal(true, newLocationEl.dataset.newLocation || "");
+        menu.classList.remove("show");
+        return;
+      }
+
+      const optionEl = event.target.closest("[data-location-id]");
+      if (!optionEl) return;
+
+      const location = activeAdminLocationOptions.find((entry) => entry.id === optionEl.dataset.locationId);
+      if (!location) return;
+
+      setSelectedAdminLocation(location);
+      showToast(`Selected location: ${location.name}${location.code ? ` (${location.code})` : ""}`);
+      menu.classList.remove("show");
+      renderAdminLocationDropdownOptions(input?.value || "");
+    });
+  }
+
+  function buildAdminLocationDropdownShell() {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    if (!menu) return;
+
+    if (!menu.dataset.rendered) {
+      menu.innerHTML = `
+        <div class="dropdown-search-container">
+          <input
+            type="text"
+            id="admin-location-dropdown-search"
+            class="dropdown-search"
+            placeholder="Search location, barcode, store, or type..."
+          >
+        </div>
+        <div class="dropdown-options-container"></div>
+      `;
+      menu.dataset.rendered = "true";
+    }
+
+    bindAdminLocationDropdownEvents();
   }
 
   function clearAddLocationForm() {
@@ -901,30 +1267,11 @@ let uploadedImages = [];
 
   //location dropdown only opening for admins
   async function populateAdminLocationDropdown(selectedValue = "") {
-    const options = await fetchUniqueLocationNames();
-    const previousSelection = document.getElementById("admin-location-name").value.trim();
-
-    renderDropdownOptionsCustom({
-      menuId: "admin-location-dropdown-menu",
-      toggleButtonId: "admin-location-dropdown-toggle",
-      hiddenInputId: "admin-location-name",
-      options,
-      placeholder: "Search or create location...",
-      dataAttribute: "location",
-      optionClass: "dropdown-option",
-      optionsContainerClass: "dropdown-options-container",
-      searchId: "admin-location-dropdown-search",
-      onClick: (value, isNew) => {
-        if (isNew) {
-          setSelectedAdminLocation(previousSelection);
-          toggleAddLocationModal(true, value);
-          return;
-        }
-
-        setSelectedAdminLocation(value);
-        showToast(`Selected location: ${value}`);
-      }
-    });
+    activeStoreOptions = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
+    activeAdminLocationOptions = await fetchAdminLocationOptions();
+    buildAdminLocationDropdownShell();
+    populateAdminLocationStoreFilter(activeAdminLocationOptions);
+    renderAdminLocationDropdownOptions(document.getElementById("admin-location-dropdown-search")?.value || "");
 
     if (selectedValue) {
       setSelectedAdminLocation(selectedValue);
@@ -946,6 +1293,53 @@ let uploadedImages = [];
         menu.classList.toggle("show");
       }
     });
+  }
+
+  function setupAdminLocationModalListeners() {
+    const confirmBtn = document.getElementById("btn-confirm-admin-stock");
+    const cancelBtn = document.getElementById("btn-cancel-admin-stock");
+    const storeFilter = document.getElementById("admin-location-store-filter");
+
+    cancelBtn.onclick = () => {
+      document.getElementById("modal-admin-assign-location").classList.add("hidden");
+    };
+
+    storeFilter?.addEventListener("change", () => {
+      const searchInput = document.getElementById("admin-location-dropdown-search");
+      renderAdminLocationDropdownOptions(searchInput?.value || "");
+    });
+
+    confirmBtn.onclick = async () => {
+      const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";
+      const locationId = document.getElementById("admin-location-id").value.trim();
+      const locationName = document.getElementById("admin-location-name").value.trim();
+      const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
+
+      if (!locationId || !locationName || isNaN(quantity)) {
+        showToast("Please select a location and enter quantity.");
+        return;
+      }
+
+      const location = selectedAdminLocation || activeAdminLocationOptions.find((entry) => entry.id === locationId);
+      if (!location) {
+        showToast("Location not found.");
+        return;
+      }
+
+      pendingStockAssignments[barcode] = {
+        location_name: location.name,
+        quantity,
+        location_id: location.id
+      };
+
+      const previewBox = document.getElementById("assignment-preview-box");
+      document.getElementById("assignment-location").textContent = `Location: ${getAdminLocationLabel(location)}`;
+      document.getElementById("assignment-quantity").textContent = `Quantity: ${quantity}`;
+      previewBox.classList.remove("hidden");
+
+      showToast(`Will assign ${quantity} to ${location.name} after item is saved`);
+      document.getElementById("modal-admin-assign-location").classList.add("hidden");
+    };
   }
 
   //== run the add location modal only if the user is an admin

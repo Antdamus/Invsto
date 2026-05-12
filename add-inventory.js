@@ -162,6 +162,7 @@ async function bumpInventoryVersion(changedIds = null) {
     if (barcodeInput) barcodeInput.value = "";
     if (nameToggle) nameToggle.innerText = "Select Location Name";
     if (barcodeToggle) barcodeToggle.innerText = "Select Barcode";
+    renderLocationIntelligenceEmpty("assign-location-intelligence");
   }
 
   function setAssignLocationSelection({ locationName = "", locationCode = "" } = {}) {
@@ -199,7 +200,7 @@ async function bumpInventoryVersion(changedIds = null) {
   async function fetchAssignableLocations(storeId = "") {
     let query = supabase
       .from("locations")
-      .select("id, location_name, location_code, store_id")
+      .select("id, location_name, location_code, store_id, type, max_capacity")
       .eq("active", true)
       .order("location_name", { ascending: true });
 
@@ -214,6 +215,164 @@ async function bumpInventoryVersion(changedIds = null) {
     }
 
     return Array.isArray(data) ? data : [];
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function formatLocationWeight(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? `${numeric.toFixed(2)} g` : "--";
+  }
+
+  function renderLocationIntelligenceEmpty(containerId, message = "Select a location to see current contents and similar-weight items.") {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = `<div class="location-intelligence-empty">${escapeHtml(message)}</div>`;
+  }
+
+  async function fetchLocationIntelligence(locationId, referenceWeight = null) {
+    const { data: location, error: locationError } = await supabase
+      .from("locations")
+      .select("id, location_name, location_code, max_capacity")
+      .eq("id", locationId)
+      .maybeSingle();
+
+    if (locationError) throw locationError;
+
+    const { data: rows, error: rowsError } = await supabase
+      .from("item_stock_locations")
+      .select("quantity, item_types(id, title, weight, barcode)")
+      .eq("location_id", locationId)
+      .gt("quantity", 0);
+
+    if (rowsError) throw rowsError;
+
+    const itemMap = new Map();
+    (Array.isArray(rows) ? rows : []).forEach((row) => {
+      const item = row.item_types || {};
+      const weight = Number(item.weight);
+      const quantity = Number(row.quantity) || 0;
+      const key = String(item.id || item.barcode || item.title || Math.random());
+      const existing = itemMap.get(key);
+      if (existing) {
+        existing.quantity += quantity;
+        return;
+      }
+      itemMap.set(key, {
+        id: item.id,
+        title: String(item.title || item.barcode || "Untitled item"),
+        barcode: String(item.barcode || ""),
+        quantity,
+        weight: Number.isFinite(weight) ? weight : null,
+      });
+    });
+
+    const items = [...itemMap.values()]
+      .filter((item) => item.quantity > 0)
+      .sort((a, b) => a.title.localeCompare(b.title));
+
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+    const approximateWeight = items.reduce((sum, item) => {
+      return sum + (Number.isFinite(item.weight) ? item.weight * item.quantity : 0);
+    }, 0);
+    const numericReferenceWeight = Number(referenceWeight);
+    const similarItems = Number.isFinite(numericReferenceWeight)
+      ? items
+          .map((item) => ({
+            ...item,
+            delta: Number.isFinite(item.weight) ? Math.abs(item.weight - numericReferenceWeight) : null,
+          }))
+          .filter((item) => Number.isFinite(item.delta) && item.delta <= 2)
+          .sort((a, b) => a.delta - b.delta || a.title.localeCompare(b.title))
+      : [];
+
+    return {
+      location: location || null,
+      items,
+      totalQuantity,
+      approximateWeight,
+      similarItems,
+    };
+  }
+
+  async function renderLocationIntelligence(containerId, locationId, { referenceWeight = null, referenceLabel = "this item" } = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!locationId) {
+      renderLocationIntelligenceEmpty(containerId);
+      return;
+    }
+
+    container.innerHTML = '<div class="location-intelligence-empty">Checking location contents...</div>';
+
+    try {
+      const data = await fetchLocationIntelligence(locationId, referenceWeight);
+      const capacity = Number(data.location?.max_capacity) || null;
+      const capacityText = capacity ? `${data.totalQuantity}/${capacity}` : `${data.totalQuantity}`;
+      const similarHtml = data.similarItems.length
+        ? data.similarItems.slice(0, 6).map((item) => `
+            <div class="location-intelligence-row is-similar">
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <span>${escapeHtml(item.barcode || "No barcode")} | Qty ${item.quantity}</span>
+              </div>
+              <div class="location-intelligence-weight">
+                ${escapeHtml(formatLocationWeight(item.weight))}
+                <small>${escapeHtml(item.delta.toFixed(2))} g off</small>
+              </div>
+            </div>
+          `).join("")
+        : `<div class="location-intelligence-muted">No items within 2 g of ${escapeHtml(referenceLabel)}.</div>`;
+      const contentsHtml = data.items.length
+        ? data.items.slice(0, 8).map((item) => `
+            <div class="location-intelligence-row">
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <span>${escapeHtml(item.barcode || "No barcode")}</span>
+              </div>
+              <div class="location-intelligence-weight">
+                Qty ${item.quantity}
+                <small>${escapeHtml(formatLocationWeight(item.weight))}</small>
+              </div>
+            </div>
+          `).join("")
+        : '<div class="location-intelligence-muted">This location is currently empty.</div>';
+
+      container.innerHTML = `
+        <div class="location-intelligence-header">
+          <div>
+            <span>Storage Snapshot</span>
+            <strong>${escapeHtml(data.location?.location_name || "Selected location")}</strong>
+          </div>
+          ${data.location?.location_code ? `<span class="location-intelligence-badge">${escapeHtml(data.location.location_code)}</span>` : ""}
+        </div>
+        <div class="location-intelligence-stats">
+          <div><span>Unique Items</span><strong>${data.items.length}</strong></div>
+          <div><span>Total Qty</span><strong>${data.totalQuantity}</strong></div>
+          <div><span>Capacity</span><strong>${escapeHtml(capacityText)}</strong></div>
+          <div><span>Est. Weight</span><strong>${escapeHtml(formatLocationWeight(data.approximateWeight))}</strong></div>
+        </div>
+        <div class="location-intelligence-section">
+          <div class="location-intelligence-section-title">Similar Weight (±2 g)</div>
+          <div class="location-intelligence-list">${similarHtml}</div>
+        </div>
+        <div class="location-intelligence-section">
+          <div class="location-intelligence-section-title">Current Contents</div>
+          <div class="location-intelligence-list">${contentsHtml}</div>
+        </div>
+      `;
+    } catch (error) {
+      console.error("Failed to load location intelligence:", error);
+      renderLocationIntelligenceEmpty(containerId, "Could not load location contents.");
+    }
   }
 
   //function to transform the inputs into selected in case it is needed
@@ -605,7 +764,7 @@ async function bumpInventoryVersion(changedIds = null) {
 
         let locationQuery = supabase
           .from("locations")
-          .select("id, location_name, location_code, store_id")
+          .select("id, location_name, location_code, store_id, max_capacity")
           .eq("active", true);
 
         if (selectedStoreId) {
@@ -634,6 +793,10 @@ async function bumpInventoryVersion(changedIds = null) {
         }
 
         const locationData = matchingLocations[0];
+        await renderLocationIntelligence("assign-location-intelligence", locationData.id, {
+          referenceWeight: Number(batchItem?.item?.weight),
+          referenceLabel: batchItem?.item?.title || "this item",
+        });
 
         window.showPasswordConfirmModal(
           batchItem,
@@ -1884,12 +2047,34 @@ document.addEventListener("DOMContentLoaded", async () => {
                 ? "assign-location-barcode-dropdown-toggle"
                 : "assign-location-name-dropdown-toggle";
             
-              document.getElementById(hiddenInputId).value = value;
-              document.getElementById(toggleBtnId).innerText = value;
-              document.getElementById(otherHiddenInputId).value = "";
-              document.getElementById(otherToggleBtnId).innerText = isName
-                ? "Select Barcode"
-                : "Select Location Name";
+              const selectedLocation = assignableLocations.find((location) => {
+                const compareValue = isName ? location.location_name : location.location_code;
+                return String(compareValue || "") === String(value || "");
+              });
+
+              if (selectedLocation) {
+                const locationName = selectedLocation.location_name || "";
+                const locationCode = selectedLocation.location_code || "";
+                document.getElementById("assign-location-name").value = locationName;
+                document.getElementById("assign-location-barcode").value = locationCode;
+                document.getElementById("assign-location-name-dropdown-toggle").innerText = locationName || "Select Location Name";
+                document.getElementById("assign-location-barcode-dropdown-toggle").innerText = locationCode || "Select Barcode";
+
+                const barcode = document.getElementById("modal-assign-location")?.dataset?.barcode || "";
+                const batchItem = currentBatch[barcode];
+                renderLocationIntelligence("assign-location-intelligence", selectedLocation.id, {
+                  referenceWeight: Number(batchItem?.item?.weight),
+                  referenceLabel: batchItem?.item?.title || "this item",
+                });
+              } else {
+                document.getElementById(hiddenInputId).value = value;
+                document.getElementById(toggleBtnId).innerText = value;
+                document.getElementById(otherHiddenInputId).value = "";
+                document.getElementById(otherToggleBtnId).innerText = isName
+                  ? "Select Barcode"
+                  : "Select Location Name";
+                renderLocationIntelligenceEmpty("assign-location-intelligence");
+              }
             
               if (isNew && isName) {
                 // 🪄 Only open the Add Location modal if creating a new location by name

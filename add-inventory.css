@@ -916,7 +916,7 @@ svg.icon.spin {
   border-radius: 20px;
   padding: 32px 36px;
   width: 100%;
-  max-width: 500px;
+  max-width: 760px;
   max-height: calc(100vh - 48px);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
   display: flex;
@@ -973,6 +973,138 @@ svg.icon.spin {
   font-size: 0.92rem;
   line-height: 1.45;
   color: #5b6472;
+}
+
+.location-intelligence-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff, #f7fafc);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  font-family: 'Inter', 'DM Serif Display', serif;
+}
+
+.location-intelligence-empty,
+.location-intelligence-muted {
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.location-intelligence-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.location-intelligence-header div {
+  display: grid;
+  gap: 3px;
+}
+
+.location-intelligence-header span,
+.location-intelligence-stats span,
+.location-intelligence-section-title {
+  color: #6d5f3c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.location-intelligence-header strong {
+  color: #111827;
+  font-size: 1rem;
+}
+
+.location-intelligence-badge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(109, 95, 60, 0.2);
+  color: #4a3f27;
+  background: rgba(214, 184, 125, 0.18);
+  font-size: 0.76rem;
+}
+
+.location-intelligence-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.location-intelligence-stats div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+}
+
+.location-intelligence-stats strong {
+  color: #111827;
+  font-size: 0.98rem;
+  overflow-wrap: anywhere;
+}
+
+.location-intelligence-section {
+  display: grid;
+  gap: 8px;
+}
+
+.location-intelligence-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.location-intelligence-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.location-intelligence-row.is-similar {
+  border-color: rgba(184, 134, 11, 0.22);
+  background: #fff9ed;
+}
+
+.location-intelligence-row strong,
+.location-intelligence-row span,
+.location-intelligence-weight,
+.location-intelligence-weight small {
+  display: block;
+}
+
+.location-intelligence-row strong {
+  color: #111827;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-intelligence-row span,
+.location-intelligence-weight small {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.location-intelligence-weight {
+  color: #111827;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .location-label {
@@ -1427,6 +1559,22 @@ svg.icon.spin {
   #form-add-location select,
   #form-add-location label {
     max-width: 100%;
+  }
+
+  .modal-content-assign-location {
+    padding: 22px;
+  }
+
+  .location-intelligence-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .location-intelligence-row {
+    grid-template-columns: 1fr;
+  }
+
+  .location-intelligence-weight {
+    text-align: left;
   }
 }
 

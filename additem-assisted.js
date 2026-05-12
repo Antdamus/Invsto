@@ -13,6 +13,8 @@
   const IMAGE_EDITOR_OUTPUT_SIZE = 1200;
   const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
+  const AUTO_STRAIGHTEN_MIN_DEGREES = 1.25;
+  const AUTO_STRAIGHTEN_MAX_DEGREES = 24;
   let backgroundRemovalModulePromise = null;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
@@ -33,6 +35,7 @@
     isReadingWeight: false,
     isGeneratingCopy: false,
     isProcessingImage: false,
+    autoStraightenBackground: false,
     hasLoadedImagesOnce: false,
     activeCaptureJobId: "",
     captureStations: [],
@@ -44,6 +47,9 @@
       sourceRevoke: null,
       imageElement: null,
       zoom: 1,
+      rotation: 0,
+      flipX: false,
+      flipY: false,
       offsetX: 0,
       offsetY: 0,
       isDragging: false,
@@ -90,6 +96,7 @@
       selectedImageEmpty: document.getElementById("assisted-selected-image-empty"),
       selectedImageName: document.getElementById("assisted-selected-image-name"),
       selectedImagePath: document.getElementById("assisted-selected-image-path"),
+      bgAutoAlignButton: document.getElementById("assisted-bg-auto-align"),
       bgBlackButton: document.getElementById("assisted-bg-black"),
       bgWhiteButton: document.getElementById("assisted-bg-white"),
       openImageEditorButton: document.getElementById("assisted-open-image-editor"),
@@ -101,6 +108,11 @@
       imageEditorZoom: document.getElementById("assisted-editor-zoom"),
       imageEditorZoomIn: document.getElementById("assisted-editor-zoom-in"),
       imageEditorZoomOut: document.getElementById("assisted-editor-zoom-out"),
+      imageEditorRotation: document.getElementById("assisted-editor-rotation"),
+      imageEditorRotateLeft: document.getElementById("assisted-editor-rotate-left"),
+      imageEditorRotateRight: document.getElementById("assisted-editor-rotate-right"),
+      imageEditorFlipHorizontal: document.getElementById("assisted-editor-flip-horizontal"),
+      imageEditorFlipVertical: document.getElementById("assisted-editor-flip-vertical"),
       imageEditorReset: document.getElementById("assisted-editor-reset"),
       imageEditorSave: document.getElementById("assisted-editor-save"),
       imageEditorStatus: document.getElementById("assisted-editor-status"),
@@ -211,6 +223,10 @@
     const blackLabel = background === "black" && isBusy ? "Processing..." : "Black Background";
     const whiteLabel = background === "white" && isBusy ? "Processing..." : "White Background";
 
+    if (elements.bgAutoAlignButton) {
+      elements.bgAutoAlignButton.disabled = isBusy;
+    }
+
     if (elements.bgBlackButton) {
       elements.bgBlackButton.disabled = isBusy;
       elements.bgBlackButton.textContent = blackLabel;
@@ -220,6 +236,28 @@
       elements.bgWhiteButton.disabled = isBusy;
       elements.bgWhiteButton.textContent = whiteLabel;
     }
+  }
+
+  function updateAutoAlignButton(elements) {
+    if (!elements.bgAutoAlignButton) return;
+
+    elements.bgAutoAlignButton.textContent = state.autoStraightenBackground
+      ? "Auto Align: On"
+      : "Auto Align: Off";
+    elements.bgAutoAlignButton.setAttribute("aria-pressed", state.autoStraightenBackground ? "true" : "false");
+    elements.bgAutoAlignButton.classList.toggle("is-active", state.autoStraightenBackground);
+  }
+
+  function toggleAutoAlign(elements) {
+    state.autoStraightenBackground = !state.autoStraightenBackground;
+    updateAutoAlignButton(elements);
+    setInlineStatus(
+      elements.bgStatus,
+      state.autoStraightenBackground
+        ? "Auto align is on for the next black/white background process."
+        : "Auto align is off. Background removal will keep the original rotation.",
+      "is-waiting"
+    );
   }
 
   function getCurrentCategory(elements) {
@@ -1232,7 +1270,120 @@
     }
   }
 
-  async function createCompositedBackgroundBlob(cutoutBlob, background) {
+  function normalizeRadians(value) {
+    let angle = value;
+    while (angle > Math.PI / 2) angle -= Math.PI;
+    while (angle < -Math.PI / 2) angle += Math.PI;
+    return angle;
+  }
+
+  function calculateForegroundAxisCorrection(context, width, height) {
+    const imageData = context.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const alphaThreshold = 24;
+    let weightTotal = 0;
+    let sumX = 0;
+    let sumY = 0;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const alpha = data[((y * width + x) * 4) + 3];
+        if (alpha <= alphaThreshold) continue;
+
+        const weight = alpha / 255;
+        weightTotal += weight;
+        sumX += x * weight;
+        sumY += y * weight;
+      }
+    }
+
+    if (weightTotal < 80) {
+      return 0;
+    }
+
+    const centerX = sumX / weightTotal;
+    const centerY = sumY / weightTotal;
+    let covXX = 0;
+    let covXY = 0;
+    let covYY = 0;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const alpha = data[((y * width + x) * 4) + 3];
+        if (alpha <= alphaThreshold) continue;
+
+        const weight = alpha / 255;
+        const dx = x - centerX;
+        const dy = y - centerY;
+        covXX += weight * dx * dx;
+        covXY += weight * dx * dy;
+        covYY += weight * dy * dy;
+      }
+    }
+
+    if (!Number.isFinite(covXX) || !Number.isFinite(covXY) || !Number.isFinite(covYY)) {
+      return 0;
+    }
+
+    const objectAxis = 0.5 * Math.atan2(2 * covXY, covXX - covYY);
+    const targetAxis = Math.round(objectAxis / (Math.PI / 2)) * (Math.PI / 2);
+    const correction = normalizeRadians(targetAxis - objectAxis);
+    const correctionDegrees = Math.abs(correction * 180 / Math.PI);
+
+    if (correctionDegrees < AUTO_STRAIGHTEN_MIN_DEGREES || correctionDegrees > AUTO_STRAIGHTEN_MAX_DEGREES) {
+      return 0;
+    }
+
+    return correction;
+  }
+
+  function createAutoStraightenedCutoutCanvas(cutoutImage, width, height) {
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = width;
+    sourceCanvas.height = height;
+
+    const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+    if (!sourceContext) {
+      throw new Error("Browser image alignment is not available.");
+    }
+
+    sourceContext.drawImage(cutoutImage, 0, 0, width, height);
+
+    const correction = calculateForegroundAxisCorrection(sourceContext, width, height);
+    if (!correction) {
+      return {
+        canvas: sourceCanvas,
+        correctionDegrees: 0,
+      };
+    }
+
+    const alignedCanvas = document.createElement("canvas");
+    alignedCanvas.width = width;
+    alignedCanvas.height = height;
+
+    const alignedContext = alignedCanvas.getContext("2d");
+    if (!alignedContext) {
+      throw new Error("Browser image alignment is not available.");
+    }
+
+    const rotatedBoundsWidth = Math.abs(Math.cos(correction)) * width + Math.abs(Math.sin(correction)) * height;
+    const rotatedBoundsHeight = Math.abs(Math.sin(correction)) * width + Math.abs(Math.cos(correction)) * height;
+    const safeScale = Math.min(1, width / rotatedBoundsWidth, height / rotatedBoundsHeight);
+
+    alignedContext.imageSmoothingEnabled = true;
+    alignedContext.imageSmoothingQuality = "high";
+    alignedContext.translate(width / 2, height / 2);
+    alignedContext.rotate(correction);
+    alignedContext.scale(safeScale, safeScale);
+    alignedContext.drawImage(sourceCanvas, -width / 2, -height / 2);
+
+    return {
+      canvas: alignedCanvas,
+      correctionDegrees: correction * 180 / Math.PI,
+    };
+  }
+
+  async function createCompositedBackgroundBlob(cutoutBlob, background, options = {}) {
     const cutoutUrl = URL.createObjectURL(cutoutBlob);
 
     try {
@@ -1255,7 +1406,12 @@
 
       context.fillStyle = background === "black" ? "#000000" : "#ffffff";
       context.fillRect(0, 0, width, height);
-      context.drawImage(cutoutImage, 0, 0, width, height);
+      if (options.autoStraighten) {
+        const alignedCutout = createAutoStraightenedCutoutCanvas(cutoutImage, width, height);
+        context.drawImage(alignedCutout.canvas, 0, 0, width, height);
+      } else {
+        context.drawImage(cutoutImage, 0, 0, width, height);
+      }
 
       return await canvasToBlob(canvas, "image/png", 0.95);
     } finally {
@@ -1263,7 +1419,7 @@
     }
   }
 
-  async function createPixelPreservingBackgroundPayload(selectedImage, background, elements) {
+  async function createPixelPreservingBackgroundPayload(selectedImage, background, elements, options = {}) {
     setInlineStatus(
       elements.bgStatus,
       "Preparing object cutout. First run may take a little while while the model loads...",
@@ -1293,7 +1449,9 @@
       },
     });
 
-    const processedBlob = await createCompositedBackgroundBlob(cutoutBlob, background);
+    const processedBlob = await createCompositedBackgroundBlob(cutoutBlob, background, {
+      autoStraighten: Boolean(options.autoStraighten),
+    });
     const dataUrl = await readBlobAsDataUrl(processedBlob);
     const processedImageBase64 = dataUrl.split(",")[1] || "";
 
@@ -1328,7 +1486,9 @@
     );
 
     try {
-      const processedImagePayload = await createPixelPreservingBackgroundPayload(selectedImage, background, elements);
+      const processedImagePayload = await createPixelPreservingBackgroundPayload(selectedImage, background, elements, {
+        autoStraighten: state.autoStraightenBackground,
+      });
       const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
         body: {
           bucket,
@@ -1402,6 +1562,9 @@
     state.imageEditor.sourceRevoke = null;
     state.imageEditor.imageElement = null;
     state.imageEditor.zoom = 1;
+    state.imageEditor.rotation = 0;
+    state.imageEditor.flipX = false;
+    state.imageEditor.flipY = false;
     state.imageEditor.offsetX = 0;
     state.imageEditor.offsetY = 0;
     state.imageEditor.isDragging = false;
@@ -1439,8 +1602,25 @@
     };
   }
 
-  function drawImageEditor(elements, options = {}) {
-    const canvas = options.canvas || elements.imageEditorCanvas;
+  function drawTransformedEditorImage(context, image, rect, outputWidth, outputHeight) {
+    const centerX = rect.x + (rect.width / 2);
+    const centerY = rect.y + (rect.height / 2);
+    const rotation = (Number(state.imageEditor.rotation) || 0) * Math.PI / 180;
+    const flipScaleX = state.imageEditor.flipX ? -1 : 1;
+    const flipScaleY = state.imageEditor.flipY ? -1 : 1;
+
+    context.save();
+    context.translate(centerX, centerY);
+    context.rotate(rotation);
+    context.scale(flipScaleX, flipScaleY);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, -rect.width / 2, -rect.height / 2, rect.width, rect.height);
+    context.restore();
+  }
+
+  function drawImageEditor(elements) {
+    const canvas = elements.imageEditorCanvas;
     const image = state.imageEditor.imageElement;
     if (!canvas || !image) return;
 
@@ -1453,9 +1633,7 @@
     context.clearRect(0, 0, width, height);
 
     if (!rect) return;
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+    drawTransformedEditorImage(context, image, rect, width, height);
   }
 
   function setEditorZoom(elements, zoom) {
@@ -1471,11 +1649,45 @@
 
   function resetEditorFraming(elements) {
     state.imageEditor.zoom = 1;
+    state.imageEditor.rotation = 0;
+    state.imageEditor.flipX = false;
+    state.imageEditor.flipY = false;
     state.imageEditor.offsetX = 0;
     state.imageEditor.offsetY = 0;
 
     if (elements.imageEditorZoom) {
       elements.imageEditorZoom.value = "1";
+    }
+
+    if (elements.imageEditorRotation) {
+      elements.imageEditorRotation.value = "0";
+    }
+
+    elements.imageEditorFlipHorizontal?.classList.remove("is-active");
+    elements.imageEditorFlipVertical?.classList.remove("is-active");
+    drawImageEditor(elements);
+  }
+
+  function setEditorRotation(elements, degrees) {
+    const nextRotation = Math.min(45, Math.max(-45, Number(degrees) || 0));
+    state.imageEditor.rotation = nextRotation;
+
+    if (elements.imageEditorRotation) {
+      elements.imageEditorRotation.value = String(nextRotation);
+    }
+
+    drawImageEditor(elements);
+  }
+
+  function toggleEditorFlip(elements, axis) {
+    if (axis === "x") {
+      state.imageEditor.flipX = !state.imageEditor.flipX;
+      elements.imageEditorFlipHorizontal?.classList.toggle("is-active", state.imageEditor.flipX);
+    }
+
+    if (axis === "y") {
+      state.imageEditor.flipY = !state.imageEditor.flipY;
+      elements.imageEditorFlipVertical?.classList.toggle("is-active", state.imageEditor.flipY);
     }
 
     drawImageEditor(elements);
@@ -1599,12 +1811,17 @@
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
       context.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
-      context.drawImage(
+      drawTransformedEditorImage(
+        context,
         state.imageEditor.imageElement,
-        rect.x * scale,
-        rect.y * scale,
-        rect.width * scale,
-        rect.height * scale
+        {
+          x: rect.x * scale,
+          y: rect.y * scale,
+          width: rect.width * scale,
+          height: rect.height * scale,
+        },
+        outputCanvas.width,
+        outputCanvas.height
       );
 
       const croppedBlob = await canvasToBlob(outputCanvas, "image/png", 0.95);
@@ -2109,6 +2326,7 @@
     setupWorkflowTabs(elements);
     setupImageStripListeners(elements);
     setupFieldListeners(elements);
+    updateAutoAlignButton(elements);
     await loadActiveCaptureStations(elements, { silent: true });
 
     elements.readWeightButton?.addEventListener("click", () => handleReadWeight(elements));
@@ -2124,6 +2342,7 @@
     elements.localImageUploadInput?.addEventListener("change", (event) => {
       handleLocalImageUpload(elements, event);
     });
+    elements.bgAutoAlignButton?.addEventListener("click", () => toggleAutoAlign(elements));
     elements.bgBlackButton?.addEventListener("click", () => processSelectedImageBackground(elements, "black"));
     elements.bgWhiteButton?.addEventListener("click", () => processSelectedImageBackground(elements, "white"));
     elements.openImageEditorButton?.addEventListener("click", () => openImageEditor(elements));
@@ -2146,6 +2365,21 @@
     });
     elements.imageEditorZoomOut?.addEventListener("click", () => {
       setEditorZoom(elements, state.imageEditor.zoom - 0.12);
+    });
+    elements.imageEditorRotation?.addEventListener("input", () => {
+      setEditorRotation(elements, elements.imageEditorRotation.value);
+    });
+    elements.imageEditorRotateLeft?.addEventListener("click", () => {
+      setEditorRotation(elements, state.imageEditor.rotation - 2.5);
+    });
+    elements.imageEditorRotateRight?.addEventListener("click", () => {
+      setEditorRotation(elements, state.imageEditor.rotation + 2.5);
+    });
+    elements.imageEditorFlipHorizontal?.addEventListener("click", () => {
+      toggleEditorFlip(elements, "x");
+    });
+    elements.imageEditorFlipVertical?.addEventListener("click", () => {
+      toggleEditorFlip(elements, "y");
     });
     elements.imageEditorReset?.addEventListener("click", () => resetEditorFraming(elements));
     elements.imageEditorSave?.addEventListener("click", () => saveImageEditorCrop(elements));

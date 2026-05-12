@@ -104,6 +104,12 @@
   background: rgba(255, 250, 243, 0.03);
 }
 
+.assisted-select option,
+.assisted-select optgroup {
+  background: #fffaf3;
+  color: #1a1510;
+}
+
 .assisted-textarea {
   min-height: 120px;
   resize: vertical;
@@ -342,6 +348,12 @@
 
 .assisted-bg-tools-wide {
   grid-column: 1 / -1;
+}
+
+.assisted-secondary-button.is-active {
+  border-color: rgba(240, 201, 143, 0.42);
+  background: rgba(201, 152, 87, 0.18);
+  color: #f7e6ca;
 }
 
 .assisted-selected-image-meta strong,
@@ -632,6 +644,12 @@
   gap: 10px;
 }
 
+.assisted-editor-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .assisted-editor-control-row-actions {
   padding-top: 8px;
   border-top: 1px solid rgba(244, 224, 190, 0.1);
@@ -688,6 +706,10 @@
 
   .assisted-editor-dialog {
     padding: 16px;
+  }
+
+  .assisted-editor-button-grid {
+    grid-template-columns: 1fr;
   }
 
   .assisted-manual-weight {
