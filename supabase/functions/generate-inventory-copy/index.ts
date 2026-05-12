@@ -7,7 +7,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ALLOWED_BUCKET = "InventoryUpload";
+const DEFAULT_BUCKET = "InventoryUpload";
+const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos"]);
 
 type RequestBody = {
   bucket?: string;
@@ -453,14 +454,19 @@ serve(async (req) => {
 
   try {
     const body = (await req.json()) as RequestBody;
-    const bucket = asTrimmedString(body.bucket || ALLOWED_BUCKET);
+    const bucket = asTrimmedString(body.bucket || DEFAULT_BUCKET);
     const imagePath = normalizePath(body.imagePath || "");
     const material = asTrimmedString(body.material);
     const purity = asTrimmedString(body.purity);
     const weight = Number(body.weight);
 
-    if (bucket !== ALLOWED_BUCKET) {
-      return json(400, { ok: false, error: "invalid_bucket" });
+    if (!ALLOWED_BUCKETS.has(bucket)) {
+      return json(400, {
+        ok: false,
+        error: "invalid_bucket",
+        allowedBuckets: Array.from(ALLOWED_BUCKETS),
+        receivedBucket: bucket,
+      });
     }
 
     if (!imagePath || !material || !purity || !Number.isFinite(weight)) {
@@ -480,13 +486,15 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const { data: signedData, error: signedError } = await supabase.storage
-      .from(ALLOWED_BUCKET)
+      .from(bucket)
       .createSignedUrl(imagePath, 60 * 10);
 
     if (signedError || !signedData?.signedUrl) {
       return json(500, {
         ok: false,
         error: "image_sign_failed",
+        bucket,
+        imagePath,
         detail: signedError?.message || "No signed URL returned",
       });
     }
@@ -530,6 +538,7 @@ serve(async (req) => {
       openaiErrorSummary: openAIDebug.openaiErrorSummary,
       parseFailure: openAIDebug.parseFailure,
       rawOutputPreview: openAIDebug.rawOutputPreview,
+      selectedImageBucket: bucket,
       selectedImagePath: imagePath,
       selectedImageSignedUrl: signedData.signedUrl,
     });

@@ -3,6 +3,7 @@
   const INVENTORY_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
   const AI_COPY_FUNCTION_NAME = "generate-inventory-copy";
   const CAPTURE_JOB_TABLE = "capture_jobs";
+  const CAPTURE_PHOTO_TABLE = "capture_job_photos";
   const CAPTURE_STATION_TABLE = "capture_stations";
   const CAPTURE_POLL_INTERVAL_MS = 1500;
   const CAPTURE_POLL_TIMEOUT_MS = 120000;
@@ -26,6 +27,9 @@
     isGeneratingCopy: false,
     hasLoadedImagesOnce: false,
     activeCaptureJobId: "",
+    captureStations: [],
+    selectedCaptureStationId: "",
+    latestCaptureJob: null,
   };
 
   function waitForSupabaseInit() {
@@ -49,6 +53,8 @@
       puritySelect: document.getElementById("assisted-purity"),
       stoneTypeInput: document.getElementById("assisted-stone-type"),
       notesInput: document.getElementById("assisted-notes"),
+      captureStationSelect: document.getElementById("assisted-capture-station"),
+      refreshStationsButton: document.getElementById("assisted-refresh-stations"),
       readWeightButton: document.getElementById("assisted-read-weight"),
       scaleState: document.getElementById("assisted-scale-state"),
       weightDisplay: document.getElementById("assisted-weight-display"),
@@ -118,6 +124,7 @@
     const name = asTrimmedString(image?.name) || `Upload ${fallbackIndex + 1}`;
     const updatedAt = asTrimmedString(image?.updatedAt);
     const createdAt = asTrimmedString(image?.createdAt);
+    const numericSortOrder = Number(image?.sortOrder);
 
     return {
       path,
@@ -125,6 +132,12 @@
       createdAt,
       updatedAt: updatedAt || createdAt,
       previewUrl: asTrimmedString(image?.previewUrl),
+      storageBucket: asTrimmedString(image?.storageBucket || image?.storage_bucket) || INVENTORY_UPLOAD_BUCKET,
+      sourceType: asTrimmedString(image?.sourceType) || "inventory-upload",
+      sortOrder: Number.isFinite(numericSortOrder) ? numericSortOrder : fallbackIndex,
+      isPrimary: Boolean(image?.isPrimary),
+      captureJobId: asTrimmedString(image?.captureJobId || image?.capture_job_id),
+      mimeType: asTrimmedString(image?.mimeType || image?.mime_type) || "image/jpeg",
     };
   }
 
@@ -176,6 +189,104 @@
     });
   }
 
+  function releaseImagePreviewUrls(images = state.recentUploadedImages) {
+    for (const image of images) {
+      const previewUrl = asTrimmedString(image?.previewUrl);
+      if (previewUrl.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(previewUrl);
+        } catch (_) {}
+      }
+    }
+  }
+
+  function getSelectedCaptureStation() {
+    return state.captureStations.find((station) => station.id === state.selectedCaptureStationId) || null;
+  }
+
+  function setSelectedCaptureStation(elements, stationId) {
+    const station = state.captureStations.find((entry) => entry.id === stationId) || null;
+    const nextId = station?.id || "";
+
+    state.selectedCaptureStationId = nextId;
+
+    if (elements.captureStationSelect && elements.captureStationSelect.value !== nextId) {
+      elements.captureStationSelect.value = nextId;
+    }
+
+    try {
+      if (nextId) {
+        window.localStorage?.setItem("og.captureStationId", nextId);
+        window.localStorage?.setItem("og.captureStationName", station?.name || "");
+      } else {
+        window.localStorage?.removeItem("og.captureStationId");
+        window.localStorage?.removeItem("og.captureStationName");
+      }
+    } catch (_) {}
+
+    return station;
+  }
+
+  function renderCaptureStations(elements) {
+    if (!elements.captureStationSelect) return;
+
+    if (!state.captureStations.length) {
+      elements.captureStationSelect.innerHTML = '<option value="">No active stations</option>';
+      elements.captureStationSelect.disabled = true;
+      return;
+    }
+
+    elements.captureStationSelect.innerHTML = ['<option value="">Select station</option>']
+      .concat(
+        state.captureStations.map((station) => {
+          return `<option value="${escapeHtml(station.id)}">${escapeHtml(station.name || station.id)}</option>`;
+        })
+      )
+      .join("");
+
+    elements.captureStationSelect.disabled = false;
+    elements.captureStationSelect.value = state.selectedCaptureStationId || "";
+  }
+
+  async function loadActiveCaptureStations(elements, options = {}) {
+    const { data, error } = await window.supabase
+      .from(CAPTURE_STATION_TABLE)
+      .select("id, name, active")
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message || "Failed to load active capture stations.");
+    }
+
+    state.captureStations = Array.isArray(data) ? data : [];
+    renderCaptureStations(elements);
+
+    if (!state.captureStations.length) {
+      state.selectedCaptureStationId = "";
+      if (!options.silent) {
+        elements.captureState.textContent = "No active capture stations are available.";
+      }
+      return [];
+    }
+
+    const { stationId, stationName } = getPreferredCaptureStationHints();
+    const nextStation = state.captureStations.find((station) => station.id === state.selectedCaptureStationId)
+      || state.captureStations.find((station) => station.id === stationId)
+      || state.captureStations.find((station) => {
+        return asTrimmedString(station.name).toLowerCase() === stationName.toLowerCase();
+      })
+      || state.captureStations[0];
+
+    setSelectedCaptureStation(elements, nextStation?.id || "");
+
+    if (!options.silent && nextStation) {
+      elements.captureState.textContent = `Ready to route capture jobs to ${nextStation.name || nextStation.id}.`;
+    }
+
+    return state.captureStations;
+  }
+
   function getPreferredCaptureStationHints() {
     const stationId = asTrimmedString(
       window.OG_CAPTURE_STATION_ID || window.localStorage?.getItem("og.captureStationId")
@@ -187,47 +298,17 @@
     return { stationId, stationName };
   }
 
-  async function resolveCaptureStation() {
-    const { data, error } = await window.supabase
-      .from(CAPTURE_STATION_TABLE)
-      .select("id, name, active")
-      .eq("active", true)
-      .order("name", { ascending: true });
-
-    if (error) {
-      throw new Error(error.message || "Failed to resolve capture station.");
+  async function resolveCaptureStation(elements) {
+    if (!state.captureStations.length) {
+      await loadActiveCaptureStations(elements, { silent: true });
     }
 
-    const activeStations = Array.isArray(data) ? data : [];
-    if (!activeStations.length) {
+    if (!state.captureStations.length) {
       throw new Error("No active capture stations are available.");
     }
 
-    const { stationId, stationName } = getPreferredCaptureStationHints();
-
-    let selectedStation = null;
-    if (stationId) {
-      selectedStation = activeStations.find((station) => station.id === stationId) || null;
-    }
-
-    if (!selectedStation && stationName) {
-      selectedStation = activeStations.find((station) => {
-        return asTrimmedString(station.name).toLowerCase() === stationName.toLowerCase();
-      }) || null;
-    }
-
-    if (!selectedStation) {
-      selectedStation = activeStations[0];
-      if (activeStations.length > 1) {
-        console.warn("Multiple active capture stations found. Defaulting to the first active station.", activeStations);
-      }
-    }
-
-    try {
-      window.localStorage?.setItem("og.captureStationId", selectedStation.id);
-      window.localStorage?.setItem("og.captureStationName", selectedStation.name || "");
-    } catch (_) {}
-
+    const selectedStation = getSelectedCaptureStation() || state.captureStations[0];
+    setSelectedCaptureStation(elements, selectedStation?.id || "");
     return selectedStation;
   }
 
@@ -300,10 +381,165 @@
     throw new Error("Timed out waiting for capture completion.");
   }
 
+  async function loadCaptureJobPhotos(jobId) {
+    const { data, error } = await window.supabase
+      .from(CAPTURE_PHOTO_TABLE)
+      .select(`
+        id,
+        capture_job_id,
+        sort_order,
+        is_primary,
+        storage_bucket,
+        storage_path,
+        file_size_bytes,
+        image_width,
+        image_height,
+        mime_type,
+        label,
+        created_at
+      `)
+      .eq("capture_job_id", jobId)
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      throw new Error(error.message || "Failed to load capture job photos.");
+    }
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  async function downloadCaptureJobPhotos(photos) {
+    const downloadedPhotos = [];
+
+    for (let index = 0; index < photos.length; index += 1) {
+      const photo = photos[index];
+      const bucket = asTrimmedString(photo?.storage_bucket);
+      const path = asTrimmedString(photo?.storage_path);
+
+      if (!bucket || !path) {
+        throw new Error("Capture photo metadata is missing bucket or path.");
+      }
+
+      const { data, error } = await window.supabase.storage.from(bucket).download(path);
+      if (error || !data) {
+        throw new Error(error?.message || `Failed to download capture photo ${index + 1}.`);
+      }
+
+      downloadedPhotos.push(
+        normalizeImageRow(
+          {
+            path,
+            name: asTrimmedString(photo?.label) || `Capture ${index + 1}`,
+            createdAt: asTrimmedString(photo?.created_at),
+            updatedAt: asTrimmedString(photo?.created_at),
+            previewUrl: URL.createObjectURL(data),
+            storageBucket: bucket,
+            sourceType: "capture-job",
+            sortOrder: Number(photo?.sort_order),
+            isPrimary: Boolean(photo?.is_primary),
+            captureJobId: asTrimmedString(photo?.capture_job_id),
+            mimeType: asTrimmedString(photo?.mime_type) || data.type || "image/jpeg",
+          },
+          index
+        )
+      );
+    }
+
+    return downloadedPhotos;
+  }
+
+  function applyRecentUploadedImages(elements, images, options = {}) {
+    const normalizedImages = Array.isArray(images) ? images : [];
+    const previousAIPath = options.preserveSelection ? state.aiSelectedUploadedImagePath : "";
+    const previousSaveSelections = options.preserveSelection
+      ? new Set(state.saveSelectedUploadedImagePaths)
+      : new Set();
+
+    releaseImagePreviewUrls(state.recentUploadedImages);
+    state.recentUploadedImages = normalizedImages;
+    state.hasLoadedImagesOnce = normalizedImages.length > 0;
+    state.saveSelectedUploadedImagePaths = normalizedImages
+      .map((image) => image.path)
+      .filter((path) => previousSaveSelections.has(path));
+
+    const defaultAIPath = options.defaultAIPath && normalizedImages.some((image) => image.path === options.defaultAIPath)
+      ? options.defaultAIPath
+      : "";
+
+    const nextAIPath = defaultAIPath
+      || (previousAIPath && normalizedImages.some((image) => image.path === previousAIPath) ? previousAIPath : "")
+      || getLatestUploadedImage(normalizedImages)?.path
+      || "";
+
+    setAISelectedImage(elements, nextAIPath, { silent: true });
+    updateSaveSelectionSummary(elements);
+    renderUploadedImages(elements);
+  }
+
+  async function hydrateCompletedCaptureJob(elements, completedJob, options = {}) {
+    const capturePhotos = await loadCaptureJobPhotos(completedJob.id);
+    if (!capturePhotos.length) {
+      throw new Error("Capture completed but no uploaded photos were returned for this job.");
+    }
+
+    const downloadedImages = await downloadCaptureJobPhotos(capturePhotos);
+    const primaryImage = downloadedImages.find((image) => image.isPrimary) || downloadedImages[0] || null;
+
+    state.latestCaptureJob = completedJob;
+    applyRecentUploadedImages(elements, downloadedImages, {
+      preserveSelection: false,
+      defaultAIPath: primaryImage?.path || "",
+    });
+
+    if (options.refreshNotice) {
+      setInlineStatus(
+        elements.imageStatus,
+        `Downloaded ${downloadedImages.length} capture photo(s) from the completed job. Choose one as the AI image.`,
+        "is-success"
+      );
+    }
+
+    return {
+      photos: capturePhotos,
+      images: downloadedImages,
+      primaryImage,
+    };
+  }
+
+  async function reloadCompletedCapturePhotos(elements, options = {}) {
+    if (!state.latestCaptureJob?.id) {
+      setInlineStatus(
+        elements.imageStatus,
+        "No completed capture session is available yet. Run Read Weight to create a new capture job.",
+        "is-error"
+      );
+      return null;
+    }
+
+    setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Photos", true);
+    setInlineStatus(elements.imageStatus, "Reloading the completed capture photo set...", "is-waiting");
+
+    try {
+      return await hydrateCompletedCaptureJob(elements, state.latestCaptureJob, {
+        refreshNotice: options.refreshNotice !== false,
+      });
+    } catch (error) {
+      console.error("Failed to reload capture photos:", error);
+      setInlineStatus(
+        elements.imageStatus,
+        `Could not reload completed capture photos: ${error.message || error}`,
+        "is-error"
+      );
+      return null;
+    } finally {
+      setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Photos", false);
+    }
+  }
+
   async function triggerIPhoneCapture(payload, elements) {
     console.log("triggerIPhoneCapture request", payload);
 
-    const station = await resolveCaptureStation();
+    const station = await resolveCaptureStation(elements);
     elements.captureState.textContent = `Routing capture to ${station.name || station.id}...`;
 
     const createdJob = await createCaptureJob(station.id);
@@ -327,17 +563,16 @@
       throw new Error(completedJob.failure_message || completedJob.failure_code || "Capture failed.");
     }
 
+    const captureResult = await hydrateCompletedCaptureJob(elements, completedJob, { refreshNotice: true });
     elements.captureState.textContent = completedJob.storage_bucket
       ? `Photo captured and uploaded to ${completedJob.storage_bucket}.`
       : "Photo captured and uploaded.";
 
-    if (state.hasLoadedImagesOnce) {
-      await loadRecentInventoryUploadImages(elements, { refreshNotice: true });
-    }
-
     return {
       station,
       job: completedJob,
+      photos: captureResult.photos,
+      images: captureResult.images,
     };
   }
 
@@ -387,8 +622,23 @@
     return Number(stableWeight.toFixed(2));
   }
 
+  function getSelectedUploadedImagesForSave() {
+    return state.saveSelectedUploadedImagePaths
+      .map((path) => getImageByPath(path))
+      .filter(Boolean)
+      .map((image) => ({
+        path: image.path,
+        name: image.name,
+        storageBucket: image.storageBucket,
+        sourceType: image.sourceType,
+        previewUrl: image.previewUrl,
+        mimeType: image.mimeType,
+        captureJobId: image.captureJobId,
+      }));
+  }
+
   function getSelectedUploadedImagePathsForSave() {
-    return [...state.saveSelectedUploadedImagePaths];
+    return getSelectedUploadedImagesForSave().map((image) => image.path);
   }
 
   function getImageByPath(path) {
@@ -425,7 +675,7 @@
     elements.saveSelectionCount.textContent = `${count} ${plural} will be saved with this item.`;
 
     if (count === 0) {
-      elements.saveSelectionSummary.textContent = "No uploaded phone images are selected for final item save yet.";
+      elements.saveSelectionSummary.textContent = "No assisted images are selected for final item save yet.";
       return;
     }
 
@@ -458,6 +708,17 @@
     state.aiSelectedUploadedImagePath = image?.path || "";
     state.aiSelectedUploadedImageUrl = image?.previewUrl || "";
 
+    if (image?.path && options.autoSelectForSave) {
+      const currentSelections = new Set(state.saveSelectedUploadedImagePaths);
+      if (!currentSelections.has(image.path)) {
+        currentSelections.add(image.path);
+        state.saveSelectedUploadedImagePaths = state.recentUploadedImages
+          .map((entry) => entry.path)
+          .filter((path) => currentSelections.has(path));
+        updateSaveSelectionSummary(elements);
+      }
+    }
+
     updateSelectedImagePreview(elements);
     renderUploadedImages(elements);
 
@@ -470,6 +731,11 @@
   }
 
   function toggleSaveSelectedImage(elements, imagePath) {
+    const image = getImageByPath(imagePath);
+    if (!image) {
+      return;
+    }
+
     const nextSelectedPaths = new Set(state.saveSelectedUploadedImagePaths);
 
     if (nextSelectedPaths.has(imagePath)) {
@@ -505,6 +771,8 @@
       const aiBadge = isAISelected
         ? '<span class="assisted-thumb-ai-badge">AI image</span>'
         : "";
+      const saveButtonLabel = isSaveSelected ? "Saving" : "Save";
+      const saveButtonAriaLabel = `${isSaveSelected ? "Remove" : "Add"} ${escapeHtml(image.name)} ${isSaveSelected ? "from" : "to"} images saved with this item`;
 
       return `
         <div
@@ -533,9 +801,9 @@
             class="assisted-thumb-save-toggle${isSaveSelected ? " is-active" : ""}"
             data-assisted-save-toggle="${escapeHtml(image.path)}"
             aria-pressed="${isSaveSelected ? "true" : "false"}"
-            aria-label="${isSaveSelected ? "Remove" : "Add"} ${escapeHtml(image.name)} ${isSaveSelected ? "from" : "to"} images saved with this item"
+            aria-label="${saveButtonAriaLabel}"
           >
-            ${isSaveSelected ? "Saving" : "Save"}
+            ${saveButtonLabel}
           </button>
         </div>
       `;
@@ -644,8 +912,10 @@
   }
 
   function collectAssistedWorkflowGenerationInputs(elements) {
+    const selectedImage = state.aiSelectedUploadedImage;
+
     return {
-      bucket: INVENTORY_UPLOAD_BUCKET,
+      bucket: asTrimmedString(selectedImage?.storageBucket) || INVENTORY_UPLOAD_BUCKET,
       imagePath: state.aiSelectedUploadedImagePath,
       material: asTrimmedString(elements.materialSelect?.value),
       purity: asTrimmedString(elements.puritySelect?.value),
@@ -665,7 +935,26 @@
     });
 
     if (error) {
-      throw new Error(error.message || "AI generation failed.");
+      let errorDetail = "";
+
+      try {
+        if (error.context && typeof error.context.clone === "function") {
+          const clonedResponse = error.context.clone();
+          const responseBody = await clonedResponse.json();
+          errorDetail = asTrimmedString(
+            responseBody?.detail
+            || responseBody?.error
+            || responseBody?.openaiErrorSummary
+            || responseBody?.receivedBucket
+          );
+          console.error("AI generation invoke response body:", responseBody);
+        }
+      } catch (detailError) {
+        console.warn("Could not parse AI generation error response body:", detailError);
+      }
+
+      console.error("AI generation invoke error:", error);
+      throw new Error(errorDetail || error.message || "AI generation failed.");
     }
 
     return data;
@@ -676,7 +965,7 @@
 
     state.isReadingWeight = true;
     setButtonBusy(elements.readWeightButton, "Reading Weight...", "Read Weight", true);
-    elements.scaleState.textContent = "Waiting for the scale placeholder to return a stable reading...";
+    elements.scaleState.textContent = "Waiting for the scale integration point to return a stable reading...";
     elements.captureState.textContent = "Waiting for stable weight";
 
     try {
@@ -696,7 +985,7 @@
       if (captureResult?.job?.storage_path) {
         setInlineStatus(
           elements.imageStatus,
-          `Capture completed. Refresh ready for ${captureResult.job.storage_path}.`,
+          `Capture completed. Loaded ${captureResult.images?.length || 0} photo(s) from ${captureResult.job.storage_path}.`,
           "is-success"
         );
       }
@@ -706,7 +995,7 @@
         "Stable weight updated. Generate again to use the latest assisted measurement."
       );
     } catch (error) {
-      console.error("Scale placeholder failed:", error);
+      console.error("Scale or capture flow failed:", error);
       elements.scaleState.textContent = "Unable to get a stable weight reading right now.";
       elements.captureState.textContent = error?.message || "Capture not triggered";
     } finally {
@@ -834,7 +1123,7 @@
     if (elements.generatedTitleInput) elements.generatedTitleInput.value = "";
     if (elements.generatedDescriptionInput) elements.generatedDescriptionInput.value = "";
     if (elements.weightDisplay) elements.weightDisplay.textContent = "--";
-    if (elements.scaleState) elements.scaleState.textContent = "Ready to read from the scale placeholder.";
+    if (elements.scaleState) elements.scaleState.textContent = "Ready to read from the scale integration point.";
     if (elements.captureState) elements.captureState.textContent = "Idle";
 
     const latestImage = getLatestUploadedImage(state.recentUploadedImages);
@@ -868,8 +1157,15 @@
     elements.manualPanel.hidden = !isManual;
     elements.assistedPanel.hidden = !isAssisted;
 
-    if (isAssisted && !state.hasLoadedImagesOnce) {
-      loadRecentInventoryUploadImages(elements);
+    if (isAssisted && !state.captureStations.length) {
+      loadActiveCaptureStations(elements).catch((error) => {
+        console.error("Failed to load capture stations:", error);
+        setInlineStatus(
+          elements.imageStatus,
+          `Could not load active capture stations: ${error.message || error}`,
+          "is-error"
+        );
+      });
     }
   }
 
@@ -887,7 +1183,9 @@
     elements.uploadedImageStrip?.addEventListener("click", (event) => {
       const aiButton = event.target.closest("[data-assisted-ai-select]");
       if (aiButton) {
-        setAISelectedImage(elements, aiButton.getAttribute("data-assisted-ai-select"));
+        setAISelectedImage(elements, aiButton.getAttribute("data-assisted-ai-select"), {
+          autoSelectForSave: true,
+        });
         return;
       }
 
@@ -928,6 +1226,13 @@
       );
     });
 
+    elements.captureStationSelect?.addEventListener("change", () => {
+      const station = setSelectedCaptureStation(elements, elements.captureStationSelect.value);
+      elements.captureState.textContent = station
+        ? `Ready to route capture jobs to ${station.name || station.id}.`
+        : "Choose a capture station before requesting a photo.";
+    });
+
     elements.mainWeightInput?.addEventListener("input", () => {
       if (!state.isReadingWeight) {
         const currentWeight = Number(elements.mainWeightInput.value);
@@ -939,9 +1244,11 @@
 
   function exposeModule(elements) {
     window.addItemAssistedModule = {
+      getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
       getAISelectedUploadedImagePath: () => state.aiSelectedUploadedImagePath,
-      refreshUploadedImages: () => loadRecentInventoryUploadImages(elements, { refreshNotice: true }),
+      refreshUploadedImages: () => reloadCompletedCapturePhotos(elements, { refreshNotice: true }),
+      loadActiveCaptureStations: () => loadActiveCaptureStations(elements, { silent: false }),
     };
   }
 
@@ -963,16 +1270,27 @@
     setupWorkflowTabs(elements);
     setupImageStripListeners(elements);
     setupFieldListeners(elements);
+    await loadActiveCaptureStations(elements, { silent: true });
 
     elements.readWeightButton?.addEventListener("click", () => handleReadWeight(elements));
+    elements.refreshStationsButton?.addEventListener("click", () => {
+      loadActiveCaptureStations(elements, { silent: false }).catch((error) => {
+        console.error("Failed to refresh capture stations:", error);
+        elements.captureState.textContent = error?.message || "Unable to refresh capture stations.";
+      });
+    });
     elements.refreshImagesButton?.addEventListener("click", () => {
-      loadRecentInventoryUploadImages(elements, { refreshNotice: true });
+      reloadCompletedCapturePhotos(elements, { refreshNotice: true });
     });
     elements.generateCopyButton?.addEventListener("click", () => handleGenerateCopy(elements));
     elements.applyCopyButton?.addEventListener("click", () => handleApplyGeneratedCopy(elements));
 
     document.addEventListener("add-item-form:reset", () => {
       resetAssistedWorkflow(elements);
+    });
+
+    window.addEventListener("beforeunload", () => {
+      releaseImagePreviewUrls();
     });
 
     exposeModule(elements);

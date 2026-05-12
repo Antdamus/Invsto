@@ -49,6 +49,10 @@
   min-width: 0;
 }
 
+.assisted-field-action {
+  justify-content: flex-end;
+}
+
 .assisted-field-wide {
   grid-column: 1 / -1;
 }
@@ -58,6 +62,12 @@
   font-size: 0.92rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.assisted-field-helper {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
 }
 
 .assisted-select,
@@ -127,6 +137,10 @@
 .assisted-secondary-button {
   background: rgba(255, 248, 236, 0.045);
   color: var(--text-soft);
+}
+
+.assisted-station-button {
+  width: fit-content;
 }
 
 .assisted-read-button:hover,
@@ -448,6 +462,17 @@
 .assisted-thumb-save-toggle:hover {
   transform: translateY(-1px);
   border-color: rgba(244, 224, 190, 0.28);
+}
+
+.assisted-thumb-save-toggle.is-disabled,
+.assisted-thumb-save-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+  transform: none;
+  border-color: rgba(244, 224, 190, 0.12);
+  background: rgba(255, 248, 236, 0.04);
+  color: var(--text-muted);
+  box-shadow: none;
 }
 
 .assisted-thumb-save-toggle.is-active {

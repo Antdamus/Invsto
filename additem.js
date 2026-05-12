@@ -101,6 +101,53 @@ let uploadedImages = [];
     });
   }
 
+  function sanitizeStorageFileName(fileName) {
+    return String(fileName || "image.jpg")
+      .replace(/[^\w.\-]+/g, "_")
+      .replace(/_+/g, "_");
+  }
+
+  async function copyAssistedImageToPhotosBucket(image, index) {
+    const sourceBucket = String(image?.storageBucket || "").trim();
+    const sourcePath = String(image?.path || "").trim();
+
+    if (!sourceBucket || !sourcePath) {
+      throw new Error("Assisted image is missing storage metadata.");
+    }
+
+    if (sourceBucket === "photos") {
+      return sourcePath;
+    }
+
+    const sourceFileName = sanitizeStorageFileName(
+      sourcePath.split("/").pop() || `assisted_${index + 1}.jpg`
+    );
+    const destinationPath = `item_photos/${Date.now()}_assisted_${index + 1}_${sourceFileName}`;
+
+    const { data: downloadedBlob, error: downloadError } = await supabase
+      .storage
+      .from(sourceBucket)
+      .download(sourcePath);
+
+    if (downloadError || !downloadedBlob) {
+      throw new Error(downloadError?.message || "Failed to download assisted image.");
+    }
+
+    const { error: uploadError } = await supabase
+      .storage
+      .from("photos")
+      .upload(destinationPath, downloadedBlob, {
+        upsert: true,
+        contentType: downloadedBlob.type || image?.mimeType || "image/jpeg",
+      });
+
+    if (uploadError) {
+      throw new Error(uploadError.message || "Failed to copy assisted image into item photos.");
+    }
+
+    return destinationPath;
+  }
+
 //#endregion
 
 //#region dropdown creation 
@@ -886,9 +933,9 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
 
   const photoFiles = photoInput.files;
   const photoUrls = [];
-  const assistedUploadedPhotoPaths = window.addItemAssistedModule?.getSelectedUploadedImagePathsForSave?.() || [];
+  const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
   const photoStatus = document.getElementById("photo-status");
-  photoStatus.innerHTML = ""; // Clear previous messages
+  photoStatus.innerHTML = "";
 
   for (const file of photoFiles) {
     const path = `item_photos/${Date.now()}_${file.name}`;
@@ -909,12 +956,28 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     photoStatus.innerHTML += `✅ Uploaded <strong>${file.name}</strong><br>`;
   }
 
-  if (assistedUploadedPhotoPaths.length > 0) {
-    const assistedPlural = assistedUploadedPhotoPaths.length === 1 ? "image" : "images";
-    photoStatus.innerHTML += `âœ… Included <strong>${assistedUploadedPhotoPaths.length}</strong> uploaded phone ${assistedPlural}<br>`;
+  const seenAssistedSources = new Set();
+  for (let index = 0; index < assistedSelectedImages.length; index += 1) {
+    const assistedImage = assistedSelectedImages[index];
+    const dedupeKey = `${assistedImage?.storageBucket || ""}:${assistedImage?.path || ""}`;
+
+    if (!assistedImage?.path || seenAssistedSources.has(dedupeKey)) {
+      continue;
+    }
+
+    seenAssistedSources.add(dedupeKey);
+
+    try {
+      const copiedPath = await copyAssistedImageToPhotosBucket(assistedImage, index);
+      photoUrls.push(copiedPath);
+      photoStatus.innerHTML += `? Included assisted image <strong>${assistedImage.name || copiedPath}</strong><br>`;
+    } catch (assistedError) {
+      console.error(`Assisted image copy failed for ${assistedImage?.path}:`, assistedError);
+      photoStatus.innerHTML += `? Failed to include assisted image <strong>${assistedImage?.name || assistedImage?.path || `#${index + 1}`}</strong>: ${assistedError.message || assistedError}<br>`;
+    }
   }
 
-  const finalPhotoPaths = [...new Set([...photoUrls, ...assistedUploadedPhotoPaths].filter(Boolean))];
+  const finalPhotoPaths = [...new Set(photoUrls.filter(Boolean))];
 
   let finalDymoPath;
   try {

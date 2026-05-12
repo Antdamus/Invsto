@@ -96,7 +96,7 @@
             <div class="assisted-copy">
               <h2 class="workflow-panel-title">Assisted Weight and Photo Intake</h2>
               <p class="workflow-panel-copy">
-                Use this guided path to choose material and purity, read a stable weight from a future scale integration point, and trigger a placeholder capture signal for the iPhone workflow before continuing with the existing Add Item form.
+                Use this guided path to choose material and purity, read a stable weight, route a capture job to a selected station, and review the completed capture photos before continuing with the existing Add Item form.
               </p>
             </div>
 
@@ -114,6 +114,23 @@
                   <option value="">Select purity</option>
                 </select>
               </label>
+            </div>
+
+            <div class="assisted-grid assisted-grid-secondary">
+              <label class="assisted-field" for="assisted-capture-station">
+                <span class="assisted-label">Capture Station</span>
+                <select id="assisted-capture-station" class="assisted-select">
+                  <option value="">Loading active stations...</option>
+                </select>
+              </label>
+
+              <div class="assisted-field assisted-field-action">
+                <span class="assisted-label">Station Directory</span>
+                <button type="button" id="assisted-refresh-stations" class="assisted-secondary-button assisted-station-button">
+                  Refresh Stations
+                </button>
+                <span class="assisted-field-helper">Queued capture jobs are routed by station UUID, not by station name.</span>
+              </div>
             </div>
 
             <div class="assisted-grid assisted-grid-secondary">
@@ -155,27 +172,27 @@
               </div>
 
               <div class="assisted-result-card">
-                <span class="assisted-result-label">iPhone Capture Placeholder</span>
+                <span class="assisted-result-label">Capture Session</span>
                 <strong id="assisted-capture-state" class="assisted-result-value assisted-result-value-small">Idle</strong>
-                <p class="assisted-result-note">This is a clean placeholder for future phone signaling and image capture transport.</p>
+                <p class="assisted-result-note">The selected station receives a queued capture job, uploads the finished photos, and this page retrieves the completed photo set.</p>
               </div>
             </div>
 
             <section class="assisted-section" aria-labelledby="assisted-upload-title">
               <div class="assisted-section-header">
                 <div>
-                  <h3 id="assisted-upload-title" class="assisted-section-title">Uploaded Phone Images</h3>
+                  <h3 id="assisted-upload-title" class="assisted-section-title">Captured Phone Images</h3>
                   <p class="assisted-section-copy">
-                    Choose 1 image for AI copy generation and choose any number of uploaded phone images to save with this item.
+                    After a capture job finishes, the completed photo set is loaded from Supabase and shown here in capture order.
                   </p>
                 </div>
                 <button type="button" id="assisted-refresh-images" class="assisted-secondary-button">
-                  Refresh Uploads
+                  Reload Photos
                 </button>
               </div>
 
               <p id="assisted-image-status" class="assisted-inline-status" aria-live="polite">
-                Waiting for the assisted workflow to load recent uploads.
+                Waiting for the assisted workflow to load completed capture photos.
               </p>
 
               <div class="assisted-image-layout">
@@ -183,7 +200,7 @@
                   <div class="assisted-selected-image-card assisted-ai-image-card">
                     <div class="assisted-card-head">
                       <span class="assisted-card-kicker">AI Description Image</span>
-                      <span class="assisted-card-helper">Exactly one uploaded image is used for title and description generation.</span>
+                      <span class="assisted-card-helper">Exactly one completed capture image is used for title and description generation.</span>
                     </div>
                     <div class="assisted-selected-image-frame">
                       <img
@@ -205,7 +222,7 @@
                   <div class="assisted-save-summary-card">
                     <div class="assisted-card-head">
                       <span class="assisted-card-kicker">Images That Will Be Saved</span>
-                      <span class="assisted-card-helper">Toggle save on any uploaded image to include it in the final item photos.</span>
+                      <span class="assisted-card-helper">Any image you mark here will be included with the final item. Assisted capture images are copied into the standard item photo pipeline during save.</span>
                     </div>
                     <strong id="assisted-save-selection-count" class="assisted-save-count">
                       0 images will be saved with this item.
@@ -218,16 +235,16 @@
 
                 <div class="assisted-upload-browser">
                   <div class="assisted-upload-browser-head">
-                    <span class="assisted-card-kicker">Recent Uploaded Images</span>
+                    <span class="assisted-card-kicker">Completed Capture Set</span>
                     <span class="assisted-card-helper">
-                      Click the image to set the AI image. Use the save toggle to include it with the final item.
+                      Click an image to set the AI image. Photos are pulled from the completed capture job and ordered by their recorded sort order.
                     </span>
                   </div>
                   <div
                     id="assisted-uploaded-image-strip"
                     class="assisted-uploaded-image-strip"
                     role="list"
-                    aria-label="Recent uploaded inventory images"
+                    aria-label="Completed capture job images"
                   ></div>
                 </div>
               </div>
