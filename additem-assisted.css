@@ -321,6 +321,12 @@
   gap: 4px;
 }
 
+.assisted-bg-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .assisted-selected-image-meta strong,
 .assisted-save-count,
 .assisted-thumb-name {
@@ -523,6 +529,10 @@
   .assisted-read-button,
   .assisted-secondary-button {
     width: 100%;
+  }
+
+  .assisted-bg-tools {
+    grid-template-columns: 1fr;
   }
 
   .assisted-manual-weight {

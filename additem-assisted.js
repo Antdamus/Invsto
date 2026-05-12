@@ -2,11 +2,15 @@
   const INVENTORY_UPLOAD_BUCKET = "InventoryUpload";
   const INVENTORY_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
   const AI_COPY_FUNCTION_NAME = "generate-inventory-copy";
+  const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
+  const BACKGROUND_REMOVAL_MODULE_URL = "https://esm.sh/@imgly/background-removal@1.7.0?bundle";
   const CAPTURE_JOB_TABLE = "capture_jobs";
   const CAPTURE_PHOTO_TABLE = "capture_job_photos";
   const CAPTURE_STATION_TABLE = "capture_stations";
   const CAPTURE_POLL_INTERVAL_MS = 1500;
   const CAPTURE_POLL_TIMEOUT_MS = 120000;
+  const BACKGROUND_PROCESSING_MAX_SOURCE_SIDE = 1600;
+  let backgroundRemovalModulePromise = null;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
     Silver: ["925", "950", "Fine Silver"],
@@ -25,6 +29,7 @@
     stableWeight: null,
     isReadingWeight: false,
     isGeneratingCopy: false,
+    isProcessingImage: false,
     hasLoadedImagesOnce: false,
     activeCaptureJobId: "",
     captureStations: [],
@@ -67,6 +72,9 @@
       selectedImageEmpty: document.getElementById("assisted-selected-image-empty"),
       selectedImageName: document.getElementById("assisted-selected-image-name"),
       selectedImagePath: document.getElementById("assisted-selected-image-path"),
+      bgBlackButton: document.getElementById("assisted-bg-black"),
+      bgWhiteButton: document.getElementById("assisted-bg-white"),
+      bgStatus: document.getElementById("assisted-bg-status"),
       saveSelectionCount: document.getElementById("assisted-save-selection-count"),
       saveSelectionSummary: document.getElementById("assisted-save-selection-summary"),
       uploadedImageStrip: document.getElementById("assisted-uploaded-image-strip"),
@@ -168,6 +176,21 @@
 
     button.disabled = isBusy;
     button.textContent = isBusy ? busyLabel : idleLabel;
+  }
+
+  function setBackgroundProcessingBusy(elements, background, isBusy) {
+    const blackLabel = background === "black" && isBusy ? "Processing..." : "Black Background";
+    const whiteLabel = background === "white" && isBusy ? "Processing..." : "White Background";
+
+    if (elements.bgBlackButton) {
+      elements.bgBlackButton.disabled = isBusy;
+      elements.bgBlackButton.textContent = blackLabel;
+    }
+
+    if (elements.bgWhiteButton) {
+      elements.bgWhiteButton.disabled = isBusy;
+      elements.bgWhiteButton.textContent = whiteLabel;
+    }
   }
 
   function getCurrentCategory(elements) {
@@ -992,6 +1015,277 @@
     return data;
   }
 
+  async function getFunctionErrorDetail(error) {
+    try {
+      const response = error?.context;
+      if (response && typeof response.clone === "function") {
+        const payload = await response.clone().json();
+        return asTrimmedString(payload?.detail || payload?.error || payload?.message);
+      }
+    } catch (detailError) {
+      console.warn("Could not read Edge Function error body:", detailError);
+    }
+
+    return asTrimmedString(error?.message);
+  }
+
+  function readBlobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read normalized image."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(new Error("Could not normalize the selected image for processing."));
+      }, type, quality);
+    });
+  }
+
+  function loadImageElement(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Could not load the selected image for normalization."));
+      image.src = src;
+    });
+  }
+
+  async function loadBackgroundRemoval() {
+    if (!backgroundRemovalModulePromise) {
+      backgroundRemovalModulePromise = import(BACKGROUND_REMOVAL_MODULE_URL)
+        .then((module) => module.default || module.removeBackground || module);
+    }
+
+    return backgroundRemovalModulePromise;
+  }
+
+  async function createObjectUrlForCanvas(previewUrl) {
+    if (previewUrl.startsWith("blob:") || previewUrl.startsWith("data:")) {
+      return {
+        imageUrl: previewUrl,
+        revoke: () => {},
+      };
+    }
+
+    const response = await fetch(previewUrl);
+    if (!response.ok) {
+      throw new Error(`Could not download the selected image for normalization (${response.status}).`);
+    }
+
+    const imageBlob = await response.blob();
+    const imageUrl = URL.createObjectURL(imageBlob);
+
+    return {
+      imageUrl,
+      revoke: () => URL.revokeObjectURL(imageUrl),
+    };
+  }
+
+  async function createScaledSourceBlobForBackgroundRemoval(selectedImage) {
+    const previewUrl = asTrimmedString(selectedImage?.previewUrl);
+    if (!previewUrl) {
+      throw new Error("Selected image has no preview URL to process.");
+    }
+
+    const objectUrl = await createObjectUrlForCanvas(previewUrl);
+
+    try {
+      const image = await loadImageElement(objectUrl.imageUrl);
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+
+      if (!sourceWidth || !sourceHeight) {
+        throw new Error("Selected image has invalid dimensions.");
+      }
+
+      const scale = Math.min(1, BACKGROUND_PROCESSING_MAX_SOURCE_SIDE / Math.max(sourceWidth, sourceHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Browser image normalization is not available.");
+      }
+
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      return await canvasToBlob(canvas, "image/png", 0.95);
+    } finally {
+      objectUrl.revoke();
+    }
+  }
+
+  async function createCompositedBackgroundBlob(cutoutBlob, background) {
+    const cutoutUrl = URL.createObjectURL(cutoutBlob);
+
+    try {
+      const cutoutImage = await loadImageElement(cutoutUrl);
+      const width = cutoutImage.naturalWidth || cutoutImage.width;
+      const height = cutoutImage.naturalHeight || cutoutImage.height;
+
+      if (!width || !height) {
+        throw new Error("Background removal returned an invalid image.");
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Browser image compositing is not available.");
+      }
+
+      context.fillStyle = background === "black" ? "#000000" : "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(cutoutImage, 0, 0, width, height);
+
+      return await canvasToBlob(canvas, "image/png", 0.95);
+    } finally {
+      URL.revokeObjectURL(cutoutUrl);
+    }
+  }
+
+  async function createPixelPreservingBackgroundPayload(selectedImage, background, elements) {
+    setInlineStatus(
+      elements.bgStatus,
+      "Preparing object cutout. First run may take a little while while the model loads...",
+      "is-waiting"
+    );
+
+    const sourceBlob = await createScaledSourceBlobForBackgroundRemoval(selectedImage);
+    const removeBackground = await loadBackgroundRemoval();
+
+    setInlineStatus(
+      elements.bgStatus,
+      "Removing only the background and keeping the original object pixels...",
+      "is-waiting"
+    );
+
+    const cutoutBlob = await removeBackground(sourceBlob, {
+      model: "isnet_fp16",
+      output: {
+        format: "image/png",
+        quality: 0.95,
+        type: "foreground",
+      },
+      progress: (key, current, total) => {
+        if (!total) return;
+        const percent = Math.round((current / total) * 100);
+        setInlineStatus(elements.bgStatus, `Loading background removal assets: ${percent}%`, "is-waiting");
+      },
+    });
+
+    const processedBlob = await createCompositedBackgroundBlob(cutoutBlob, background);
+    const dataUrl = await readBlobAsDataUrl(processedBlob);
+    const processedImageBase64 = dataUrl.split(",")[1] || "";
+
+    if (!processedImageBase64) {
+      throw new Error("Background processor returned an empty image.");
+    }
+
+    return {
+      processedImageBase64,
+      processedMimeType: processedBlob.type || "image/png",
+    };
+  }
+
+  async function processSelectedImageBackground(elements, background) {
+    if (state.isProcessingImage) return;
+
+    const selectedImage = state.aiSelectedUploadedImage;
+    const bucket = asTrimmedString(selectedImage?.storageBucket);
+    const imagePath = asTrimmedString(selectedImage?.path);
+
+    if (!bucket || !imagePath) {
+      setInlineStatus(elements.bgStatus, "Select an image before processing the background.", "is-error");
+      return;
+    }
+
+    state.isProcessingImage = true;
+    setBackgroundProcessingBusy(elements, background, true);
+    setInlineStatus(
+      elements.bgStatus,
+      `Creating ${background} background version and uploading it back...`,
+      "is-waiting"
+    );
+
+    try {
+      const processedImagePayload = await createPixelPreservingBackgroundPayload(selectedImage, background, elements);
+      const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
+        body: {
+          bucket,
+          imagePath,
+          background,
+          ...processedImagePayload,
+        },
+      });
+
+      if (error) {
+        throw new Error(await getFunctionErrorDetail(error) || "Background processing failed.");
+      }
+
+      if (!data?.ok || !data?.path || !data?.bucket) {
+        throw new Error(data?.detail || data?.error || "Background processor returned no image.");
+      }
+
+      const processedImage = normalizeImageRow(
+        {
+          path: data.path,
+          name: data.name || `${background} background - ${selectedImage.name || "processed image"}`,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.createdAt || new Date().toISOString(),
+          previewUrl: data.previewUrl || "",
+          storageBucket: data.bucket,
+          sourceType: `processed-${background}-background`,
+          sortOrder: -1,
+          mimeType: data.mimeType || "image/png",
+        },
+        0
+      );
+
+      state.recentUploadedImages = [
+        processedImage,
+        ...state.recentUploadedImages.filter((image) => image.path !== processedImage.path),
+      ];
+
+      setAISelectedImage(elements, processedImage.path, {
+        autoSelectForSave: true,
+        silent: true,
+      });
+      updateSaveSelectionSummary(elements);
+      renderUploadedImages(elements);
+      setInlineStatus(
+        elements.bgStatus,
+        `Processed image uploaded with a ${background} background. Review it in the preview and capture set.`,
+        "is-success"
+      );
+    } catch (error) {
+      console.error("Background processing failed:", error);
+      setInlineStatus(
+        elements.bgStatus,
+        error?.message || "Could not process the background.",
+        "is-error"
+      );
+    } finally {
+      state.isProcessingImage = false;
+      setBackgroundProcessingBusy(elements, background, false);
+    }
+  }
+
   async function handleReadWeight(elements) {
     if (state.isReadingWeight) return;
 
@@ -1366,6 +1660,8 @@
     elements.refreshImagesButton?.addEventListener("click", () => {
       reloadCompletedCapturePhotos(elements, { refreshNotice: true });
     });
+    elements.bgBlackButton?.addEventListener("click", () => processSelectedImageBackground(elements, "black"));
+    elements.bgWhiteButton?.addEventListener("click", () => processSelectedImageBackground(elements, "white"));
     elements.generateCopyButton?.addEventListener("click", () => handleGenerateCopy(elements));
     elements.applyCopyButton?.addEventListener("click", () => handleApplyGeneratedCopy(elements));
 
