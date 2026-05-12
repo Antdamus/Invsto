@@ -469,7 +469,7 @@ function renderLocationsTable() {
       <td>${escapeHtml(formatDateTime(getLocationDisplayDate(location)))}</td>
       <td>
         <button type="button" class="locations-action-button" data-open-location="${escapeHtml(location.id)}">
-          View
+          View / Edit
         </button>
       </td>
     </tr>
@@ -600,7 +600,10 @@ async function renderLocationDetail(locationId) {
 
     <section class="location-detail-card">
       <div class="location-detail-card-head">
-        <h4 class="location-detail-card-title">Edit Location</h4>
+        <div>
+          <h4 class="location-detail-card-title">Edit Location Details</h4>
+          <div class="location-status-line">Admins can rename locations, change store/type/capacity, update notes, and replace the photo here.</div>
+        </div>
       </div>
       <form id="location-edit-form" data-location-id="${escapeHtml(location.id)}">
         <div class="location-edit-grid">
@@ -643,7 +646,7 @@ async function renderLocationDetail(locationId) {
         </div>
 
         <div class="location-edit-actions">
-          <button type="submit" class="locations-action-button">Save Changes</button>
+          <button type="submit" class="locations-action-button">Save Location Changes</button>
         </div>
         <div id="location-edit-status" class="location-status-line"></div>
       </form>

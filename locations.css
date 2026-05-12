@@ -82,6 +82,14 @@
   box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
 }
 
+.locations-select option,
+.locations-select optgroup,
+.location-edit-select option,
+.location-edit-select optgroup {
+  background: #111217;
+  color: #f7f1e6;
+}
+
 .locations-input::placeholder,
 .location-edit-input::placeholder,
 .location-edit-textarea::placeholder {
@@ -225,7 +233,7 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: min(390px, 100vw);
+  width: min(540px, 100vw);
   height: 100vh;
   z-index: 30;
   padding: 16px 16px 16px 0;
@@ -559,5 +567,148 @@
     min-width: 0;
     text-align: left;
     grid-column: 2;
+  }
+}
+
+/* Locations readability and edit polish */
+.locations-toolbar {
+  position: relative;
+  z-index: 5;
+  align-items: end;
+}
+
+.locations-control {
+  min-width: 0;
+}
+
+.locations-input,
+.locations-select,
+.location-edit-input,
+.location-edit-select,
+.location-edit-textarea {
+  color-scheme: dark;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+}
+
+.locations-select,
+.location-edit-select {
+  cursor: pointer;
+}
+
+.locations-select:hover,
+.location-edit-select:hover,
+.locations-input:hover,
+.location-edit-input:hover,
+.location-edit-textarea:hover {
+  border-color: rgba(214,178,94,.22);
+  background: rgba(255,255,255,.055);
+}
+
+.locations-table-wrap {
+  overflow-x: auto;
+  padding-bottom: 20px;
+}
+
+.locations-table-wrap::-webkit-scrollbar,
+.location-detail-body::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.locations-table-wrap::-webkit-scrollbar-thumb,
+.location-detail-body::-webkit-scrollbar-thumb {
+  background: rgba(214,178,94,.22);
+  border-radius: 999px;
+}
+
+.locations-table th:first-child {
+  border-top-left-radius: 14px;
+}
+
+.locations-table th:last-child {
+  border-top-right-radius: 14px;
+}
+
+.locations-table tbody tr {
+  cursor: pointer;
+}
+
+.location-row-title {
+  font-size: 1rem;
+}
+
+.location-row-sub {
+  max-width: 260px;
+  line-height: 1.45;
+}
+
+.locations-action-button {
+  min-width: 92px;
+  white-space: nowrap;
+}
+
+.location-detail-drawer {
+  z-index: 80;
+}
+
+.location-detail-shell {
+  border: 1px solid rgba(255,255,255,.1);
+  border-right: 0;
+  box-shadow: -22px 0 54px rgba(0,0,0,.44);
+}
+
+.location-detail-card {
+  background: rgba(255,255,255,.04);
+}
+
+.location-detail-card-head {
+  align-items: flex-start;
+}
+
+.location-detail-card-title {
+  color: var(--text);
+}
+
+.location-edit-grid {
+  gap: 14px;
+}
+
+.location-edit-label span {
+  color: var(--gold-2);
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.location-edit-actions .locations-action-button {
+  min-width: 180px;
+  border-color: rgba(214,178,94,.32);
+  background: rgba(214,178,94,.12);
+  color: #ffe8ad;
+}
+
+.location-edit-actions .locations-action-button:hover,
+.location-edit-actions .locations-action-button:focus-visible {
+  background: rgba(214,178,94,.18);
+}
+
+@media (max-width: 1200px) {
+  .location-detail-drawer {
+    z-index: 90;
+  }
+
+  .location-detail-shell {
+    border-right: 1px solid rgba(255,255,255,.1);
+  }
+}
+
+@media (max-width: 768px) {
+  .location-row-sub {
+    max-width: none;
+  }
+
+  .locations-action-button {
+    min-width: 0;
   }
 }
