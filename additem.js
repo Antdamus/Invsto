@@ -32,6 +32,7 @@ let latestLocationDymoUrl = null;
 let activeStoreOptions = [];
 let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
+const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 
 
 // === DOM ELEMENTS ===
@@ -108,6 +109,8 @@ let uploadedImages = [];
 
   // === MULTI-IMAGE PREVIEW & UPLOAD ===
   function setupPhotoUploadPreview() {
+    if (!photoInput || !previewContainer) return;
+
     photoInput.addEventListener('change', () => {
       previewContainer.innerHTML = "";
       uploadedImages = [];
@@ -356,8 +359,8 @@ let uploadedImages = [];
   qrTypeSelect?.addEventListener("change", () => {
     typeqr = qrTypeSelect.value;
     if (typeqr === "website") {
-      document.getElementById("qr-code").value = "https://ogjeweler.com/";
-      renderQR("https://ogjeweler.com/");
+      document.getElementById("qr-code").value = OG_WEBSITE_QR_URL;
+      renderQR(OG_WEBSITE_QR_URL);
     }
   });
 
@@ -667,7 +670,10 @@ let uploadedImages = [];
       const data = await fetchLocationIntelligence(locationId, referenceWeight);
       const capacity = Number(data.location?.max_capacity) || null;
       const capacityText = capacity ? `${data.totalQuantity}/${capacity}` : `${data.totalQuantity}`;
-      const similarHtml = data.similarItems.length
+      const similarTypeCount = data.similarItems.length;
+      const similarItemCount = data.similarItems.reduce((sum, item) => sum + item.quantity, 0);
+      const similarLabel = `${similarTypeCount} ${similarTypeCount === 1 ? "type" : "types"} / ${similarItemCount} total ${similarItemCount === 1 ? "item" : "items"} within 2 g`;
+      const similarHtml = similarTypeCount
         ? data.similarItems.slice(0, 6).map((item) => `
             <div class="location-intelligence-row is-similar">
               <div>
@@ -711,7 +717,7 @@ let uploadedImages = [];
           <div><span>Est. Weight</span><strong>${escapeDropdownHtml(formatLocationWeight(data.approximateWeight))}</strong></div>
         </div>
         <div class="location-intelligence-section">
-          <div class="location-intelligence-section-title">Similar Weight (±2 g)</div>
+          <div class="location-intelligence-section-title">Similar Weight (±2 g) - ${escapeDropdownHtml(similarLabel)}</div>
           <div class="location-intelligence-list">${similarHtml}</div>
         </div>
         <div class="location-intelligence-section">
@@ -1385,11 +1391,11 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const qr_code = document.getElementById("qr-code").value.trim();
   const barcode = barcodeInput.value;
 
-  const photoFiles = photoInput.files;
+  const photoFiles = photoInput?.files || [];
   const photoUrls = [];
   const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
   const photoStatus = document.getElementById("photo-status");
-  photoStatus.innerHTML = "";
+  if (photoStatus) photoStatus.innerHTML = "";
 
   for (const file of photoFiles) {
     const path = `item_photos/${Date.now()}_${file.name}`;
@@ -1424,10 +1430,14 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     try {
       const copiedPath = await copyAssistedImageToPhotosBucket(assistedImage, index);
       photoUrls.push(copiedPath);
-      photoStatus.innerHTML += `? Included assisted image <strong>${assistedImage.name || copiedPath}</strong><br>`;
+      if (photoStatus) {
+        photoStatus.innerHTML += `? Included assisted image <strong>${assistedImage.name || copiedPath}</strong><br>`;
+      }
     } catch (assistedError) {
       console.error(`Assisted image copy failed for ${assistedImage?.path}:`, assistedError);
-      photoStatus.innerHTML += `? Failed to include assisted image <strong>${assistedImage?.name || assistedImage?.path || `#${index + 1}`}</strong>: ${assistedError.message || assistedError}<br>`;
+      if (photoStatus) {
+        photoStatus.innerHTML += `? Failed to include assisted image <strong>${assistedImage?.name || assistedImage?.path || `#${index + 1}`}</strong>: ${assistedError.message || assistedError}<br>`;
+      }
     }
   }
 

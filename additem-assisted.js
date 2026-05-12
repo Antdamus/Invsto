@@ -893,7 +893,7 @@
       const aiBadge = isAISelected
         ? '<span class="assisted-thumb-ai-badge">AI image</span>'
         : "";
-      const saveButtonLabel = isSaveSelected ? "Saving" : "Save";
+      const saveButtonLabel = isSaveSelected ? "Included" : "Include";
       const saveButtonAriaLabel = `${isSaveSelected ? "Remove" : "Add"} ${escapeHtml(image.name)} ${isSaveSelected ? "from" : "to"} images saved with this item`;
 
       return `
@@ -911,10 +911,12 @@
           >
             <span class="assisted-thumb-image">
               <img src="${escapeHtml(image.previewUrl)}" alt="${escapeHtml(image.name)}" loading="lazy" />
+              <span class="assisted-thumb-save-ribbon" aria-hidden="true">SAVE</span>
             </span>
             <span class="assisted-thumb-meta">
               <span class="assisted-thumb-name">${escapeHtml(image.name)}</span>
               <span class="assisted-thumb-subtext">${escapeHtml(formatTimestamp(image.updatedAt || image.createdAt))}</span>
+              <span class="assisted-thumb-save-state">${isSaveSelected ? "Selected for final item photos" : "Not saved unless included"}</span>
               ${aiBadge}
             </span>
           </button>
@@ -2229,7 +2231,7 @@
       const aiButton = event.target.closest("[data-assisted-ai-select]");
       if (aiButton) {
         setAISelectedImage(elements, aiButton.getAttribute("data-assisted-ai-select"), {
-          autoSelectForSave: true,
+          silent: false,
         });
         return;
       }

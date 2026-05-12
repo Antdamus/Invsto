@@ -317,7 +317,10 @@ async function bumpInventoryVersion(changedIds = null) {
       const data = await fetchLocationIntelligence(locationId, referenceWeight);
       const capacity = Number(data.location?.max_capacity) || null;
       const capacityText = capacity ? `${data.totalQuantity}/${capacity}` : `${data.totalQuantity}`;
-      const similarHtml = data.similarItems.length
+      const similarTypeCount = data.similarItems.length;
+      const similarItemCount = data.similarItems.reduce((sum, item) => sum + item.quantity, 0);
+      const similarLabel = `${similarTypeCount} ${similarTypeCount === 1 ? "type" : "types"} / ${similarItemCount} total ${similarItemCount === 1 ? "item" : "items"} within 2 g`;
+      const similarHtml = similarTypeCount
         ? data.similarItems.slice(0, 6).map((item) => `
             <div class="location-intelligence-row is-similar">
               <div>
@@ -361,7 +364,7 @@ async function bumpInventoryVersion(changedIds = null) {
           <div><span>Est. Weight</span><strong>${escapeHtml(formatLocationWeight(data.approximateWeight))}</strong></div>
         </div>
         <div class="location-intelligence-section">
-          <div class="location-intelligence-section-title">Similar Weight (±2 g)</div>
+          <div class="location-intelligence-section-title">Similar Weight (±2 g) - ${escapeHtml(similarLabel)}</div>
           <div class="location-intelligence-list">${similarHtml}</div>
         </div>
         <div class="location-intelligence-section">
