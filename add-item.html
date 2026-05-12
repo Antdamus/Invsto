@@ -96,7 +96,7 @@
             <div class="assisted-copy">
               <h2 class="workflow-panel-title">Assisted Weight and Photo Intake</h2>
               <p class="workflow-panel-copy">
-                Use this guided path to choose material and purity, read a stable weight, route a capture job to a selected station, and review the completed capture photos before continuing with the existing Add Item form.
+                Use this guided path to choose material and purity, read or enter a weight, route a capture job to a selected station, and review the completed capture photos before continuing with the existing Add Item form.
               </p>
             </div>
 
@@ -158,6 +158,20 @@
             <div class="assisted-actions">
               <button type="button" id="assisted-read-weight" class="assisted-read-button">
                 Read Weight
+              </button>
+              <label class="assisted-manual-weight" for="assisted-manual-weight">
+                <span class="assisted-label">Manual Weight (g)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  id="assisted-manual-weight"
+                  class="assisted-input"
+                  placeholder="Type weight"
+                />
+              </label>
+              <button type="button" id="assisted-use-manual-weight" class="assisted-secondary-button">
+                Use Manual Weight
               </button>
               <span id="assisted-scale-state" class="assisted-scale-state" aria-live="polite">
                 Waiting for a material and purity selection.
@@ -264,7 +278,7 @@
               </div>
 
               <p id="assisted-generate-status" class="assisted-inline-status" aria-live="polite">
-                Ready when you have an AI image selected and a stable weight.
+                Ready when you have an AI image selected and a weight.
               </p>
 
               <div class="assisted-generated-fields">

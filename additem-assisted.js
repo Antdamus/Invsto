@@ -56,6 +56,8 @@
       captureStationSelect: document.getElementById("assisted-capture-station"),
       refreshStationsButton: document.getElementById("assisted-refresh-stations"),
       readWeightButton: document.getElementById("assisted-read-weight"),
+      manualWeightInput: document.getElementById("assisted-manual-weight"),
+      useManualWeightButton: document.getElementById("assisted-use-manual-weight"),
       scaleState: document.getElementById("assisted-scale-state"),
       weightDisplay: document.getElementById("assisted-weight-display"),
       captureState: document.getElementById("assisted-capture-state"),
@@ -99,6 +101,11 @@
     const numericValue = Number(value);
     if (!Number.isFinite(numericValue)) return "--";
     return `${numericValue.toFixed(2)} g`;
+  }
+
+  function parseWeightInput(value) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && numericValue > 0 ? Number(numericValue.toFixed(2)) : null;
   }
 
   function formatTimestamp(value) {
@@ -181,6 +188,31 @@
     elements.mainWeightInput.value = Number(stableWeight).toFixed(2);
     elements.mainWeightInput.dispatchEvent(new Event("input", { bubbles: true }));
     elements.mainWeightInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setAssistedWeight(elements, weight, options = {}) {
+    const stableWeight = parseWeightInput(weight);
+    if (!Number.isFinite(stableWeight)) return false;
+
+    state.stableWeight = stableWeight;
+
+    if (elements.weightDisplay) elements.weightDisplay.textContent = formatWeight(stableWeight);
+    if (elements.manualWeightInput && elements.manualWeightInput.value !== stableWeight.toFixed(2)) {
+      elements.manualWeightInput.value = stableWeight.toFixed(2);
+    }
+
+    syncWeightIntoMainForm(elements, stableWeight);
+
+    if (options.message && elements.scaleState) {
+      elements.scaleState.textContent = options.message;
+    }
+
+    markGeneratedCopyNeedsRefresh(
+      elements,
+      options.refreshMessage || "Weight updated. Generate again to use the latest assisted measurement."
+    );
+
+    return true;
   }
 
   function delay(ms) {
@@ -971,10 +1003,10 @@
     try {
       const stableWeight = await simulateStableScaleReading();
 
-      state.stableWeight = stableWeight;
-      elements.weightDisplay.textContent = formatWeight(stableWeight);
-      elements.scaleState.textContent = `Stable weight locked at ${formatWeight(stableWeight)}.`;
-      syncWeightIntoMainForm(elements, stableWeight);
+      setAssistedWeight(elements, stableWeight, {
+        message: `Stable weight locked at ${formatWeight(stableWeight)}.`,
+        refreshMessage: "Stable weight updated. Generate again to use the latest assisted measurement.",
+      });
 
       const captureResult = await triggerIPhoneCapture({
         material: asTrimmedString(elements.materialSelect?.value),
@@ -990,10 +1022,6 @@
         );
       }
 
-      markGeneratedCopyNeedsRefresh(
-        elements,
-        "Stable weight updated. Generate again to use the latest assisted measurement."
-      );
     } catch (error) {
       console.error("Scale or capture flow failed:", error);
       elements.scaleState.textContent = "Unable to get a stable weight reading right now.";
@@ -1002,6 +1030,50 @@
       state.activeCaptureJobId = "";
       state.isReadingWeight = false;
       setButtonBusy(elements.readWeightButton, "Reading Weight...", "Read Weight", false);
+    }
+  }
+
+  async function handleUseManualWeight(elements) {
+    if (state.isReadingWeight) return;
+
+    const manualWeight = parseWeightInput(elements.manualWeightInput?.value);
+    if (!Number.isFinite(manualWeight)) {
+      elements.scaleState.textContent = "Enter a manual weight greater than 0 grams.";
+      return;
+    }
+
+    state.isReadingWeight = true;
+    setButtonBusy(elements.useManualWeightButton, "Sending...", "Use Manual Weight", true);
+    elements.captureState.textContent = "Sending manual weight to capture app";
+
+    try {
+      setAssistedWeight(elements, manualWeight, {
+        message: `Manual weight locked at ${formatWeight(manualWeight)}.`,
+        refreshMessage: "Manual weight updated. Generate again to use the latest assisted measurement.",
+      });
+
+      const captureResult = await triggerIPhoneCapture({
+        material: asTrimmedString(elements.materialSelect?.value),
+        purity: asTrimmedString(elements.puritySelect?.value),
+        weight: manualWeight,
+        weightSource: "manual",
+      }, elements);
+
+      if (captureResult?.job?.storage_path) {
+        setInlineStatus(
+          elements.imageStatus,
+          `Capture completed. Loaded ${captureResult.images?.length || 0} photo(s) from ${captureResult.job.storage_path}.`,
+          "is-success"
+        );
+      }
+    } catch (error) {
+      console.error("Manual weight capture flow failed:", error);
+      elements.scaleState.textContent = "Manual weight was saved, but the capture app was not triggered.";
+      elements.captureState.textContent = error?.message || "Capture not triggered";
+    } finally {
+      state.activeCaptureJobId = "";
+      state.isReadingWeight = false;
+      setButtonBusy(elements.useManualWeightButton, "Sending...", "Use Manual Weight", false);
     }
   }
 
@@ -1027,7 +1099,7 @@
     if (!Number.isFinite(payload.weight)) {
       setInlineStatus(
         elements.generateStatus,
-        "Read a stable weight before generating copy.",
+        "Read or enter a weight before generating copy.",
         "is-error"
       );
       return;
@@ -1122,6 +1194,7 @@
     if (elements.notesInput) elements.notesInput.value = "";
     if (elements.generatedTitleInput) elements.generatedTitleInput.value = "";
     if (elements.generatedDescriptionInput) elements.generatedDescriptionInput.value = "";
+    if (elements.manualWeightInput) elements.manualWeightInput.value = "";
     if (elements.weightDisplay) elements.weightDisplay.textContent = "--";
     if (elements.scaleState) elements.scaleState.textContent = "Ready to read from the scale integration point.";
     if (elements.captureState) elements.captureState.textContent = "Idle";
@@ -1139,7 +1212,7 @@
     );
     setInlineStatus(
       elements.generateStatus,
-      "Ready when you have an AI image selected and a stable weight.",
+      "Ready when you have an AI image selected and a weight.",
       null
     );
   }
@@ -1226,6 +1299,14 @@
       );
     });
 
+    elements.manualWeightInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      elements.useManualWeightButton?.click();
+    });
+
+    elements.useManualWeightButton?.addEventListener("click", () => handleUseManualWeight(elements));
+
     elements.captureStationSelect?.addEventListener("change", () => {
       const station = setSelectedCaptureStation(elements, elements.captureStationSelect.value);
       elements.captureState.textContent = station
@@ -1235,9 +1316,12 @@
 
     elements.mainWeightInput?.addEventListener("input", () => {
       if (!state.isReadingWeight) {
-        const currentWeight = Number(elements.mainWeightInput.value);
+        const currentWeight = parseWeightInput(elements.mainWeightInput.value);
         state.stableWeight = Number.isFinite(currentWeight) ? currentWeight : null;
         elements.weightDisplay.textContent = formatWeight(state.stableWeight);
+        if (elements.manualWeightInput && Number.isFinite(currentWeight)) {
+          elements.manualWeightInput.value = currentWeight.toFixed(2);
+        }
       }
     });
   }
