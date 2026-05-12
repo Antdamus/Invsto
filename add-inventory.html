@@ -156,6 +156,21 @@
 
         <!-- Modal Body -->
         <div class="modal-body-assign-location">
+          <div class="assign-location-summary-card">
+            <div class="assign-location-summary-row">
+              <span class="assign-location-summary-label">Item</span>
+              <strong id="assign-location-item-title">Current Batch Item</strong>
+            </div>
+            <div class="assign-location-summary-row">
+              <span class="assign-location-summary-label">Scanned Count</span>
+              <strong id="assign-location-scanned-count">0</strong>
+            </div>
+          </div>
+
+          <label for="assign-location-store">Filter by Store</label>
+          <select id="assign-location-store" name="assign_location_store">
+            <option value="">All Stores</option>
+          </select>
           
           <!-- 🏷️ Location Name Dropdown -->
           <label for="assign-location-name">Search or Select by Name</label>
@@ -182,6 +197,18 @@
             Last used location: <strong id="last-used-location-name">—</strong>
           </div>
 
+          <label for="assign-location-quantity">Quantity to Add</label>
+          <input
+            type="number"
+            id="assign-location-quantity"
+            min="1"
+            step="1"
+            class="location-search-input"
+            placeholder="Enter quantity to add"
+          />
+          <p class="assign-location-helper">
+            Use the scanned count or adjust it here before confirming the stock assignment.
+          </p>
         </div>
 
         <!-- Modal Footer -->
@@ -383,3 +410,4 @@
   </script>
 </body>
 </html>
+

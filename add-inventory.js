@@ -5,6 +5,7 @@ let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 let pendingBulkItem = null; // item selected for a bulk bag
 let activeStoreOptions = [];
+let pendingAssignLocationDraft = null;
 
 //update the inventory after adding items
 async function bumpInventoryVersion(changedIds = null) {
@@ -118,6 +119,85 @@ async function bumpInventoryVersion(changedIds = null) {
       .join("");
 
     return activeStoreOptions;
+  }
+
+  function resetAssignLocationDropdownState() {
+    const ids = [
+      "assign-location-name-dropdown-menu",
+      "assign-location-barcode-dropdown-menu",
+    ];
+
+    ids.forEach((id) => {
+      const menu = document.getElementById(id);
+      if (!menu) return;
+      menu.dataset.populated = "";
+      menu.classList.remove("show");
+      menu.innerHTML = "";
+    });
+  }
+
+  function resetAssignLocationSelection() {
+    const nameInput = document.getElementById("assign-location-name");
+    const barcodeInput = document.getElementById("assign-location-barcode");
+    const nameToggle = document.getElementById("assign-location-name-dropdown-toggle");
+    const barcodeToggle = document.getElementById("assign-location-barcode-dropdown-toggle");
+
+    if (nameInput) nameInput.value = "";
+    if (barcodeInput) barcodeInput.value = "";
+    if (nameToggle) nameToggle.innerText = "Select Location Name";
+    if (barcodeToggle) barcodeToggle.innerText = "Select Barcode";
+  }
+
+  function setAssignLocationSelection({ locationName = "", locationCode = "" } = {}) {
+    const nameInput = document.getElementById("assign-location-name");
+    const barcodeInput = document.getElementById("assign-location-barcode");
+    const nameToggle = document.getElementById("assign-location-name-dropdown-toggle");
+    const barcodeToggle = document.getElementById("assign-location-barcode-dropdown-toggle");
+
+    if (nameInput) nameInput.value = locationName || "";
+    if (barcodeInput) barcodeInput.value = locationCode || "";
+    if (nameToggle) nameToggle.innerText = locationName || "Select Location Name";
+    if (barcodeToggle) barcodeToggle.innerText = locationCode || "Select Barcode";
+  }
+
+  async function populateAssignLocationStoreFilter(selectedStoreId = "") {
+    const select = document.getElementById("assign-location-store");
+    if (!select) return [];
+
+    const stores = activeStoreOptions.length > 0 ? activeStoreOptions : await fetchActiveStores();
+    activeStoreOptions = stores;
+
+    select.innerHTML = ['<option value="">All Stores</option>']
+      .concat(stores.map((store) => `<option value="${store.id}">${store.name}</option>`))
+      .join("");
+
+    if (selectedStoreId && stores.some((store) => store.id === selectedStoreId)) {
+      select.value = selectedStoreId;
+    } else {
+      select.value = "";
+    }
+
+    return stores;
+  }
+
+  async function fetchAssignableLocations(storeId = "") {
+    let query = supabase
+      .from("locations")
+      .select("id, location_name, location_code, store_id")
+      .eq("active", true)
+      .order("location_name", { ascending: true });
+
+    if (storeId) {
+      query = query.eq("store_id", storeId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("Failed to fetch assignable locations:", error);
+      return [];
+    }
+
+    return Array.isArray(data) ? data : [];
   }
 
   //function to transform the inputs into selected in case it is needed
@@ -280,14 +360,23 @@ async function bumpInventoryVersion(changedIds = null) {
 
   //function to show the modal for add location 
   // 🪄 Open/close modal with optional barcode generation
-  function toggleModal(show = true) {
+  async function toggleModal(show = true, preset = {}) {
     const modal = document.getElementById("modal-add-location");
     const nameInput = document.getElementById("location-name");
+    const storeSelect = document.getElementById("location-store");
   
     if (show) {
+      const effectivePreset = (preset && (preset.locationName || preset.storeId))
+        ? preset
+        : (pendingAssignLocationDraft || {});
+
       modal.classList.remove("hidden");
       updateBarcodeInputStateBasedOnModals();
-      populateLocationStoreSelect();
+      await populateLocationStoreSelect();
+      nameInput.value = effectivePreset.locationName || nameInput.value || "";
+      if (storeSelect) {
+        storeSelect.value = effectivePreset.storeId || storeSelect.value || "";
+      }
       nameInput.focus();
       generateAndRenderLocationBarcode();
     } else {
@@ -302,14 +391,25 @@ async function bumpInventoryVersion(changedIds = null) {
   async function showAssignLocationModal(batchItem) {
     const modal = document.getElementById("modal-assign-location");
     const lastUsedLabel = document.getElementById("last-used-location-name");
+    const itemTitle = document.getElementById("assign-location-item-title");
+    const scannedCount = document.getElementById("assign-location-scanned-count");
+    const quantityInput = document.getElementById("assign-location-quantity");
+    const storeSelect = document.getElementById("assign-location-store");
   
     const { data: lastUsed, error } = await supabase
       .from("item_stock_locations")
-      .select("quantity, confirmed_at, locations(location_name, location_code)")
+      .select("quantity, confirmed_at, locations(location_name, location_code, store_id)")
       .eq("item_id", batchItem.item.id)
       .order("confirmed_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    resetAssignLocationSelection();
+    resetAssignLocationDropdownState();
+
+    if (itemTitle) itemTitle.textContent = batchItem.item.title || "Current Batch Item";
+    if (scannedCount) scannedCount.textContent = String(batchItem.count || 0);
+    if (quantityInput) quantityInput.value = String(Math.max(1, Number(batchItem.count) || 1));
 
     if (error) {
       console.error("❌ Error fetching last used location:", error);
@@ -322,19 +422,21 @@ async function bumpInventoryVersion(changedIds = null) {
     }
 
   
+    const preferredStoreId = lastUsed?.locations?.store_id || "";
+    await populateAssignLocationStoreFilter(preferredStoreId);
+    if (storeSelect && preferredStoreId) {
+      storeSelect.value = preferredStoreId;
+    }
+
     modal.dataset.barcode = batchItem.item.barcode;
     modal.classList.remove("hidden");
   
     updateBarcodeInputStateBasedOnModals();
   
-    populateLocationDropdown(); // this injects search field
-  
-    // Delay the focus until dropdown search is actually injected
     setTimeout(() => {
-      const searchInput = document.getElementById("assign-location-name-search");
-      if (searchInput) searchInput.value = ""; // clear previous
-      searchInput?.focus();
-    }, 100); // small delay to wait for DOM update
+      quantityInput?.focus();
+      quantityInput?.select?.();
+    }, 80);
   }
   
   //function to coordinate the display of the limit modal
@@ -450,9 +552,14 @@ async function bumpInventoryVersion(changedIds = null) {
       const modal = document.getElementById("modal-assign-location");
       const confirmBtn = document.getElementById("btn-confirm-location-assign");
       const cancelBtn = document.getElementById("btn-cancel-location-assign");
-      const searchInput = document.getElementById("location-dropdown-search");
-      const scanInput = document.getElementById("input-scan-location-barcode");
+      const storeFilter = document.getElementById("assign-location-store");
+      const quantityInput = document.getElementById("assign-location-quantity");
       const barcodeInput = document.getElementById("input-to-search-inventory-item");
+
+      storeFilter?.addEventListener("change", () => {
+        resetAssignLocationSelection();
+        resetAssignLocationDropdownState();
+      });
     
       cancelBtn.addEventListener("click", () => {
         modal.classList.add("hidden");
@@ -466,25 +573,58 @@ async function bumpInventoryVersion(changedIds = null) {
         const batchItem = currentBatch[barcode];
         const location_name = document.getElementById("assign-location-name").value.trim();
         const location_code = document.getElementById("assign-location-barcode").value.trim();
+        const selectedStoreId = storeFilter?.value?.trim() || "";
+        const quantityToAdd = parseInt(quantityInput?.value?.trim() || "", 10);
       
         if (!location_name && !location_code) {
           showToast("⚠️ Please select a location name or barcode.");
           return;
         }
       
-        const { data: locationData, error } = await supabase
+        if (!Number.isInteger(quantityToAdd) || quantityToAdd <= 0) {
+          showToast("Enter a valid quantity to add.");
+          quantityInput?.focus();
+          return;
+        }
+
+        let locationQuery = supabase
           .from("locations")
-          .select("id")
-          .or(`location_name.eq.${location_name},location_code.eq.${location_code}`)
-          .single();
+          .select("id, location_name, location_code, store_id")
+          .eq("active", true);
+
+        if (selectedStoreId) {
+          locationQuery = locationQuery.eq("store_id", selectedStoreId);
+        }
+
+        if (location_name) {
+          locationQuery = locationQuery.eq("location_name", location_name);
+        }
+
+        if (location_code) {
+          locationQuery = locationQuery.eq("location_code", location_code);
+        }
+
+        const { data: matchingLocations, error } = await locationQuery.limit(2);
       
-        if (error || !locationData) {
+        if (error || !Array.isArray(matchingLocations) || matchingLocations.length === 0) {
           showToast("❌ Could not find matching location.");
           return;
         }
       
         // ✅ Trigger password modal
-        window.showPasswordConfirmModal(batchItem, locationData.id, location_name || location_code);
+        if (matchingLocations.length > 1) {
+          showToast("Multiple matches found. Filter by store or use the barcode.");
+          return;
+        }
+
+        const locationData = matchingLocations[0];
+
+        window.showPasswordConfirmModal(
+          batchItem,
+          locationData.id,
+          locationData.location_name || locationData.location_code || location_name || location_code,
+          quantityToAdd
+        );
       });      
     }
     
@@ -737,7 +877,10 @@ async function bumpInventoryVersion(changedIds = null) {
       populateLocationStoreSelect();
       generateBtn.addEventListener("click", generateAndRenderLocationBarcode);
     
-      cancelBtn.addEventListener("click", () => toggleModal(false));
+      cancelBtn.addEventListener("click", async () => {
+        pendingAssignLocationDraft = null;
+        await toggleModal(false);
+      });
     
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -818,8 +961,25 @@ async function bumpInventoryVersion(changedIds = null) {
         }
     
         showToast("✅ Location saved!");
-        toggleModal(false);
-        await populateLocationDropdown();
+        await toggleModal(false);
+        if (pendingAssignLocationDraft) {
+          await populateAssignLocationStoreFilter(store_id || "");
+          resetAssignLocationDropdownState();
+          setAssignLocationSelection({
+            locationName: location_name,
+            locationCode: location_code,
+          });
+
+          const assignStore = document.getElementById("assign-location-store");
+          if (assignStore && store_id) {
+            assignStore.value = store_id;
+          }
+
+          document.getElementById("assign-location-quantity")?.focus();
+          pendingAssignLocationDraft = null;
+        } else {
+          await populateLocationDropdown();
+        }
       });
 
     }
@@ -833,11 +993,18 @@ async function bumpInventoryVersion(changedIds = null) {
       const confirmBtn = document.getElementById("btn-confirm-password");
       const cancelBtn = document.getElementById("btn-cancel-password");
 
-      let pendingAssignment = null; // { batchItem, location_id, location_name }
+      let pendingAssignment = null; // { batchItem, location_id, location_name, quantityToAdd }
 
       // 👇 Called from assign-location modal
-      window.showPasswordConfirmModal = (batchItem, location_id, location_name) => {
-        pendingAssignment = { batchItem, location_id, location_name };
+      window.showPasswordConfirmModal = (batchItem, location_id, location_name, quantityToAdd = null) => {
+        pendingAssignment = {
+          batchItem,
+          location_id,
+          location_name,
+          quantityToAdd: Number.isInteger(quantityToAdd) && quantityToAdd > 0
+            ? quantityToAdd
+            : Math.max(1, Number(batchItem?.count) || 1),
+        };
         emailInput.value = currentUser.email || "";
         passwordInput.value = "";
         errorMsg.style.display = "none";
@@ -860,11 +1027,11 @@ async function bumpInventoryVersion(changedIds = null) {
           return;
         }
 
-        const { batchItem, location_id, location_name } = pendingAssignment;
+        const { batchItem, location_id, location_name, quantityToAdd } = pendingAssignment;
         const isBulkFlow = !!batchItem?.bag_info?.bulkPayload; 
 
         try {
-          const { batchItem, location_id, location_name } = pendingAssignment;
+          const { batchItem, location_id, location_name, quantityToAdd } = pendingAssignment;
           const bagInfo = batchItem?.bag_info;
           const isBulkFlow = !!(bagInfo && bagInfo.bulkPayload);
 
@@ -889,7 +1056,7 @@ async function bumpInventoryVersion(changedIds = null) {
               const { error: updateError } = await supabase
                 .from("item_stock_locations")
                 .update({
-                  quantity: existingStock.quantity + batchItem.count,
+                  quantity: existingStock.quantity + quantityToAdd,
                   last_updated: new Date().toISOString(),
                   added_by: currentUser.id,
                   confirmation_email: currentUser.email,
@@ -910,7 +1077,7 @@ async function bumpInventoryVersion(changedIds = null) {
                 .insert({
                   item_id: batchItem.item.id,
                   location_id,
-                  quantity: batchItem.count,
+                  quantity: quantityToAdd,
                   added_by: currentUser.id,
                   confirmation_email: currentUser.email,
                   confirmation_method: "manual_password",
@@ -928,7 +1095,7 @@ async function bumpInventoryVersion(changedIds = null) {
             const { error: txError } = await supabase.from("stock_transactions").insert({
               item_id: batchItem.item.id,
               location_id,
-              quantity: batchItem.count,
+              quantity: quantityToAdd,
               action_type: "checkin",
               method: "manual_password",
               user_id: currentUser.id,
@@ -942,7 +1109,7 @@ async function bumpInventoryVersion(changedIds = null) {
               console.error("❌ Failed to log transaction:", txError);
               showToast("⚠️ Stock saved, but audit log failed.");
             } else {
-              showToast(`✅ Saved ${batchItem.count} to ${location_name}`);
+              showToast(`✅ Saved ${quantityToAdd} to ${location_name}`);
             }
           } else {
             // ── BULK BAG: per-bag stock only (no generic item stock write) ──
@@ -969,7 +1136,7 @@ async function bumpInventoryVersion(changedIds = null) {
             const { error: bulkTxErr } = await supabase.from("stock_transactions").insert({
               item_id: batchItem.item.id,
               location_id,
-              quantity: batchItem.count,            // estimated qty added from this bag
+              quantity: quantityToAdd,
               action_type: "checkin",
               method: "bulk_bag",
               user_id: currentUser.id,
@@ -983,7 +1150,7 @@ async function bumpInventoryVersion(changedIds = null) {
               console.warn("⚠️ Bulk saved, but audit log failed:", bulkTxErr);
               showToast("⚠️ Bulk saved, but audit log failed.");
             } else {
-              showToast(`✅ Saved ${batchItem.count} to ${location_name} (Bag ${bagBarcode})`);
+              showToast(`✅ Saved ${quantityToAdd} to ${location_name} (Bag ${bagBarcode})`);
             }
           }
 
@@ -1647,9 +1814,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       if (!menu.dataset.populated) {
-        const options = isName
-          ? await fetchUniqueLocationNames()
-          : await fetchUniqueLocationBarcodes();
+        const selectedStoreId = document.getElementById("assign-location-store")?.value?.trim() || "";
+        const assignableLocations = await fetchAssignableLocations(selectedStoreId);
+        const options = [
+          ...new Set(
+            assignableLocations
+              .map((location) => (isName ? location.location_name : location.location_code))
+              .filter(Boolean)
+          ),
+        ].sort((a, b) => a.localeCompare(b));
 
         renderDropdownOptionsCustom({
           menuId: isName
@@ -1672,12 +1845,24 @@ document.addEventListener("DOMContentLoaded", async () => {
               const toggleBtnId = isName
                 ? "assign-location-name-dropdown-toggle"
                 : "assign-location-barcode-dropdown-toggle";
+              const otherHiddenInputId = isName ? "assign-location-barcode" : "assign-location-name";
+              const otherToggleBtnId = isName
+                ? "assign-location-barcode-dropdown-toggle"
+                : "assign-location-name-dropdown-toggle";
             
               document.getElementById(hiddenInputId).value = value;
               document.getElementById(toggleBtnId).innerText = value;
+              document.getElementById(otherHiddenInputId).value = "";
+              document.getElementById(otherToggleBtnId).innerText = isName
+                ? "Select Barcode"
+                : "Select Location Name";
             
               if (isNew && isName) {
                 // 🪄 Only open the Add Location modal if creating a new location by name
+                pendingAssignLocationDraft = {
+                  locationName: value,
+                  storeId: selectedStoreId,
+                };
                 document.getElementById("location-name").value = value;
                 toggleModal(true); // 👈 This is the key line that was missing
               } else {
@@ -1780,3 +1965,4 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 
 });
+

@@ -901,7 +901,9 @@ svg.icon.spin {
   backdrop-filter: blur(12px);
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
+  overflow-y: auto;
+  padding: 24px;
   z-index: 9999;
 }
 
@@ -915,6 +917,7 @@ svg.icon.spin {
   padding: 32px 36px;
   width: 100%;
   max-width: 500px;
+  max-height: calc(100vh - 48px);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
@@ -922,6 +925,8 @@ svg.icon.spin {
   animation: popFadeIn 0.5s ease;
   font-family: 'DM Serif Display', serif;
   border: 1px solid rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  margin: auto 0;
 }
 
 .modal-header-assign-location {
@@ -936,6 +941,38 @@ svg.icon.spin {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.assign-location-summary-card {
+  display: grid;
+  gap: 0.8rem;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(0, 113, 227, 0.08), rgba(255, 255, 255, 0.92));
+  border: 1px solid rgba(0, 113, 227, 0.12);
+}
+
+.assign-location-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.assign-location-summary-label {
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.assign-location-helper {
+  margin: -0.4rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #5b6472;
 }
 
 .location-label {
@@ -946,7 +983,8 @@ svg.icon.spin {
 }
 
 .location-search-input,
-.location-scan-input {
+.location-scan-input,
+#assign-location-store {
   padding: 12px 20px;
   font-size: 1rem;
   border-radius: 12px;
@@ -959,7 +997,8 @@ svg.icon.spin {
 }
 
 .location-search-input:focus,
-.location-scan-input:focus {
+.location-scan-input:focus,
+#assign-location-store:focus {
   outline: none;
   border-color: #0071e3;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
@@ -1003,6 +1042,8 @@ svg.icon.spin {
   justify-content: center;
   gap: 1rem;
   flex-wrap: wrap;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .btn-location-confirm,
