@@ -68,6 +68,12 @@
   transform: scale(1.02);
 }
 
+.export-option-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
+}
+
 .export-subtext {
   display: block;
   font-size: 0.85rem;
@@ -142,5 +148,107 @@
 }
 
 
+
+.export-type-section {
+  margin-bottom: 18px;
+}
+
+.export-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.export-type-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  background: #2c2c2e;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.export-type-choice:has(input:checked) {
+  border-color: #1877e0;
+  box-shadow: 0 0 0 1px rgba(24, 119, 224, 0.5);
+}
+
+.export-type-choice input {
+  accent-color: #1877e0;
+}
+
+.export-type-choice-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.export-progress {
+  margin-top: 18px;
+  padding: 14px;
+  background: #252529;
+  border: 1px solid #3a3a3c;
+  border-radius: 10px;
+}
+
+.export-progress.hidden {
+  display: none;
+}
+
+.export-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #f0f0f5;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.export-progress-track {
+  height: 8px;
+  overflow: hidden;
+  background: #141416;
+  border-radius: 999px;
+}
+
+.export-progress-bar {
+  width: 0%;
+  height: 100%;
+  background: #1877e0;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.export-progress-detail {
+  margin-top: 10px;
+  color: #aaa;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.export-type-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.export-type-choice small {
+  color: #999;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+@media (max-width: 520px) {
+  .export-type-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /*#endregion*/

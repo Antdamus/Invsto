@@ -2637,6 +2637,7 @@ function setupExportModal() {
   closeBtn.addEventListener("click", () => {
     modal.classList.add("hidden");
     document.body.classList.remove("modal-open");
+    resetEbayExportProgress();
   });
 
   // Close modal if user clicks outside modal content
@@ -2644,8 +2645,36 @@ function setupExportModal() {
     if (e.target === modal) {
       modal.classList.add("hidden");
       document.body.classList.remove("modal-open");
+      resetEbayExportProgress();
     }
   });
+}
+
+function updateEbayExportProgress({
+  title = "Preparing eBay export",
+  detail = "",
+  processed = 0,
+  total = 0,
+  percent = 0,
+  visible = true
+} = {}) {
+  const panel = document.getElementById("ebay-export-progress");
+  const titleEl = document.getElementById("ebay-export-progress-title");
+  const countEl = document.getElementById("ebay-export-progress-count");
+  const barEl = document.getElementById("ebay-export-progress-bar");
+  const detailEl = document.getElementById("ebay-export-progress-detail");
+
+  if (!panel) return;
+
+  panel.classList.toggle("hidden", !visible);
+  if (titleEl) titleEl.textContent = title;
+  if (countEl) countEl.textContent = total ? `${processed} of ${total}` : "";
+  if (barEl) barEl.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  if (detailEl) detailEl.textContent = detail;
+}
+
+function resetEbayExportProgress() {
+  updateEbayExportProgress({ visible: false, percent: 0 });
 }
 
 //ebuy export function
@@ -2657,23 +2686,63 @@ function setupEbayExportButton() {
 
   ebayBtn.addEventListener("click", async () => {
     const itemsToExport = allItems.filter(item => selectedItems.has(item.id));
+    const exportType = document.querySelector('input[name="ebay-export-type"]:checked')?.value || "pendant";
+    const exportProfile = window.EBAY_EXPORT_PROFILES?.[exportType];
 
     if (!itemsToExport.length) {
       showToast("🛑 No items selected for export.");
+      updateEbayExportProgress({
+        title: "Nothing to export",
+        detail: "Select at least one item before starting an eBay export.",
+        visible: true
+      });
       return;
     }
 
+    ebayBtn.disabled = true;
+    updateEbayExportProgress({
+      title: `Exporting ${itemsToExport.length} ${exportProfile?.label || "eBay"} item${itemsToExport.length === 1 ? "" : "s"}`,
+      detail: "Starting export...",
+      processed: 0,
+      total: itemsToExport.length,
+      percent: 3,
+      visible: true
+    });
+
     try {
       showToast("⏳ Generating eBay export...");
-      await window.exportToEbayXLSX(itemsToExport);
-      showToast("✅ Your eBay Excel file is ready.");
+      await window.exportToEbayXLSX(itemsToExport, {
+        exportType,
+        onProgress: updateEbayExportProgress
+      });
+      updateEbayExportProgress({
+        title: "eBay export ready",
+        detail: `Finished ${itemsToExport.length} selected item${itemsToExport.length === 1 ? "" : "s"}. Your CSV download should begin now.`,
+        processed: itemsToExport.length,
+        total: itemsToExport.length,
+        percent: 100,
+        visible: true
+      });
+      showToast("✅ Your eBay CSV file is ready.");
+      setTimeout(() => {
+        modal.classList.add("hidden");
+        document.body.classList.remove("modal-open");
+        resetEbayExportProgress();
+      }, 1400);
     } catch (err) {
       console.error("Export error:", err);
+      updateEbayExportProgress({
+        title: "Export failed",
+        detail: err?.message || "Something went wrong while generating the eBay export.",
+        processed: 0,
+        total: itemsToExport.length,
+        percent: 100,
+        visible: true
+      });
       showToast("❌ Failed to generate export.");
+    } finally {
+      ebayBtn.disabled = false;
     }
-
-    modal.classList.add("hidden");
-    document.body.classList.remove("modal-open");
   });
 }
 

@@ -413,9 +413,26 @@
       <h2 class="modal-header">📤 Export Options</h2>
       <p class="modal-subtext">Choose how you want to export your selected items.</p>
 
-      <!-- 📁 Excel Template Upload Field -->
-      <label for="base-ebay-template" class="upload-label">Upload your eBay template (.xlsx)</label>
-      <input type="file" id="base-ebay-template" accept=".xlsx" class="upload-input" />
+      <!-- eBay export type selector -->
+      <div class="export-type-section" aria-labelledby="ebay-export-type-label">
+        <div id="ebay-export-type-label" class="upload-label">eBay export category</div>
+        <div class="export-type-grid">
+          <label class="export-type-choice">
+            <input type="radio" name="ebay-export-type" value="pendant" checked />
+            <span>
+              Pendant
+              <small>Necklaces &amp; Pendants</small>
+            </span>
+          </label>
+          <label class="export-type-choice">
+            <input type="radio" name="ebay-export-type" value="bracelet" />
+            <span>
+              Bracelet
+              <small>Bracelets &amp; Charms</small>
+            </span>
+          </label>
+        </div>
+      </div>
 
       <div class="export-options-grid">
         <button id="export-csv-btn" class="export-option-btn">
@@ -425,7 +442,7 @@
 
         <button id="export-ebay-btn" class="export-option-btn">
           🛒 Export for eBay
-          <span class="export-subtext">Fills your uploaded Excel template with selected inventory</span>
+          <span class="export-subtext">Creates an eBay-ready CSV from the latest template</span>
         </button>
 
         <!-- Future: PDF label option -->
@@ -435,6 +452,17 @@
           <span class="export-subtext">Generate printable barcode label sheets</span>
         </button>
         -->
+      </div>
+
+      <div id="ebay-export-progress" class="export-progress hidden" aria-live="polite">
+        <div class="export-progress-header">
+          <span id="ebay-export-progress-title">Preparing eBay export</span>
+          <span id="ebay-export-progress-count">0 of 0</span>
+        </div>
+        <div class="export-progress-track">
+          <div id="ebay-export-progress-bar" class="export-progress-bar"></div>
+        </div>
+        <div id="ebay-export-progress-detail" class="export-progress-detail">Waiting to start...</div>
       </div>
     </div>
   </div>
