@@ -10,6 +10,9 @@
   const CAPTURE_POLL_INTERVAL_MS = 1500;
   const CAPTURE_POLL_TIMEOUT_MS = 120000;
   const BACKGROUND_PROCESSING_MAX_SOURCE_SIDE = 1600;
+  const IMAGE_EDITOR_OUTPUT_SIZE = 1200;
+  const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
+  const LOCAL_UPLOAD_MAX_SIDE = 2200;
   let backgroundRemovalModulePromise = null;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
@@ -35,6 +38,20 @@
     captureStations: [],
     selectedCaptureStationId: "",
     latestCaptureJob: null,
+    imageEditor: {
+      image: null,
+      sourceUrl: "",
+      sourceRevoke: null,
+      imageElement: null,
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+      isDragging: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      dragOriginX: 0,
+      dragOriginY: 0,
+    },
   };
 
   function waitForSupabaseInit() {
@@ -67,6 +84,7 @@
       weightDisplay: document.getElementById("assisted-weight-display"),
       captureState: document.getElementById("assisted-capture-state"),
       refreshImagesButton: document.getElementById("assisted-refresh-images"),
+      localImageUploadInput: document.getElementById("assisted-local-image-upload"),
       imageStatus: document.getElementById("assisted-image-status"),
       selectedImagePreview: document.getElementById("assisted-selected-image-preview"),
       selectedImageEmpty: document.getElementById("assisted-selected-image-empty"),
@@ -74,7 +92,18 @@
       selectedImagePath: document.getElementById("assisted-selected-image-path"),
       bgBlackButton: document.getElementById("assisted-bg-black"),
       bgWhiteButton: document.getElementById("assisted-bg-white"),
+      openImageEditorButton: document.getElementById("assisted-open-image-editor"),
       bgStatus: document.getElementById("assisted-bg-status"),
+      imageEditorModal: document.getElementById("assisted-image-editor-modal"),
+      imageEditorCanvas: document.getElementById("assisted-editor-canvas"),
+      imageEditorCanvasWrap: document.querySelector(".assisted-editor-canvas-wrap"),
+      imageEditorClose: document.getElementById("assisted-editor-close"),
+      imageEditorZoom: document.getElementById("assisted-editor-zoom"),
+      imageEditorZoomIn: document.getElementById("assisted-editor-zoom-in"),
+      imageEditorZoomOut: document.getElementById("assisted-editor-zoom-out"),
+      imageEditorReset: document.getElementById("assisted-editor-reset"),
+      imageEditorSave: document.getElementById("assisted-editor-save"),
+      imageEditorStatus: document.getElementById("assisted-editor-status"),
       saveSelectionCount: document.getElementById("assisted-save-selection-count"),
       saveSelectionSummary: document.getElementById("assisted-save-selection-summary"),
       uploadedImageStrip: document.getElementById("assisted-uploaded-image-strip"),
@@ -1038,6 +1067,27 @@
     });
   }
 
+  function getExtensionFromFile(file) {
+    const nameExtension = asTrimmedString(file?.name).split(".").pop()?.toLowerCase();
+    if (["jpg", "jpeg", "png", "webp"].includes(nameExtension)) {
+      return nameExtension === "jpeg" ? "jpg" : nameExtension;
+    }
+
+    const type = asTrimmedString(file?.type).toLowerCase();
+    if (type.includes("png")) return "png";
+    if (type.includes("webp")) return "webp";
+    return "jpg";
+  }
+
+  function getSafeUploadName(file) {
+    const baseName = asTrimmedString(file?.name)
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^\w.-]+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 80) || "document-image";
+    return `${baseName}.${getExtensionFromFile(file)}`;
+  }
+
   function canvasToBlob(canvas, type, quality) {
     return new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
@@ -1049,6 +1099,60 @@
         reject(new Error("Could not normalize the selected image for processing."));
       }, type, quality);
     });
+  }
+
+  async function createCompressedImageBlobFromFile(file) {
+    const sourceUrl = URL.createObjectURL(file);
+
+    try {
+      const image = await loadImageElement(sourceUrl);
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+
+      if (!sourceWidth || !sourceHeight) {
+        throw new Error("Selected file has invalid image dimensions.");
+      }
+
+      const scale = Math.min(1, LOCAL_UPLOAD_MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Browser image upload preparation is not available.");
+      }
+
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      return await canvasToBlob(canvas, "image/jpeg", 0.94);
+    } finally {
+      URL.revokeObjectURL(sourceUrl);
+    }
+  }
+
+  async function createLocalImageUploadPayload(file) {
+    if (!file || !String(file.type || "").startsWith("image/")) {
+      throw new Error("Choose a valid image file.");
+    }
+
+    const shouldUploadDirectly = file.size <= LOCAL_UPLOAD_MAX_DIRECT_BYTES
+      && /image\/(png|jpe?g|webp)/i.test(file.type || "");
+    const uploadBlob = shouldUploadDirectly ? file : await createCompressedImageBlobFromFile(file);
+    const dataUrl = await readBlobAsDataUrl(uploadBlob);
+    const processedImageBase64 = dataUrl.split(",")[1] || "";
+
+    if (!processedImageBase64) {
+      throw new Error("Could not prepare the selected image for upload.");
+    }
+
+    return {
+      processedImageBase64,
+      processedMimeType: uploadBlob.type || "image/jpeg",
+      fileName: getSafeUploadName(file),
+    };
   }
 
   function loadImageElement(src) {
@@ -1283,6 +1387,363 @@
     } finally {
       state.isProcessingImage = false;
       setBackgroundProcessingBusy(elements, background, false);
+    }
+  }
+
+  function resetImageEditorState() {
+    if (typeof state.imageEditor.sourceRevoke === "function") {
+      try {
+        state.imageEditor.sourceRevoke();
+      } catch (_) {}
+    }
+
+    state.imageEditor.image = null;
+    state.imageEditor.sourceUrl = "";
+    state.imageEditor.sourceRevoke = null;
+    state.imageEditor.imageElement = null;
+    state.imageEditor.zoom = 1;
+    state.imageEditor.offsetX = 0;
+    state.imageEditor.offsetY = 0;
+    state.imageEditor.isDragging = false;
+    state.imageEditor.dragStartX = 0;
+    state.imageEditor.dragStartY = 0;
+    state.imageEditor.dragOriginX = 0;
+    state.imageEditor.dragOriginY = 0;
+  }
+
+  function getEditorCanvasSize(elements) {
+    const canvas = elements.imageEditorCanvas;
+    return {
+      width: canvas?.width || 900,
+      height: canvas?.height || 900,
+    };
+  }
+
+  function getEditorDrawRect(width, height) {
+    const image = state.imageEditor.imageElement;
+    if (!image) return null;
+
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (!sourceWidth || !sourceHeight) return null;
+
+    const baseScale = Math.max(width / sourceWidth, height / sourceHeight);
+    const drawWidth = sourceWidth * baseScale * state.imageEditor.zoom;
+    const drawHeight = sourceHeight * baseScale * state.imageEditor.zoom;
+
+    return {
+      x: ((width - drawWidth) / 2) + state.imageEditor.offsetX,
+      y: ((height - drawHeight) / 2) + state.imageEditor.offsetY,
+      width: drawWidth,
+      height: drawHeight,
+    };
+  }
+
+  function drawImageEditor(elements, options = {}) {
+    const canvas = options.canvas || elements.imageEditorCanvas;
+    const image = state.imageEditor.imageElement;
+    if (!canvas || !image) return;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const rect = getEditorDrawRect(width, height);
+    context.clearRect(0, 0, width, height);
+
+    if (!rect) return;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+  }
+
+  function setEditorZoom(elements, zoom) {
+    const nextZoom = Math.min(4, Math.max(1, Number(zoom) || 1));
+    state.imageEditor.zoom = nextZoom;
+
+    if (elements.imageEditorZoom) {
+      elements.imageEditorZoom.value = String(nextZoom);
+    }
+
+    drawImageEditor(elements);
+  }
+
+  function resetEditorFraming(elements) {
+    state.imageEditor.zoom = 1;
+    state.imageEditor.offsetX = 0;
+    state.imageEditor.offsetY = 0;
+
+    if (elements.imageEditorZoom) {
+      elements.imageEditorZoom.value = "1";
+    }
+
+    drawImageEditor(elements);
+  }
+
+  async function openImageEditor(elements) {
+    const selectedImage = state.aiSelectedUploadedImage;
+
+    if (!selectedImage?.path || !selectedImage?.previewUrl) {
+      setInlineStatus(elements.bgStatus, "Select an image before opening the crop editor.", "is-error");
+      return;
+    }
+
+    resetImageEditorState();
+    state.imageEditor.image = selectedImage;
+    setInlineStatus(elements.imageEditorStatus, "Loading selected image...", "is-waiting");
+
+    elements.imageEditorModal?.classList.remove("hidden");
+    elements.imageEditorModal?.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+
+    try {
+      const objectUrl = await createObjectUrlForCanvas(selectedImage.previewUrl);
+      const imageElement = await loadImageElement(objectUrl.imageUrl);
+
+      state.imageEditor.sourceUrl = objectUrl.imageUrl;
+      state.imageEditor.sourceRevoke = objectUrl.revoke;
+      state.imageEditor.imageElement = imageElement;
+      resetEditorFraming(elements);
+      setInlineStatus(
+        elements.imageEditorStatus,
+        "Drag the image to frame it, then save the crop as the final selected image.",
+        ""
+      );
+    } catch (error) {
+      console.error("Image editor failed to load:", error);
+      setInlineStatus(
+        elements.imageEditorStatus,
+        error?.message || "Could not load the image editor.",
+        "is-error"
+      );
+    }
+  }
+
+  function closeImageEditor(elements) {
+    elements.imageEditorModal?.classList.add("hidden");
+    elements.imageEditorModal?.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+    resetImageEditorState();
+  }
+
+  function getEditorPointerPosition(event, elements) {
+    const canvas = elements.imageEditorCanvas;
+    const bounds = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / bounds.width;
+    const scaleY = canvas.height / bounds.height;
+
+    return {
+      x: (event.clientX - bounds.left) * scaleX,
+      y: (event.clientY - bounds.top) * scaleY,
+    };
+  }
+
+  function handleEditorPointerDown(event, elements) {
+    if (!state.imageEditor.imageElement || !elements.imageEditorCanvas) return;
+
+    const position = getEditorPointerPosition(event, elements);
+    state.imageEditor.isDragging = true;
+    state.imageEditor.dragStartX = position.x;
+    state.imageEditor.dragStartY = position.y;
+    state.imageEditor.dragOriginX = state.imageEditor.offsetX;
+    state.imageEditor.dragOriginY = state.imageEditor.offsetY;
+    elements.imageEditorCanvasWrap?.classList.add("is-dragging");
+    elements.imageEditorCanvas.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleEditorPointerMove(event, elements) {
+    if (!state.imageEditor.isDragging) return;
+
+    const position = getEditorPointerPosition(event, elements);
+    state.imageEditor.offsetX = state.imageEditor.dragOriginX + (position.x - state.imageEditor.dragStartX);
+    state.imageEditor.offsetY = state.imageEditor.dragOriginY + (position.y - state.imageEditor.dragStartY);
+    drawImageEditor(elements);
+  }
+
+  function handleEditorPointerUp(event, elements) {
+    if (!state.imageEditor.isDragging) return;
+
+    state.imageEditor.isDragging = false;
+    elements.imageEditorCanvasWrap?.classList.remove("is-dragging");
+    elements.imageEditorCanvas?.releasePointerCapture?.(event.pointerId);
+  }
+
+  async function saveImageEditorCrop(elements) {
+    const selectedImage = state.imageEditor.image;
+    const bucket = asTrimmedString(selectedImage?.storageBucket);
+    const imagePath = asTrimmedString(selectedImage?.path);
+
+    if (!selectedImage || !bucket || !imagePath || !state.imageEditor.imageElement) {
+      setInlineStatus(elements.imageEditorStatus, "Open an image before saving a crop.", "is-error");
+      return;
+    }
+
+    setButtonBusy(elements.imageEditorSave, "Saving...", "Use This Crop", true);
+    setInlineStatus(elements.imageEditorStatus, "Uploading cropped final image...", "is-waiting");
+
+    try {
+      const outputCanvas = document.createElement("canvas");
+      outputCanvas.width = IMAGE_EDITOR_OUTPUT_SIZE;
+      outputCanvas.height = IMAGE_EDITOR_OUTPUT_SIZE;
+
+      const { width: editorWidth, height: editorHeight } = getEditorCanvasSize(elements);
+      const scale = IMAGE_EDITOR_OUTPUT_SIZE / editorWidth;
+      const context = outputCanvas.getContext("2d");
+      const rect = getEditorDrawRect(editorWidth, editorHeight);
+
+      if (!context || !rect) {
+        throw new Error("Could not render the crop.");
+      }
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+      context.drawImage(
+        state.imageEditor.imageElement,
+        rect.x * scale,
+        rect.y * scale,
+        rect.width * scale,
+        rect.height * scale
+      );
+
+      const croppedBlob = await canvasToBlob(outputCanvas, "image/png", 0.95);
+      const dataUrl = await readBlobAsDataUrl(croppedBlob);
+      const processedImageBase64 = dataUrl.split(",")[1] || "";
+
+      if (!processedImageBase64) {
+        throw new Error("The crop rendered an empty image.");
+      }
+
+      const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
+        body: {
+          bucket,
+          imagePath,
+          background: "edited",
+          processedImageBase64,
+          processedMimeType: croppedBlob.type || "image/png",
+        },
+      });
+
+      if (error) {
+        throw new Error(await getFunctionErrorDetail(error) || "Could not upload cropped image.");
+      }
+
+      if (!data?.ok || !data?.path || !data?.bucket) {
+        throw new Error(data?.detail || data?.error || "Crop upload returned no image.");
+      }
+
+      const croppedImage = normalizeImageRow(
+        {
+          path: data.path,
+          name: data.name || `cropped - ${selectedImage.name || "final image"}`,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.createdAt || new Date().toISOString(),
+          previewUrl: data.previewUrl || "",
+          storageBucket: data.bucket,
+          sourceType: "edited-crop",
+          sortOrder: -2,
+          mimeType: data.mimeType || "image/png",
+        },
+        0
+      );
+
+      state.recentUploadedImages = [
+        croppedImage,
+        ...state.recentUploadedImages.filter((image) => image.path !== croppedImage.path),
+      ];
+
+      setAISelectedImage(elements, croppedImage.path, { silent: true });
+      state.saveSelectedUploadedImagePaths = [croppedImage.path];
+      updateSaveSelectionSummary(elements);
+      renderUploadedImages(elements);
+      setInlineStatus(elements.bgStatus, "Cropped final image uploaded and selected.", "is-success");
+      closeImageEditor(elements);
+    } catch (error) {
+      console.error("Image crop save failed:", error);
+      setInlineStatus(
+        elements.imageEditorStatus,
+        error?.message || "Could not save the cropped image.",
+        "is-error"
+      );
+    } finally {
+      setButtonBusy(elements.imageEditorSave, "Saving...", "Use This Crop", false);
+    }
+  }
+
+  async function handleLocalImageUpload(elements, event) {
+    const file = event?.target?.files?.[0] || null;
+    if (!file) return;
+
+    if (elements.localImageUploadInput) {
+      elements.localImageUploadInput.disabled = true;
+    }
+
+    setInlineStatus(elements.imageStatus, "Uploading selected document image into assisted images...", "is-waiting");
+
+    try {
+      const uploadPayload = await createLocalImageUploadPayload(file);
+      const { data, error } = await window.supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
+        body: {
+          bucket: INVENTORY_UPLOAD_BUCKET,
+          imagePath: uploadPayload.fileName,
+          background: "uploaded",
+          processedImageBase64: uploadPayload.processedImageBase64,
+          processedMimeType: uploadPayload.processedMimeType,
+        },
+      });
+
+      if (error) {
+        throw new Error(await getFunctionErrorDetail(error) || "Could not upload selected image.");
+      }
+
+      if (!data?.ok || !data?.path || !data?.bucket) {
+        throw new Error(data?.detail || data?.error || "Upload returned no image.");
+      }
+
+      const uploadedImage = normalizeImageRow(
+        {
+          path: data.path,
+          name: data.name || `uploaded - ${file.name}`,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.createdAt || new Date().toISOString(),
+          previewUrl: data.previewUrl || "",
+          storageBucket: data.bucket,
+          sourceType: "document-upload",
+          sortOrder: -4,
+          mimeType: data.mimeType || uploadPayload.processedMimeType || "image/jpeg",
+        },
+        0
+      );
+
+      state.recentUploadedImages = [
+        uploadedImage,
+        ...state.recentUploadedImages.filter((image) => image.path !== uploadedImage.path),
+      ];
+
+      setAISelectedImage(elements, uploadedImage.path, {
+        autoSelectForSave: true,
+        silent: true,
+      });
+      updateSaveSelectionSummary(elements);
+      renderUploadedImages(elements);
+      setInlineStatus(
+        elements.imageStatus,
+        "Document image uploaded, selected, and ready for crop/background tools.",
+        "is-success"
+      );
+    } catch (error) {
+      console.error("Document image upload failed:", error);
+      setInlineStatus(
+        elements.imageStatus,
+        error?.message || "Could not upload the selected image.",
+        "is-error"
+      );
+    } finally {
+      if (elements.localImageUploadInput) {
+        elements.localImageUploadInput.disabled = false;
+        elements.localImageUploadInput.value = "";
+      }
     }
   }
 
@@ -1660,8 +2121,38 @@
     elements.refreshImagesButton?.addEventListener("click", () => {
       reloadCompletedCapturePhotos(elements, { refreshNotice: true });
     });
+    elements.localImageUploadInput?.addEventListener("change", (event) => {
+      handleLocalImageUpload(elements, event);
+    });
     elements.bgBlackButton?.addEventListener("click", () => processSelectedImageBackground(elements, "black"));
     elements.bgWhiteButton?.addEventListener("click", () => processSelectedImageBackground(elements, "white"));
+    elements.openImageEditorButton?.addEventListener("click", () => openImageEditor(elements));
+    elements.imageEditorClose?.addEventListener("click", () => closeImageEditor(elements));
+    elements.imageEditorModal?.addEventListener("click", (event) => {
+      if (event.target === elements.imageEditorModal) {
+        closeImageEditor(elements);
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !elements.imageEditorModal?.classList.contains("hidden")) {
+        closeImageEditor(elements);
+      }
+    });
+    elements.imageEditorZoom?.addEventListener("input", () => {
+      setEditorZoom(elements, elements.imageEditorZoom.value);
+    });
+    elements.imageEditorZoomIn?.addEventListener("click", () => {
+      setEditorZoom(elements, state.imageEditor.zoom + 0.12);
+    });
+    elements.imageEditorZoomOut?.addEventListener("click", () => {
+      setEditorZoom(elements, state.imageEditor.zoom - 0.12);
+    });
+    elements.imageEditorReset?.addEventListener("click", () => resetEditorFraming(elements));
+    elements.imageEditorSave?.addEventListener("click", () => saveImageEditorCrop(elements));
+    elements.imageEditorCanvas?.addEventListener("pointerdown", (event) => handleEditorPointerDown(event, elements));
+    elements.imageEditorCanvas?.addEventListener("pointermove", (event) => handleEditorPointerMove(event, elements));
+    elements.imageEditorCanvas?.addEventListener("pointerup", (event) => handleEditorPointerUp(event, elements));
+    elements.imageEditorCanvas?.addEventListener("pointercancel", (event) => handleEditorPointerUp(event, elements));
     elements.generateCopyButton?.addEventListener("click", () => handleGenerateCopy(elements));
     elements.applyCopyButton?.addEventListener("click", () => handleApplyGeneratedCopy(elements));
 

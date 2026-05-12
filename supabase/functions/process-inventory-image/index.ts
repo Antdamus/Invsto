@@ -8,12 +8,12 @@ const corsHeaders = {
 };
 
 const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos", "photos"]);
-const SUPPORTED_BACKGROUNDS = new Set(["black", "white"]);
+const SUPPORTED_BACKGROUNDS = new Set(["black", "white", "edited", "uploaded"]);
 
 type RequestBody = {
   bucket?: string;
   imagePath?: string;
-  background?: "black" | "white";
+  background?: "black" | "white" | "edited" | "uploaded";
   imageBase64?: string;
   imageDataUrl?: string;
   processedImageBase64?: string;
@@ -228,7 +228,7 @@ serve(async (req) => {
     const body = (await req.json()) as RequestBody;
     const bucket = asTrimmedString(body.bucket);
     const imagePath = normalizePath(body.imagePath || "");
-    const background = asTrimmedString(body.background).toLowerCase() as "black" | "white";
+    const background = asTrimmedString(body.background).toLowerCase() as "black" | "white" | "edited" | "uploaded";
     let normalizedImage: { bytes: Uint8Array; contentType: string } | null;
     let processedImage: { bytes: Uint8Array; contentType: string } | null;
     try {
@@ -250,11 +250,11 @@ serve(async (req) => {
       return json(400, {
         ok: false,
         error: "missing_required_fields",
-        required: ["bucket", "imagePath", "background:black|white"],
+        required: ["bucket", "imagePath", "background:black|white|edited|uploaded"],
       });
     }
 
-    if (!normalizedImage) {
+    if (!normalizedImage && !processedImage) {
       try {
         assertSupportedSourceImage(imagePath);
       } catch (error) {
@@ -315,7 +315,11 @@ serve(async (req) => {
         ok: true,
         bucket,
         path: outputPath,
-        name: `${background} background - ${imagePath.split("/").pop() || "processed image"}`,
+        name: background === "edited"
+          ? `edited crop - ${imagePath.split("/").pop() || "processed image"}`
+          : background === "uploaded"
+            ? `uploaded document - ${imagePath.split("/").pop() || "processed image"}`
+            : `${background} background - ${imagePath.split("/").pop() || "processed image"}`,
         background,
         previewUrl: outputSignedData.signedUrl,
         mimeType: processedImage.contentType,
@@ -325,6 +329,13 @@ serve(async (req) => {
     }
 
     let normalizedSource: { path: string; signedUrl: string };
+    if (background === "edited" || background === "uploaded") {
+      return json(400, {
+        ok: false,
+        error: "processed_upload_requires_image",
+        detail: "Edited and uploaded image writes must include processedImageBase64 or processedImageDataUrl.",
+      });
+    }
     if (normalizedImage) {
       try {
         normalizedSource = await uploadNormalizedSourceImage(supabase, bucket, imagePath, normalizedImage);

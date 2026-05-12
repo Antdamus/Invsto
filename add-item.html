@@ -200,9 +200,15 @@
                     After a capture job finishes, the completed photo set is loaded from Supabase and shown here in capture order.
                   </p>
                 </div>
-                <button type="button" id="assisted-refresh-images" class="assisted-secondary-button">
-                  Reload Photos
-                </button>
+                <div class="assisted-upload-actions">
+                  <label class="assisted-secondary-button assisted-file-upload-button" for="assisted-local-image-upload">
+                    Upload From Documents
+                    <input type="file" id="assisted-local-image-upload" accept="image/*" hidden />
+                  </label>
+                  <button type="button" id="assisted-refresh-images" class="assisted-secondary-button">
+                    Reload Photos
+                  </button>
+                </div>
               </div>
 
               <p id="assisted-image-status" class="assisted-inline-status" aria-live="polite">
@@ -237,6 +243,9 @@
                       </button>
                       <button type="button" id="assisted-bg-white" class="assisted-secondary-button">
                         White Background
+                      </button>
+                      <button type="button" id="assisted-open-image-editor" class="assisted-secondary-button assisted-bg-tools-wide">
+                        Crop / Zoom
                       </button>
                     </div>
                     <p id="assisted-bg-status" class="assisted-inline-status" aria-live="polite">
@@ -634,6 +643,44 @@
   </div>
 
   <div id="toast-container" class="toast-container"></div>
+
+  <div id="assisted-image-editor-modal" class="modal hidden assisted-editor-modal" aria-hidden="true">
+    <div class="assisted-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="assisted-editor-title">
+      <div class="assisted-editor-header">
+        <div>
+          <p class="assisted-editor-kicker">Final Image Framing</p>
+          <h2 id="assisted-editor-title" class="assisted-editor-title">Crop and Zoom Image</h2>
+        </div>
+        <button type="button" id="assisted-editor-close" class="assisted-editor-close" aria-label="Close crop editor">X</button>
+      </div>
+
+      <div class="assisted-editor-body">
+        <div class="assisted-editor-canvas-wrap">
+          <canvas id="assisted-editor-canvas" class="assisted-editor-canvas" width="900" height="900"></canvas>
+        </div>
+
+        <div class="assisted-editor-controls">
+          <div class="assisted-editor-control-row">
+            <button type="button" id="assisted-editor-zoom-out" class="assisted-secondary-button">Zoom Out</button>
+            <label class="assisted-editor-slider-label" for="assisted-editor-zoom">
+              <span>Zoom</span>
+              <input type="range" id="assisted-editor-zoom" min="1" max="4" step="0.01" value="1" />
+            </label>
+            <button type="button" id="assisted-editor-zoom-in" class="assisted-secondary-button">Zoom In</button>
+          </div>
+
+          <div class="assisted-editor-control-row assisted-editor-control-row-actions">
+            <button type="button" id="assisted-editor-reset" class="assisted-secondary-button">Reset</button>
+            <button type="button" id="assisted-editor-save" class="assisted-read-button">Use This Crop</button>
+          </div>
+
+          <p id="assisted-editor-status" class="assisted-inline-status" aria-live="polite">
+            Drag the image to frame it, then save the crop as the final selected image.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="modal-bulk-bag" class="modal hidden">
     <div class="modal-content modal-content-bulk">
