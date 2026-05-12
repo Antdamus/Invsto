@@ -7,6 +7,22 @@ async function waitForSupabaseInit() {
   });
 }
 
+async function loadActiveInventoryWorker(userId) {
+  const { data: employee, error } = await supabase
+    .from("employees")
+    .select("role, active, display_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!employee || employee.active === false) return null;
+
+  const role = String(employee.role || "").toLowerCase();
+  if (!["admin", "manager", "employee"].includes(role)) return null;
+
+  return employee;
+}
+
 console.log("Loaded JS")
 // === GLOBALS ===
 let latestDymoXml = "";
@@ -1143,9 +1159,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     const { data, error } = await supabase.auth.getUser();
     const user = data?.user;
 
-    if (!user || user.user_metadata?.role !== "admin") {
-      alert("You must be an admin to access this page.");
+    if (error || !user) {
+      alert("Please log in to access this page.");
       window.location.href = "index.html";
+      return;
+    }
+
+    const employee = await loadActiveInventoryWorker(user.id);
+    if (!employee) {
+      alert("You must be an active worker to access this page.");
+      window.location.href = "worker-dashboard.html";
       return;
     }
 

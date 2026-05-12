@@ -4,27 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#070708" />
-  <title>OG Jewelry Dashboard</title>
+  <title>OG Jewelry Daily Adds</title>
 
-  <!-- Core Styles -->
   <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
-
-  <!-- Lucide Icons -->
+  <link rel="stylesheet" href="inventory-activity.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
 <body>
-  <!-- Mobile Header -->
   <div class="mobile-header">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
       <i data-lucide="menu"></i>
     </button>
-    <span class="mobile-title">OG Dashboard</span>
+    <span class="mobile-title">Daily Adds</span>
   </div>
 
-  <!-- Mobile Menu -->
   <div class="mobile-menu" id="mobile-menu">
     <nav class="mobile-nav-links">
       <a href="dashboard.html">Dashboard</a>
@@ -39,7 +35,6 @@
     </nav>
   </div>
 
-  <!-- Desktop Sidebar + Main -->
   <div class="page">
     <aside class="sidebar">
       <div class="sidebar-inner">
@@ -99,55 +94,53 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="admin-greeting">Welcome, Admin</strong>
-            <div class="sub" id="header-subtitle">Inventory intelligence • Live snapshot</div>
+            <div class="sub" id="header-subtitle">Daily inventory intake report</div>
           </div>
 
-          <div class="header-pills" aria-label="Quick stats">
-            <div class="pill">Status: <b>Secure</b></div>
-            <div class="pill">Mode: <b>Admin</b></div>
-            <div class="pill" id="pill-date">Date: <b>—</b></div>
+          <div class="header-pills" aria-label="Report controls">
+            <label class="activity-date">
+              <span>Date</span>
+              <input id="activity-date" type="date" />
+            </label>
+            <button id="refresh-activity" class="activity-refresh" type="button">Refresh</button>
           </div>
         </div>
       </header>
 
       <main class="content">
-        <h2 class="page-title">Inventory Summary</h2>
+        <div class="activity-title-row">
+          <div>
+            <h2 class="page-title">Daily Adds</h2>
+            <p id="activity-subtitle" class="activity-subtitle">Loading today&apos;s inventory activity...</p>
+          </div>
 
-        <!-- Metric Cards -->
-        <div class="metrics-grid" id="metric-cards"></div>
+          <label class="activity-search">
+            <span>Search</span>
+            <input id="activity-search" type="search" placeholder="Item, barcode, worker, location..." />
+          </label>
+        </div>
 
-        <!-- Chart -->
+        <div class="metrics-grid" id="activity-metrics"></div>
+
         <section class="section">
           <div class="section-head">
             <div>
-              <h3 class="section-title">Category Breakdown</h3>
-              <div class="section-sub">Value distribution by category</div>
-            </div>
-          </div>
-          <div class="chart-wrap">
-            <canvas id="category-chart" class="chart-canvas"></canvas>
-          </div>
-        </section>
-
-        <!-- Table -->
-        <section class="section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Category Details</h3>
-              <div class="section-sub">Quantity, cost, value, and markup by category</div>
+              <h3 class="section-title">Activity Log</h3>
+              <div class="section-sub">New item types and inventory check-ins for the selected day</div>
             </div>
           </div>
           <div class="table-wrap">
-            <div id="inventory-table-container" class="inventory-table"></div>
+            <div id="activity-table-container" class="inventory-table"></div>
           </div>
         </section>
+
+        <div class="soft-error" id="activity-error" hidden></div>
       </main>
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
-  <script src="dashboard.js"></script>
+  <script src="inventory-activity.js"></script>
 </body>
 </html>

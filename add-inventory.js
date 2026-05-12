@@ -7,6 +7,22 @@ let pendingBulkItem = null; // item selected for a bulk bag
 let activeStoreOptions = [];
 let pendingAssignLocationDraft = null;
 
+async function loadActiveInventoryWorker(userId) {
+  const { data: employee, error } = await supabase
+    .from("employees")
+    .select("role, active, display_name")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!employee || employee.active === false) return null;
+
+  const role = String(employee.role || "").toLowerCase();
+  if (!["admin", "manager", "employee"].includes(role)) return null;
+
+  return employee;
+}
+
 //update the inventory after adding items
 async function bumpInventoryVersion(changedIds = null) {
   const payload = {
@@ -1718,12 +1734,30 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error("Session not found.");
       // Redirect to login
       setTimeout(() => {
-        window.location.href = "login.html";
+        window.location.href = "index.html";
       }, 1500);
       return;
     }
 
-    // ✅ FIX: Define currentUser globally
+    try {
+      const employee = await loadActiveInventoryWorker(session.user.id);
+      if (!employee) {
+        showToast("You must be an active worker to add inventory.");
+        setTimeout(() => {
+          window.location.href = "worker-dashboard.html";
+        }, 1500);
+        return;
+      }
+    } catch (workerError) {
+      console.error("Failed to verify inventory worker access:", workerError);
+      showToast("Could not verify your worker access.");
+      setTimeout(() => {
+        window.location.href = "index.html";
+      }, 1500);
+      return;
+    }
+
+    // Define currentUser globally for the existing inventory flow.
     window.currentUser = session.user;
   
     console.log("✅ Session loaded. User is authenticated.");

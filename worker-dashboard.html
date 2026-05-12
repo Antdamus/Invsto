@@ -28,6 +28,8 @@
     <nav class="mobile-nav-links">
       <a href="worker-dashboard.html">My Dashboard</a>
       <a href="timeclock.html">Time Sheet</a>
+      <a href="add-item.html">Add Item</a>
+      <a href="add-inventory.html">Add Inventory</a>
       <a href="dashboard.html">Admin Dashboard (Admins only)</a>
       <a href="#" id="logout-mobile">Logout</a>
     </nav>
@@ -45,6 +47,14 @@
 
           <a class="nav-link" href="timeclock.html">
             <i class="ti ti-clock"></i><span class="link-text">Time Sheet</span>
+          </a>
+
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i><span class="link-text">Add Item</span>
+          </a>
+
+          <a class="nav-link" href="add-inventory.html">
+            <i class="ti ti-box-seam"></i><span class="link-text">Add Inventory</span>
           </a>
 
           <a class="nav-link" href="dashboard.html" title="Admins only">
@@ -105,6 +115,29 @@
           </div>
 
           <div class="status-note" id="status-note"></div>
+        </section>
+
+        <section class="worker-actions" aria-labelledby="worker-actions-title">
+          <div class="worker-actions-head">
+            <div>
+              <h3 id="worker-actions-title" class="section-title">Inventory Actions</h3>
+              <p class="worker-actions-sub">Create new item records or add stock to existing inventory.</p>
+            </div>
+          </div>
+
+          <div class="worker-action-grid">
+            <a class="worker-action-card" href="add-item.html">
+              <span class="worker-action-kicker">Item Intake</span>
+              <strong>Add Item</strong>
+              <span>Create a new item type with photos, pricing, barcode, and optional starting stock.</span>
+            </a>
+
+            <a class="worker-action-card" href="add-inventory.html">
+              <span class="worker-action-kicker">Stock Intake</span>
+              <strong>Add Inventory</strong>
+              <span>Scan existing item barcodes and assign quantities to storage locations.</span>
+            </a>
+          </div>
         </section>
 
         <!-- History Month Picker -->
