@@ -1,5 +1,6 @@
 // dymo.js
 window.dymoModule = (function () {
+    const WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 
     //check barcode uniqueness
     async function barcodeExists(barcode) {
@@ -716,6 +717,61 @@ window.dymoModule = (function () {
 
     }
 
+    async function generateDymoLabelFromForm(options = {}) {
+        const { downloadPreview = true, silent = false } = options;
+        const barcodeEl = document.getElementById("scanned-barcode");
+        const qrEl = document.getElementById("qr-code");
+        const qrTypeEl = document.getElementById("qr-type");
+        const statusEl = document.getElementById("dymo-status");
+        const barcode = barcodeEl?.value || "OG" + Date.now();
+        const effectiveQrType = qrTypeEl?.value || (typeof typeqr !== "undefined" ? typeqr : "website");
+
+        const exists = await dymoModule.barcodeExists(barcode);
+        if (exists) {
+            const message = `Barcode "${barcode}" already exists in inventory. Please generate a new one.`;
+            if (!silent) alert(`❌ ${message}`);
+            throw new Error(message);
+        }
+
+        const qr = qrEl?.value?.trim() || (
+            effectiveQrType === "website"
+                ? WEBSITE_QR_URL
+                : "https://ogjewelry.store/auth?id=" + barcode
+        );
+        const price = document.getElementById("weight")?.value?.trim() || "0.0";
+
+        const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
+            barcode,
+            qr,
+            price,
+            typeqr: effectiveQrType,
+        });
+
+        if (downloadPreview) {
+            const blob = new Blob([templateXml], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "OGJewelryLabel.dymo";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        window.latestDymoXml = templateXml;
+        window.latestDymoUrl = labelPath;
+
+        console.log(`✅ DYMO label generated, path reserved: ${labelPath}`);
+        if (statusEl) {
+            statusEl.innerText = downloadPreview
+                ? "✅ DYMO label generated & ready for final upload."
+                : "✅ DYMO label auto-generated & ready for final upload.";
+        }
+
+        return { templateXml, labelPath };
+    }
+
     //set up the event listener 
     function setupGenerateDymoButtonListener() {
         const button = document.getElementById("generate-dymo-label");
@@ -726,6 +782,8 @@ window.dymoModule = (function () {
 
         button.addEventListener("click", async () => {
             try {
+                await generateDymoLabelFromForm({ downloadPreview: true });
+                return;
                 const barcode = barcodeInput.value || "OG" + Date.now();
 
                 const exists = await dymoModule.barcodeExists(barcode);
@@ -736,7 +794,7 @@ window.dymoModule = (function () {
 
                 const qr = qrInput.value.trim() || (
                     typeqr === "website"
-                        ? "https://ogjeweler.com/"
+                        ? WEBSITE_QR_URL
                         : "https://ogjewelry.store/auth?id=" + barcode
                 );
                 const price = document.getElementById("weight").value?.trim() || "0.0"; // pass weight as price
@@ -800,6 +858,7 @@ window.dymoModule = (function () {
 
   return { 
     generateAndUploadDymoLabel, 
+    generateDymoLabelFromForm,
     barcodeExists, 
     dymoLabelExists, 
     setupGenerateDymoButtonListener, 

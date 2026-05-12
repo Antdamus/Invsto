@@ -33,6 +33,7 @@ let activeStoreOptions = [];
 let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
+let automaticDymoTimer = null;
 
 
 // === DOM ELEMENTS ===
@@ -328,9 +329,32 @@ let uploadedImages = [];
     }
   }
 
+  function scheduleAutomaticDymoGeneration(delayMs = 450) {
+    if (automaticDymoTimer) {
+      window.clearTimeout(automaticDymoTimer);
+    }
+
+    automaticDymoTimer = window.setTimeout(async () => {
+      automaticDymoTimer = null;
+      if (!barcodeInput?.value || !qrInput?.value || !window.dymoModule?.generateDymoLabelFromForm) return;
+
+      try {
+        await window.dymoModule.generateDymoLabelFromForm({
+          downloadPreview: false,
+          silent: true,
+        });
+      } catch (error) {
+        console.warn("Automatic DYMO generation skipped:", error?.message || error);
+      }
+    }, delayMs);
+  }
+
   //listeners for the calculation and calculation of the final prince
   function setupCostAndPriceListeners() {
-    document.getElementById("weight")?.addEventListener('input', updateCostFromWeight);
+    document.getElementById("weight")?.addEventListener('input', () => {
+      updateCostFromWeight();
+      scheduleAutomaticDymoGeneration();
+    });
     pricePerWeightInput?.addEventListener('input', updateCostFromWeight);
     document.getElementById('cost')?.addEventListener('input', () => {
       const cost = parseFloat(document.getElementById('cost').value.replace(/,/g, ''));
@@ -361,12 +385,16 @@ let uploadedImages = [];
     if (typeqr === "website") {
       document.getElementById("qr-code").value = OG_WEBSITE_QR_URL;
       renderQR(OG_WEBSITE_QR_URL);
+      scheduleAutomaticDymoGeneration();
     }
   });
 
   qrInput?.addEventListener('input', () => {
     const url = qrInput.value.trim();
-    if (url) renderQR(url);
+    if (url) {
+      renderQR(url);
+      scheduleAutomaticDymoGeneration();
+    }
   });
 
   // === Barcode Rendering
@@ -386,11 +414,45 @@ let uploadedImages = [];
   }
 
   //respective event listener
+  function generateNewItemBarcode(options = {}) {
+    const code = 'OG' + Date.now();
+    barcodeInput.value = code;
+    renderBarcode(code);
+
+    if (options.generateDymo !== false) {
+      scheduleAutomaticDymoGeneration(options.dymoDelayMs ?? 250);
+    }
+
+    return code;
+  }
+
+  function applyDefaultQrWebsite() {
+    if (qrTypeSelect) {
+      qrTypeSelect.value = "website";
+    }
+    typeqr = "website";
+    if (qrInput) {
+      qrInput.value = OG_WEBSITE_QR_URL;
+    }
+    renderQR(OG_WEBSITE_QR_URL);
+  }
+
+  function applyDefaultItemAutomation(options = {}) {
+    applyDefaultQrWebsite();
+
+    if (options.generateBarcode !== false && !barcodeInput?.value) {
+      generateNewItemBarcode({
+        generateDymo: options.generateDymo !== false,
+        dymoDelayMs: options.dymoDelayMs ?? 350,
+      });
+    } else if (options.generateDymo !== false) {
+      scheduleAutomaticDymoGeneration(options.dymoDelayMs ?? 350);
+    }
+  }
+
   function setupBarcodeGeneration() {
     document.getElementById('generate-barcode')?.addEventListener('click', () => {
-      const code = 'OG' + Date.now();
-      barcodeInput.value = code;
-      renderBarcode(code);
+      generateNewItemBarcode({ generateDymo: true });
     });
   }
 
@@ -1550,8 +1612,11 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   previewContainer.innerHTML = "";
   uploadedImages = [];
   latestDymoXml = "";
-  pricePerWeightInput.value = "";
+  if (pricePerWeightInput.dataset.autoSilver925 !== "true") {
+    pricePerWeightInput.value = "";
+  }
   autoCostCheckbox.checked = true;
+  applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
   await bumpInventoryVersion();
 });
 
@@ -1595,4 +1660,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupAdminLocationDropdownToggle();
   setupCategoryDropdownToggle();
   dymoModule.setupGenerateDymoButtonListener();
+  applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
 });

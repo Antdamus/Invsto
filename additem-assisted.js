@@ -35,7 +35,9 @@
     isReadingWeight: false,
     isGeneratingCopy: false,
     isProcessingImage: false,
+    isAutoBlackProcessing: false,
     autoStraightenBackground: false,
+    autoBlackProcessedSourcePaths: new Set(),
     hasLoadedImagesOnce: false,
     activeCaptureJobId: "",
     captureStations: [],
@@ -278,6 +280,34 @@
     elements.mainWeightInput.value = Number(stableWeight).toFixed(2);
     elements.mainWeightInput.dispatchEvent(new Event("input", { bubbles: true }));
     elements.mainWeightInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function syncSilver925Pricing(elements) {
+    const priceInput = document.getElementById("price-per-weight");
+    if (!priceInput) return;
+
+    const isSilver925 = asTrimmedString(elements.materialSelect?.value) === "Silver"
+      && asTrimmedString(elements.puritySelect?.value) === "925";
+
+    if (isSilver925) {
+      priceInput.value = "7";
+      priceInput.dataset.autoSilver925 = "true";
+      priceInput.dispatchEvent(new Event("input", { bubbles: true }));
+      priceInput.dispatchEvent(new Event("change", { bubbles: true }));
+    } else if (priceInput.dataset.autoSilver925 === "true") {
+      priceInput.value = "";
+      delete priceInput.dataset.autoSilver925;
+      priceInput.dispatchEvent(new Event("input", { bubbles: true }));
+      priceInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function applyDefaultSilver925Selection(elements) {
+    if (!elements.materialSelect || !elements.puritySelect) return;
+
+    elements.materialSelect.value = "Silver";
+    updatePurityOptions(elements, "Silver", "925");
+    syncSilver925Pricing(elements);
   }
 
   function setAssistedWeight(elements, weight, options = {}) {
@@ -596,6 +626,7 @@
     setAISelectedImage(elements, nextAIPath, { silent: true });
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
+    autoProcessBlackBackgroundImages(elements, normalizedImages);
   }
 
   async function hydrateCompletedCaptureJob(elements, completedJob, options = {}) {
@@ -1467,23 +1498,29 @@
     };
   }
 
-  async function processSelectedImageBackground(elements, background) {
-    if (state.isProcessingImage) return;
+  function shouldAutoProcessBlackBackground(image) {
+    const sourceType = asTrimmedString(image?.sourceType).toLowerCase();
+    return Boolean(image?.path && image?.storageBucket)
+      && !sourceType.startsWith("processed-")
+      && sourceType !== "edited"
+      && sourceType !== "cropped";
+  }
 
-    const selectedImage = state.aiSelectedUploadedImage;
+  async function processImageBackgroundForImage(elements, selectedImage, background, options = {}) {
     const bucket = asTrimmedString(selectedImage?.storageBucket);
     const imagePath = asTrimmedString(selectedImage?.path);
 
     if (!bucket || !imagePath) {
       setInlineStatus(elements.bgStatus, "Select an image before processing the background.", "is-error");
-      return;
+      return null;
     }
 
-    state.isProcessingImage = true;
-    setBackgroundProcessingBusy(elements, background, true);
+    if (options.showBusy !== false) {
+      setBackgroundProcessingBusy(elements, background, true);
+    }
     setInlineStatus(
       elements.bgStatus,
-      `Creating ${background} background version and uploading it back...`,
+      options.statusMessage || `Creating ${background} background version and uploading it back...`,
       "is-waiting"
     );
 
@@ -1528,10 +1565,12 @@
         ...state.recentUploadedImages.filter((image) => image.path !== processedImage.path),
       ];
 
-      setAISelectedImage(elements, processedImage.path, {
-        autoSelectForSave: true,
-        silent: true,
-      });
+      if (options.selectResult !== false) {
+        setAISelectedImage(elements, processedImage.path, {
+          autoSelectForSave: true,
+          silent: true,
+        });
+      }
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
       setInlineStatus(
@@ -1539,6 +1578,8 @@
         `Processed image uploaded with a ${background} background. Review it in the preview and capture set.`,
         "is-success"
       );
+
+      return processedImage;
     } catch (error) {
       console.error("Background processing failed:", error);
       setInlineStatus(
@@ -1546,10 +1587,53 @@
         error?.message || "Could not process the background.",
         "is-error"
       );
+      return null;
     } finally {
-      state.isProcessingImage = false;
-      setBackgroundProcessingBusy(elements, background, false);
+      if (options.showBusy !== false) {
+        setBackgroundProcessingBusy(elements, background, false);
+      }
     }
+  }
+
+  async function autoProcessBlackBackgroundImages(elements, images = []) {
+    if (state.isAutoBlackProcessing) return;
+
+    const candidates = (Array.isArray(images) ? images : [])
+      .filter(shouldAutoProcessBlackBackground)
+      .filter((image) => !state.autoBlackProcessedSourcePaths.has(image.path));
+
+    if (!candidates.length) return;
+
+    state.isAutoBlackProcessing = true;
+    state.isProcessingImage = true;
+    setBackgroundProcessingBusy(elements, "black", true);
+
+    try {
+      for (let index = 0; index < candidates.length; index += 1) {
+        const image = candidates[index];
+        state.autoBlackProcessedSourcePaths.add(image.path);
+        await processImageBackgroundForImage(elements, image, "black", {
+          showBusy: false,
+          selectResult: true,
+          statusMessage: `Auto-processing black background ${index + 1} of ${candidates.length}...`,
+        });
+      }
+    } finally {
+      state.isAutoBlackProcessing = false;
+      state.isProcessingImage = false;
+      setBackgroundProcessingBusy(elements, "black", false);
+    }
+  }
+
+  async function processSelectedImageBackground(elements, background) {
+    if (state.isProcessingImage) return;
+
+    state.isProcessingImage = true;
+    await processImageBackgroundForImage(elements, state.aiSelectedUploadedImage, background, {
+      showBusy: true,
+      selectResult: true,
+    });
+    state.isProcessingImage = false;
   }
 
   function resetImageEditorState() {
@@ -1946,9 +2030,10 @@
       });
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
+      autoProcessBlackBackgroundImages(elements, [uploadedImage]);
       setInlineStatus(
         elements.imageStatus,
-        "Document image uploaded, selected, and ready for crop/background tools.",
+        "Document image uploaded. A black-background version is being prepared automatically.",
         "is-success"
       );
     } catch (error) {
@@ -2162,8 +2247,7 @@
     state.isGeneratingCopy = false;
     state.saveSelectedUploadedImagePaths = [];
 
-    if (elements.materialSelect) elements.materialSelect.value = "";
-    if (elements.puritySelect) updatePurityOptions(elements, "");
+    applyDefaultSilver925Selection(elements);
     if (elements.stoneTypeInput) elements.stoneTypeInput.value = "";
     if (elements.notesInput) elements.notesInput.value = "";
     if (elements.generatedTitleInput) elements.generatedTitleInput.value = "";
@@ -2246,6 +2330,7 @@
   function setupFieldListeners(elements) {
     elements.materialSelect?.addEventListener("change", () => {
       updatePurityOptions(elements, elements.materialSelect.value);
+      syncSilver925Pricing(elements);
       markGeneratedCopyNeedsRefresh(
         elements,
         "Material changed. Generate again to refresh the AI copy."
@@ -2253,6 +2338,7 @@
     });
 
     elements.puritySelect?.addEventListener("change", () => {
+      syncSilver925Pricing(elements);
       markGeneratedCopyNeedsRefresh(
         elements,
         "Purity changed. Generate again to refresh the AI copy."
@@ -2322,6 +2408,7 @@
 
     state.initialized = true;
     populateMaterialOptions(elements);
+    applyDefaultSilver925Selection(elements);
     updateSelectedImagePreview(elements);
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
