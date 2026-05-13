@@ -2603,6 +2603,206 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   overflow: hidden;
 }
 
+.manual-ebay-sale-fab {
+  position: fixed;
+  right: 22px;
+  bottom: 164px;
+  z-index: 1200;
+  min-width: 112px;
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid rgba(232, 206, 139, 0.5);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #161411, #2a2419);
+  color: #f7df9d;
+  font-weight: 800;
+  letter-spacing: 0;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+.manual-ebay-sale-fab:hover {
+  transform: translateY(-1px);
+  border-color: rgba(247, 223, 157, 0.9);
+}
+
+.manual-sale-modal-content {
+  width: min(980px, calc(100vw - 28px));
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  position: relative;
+  padding: 30px;
+  border-radius: 18px;
+  background: #f8f7f4;
+  color: #181716;
+  border: 1px solid rgba(28, 27, 25, 0.12);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+}
+
+.manual-sale-header {
+  padding-right: 48px;
+  margin-bottom: 22px;
+}
+
+.manual-sale-kicker {
+  display: block;
+  margin-bottom: 8px;
+  color: #9d7a2e;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.manual-sale-header h2 {
+  margin: 0;
+  font-family: "DM Serif Display", serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  letter-spacing: 0;
+}
+
+.manual-sale-header p {
+  margin: 6px 0 0;
+  color: #5b5750;
+}
+
+.manual-sale-grid,
+.manual-sale-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.manual-sale-panel,
+.manual-sale-summary {
+  border: 1px solid rgba(28, 27, 25, 0.1);
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.manual-sale-panel label,
+.manual-sale-form-grid label {
+  display: grid;
+  gap: 8px;
+  color: #292723;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.manual-sale-scan-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.manual-sale-panel input,
+.manual-sale-form-grid input,
+.manual-sale-form-grid textarea {
+  width: 100%;
+  border: 1px solid #d7d2c8;
+  border-radius: 12px;
+  padding: 12px 13px;
+  background: #fbfaf7;
+  color: #171513;
+  font: inherit;
+  letter-spacing: 0;
+  box-sizing: border-box;
+}
+
+.manual-sale-panel input:focus,
+.manual-sale-form-grid input:focus,
+.manual-sale-form-grid textarea:focus {
+  outline: none;
+  border-color: #b58b34;
+  box-shadow: 0 0 0 4px rgba(181, 139, 52, 0.16);
+}
+
+.manual-sale-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.manual-sale-result-btn {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 1px solid #e1dcd2;
+  border-radius: 12px;
+  background: #fbfaf7;
+  padding: 12px;
+  color: #171513;
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-sale-result-btn:hover,
+.manual-sale-result-btn.is-selected {
+  border-color: #b58b34;
+  background: #fff7df;
+}
+
+.manual-sale-result-btn strong {
+  font-size: 0.96rem;
+}
+
+.manual-sale-result-btn span {
+  color: #635f57;
+  font-size: 0.84rem;
+}
+
+.manual-sale-summary {
+  margin: 16px 0;
+  display: grid;
+  gap: 8px;
+}
+
+.manual-sale-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.manual-sale-summary-grid span {
+  display: grid;
+  gap: 3px;
+  border-radius: 12px;
+  background: #f4f1ea;
+  padding: 10px;
+}
+
+.manual-sale-summary-grid small {
+  color: #746d61;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.manual-sale-wide {
+  grid-column: 1 / -1;
+}
+
+.manual-sale-status {
+  min-height: 22px;
+  margin: 14px 0 0;
+  color: #7d5f1f;
+  font-weight: 700;
+}
+
+.manual-sale-status.is-error {
+  color: #be123c;
+}
+
+.manual-sale-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
 .stock-photo-viewer-stage img {
   max-width: 100%;
   max-height: 72vh;
@@ -2752,6 +2952,23 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 @media (max-width: 760px) {
+  .manual-ebay-sale-fab {
+    right: 16px;
+    bottom: 148px;
+    min-width: 104px;
+  }
+
+  .manual-sale-modal-content {
+    padding: 22px;
+  }
+
+  .manual-sale-grid,
+  .manual-sale-form-grid,
+  .manual-sale-summary-grid,
+  .manual-sale-scan-row {
+    grid-template-columns: 1fr;
+  }
+
   .pagination-controls {
     align-items: stretch;
     gap: 8px;

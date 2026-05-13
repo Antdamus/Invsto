@@ -67,6 +67,13 @@ const stockMediaState = {
   },
 };
 
+const manualEbaySaleState = {
+  item: null,
+  stockRows: [],
+  selectedStockRow: null,
+  busy: false,
+};
+
 const TRAY_STATUS_LABELS = {
   checked_in: "Checked In",
   checked_out: "Checked Out",
@@ -3914,6 +3921,311 @@ function hideLoading(selector = "#loading-overlay") {
 }
 
 // 🔸 Helper: Create a category option DOM element
+function setManualSaleStatus(message = "", type = "info") {
+  const el = document.getElementById("manual-sale-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+}
+
+function parseManualSaleMoney(value) {
+  const number = Number(String(value || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function getManualSaleItemPhotoPath(item) {
+  return (Array.isArray(item?.photoPaths) ? item.photoPaths : Array.isArray(item?.photos) ? item.photos : [])[0] || "";
+}
+
+function resetManualEbaySale() {
+  manualEbaySaleState.item = null;
+  manualEbaySaleState.stockRows = [];
+  manualEbaySaleState.selectedStockRow = null;
+  ["manual-sale-item-scan", "manual-sale-location-scan", "manual-sale-order-id", "manual-sale-sold-price", "manual-sale-payout", "manual-sale-notes", "manual-sale-password"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const qty = document.getElementById("manual-sale-quantity");
+  if (qty) qty.value = "1";
+  document.getElementById("manual-sale-item-results")?.replaceChildren();
+  document.getElementById("manual-sale-location-results")?.replaceChildren();
+  renderManualSaleSummary();
+  setManualSaleStatus("");
+}
+
+function openManualEbaySaleModal() {
+  resetManualEbaySale();
+  document.getElementById("manual-ebay-sale-modal")?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setTimeout(() => document.getElementById("manual-sale-item-scan")?.focus(), 80);
+}
+
+function closeManualEbaySaleModal() {
+  document.getElementById("manual-ebay-sale-modal")?.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  resetManualEbaySale();
+}
+
+function renderManualSaleSummary() {
+  const summary = document.getElementById("manual-sale-selection-summary");
+  if (!summary) return;
+  const item = manualEbaySaleState.item;
+  const row = manualEbaySaleState.selectedStockRow;
+  if (!item) {
+    summary.textContent = "No item selected yet.";
+    return;
+  }
+  summary.innerHTML = `
+    <strong>${escapeStockHtml(item.title || "Untitled item")}</strong>
+    <div class="manual-sale-summary-grid">
+      <span><small>Barcode</small>${escapeStockHtml(item.barcode || "-")}</span>
+      <span><small>Retail</small>${formatStockMoney(item.sale_price)}</span>
+      <span><small>Source</small>${row ? escapeStockHtml(row.locationLabel) : "Choose tray/location"}</span>
+      <span><small>Available</small>${row ? Number(row.quantity || 0).toLocaleString() : "-"}</span>
+    </div>
+  `;
+}
+
+function renderManualSaleItemResults(items, message = "No matching items.") {
+  const container = document.getElementById("manual-sale-item-results");
+  if (!container) return;
+  container.replaceChildren();
+  if (!items.length) {
+    container.innerHTML = `<p>${escapeStockHtml(message)}</p>`;
+    return;
+  }
+  items.slice(0, 10).forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "manual-sale-result-btn";
+    btn.innerHTML = `<strong>${escapeStockHtml(item.title || "Untitled item")}</strong><span>${escapeStockHtml(item.barcode || "No barcode")} - ${formatStockMoney(item.sale_price)}</span>`;
+    btn.addEventListener("click", () => selectManualSaleItem(item));
+    container.appendChild(btn);
+  });
+}
+
+function renderManualSaleLocationResults(rows, message = "No stock locations found for this item.") {
+  const container = document.getElementById("manual-sale-location-results");
+  if (!container) return;
+  container.replaceChildren();
+  if (!rows.length) {
+    container.innerHTML = `<p>${escapeStockHtml(message)}</p>`;
+    return;
+  }
+  rows.forEach((row) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `manual-sale-result-btn ${manualEbaySaleState.selectedStockRow?.id === row.id ? "is-selected" : ""}`;
+    btn.innerHTML = `<strong>${escapeStockHtml(row.locationLabel)}</strong><span>${Number(row.quantity || 0).toLocaleString()} available${row.location_code ? ` - ${escapeStockHtml(row.location_code)}` : ""}</span>`;
+    btn.addEventListener("click", () => selectManualSaleStockRow(row));
+    container.appendChild(btn);
+  });
+}
+
+function findManualSaleItems(term) {
+  const q = String(term || "").trim().toLowerCase();
+  if (!q) return [];
+  const exact = allItems.filter((item) => String(item.barcode || "").trim().toLowerCase() === q || String(item.id || "").toLowerCase() === q);
+  if (exact.length) return exact;
+  return allItems.filter((item) =>
+    String(item.barcode || "").toLowerCase().includes(q) ||
+    String(item.title || "").toLowerCase().includes(q) ||
+    String(item.description || "").toLowerCase().includes(q)
+  );
+}
+
+async function searchManualSaleItem() {
+  const term = document.getElementById("manual-sale-item-scan")?.value || "";
+  const matches = findManualSaleItems(term);
+  if (matches.length === 1) {
+    await selectManualSaleItem(matches[0]);
+  } else {
+    renderManualSaleItemResults(matches, "Scan an item label or type the title/barcode.");
+    setManualSaleStatus(matches.length ? `${matches.length} item match(es). Choose one.` : "No item found.", matches.length ? "info" : "error");
+  }
+}
+
+async function selectManualSaleItem(item) {
+  manualEbaySaleState.item = item;
+  manualEbaySaleState.selectedStockRow = null;
+  document.getElementById("manual-sale-item-scan").value = item.barcode || item.title || "";
+  document.getElementById("manual-sale-sold-price").value = Number(item.sale_price || 0).toFixed(2);
+  renderManualSaleItemResults([item]);
+  renderManualSaleSummary();
+  await loadManualSaleStockRows(item.id);
+}
+
+function normalizeManualSaleStockRow(row) {
+  const loc = row.location || {};
+  const status = loc.is_tray ? (TRAY_STATUS_LABELS[loc.tray_status] || "Tray") : "Location";
+  const locationLabel = loc.is_tray ? `${loc.location_name || "Unnamed tray"} (${status})` : (loc.location_name || "Unnamed location");
+  return { ...row, location_id: row.location_id || loc.id, location_name: loc.location_name || "", location_code: loc.location_code || "", is_tray: Boolean(loc.is_tray), tray_status: loc.tray_status || "", locationLabel };
+}
+
+async function loadManualSaleStockRows(itemId) {
+  setManualSaleStatus("Loading available trays and locations...");
+  const { data, error } = await supabase
+    .from("item_stock_locations")
+    .select(`id, item_id, location_id, quantity, location:location_id (id, location_name, location_code, is_tray, tray_status, tray_current_store_id, store_id)`)
+    .eq("item_id", itemId)
+    .gt("quantity", 0);
+  if (error) {
+    console.error("Manual eBay sale location load failed:", error);
+    manualEbaySaleState.stockRows = [];
+    renderManualSaleLocationResults([], "Could not load source locations.");
+    setManualSaleStatus(error.message || "Could not load source locations.", "error");
+    return;
+  }
+  manualEbaySaleState.stockRows = (data || []).map(normalizeManualSaleStockRow);
+  if (manualEbaySaleState.stockRows.length === 1) selectManualSaleStockRow(manualEbaySaleState.stockRows[0]);
+  else {
+    renderManualSaleLocationResults(manualEbaySaleState.stockRows);
+    setManualSaleStatus(manualEbaySaleState.stockRows.length ? "Choose or scan the source tray/location." : "No available stock found.", manualEbaySaleState.stockRows.length ? "info" : "error");
+  }
+}
+
+function selectManualSaleStockRow(row) {
+  manualEbaySaleState.selectedStockRow = row;
+  const locationInput = document.getElementById("manual-sale-location-scan");
+  if (locationInput) locationInput.value = row.location_code || row.location_name || row.locationLabel;
+  const qtyInput = document.getElementById("manual-sale-quantity");
+  if (qtyInput) qtyInput.max = String(Math.max(1, Number(row.quantity || 1)));
+  renderManualSaleLocationResults(manualEbaySaleState.stockRows);
+  renderManualSaleSummary();
+  setManualSaleStatus("Source selected. Enter order details and sign.");
+}
+
+async function searchManualSaleLocation() {
+  const term = String(document.getElementById("manual-sale-location-scan")?.value || "").trim().toLowerCase();
+  if (!term) return setManualSaleStatus("Scan or type a tray/location label.", "error");
+  if (manualEbaySaleState.item) {
+    const matches = manualEbaySaleState.stockRows.filter((row) =>
+      String(row.id || "").toLowerCase() === term ||
+      String(row.location_id || "").toLowerCase() === term ||
+      String(row.location_code || "").toLowerCase() === term ||
+      String(row.location_name || "").toLowerCase().includes(term) ||
+      String(row.locationLabel || "").toLowerCase().includes(term)
+    );
+    if (matches.length === 1) selectManualSaleStockRow(matches[0]);
+    else {
+      renderManualSaleLocationResults(matches, "That tray/location does not currently hold this item.");
+      setManualSaleStatus(matches.length ? `${matches.length} source match(es). Choose one.` : "No matching source for this item.", matches.length ? "info" : "error");
+    }
+    return;
+  }
+  setManualSaleStatus("Looking up items in that tray/location...");
+  const { data: locations, error: locError } = await supabase.from("locations").select("id, location_name, location_code").limit(1000);
+  if (locError) return setManualSaleStatus(locError.message || "Could not search locations.", "error");
+  const matches = (locations || []).filter((loc) =>
+    String(loc.id || "").toLowerCase() === term ||
+    String(loc.location_code || "").toLowerCase() === term ||
+    String(loc.location_name || "").toLowerCase().includes(term)
+  );
+  if (!matches.length) return setManualSaleStatus("No matching tray/location found.", "error");
+  const { data: stockRows, error: stockError } = await supabase
+    .from("item_stock_locations")
+    .select("item_id, quantity, location_id")
+    .in("location_id", matches.map((loc) => loc.id))
+    .gt("quantity", 0);
+  if (stockError) return setManualSaleStatus(stockError.message || "Could not load stock in that location.", "error");
+  const itemIds = new Set((stockRows || []).map((row) => row.item_id));
+  const items = allItems.filter((item) => itemIds.has(item.id));
+  renderManualSaleItemResults(items, "No active items found in that tray/location.");
+  setManualSaleStatus(items.length ? `${items.length} item type(s) found in that tray/location.` : "No active stock in that tray/location.", items.length ? "info" : "error");
+}
+
+async function verifyManualSalePassword(password) {
+  const user = currentUser || (await supabase.auth.getUser()).data.user;
+  if (!user?.email || !password) return false;
+  const { error } = await supabase.auth.signInWithPassword({ email: user.email, password });
+  return !error;
+}
+
+async function finalizeManualEbaySale() {
+  if (manualEbaySaleState.busy) return;
+  const item = manualEbaySaleState.item;
+  const row = manualEbaySaleState.selectedStockRow;
+  const orderId = String(document.getElementById("manual-sale-order-id")?.value || "").trim();
+  const qty = Math.max(1, parseInt(document.getElementById("manual-sale-quantity")?.value || "1", 10) || 1);
+  const soldPrice = parseManualSaleMoney(document.getElementById("manual-sale-sold-price")?.value);
+  const payoutRaw = document.getElementById("manual-sale-payout")?.value;
+  const payout = payoutRaw ? parseManualSaleMoney(payoutRaw) : soldPrice * qty;
+  const password = document.getElementById("manual-sale-password")?.value || "";
+  const notes = String(document.getElementById("manual-sale-notes")?.value || "").trim();
+  if (!item) return setManualSaleStatus("Choose the sold item first.", "error");
+  if (!row) return setManualSaleStatus("Choose the tray/location the item is shipping from.", "error");
+  if (!orderId) return setManualSaleStatus("Enter the eBay order ID.", "error");
+  if (!soldPrice) return setManualSaleStatus("Enter the sold price.", "error");
+  if (!password) return setManualSaleStatus("Enter your password to sign this sale.", "error");
+  if (qty > Number(row.quantity || 0)) return setManualSaleStatus(`Only ${row.quantity} available in that source.`, "error");
+  manualEbaySaleState.busy = true;
+  document.getElementById("finalize-manual-ebay-sale").disabled = true;
+  showLoading();
+  setManualSaleStatus("Signing and recording sale...");
+  try {
+    const valid = await verifyManualSalePassword(password);
+    if (!valid) throw new Error("Incorrect password. Please try again.");
+    const { data: existingSale, error: existingError } = await supabase.from("sales").select("id").eq("platform", "ebay").eq("external_sales_id", orderId).maybeSingle();
+    if (existingError) throw new Error(existingError.message);
+    if (existingSale?.id) throw new Error("This eBay order ID was already checked out.");
+    const { data: latestRow, error: latestError } = await supabase.from("item_stock_locations").select("quantity, location_id").eq("id", row.id).single();
+    if (latestError) throw new Error(latestError.message);
+    if (Number(latestRow.quantity || 0) < qty) throw new Error(`Only ${latestRow.quantity || 0} available at this source now.`);
+    const user = currentUser || (await supabase.auth.getUser()).data.user;
+    const lineSubtotal = soldPrice * qty;
+    const platformFeeAmount = Math.max(0, lineSubtotal - payout);
+    const platformFeePercent = lineSubtotal > 0 ? (platformFeeAmount / lineSubtotal) * 100 : 0;
+    const remainingAfterSale = Number(latestRow.quantity || 0) - qty;
+    const photoPath = getManualSaleItemPhotoPath(item);
+    const cartSnapshot = [{ item_id: item.id, title: item.title, barcode: item.barcode || null, quantity: qty, sale_price: soldPrice, payout, selected_location_id: row.id, physical_location_id: latestRow.location_id || row.location_id, location_label: row.locationLabel, photo_path: photoPath }];
+    const { error: auditError } = await supabase.from("sales_audit").insert({
+      external_sales_id: orderId, subtotal: lineSubtotal, credits_applied: 0, owes_after_credit: lineSubtotal, per_item_discount: 0, general_discount: 0, effective_discount_pct: 0, owes_store: lineSubtotal, platform_fee_amount: platformFeeAmount, platform_fee_percent: platformFeePercent, profit_amount: payout, platform: "ebay", cart_snapshot: cartSnapshot, flagged: false, notes: notes || "Manual eBay sale checkout", verified_method: "password", verified_at: new Date().toISOString(), created_at: new Date().toISOString(), email: user?.email || null, user_id: user?.id || null, credits_breakdown: []
+    });
+    if (auditError) throw new Error(`Failed audit log: ${auditError.message}`);
+    const { data: saleData, error: saleError } = await supabase.from("sales").insert({
+      external_sales_id: orderId, user_id: user?.id || null, email: user?.email || null, platform: "ebay", subtotal: lineSubtotal, credits_applied: 0, total_discount: 0, final_amount: lineSubtotal, platform_fee_amount: platformFeeAmount, platform_fee_percent: platformFeePercent, profit_amount: payout, flagged: false, verified_method: "password", verified_at: new Date().toISOString(), created_at: new Date().toISOString()
+    }).select("id").single();
+    if (saleError) throw new Error(`Failed to record sale: ${saleError.message}`);
+    const { data: saleItemData, error: saleItemError } = await supabase.from("sale_items").insert({
+      sale_id: saleData.id, item_id: item.id, title: item.title || "Untitled item", quantity: qty, sale_price: soldPrice, discount_percent: 0, discount_amount: 0, final_price: lineSubtotal, remaining_stock_qty: remainingAfterSale, location_id: latestRow.location_id || row.location_id, photo_path: photoPath
+    }).select("id").single();
+    if (saleItemError) throw new Error(`Failed to record sale item: ${saleItemError.message}`);
+    for (const category of Array.isArray(item.categories) ? item.categories : []) {
+      const { error: categoryError } = await supabase.from("sale_item_categories").insert({ sale_item_id: saleItemData.id, category });
+      if (categoryError) throw new Error(`Failed to record category "${category}": ${categoryError.message}`);
+    }
+    const { error: txError } = await supabase.from("stock_transactions").insert({
+      item_id: item.id, location_id: latestRow.location_id || row.location_id, quantity: -qty, action_type: "checkout", confirmed_at: new Date().toISOString(), user_id: user?.id || null, email: user?.email || null, notes: `Manual eBay sale, Order ID: ${orderId}${notes ? ` - ${notes}` : ""}`, method: "manual_ebay_sale"
+    });
+    if (txError) throw new Error(`Failed transaction log: ${txError.message}`);
+    const { error: rpcError } = await supabase.rpc("subtract_quantity", { loc_id: row.id, delta: qty });
+    if (rpcError) throw new Error(`Failed stock update: ${rpcError.message}`);
+    await bumpInventoryVersion([item.id]);
+    await refreshItemById(item.id);
+    showToast("Manual eBay sale finalized and stock removed.");
+    closeManualEbaySaleModal();
+  } catch (error) {
+    console.error("Manual eBay sale failed:", error);
+    setManualSaleStatus(error.message || "Could not finalize eBay sale.", "error");
+  } finally {
+    manualEbaySaleState.busy = false;
+    document.getElementById("finalize-manual-ebay-sale").disabled = false;
+    hideLoading();
+  }
+}
+
+function setupManualEbaySale() {
+  document.getElementById("manual-ebay-sale-btn")?.addEventListener("click", openManualEbaySaleModal);
+  document.getElementById("close-manual-ebay-sale")?.addEventListener("click", closeManualEbaySaleModal);
+  document.getElementById("cancel-manual-ebay-sale")?.addEventListener("click", closeManualEbaySaleModal);
+  document.getElementById("manual-sale-find-item")?.addEventListener("click", searchManualSaleItem);
+  document.getElementById("manual-sale-find-location")?.addEventListener("click", searchManualSaleLocation);
+  document.getElementById("finalize-manual-ebay-sale")?.addEventListener("click", finalizeManualEbaySale);
+  document.getElementById("manual-sale-item-scan")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); searchManualSaleItem(); } });
+  document.getElementById("manual-sale-location-scan")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); searchManualSaleLocation(); } });
+  document.getElementById("manual-sale-password")?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); finalizeManualEbaySale(); } });
+}
+
 function createCategoryOption(label, isSelected, onClick) {
   const option = document.createElement("div");
   option.className = "category-option";
@@ -4451,6 +4763,7 @@ populateDropdowns({
 
     //event listerner for the export modal and logic
     setupExportModal();
+    setupManualEbaySale();
     setupEbayExportButton(); // <— this must run
 
 
