@@ -303,17 +303,17 @@ function buildLocationDymoXml(locationCode) {
   <DYMOLabel Version="4">
     <Description>DYMO Label</Description>
     <Orientation>Landscape</Orientation>
-    <LabelName>Small30346</LabelName>
+    <LabelName>Address</LabelName>
     <InitialLength>0</InitialLength>
     <BorderStyle>SolidLine</BorderStyle>
     <DYMORect>
       <DYMOPoint>
-        <X>0.22666666</X>
-        <Y>0.056666665</Y>
+        <X>0.23</X>
+        <Y>0.060000002</Y>
       </DYMOPoint>
       <Size>
-        <Width>1.59</Width>
-        <Height>0.4033333</Height>
+        <Width>3.21</Width>
+        <Height>0.9966666</Height>
       </Size>
     </DYMORect>
     <BorderColor>
@@ -369,7 +369,7 @@ function buildLocationDymoXml(locationCode) {
           <TextPosition>Bottom</TextPosition>
           <FontInfo>
             <FontName>Arial</FontName>
-            <FontSize>8</FontSize>
+            <FontSize>16</FontSize>
             <IsBold>False</IsBold>
             <IsItalic>False</IsItalic>
             <IsUnderline>False</IsUnderline>
@@ -381,12 +381,12 @@ function buildLocationDymoXml(locationCode) {
           </FontInfo>
           <ObjectLayout>
             <DYMOPoint>
-              <X>0.22666667</X>
-              <Y>0.06666668</Y>
+              <X>0.34072888</X>
+              <Y>0.21541661</Y>
             </DYMOPoint>
             <Size>
-              <Width>1.3885133</Width>
-              <Height>0.39078796</Height>
+              <Width>2.8185425</Width>
+              <Height>0.68583345</Height>
             </Size>
           </ObjectLayout>
         </BarcodeObject>
@@ -484,6 +484,42 @@ async function uploadCreateLocationDymo(locationCode) {
 
   if (error) throw error;
   return labelPath;
+}
+
+function setLocationDymoStatus(message) {
+  const status = document.getElementById("location-dymo-status");
+  if (status) status.textContent = message;
+}
+
+async function regenerateLocationDymoLabel(locationId) {
+  const location = state.locations.find((entry) => String(entry.id) === String(locationId));
+  if (!location) throw new Error("Location not found.");
+
+  const locationCode = asTrimmedString(location.location_code);
+  if (!locationCode) throw new Error("This location does not have a barcode yet.");
+
+  setLocationDymoStatus("Generating a fresh LocationLabelSystem DYMO label...");
+
+  const previousPath = location.dymo_label_url || "";
+  const labelPath = await uploadCreateLocationDymo(locationCode);
+
+  const { error } = await supabase
+    .from("locations")
+    .update({ dymo_label_url: labelPath })
+    .eq("id", location.id);
+
+  if (error) throw error;
+
+  if (previousPath) state.dymoUrls.delete(previousPath);
+  state.dymoUrls.delete(labelPath);
+  location.dymo_label_url = labelPath;
+
+  const signedUrl = await resolveDymoUrl(location);
+  if (!signedUrl) throw new Error("The new label was saved, but could not be opened.");
+
+  setLocationDymoStatus("New DYMO label generated and saved to this location.");
+  renderLocationsTable();
+  return signedUrl;
 }
 
 async function uploadCreateLocationPhoto(file) {
@@ -886,9 +922,8 @@ async function renderLocationDetail(locationId) {
     subtitle.textContent = `${subtitle.textContent} - ${getTrayStatusLabel(location)}`;
   }
 
-  const [photoUrl, dymoUrl, itemPhotoUrls] = await Promise.all([
+  const [photoUrl, itemPhotoUrls] = await Promise.all([
     resolveLocationPhotoUrl(location),
-    resolveDymoUrl(location),
     Promise.all(location.itemRows.map((item) => resolveItemPhotoUrl(item.photoPath))),
   ]);
 
@@ -1080,9 +1115,10 @@ async function renderLocationDetail(locationId) {
             <button type="button" class="locations-action-button" data-copy-location-code="${escapeHtml(location.location_code || "")}" ${location.location_code ? "" : "disabled"}>
               Copy Barcode
             </button>
-            ${dymoUrl
-              ? `<a class="locations-link-button" href="${escapeHtml(dymoUrl)}" target="_blank" rel="noreferrer">Open DYMO Label</a>`
-              : `<span class="locations-pill is-asset">DYMO label unavailable</span>`}
+            <button type="button" class="locations-link-button" data-open-location-dymo="${escapeHtml(location.id)}" ${location.location_code ? "" : "disabled"}>
+              ${location.dymo_label_url ? "Generate New DYMO Label" : "Generate DYMO Label"}
+            </button>
+            <div id="location-dymo-status" class="location-status-line">Opens a fresh label using the LocationLabelSystem template.</div>
           </div>
         </div>
 
@@ -1459,6 +1495,32 @@ function bindEvents() {
   });
 
   document.getElementById("location-detail-body")?.addEventListener("click", async (event) => {
+    const dymoButton = event.target.closest("[data-open-location-dymo]");
+    if (dymoButton) {
+      event.preventDefault();
+      const locationId = dymoButton.getAttribute("data-open-location-dymo");
+      const labelWindow = window.open("about:blank", "_blank");
+      dymoButton.disabled = true;
+      dymoButton.textContent = "Generating...";
+
+      try {
+        const signedUrl = await regenerateLocationDymoLabel(locationId);
+        if (labelWindow) {
+          labelWindow.location.href = signedUrl;
+        } else {
+          window.open(signedUrl, "_blank");
+        }
+        await renderLocationDetail(locationId);
+      } catch (error) {
+        console.error("Location DYMO regeneration failed:", error);
+        if (labelWindow && !labelWindow.closed) labelWindow.close();
+        setLocationDymoStatus(`Could not generate label: ${error?.message || "Unknown error"}`);
+        dymoButton.disabled = false;
+        dymoButton.textContent = "Generate New DYMO Label";
+      }
+      return;
+    }
+
     const copyButton = event.target.closest("[data-copy-location-code]");
     if (copyButton) {
       const code = copyButton.getAttribute("data-copy-location-code");

@@ -989,17 +989,17 @@ let uploadedImages = [];
       <DYMOLabel Version="4">
         <Description>DYMO Label</Description>
         <Orientation>Landscape</Orientation>
-        <LabelName>Small30346</LabelName>
+        <LabelName>Address</LabelName>
         <InitialLength>0</InitialLength>
         <BorderStyle>SolidLine</BorderStyle>
         <DYMORect>
           <DYMOPoint>
-            <X>0.22666666</X>
-            <Y>0.056666665</Y>
+            <X>0.23</X>
+            <Y>0.060000002</Y>
           </DYMOPoint>
           <Size>
-            <Width>1.59</Width>
-            <Height>0.4033333</Height>
+            <Width>3.21</Width>
+            <Height>0.9966666</Height>
           </Size>
         </DYMORect>
         <BorderColor>
@@ -1055,7 +1055,7 @@ let uploadedImages = [];
               <TextPosition>Bottom</TextPosition>
               <FontInfo>
                 <FontName>Arial</FontName>
-                <FontSize>8</FontSize>
+                <FontSize>16</FontSize>
                 <IsBold>False</IsBold>
                 <IsItalic>False</IsItalic>
                 <IsUnderline>False</IsUnderline>
@@ -1067,12 +1067,12 @@ let uploadedImages = [];
               </FontInfo>
               <ObjectLayout>
                 <DYMOPoint>
-                  <X>0.22666667</X>
-                  <Y>0.06666668</Y>
+                  <X>0.34072888</X>
+                  <Y>0.21541661</Y>
                 </DYMOPoint>
                 <Size>
-                  <Width>1.3885133</Width>
-                  <Height>0.39078796</Height>
+                  <Width>2.8185425</Width>
+                  <Height>0.68583345</Height>
                 </Size>
               </ObjectLayout>
             </BarcodeObject>

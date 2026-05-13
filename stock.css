@@ -1998,12 +1998,38 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .stock-description {
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   color: #54545a !important;
   font-family: system-ui, sans-serif !important;
+}
+
+.stock-description-wrap {
+  display: grid;
+  gap: 7px;
+}
+
+.stock-description-read-btn {
+  justify-self: start;
+  min-height: 30px;
+  border: 0;
+  background: transparent;
+  color: #0759b8;
+  font-family: system-ui, sans-serif;
+  font-size: .86rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.stock-description-read-btn:hover {
+  color: #003f91;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .stock-content > p:not(.stock-description):not(.chip-section-label),
@@ -2295,7 +2321,8 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 .stock-photo-viewer-content,
 .stock-photo-manager-content,
-.stock-barcode-content {
+.stock-barcode-content,
+.stock-description-modal-content {
   position: relative;
   width: min(1040px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -2579,12 +2606,13 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .hidden-sensitive-filter,
+.stock-sensitive-legacy,
+.stock-content > .stock-count,
 .stock-access-loading input[name="distributor"],
 .stock-access-loading input[name="costMin"],
 .stock-access-loading input[name="costMax"],
 .stock-access-loading #bulk-delete,
 .stock-access-loading #bulk-export,
-.worker-stock-view .stock-sensitive-legacy,
 .worker-stock-view #bulk-delete,
 .worker-stock-view #bulk-export,
 .worker-stock-view #bulk-category-container,
@@ -2951,6 +2979,40 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font-size: clamp(1.3rem, 5vw, 2.4rem);
 }
 
+.stock-description-modal-content {
+  width: min(680px, calc(100vw - 32px));
+  padding: 28px;
+}
+
+.stock-description-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: #7a6125;
+  font-family: system-ui, sans-serif;
+  font-size: .76rem;
+  font-weight: 900;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.stock-description-modal-content h2 {
+  margin: 0 44px 14px 0;
+  color: #171719;
+  font-family: "DM Serif Display", serif;
+  font-size: clamp(1.7rem, 5vw, 2.5rem);
+  line-height: 1.05;
+}
+
+#stock-description-modal-text {
+  margin: 0;
+  color: #393a40;
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 760px) {
   .manual-ebay-sale-fab {
     right: 16px;
@@ -2959,6 +3021,10 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   }
 
   .manual-sale-modal-content {
+    padding: 22px;
+  }
+
+  .stock-description-modal-content {
     padding: 22px;
   }
 

@@ -305,6 +305,8 @@ function buildLocationChips(item) {
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
       const showSensitive = canViewSensitiveStockData();
+      const descriptionText = String(item.description || "").trim() || "No description recorded.";
+      const hasFullDescription = Boolean(String(item.description || "").trim());
       const stockLabel = `
         <button type="button" class="stock-count ${stockClass}" data-tooltip="${escapeStockHtml(tooltip)}" data-id="${item.id}">
           ${stock === 0 ? `<i data-lucide="alert-circle" class="stock-alert-icon"></i>` : ""}
@@ -336,7 +338,10 @@ function buildLocationChips(item) {
             <h2>${escapeStockHtml(item.title || "Untitled item")}</h2>
             ${stockLabel}
           </div>
-          <p class="stock-description">${escapeStockHtml(item.description || "No description recorded.")}</p>
+          <div class="stock-description-wrap">
+            <p class="stock-description">${escapeStockHtml(descriptionText)}</p>
+            ${hasFullDescription ? `<button type="button" class="stock-description-read-btn" data-id="${item.id}" aria-label="Read full description for ${escapeStockHtml(item.title || "this item")}">Read full description</button>` : ""}
+          </div>
           <div class="stock-metric-grid">
             <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
             <span><small>Sale</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
@@ -632,7 +637,15 @@ function buildLocationChips(item) {
           }
         }
 
-        // ✅ 🟢 NEW: Handle clicks on stock-count to open transfer modal
+        // Open the full description without triggering card-level stock actions.
+        const descriptionTrigger = e.target.closest(".stock-description-read-btn");
+        if (descriptionTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          openStockDescriptionModal(descriptionTrigger.dataset.id);
+          return;
+        }
+
         const transferTrigger = e.target.closest(".stock-count, .transfer-stock-btn");
         if (transferTrigger) {
           const itemId = transferTrigger.dataset.id;
@@ -2680,6 +2693,27 @@ function closeBarcodeModal() {
   document.body.classList.remove("modal-open");
 }
 
+function openStockDescriptionModal(itemId) {
+  const item = findStockItemById(itemId);
+  const modal = document.getElementById("stock-description-modal");
+  if (!item || !modal) return;
+
+  const title = document.getElementById("stock-description-modal-title");
+  const text = document.getElementById("stock-description-modal-text");
+  if (title) title.textContent = item.title || "Item Description";
+  if (text) text.textContent = String(item.description || "").trim() || "No description recorded.";
+
+  modal.classList.remove("hidden");
+  modal.classList.add("show");
+  document.body.classList.add("modal-open");
+}
+
+function closeStockDescriptionModal() {
+  document.getElementById("stock-description-modal")?.classList.add("hidden");
+  document.getElementById("stock-description-modal")?.classList.remove("show");
+  document.body.classList.remove("modal-open");
+}
+
 function stockCanvasToBlob(canvas, type, quality) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -3575,6 +3609,10 @@ function setupStockMediaListeners() {
   document.getElementById("close-stock-photo-viewer")?.addEventListener("click", closeStockPhotoViewer);
   document.getElementById("close-stock-photo-manager")?.addEventListener("click", closeStockPhotoManager);
   document.getElementById("close-stock-barcode-modal")?.addEventListener("click", closeBarcodeModal);
+  document.getElementById("close-stock-description-modal")?.addEventListener("click", closeStockDescriptionModal);
+  document.getElementById("stock-description-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "stock-description-modal") closeStockDescriptionModal();
+  });
   document.getElementById("stock-photo-viewer-add")?.addEventListener("click", () => {
     if (stockPhotoViewerItemId) {
       const itemId = stockPhotoViewerItemId;
