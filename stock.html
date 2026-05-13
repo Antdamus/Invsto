@@ -524,6 +524,23 @@
 
   <!-- 🔄 Modal: Transfer Stock Between Locations -->
   <!-- Full-size stock photo viewer -->
+  <div id="photo-delete-confirm-modal" class="modal hidden">
+    <div class="photo-delete-confirm-content">
+      <button type="button" id="close-photo-delete-confirm" class="stock-modal-close" title="Close">&times;</button>
+      <h3>Remove Photo?</h3>
+      <p id="photo-delete-confirm-summary">This will remove the selected photo and record the deletion trail.</p>
+      <label for="photo-delete-password">Admin Password</label>
+      <input type="password" id="photo-delete-password" autocomplete="current-password" placeholder="Enter your password">
+      <label for="photo-delete-reason">Reason</label>
+      <textarea id="photo-delete-reason" rows="3" placeholder="Optional note for the audit trail"></textarea>
+      <p id="photo-delete-error" class="error-message"></p>
+      <div class="photo-delete-confirm-actions">
+        <button type="button" id="cancel-photo-delete-confirm" class="stock-secondary-btn">Cancel</button>
+        <button type="button" id="confirm-photo-delete" class="stock-primary-btn danger">Remove Photo</button>
+      </div>
+    </div>
+  </div>
+
   <div id="stock-photo-viewer-modal" class="modal hidden">
     <div class="stock-photo-viewer-content">
       <button type="button" id="close-stock-photo-viewer" class="stock-modal-close" title="Close">&times;</button>

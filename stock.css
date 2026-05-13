@@ -2524,6 +2524,60 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   color: #fff;
 }
 
+.photo-delete-confirm-content {
+  position: relative;
+  width: min(460px, calc(100vw - 32px));
+  padding: 24px;
+  border-radius: 22px;
+  background: #fff;
+  color: #1d1d1f;
+  box-shadow: 0 28px 70px rgba(0,0,0,.36);
+  display: grid;
+  gap: 12px;
+}
+
+.photo-delete-confirm-content h3 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.photo-delete-confirm-content p {
+  margin: 0;
+  color: #65656b;
+  font-family: system-ui, sans-serif;
+}
+
+.photo-delete-confirm-content label {
+  color: #3f4148;
+  font-family: system-ui, sans-serif;
+  font-size: .74rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.photo-delete-confirm-content input,
+.photo-delete-confirm-content textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(17,24,39,.16);
+  border-radius: 14px;
+  padding: 11px 12px;
+  font: 800 .95rem system-ui, sans-serif;
+}
+
+.photo-delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.stock-primary-btn.danger {
+  border-color: rgba(190,18,60,.22);
+  background: #be123c;
+}
+
 .stock-photo-viewer-stage {
   display: grid;
   place-items: center;

@@ -3061,6 +3061,14 @@ async function saveSelectedStockPhotos() {
     return;
   }
 
+  const confirmed = window.confirm(
+    `Are you sure you want to add ${selectedPaths.length} selected photo${selectedPaths.length === 1 ? "" : "s"} to this item?`
+  );
+  if (!confirmed) {
+    setStockPhotoStatus("Photo save cancelled. Your selections are still here.", "waiting");
+    return;
+  }
+
   setStockPhotoStatus("Saving selected photos to the item...", "waiting");
   const { data: items, error: fetchError } = await supabase
     .from("item_types")

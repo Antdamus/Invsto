@@ -3,6 +3,8 @@ window.editCardModule = (function () {
     let currentItemId = null;
     let originalWeight = null;
     let deletedPhotos = new Set();
+    let currentItemSnapshot = null;
+    let activePhotoDeleteRequest = null;
 
     //functions needes
     if (typeof getSignedUrl !== "function") {
@@ -162,6 +164,7 @@ window.editCardModule = (function () {
 
         const item = items[0];
         currentItemId = item.id;
+        currentItemSnapshot = item;
         originalWeight = parseFloat(item.weight) || 0;
         deletedPhotos.clear();
 
@@ -214,10 +217,195 @@ window.editCardModule = (function () {
         document.body.classList.remove("modal-open");
     }
     currentItemId = null;
+    currentItemSnapshot = null;
     originalWeight = null;
     }
 
     // 🔹 Save changes: update Supabase, handle DYMO & photos, refresh card
+    function getAuthenticatedStockUser() {
+        try {
+            if (typeof currentUser !== "undefined" && currentUser) return currentUser;
+        } catch (_) {}
+        return null;
+    }
+
+    async function verifyPhotoDeletePassword(password) {
+        const user = getAuthenticatedStockUser();
+        if (!user?.email || !password) return false;
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password,
+        });
+
+        return !error;
+    }
+
+    async function getOptionalPhotoDeleteLocation() {
+        try {
+            if (typeof getUserLocation === "function") {
+                return await getUserLocation();
+            }
+        } catch (error) {
+            console.warn("Photo deletion location unavailable:", error);
+        }
+        return null;
+    }
+
+    function closePhotoDeleteConfirmModal() {
+        document.getElementById("photo-delete-confirm-modal")?.classList.add("hidden");
+        document.getElementById("photo-delete-confirm-modal")?.classList.remove("show");
+        const passwordInput = document.getElementById("photo-delete-password");
+        const reasonInput = document.getElementById("photo-delete-reason");
+        const errorMsg = document.getElementById("photo-delete-error");
+        if (passwordInput) passwordInput.value = "";
+        if (reasonInput) reasonInput.value = "";
+        if (errorMsg) {
+            errorMsg.textContent = "";
+            errorMsg.classList.remove("show");
+        }
+        activePhotoDeleteRequest = null;
+    }
+
+    function openPhotoDeleteConfirmModal(path, thumbElement) {
+        const item = currentItemSnapshot;
+        const modal = document.getElementById("photo-delete-confirm-modal");
+        const summary = document.getElementById("photo-delete-confirm-summary");
+        const passwordInput = document.getElementById("photo-delete-password");
+        const errorMsg = document.getElementById("photo-delete-error");
+        const reasonInput = document.getElementById("photo-delete-reason");
+        if (!modal || !item || !path) return;
+
+        activePhotoDeleteRequest = { itemId: item.id, photoPath: path, thumbElement };
+        if (summary) {
+            summary.textContent = `Remove this photo from ${item.title || "this item"}? This action requires your password and will be logged.`;
+        }
+        if (errorMsg) {
+            errorMsg.textContent = "";
+            errorMsg.classList.remove("show");
+        }
+        if (passwordInput) passwordInput.value = "";
+        if (reasonInput) reasonInput.value = "";
+        modal.classList.remove("hidden");
+        modal.classList.add("show");
+        passwordInput?.focus();
+    }
+
+    async function removePhotoWithAudit() {
+        const request = activePhotoDeleteRequest;
+        const passwordInput = document.getElementById("photo-delete-password");
+        const reasonInput = document.getElementById("photo-delete-reason");
+        const errorMsg = document.getElementById("photo-delete-error");
+        const confirmBtn = document.getElementById("confirm-photo-delete");
+        if (!request?.itemId || !request?.photoPath) return;
+
+        const password = passwordInput?.value?.trim() || "";
+        if (!password) {
+            if (errorMsg) {
+                errorMsg.textContent = "Password required.";
+                errorMsg.classList.add("show");
+            }
+            return;
+        }
+
+        if (confirmBtn) confirmBtn.disabled = true;
+        if (errorMsg) {
+            errorMsg.textContent = "Verifying and creating deletion trail...";
+            errorMsg.classList.add("show");
+        }
+
+        try {
+            const valid = await verifyPhotoDeletePassword(password);
+            if (!valid) throw new Error("Incorrect password. Please try again.");
+
+            const { data: items, error: fetchError } = await supabase
+                .from("item_types")
+                .select("*")
+                .eq("id", request.itemId)
+                .limit(1);
+
+            if (fetchError || !items?.length) {
+                throw new Error(fetchError?.message || "Could not reload the item before removing the photo.");
+            }
+
+            const item = items[0];
+            const existingPhotos = Array.isArray(item.photos) ? item.photos : [];
+            if (!existingPhotos.includes(request.photoPath)) {
+                throw new Error("This photo is no longer attached to the item.");
+            }
+
+            const remainingPhotos = existingPhotos.filter((path) => path !== request.photoPath);
+            const user = getAuthenticatedStockUser();
+            const location = await getOptionalPhotoDeleteLocation();
+            const auditPayload = {
+                item_id: item.id,
+                item_title: item.title || null,
+                item_barcode: item.barcode || null,
+                photo_path: request.photoPath,
+                storage_bucket: "photos",
+                deleted_by_email: user?.email || null,
+                reason: reasonInput?.value?.trim() || null,
+                item_snapshot: item,
+                remaining_photos: remainingPhotos,
+                location_lat: location?.lat ?? null,
+                location_lng: location?.lng ?? null,
+                user_agent: navigator.userAgent || null,
+                status: "requested",
+                storage_removed: false,
+            };
+            if (user?.id) auditPayload.deleted_by = user.id;
+
+            const { data: auditRow, error: auditError } = await supabase
+                .from("photo_deletion_log")
+                .insert(auditPayload)
+                .select("id")
+                .single();
+
+            if (auditError || !auditRow?.id) {
+                throw new Error(auditError?.message || "Could not create the photo deletion audit trail.");
+            }
+
+            const { error: updateError } = await supabase
+                .from("item_types")
+                .update({ photos: remainingPhotos })
+                .eq("id", item.id);
+
+            if (updateError) {
+                await supabase.from("photo_deletion_log").update({
+                    status: "failed",
+                    storage_error: updateError.message || "Item update failed",
+                }).eq("id", auditRow.id);
+                throw new Error(updateError.message || "Could not remove the photo from the item.");
+            }
+
+            const { error: storageError } = await supabase.storage.from("photos").remove([request.photoPath]);
+            await supabase.from("photo_deletion_log").update({
+                status: storageError ? "metadata_removed_storage_failed" : "completed",
+                storage_removed: !storageError,
+                storage_error: storageError?.message || null,
+            }).eq("id", auditRow.id);
+
+            if (typeof signedUrlCache !== "undefined") signedUrlCache.delete(request.photoPath);
+            request.thumbElement?.remove();
+            deletedPhotos.delete(request.photoPath);
+            currentItemSnapshot = { ...item, photos: remainingPhotos };
+            await bumpInventoryVersion();
+            await refreshItemById(item.id);
+            showToast(storageError
+                ? "Photo removed from item, but storage cleanup needs review."
+                : "Photo removed and audit trail saved.");
+            closePhotoDeleteConfirmModal();
+        } catch (error) {
+            console.error("Photo deletion failed:", error);
+            if (errorMsg) {
+                errorMsg.textContent = error?.message || "Could not remove the photo.";
+                errorMsg.classList.add("show");
+            }
+        } finally {
+            if (confirmBtn) confirmBtn.disabled = false;
+        }
+    }
+
     async function saveItemChanges(e) {
         e.preventDefault();
         if (!currentItemId) {
@@ -287,7 +475,7 @@ window.editCardModule = (function () {
    
 
         // 🔹 Remove deleted photos
-        let updatedPhotos = existingItem.photos?.filter(p => !deletedPhotos.has(p)) || [];
+        const updatedPhotos = existingItem.photos || [];
         for (const path of deletedPhotos) {
             console.log(`🗑️ Deleting removed photo: ${path}`);
             await supabase.storage.from("photos").remove([path]);
@@ -367,8 +555,17 @@ window.editCardModule = (function () {
             if (e.target.matches(".delete-photo-btn")) {
                 const pathToDelete = e.target.dataset.path;
                 if (!pathToDelete) return;
-                e.target.closest(".photo-thumb-container")?.remove(); // remove from preview
-                deletedPhotos.add(pathToDelete);                      // mark for deletion
+                openPhotoDeleteConfirmModal(pathToDelete, e.target.closest(".photo-thumb-container"));
+            }
+        });
+
+        document.getElementById("close-photo-delete-confirm")?.addEventListener("click", closePhotoDeleteConfirmModal);
+        document.getElementById("cancel-photo-delete-confirm")?.addEventListener("click", closePhotoDeleteConfirmModal);
+        document.getElementById("confirm-photo-delete")?.addEventListener("click", removePhotoWithAudit);
+        document.getElementById("photo-delete-password")?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                removePhotoWithAudit();
             }
         });
 
