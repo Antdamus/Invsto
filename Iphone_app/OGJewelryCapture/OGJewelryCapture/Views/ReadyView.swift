@@ -33,7 +33,7 @@ struct ReadyView: View {
                         HStack(spacing: 10) {
                             Label(viewModel.listenerState.label, systemImage: "dot.radiowaves.left.and.right")
                             Label(viewModel.captureMode.label, systemImage: "camera.aperture")
-                            Label(activeResolutionLabel, systemImage: "photo")
+                            Label(activeQualityLabel, systemImage: "photo")
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(OGVisualStyle.goldSoft)
@@ -51,8 +51,9 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Camera", value: viewModel.cameraAvailability.label)
+                    LabeledContent("Camera Path", value: viewModel.cameraModeStatus.activeCameraLabel)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: activeResolutionLabel)
+                    LabeledContent("Capture Quality", value: activeQualityLabel)
 
                     if let role = viewModel.employee.role, !role.isEmpty {
                         LabeledContent("Role", value: role)
@@ -82,12 +83,12 @@ struct ReadyView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("Resolution", selection: captureResolutionModeBinding) {
+                    Picker("Capture Quality", selection: captureResolutionModeBinding) {
                         ForEach(CaptureResolutionMode.allCases) { mode in
                             Text(mode.label).tag(mode)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
                     .disabled(viewModel.isResolutionSelectionLocked)
 
                     if viewModel.captureMode == .auto {
@@ -121,11 +122,17 @@ struct ReadyView: View {
                     }
 
                     if viewModel.isResolutionSelectionLocked {
-                        Text("Resolution is locked for the active capture session and applies to every kept photo in this job.")
+                        Text("Capture quality is locked for the active capture session and applies to every kept photo in this job.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else if viewModel.captureResolutionMode == .highResolution {
                         Text("High Resolution requests the largest processed still-photo dimensions supported by the active camera format on this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let cameraModeMessage = viewModel.cameraModeStatus.message {
+                        Text(cameraModeMessage)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -157,7 +164,7 @@ struct ReadyView: View {
                 Section("Active Session") {
                     LabeledContent("Job", value: pendingJobReference)
                     LabeledContent("Kept Photos", value: "\(activeSession.keptPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
-                    LabeledContent("Resolution", value: activeSession.resolutionMode.label)
+                    LabeledContent("Capture Quality", value: activeSession.resolutionMode.label)
 
                     if let primaryPhoto = activeSession.primaryPhoto {
                         LabeledContent("Primary", value: "Photo \(primaryPhoto.sortOrder + 1)")
@@ -312,7 +319,7 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: activeResolutionLabel)
+                    LabeledContent("Capture Quality", value: activeQualityLabel)
 
                     if let latestLocalResult = viewModel.latestLocalResult {
                         LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
@@ -350,7 +357,7 @@ struct ReadyView: View {
                     LabeledContent("Connection", value: viewModel.listenerState.label)
                     LabeledContent("Capture State", value: viewModel.captureState.label)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Resolution", value: activeResolutionLabel)
+                    LabeledContent("Capture Quality", value: activeQualityLabel)
 
                     if let latestUploadResult = viewModel.latestUploadResult {
                         LabeledContent("Job", value: String(latestUploadResult.jobID.uuidString.prefix(8)).uppercased())
@@ -440,7 +447,7 @@ struct ReadyView: View {
         }
     }
 
-    private var activeResolutionLabel: String {
+    private var activeQualityLabel: String {
         viewModel.activeSession?.resolutionMode.label ?? viewModel.captureResolutionMode.label
     }
 

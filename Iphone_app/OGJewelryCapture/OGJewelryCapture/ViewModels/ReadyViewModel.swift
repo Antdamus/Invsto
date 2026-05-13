@@ -66,6 +66,7 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var activeSession: LocalCaptureSession?
     @Published private(set) var captureMode: CaptureMode
     @Published private(set) var captureResolutionMode: CaptureResolutionMode
+    @Published private(set) var cameraModeStatus: CameraModeStatus = .unknown
     @Published private(set) var autoCaptureDelay: TimeInterval
     @Published private(set) var zoomFactor: CGFloat
     @Published private(set) var zoomRange: ClosedRange<CGFloat>
@@ -170,6 +171,7 @@ final class ReadyViewModel: ObservableObject {
 
         cameraAvailability = await cameraService.prepareIfNeeded()
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
         await refreshZoomState(resetToDefault: true)
         captureState = .listening
 
@@ -198,6 +200,7 @@ final class ReadyViewModel: ObservableObject {
         activeJobID = nil
         zoomFactor = CameraZoomState.unavailable.factor
         zoomRange = CameraZoomState.unavailable.range
+        cameraModeStatus = .unknown
         hasStarted = false
     }
 
@@ -225,6 +228,8 @@ final class ReadyViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await self.cameraService.updateCaptureResolutionMode(mode)
+            await self.refreshCameraModeStatus()
+            await self.refreshZoomState(resetToDefault: true)
         }
     }
 
@@ -282,6 +287,7 @@ final class ReadyViewModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             self.cameraAvailability = await self.cameraService.prepareIfNeeded()
+            self.cameraModeStatus = await self.cameraService.currentCameraModeStatus()
             await self.refreshZoomState(resetToDefault: true)
             await self.refreshPendingJob()
         }
@@ -415,6 +421,7 @@ final class ReadyViewModel: ObservableObject {
 
             cameraAvailability = await cameraService.prepareIfNeeded()
             await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+            cameraModeStatus = await cameraService.currentCameraModeStatus()
             await refreshZoomState(resetToDefault: true)
 
             switch cameraAvailability {
@@ -576,6 +583,9 @@ final class ReadyViewModel: ObservableObject {
             scheduleAutoCapture(for: job)
         case .manual:
             pendingAutoCaptureTask?.cancel()
+            Task {
+                await cameraService.enableContinuousPreviewAutoFocus()
+            }
             captureState = .waitingForManualCapture(job)
         }
     }
@@ -709,6 +719,7 @@ final class ReadyViewModel: ObservableObject {
 
         cameraAvailability = await cameraService.prepareIfNeeded()
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
         await refreshZoomState(resetToDefault: true)
         await refreshPendingJob()
     }
@@ -840,6 +851,10 @@ final class ReadyViewModel: ObservableObject {
             zoomFactor = CameraZoomState.unavailable.factor
             zoomRange = CameraZoomState.unavailable.range
         }
+    }
+
+    private func refreshCameraModeStatus() async {
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
     }
 
     var isShowingPersistentResult: Bool {

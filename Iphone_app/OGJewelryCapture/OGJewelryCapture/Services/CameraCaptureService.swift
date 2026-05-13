@@ -57,6 +57,7 @@ enum CameraCaptureServiceError: LocalizedError {
 enum CaptureResolutionMode: String, CaseIterable, Identifiable {
     case standard
     case highResolution
+    case closeUpMacro
 
     var id: String { rawValue }
 
@@ -66,8 +67,26 @@ enum CaptureResolutionMode: String, CaseIterable, Identifiable {
             "Standard"
         case .highResolution:
             "High Resolution"
+        case .closeUpMacro:
+            "Close-Up / Macro"
         }
     }
+}
+
+struct CameraModeStatus: Equatable {
+    let requestedMode: CaptureResolutionMode
+    let activeCameraLabel: String
+    let isUsingCloseUpCamera: Bool
+    let isUsingStandardFallback: Bool
+    let message: String?
+
+    static let unknown = CameraModeStatus(
+        requestedMode: .standard,
+        activeCameraLabel: "Unknown camera",
+        isUsingCloseUpCamera: false,
+        isUsingStandardFallback: false,
+        message: nil
+    )
 }
 
 final class CameraCaptureService: NSObject {
@@ -85,6 +104,7 @@ final class CameraCaptureService: NSObject {
     private var availability: CameraAvailability = .unknown
     private var activeProcessor: PhotoCaptureProcessor?
     private var captureResolutionMode: CaptureResolutionMode = .standard
+    private var cameraModeStatus: CameraModeStatus = .unknown
 
     private let preferredMaximumZoomFactor: CGFloat = 3.0
 
@@ -141,13 +161,44 @@ final class CameraCaptureService: NSObject {
     func updateCaptureResolutionMode(_ mode: CaptureResolutionMode) async {
         captureResolutionMode = mode
 
-        guard availability != .simulatorFallback else { return }
+        guard availability != .simulatorFallback else {
+            cameraModeStatus = CameraModeStatus(
+                requestedMode: mode,
+                activeCameraLabel: "Simulator fallback",
+                isUsingCloseUpCamera: mode == .closeUpMacro,
+                isUsingStandardFallback: false,
+                message: nil
+            )
+            return
+        }
         guard isConfigured else { return }
 
         await withCheckedContinuation { continuation in
             sessionQueue.async {
-                self.applyCaptureResolutionModeToPhotoOutput()
+                do {
+                    try self.configureSession(for: mode, forceReconfigure: false)
+                } catch {
+                    self.applyCaptureResolutionModeToPhotoOutput()
+                }
                 continuation.resume()
+            }
+        }
+    }
+
+    func currentCameraModeStatus() async -> CameraModeStatus {
+        guard availability != .simulatorFallback else {
+            return CameraModeStatus(
+                requestedMode: captureResolutionMode,
+                activeCameraLabel: "Simulator fallback",
+                isUsingCloseUpCamera: captureResolutionMode == .closeUpMacro,
+                isUsingStandardFallback: false,
+                message: nil
+            )
+        }
+
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                continuation.resume(returning: self.cameraModeStatus)
             }
         }
     }
@@ -177,42 +228,61 @@ final class CameraCaptureService: NSObject {
         try await withCheckedThrowingContinuation { continuation in
             sessionQueue.async {
                 do {
-                    self.previewSession.beginConfiguration()
-                    self.previewSession.sessionPreset = .photo
-
-                    self.previewSession.inputs.forEach { self.previewSession.removeInput($0) }
-                    self.previewSession.outputs.forEach { self.previewSession.removeOutput($0) }
-
-                    guard
-                        let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-                    else {
-                        throw CameraCaptureServiceError.cameraUnavailable
-                    }
-
-                    let input = try AVCaptureDeviceInput(device: camera)
-
-                    guard self.previewSession.canAddInput(input) else {
-                        throw CameraCaptureServiceError.cameraUnavailable
-                    }
-
-                    guard self.previewSession.canAddOutput(self.photoOutput) else {
-                        throw CameraCaptureServiceError.cameraUnavailable
-                    }
-
-                    self.previewSession.addInput(input)
-                    self.previewSession.addOutput(self.photoOutput)
-                    self.photoOutput.maxPhotoQualityPrioritization = .quality
-                    self.activeDevice = camera
-                    self.applyCaptureResolutionModeToPhotoOutput()
-
-                    self.previewSession.commitConfiguration()
-                    self.isConfigured = true
+                    try self.configureSession(for: self.captureResolutionMode, forceReconfigure: true)
                     continuation.resume()
                 } catch {
-                    self.previewSession.commitConfiguration()
                     continuation.resume(throwing: error)
                 }
             }
+        }
+    }
+
+    private func configureSession(for mode: CaptureResolutionMode, forceReconfigure: Bool) throws {
+        let selection = try cameraSelection(for: mode)
+
+        if
+            !forceReconfigure,
+            let activeDevice,
+            activeDevice.uniqueID == selection.device.uniqueID,
+            isConfigured
+        {
+            captureResolutionMode = mode
+            cameraModeStatus = selection.status(for: mode)
+            applyCaptureResolutionModeToPhotoOutput()
+            return
+        }
+
+        previewSession.beginConfiguration()
+        previewSession.sessionPreset = .photo
+
+        do {
+            previewSession.inputs.forEach { previewSession.removeInput($0) }
+
+            if !previewSession.outputs.contains(where: { $0 === photoOutput }) {
+                guard previewSession.canAddOutput(photoOutput) else {
+                    throw CameraCaptureServiceError.cameraUnavailable
+                }
+                previewSession.addOutput(photoOutput)
+            }
+
+            let input = try AVCaptureDeviceInput(device: selection.device)
+
+            guard previewSession.canAddInput(input) else {
+                throw CameraCaptureServiceError.cameraUnavailable
+            }
+
+            previewSession.addInput(input)
+            photoOutput.maxPhotoQualityPrioritization = .quality
+            activeDevice = selection.device
+            captureResolutionMode = mode
+            cameraModeStatus = selection.status(for: mode)
+            applyCaptureResolutionModeToPhotoOutput()
+
+            previewSession.commitConfiguration()
+            isConfigured = true
+        } catch {
+            previewSession.commitConfiguration()
+            throw error
         }
     }
 
@@ -373,7 +443,7 @@ final class CameraCaptureService: NSObject {
                 let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
                 settings.photoQualityPrioritization = .quality
 
-                if self.captureResolutionMode == .highResolution,
+                if self.captureResolutionMode.requestsMaximumStillDimensions,
                    let maxPhotoDimensions = self.maximumSupportedPhotoDimensions()
                 {
                     settings.maxPhotoDimensions = maxPhotoDimensions
@@ -482,9 +552,46 @@ final class CameraCaptureService: NSObject {
         switch mode {
         case .standard:
             return minimumDimensions(in: supportedDimensions)
-        case .highResolution:
+        case .highResolution, .closeUpMacro:
             return maximumDimensions(in: supportedDimensions)
         }
+    }
+
+    private func cameraSelection(for mode: CaptureResolutionMode) throws -> CameraSelection {
+        switch mode {
+        case .standard, .highResolution:
+            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+                throw CameraCaptureServiceError.cameraUnavailable
+            }
+
+            return CameraSelection(device: device, path: .wide)
+        case .closeUpMacro:
+            if let ultraWide = firstBackCamera(of: .builtInUltraWideCamera) {
+                return CameraSelection(device: ultraWide, path: .ultraWide)
+            }
+
+            if let dualWide = firstBackCamera(of: .builtInDualWideCamera) {
+                return CameraSelection(device: dualWide, path: .dualWide)
+            }
+
+            if let triple = firstBackCamera(of: .builtInTripleCamera) {
+                return CameraSelection(device: triple, path: .triple)
+            }
+
+            guard let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+                throw CameraCaptureServiceError.cameraUnavailable
+            }
+
+            return CameraSelection(device: wide, path: .wideFallback)
+        }
+    }
+
+    private func firstBackCamera(of deviceType: AVCaptureDevice.DeviceType) -> AVCaptureDevice? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [deviceType],
+            mediaType: .video,
+            position: .back
+        ).devices.first
     }
 
     private func maximumDimensions(in supportedDimensions: [CMVideoDimensions]) -> CMVideoDimensions? {
@@ -510,6 +617,83 @@ final class CameraCaptureService: NSObject {
         }
 
         return (width, height)
+    }
+}
+
+private extension CaptureResolutionMode {
+    var requestsMaximumStillDimensions: Bool {
+        switch self {
+        case .standard:
+            false
+        case .highResolution, .closeUpMacro:
+            true
+        }
+    }
+}
+
+private struct CameraSelection {
+    enum Path {
+        case wide
+        case ultraWide
+        case dualWide
+        case triple
+        case wideFallback
+
+        var label: String {
+            switch self {
+            case .wide, .wideFallback:
+                "Back Wide camera"
+            case .ultraWide:
+                "Back Ultra Wide camera"
+            case .dualWide:
+                "Back Dual Wide camera"
+            case .triple:
+                "Back Triple camera"
+            }
+        }
+
+        var isCloseUpCamera: Bool {
+            switch self {
+            case .ultraWide, .dualWide, .triple:
+                true
+            case .wide, .wideFallback:
+                false
+            }
+        }
+
+        var isStandardFallback: Bool {
+            if case .wideFallback = self {
+                return true
+            }
+
+            return false
+        }
+    }
+
+    let device: AVCaptureDevice
+    let path: Path
+
+    func status(for mode: CaptureResolutionMode) -> CameraModeStatus {
+        let message: String?
+
+        switch (mode, path) {
+        case (.closeUpMacro, .wideFallback):
+            message = "Close-Up uses the standard camera on this device."
+        case (.closeUpMacro, .ultraWide):
+            message = "Close-Up / Macro is using the Ultra Wide camera."
+        case (.closeUpMacro, .dualWide), (.closeUpMacro, .triple):
+            message = "Close-Up / Macro is using a multi-camera close-up path."
+        default:
+            message = nil
+        }
+
+        return CameraModeStatus(
+            requestedMode: mode,
+            activeCameraLabel: path.label,
+            isUsingCloseUpCamera: path.isCloseUpCamera,
+            isUsingStandardFallback: path.isStandardFallback,
+            message: message
+        )
     }
 }
 
