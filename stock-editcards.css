@@ -141,6 +141,10 @@
   transform: scale(1.04);
 }
 
+.worker-hidden-edit-field {
+  display: none !important;
+}
+
 
 .delete-photo-btn {
   position: absolute;

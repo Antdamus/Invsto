@@ -18,6 +18,8 @@ function waitForSupabaseReady(timeoutMs = 8000) {
   });
 }
 
+let locationsAccess = { role: "", isAdmin: false, canUseLocations: false };
+
 async function checkAuth() {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
@@ -40,16 +42,37 @@ async function checkAuth() {
     return false;
   }
 
-  if (String(employee.role || "").toLowerCase() !== "admin") {
+  const role = String(employee.role || "").toLowerCase();
+  const canUseLocations = ["admin", "manager", "employee"].includes(role);
+  locationsAccess = {
+    role,
+    isAdmin: role === "admin",
+    canUseLocations,
+  };
+  window.locationsAccess = locationsAccess;
+  if (!canUseLocations) {
     window.location.href = "worker-dashboard.html";
     return false;
   }
 
+  document.body.classList.toggle("locations-worker-view", role !== "admin");
+
   const greeting = document.getElementById("admin-greeting");
   if (greeting) {
     const name = employee.display_name ? `, ${employee.display_name}` : "";
-    greeting.textContent = `Welcome, Admin${name}`;
+    greeting.textContent = role === "admin" ? `Welcome, Admin${name}` : `Welcome${name}`;
   }
+
+  const subtitle = document.getElementById("header-subtitle");
+  if (subtitle && role !== "admin") {
+    subtitle.textContent = "Tray creation and inventory placement tools";
+  }
+
+  document.querySelectorAll(".header-pills .pill").forEach((pill) => {
+    if (pill.textContent.includes("Mode:")) {
+      pill.innerHTML = `Mode: <b>${role === "admin" ? "Admin" : "Inventory"}</b>`;
+    }
+  });
 
   return true;
 }
@@ -426,20 +449,25 @@ function closeCreateLocationModal() {
 function openCreateLocationModal({ tray = false } = {}) {
   const elements = getCreateModalElements();
   if (!elements.modal) return;
+  const forceTray = !locationsAccess.isAdmin;
+  const createTray = tray || forceTray;
 
   elements.form?.reset();
   populateCreateLocationStoreSelect();
   elements.modal.classList.remove("hidden");
   elements.modal.setAttribute("aria-hidden", "false");
-  if (elements.title) elements.title.textContent = tray ? "Create Tray" : "Create Location";
+  if (elements.title) elements.title.textContent = createTray ? "Create Tray" : "Create Location";
   if (elements.subtitle) {
-    elements.subtitle.textContent = tray
+    elements.subtitle.textContent = createTray
       ? "Create a barcode-ready mobile tray that can be checked in and out."
       : "Create a barcode-ready fixed location.";
   }
-  if (elements.typeInput) elements.typeInput.value = tray ? "tray" : "";
-  if (elements.isTrayInput) elements.isTrayInput.checked = tray;
-  if (elements.toleranceInput) elements.toleranceInput.value = tray ? "10" : "10";
+  if (elements.typeInput) elements.typeInput.value = createTray ? "tray" : "";
+  if (elements.isTrayInput) {
+    elements.isTrayInput.checked = createTray;
+    elements.isTrayInput.disabled = forceTray;
+  }
+  if (elements.toleranceInput) elements.toleranceInput.value = "10";
   if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
   if (elements.status) elements.status.textContent = "";
   generateCreateLocationBarcode();
@@ -477,7 +505,7 @@ async function saveCreatedLocation() {
   const type = asTrimmedString(elements.typeInput?.value);
   const capacityValue = asTrimmedString(elements.capacityInput?.value);
   const locationCode = asTrimmedString(elements.barcodeInput?.value);
-  const isTray = Boolean(elements.isTrayInput?.checked);
+  const isTray = !locationsAccess.isAdmin ? true : Boolean(elements.isTrayInput?.checked);
   const toleranceValue = asTrimmedString(elements.toleranceInput?.value);
   const notes = asTrimmedString(elements.notesInput?.value);
   const photoFile = elements.photoInput?.files?.[0] || null;

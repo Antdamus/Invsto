@@ -24,7 +24,7 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
 
-<body class="stock-body">
+<body class="stock-body stock-access-loading">
 
   <!-- Home Button -->
   <button id="toggle-controller" class="toggle-controller-btn" title="Show/Hide Controls" aria-label="Toggle Controls">
@@ -529,7 +529,7 @@
       <button type="button" id="close-photo-delete-confirm" class="stock-modal-close" title="Close">&times;</button>
       <h3>Remove Photo?</h3>
       <p id="photo-delete-confirm-summary">This will remove the selected photo and record the deletion trail.</p>
-      <label for="photo-delete-password">Admin Password</label>
+      <label for="photo-delete-password">Your Password</label>
       <input type="password" id="photo-delete-password" autocomplete="current-password" placeholder="Enter your password">
       <label for="photo-delete-reason">Reason</label>
       <textarea id="photo-delete-reason" rows="3" placeholder="Optional note for the audit trail"></textarea>

@@ -2578,6 +2578,21 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   background: #be123c;
 }
 
+.hidden-sensitive-filter,
+.stock-access-loading input[name="distributor"],
+.stock-access-loading input[name="costMin"],
+.stock-access-loading input[name="costMax"],
+.stock-access-loading #bulk-delete,
+.stock-access-loading #bulk-export,
+.worker-stock-view .stock-sensitive-legacy,
+.worker-stock-view #bulk-delete,
+.worker-stock-view #bulk-export,
+.worker-stock-view #bulk-category-container,
+.worker-stock-view .remove-category-btn,
+.worker-stock-view .custom-dropdown[id^="cardchip-container"] {
+  display: none !important;
+}
+
 .stock-photo-viewer-stage {
   display: grid;
   place-items: center;

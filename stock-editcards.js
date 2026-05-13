@@ -6,6 +6,47 @@ window.editCardModule = (function () {
     let currentItemSnapshot = null;
     let activePhotoDeleteRequest = null;
 
+    function canViewSensitiveStockFields() {
+        return Boolean(window.stockAccess?.canViewSensitive);
+    }
+
+    function setEditFieldVisible(fieldId, visible) {
+        const field = document.getElementById(fieldId);
+        const label = document.querySelector(`label[for="${fieldId}"]`);
+        [label, field].forEach((node) => {
+            if (!node) return;
+            node.classList.toggle("worker-hidden-edit-field", !visible);
+            node.setAttribute("aria-hidden", visible ? "false" : "true");
+        });
+    }
+
+    function applyEditModalAccessMode() {
+        const canSensitive = canViewSensitiveStockFields();
+        const modalTitle = document.querySelector("#editItemModal h2");
+        if (modalTitle) modalTitle.textContent = canSensitive ? "Edit Inventory Item" : "Photo Settings";
+
+        [
+            "edit-title",
+            "edit-description",
+            "edit-weight",
+            "edit-qr-type",
+            "edit-qr",
+            "edit-cost",
+            "edit-sale-price",
+            "edit-price-per-weight",
+            "edit-stock-batch",
+        ].forEach((fieldId) => setEditFieldVisible(fieldId, canSensitive));
+
+        const dymoButton = document.getElementById("generate-edit-dymo-label");
+        if (dymoButton) dymoButton.classList.toggle("worker-hidden-edit-field", !canSensitive);
+
+        const saveButton = document.querySelector("#edit-item-form .save-edit-btn");
+        if (saveButton) saveButton.classList.toggle("worker-hidden-edit-field", !canSensitive);
+
+        const fileWrapper = document.getElementById("edit-photos")?.closest(".file-input-wrapper");
+        if (fileWrapper) fileWrapper.classList.toggle("worker-hidden-edit-field", !canSensitive);
+    }
+
     //functions needes
     if (typeof getSignedUrl !== "function") {
         async function getSignedUrl(path) {
@@ -179,6 +220,8 @@ window.editCardModule = (function () {
         document.getElementById("edit-barcode").value = item.barcode || "";
         document.getElementById("edit-qr-type").value = item.qr_type || "";
         document.getElementById("edit-qr").value = item.qr_code || "";
+
+        applyEditModalAccessMode();
 
         // 🔹 Inject current photos preview
         const previewContainer = document.getElementById("current-photos-preview");
@@ -365,10 +408,16 @@ window.editCardModule = (function () {
                 throw new Error(auditError?.message || "Could not create the photo deletion audit trail.");
             }
 
-            const { error: updateError } = await supabase
-                .from("item_types")
-                .update({ photos: remainingPhotos })
-                .eq("id", item.id);
+            const updateResult = canViewSensitiveStockFields()
+                ? await supabase
+                    .from("item_types")
+                    .update({ photos: remainingPhotos })
+                    .eq("id", item.id)
+                : await supabase.rpc("remove_item_photo", {
+                    _item_id: item.id,
+                    _photo_path: request.photoPath,
+                });
+            const updateError = updateResult.error;
 
             if (updateError) {
                 await supabase.from("photo_deletion_log").update({
@@ -408,6 +457,10 @@ window.editCardModule = (function () {
 
     async function saveItemChanges(e) {
         e.preventDefault();
+        if (!canViewSensitiveStockFields()) {
+            alert("Only admins can edit item details. Workers can add, remove, and manage photos from the stock tools.");
+            return;
+        }
         if (!currentItemId) {
             console.warn("No item selected for editing.");
             return;

@@ -4,6 +4,8 @@ let itemsPerPage = 6;                 // Number of items per page
 let allItems = [];                     // Holds all fetched stock items
 let userFavorites = new Set();         // Set of favorite item IDs for the current user
 let currentUser = null;                // Holds authenticated user info
+let currentEmployee = null;
+let stockAccess = { role: "", isAdmin: false, canViewSensitive: false };
 let selectedItems = new Set();         // Tracks currently selected items for bulk actions
 let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
 let activeDropdown = null;
@@ -76,6 +78,57 @@ function escapeStockHtml(value) {
 function formatStockMoney(value) {
   const number = Number(value || 0);
   return `$${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function canViewSensitiveStockData() {
+  return Boolean(stockAccess?.canViewSensitive);
+}
+
+function applyStockAccessUi() {
+  document.body.classList.remove("stock-access-loading");
+  document.body.classList.toggle("worker-stock-view", !canViewSensitiveStockData());
+
+  if (!canViewSensitiveStockData()) {
+    const backButton = document.querySelector(".back-button");
+    if (backButton) {
+      backButton.setAttribute("href", "worker-dashboard.html");
+    }
+    document.querySelector('input[name="distributor"]')?.classList.add("hidden-sensitive-filter");
+    document.querySelector('input[name="costMin"]')?.classList.add("hidden-sensitive-filter");
+    document.querySelector('input[name="costMax"]')?.classList.add("hidden-sensitive-filter");
+    document.querySelectorAll('#sortDropdownMenu [data-value^="cost"], #sort-select option[value^="cost"]').forEach((el) => el.remove());
+    const sortSelect = document.getElementById("sort-select");
+    if (sortSelect?.value?.startsWith("cost")) sortSelect.value = "title-asc";
+  }
+}
+
+async function loadStockAccessForCurrentUser() {
+  if (!currentUser?.id) return null;
+
+  const { data, error } = await supabase
+    .from("employees")
+    .select("role, active, display_name")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not load stock employee access:", error);
+    stockAccess = { role: "", isAdmin: false, canViewSensitive: false };
+    window.stockAccess = stockAccess;
+    applyStockAccessUi();
+    return null;
+  }
+
+  currentEmployee = data || null;
+  const role = String(data?.role || "").toLowerCase();
+  stockAccess = {
+    role,
+    isAdmin: role === "admin",
+    canViewSensitive: role === "admin",
+  };
+  window.stockAccess = stockAccess;
+  applyStockAccessUi();
+  return data;
 }
 
 function buildLocationChips(item) {
@@ -217,6 +270,7 @@ function buildLocationChips(item) {
       const stock = typeof item.stock === "number" ? item.stock : 0;
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
+      const showSensitive = canViewSensitiveStockData();
       const stockLabel = `
         <button type="button" class="stock-count ${stockClass}" data-tooltip="${escapeStockHtml(tooltip)}" data-id="${item.id}">
           ${stock === 0 ? `<i data-lucide="alert-circle" class="stock-alert-icon"></i>` : ""}
@@ -251,9 +305,9 @@ function buildLocationChips(item) {
           <p class="stock-description">${escapeStockHtml(item.description || "No description recorded.")}</p>
           <div class="stock-metric-grid">
             <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
-            <span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>
             <span><small>Sale</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
             <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
+            ${showSensitive ? `<span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>` : ""}
           </div>
           <div class="stock-location-section">
             <div class="stock-section-row">
@@ -264,12 +318,13 @@ function buildLocationChips(item) {
           </div>
           <details class="stock-card-details">
             <summary>More details</summary>
-            <p><strong>Distributor:</strong> ${escapeStockHtml(item.distributor_name || "-")}<br/>${escapeStockHtml(item.distributor_phone || "")}</p>
-            <p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>
+            ${showSensitive ? `<p><strong>Distributor:</strong> ${escapeStockHtml(item.distributor_name || "-")}<br/>${escapeStockHtml(item.distributor_phone || "")}</p>` : ""}
+            ${showSensitive ? `<p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>` : ""}
             <p><strong>QR Type:</strong> ${escapeStockHtml(item.qr_type || "-")}</p>
             <p><strong>Last Updated:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
             ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${escapeStockHtml(item.dymo_label_url)}">DYMO Label</a></p>` : ""}
           </details>
+          <div class="stock-sensitive-legacy">
           <p><strong>Weight:</strong> ${item.weight}</p>
           <p><strong>Cost:</strong> $${Number(item.cost || 0).toLocaleString()}</p>
           <p><strong>Sale Price:</strong> $${Number(item.sale_price || 0).toLocaleString()}</p>
@@ -279,6 +334,7 @@ function buildLocationChips(item) {
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
           ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${item.dymo_label_url}">📄 DYMO Label</a></p>` : ""}
+          </div>
           ${stockLabel}
           <p class="chip-section-label">Categories:</p>
           <div class="category-chips">
@@ -631,17 +687,18 @@ function buildLocationChips(item) {
       syncHiddenInputsWithDropdowns()
       const form = document.getElementById("filter-form");
       const formData = new FormData(form);
+      const showSensitive = canViewSensitiveStockData();
 
       return {
         title: formData.get("title")?.toLowerCase(),
         description: formData.get("description")?.toLowerCase(),
         barcode: formData.get("barcode")?.toLowerCase(),
-        distributor: formData.get("distributor")?.toLowerCase(),
+        distributor: showSensitive ? formData.get("distributor")?.toLowerCase() : null,
 
         weightMin: parseOrNull(formData.get("weightMin")),
         weightMax: parseOrNull(formData.get("weightMax")),
-        costMin: parseOrNull(formData.get("costMin")),
-        costMax: parseOrNull(formData.get("costMax")),
+        costMin: showSensitive ? parseOrNull(formData.get("costMin")) : null,
+        costMax: showSensitive ? parseOrNull(formData.get("costMax")) : null,
         priceMin: parseOrNull(formData.get("priceMin")),
         priceMax: parseOrNull(formData.get("priceMax")),
         stockMin: parseOrNull(formData.get("stockMin")),
@@ -744,6 +801,7 @@ function buildLocationChips(item) {
       // Parse the field to sort by and the direction (asc or desc)
       const [field, direction] = sortValue.split("-");
       const isAsc = direction === "asc";
+      if (field === "cost" && !canViewSensitiveStockData()) return [...data];
     
       // Create and return a new sorted array
       return [...data].sort((a, b) => {
@@ -1698,6 +1756,10 @@ function buildLocationChips(item) {
     // 🔴 Event listener for the "Delete" button in the bulk toolbar
     // ✅ Bulk Delete: Show password confirmation before deletion
     document.getElementById("bulk-delete")?.addEventListener("click", async () => {
+      if (!canViewSensitiveStockData()) {
+        showToast("Only admins can delete stock items.");
+        return;
+      }
       if (selectedItems.size === 0) return;
     
       const now = Date.now();
@@ -1865,6 +1927,10 @@ function buildLocationChips(item) {
 
     // 📄 Export selected cards to CSV
     document.getElementById("bulk-export")?.addEventListener("click", () => {
+      if (!canViewSensitiveStockData()) {
+        showToast("Only admins can export stock data.");
+        return;
+      }
       const exportCards = Array.from(document.querySelectorAll(".stock-card"))
         .filter(card => selectedItems.has(card.dataset.itemId));
 
@@ -3070,23 +3136,32 @@ async function saveSelectedStockPhotos() {
   }
 
   setStockPhotoStatus("Saving selected photos to the item...", "waiting");
-  const { data: items, error: fetchError } = await supabase
-    .from("item_types")
-    .select("id, photos")
-    .eq("id", itemId)
-    .limit(1);
+  let saveResult;
+  if (canViewSensitiveStockData()) {
+    const { data: items, error: fetchError } = await supabase
+      .from("item_types")
+      .select("id, photos")
+      .eq("id", itemId)
+      .limit(1);
 
-  if (fetchError || !items?.length) {
-    setStockPhotoStatus(fetchError?.message || "Could not load the item before saving.", "error");
-    return;
+    if (fetchError || !items?.length) {
+      saveResult = { error: fetchError || new Error("Could not load the item before saving.") };
+    } else {
+      const existingPhotos = Array.isArray(items[0].photos) ? items[0].photos : [];
+      const nextPhotos = [...new Set([...existingPhotos, ...selectedPaths])];
+      saveResult = await supabase
+        .from("item_types")
+        .update({ photos: nextPhotos })
+        .eq("id", itemId);
+    }
+  } else {
+    saveResult = await supabase.rpc("append_item_photos", {
+      _item_id: itemId,
+      _photo_paths: selectedPaths,
+    });
   }
 
-  const existingPhotos = Array.isArray(items[0].photos) ? items[0].photos : [];
-  const nextPhotos = [...new Set([...existingPhotos, ...selectedPaths])];
-  const { error } = await supabase
-    .from("item_types")
-    .update({ photos: nextPhotos })
-    .eq("id", itemId);
+  const { error } = saveResult;
 
   if (error) {
     setStockPhotoStatus(error.message || "Could not save photos.", "error");
@@ -3905,6 +3980,10 @@ function setupExportModal() {
   if (!exportBtn || !modal || !closeBtn) return;
 
   exportBtn.addEventListener("click", () => {
+    if (!canViewSensitiveStockData()) {
+      showToast("Only admins can export stock data.");
+      return;
+    }
     modal.classList.remove("hidden");
     document.body.classList.add("modal-open");
   });
@@ -4183,6 +4262,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Step 1: Authenticate and load user favorites
   currentUser = (await supabase.auth.getUser()).data.user;
   if (currentUser) {
+    await loadStockAccessForCurrentUser();
     const { data: favs } = await supabase
       .from("favorites")
       .select("item_id")
