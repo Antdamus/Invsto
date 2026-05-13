@@ -355,8 +355,9 @@ window.editCardModule = (function () {
 
         // Delegated listener: clicks on edit buttons
         document.addEventListener("click", (e) => {
-            if (e.target.matches(".edit-item-btn")) {
-                const itemId = e.target.dataset.id;
+            const editButton = e.target.closest(".edit-item-btn");
+            if (editButton) {
+                const itemId = editButton.dataset.id;
                 if (!itemId) return;
                 openEditModal(itemId); // now just pass the ID!
             }

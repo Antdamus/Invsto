@@ -12,6 +12,39 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 // 🔒 In-memory cache for signed photo URLs
 const signedUrlCache = new Map();
 const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
+const STOCK_IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
+const STOCK_PHOTO_BUCKET = "photos";
+const STOCK_BACKGROUND_REMOVAL_MODULE_URL = "https://esm.sh/@imgly/background-removal@1.7.0?bundle";
+const STOCK_LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
+const STOCK_LOCAL_UPLOAD_MAX_SIDE = 2200;
+const STOCK_BACKGROUND_MAX_SOURCE_SIDE = 1600;
+const STOCK_EDITOR_OUTPUT_SIZE = 1200;
+const STOCK_CAPTURE_JOB_TABLE = "capture_jobs";
+const STOCK_CAPTURE_PHOTO_TABLE = "capture_job_photos";
+const STOCK_CAPTURE_STATION_TABLE = "capture_stations";
+const STOCK_CAPTURE_POLL_INTERVAL_MS = 1500;
+const STOCK_CAPTURE_POLL_TIMEOUT_MS = 120000;
+const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
+let stockBackgroundRemovalModulePromise = null;
+
+const stockMediaState = {
+  itemId: null,
+  stagedImages: [],
+  selectedPaths: new Set(),
+  busy: false,
+  latestCaptureJob: null,
+  captureStations: [],
+  selectedCaptureStationId: "",
+  editor: {
+    index: -1,
+    image: null,
+    imageElement: null,
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+    rotation: 0,
+  },
+};
 
 const TRAY_STATUS_LABELS = {
   checked_in: "Checked In",
@@ -220,7 +253,7 @@ function buildLocationChips(item) {
             <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
             <span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>
             <span><small>Sale</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
-            <span><small>Barcode</small><strong>${escapeStockHtml(item.barcode || "-")}</strong></span>
+            <span><small>Barcode</small><button type="button" class="stock-barcode-btn" data-barcode="${escapeStockHtml(item.barcode || "")}">${escapeStockHtml(item.barcode || "-")}</button></span>
           </div>
           <div class="stock-location-section">
             <div class="stock-section-row">
@@ -346,7 +379,7 @@ function buildLocationChips(item) {
         <div class="carousel" id="carousel-${index}">
           <div class="carousel-track">
             ${signedUrls.map((url, i) => `
-              <img loading="lazy" src="${url}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/>
+              <img loading="lazy" src="${url}" class="carousel-photo stock-photo-open ${i === 0 ? 'active' : ''}" data-id="${item.id}" data-path="${escapeStockHtml(visiblePaths[i] || "")}" data-photo-index="${i}" alt="Item photo"/>
             `).join('')}
           </div>
           ${validPaths.length > 1 ? `<span class="stock-photo-count">+${validPaths.length - 1} photos</span>` : ""}
@@ -381,11 +414,18 @@ function buildLocationChips(item) {
       </button>
     `;
 
+    const photoBtn = `
+      <button class="stock-add-photo-btn" data-id="${id}" title="Add item photos">
+        <i data-lucide="camera"></i>
+      </button>
+    `;
+
 
     return `
       <div class="float-controls-inner">
         ${checkbox}
         ${favoriteBtn}
+        ${photoBtn}
         ${editBtn} <!-- 🆕 placed edit button with existing float controls -->
       </div>
     `;
@@ -509,6 +549,21 @@ function buildLocationChips(item) {
           if (itemId) {
             transferModule.openTransferModal(itemId);
           }
+        }
+
+        const photoTrigger = e.target.closest(".stock-photo-open");
+        if (photoTrigger) {
+          openStockPhotoViewer(photoTrigger.dataset.id, photoTrigger.dataset.path || "");
+        }
+
+        const addPhotoTrigger = e.target.closest(".stock-add-photo-btn");
+        if (addPhotoTrigger) {
+          openStockPhotoManager(addPhotoTrigger.dataset.id);
+        }
+
+        const barcodeTrigger = e.target.closest(".stock-barcode-btn");
+        if (barcodeTrigger) {
+          openBarcodeModal(barcodeTrigger.dataset.barcode || barcodeTrigger.textContent);
         }
       });
 
@@ -745,6 +800,7 @@ function buildLocationChips(item) {
       const btn = document.createElement("button");
       btn.textContent = label;
       if (isActive) btn.classList.add("active");
+      if (isActive && page === currentPage) btn.setAttribute("aria-current", "page");
       btn.addEventListener("click", () => {
         currentPage = page;
         const filtered = getFilteredItems(allItems);
@@ -755,8 +811,26 @@ function buildLocationChips(item) {
       container.appendChild(btn);
     }
 
+    function getCompactPageList(totalPages) {
+      if (totalPages <= 9) {
+        return Array.from({ length: totalPages }, (_, index) => index + 1);
+      }
+
+      const pages = new Set([1, totalPages]);
+      for (let page = currentPage - 2; page <= currentPage + 2; page += 1) {
+        if (page >= 1 && page <= totalPages) pages.add(page);
+      }
+
+      const sorted = [...pages].sort((a, b) => a - b);
+      return sorted.reduce((result, page, index) => {
+        if (index > 0 && page - sorted[index - 1] > 1) result.push("...");
+        result.push(page);
+        return result;
+      }, []);
+    }
+
     //function to put buttons for the pages
-    function renderPaginationControls(totalPages) {
+    function renderPaginationControlsLegacy(totalPages) {
       const container = document.getElementById("pagination-buttons");
       container.innerHTML = ""; // 🧹 Clear previous buttons
     
@@ -777,6 +851,52 @@ function buildLocationChips(item) {
       if (currentPage < totalPages) {
         addBtn("Next »", currentPage + 1, false, container);
       }
+    }
+
+    function renderPaginationControls(totalPages) {
+      const container = document.getElementById("pagination-buttons");
+      container.innerHTML = "";
+
+      if (totalPages <= 1) return;
+
+      const compactBar = document.createElement("div");
+      compactBar.className = "pagination-compact-bar";
+
+      if (currentPage > 1) {
+        addBtn("Prev", currentPage - 1, false, compactBar);
+      }
+
+      const summary = document.createElement("span");
+      summary.className = "pagination-summary-pill";
+      summary.textContent = `Page ${currentPage} of ${totalPages}`;
+      compactBar.appendChild(summary);
+
+      if (currentPage < totalPages) {
+        addBtn("Next", currentPage + 1, false, compactBar);
+      }
+
+      const details = document.createElement("details");
+      details.className = "pagination-page-drawer";
+      const drawerSummary = document.createElement("summary");
+      drawerSummary.textContent = "Pages";
+      const pageList = document.createElement("div");
+      pageList.className = "pagination-page-list";
+
+      getCompactPageList(totalPages).forEach((page) => {
+        if (page === "...") {
+          const ellipsis = document.createElement("span");
+          ellipsis.className = "pagination-ellipsis";
+          ellipsis.textContent = "...";
+          pageList.appendChild(ellipsis);
+          return;
+        }
+        addBtn(page, page, page === currentPage, pageList);
+      });
+
+      details.appendChild(drawerSummary);
+      details.appendChild(pageList);
+      container.appendChild(compactBar);
+      container.appendChild(details);
     }
 
     // paginate and renders the data you give it, here, the sorted items
@@ -2386,6 +2506,1032 @@ function showToast(message) {
   }, 4000);
 }
 
+let stockPhotoViewerItemId = null;
+
+function getStockItemById(itemId) {
+  return allItems.find((item) => String(item.id) === String(itemId)) || null;
+}
+
+function getStockItemPhotoPaths(item) {
+  return (Array.isArray(item?.photoPaths) ? item.photoPaths : Array.isArray(item?.photos) ? item.photos : [])
+    .filter((path) => typeof path === "string" && path.includes("/"));
+}
+
+function setStockPhotoStatus(message, type = "") {
+  const status = document.getElementById("stock-photo-manager-status");
+  if (!status) return;
+  status.textContent = message;
+  status.className = type ? `is-${type}` : "";
+}
+
+function setStockPhotoProgress(percent = 0, label = "", active = true) {
+  const progress = document.getElementById("stock-photo-progress");
+  const bar = document.getElementById("stock-photo-progress-bar");
+  const labelEl = document.getElementById("stock-photo-progress-label");
+  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+
+  if (progress) {
+    progress.classList.toggle("is-active", active);
+    progress.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+  if (bar) bar.style.width = `${clamped}%`;
+  if (labelEl) labelEl.textContent = label || (active ? `${Math.round(clamped)}%` : "Idle");
+}
+
+function resetStockPhotoProgress() {
+  setStockPhotoProgress(0, "Idle", false);
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "readonly");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+}
+
+async function openBarcodeModal(barcode) {
+  const value = String(barcode || "").trim();
+  if (!value) {
+    showToast("No barcode recorded for this item.");
+    return;
+  }
+
+  await copyTextToClipboard(value);
+  document.getElementById("stock-barcode-full-value").textContent = value;
+  document.getElementById("stock-barcode-modal")?.classList.remove("hidden");
+  document.getElementById("stock-barcode-modal")?.classList.add("show");
+  document.body.classList.add("modal-open");
+}
+
+function closeBarcodeModal() {
+  document.getElementById("stock-barcode-modal")?.classList.add("hidden");
+  document.getElementById("stock-barcode-modal")?.classList.remove("show");
+  document.body.classList.remove("modal-open");
+}
+
+function stockCanvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not prepare the image."));
+    }, type, quality);
+  });
+}
+
+function stockReadBlobAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function getStockFileExtension(file) {
+  const ext = String(file?.name || "").split(".").pop()?.toLowerCase();
+  if (["jpg", "jpeg", "png", "webp"].includes(ext)) return ext === "jpeg" ? "jpg" : ext;
+  const type = String(file?.type || "").toLowerCase();
+  if (type.includes("png")) return "png";
+  if (type.includes("webp")) return "webp";
+  return "jpg";
+}
+
+function getSafeStockUploadName(file) {
+  const baseName = String(file?.name || "stock-photo")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80) || "stock-photo";
+  return `${baseName}.${getStockFileExtension(file)}`;
+}
+
+function loadStockImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load the image."));
+    image.src = src;
+  });
+}
+
+async function prepareStockUploadBlob(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) {
+    throw new Error("Choose a valid image file.");
+  }
+
+  const canUploadDirectly = file.size <= STOCK_LOCAL_UPLOAD_MAX_DIRECT_BYTES
+    && /image\/(png|jpe?g|webp)/i.test(file.type || "");
+  if (canUploadDirectly) {
+    return {
+      blob: file,
+      mimeType: file.type || "image/jpeg",
+      fileName: getSafeStockUploadName(file),
+    };
+  }
+
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadStockImageElement(sourceUrl);
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    const scale = Math.min(1, STOCK_LOCAL_UPLOAD_MAX_SIDE / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Browser image preparation is not available.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return {
+      blob: await stockCanvasToBlob(canvas, "image/jpeg", 0.94),
+      mimeType: "image/jpeg",
+      fileName: getSafeStockUploadName(file).replace(/\.(png|webp)$/i, ".jpg"),
+    };
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
+}
+
+async function uploadStockPhotoFile(file) {
+  const prepared = await prepareStockUploadBlob(file);
+  return await uploadStockPhotoBlob(prepared.blob, prepared.fileName, prepared.mimeType);
+}
+
+async function uploadStockPhotoBlob(blob, fileName = "stock-photo.jpg", mimeType = "image/jpeg") {
+  const type = mimeType || blob?.type || "image/jpeg";
+  const extension = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+  const baseName = String(fileName || "stock-photo")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^\w.\-]+/g, "_") || "stock-photo";
+  const safeName = `${baseName}.${extension}`;
+  const uploadPath = `item_photos/${stockMediaState.itemId}-${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+  const { error } = await supabase.storage
+    .from(STOCK_PHOTO_BUCKET)
+    .upload(uploadPath, blob, {
+      upsert: true,
+      contentType: type,
+    });
+
+  if (error) throw new Error(error.message || "Photo upload failed.");
+
+  signedUrlCache.delete(uploadPath);
+  return {
+    path: uploadPath,
+    name: fileName || safeName,
+    previewUrl: await getSignedUrl(uploadPath),
+    sourceType: "uploaded",
+  };
+}
+
+async function getStockFunctionErrorDetail(error) {
+  try {
+    const response = error?.context?.response;
+    if (response?.clone) {
+      const payload = await response.clone().json();
+      return String(payload?.detail || payload?.error || payload?.message || "").trim();
+    }
+  } catch (detailError) {
+    console.warn("Could not read image processor error:", detailError);
+  }
+  return String(error?.message || "").trim();
+}
+
+async function loadStockBackgroundRemoval() {
+  if (!stockBackgroundRemovalModulePromise) {
+    stockBackgroundRemovalModulePromise = import(STOCK_BACKGROUND_REMOVAL_MODULE_URL)
+      .then((module) => module.default || module.removeBackground || module);
+  }
+  return stockBackgroundRemovalModulePromise;
+}
+
+async function createStockObjectUrl(previewUrl) {
+  const response = await fetch(previewUrl);
+  if (!response.ok) throw new Error(`Could not download the image (${response.status}).`);
+  const blob = await response.blob();
+  const imageUrl = URL.createObjectURL(blob);
+  return {
+    imageUrl,
+    revoke: () => URL.revokeObjectURL(imageUrl),
+  };
+}
+
+async function createStockSourceBlobForBackgroundRemoval(image) {
+  const objectUrl = await createStockObjectUrl(image.previewUrl);
+  try {
+    const sourceImage = await loadStockImageElement(objectUrl.imageUrl);
+    const sourceWidth = sourceImage.naturalWidth || sourceImage.width;
+    const sourceHeight = sourceImage.naturalHeight || sourceImage.height;
+    const scale = Math.min(1, STOCK_BACKGROUND_MAX_SOURCE_SIDE / Math.max(sourceWidth, sourceHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Browser image processing is not available.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(sourceImage, 0, 0, canvas.width, canvas.height);
+    return await stockCanvasToBlob(canvas, "image/png", 0.95);
+  } finally {
+    objectUrl.revoke();
+  }
+}
+
+async function createStockBackgroundPayload(image, background, options = {}) {
+  options.onProgress?.(10, "Preparing image...");
+  const sourceBlob = await createStockSourceBlobForBackgroundRemoval(image);
+  options.onProgress?.(18, "Loading background remover...");
+  const removeBackground = await loadStockBackgroundRemoval();
+  options.onProgress?.(25, "Removing background...");
+  const cutoutBlob = await removeBackground(sourceBlob, {
+    model: "isnet_fp16",
+    output: {
+      format: "image/png",
+      quality: 0.95,
+      type: "foreground",
+    },
+    progress: (key, current, total) => {
+      if (!total) return;
+      const percent = 25 + Math.round((current / total) * 45);
+      options.onProgress?.(percent, "Removing background...");
+    },
+  });
+
+  const cutoutUrl = URL.createObjectURL(cutoutBlob);
+  try {
+    options.onProgress?.(74, `Compositing ${background} background...`);
+    const cutout = await loadStockImageElement(cutoutUrl);
+    const width = cutout.naturalWidth || cutout.width;
+    const height = cutout.naturalHeight || cutout.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Browser image compositing is not available.");
+    context.fillStyle = background === "black" ? "#000000" : "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(cutout, 0, 0, width, height);
+    const processedBlob = await stockCanvasToBlob(canvas, "image/png", 0.95);
+    const dataUrl = await stockReadBlobAsDataUrl(processedBlob);
+    const processedImageBase64 = dataUrl.split(",")[1] || "";
+    if (!processedImageBase64) throw new Error("Background processor returned an empty image.");
+    options.onProgress?.(86, "Uploading processed version...");
+    return {
+      processedImageBase64,
+      processedMimeType: processedBlob.type || "image/png",
+    };
+  } finally {
+    URL.revokeObjectURL(cutoutUrl);
+  }
+}
+
+function renderStockPhotoManagerGrid() {
+  const grid = document.getElementById("stock-photo-manager-grid");
+  const selectedCount = document.getElementById("stock-photo-selected-count");
+  if (!grid) return;
+
+  if (selectedCount) {
+    selectedCount.textContent = `${stockMediaState.selectedPaths.size} selected`;
+  }
+
+  if (!stockMediaState.stagedImages.length) {
+    grid.innerHTML = `<div class="stock-photo-empty">Choose photos to start. Black background versions are prepared automatically.</div>`;
+    return;
+  }
+
+  grid.innerHTML = stockMediaState.stagedImages.map((image, index) => {
+    const isSelected = stockMediaState.selectedPaths.has(image.path);
+    return `
+      <article class="stock-photo-candidate ${isSelected ? "is-selected" : ""}" data-index="${index}">
+        <button type="button" class="stock-photo-candidate-image" data-action="preview" data-index="${index}">
+          <img src="${escapeStockHtml(image.previewUrl || "")}" alt="${escapeStockHtml(image.name || "Item photo")}">
+        </button>
+        <div class="stock-photo-candidate-body">
+          <strong>${escapeStockHtml(image.name || "Item photo")}</strong>
+          <small>${escapeStockHtml(image.sourceType || "photo")}</small>
+        </div>
+        <div class="stock-photo-candidate-actions">
+          <button type="button" data-action="toggle" data-index="${index}">${isSelected ? "Selected" : "Use"}</button>
+          <button type="button" data-action="edit" data-index="${index}">Edit</button>
+          <button type="button" data-action="black" data-index="${index}">Black</button>
+          <button type="button" data-action="white" data-index="${index}">White</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function closeStockPhotoEditor() {
+  const editor = document.getElementById("stock-photo-editor");
+  editor?.classList.add("hidden");
+  stockMediaState.editor = {
+    index: -1,
+    image: null,
+    imageElement: null,
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+    rotation: 0,
+  };
+}
+
+function syncStockEditorControls() {
+  document.getElementById("stock-photo-editor-zoom").value = String(stockMediaState.editor.zoom);
+  document.getElementById("stock-photo-editor-x").value = String(stockMediaState.editor.offsetX);
+  document.getElementById("stock-photo-editor-y").value = String(stockMediaState.editor.offsetY);
+}
+
+function drawStockPhotoEditor() {
+  const canvas = document.getElementById("stock-photo-editor-canvas");
+  const image = stockMediaState.editor.imageElement;
+  if (!canvas || !image) return;
+
+  const context = canvas.getContext("2d");
+  if (!context) return;
+
+  const size = canvas.width;
+  const baseScale = Math.min(size / image.width, size / image.height);
+  const scale = baseScale * stockMediaState.editor.zoom;
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const maxOffset = size * 0.42;
+  const x = size / 2 + stockMediaState.editor.offsetX * maxOffset;
+  const y = size / 2 + stockMediaState.editor.offsetY * maxOffset;
+
+  context.clearRect(0, 0, size, size);
+  context.fillStyle = "#101014";
+  context.fillRect(0, 0, size, size);
+  context.save();
+  context.translate(x, y);
+  context.rotate(stockMediaState.editor.rotation * Math.PI / 180);
+  context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  context.restore();
+}
+
+async function openStockPhotoEditor(index) {
+  const image = stockMediaState.stagedImages[index];
+  if (!image?.previewUrl) return;
+
+  setStockPhotoStatus("Opening editor. Crop, recenter, or rotate the photo.", "waiting");
+  const objectUrl = await createStockObjectUrl(image.previewUrl);
+  try {
+    const imageElement = await loadStockImageElement(objectUrl.imageUrl);
+    stockMediaState.editor = {
+      index,
+      image,
+      imageElement,
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+      rotation: 0,
+    };
+    document.getElementById("stock-photo-editor")?.classList.remove("hidden");
+    syncStockEditorControls();
+    drawStockPhotoEditor();
+    setStockPhotoStatus("Editor ready. Adjust the crop, then use the edited photo.", "success");
+  } finally {
+    objectUrl.revoke();
+  }
+}
+
+async function saveStockPhotoEditorImage() {
+  if (!stockMediaState.editor.imageElement || stockMediaState.editor.index < 0) {
+    setStockPhotoStatus("Open a photo in the editor first.", "error");
+    return;
+  }
+
+  setStockPhotoStatus("Saving edited photo...", "waiting");
+  setStockPhotoProgress(12, "Rendering edited crop...", true);
+
+  try {
+    const outputCanvas = document.createElement("canvas");
+    outputCanvas.width = STOCK_EDITOR_OUTPUT_SIZE;
+    outputCanvas.height = STOCK_EDITOR_OUTPUT_SIZE;
+    const outputContext = outputCanvas.getContext("2d");
+    if (!outputContext) throw new Error("Browser image editor is not available.");
+
+    const previewCanvas = document.getElementById("stock-photo-editor-canvas");
+    if (!previewCanvas) throw new Error("Editor canvas is not available.");
+    outputContext.drawImage(previewCanvas, 0, 0, outputCanvas.width, outputCanvas.height);
+
+    const blob = await stockCanvasToBlob(outputCanvas, "image/png", 0.95);
+    setStockPhotoProgress(45, "Uploading edited photo...", true);
+    const uploaded = await uploadStockPhotoBlob(blob, `edited-${stockMediaState.editor.image?.name || "stock-photo"}.png`, "image/png");
+    uploaded.sourceType = "edited crop";
+    stockMediaState.stagedImages.unshift(uploaded);
+    stockMediaState.selectedPaths.add(uploaded.path);
+    renderStockPhotoManagerGrid();
+    closeStockPhotoEditor();
+    setStockPhotoStatus("Edited photo is ready and selected.", "success");
+    setStockPhotoProgress(100, "Edited photo ready.", true);
+    setTimeout(resetStockPhotoProgress, 900);
+  } catch (error) {
+    console.error("Stock photo editor save failed:", error);
+    setStockPhotoStatus(error?.message || "Could not save edited photo.", "error");
+    setStockPhotoProgress(100, "Editor save failed.", true);
+  }
+}
+
+async function processStockStagedImage(index, background, options = {}) {
+  const source = stockMediaState.stagedImages[index];
+  if (!source || !source.path || !source.previewUrl) return null;
+
+  stockMediaState.busy = true;
+  setStockPhotoStatus(`Preparing ${background} background version...`, "waiting");
+  setStockPhotoProgress(5, `Starting ${background} background...`, true);
+  renderStockPhotoManagerGrid();
+  window.dispatchEvent(new CustomEvent("stock:photo-processing-requested", {
+    detail: { itemId: stockMediaState.itemId, sourcePath: source.path, background },
+  }));
+
+  try {
+    const payload = await createStockBackgroundPayload(source, background, {
+      onProgress: (percent, label) => setStockPhotoProgress(percent, label, true),
+    });
+    const { data, error } = await supabase.functions.invoke(STOCK_IMAGE_PROCESS_FUNCTION_NAME, {
+      body: {
+        bucket: STOCK_PHOTO_BUCKET,
+        imagePath: source.path,
+        background,
+        ...payload,
+      },
+    });
+
+    if (error) throw new Error(await getStockFunctionErrorDetail(error) || "Background processing failed.");
+    if (!data?.ok || !data?.path || !data?.bucket) {
+      throw new Error(data?.detail || data?.error || "Background processor returned no image.");
+    }
+
+    signedUrlCache.delete(data.path);
+    const processed = {
+      path: data.path,
+      name: data.name || `${background} background`,
+      previewUrl: data.previewUrl || await getSignedUrl(data.path),
+      sourceType: `${background} background`,
+    };
+    stockMediaState.stagedImages.unshift(processed);
+    if (options.autoSelect !== false) {
+      stockMediaState.selectedPaths.add(processed.path);
+      if (options.replaceSourceSelection !== false) {
+        stockMediaState.selectedPaths.delete(source.path);
+      }
+    }
+    setStockPhotoStatus(`${background[0].toUpperCase()}${background.slice(1)} background version is ready.`, "success");
+    setStockPhotoProgress(100, "Processed version ready.", true);
+    renderStockPhotoManagerGrid();
+    setTimeout(resetStockPhotoProgress, 900);
+    return processed;
+  } catch (error) {
+    console.error("Stock photo background processing failed:", error);
+    setStockPhotoStatus(error?.message || "Could not process the background.", "error");
+    setStockPhotoProgress(100, "Processing failed.", true);
+    return null;
+  } finally {
+    stockMediaState.busy = false;
+  }
+}
+
+async function handleStockPhotoFiles(files) {
+  const fileList = Array.from(files || []);
+  if (!stockMediaState.itemId || !fileList.length) return;
+
+  for (let index = 0; index < fileList.length; index += 1) {
+    const file = fileList[index];
+    setStockPhotoStatus(`Uploading photo ${index + 1} of ${fileList.length}...`, "waiting");
+    setStockPhotoProgress(8, `Uploading ${index + 1} of ${fileList.length}...`, true);
+    try {
+      const uploaded = await uploadStockPhotoFile(file);
+      setStockPhotoProgress(32, "Upload complete. Preparing black background...", true);
+      stockMediaState.stagedImages.unshift(uploaded);
+      stockMediaState.selectedPaths.add(uploaded.path);
+      renderStockPhotoManagerGrid();
+      await processStockStagedImage(0, "black", { autoSelect: true, replaceSourceSelection: true });
+    } catch (error) {
+      console.error("Stock photo upload failed:", error);
+      setStockPhotoStatus(error?.message || "Could not upload one of the photos.", "error");
+      setStockPhotoProgress(100, "Upload failed.", true);
+    }
+  }
+}
+
+async function openStockPhotoManager(itemId) {
+  const item = getStockItemById(itemId);
+  stockMediaState.itemId = itemId;
+  stockMediaState.stagedImages = [];
+  stockMediaState.selectedPaths = new Set();
+  stockMediaState.selectedCaptureStationId = "";
+  document.getElementById("stock-photo-manager-title").textContent = `Add Photos${item?.title ? `: ${item.title}` : ""}`;
+  document.getElementById("stock-photo-upload-input").value = "";
+  setStockPhotoStatus("Upload photos, review the processed versions, then save only the ones you want.");
+  resetStockPhotoProgress();
+  closeStockPhotoEditor();
+  renderStockPhotoManagerGrid();
+  document.getElementById("stock-photo-manager-modal")?.classList.remove("hidden");
+  document.getElementById("stock-photo-manager-modal")?.classList.add("show");
+  document.body.classList.add("modal-open");
+  loadStockCaptureStations({ silent: true }).catch((error) => {
+    console.error("Failed to load stock capture stations:", error);
+    setStockPhotoStatus(error?.message || "Could not load camera stations.", "error");
+  });
+}
+
+function closeStockPhotoManager() {
+  document.getElementById("stock-photo-manager-modal")?.classList.add("hidden");
+  document.getElementById("stock-photo-manager-modal")?.classList.remove("show");
+  document.body.classList.remove("modal-open");
+  closeStockPhotoEditor();
+  resetStockPhotoProgress();
+}
+
+async function saveSelectedStockPhotos() {
+  const itemId = stockMediaState.itemId;
+  const selectedPaths = [...stockMediaState.selectedPaths];
+  if (!itemId || !selectedPaths.length) {
+    setStockPhotoStatus("Select at least one photo before saving.", "error");
+    return;
+  }
+
+  setStockPhotoStatus("Saving selected photos to the item...", "waiting");
+  const { data: items, error: fetchError } = await supabase
+    .from("item_types")
+    .select("id, photos")
+    .eq("id", itemId)
+    .limit(1);
+
+  if (fetchError || !items?.length) {
+    setStockPhotoStatus(fetchError?.message || "Could not load the item before saving.", "error");
+    return;
+  }
+
+  const existingPhotos = Array.isArray(items[0].photos) ? items[0].photos : [];
+  const nextPhotos = [...new Set([...existingPhotos, ...selectedPaths])];
+  const { error } = await supabase
+    .from("item_types")
+    .update({ photos: nextPhotos })
+    .eq("id", itemId);
+
+  if (error) {
+    setStockPhotoStatus(error.message || "Could not save photos.", "error");
+    return;
+  }
+
+  await bumpInventoryVersion([itemId]);
+  await refreshItemById(itemId);
+  window.dispatchEvent(new CustomEvent("stock:photos-added", {
+    detail: { itemId, photoPaths: selectedPaths },
+  }));
+  showToast("Photos added to item.");
+  closeStockPhotoManager();
+}
+
+function delayStockCapture(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function renderStockCaptureStations() {
+  const select = document.getElementById("stock-photo-camera-station");
+  if (!select) return;
+
+  const stations = stockMediaState.captureStations;
+  if (!stations.length) {
+    select.innerHTML = '<option value="">No active stations</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.replaceChildren(new Option("Choose station", ""));
+  stations.forEach((station) => {
+    select.appendChild(new Option(station.name || station.id, station.id));
+  });
+  select.disabled = false;
+  select.value = stations.some((station) => station.id === stockMediaState.selectedCaptureStationId)
+    ? stockMediaState.selectedCaptureStationId
+    : "";
+}
+
+function setSelectedStockCaptureStation(stationId = "") {
+  const station = stockMediaState.captureStations.find((entry) => entry.id === stationId) || null;
+  stockMediaState.selectedCaptureStationId = station?.id || "";
+
+  const select = document.getElementById("stock-photo-camera-station");
+  if (select && select.value !== stockMediaState.selectedCaptureStationId) {
+    select.value = stockMediaState.selectedCaptureStationId;
+  }
+
+  try {
+    if (station) {
+      window.localStorage?.setItem("og.captureStationId", station.id);
+      window.localStorage?.setItem("og.captureStationName", station.name || "");
+    }
+  } catch (_) {}
+
+  return station;
+}
+
+async function loadStockCaptureStations(options = {}) {
+  const { silent = false } = options;
+  const select = document.getElementById("stock-photo-camera-station");
+  if (select) {
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading stations...</option>';
+  }
+
+  const { data, error } = await supabase
+    .from(STOCK_CAPTURE_STATION_TABLE)
+    .select("id, name, active")
+    .eq("active", true)
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(error.message || "Could not load capture stations.");
+  stockMediaState.captureStations = Array.isArray(data) ? data : [];
+
+  if (!stockMediaState.captureStations.some((station) => station.id === stockMediaState.selectedCaptureStationId)) {
+    stockMediaState.selectedCaptureStationId = "";
+  }
+
+  renderStockCaptureStations();
+
+  if (!stockMediaState.captureStations.length) {
+    if (!silent) setStockPhotoStatus("No active capture stations are available.", "error");
+    return [];
+  }
+
+  if (!silent) setStockPhotoStatus("Choose which camera station should take this photo.", "waiting");
+  return stockMediaState.captureStations;
+}
+
+function getSelectedStockCaptureStation() {
+  return stockMediaState.captureStations.find((station) => station.id === stockMediaState.selectedCaptureStationId) || null;
+}
+
+async function createStockCaptureJob(stationId) {
+  const { data, error } = await supabase
+    .from(STOCK_CAPTURE_JOB_TABLE)
+    .insert({
+      station_id: stationId,
+      status: "queued",
+      requested_at: new Date().toISOString(),
+    })
+    .select("id, station_id, status, requested_at")
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "Failed to create capture job.");
+  return data;
+}
+
+function stockCaptureJobHasUpload(job) {
+  return Boolean(job?.storage_bucket && job?.storage_path)
+    || Boolean(job?.upload_completed_at)
+    || Boolean(job?.capture_completed_at && job?.storage_path);
+}
+
+async function getStockCaptureJobPhotoCount(jobId) {
+  const { count, error } = await supabase
+    .from(STOCK_CAPTURE_PHOTO_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("capture_job_id", jobId);
+
+  if (error) {
+    console.warn("Could not check capture photo count:", error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
+async function findRecentStockCaptureCompletion(stationId, requestedAt) {
+  if (!stationId || !requestedAt) return null;
+
+  const requestedMs = new Date(requestedAt).getTime();
+  const lookbackIso = Number.isFinite(requestedMs)
+    ? new Date(requestedMs - STOCK_CAPTURE_FALLBACK_LOOKBACK_MS).toISOString()
+    : requestedAt;
+
+  const { data, error } = await supabase
+    .from(STOCK_CAPTURE_JOB_TABLE)
+    .select(`
+      id,
+      station_id,
+      status,
+      storage_bucket,
+      storage_path,
+      capture_completed_at,
+      upload_completed_at,
+      mime_type,
+      file_size_bytes,
+      failure_code,
+      failure_message,
+      requested_at
+    `)
+    .eq("station_id", stationId)
+    .gte("requested_at", lookbackIso)
+    .order("requested_at", { ascending: false })
+    .limit(5);
+
+  if (error) {
+    console.warn("Could not check recent capture jobs:", error);
+    return null;
+  }
+
+  const jobs = Array.isArray(data) ? data : [];
+  for (const job of jobs) {
+    if (job.status === "failed") continue;
+    if (job.status === "completed" || stockCaptureJobHasUpload(job) || await getStockCaptureJobPhotoCount(job.id)) {
+      return { ...job, status: "completed" };
+    }
+  }
+
+  return null;
+}
+
+async function pollStockCaptureJob(job, station = {}) {
+  const jobId = typeof job === "object" ? job.id : job;
+  const stationId = station.id || job?.station_id || "";
+  const stationName = station.name || "";
+  const requestedAt = job?.requested_at || "";
+  const startedAt = Date.now();
+
+  while ((Date.now() - startedAt) < STOCK_CAPTURE_POLL_TIMEOUT_MS) {
+    const { data, error } = await supabase
+      .from(STOCK_CAPTURE_JOB_TABLE)
+      .select(`
+        id,
+        station_id,
+        status,
+        storage_bucket,
+        storage_path,
+        capture_completed_at,
+        upload_completed_at,
+        mime_type,
+        file_size_bytes,
+        failure_code,
+        failure_message,
+        requested_at
+      `)
+      .eq("id", jobId)
+      .single();
+
+    if (error || !data) throw new Error(error?.message || "Failed to poll capture job.");
+    if (data.status === "completed" || data.status === "failed") return data;
+    if (stockCaptureJobHasUpload(data) || await getStockCaptureJobPhotoCount(jobId)) {
+      return { ...data, status: "completed" };
+    }
+
+    const fallbackJob = await findRecentStockCaptureCompletion(stationId, requestedAt);
+    if (fallbackJob && fallbackJob.id !== jobId) {
+      return fallbackJob;
+    }
+
+    const stationLabel = stationName ? ` on ${stationName}` : "";
+    const label = data.status === "queued"
+      ? `Capture queued${stationLabel}. Waiting for camera...`
+      : data.status === "capturing"
+        ? `Camera is capturing${stationLabel}...`
+        : data.status === "uploading"
+          ? `Camera is uploading${stationLabel}...`
+          : `Capture status: ${data.status || "waiting"}`;
+    setStockPhotoStatus(label, "waiting");
+    setStockPhotoProgress(data.status === "queued" ? 20 : data.status === "capturing" ? 45 : 68, label, true);
+    await delayStockCapture(STOCK_CAPTURE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Timed out waiting for camera capture.");
+}
+
+async function loadStockCaptureJobPhotos(jobId) {
+  const { data, error } = await supabase
+    .from(STOCK_CAPTURE_PHOTO_TABLE)
+    .select("id, capture_job_id, sort_order, is_primary, storage_bucket, storage_path, mime_type, label, created_at")
+    .eq("capture_job_id", jobId)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw new Error(error.message || "Failed to load capture photos.");
+  return Array.isArray(data) ? data : [];
+}
+
+async function importCapturedPhotoToStock(photo, index = 0) {
+  const bucket = String(photo?.storage_bucket || "").trim();
+  const path = String(photo?.storage_path || "").trim();
+  if (!bucket || !path) throw new Error("Captured photo is missing storage metadata.");
+
+  const { data, error } = await supabase.storage.from(bucket).download(path);
+  if (error || !data) throw new Error(error?.message || "Could not download captured photo.");
+
+  const name = String(photo?.label || `camera-capture-${index + 1}.jpg`).trim();
+  const uploaded = await uploadStockPhotoBlob(data, name, photo?.mime_type || data.type || "image/jpeg");
+  uploaded.sourceType = "camera capture";
+  return uploaded;
+}
+
+async function requestStockCameraCapture() {
+  if (!stockMediaState.itemId || stockMediaState.busy) return;
+
+  stockMediaState.busy = true;
+  setStockPhotoStatus("Sending camera request to the OG app...", "waiting");
+  setStockPhotoProgress(12, "Sending camera request...", true);
+
+  try {
+    if (!stockMediaState.captureStations.length) {
+      await loadStockCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedStockCaptureStation();
+    if (!station) {
+      resetStockPhotoProgress();
+      setStockPhotoStatus("Choose the camera station before sending the request.", "error");
+      document.getElementById("stock-photo-camera-station")?.focus();
+      return;
+    }
+
+    const job = await createStockCaptureJob(station.id);
+    stockMediaState.latestCaptureJob = job;
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "stock-photo-manager",
+        itemId: stockMediaState.itemId,
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+      },
+    }));
+
+    const completedJob = await pollStockCaptureJob(job, station);
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || completedJob.failure_code || "Capture failed.");
+    }
+
+    setStockPhotoProgress(78, "Loading captured photos...", true);
+    const capturePhotos = await loadStockCaptureJobPhotos(completedJob.id);
+    if (!capturePhotos.length && completedJob.storage_bucket && completedJob.storage_path) {
+      capturePhotos.push({
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        label: "Camera capture",
+      });
+    }
+    if (!capturePhotos.length) throw new Error("Camera completed, but no uploaded photos were returned.");
+
+    for (let index = 0; index < capturePhotos.length; index += 1) {
+      const uploaded = await importCapturedPhotoToStock(capturePhotos[index], index);
+      stockMediaState.stagedImages.unshift(uploaded);
+      stockMediaState.selectedPaths.add(uploaded.path);
+      renderStockPhotoManagerGrid();
+      await processStockStagedImage(0, "black", { autoSelect: true, replaceSourceSelection: true });
+    }
+
+    setStockPhotoStatus(`Loaded ${capturePhotos.length} camera photo${capturePhotos.length === 1 ? "" : "s"}.`, "success");
+    setStockPhotoProgress(100, "Camera photos loaded.", true);
+    setTimeout(resetStockPhotoProgress, 900);
+  } catch (error) {
+    console.error("Stock camera capture failed:", error);
+    setStockPhotoStatus(error?.message || "Could not complete camera capture.", "error");
+    setStockPhotoProgress(100, "Camera capture failed.", true);
+  } finally {
+    stockMediaState.busy = false;
+  }
+}
+
+async function openStockPhotoViewer(itemId, startPath = "") {
+  const item = getStockItemById(itemId);
+  const paths = getStockItemPhotoPaths(item);
+  if (!item || !paths.length) {
+    openStockPhotoManager(itemId);
+    return;
+  }
+
+  stockPhotoViewerItemId = itemId;
+  document.getElementById("stock-photo-viewer-title").textContent = item.title || "Item Photos";
+  const modal = document.getElementById("stock-photo-viewer-modal");
+  const image = document.getElementById("stock-photo-viewer-image");
+  const thumbs = document.getElementById("stock-photo-viewer-thumbs");
+  thumbs.innerHTML = "";
+
+  const signed = await Promise.all(paths.map(async (path) => ({
+    path,
+    url: await getSignedUrl(path),
+  })));
+
+  function showPath(path) {
+    const entry = signed.find((photo) => photo.path === path) || signed[0];
+    if (!entry?.url) return;
+    image.src = entry.url;
+    thumbs.querySelectorAll("button").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.path === entry.path);
+    });
+  }
+
+  signed.forEach((entry) => {
+    if (!entry.url) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.path = entry.path;
+    button.innerHTML = `<img src="${entry.url}" alt="Item thumbnail">`;
+    button.addEventListener("click", () => showPath(entry.path));
+    thumbs.appendChild(button);
+  });
+
+  modal?.classList.remove("hidden");
+  modal?.classList.add("show");
+  document.body.classList.add("modal-open");
+  showPath(startPath || paths[0]);
+}
+
+function closeStockPhotoViewer() {
+  document.getElementById("stock-photo-viewer-modal")?.classList.add("hidden");
+  document.getElementById("stock-photo-viewer-modal")?.classList.remove("show");
+  document.body.classList.remove("modal-open");
+}
+
+function setupStockMediaListeners() {
+  document.getElementById("close-stock-photo-viewer")?.addEventListener("click", closeStockPhotoViewer);
+  document.getElementById("close-stock-photo-manager")?.addEventListener("click", closeStockPhotoManager);
+  document.getElementById("close-stock-barcode-modal")?.addEventListener("click", closeBarcodeModal);
+  document.getElementById("stock-photo-viewer-add")?.addEventListener("click", () => {
+    if (stockPhotoViewerItemId) {
+      const itemId = stockPhotoViewerItemId;
+      closeStockPhotoViewer();
+      openStockPhotoManager(itemId);
+    }
+  });
+  document.getElementById("stock-photo-upload-input")?.addEventListener("change", (event) => {
+    handleStockPhotoFiles(event.target.files);
+  });
+  document.getElementById("stock-photo-camera-station")?.addEventListener("change", (event) => {
+    const station = setSelectedStockCaptureStation(event.target.value);
+    setStockPhotoStatus(station
+      ? `Camera requests will route to ${station.name || station.id}.`
+      : "Choose which camera station should take this photo.", station ? "success" : "waiting");
+  });
+  document.getElementById("stock-photo-camera-refresh")?.addEventListener("click", async () => {
+    if (stockMediaState.busy) return;
+    try {
+      setStockPhotoStatus("Refreshing camera stations...", "waiting");
+      await loadStockCaptureStations();
+    } catch (error) {
+      console.error("Failed to refresh stock capture stations:", error);
+      setStockPhotoStatus(error?.message || "Could not refresh camera stations.", "error");
+    }
+  });
+  document.getElementById("stock-photo-camera-request")?.addEventListener("click", requestStockCameraCapture);
+  document.getElementById("stock-photo-save-selection")?.addEventListener("click", saveSelectedStockPhotos);
+  ["stock-photo-editor-zoom", "stock-photo-editor-x", "stock-photo-editor-y"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", (event) => {
+      const value = Number(event.target.value);
+      if (id.endsWith("zoom")) stockMediaState.editor.zoom = value;
+      if (id.endsWith("-x")) stockMediaState.editor.offsetX = value;
+      if (id.endsWith("-y")) stockMediaState.editor.offsetY = value;
+      drawStockPhotoEditor();
+    });
+  });
+  document.getElementById("stock-photo-editor-rotate-left")?.addEventListener("click", () => {
+    stockMediaState.editor.rotation -= 5;
+    drawStockPhotoEditor();
+  });
+  document.getElementById("stock-photo-editor-rotate-right")?.addEventListener("click", () => {
+    stockMediaState.editor.rotation += 5;
+    drawStockPhotoEditor();
+  });
+  document.getElementById("stock-photo-editor-reset")?.addEventListener("click", () => {
+    stockMediaState.editor.zoom = 1;
+    stockMediaState.editor.offsetX = 0;
+    stockMediaState.editor.offsetY = 0;
+    stockMediaState.editor.rotation = 0;
+    syncStockEditorControls();
+    drawStockPhotoEditor();
+  });
+  document.getElementById("stock-photo-editor-save")?.addEventListener("click", saveStockPhotoEditorImage);
+  document.getElementById("stock-photo-manager-grid")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button || stockMediaState.busy) return;
+    const index = Number(button.dataset.index);
+    const action = button.dataset.action;
+    const image = stockMediaState.stagedImages[index];
+    if (!image) return;
+    if (action === "toggle") {
+      if (stockMediaState.selectedPaths.has(image.path)) stockMediaState.selectedPaths.delete(image.path);
+      else stockMediaState.selectedPaths.add(image.path);
+      renderStockPhotoManagerGrid();
+    } else if (action === "black" || action === "white") {
+      await processStockStagedImage(index, action, { autoSelect: true, replaceSourceSelection: false });
+    } else if (action === "edit") {
+      await openStockPhotoEditor(index);
+    } else if (action === "preview") {
+      window.open(image.previewUrl, "_blank", "noopener,noreferrer");
+    }
+  });
+}
+
 // 🔹 Fetch unique, non-null values from any column in any Supabase table //
 // ✅ Returns an array of cleaned, unique values
 // ✅ Safe for reuse across different features (e.g., categories, brands, types, etc.)
@@ -3157,6 +4303,7 @@ populateDropdowns({
 
     //event listener for card functions
     setupCardEventListeners();
+    setupStockMediaListeners();
     editCardModule.setupEditCardListeners();
 
     //event listener to switch filter tabs and the match all button

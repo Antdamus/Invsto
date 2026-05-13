@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="stock-checkout.css" />
   <link rel="stylesheet" href="stock-export.css" />
   <link rel="stylesheet" href="stock-transferstock.css" />
+  <link rel="stylesheet" href="stock-transfer-modal.css" />
 
 
   <!-- 🅰️ Google Fonts: Display Serif Font -->
@@ -522,12 +523,93 @@
   </div>
 
   <!-- 🔄 Modal: Transfer Stock Between Locations -->
+  <!-- Full-size stock photo viewer -->
+  <div id="stock-photo-viewer-modal" class="modal hidden">
+    <div class="stock-photo-viewer-content">
+      <button type="button" id="close-stock-photo-viewer" class="stock-modal-close" title="Close">&times;</button>
+      <div class="stock-photo-viewer-header">
+        <h2 id="stock-photo-viewer-title">Item Photos</h2>
+        <button type="button" id="stock-photo-viewer-add" class="stock-secondary-btn">Add Photos</button>
+      </div>
+      <div class="stock-photo-viewer-stage">
+        <img id="stock-photo-viewer-image" src="" alt="Selected item photo">
+      </div>
+      <div id="stock-photo-viewer-thumbs" class="stock-photo-viewer-thumbs"></div>
+    </div>
+  </div>
+
+  <!-- Add stock photos modal -->
+  <div id="stock-photo-manager-modal" class="modal hidden">
+    <div class="stock-photo-manager-content">
+      <button type="button" id="close-stock-photo-manager" class="stock-modal-close" title="Close">&times;</button>
+      <div class="stock-photo-manager-header">
+        <div>
+          <h2 id="stock-photo-manager-title">Add Photos</h2>
+          <p id="stock-photo-manager-status">Upload photos, review the processed versions, then save only the ones you want.</p>
+        </div>
+        <label class="stock-upload-dropzone" for="stock-photo-upload-input">
+          <span>Choose Photos</span>
+          <input type="file" id="stock-photo-upload-input" accept="image/*" multiple>
+        </label>
+      </div>
+      <div class="stock-photo-manager-toolbar">
+        <div class="stock-camera-request-panel">
+          <label for="stock-photo-camera-station">Camera Station</label>
+          <div class="stock-camera-request-controls">
+            <select id="stock-photo-camera-station">
+              <option value="">Load stations first</option>
+            </select>
+            <button type="button" id="stock-photo-camera-refresh" class="stock-secondary-btn">Refresh</button>
+            <button type="button" id="stock-photo-camera-request" class="stock-secondary-btn">Take With Camera</button>
+          </div>
+        </div>
+        <div class="stock-photo-progress" id="stock-photo-progress" aria-hidden="true">
+          <div class="stock-photo-progress-track">
+            <div id="stock-photo-progress-bar" class="stock-photo-progress-bar"></div>
+          </div>
+          <span id="stock-photo-progress-label">Idle</span>
+        </div>
+      </div>
+      <section id="stock-photo-editor" class="stock-photo-editor hidden">
+        <div class="stock-photo-editor-stage">
+          <canvas id="stock-photo-editor-canvas" width="520" height="520"></canvas>
+        </div>
+        <div class="stock-photo-editor-controls">
+          <label>Zoom <input type="range" id="stock-photo-editor-zoom" min="0.6" max="2.5" step="0.01" value="1"></label>
+          <label>Horizontal <input type="range" id="stock-photo-editor-x" min="-1" max="1" step="0.01" value="0"></label>
+          <label>Vertical <input type="range" id="stock-photo-editor-y" min="-1" max="1" step="0.01" value="0"></label>
+          <div class="stock-photo-editor-buttons">
+            <button type="button" id="stock-photo-editor-rotate-left">Rotate Left</button>
+            <button type="button" id="stock-photo-editor-rotate-right">Rotate Right</button>
+            <button type="button" id="stock-photo-editor-reset">Reset</button>
+            <button type="button" id="stock-photo-editor-save">Use Edited Photo</button>
+          </div>
+        </div>
+      </section>
+      <div id="stock-photo-manager-grid" class="stock-photo-manager-grid"></div>
+      <div class="stock-photo-manager-actions">
+        <span id="stock-photo-selected-count">0 selected</span>
+        <button type="button" id="stock-photo-save-selection" class="stock-primary-btn">Save Selected Photos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barcode copy modal -->
+  <div id="stock-barcode-modal" class="modal hidden">
+    <div class="stock-barcode-content">
+      <button type="button" id="close-stock-barcode-modal" class="stock-modal-close" title="Close">&times;</button>
+      <span class="stock-barcode-eyebrow">Copied barcode</span>
+      <strong id="stock-barcode-full-value"></strong>
+      <p>The full barcode was copied to your clipboard.</p>
+    </div>
+  </div>
+
   <div id="transfer-modal" class="modal hidden">
     <div class="modal-content">
-      <span class="material-icons-outlined close-icon" id="close-transfer-modal" title="Close">close</span>
+      <button type="button" class="close-icon" id="close-transfer-modal" title="Close">&times;</button>
 
-      <h2 class="modal-header">🔄 Transfer Stock</h2>
-      <p class="modal-subtext">Move stock between locations. You can only transfer up to the available quantity at the source location.</p>
+      <h2 class="modal-header">Transfer Stock</h2>
+      <p class="modal-subtext">Move inventory between locations and review the receiving tray before confirming.</p>
 
       <div class="modal-scrollable-body">
         <!-- ✅ Display item information -->
@@ -567,11 +649,14 @@
           </div>
         </div>
         <p id="transfer-dest-current-stock" class="transfer-current-stock hidden"></p>
+        <section id="transfer-location-intelligence" class="transfer-intelligence-panel is-empty">
+          <div class="transfer-intelligence-empty">Select a destination tray or location to review its contents and similar-weight items.</div>
+        </section>
       </div>
 
-      <div class="modal-actions" style="margin-top: 20px;">
-        <button id="confirm-transfer-btn" class="confirm-btn" title="Confirm transfer">✅ Confirm Transfer</button>
-        <button id="cancel-transfer-btn" class="cancel-btn" title="Cancel transfer">❌ Cancel</button>
+      <div class="modal-actions">
+        <button id="confirm-transfer-btn" class="confirm-btn" title="Confirm transfer">Confirm Transfer</button>
+        <button id="cancel-transfer-btn" class="cancel-btn" title="Cancel transfer">Cancel</button>
       </div>
 
       <p id="transfer-error-message" class="error-message"></p>

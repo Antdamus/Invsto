@@ -36,6 +36,212 @@ window.transferModule = (function () {
             .replace(/'/g, "&#39;");
     }
 
+    function ensureTransferModalLayout() {
+        const modalContent = document.querySelector("#transfer-modal .modal-content");
+        if (!modalContent || modalContent.querySelector(".transfer-v2")) return;
+        modalContent.classList.add("transfer-v2-content");
+
+        modalContent.innerHTML = `
+            <button type="button" class="transfer-v2-close" id="close-transfer-modal" title="Close" aria-label="Close">&times;</button>
+            <header class="transfer-v2-head">
+                <div>
+                    <p class="transfer-v2-kicker">Inventory Movement</p>
+                    <h2 class="modal-header">Transfer Stock</h2>
+                    <p class="modal-subtext">Move inventory between locations and review the receiving tray before confirming.</p>
+                </div>
+            </header>
+
+            <div class="transfer-v2">
+                <aside class="transfer-v2-item">
+                    <div class="transfer-v2-photo">
+                        <img id="transfer-item-image" class="transfer-item-image" src="" alt="Item Preview" />
+                    </div>
+                    <div class="transfer-v2-item-copy">
+                        <span>Item</span>
+                        <strong id="transfer-item-title">Loading...</strong>
+                    </div>
+                    <section class="transfer-v2-stock-card">
+                        <div class="transfer-v2-section-label">Current Stock</div>
+                        <ul id="transfer-stock-breakdown" class="transfer-stock-list"></ul>
+                    </section>
+                </aside>
+
+                <section class="transfer-v2-workflow">
+                    <div class="transfer-v2-fields">
+                        <div class="modal-input-section">
+                            <label for="transfer-source-location">Source Location</label>
+                            <select id="transfer-source-location">
+                                <option value="">Choose Source</option>
+                            </select>
+                        </div>
+
+                        <div class="modal-input-section">
+                            <label for="transfer-destination-location">Destination Location</label>
+                            <select id="transfer-destination-location">
+                                <option value="">Choose Destination</option>
+                            </select>
+                        </div>
+
+                        <div class="modal-input-section transfer-quantity-section">
+                            <label for="transfer-quantity">Quantity</label>
+                            <div class="transfer-qty-wrapper">
+                                <input type="number" id="transfer-quantity" min="1" placeholder="1" />
+                                <span class="transfer-max-info">Max <span id="transfer-max-qty">0</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p id="transfer-dest-current-stock" class="transfer-current-stock hidden"></p>
+                    <section id="transfer-location-intelligence" class="transfer-intelligence-panel is-empty">
+                        <div class="transfer-intelligence-empty">Select a destination tray or location to review its contents and similar-weight items.</div>
+                    </section>
+                </section>
+            </div>
+
+            <footer class="modal-actions transfer-v2-actions">
+                <p id="transfer-error-message" class="error-message"></p>
+                <div>
+                    <button id="cancel-transfer-btn" class="cancel-btn" title="Cancel transfer">Cancel</button>
+                    <button id="confirm-transfer-btn" class="confirm-btn" title="Confirm transfer">Confirm Transfer</button>
+                </div>
+            </footer>
+        `;
+    }
+
+    function formatTransferWeight(value) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return "--";
+        return `${number.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`;
+    }
+
+    function getCurrentItemWeight() {
+        const weight = Number(currentItem?.weight || 0);
+        return Number.isFinite(weight) ? weight : 0;
+    }
+
+    function setTransferIntelligenceEmpty(message = "Select a destination tray or location to review its contents and similar-weight items.") {
+        const panel = document.getElementById("transfer-location-intelligence");
+        if (!panel) return;
+        panel.className = "transfer-intelligence-panel is-empty";
+        panel.innerHTML = `<div class="transfer-intelligence-empty">${escapeTransferHtml(message)}</div>`;
+    }
+
+    async function renderTransferLocationIntelligence(locationId, label = "Selected Location") {
+        const panel = document.getElementById("transfer-location-intelligence");
+        if (!panel) return;
+
+        if (!locationId) {
+            setTransferIntelligenceEmpty();
+            return;
+        }
+
+        panel.className = "transfer-intelligence-panel is-loading";
+        panel.innerHTML = `<div class="transfer-intelligence-empty">Loading ${escapeTransferHtml(label.toLowerCase())} contents...</div>`;
+
+        try {
+            const storeMap = await fetchTransferStores();
+            const [
+                { data: location, error: locationError },
+                { data: stockRows, error: stockError },
+            ] = await Promise.all([
+                supabase
+                    .from("locations")
+                    .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
+                    .eq("id", locationId)
+                    .maybeSingle(),
+                supabase
+                    .from("item_stock_locations")
+                    .select("item_id, quantity")
+                    .eq("location_id", locationId)
+                    .gt("quantity", 0),
+            ]);
+
+            if (locationError) throw locationError;
+            if (stockError) throw stockError;
+
+            const itemIds = [...new Set((stockRows || []).map((row) => row.item_id).filter(Boolean))];
+            let itemMap = {};
+            if (itemIds.length) {
+                const { data: items, error: itemsError } = await supabase
+                    .from("item_types")
+                    .select("id, title, barcode, weight")
+                    .in("id", itemIds);
+                if (itemsError) throw itemsError;
+                itemMap = Object.fromEntries((items || []).map((item) => [item.id, item]));
+            }
+
+            const rows = (stockRows || []).map((row) => {
+                const item = itemMap[row.item_id] || {};
+                const weight = Number(item.weight || 0);
+                const quantity = Number(row.quantity || 0);
+                const delta = Math.abs(weight - getCurrentItemWeight());
+                return {
+                    itemId: row.item_id,
+                    title: item.title || "Untitled item",
+                    barcode: item.barcode || "",
+                    weight,
+                    quantity,
+                    delta,
+                    isSimilar: row.item_id !== currentItem?.id && Number.isFinite(delta) && delta <= 2,
+                };
+            });
+
+            const locationLabel = formatTransferLocation(location, storeMap);
+            const totalUnits = rows.reduce((sum, row) => sum + row.quantity, 0);
+            const totalWeight = rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight * row.quantity : 0), 0);
+            const similarRows = rows.filter((row) => row.isSimilar);
+            const similarUnits = similarRows.reduce((sum, row) => sum + row.quantity, 0);
+            const sortedRows = rows
+                .slice()
+                .sort((a, b) => (b.isSimilar - a.isSimilar) || (a.delta - b.delta) || (b.quantity - a.quantity))
+                .slice(0, 6);
+
+            panel.className = `transfer-intelligence-panel ${location?.is_tray ? "is-tray" : ""}`;
+            panel.innerHTML = `
+                <div class="transfer-intelligence-head">
+                    <div>
+                        <span>${escapeTransferHtml(label)}</span>
+                        <strong>${escapeTransferHtml(locationLabel.title)}</strong>
+                        <small>${escapeTransferHtml(locationLabel.meta || "Storage location")}</small>
+                    </div>
+                    <div class="transfer-similar-badge">
+                        <strong>${similarRows.length.toLocaleString()}</strong>
+                        <span>types within 2 g</span>
+                    </div>
+                </div>
+                <div class="transfer-intelligence-stats">
+                    <span><small>Item Types</small><strong>${rows.length.toLocaleString()}</strong></span>
+                    <span><small>Total Units</small><strong>${totalUnits.toLocaleString()}</strong></span>
+                    <span><small>Est. Weight</small><strong>${formatTransferWeight(totalWeight)}</strong></span>
+                    <span><small>Similar Units</small><strong>${similarUnits.toLocaleString()}</strong></span>
+                </div>
+                <div class="transfer-similar-summary">
+                    Current item weight: <strong>${formatTransferWeight(getCurrentItemWeight())}</strong>.
+                    ${similarRows.length
+                        ? `${similarRows.length.toLocaleString()} item type${similarRows.length === 1 ? "" : "s"} and ${similarUnits.toLocaleString()} total unit${similarUnits === 1 ? "" : "s"} match within 2 g.`
+                        : "No other item types in this location match within 2 g."}
+                </div>
+                <div class="transfer-location-items">
+                    ${sortedRows.length
+                        ? sortedRows.map((row) => `
+                            <div class="transfer-location-item ${row.isSimilar ? "is-similar" : ""}">
+                                <div>
+                                    <strong>${escapeTransferHtml(row.title)}</strong>
+                                    <small>${escapeTransferHtml(row.barcode || "No barcode")} · ${formatTransferWeight(row.weight)}</small>
+                                </div>
+                                <span>${row.quantity.toLocaleString()} unit${row.quantity === 1 ? "" : "s"}</span>
+                                ${row.isSimilar ? `<b>${formatTransferWeight(row.delta)} off</b>` : ""}
+                            </div>
+                        `).join("")
+                        : `<div class="transfer-intelligence-empty">No items are currently in this location.</div>`}
+                </div>
+            `;
+        } catch (error) {
+            console.error("Failed to load transfer location intelligence:", error);
+            setTransferIntelligenceEmpty(error?.message || "Could not load location intelligence.");
+        }
+    }
+
     async function fetchTransferStores() {
         const { data, error } = await supabase
             .from("store_locations")
@@ -51,12 +257,21 @@ window.transferModule = (function () {
 
     async function openTransferModal(itemId) {
     try {
+        ensureTransferModalLayout();
         const modal = document.getElementById("transfer-modal");
         currentItem = allItems.find(i => i.id === itemId);
         console.log("🔍 currentItem object:", currentItem);
         if (!currentItem) throw new Error("Item not found.");
+        document.querySelector("#transfer-modal .modal-header").textContent = "Transfer Stock";
+        document.querySelector("#transfer-modal .modal-subtext").textContent = "Move inventory between locations and review the receiving tray before confirming.";
+        document.getElementById("confirm-transfer-btn").textContent = "Confirm Transfer";
+        document.getElementById("cancel-transfer-btn").textContent = "Cancel";
+        setTransferIntelligenceEmpty();
 
         document.getElementById("transfer-item-title").textContent = currentItem.title || "Untitled";
+        if (!Array.isArray(currentItem.photoPaths)) {
+            currentItem.photoPaths = Array.isArray(currentItem.photos) ? currentItem.photos : [];
+        }
 
         const itemImageEl = document.getElementById("transfer-item-image");
         console.log("🖼️ Attempting to resolve photo:", currentItem.photoPaths[0]);
@@ -151,6 +366,7 @@ window.transferModule = (function () {
 
     // 🚦 Listen for source selection change to update max quantity display
     function setupListeners() {
+        ensureTransferModalLayout();
         const sourceSelect = document.getElementById("transfer-source-location");
         const destSelect = document.getElementById("transfer-destination-location");
 
@@ -166,10 +382,15 @@ window.transferModule = (function () {
 
             if (!sourceId) {
                 destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
+                setTransferIntelligenceEmpty();
                 return;
             }
 
             // 🔒 Attempt to lock source location immediately when selected
+            if (currentLockedSourceId && currentLockedSourceId !== sourceId) {
+                await unlockLocationForTransfer(currentLockedSourceId);
+                currentLockedSourceId = null;
+            }
             const locked = await lockLocationForTransfer(sourceId);
             if (!locked) {
                 showToast("❌ Could not lock source. Please select another or try again.", "error");
@@ -190,6 +411,7 @@ window.transferModule = (function () {
             }
 
             // 🚦 Rebuild destination dropdown excluding the selected source's location
+            await renderTransferLocationIntelligence(sourceRecord.location_id, "Source Location");
             destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
 
             const storeMap = await fetchTransferStores();
@@ -230,9 +452,13 @@ window.transferModule = (function () {
             destStockEl.classList.add("hidden");
             destStockEl.textContent = "";
 
-            if (!destId) return; // nothing selected
+            if (!destId) {
+                setTransferIntelligenceEmpty();
+                return;
+            }
 
             try {
+                await renderTransferLocationIntelligence(destId, "Destination");
                 const { data: existingDest, error: destFetchError } = await supabase
                     .from("item_stock_locations")
                     .select("quantity")
@@ -247,11 +473,11 @@ window.transferModule = (function () {
                 }
 
                 if (existingDest && existingDest.quantity > 0) {
-                    destStockEl.textContent = `📦 Destination currently has ${existingDest.quantity} units.`;
+                    destStockEl.textContent = `Destination currently has ${existingDest.quantity} unit${Number(existingDest.quantity) === 1 ? "" : "s"} of this item.`;
                     destStockEl.classList.remove("hidden");
                 } else {
                     console.log(`ℹ️ Destination ${destId} has no existing stock record — assuming 0 units.`);
-                    destStockEl.textContent = `ℹ️ Destination currently has 0 units.`;
+                    destStockEl.textContent = "Destination currently has 0 units of this item.";
                     destStockEl.classList.remove("hidden");
                 }
             } catch (err) {
@@ -571,6 +797,8 @@ showToast("✅ Transfer complete!", "success");
         };
     }
 
+
+  ensureTransferModalLayout();
 
   return {
     openTransferModal,
