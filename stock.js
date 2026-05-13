@@ -28,6 +28,25 @@ const STOCK_CAPTURE_POLL_INTERVAL_MS = 1500;
 const STOCK_CAPTURE_POLL_TIMEOUT_MS = 120000;
 const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
 let stockBackgroundRemovalModulePromise = null;
+const STOCK_WORKER_ITEM_SELECT = [
+  "id",
+  "title",
+  "description",
+  "weight",
+  "sale_price",
+  "barcode",
+  "qr_code",
+  "photo_url",
+  "created_at",
+  "dymo_label_url",
+  "photos",
+  "qr_type",
+  "categories",
+  "stock",
+  "stock_batch_size_update",
+  "added_by",
+  "added_by_email",
+].join(", ");
 
 const stockMediaState = {
   itemId: null,
@@ -82,6 +101,14 @@ function formatStockMoney(value) {
 
 function canViewSensitiveStockData() {
   return Boolean(stockAccess?.canViewSensitive);
+}
+
+function getStockItemSelectColumns() {
+  return canViewSensitiveStockData() ? "*" : STOCK_WORKER_ITEM_SELECT;
+}
+
+function getStockCacheKey() {
+  return canViewSensitiveStockData() ? "cachedAllItemsAdmin" : "cachedAllItemsWorker";
 }
 
 function applyStockAccessUi() {
@@ -2382,7 +2409,7 @@ async function refreshItemById(itemId) {
   // Step 1: Fetch the updated item
   const { data: items, error: itemError } = await supabase
     .from("item_types")
-    .select("*")
+    .select(getStockItemSelectColumns())
     .eq("id", itemId);
 
   if (itemError || !items || items.length === 0) {
@@ -2480,7 +2507,7 @@ async function refreshItemById(itemId) {
   //step 6, update the cache
   const version = await getCurrentInventoryVersionFromSupabase();
   if (version) {
-    sessionStorage.setItem("cachedAllItems", JSON.stringify({
+    sessionStorage.setItem(getStockCacheKey(), JSON.stringify({
       version,
       data: allItems
     }));
@@ -2519,7 +2546,8 @@ async function getSignedUrl(path) {
 
 //function to clean cache
 function cleanCachedPhotos() {
-  const cached = sessionStorage.getItem("cachedAllItems");
+  const cacheKey = getStockCacheKey();
+  const cached = sessionStorage.getItem(cacheKey);
   if (!cached) return;
 
   try {
@@ -2537,10 +2565,10 @@ function cleanCachedPhotos() {
       }
     });
 
-    sessionStorage.setItem("cachedAllItems", JSON.stringify(parsed));
-    console.log("🧹 Cleaned photo paths in cachedAllItems");
+    sessionStorage.setItem(cacheKey, JSON.stringify(parsed));
+    console.log(`Cleaned photo paths in ${cacheKey}`);
   } catch (err) {
-    console.warn("⚠️ Failed to clean cachedAllItems:", err);
+    console.warn("Failed to clean cached stock photos:", err);
   }
 }
 
@@ -3676,7 +3704,7 @@ async function fetchStockItems() {
   // Step 1: Get base item data
   const { data: items, error: itemError } = await supabase
     .from("item_types")
-    .select("*");
+    .select(getStockItemSelectColumns());
 
   if (itemError || !items) {
     console.error("❌ Failed to fetch item types:", itemError);
@@ -3781,7 +3809,8 @@ async function loadAllItemsWithCache() {
   const overlay = document.getElementById("loading-overlay");
   overlay.style.display = "flex"; // ✅ Show loading
 
-  const cached = sessionStorage.getItem("cachedAllItems");
+  const cacheKey = getStockCacheKey();
+  const cached = sessionStorage.getItem(cacheKey);
   const currentVersion = await getCurrentInventoryVersionFromSupabase();
   
 
@@ -3812,7 +3841,7 @@ async function loadAllItemsWithCache() {
   allItems = await fetchStockItems();
 
   // Then store it in session cache
-  sessionStorage.setItem("cachedAllItems", JSON.stringify({
+  sessionStorage.setItem(cacheKey, JSON.stringify({
     version: currentVersion,
     data: allItems
   }));

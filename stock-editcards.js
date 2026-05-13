@@ -10,6 +10,15 @@ window.editCardModule = (function () {
         return Boolean(window.stockAccess?.canViewSensitive);
     }
 
+    function getEditItemSelectColumns() {
+        if (typeof getStockItemSelectColumns === "function") {
+            return getStockItemSelectColumns();
+        }
+        return canViewSensitiveStockFields()
+            ? "*"
+            : "id, title, description, weight, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, added_by, added_by_email";
+    }
+
     function setEditFieldVisible(fieldId, visible) {
         const field = document.getElementById(fieldId);
         const label = document.querySelector(`label[for="${fieldId}"]`);
@@ -85,7 +94,7 @@ window.editCardModule = (function () {
         // Step 1: Fetch the updated item
         const { data: items, error: itemError } = await supabase
             .from("item_types")
-            .select("*")
+            .select(getEditItemSelectColumns())
             .eq("id", itemId);
 
         if (itemError || !items || items.length === 0) {
@@ -155,7 +164,8 @@ window.editCardModule = (function () {
         //step 6, update the cache
         const version = await getCurrentInventoryVersionFromSupabase();
         if (version) {
-            sessionStorage.setItem("cachedAllItems", JSON.stringify({
+            const cacheKey = typeof getStockCacheKey === "function" ? getStockCacheKey() : "cachedAllItemsWorker";
+            sessionStorage.setItem(cacheKey, JSON.stringify({
             version,
             data: allItems
             }));
@@ -193,7 +203,7 @@ window.editCardModule = (function () {
         console.log(`🔍 Fetching fresh item data for modal: ${itemId}`);
         const { data: items, error } = await supabase
             .from("item_types")
-            .select("*")
+            .select(getEditItemSelectColumns())
             .eq("id", itemId)
             .limit(1);
 
@@ -363,7 +373,7 @@ window.editCardModule = (function () {
 
             const { data: items, error: fetchError } = await supabase
                 .from("item_types")
-                .select("*")
+                .select(getEditItemSelectColumns())
                 .eq("id", request.itemId)
                 .limit(1);
 
