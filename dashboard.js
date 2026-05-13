@@ -90,6 +90,39 @@ function setActiveNavLink() {
 /** =================== Formatters =================== */
 const fmtMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
 
+const TRAY_STATUS_LABELS = {
+  checked_in: "Checked In",
+  checked_out: "Checked Out",
+  in_transfer: "In Transfer",
+  weight_mismatch: "Weight Mismatch",
+};
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatWeight(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** =================== Data Loading =================== */
 async function loadInventoryData() {
   const { data: itemTypes, error: itemTypeError } = await supabase
@@ -212,6 +245,61 @@ function renderMetricCards(summary) {
       <div class="metric-foot">Value / cost multiplier</div>
     </div>
   `;
+}
+
+async function loadTrayAlerts() {
+  const container = document.getElementById("tray-alerts-container");
+  if (!container) return;
+
+  container.innerHTML = `<div class="tray-watch-empty">Loading tray status...</div>`;
+
+  const [{ data: trays, error: trayError }, { data: stores, error: storeError }] = await Promise.all([
+    supabase
+      .from("locations")
+      .select("id, location_name, location_code, store_id, is_tray, tray_status, tray_current_store_id, tray_last_checkout_weight, tray_last_checkin_weight, tray_last_weight_delta, tray_weight_tolerance_grams, tray_checked_out_at, tray_checked_in_at")
+      .eq("is_tray", true)
+      .in("tray_status", ["checked_out", "in_transfer", "weight_mismatch"])
+      .order("updated_at", { ascending: false }),
+    supabase.from("store_locations").select("id, name"),
+  ]);
+
+  if (trayError || storeError) {
+    console.error("Failed to load tray alerts:", trayError || storeError);
+    container.innerHTML = `<div class="tray-watch-empty is-error">Could not load tray watch.</div>`;
+    return;
+  }
+
+  const storeMap = new Map((stores || []).map((store) => [store.id, store.name]));
+  const activeTrays = trays || [];
+
+  if (!activeTrays.length) {
+    container.innerHTML = `<div class="tray-watch-empty">All mobile trays are checked in with no weight flags.</div>`;
+    return;
+  }
+
+  container.innerHTML = activeTrays.map((tray) => {
+    const storeName = storeMap.get(tray.tray_current_store_id) || storeMap.get(tray.store_id) || "Unassigned";
+    const statusLabel = TRAY_STATUS_LABELS[tray.tray_status] || tray.tray_status || "Tray Alert";
+    const isMismatch = tray.tray_status === "weight_mismatch";
+    return `
+      <a class="tray-alert-card ${isMismatch ? "is-mismatch" : ""}" href="locations.html">
+        <div>
+          <span class="tray-alert-kicker">${escapeHtml(statusLabel)}</span>
+          <strong>${escapeHtml(tray.location_name || "Unnamed Tray")}</strong>
+          <span>${escapeHtml(tray.location_code || "No barcode")} - ${escapeHtml(storeName)}</span>
+        </div>
+        <div class="tray-alert-metrics">
+          <span>Checkout: <b>${formatWeight(tray.tray_last_checkout_weight)}</b></span>
+          <span>Check-in: <b>${formatWeight(tray.tray_last_checkin_weight)}</b></span>
+          <span>Delta: <b>${formatWeight(tray.tray_last_weight_delta)}</b></span>
+        </div>
+        <div class="tray-alert-foot">
+          <span>Tolerance ${formatWeight(tray.tray_weight_tolerance_grams || 10)}</span>
+          <span>${formatDateTime(tray.tray_checked_in_at || tray.tray_checked_out_at)}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
 }
 
 function getSortedCategories(summary) {
@@ -377,6 +465,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const summary = computeSummaryByCategory(items);
 
   renderMetricCards(summary);
+  await loadTrayAlerts();
   renderCategoryTable(summary);
   renderCategoryChart(summary);
 });

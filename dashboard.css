@@ -242,6 +242,105 @@ body::before{
 }
 .nav-link.active::after{ opacity:1; }
 
+.tray-watch-section {
+  border-color: rgba(125, 211, 252, .14);
+}
+
+.tray-alerts-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.tray-watch-empty {
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 16px;
+  background: rgba(255,255,255,.035);
+  color: var(--muted);
+}
+
+.tray-watch-empty.is-error {
+  color: #ffb4a7;
+  border-color: rgba(255,129,112,.28);
+}
+
+.tray-alert-card {
+  display: grid;
+  gap: 14px;
+  min-height: 180px;
+  padding: 16px;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid rgba(125, 211, 252, .16);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, .12), rgba(255,255,255,.035)),
+    rgba(255,255,255,.035);
+  box-shadow: 0 16px 36px rgba(0,0,0,.22);
+  transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+}
+
+.tray-alert-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(125, 211, 252, .30);
+}
+
+.tray-alert-card.is-mismatch {
+  border-color: rgba(255, 129, 112, .34);
+  background:
+    linear-gradient(135deg, rgba(255, 129, 112, .15), rgba(255,255,255,.035)),
+    rgba(255,255,255,.035);
+}
+
+.tray-alert-kicker {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.22);
+  color: var(--gold-2);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.tray-alert-card strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.tray-alert-card span {
+  color: var(--muted);
+}
+
+.tray-alert-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tray-alert-metrics span,
+.tray-alert-foot span {
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(0,0,0,.20);
+  font-size: .82rem;
+}
+
+.tray-alert-metrics b {
+  color: var(--text);
+}
+
+.tray-alert-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* ---------- Main ---------- */
 .main{
   flex:1;

@@ -13,6 +13,24 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 const signedUrlCache = new Map();
 const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+const TRAY_STATUS_LABELS = {
+  checked_in: "Checked In",
+  checked_out: "Checked Out",
+  in_transfer: "In Transfer",
+  weight_mismatch: "Weight Mismatch",
+};
+
+function buildStockLocationLabel(location, storeMap = {}) {
+  if (!location) return "Unknown Location";
+  const locationName = location.location_name || "Unknown Location";
+  if (!location.is_tray) return locationName;
+
+  const homeStore = storeMap[location.store_id] || "Unassigned";
+  const currentStore = storeMap[location.tray_current_store_id] || homeStore;
+  const status = TRAY_STATUS_LABELS[location.tray_status] || "Tray";
+  return `${locationName} (Tray - ${status} - Current: ${currentStore} - Home: ${homeStore})`;
+}
+
 
 
 //---------------------------------------------------------------//
@@ -2155,12 +2173,18 @@ async function refreshItemById(itemId) {
     .eq("item_id", itemId);
 
   if (!stockError && stockData) {
-    const { data: locations, error: locError } = await supabase
-      .from("locations")
-      .select("id, location_name");
+    const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
+      supabase
+        .from("locations")
+        .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id"),
+      supabase
+        .from("store_locations")
+        .select("id, name"),
+    ]);
 
-    if (!locError && locations) {
-      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+    if (!locError && !storeError && locations) {
+      const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
+      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, buildStockLocationLabel(loc, storeMap)]));
       const breakdown = {};
       let total = 0;
 
@@ -2384,16 +2408,22 @@ async function fetchStockItems() {
   }
 
   // Step 3: Fetch location name map
-  const { data: locations, error: locError } = await supabase
-    .from("locations")
-    .select("id, location_name");
+  const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
+    supabase
+      .from("locations")
+      .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id"),
+    supabase
+      .from("store_locations")
+      .select("id, name"),
+  ]);
 
-  if (locError || !locations) {
+  if (locError || storeError || !locations) {
     console.error("❌ Failed to fetch location names:", locError);
     return items;
   }
 
-  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, loc.location_name]));
+  const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
+  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, buildStockLocationLabel(loc, storeMap)]));
 
   // Step 4: Aggregate stock per item
   const stockMap = {};

@@ -147,6 +147,42 @@ function getStoreLabel(location) {
   return asTrimmedString(location?.store_name) || "Unassigned";
 }
 
+const TRAY_STATUS_LABELS = {
+  checked_in: "Checked In",
+  checked_out: "Checked Out",
+  in_transfer: "In Transfer",
+  weight_mismatch: "Weight Mismatch",
+};
+
+function getTrayStatusLabel(location) {
+  return TRAY_STATUS_LABELS[location?.tray_status] || "Checked In";
+}
+
+function getStoreNameById(storeId) {
+  const store = state.stores.find((entry) => entry.id === storeId);
+  return store?.name || "";
+}
+
+function getTrayCurrentStoreLabel(location) {
+  return asTrimmedString(location?.tray_current_store_name)
+    || getStoreNameById(location?.tray_current_store_id)
+    || getStoreLabel(location);
+}
+
+function formatWeight(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toLocaleString(undefined, { maximumFractionDigits: 2 })} g`;
+}
+
+function calculateTrayEstimatedWeight(location) {
+  return (location?.itemRows || []).reduce((sum, item) => {
+    const unitWeight = Number(item.weight || 0);
+    const quantity = Number(item.quantity || 0);
+    return sum + (Number.isFinite(unitWeight) ? unitWeight * quantity : 0);
+  }, 0);
+}
+
 function buildStoreOptionsMarkup(selectedValue = "", emptyLabel = "All stores") {
   return [`<option value="">${escapeHtml(emptyLabel)}</option>`]
     .concat(
@@ -202,6 +238,303 @@ async function resolveDymoUrl(location) {
   return createSignedStorageUrl("dymo-labels", location.dymo_label_url, state.dymoUrls, 60 * 60 * 24);
 }
 
+async function bumpInventoryVersionForLocationChange() {
+  const { error } = await supabase
+    .from("metadata")
+    .update({
+      inventory_version: crypto.randomUUID(),
+      changed_item_ids: null,
+    })
+    .eq("id", "inventory");
+
+  if (error) {
+    console.warn("Inventory cache version update failed:", error);
+  }
+}
+
+function getCreateModalElements() {
+  return {
+    modal: document.getElementById("location-create-modal"),
+    title: document.getElementById("location-create-title"),
+    subtitle: document.getElementById("location-create-subtitle"),
+    form: document.getElementById("location-create-form"),
+    nameInput: document.getElementById("location-create-name"),
+    storeSelect: document.getElementById("location-create-store"),
+    typeInput: document.getElementById("location-create-type"),
+    capacityInput: document.getElementById("location-create-capacity"),
+    barcodeInput: document.getElementById("location-create-barcode"),
+    isTrayInput: document.getElementById("location-create-is-tray"),
+    toleranceInput: document.getElementById("location-create-tray-tolerance"),
+    notesInput: document.getElementById("location-create-notes"),
+    photoInput: document.getElementById("location-create-photo"),
+    photoPreview: document.getElementById("location-create-photo-preview"),
+    canvas: document.getElementById("location-create-barcode-canvas"),
+    status: document.getElementById("location-create-status"),
+    dymoStatus: document.getElementById("location-create-dymo-status"),
+  };
+}
+
+function buildLocationDymoXml(locationCode) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<DesktopLabel Version="1">
+  <DYMOLabel Version="4">
+    <Description>DYMO Label</Description>
+    <Orientation>Landscape</Orientation>
+    <LabelName>Small30346</LabelName>
+    <InitialLength>0</InitialLength>
+    <BorderStyle>SolidLine</BorderStyle>
+    <DYMORect>
+      <DYMOPoint>
+        <X>0.22666666</X>
+        <Y>0.056666665</Y>
+      </DYMOPoint>
+      <Size>
+        <Width>1.59</Width>
+        <Height>0.4033333</Height>
+      </Size>
+    </DYMORect>
+    <BorderColor>
+      <SolidColorBrush>
+        <Color A="1" R="0" G="0" B="0"></Color>
+      </SolidColorBrush>
+    </BorderColor>
+    <BorderThickness>1</BorderThickness>
+    <Show_Border>False</Show_Border>
+    <HasFixedLength>False</HasFixedLength>
+    <FixedLengthValue>0</FixedLengthValue>
+    <DynamicLayoutManager>
+      <RotationBehavior>ClearObjects</RotationBehavior>
+      <LabelObjects>
+        <BarcodeObject>
+          <Name>BarcodeObject0</Name>
+          <Brushes>
+            <BackgroundBrush>
+              <SolidColorBrush>
+                <Color A="1" R="1" G="1" B="1"></Color>
+              </SolidColorBrush>
+            </BackgroundBrush>
+            <BorderBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </BorderBrush>
+            <StrokeBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </StrokeBrush>
+            <FillBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </FillBrush>
+          </Brushes>
+          <Rotation>Rotation0</Rotation>
+          <OutlineThickness>1</OutlineThickness>
+          <IsOutlined>False</IsOutlined>
+          <BorderStyle>SolidLine</BorderStyle>
+          <Margin>
+            <DYMOThickness Left="0" Top="0" Right="0" Bottom="0" />
+          </Margin>
+          <BarcodeFormat>Code128Auto</BarcodeFormat>
+          <Data>
+            <DataString>${locationCode}</DataString>
+          </Data>
+          <HorizontalAlignment>Center</HorizontalAlignment>
+          <VerticalAlignment>Middle</VerticalAlignment>
+          <Size>AutoFit</Size>
+          <TextPosition>Bottom</TextPosition>
+          <FontInfo>
+            <FontName>Arial</FontName>
+            <FontSize>8</FontSize>
+            <IsBold>False</IsBold>
+            <IsItalic>False</IsItalic>
+            <IsUnderline>False</IsUnderline>
+            <FontBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </FontBrush>
+          </FontInfo>
+          <ObjectLayout>
+            <DYMOPoint>
+              <X>0.22666667</X>
+              <Y>0.06666668</Y>
+            </DYMOPoint>
+            <Size>
+              <Width>1.3885133</Width>
+              <Height>0.39078796</Height>
+            </Size>
+          </ObjectLayout>
+        </BarcodeObject>
+      </LabelObjects>
+    </DynamicLayoutManager>
+  </DYMOLabel>
+  <LabelApplication>Blank</LabelApplication>
+  <DataTable>
+    <Columns></Columns>
+    <Rows></Rows>
+  </DataTable>
+</DesktopLabel>`;
+}
+
+function generateCreateLocationBarcode() {
+  const elements = getCreateModalElements();
+  if (!elements.barcodeInput || !elements.canvas) return "";
+
+  const code = `LOC-${Date.now().toString().slice(-8)}`;
+  elements.barcodeInput.value = code;
+
+  if (typeof JsBarcode !== "undefined") {
+    JsBarcode(elements.canvas, code, {
+      format: "CODE128",
+      lineColor: "#111111",
+      background: "#ffffff",
+      displayValue: true,
+      fontOptions: "bold",
+      fontSize: 16,
+      height: 62,
+      margin: 10,
+    });
+  }
+
+  if (elements.dymoStatus) {
+    elements.dymoStatus.textContent = "DYMO label ready to save";
+  }
+
+  return code;
+}
+
+function populateCreateLocationStoreSelect(selectedStoreId = "") {
+  const { storeSelect } = getCreateModalElements();
+  if (!storeSelect) return;
+
+  storeSelect.innerHTML = buildStoreOptionsMarkup(selectedStoreId, "Select store");
+  storeSelect.value = selectedStoreId || "";
+}
+
+function closeCreateLocationModal() {
+  const elements = getCreateModalElements();
+  elements.modal?.classList.add("hidden");
+  elements.modal?.setAttribute("aria-hidden", "true");
+  elements.form?.reset();
+  if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
+  if (elements.status) elements.status.textContent = "";
+  if (elements.dymoStatus) elements.dymoStatus.textContent = "DYMO label will be created on save";
+}
+
+function openCreateLocationModal({ tray = false } = {}) {
+  const elements = getCreateModalElements();
+  if (!elements.modal) return;
+
+  elements.form?.reset();
+  populateCreateLocationStoreSelect();
+  elements.modal.classList.remove("hidden");
+  elements.modal.setAttribute("aria-hidden", "false");
+  if (elements.title) elements.title.textContent = tray ? "Create Tray" : "Create Location";
+  if (elements.subtitle) {
+    elements.subtitle.textContent = tray
+      ? "Create a barcode-ready mobile tray that can be checked in and out."
+      : "Create a barcode-ready fixed location.";
+  }
+  if (elements.typeInput) elements.typeInput.value = tray ? "tray" : "";
+  if (elements.isTrayInput) elements.isTrayInput.checked = tray;
+  if (elements.toleranceInput) elements.toleranceInput.value = tray ? "10" : "10";
+  if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
+  if (elements.status) elements.status.textContent = "";
+  generateCreateLocationBarcode();
+  elements.nameInput?.focus();
+}
+
+async function uploadCreateLocationDymo(locationCode) {
+  const xml = buildLocationDymoXml(locationCode);
+  const labelPath = `labels/location_${Date.now()}.dymo`;
+  const blob = new Blob([xml], { type: "application/octet-stream" });
+  const { error } = await supabase.storage
+    .from("dymo-labels")
+    .upload(labelPath, blob, { upsert: true });
+
+  if (error) throw error;
+  return labelPath;
+}
+
+async function uploadCreateLocationPhoto(file) {
+  if (!file) return null;
+  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+  const path = `photos/${Date.now()}_${safeName}`;
+  const { data, error } = await supabase.storage
+    .from("location-assets")
+    .upload(path, file, { upsert: true });
+
+  if (error) throw error;
+  return data?.path || path;
+}
+
+async function saveCreatedLocation() {
+  const elements = getCreateModalElements();
+  const locationName = asTrimmedString(elements.nameInput?.value);
+  const storeId = asTrimmedString(elements.storeSelect?.value);
+  const type = asTrimmedString(elements.typeInput?.value);
+  const capacityValue = asTrimmedString(elements.capacityInput?.value);
+  const locationCode = asTrimmedString(elements.barcodeInput?.value);
+  const isTray = Boolean(elements.isTrayInput?.checked);
+  const toleranceValue = asTrimmedString(elements.toleranceInput?.value);
+  const notes = asTrimmedString(elements.notesInput?.value);
+  const photoFile = elements.photoInput?.files?.[0] || null;
+
+  if (!locationName || !locationCode) {
+    if (elements.status) elements.status.textContent = "Name and barcode are required.";
+    return;
+  }
+
+  if (state.stores.length > 0 && !storeId) {
+    if (elements.status) elements.status.textContent = "Choose the store for this location.";
+    return;
+  }
+
+  if (elements.status) elements.status.textContent = "Creating location and label...";
+
+  try {
+    const [dymoPath, photoPath] = await Promise.all([
+      uploadCreateLocationDymo(locationCode),
+      uploadCreateLocationPhoto(photoFile),
+    ]);
+
+    const payload = {
+      location_name: locationName,
+      location_code: locationCode,
+      dymo_label_url: dymoPath,
+      photo_url: photoPath,
+      type: type || (isTray ? "tray" : null),
+      max_capacity: capacityValue ? Number(capacityValue) : null,
+      active: true,
+      notes: notes || null,
+      store_id: storeId || null,
+      is_tray: isTray,
+      tray_weight_tolerance_grams: toleranceValue ? Number(toleranceValue) : 10,
+      tray_current_store_id: isTray ? (storeId || null) : null,
+    };
+
+    const { data, error } = await supabase
+      .from("locations")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if (error || !data) throw error || new Error("Location was not returned after saving.");
+
+    if (elements.status) elements.status.textContent = "Location created.";
+    closeCreateLocationModal();
+    await loadLocationsData();
+    await renderLocationDetail(data.id);
+  } catch (error) {
+    console.error("Create location failed:", error);
+    if (elements.status) {
+      elements.status.textContent = `Could not create location: ${error?.message || "Unknown error"}`;
+    }
+  }
+}
+
 function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
   const itemMap = new Map((itemTypes || []).map((item) => [item.id, item]));
   const stockByLocation = new Map();
@@ -243,6 +576,7 @@ function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
           itemId: entry.item_id,
           title: item?.title || "Untitled Item",
           barcode: item?.barcode || "—",
+          weight: Number(item?.weight || 0),
           quantity: entry.quantity,
           photoPath: photos[0] || "",
           recentAt: entry.recentAt,
@@ -260,6 +594,7 @@ function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
     return {
       ...location,
       store_name: storeMap.get(location.store_id)?.name || "",
+      tray_current_store_name: storeMap.get(location.tray_current_store_id)?.name || "",
       itemRows,
       distinctItemTypes: itemRows.length,
       totalQuantity,
@@ -281,7 +616,7 @@ async function loadLocationsData() {
     supabase.from("locations").select("*"),
     supabase.from("store_locations").select("id, name, active").order("name", { ascending: true }),
     supabase.from("item_stock_locations").select("*"),
-    supabase.from("item_types").select("id, title, barcode, photos"),
+    supabase.from("item_types").select("id, title, barcode, photos, weight"),
   ]);
 
   if (locationsError || storesError || stockError || itemTypesError) {
@@ -373,6 +708,8 @@ function renderSummaryCards() {
   const totalLocations = state.locations.length;
   const activeLocations = state.locations.filter((location) => location.active !== false).length;
   const totalStockUnits = state.locations.reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0);
+  const trayLocations = state.locations.filter((location) => location.is_tray);
+  const trayAlerts = trayLocations.filter((location) => ["checked_out", "in_transfer", "weight_mismatch"].includes(location.tray_status)).length;
   const representedStores = new Set(state.locations.map((location) => asTrimmedString(location.store_id)).filter(Boolean)).size;
   const recentThreshold = Date.now() - (1000 * 60 * 60 * 24 * 14);
   const recentUpdates = state.locations.filter((location) => {
@@ -416,6 +753,15 @@ function renderSummaryCards() {
       <div class="metric-value">${representedStores.toLocaleString()}</div>
       <div class="metric-foot">${recentUpdates.toLocaleString()} locations updated or created in the last 14 days</div>
     </div>
+
+    <div class="metric-card ${trayAlerts ? "is-tray-alert" : ""}">
+      <div class="metric-top">
+        <div class="metric-label">Mobile Trays</div>
+        <div class="metric-icon">Tray</div>
+      </div>
+      <div class="metric-value">${trayLocations.length.toLocaleString()}</div>
+      <div class="metric-foot">${trayAlerts.toLocaleString()} tray(s) checked out, in transfer, or weight flagged</div>
+    </div>
   `;
 }
 
@@ -457,6 +803,11 @@ function renderLocationsTable() {
         <span class="locations-pill ${location.active === false ? "is-inactive" : "is-active"}">
           ${location.active === false ? "Inactive" : "Active"}
         </span>
+        ${location.is_tray ? `
+          <span class="locations-pill is-tray-status ${location.tray_status === "weight_mismatch" ? "is-tray-alert" : ""}">
+            ${escapeHtml(getTrayStatusLabel(location))}
+          </span>
+        ` : ""}
       </td>
       <td>
         <div class="locations-assets">
@@ -503,11 +854,126 @@ async function renderLocationDetail(locationId) {
   subtitle.textContent = `${location.location_code || "No barcode"} • ${Number(location.totalQuantity || 0).toLocaleString()} total units • ${Number(location.distinctItemTypes || 0).toLocaleString()} item types`;
   body.innerHTML = `<div class="location-detail-empty">Loading location detail…</div>`;
 
+  if (location.is_tray) {
+    subtitle.textContent = `${subtitle.textContent} - ${getTrayStatusLabel(location)}`;
+  }
+
   const [photoUrl, dymoUrl, itemPhotoUrls] = await Promise.all([
     resolveLocationPhotoUrl(location),
     resolveDymoUrl(location),
     Promise.all(location.itemRows.map((item) => resolveItemPhotoUrl(item.photoPath))),
   ]);
+
+  let trayMovements = [];
+  if (location.is_tray) {
+    const { data: movements, error: movementError } = await supabase
+      .from("tray_movements")
+      .select("*")
+      .eq("tray_location_id", location.id)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    if (movementError) {
+      console.warn("Tray movement history unavailable:", movementError);
+    } else {
+      trayMovements = movements || [];
+    }
+  }
+
+  const estimatedTrayWeight = calculateTrayEstimatedWeight(location);
+  const trayStoreOptions = buildStoreOptionsMarkup(asTrimmedString(location.tray_current_store_id || location.store_id), "Select store");
+  const movementHistoryMarkup = trayMovements.length
+    ? trayMovements.map((movement) => `
+      <div class="tray-movement-row">
+        <div>
+          <strong>${movement.action === "check_in" ? "Checked in" : "Checked out"}</strong>
+          <span>${escapeHtml(formatDateTime(movement.created_at))} by ${escapeHtml(movement.performed_by_email || "staff")}</span>
+        </div>
+        <div>
+          <strong>${formatWeight(movement.actual_weight_grams)}</strong>
+          <span>${movement.weight_delta_grams === null || movement.weight_delta_grams === undefined ? "Baseline" : `Delta ${formatWeight(movement.weight_delta_grams)}`}</span>
+        </div>
+        <span class="locations-pill ${movement.result === "mismatch" ? "is-tray-alert" : "is-active"}">${movement.result === "mismatch" ? "Mismatch" : "OK"}</span>
+      </div>
+    `).join("")
+    : `<div class="location-detail-empty">No tray movements have been recorded yet.</div>`;
+  const trayMarkup = location.is_tray ? `
+    <section class="location-detail-card tray-control-card ${location.tray_status === "weight_mismatch" ? "has-tray-alert" : ""}">
+      <div class="location-detail-card-head">
+        <div>
+          <h4 class="location-detail-card-title">Mobile Tray Control</h4>
+          <div class="location-status-line">Record checkout and check-in weights against this tray barcode.</div>
+        </div>
+        <span class="locations-pill is-tray-status ${location.tray_status === "weight_mismatch" ? "is-tray-alert" : ""}">
+          ${escapeHtml(getTrayStatusLabel(location))}
+        </span>
+      </div>
+
+      <div class="location-detail-meta-grid tray-meta-grid">
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Home Store</div>
+          <div class="location-detail-stat-value">${escapeHtml(getStoreLabel(location))}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Current Store</div>
+          <div class="location-detail-stat-value">${escapeHtml(getTrayCurrentStoreLabel(location))}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Tolerance</div>
+          <div class="location-detail-stat-value">${formatWeight(location.tray_weight_tolerance_grams || 10)}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Estimated Contents</div>
+          <div class="location-detail-stat-value">${formatWeight(estimatedTrayWeight)}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Checkout Weight</div>
+          <div class="location-detail-stat-value">${formatWeight(location.tray_last_checkout_weight)}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Last Delta</div>
+          <div class="location-detail-stat-value">${formatWeight(location.tray_last_weight_delta)}</div>
+        </div>
+      </div>
+
+      <form id="tray-movement-form" data-location-id="${escapeHtml(location.id)}" class="tray-movement-form">
+        <label class="location-edit-label">
+          <span>Movement</span>
+          <select id="tray-movement-action" class="location-edit-select">
+            <option value="check_out">Check Out Tray</option>
+            <option value="check_in">Check In Tray</option>
+          </select>
+        </label>
+
+        <label class="location-edit-label">
+          <span>Store</span>
+          <select id="tray-movement-store" class="location-edit-select">
+            ${trayStoreOptions}
+          </select>
+        </label>
+
+        <label class="location-edit-label">
+          <span>Actual Weight (g)</span>
+          <input type="number" id="tray-movement-weight" class="location-edit-input" step="0.01" min="0" placeholder="Tray weight on scale" />
+        </label>
+
+        <label class="location-edit-label full">
+          <span>Notes</span>
+          <textarea id="tray-movement-notes" class="location-edit-textarea" placeholder="Optional note for the movement log"></textarea>
+        </label>
+
+        <div class="tray-movement-actions">
+          <button type="submit" class="locations-action-button">Record Tray Movement</button>
+          <div id="tray-movement-status" class="location-status-line"></div>
+        </div>
+      </form>
+
+      <div class="tray-movement-history">
+        <div class="location-detail-card-title">Recent Tray Movements</div>
+        ${movementHistoryMarkup}
+      </div>
+    </section>
+  ` : "";
 
   const itemsMarkup = location.itemRows.length
     ? location.itemRows.map((item, index) => `
@@ -570,6 +1036,8 @@ async function renderLocationDetail(locationId) {
       </div>
       <div class="location-status-line">Updated: ${escapeHtml(formatDateTime(getLocationDisplayDate(location)))}</div>
     </section>
+
+    ${trayMarkup}
 
     <section class="location-detail-card">
       <div class="location-detail-card-head">
@@ -643,6 +1111,16 @@ async function renderLocationDetail(locationId) {
             <input type="checkbox" id="location-edit-active" ${location.active === false ? "" : "checked"} />
             <span>Location is active</span>
           </label>
+
+          <label class="location-edit-toggle full">
+            <input type="checkbox" id="location-edit-is-tray" ${location.is_tray ? "checked" : ""} />
+            <span>This location is a mobile tray</span>
+          </label>
+
+          <label class="location-edit-label">
+            <span>Tray Tolerance (g)</span>
+            <input type="number" id="location-edit-tray-tolerance" class="location-edit-input" value="${location.tray_weight_tolerance_grams ?? 10}" min="0" step="0.01" />
+          </label>
         </div>
 
         <div class="location-edit-actions">
@@ -686,6 +1164,8 @@ async function saveLocationEdits(locationId) {
   const capacityValue = asTrimmedString(document.getElementById("location-edit-capacity")?.value);
   const notes = asTrimmedString(document.getElementById("location-edit-notes")?.value);
   const active = Boolean(document.getElementById("location-edit-active")?.checked);
+  const isTray = Boolean(document.getElementById("location-edit-is-tray")?.checked);
+  const trayToleranceValue = asTrimmedString(document.getElementById("location-edit-tray-tolerance")?.value);
   const photoFile = document.getElementById("location-edit-photo")?.files?.[0] || null;
 
   if (!name) {
@@ -722,6 +1202,9 @@ async function saveLocationEdits(locationId) {
     active,
     photo_url: photoPath,
     max_capacity: capacityValue ? Number(capacityValue) : null,
+    is_tray: isTray,
+    tray_weight_tolerance_grams: trayToleranceValue ? Number(trayToleranceValue) : 10,
+    tray_current_store_id: isTray ? (location.tray_current_store_id || storeId || null) : null,
   };
 
   const { data, error } = await supabase
@@ -738,6 +1221,111 @@ async function saveLocationEdits(locationId) {
   }
 
   if (statusEl) statusEl.textContent = "Location updated.";
+  await bumpInventoryVersionForLocationChange();
+  await loadLocationsData();
+  await renderLocationDetail(locationId);
+}
+
+async function saveTrayMovement(locationId) {
+  const location = state.locations.find((entry) => entry.id === locationId);
+  if (!location || !location.is_tray) return;
+
+  const statusEl = document.getElementById("tray-movement-status");
+  const action = asTrimmedString(document.getElementById("tray-movement-action")?.value);
+  const storeId = asTrimmedString(document.getElementById("tray-movement-store")?.value);
+  const weightValue = asTrimmedString(document.getElementById("tray-movement-weight")?.value);
+  const notes = asTrimmedString(document.getElementById("tray-movement-notes")?.value);
+  const actualWeight = Number(weightValue);
+  const tolerance = Number(location.tray_weight_tolerance_grams || 10);
+
+  if (!storeId) {
+    if (statusEl) statusEl.textContent = "Choose the store for this tray movement.";
+    return;
+  }
+
+  if (!Number.isFinite(actualWeight) || actualWeight < 0) {
+    if (statusEl) statusEl.textContent = "Enter the actual tray weight in grams.";
+    return;
+  }
+
+  if (action === "check_out" && location.tray_status === "checked_out") {
+    if (statusEl) statusEl.textContent = "This tray is already checked out. Check it in before checking it out again.";
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = "Recording tray movement...";
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const nowIso = new Date().toISOString();
+  const expectedWeight = action === "check_in" && Number.isFinite(Number(location.tray_last_checkout_weight))
+    ? Number(location.tray_last_checkout_weight)
+    : null;
+  const delta = expectedWeight === null ? null : Number((actualWeight - expectedWeight).toFixed(2));
+  const result = delta !== null && Math.abs(delta) > tolerance ? "mismatch" : "ok";
+  const trayStatus = action === "check_in"
+    ? (result === "mismatch" ? "weight_mismatch" : "checked_in")
+    : "checked_out";
+
+  const movementPayload = {
+    tray_location_id: locationId,
+    action,
+    from_store_id: action === "check_out" ? storeId : (location.tray_current_store_id || location.store_id || null),
+    to_store_id: action === "check_in" ? storeId : null,
+    expected_weight_grams: expectedWeight,
+    actual_weight_grams: actualWeight,
+    weight_delta_grams: delta,
+    tolerance_grams: tolerance,
+    result,
+    notes: notes || null,
+    performed_by: user?.id || null,
+    performed_by_email: user?.email || null,
+  };
+
+  const updatePayload = {
+    tray_status: trayStatus,
+    tray_current_store_id: storeId,
+    tray_last_weight_delta: delta,
+  };
+
+  if (action === "check_out") {
+    updatePayload.tray_last_checkout_weight = actualWeight;
+    updatePayload.tray_checked_out_at = nowIso;
+    updatePayload.tray_checked_out_by = user?.id || null;
+    updatePayload.tray_last_weight_delta = null;
+  } else {
+    updatePayload.tray_last_checkin_weight = actualWeight;
+    updatePayload.tray_checked_in_at = nowIso;
+    updatePayload.tray_checked_in_by = user?.id || null;
+  }
+
+  const { error: movementError } = await supabase
+    .from("tray_movements")
+    .insert(movementPayload);
+
+  if (movementError) {
+    console.error("Tray movement insert failed:", movementError);
+    if (statusEl) statusEl.textContent = `Could not record movement: ${movementError.message}`;
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from("locations")
+    .update(updatePayload)
+    .eq("id", locationId);
+
+  if (updateError) {
+    console.error("Tray location update failed:", updateError);
+    if (statusEl) statusEl.textContent = `Movement logged, but tray status was not updated: ${updateError.message}`;
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.textContent = result === "mismatch"
+      ? `Weight mismatch flagged: ${formatWeight(delta)} from checkout baseline.`
+      : "Tray movement recorded.";
+  }
+
+  await bumpInventoryVersionForLocationChange();
   await loadLocationsData();
   await renderLocationDetail(locationId);
 }
@@ -746,6 +1334,22 @@ function bindEvents() {
   document.getElementById("locations-search")?.addEventListener("input", (event) => {
     state.filters.search = event.target.value.trim();
     renderLocationsTable();
+  });
+
+  document.getElementById("locations-search")?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") return;
+    const query = asTrimmedString(event.target.value).toLowerCase();
+    if (!query) return;
+
+    const exactMatch = state.locations.find((location) => {
+      return [location.location_code, location.location_name]
+        .some((value) => asTrimmedString(value).toLowerCase() === query);
+    });
+
+    if (exactMatch) {
+      event.preventDefault();
+      await renderLocationDetail(exactMatch.id);
+    }
   });
 
   document.getElementById("locations-type-filter")?.addEventListener("change", (event) => {
@@ -770,6 +1374,50 @@ function bindEvents() {
 
   document.getElementById("locations-refresh")?.addEventListener("click", async () => {
     await loadLocationsData();
+  });
+
+  document.getElementById("locations-create-location")?.addEventListener("click", () => {
+    openCreateLocationModal({ tray: false });
+  });
+
+  document.getElementById("locations-create-tray")?.addEventListener("click", () => {
+    openCreateLocationModal({ tray: true });
+  });
+
+  document.getElementById("location-create-close")?.addEventListener("click", () => {
+    closeCreateLocationModal();
+  });
+
+  document.getElementById("location-create-regenerate")?.addEventListener("click", () => {
+    generateCreateLocationBarcode();
+  });
+
+  document.getElementById("location-create-photo")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0] || null;
+    const preview = document.getElementById("location-create-photo-preview");
+    if (!preview) return;
+
+    if (!file) {
+      preview.textContent = "No photo selected.";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (loadEvent) => {
+      preview.innerHTML = `<img src="${escapeHtml(loadEvent.target?.result || "")}" alt="Location preview" />`;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById("location-create-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "location-create-modal") {
+      closeCreateLocationModal();
+    }
+  });
+
+  document.getElementById("location-create-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await saveCreatedLocation();
   });
 
   document.getElementById("locations-table-body")?.addEventListener("click", async (event) => {
@@ -797,6 +1445,13 @@ function bindEvents() {
     if (!form) return;
     event.preventDefault();
     await saveLocationEdits(form.dataset.locationId);
+  });
+
+  document.getElementById("location-detail-body")?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("#tray-movement-form");
+    if (!form) return;
+    event.preventDefault();
+    await saveTrayMovement(form.dataset.locationId);
   });
 }
 

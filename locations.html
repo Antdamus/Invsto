@@ -108,9 +108,17 @@
                 Monitor storage destinations, track item density, review label assets, and maintain location metadata from one central control surface.
               </div>
             </div>
-            <button type="button" id="locations-refresh" class="locations-toolbar-button">
-              Refresh Data
-            </button>
+            <div class="locations-hero-actions">
+              <button type="button" id="locations-create-location" class="locations-toolbar-button">
+                Create Location
+              </button>
+              <button type="button" id="locations-create-tray" class="locations-toolbar-button locations-toolbar-button-primary">
+                Create Tray
+              </button>
+              <button type="button" id="locations-refresh" class="locations-toolbar-button">
+                Refresh Data
+              </button>
+            </div>
           </div>
 
           <div class="metrics-grid" id="locations-metric-cards"></div>
@@ -195,6 +203,88 @@
           </div>
         </section>
       </main>
+    </div>
+  </div>
+
+  <div id="location-create-modal" class="location-create-modal hidden" aria-hidden="true">
+    <div class="location-create-shell" role="dialog" aria-modal="true" aria-labelledby="location-create-title">
+      <div class="location-detail-head">
+        <div>
+          <div class="locations-detail-kicker">New Storage Destination</div>
+          <h3 id="location-create-title" class="location-detail-title">Create Location</h3>
+          <div id="location-create-subtitle" class="location-detail-subtitle">Create a barcode-ready location or mobile tray.</div>
+        </div>
+        <button type="button" id="location-create-close" class="location-detail-close" aria-label="Close creation modal">
+          Close
+        </button>
+      </div>
+
+      <form id="location-create-form" class="location-create-form">
+        <div class="location-edit-grid">
+          <label class="location-edit-label">
+            <span>Name</span>
+            <input type="text" id="location-create-name" class="location-edit-input" placeholder="Tray 1, Front Case, Safe Shelf A" required />
+          </label>
+
+          <label class="location-edit-label">
+            <span>Store</span>
+            <select id="location-create-store" class="location-edit-select"></select>
+          </label>
+
+          <label class="location-edit-label">
+            <span>Type</span>
+            <input type="text" id="location-create-type" class="location-edit-input" placeholder="tray, shelf, safe, bin" />
+          </label>
+
+          <label class="location-edit-label">
+            <span>Max Capacity</span>
+            <input type="number" id="location-create-capacity" class="location-edit-input" min="0" />
+          </label>
+
+          <label class="location-edit-label">
+            <span>Barcode</span>
+            <input type="text" id="location-create-barcode" class="location-edit-input" readonly />
+          </label>
+
+          <label class="location-edit-label">
+            <span>Tray Tolerance (g)</span>
+            <input type="number" id="location-create-tray-tolerance" class="location-edit-input" min="0" step="0.01" value="10" />
+          </label>
+
+          <label class="location-edit-toggle full">
+            <input type="checkbox" id="location-create-is-tray" />
+            <span>This location is a mobile tray</span>
+          </label>
+
+          <label class="location-edit-label full">
+            <span>Notes</span>
+            <textarea id="location-create-notes" class="location-edit-textarea" placeholder="Optional storage notes"></textarea>
+          </label>
+
+          <label class="location-edit-label full">
+            <span>Photo</span>
+            <input type="file" id="location-create-photo" class="location-edit-input" accept="image/*" />
+          </label>
+        </div>
+
+        <div class="location-create-assets">
+          <div class="location-barcode-panel">
+            <canvas id="location-create-barcode-canvas" class="location-barcode-canvas"></canvas>
+            <div class="location-asset-actions">
+              <button type="button" id="location-create-regenerate" class="locations-action-button">Regenerate Barcode</button>
+              <span id="location-create-dymo-status" class="locations-pill is-asset">DYMO label will be created on save</span>
+            </div>
+          </div>
+          <div id="location-create-photo-preview" class="location-photo-panel location-create-photo-preview">
+            No photo selected.
+          </div>
+        </div>
+
+        <div class="location-edit-actions">
+          <button type="submit" class="locations-action-button">Save Location</button>
+          <div id="location-create-status" class="location-status-line"></div>
+        </div>
+      </form>
     </div>
   </div>
 
