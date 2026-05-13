@@ -1,6 +1,6 @@
 // 🔹 Global App State
 let currentPage = 1;                    // Current page number or pagination
-let itemsPerPage = 12;                 // Number of items per page
+let itemsPerPage = 6;                 // Number of items per page
 let allItems = [];                     // Holds all fetched stock items
 let userFavorites = new Set();         // Set of favorite item IDs for the current user
 let currentUser = null;                // Holds authenticated user info
@@ -29,6 +29,37 @@ function buildStockLocationLabel(location, storeMap = {}) {
   const currentStore = storeMap[location.tray_current_store_id] || homeStore;
   const status = TRAY_STATUS_LABELS[location.tray_status] || "Tray";
   return `${locationName} (Tray - ${status} - Current: ${currentStore} - Home: ${homeStore})`;
+}
+
+function escapeStockHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatStockMoney(value) {
+  const number = Number(value || 0);
+  return `$${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function buildLocationChips(item) {
+  const details = Array.isArray(item.stock_location_details) ? item.stock_location_details : [];
+  if (!details.length) {
+    return `<div class="stock-location-empty">No assigned locations</div>`;
+  }
+
+  return details.slice(0, 4).map((entry) => `
+    <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""}">
+      <strong>${escapeStockHtml(entry.location_name || "Unknown")}</strong>
+      <small>${entry.is_tray ? `${escapeStockHtml(entry.tray_status_label || "Tray")} - ${escapeStockHtml(entry.current_store || "Unassigned")}` : escapeStockHtml(entry.store_name || "Fixed location")}</small>
+      <b>${Number(entry.quantity || 0).toLocaleString()}</b>
+    </span>
+  `).join("") + (details.length > 4
+    ? `<span class="stock-location-more">+${details.length - 4} more</span>`
+    : "");
 }
 
 
@@ -153,11 +184,13 @@ function buildStockLocationLabel(location, storeMap = {}) {
       const stock = typeof item.stock === "number" ? item.stock : 0;
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
-      const stockLabel = stock === 0
-        ? `<p class="stock-count ${stockClass}" data-tooltip="${tooltip}" data-id="${item.id}">
-            <i data-lucide="alert-circle" class="stock-alert-icon"></i> In Stock: ${stock}
-          </p>`
-        : `<p class="stock-count" data-tooltip="${tooltip}" data-id="${item.id}">In Stock: ${stock}</p>`;
+      const stockLabel = `
+        <button type="button" class="stock-count ${stockClass}" data-tooltip="${escapeStockHtml(tooltip)}" data-id="${item.id}">
+          ${stock === 0 ? `<i data-lucide="alert-circle" class="stock-alert-icon"></i>` : ""}
+          <span>In Stock</span>
+          <strong>${Number(stock || 0).toLocaleString()}</strong>
+        </button>
+      `;
 
     
         const categoryChips = (item.categories || []).map(cat => { /**this
@@ -167,8 +200,8 @@ function buildStockLocationLabel(location, storeMap = {}) {
             by caterogories in the item row */
             const color = getChipColor(cat); /**returns the color class */
             return `
-                <div class="category-chip" data-color="${color}" data-cat="${cat}" data-id="${item.id}">
-                ${cat}
+                <div class="category-chip" data-color="${color}" data-cat="${escapeStockHtml(cat)}" data-id="${item.id}">
+                ${escapeStockHtml(cat)}
                 <button class="remove-category-btn" title="Remove categories">&times;</button>
                 </div>
             `;
@@ -178,11 +211,35 @@ function buildStockLocationLabel(location, storeMap = {}) {
     
         return `
         <div class="stock-content">
-          <h2>${item.title}</h2>
-          <p>${item.description}</p>
+          <div class="stock-card-headline">
+            <h2>${escapeStockHtml(item.title || "Untitled item")}</h2>
+            ${stockLabel}
+          </div>
+          <p class="stock-description">${escapeStockHtml(item.description || "No description recorded.")}</p>
+          <div class="stock-metric-grid">
+            <span><small>Weight</small><strong>${Number(item.weight || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} g</strong></span>
+            <span><small>Cost</small><strong>${formatStockMoney(item.cost)}</strong></span>
+            <span><small>Sale</small><strong>${formatStockMoney(item.sale_price)}</strong></span>
+            <span><small>Barcode</small><strong>${escapeStockHtml(item.barcode || "-")}</strong></span>
+          </div>
+          <div class="stock-location-section">
+            <div class="stock-section-row">
+              <span>Locations</span>
+              <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
+            </div>
+            <div class="stock-location-chips">${buildLocationChips(item)}</div>
+          </div>
+          <details class="stock-card-details">
+            <summary>More details</summary>
+            <p><strong>Distributor:</strong> ${escapeStockHtml(item.distributor_name || "-")}<br/>${escapeStockHtml(item.distributor_phone || "")}</p>
+            <p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>
+            <p><strong>QR Type:</strong> ${escapeStockHtml(item.qr_type || "-")}</p>
+            <p><strong>Last Updated:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
+            ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${escapeStockHtml(item.dymo_label_url)}">DYMO Label</a></p>` : ""}
+          </details>
           <p><strong>Weight:</strong> ${item.weight}</p>
-          <p><strong>Cost:</strong> $${item.cost.toLocaleString()}</p>
-          <p><strong>Sale Price:</strong> $${item.sale_price.toLocaleString()}</p>
+          <p><strong>Cost:</strong> $${Number(item.cost || 0).toLocaleString()}</p>
+          <p><strong>Sale Price:</strong> $${Number(item.sale_price || 0).toLocaleString()}</p>
           <p><strong>Distributor:</strong> ${item.distributor_name || "—"}<br/>${item.distributor_phone || ""}</p>
           <p><strong>Notes:</strong> ${item.distributor_notes || "—"}</p>
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
@@ -269,11 +326,13 @@ function buildStockLocationLabel(location, storeMap = {}) {
         return `<div class="no-photo">No Photos</div>`;
       }
 
-      // Lazily sign only what's needed
+      // Keep cards light: the full media set can still live in the editor,
+      // but stock cards only need the primary photo for scanning and movement.
       const validPaths = paths.filter(p => typeof p === "string" && p.includes("/"));
+      const visiblePaths = validPaths.slice(0, 1);
 
       const signedUrls = await Promise.all(
-        validPaths.map(path => getSignedUrl(path))
+        visiblePaths.map(path => getSignedUrl(path))
       );
 
       const filteredOut = paths.filter(p => !(typeof p === "string" && p.includes("/")));
@@ -285,17 +344,12 @@ function buildStockLocationLabel(location, storeMap = {}) {
 
       return `
         <div class="carousel" id="carousel-${index}">
-          <button class="carousel-btn left" data-carousel-index="${index}" data-dir="prev" title="Previous image">
-            <i data-lucide="chevron-left" class="carousel-icon"></i>
-          </button>
           <div class="carousel-track">
             ${signedUrls.map((url, i) => `
               <img loading="lazy" src="${url}" class="carousel-photo ${i === 0 ? 'active' : ''}" alt="Item photo"/>
             `).join('')}
           </div>
-          <button class="carousel-btn right" data-carousel-index="${index}" data-dir="next" title="Next image">
-            <i data-lucide="chevron-right" class="carousel-icon"></i>
-          </button>
+          ${validPaths.length > 1 ? `<span class="stock-photo-count">+${validPaths.length - 1} photos</span>` : ""}
         </div>
       `;
     }
@@ -414,10 +468,11 @@ function buildStockLocationLabel(location, storeMap = {}) {
     function setupCardEventListeners() {
       // 🎯 Handle all click-based interactions (e.g., favorite, category, carousel)
       document.addEventListener("click", (e) => {
-        const id = e.target.dataset.id; // Common data-id used for most card actions
+        const actionTarget = e.target.closest("[data-id]");
+        const id = actionTarget?.dataset.id || e.target.dataset.id; // Common data-id used for most card actions
 
         // ⭐ Toggle favorite status
-        if (e.target.matches(".favorite-btn")) {
+        if (e.target.closest(".favorite-btn")) {
           toggleFavorite(id);
         }
 
@@ -448,8 +503,9 @@ function buildStockLocationLabel(location, storeMap = {}) {
         }
 
         // ✅ 🟢 NEW: Handle clicks on stock-count to open transfer modal
-        if (e.target.matches(".stock-count")) {
-          const itemId = e.target.dataset.id;
+        const transferTrigger = e.target.closest(".stock-count, .transfer-stock-btn");
+        if (transferTrigger) {
+          const itemId = transferTrigger.dataset.id;
           if (itemId) {
             transferModule.openTransferModal(itemId);
           }
@@ -2184,17 +2240,35 @@ async function refreshItemById(itemId) {
 
     if (!locError && !storeError && locations) {
       const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
-      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, buildStockLocationLabel(loc, storeMap)]));
+      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, {
+        ...loc,
+        label: buildStockLocationLabel(loc, storeMap),
+        store_name: storeMap[loc.store_id] || "",
+        current_store: storeMap[loc.tray_current_store_id] || storeMap[loc.store_id] || "",
+        tray_status_label: TRAY_STATUS_LABELS[loc.tray_status] || "Tray",
+      }]));
       const breakdown = {};
+      const locationDetails = [];
       let total = 0;
 
       stockData.forEach(({ quantity, location_id }) => {
-        const locName = locationMap[location_id] || "Unknown Location";
+        const locationInfo = locationMap[location_id] || {};
+        const locName = locationInfo.label || "Unknown Location";
         total += quantity;
         breakdown[locName] = (breakdown[locName] || 0) + quantity;
+        locationDetails.push({
+          location_id,
+          location_name: locationInfo.location_name || locName,
+          store_name: locationInfo.store_name || "",
+          current_store: locationInfo.current_store || "",
+          tray_status_label: locationInfo.tray_status_label || "",
+          is_tray: Boolean(locationInfo.is_tray),
+          quantity,
+        });
       });
 
       item.stock = total;
+      item.stock_location_details = locationDetails;
       item.stock_tooltip = Object.entries(breakdown)
         .map(([loc, qty]) => `${loc}: ${qty}`)
         .join("\n");
@@ -2423,23 +2497,40 @@ async function fetchStockItems() {
   }
 
   const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
-  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, buildStockLocationLabel(loc, storeMap)]));
+  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, {
+    ...loc,
+    label: buildStockLocationLabel(loc, storeMap),
+    store_name: storeMap[loc.store_id] || "",
+    current_store: storeMap[loc.tray_current_store_id] || storeMap[loc.store_id] || "",
+    tray_status_label: TRAY_STATUS_LABELS[loc.tray_status] || "Tray",
+  }]));
 
   // Step 4: Aggregate stock per item
   const stockMap = {};
   stockData.forEach(({ item_id, quantity, location_id }) => {
-    const locName = locationMap[location_id] || "Unknown Location";
+    const locationInfo = locationMap[location_id] || {};
+    const locName = locationInfo.label || "Unknown Location";
     if (!stockMap[item_id]) {
-      stockMap[item_id] = { total: 0, breakdown: {} };
+      stockMap[item_id] = { total: 0, breakdown: {}, details: [] };
     }
     stockMap[item_id].total += quantity;
     stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + quantity;
+    stockMap[item_id].details.push({
+      location_id,
+      location_name: locationInfo.location_name || locName,
+      store_name: locationInfo.store_name || "",
+      current_store: locationInfo.current_store || "",
+      tray_status_label: locationInfo.tray_status_label || "",
+      is_tray: Boolean(locationInfo.is_tray),
+      quantity,
+    });
   });
 
   // Step 5: Inject stock and tooltip
   items.forEach(item => {
     const stockEntry = stockMap[item.id];
     item.stock = stockEntry?.total || 0;
+    item.stock_location_details = stockEntry?.details || [];
 
     if (stockEntry) {
       item.stock_tooltip = Object.entries(stockEntry.breakdown)

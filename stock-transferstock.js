@@ -6,6 +6,49 @@ window.transferModule = (function () {
 
 
     // 🚪 Open the transfer modal for a specific item ID
+    const TRAY_STATUS_LABELS = {
+        checked_in: "Checked In",
+        checked_out: "Checked Out",
+        in_transfer: "In Transfer",
+        weight_mismatch: "Weight Mismatch",
+    };
+
+    function formatTransferLocation(location, storeMap = {}) {
+        if (!location) return { title: "Unknown location", meta: "", isTray: false };
+        const homeStore = storeMap[location.store_id] || "Unassigned";
+        const currentStore = storeMap[location.tray_current_store_id] || homeStore;
+        const isTray = Boolean(location.is_tray);
+        return {
+            title: location.location_name || "Unknown location",
+            meta: isTray
+                ? `Tray - ${TRAY_STATUS_LABELS[location.tray_status] || "Tray"} - Current: ${currentStore}`
+                : homeStore,
+            isTray,
+        };
+    }
+
+    function escapeTransferHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    async function fetchTransferStores() {
+        const { data, error } = await supabase
+            .from("store_locations")
+            .select("id, name");
+
+        if (error) {
+            console.warn("Could not load store labels for transfer:", error.message);
+            return {};
+        }
+
+        return Object.fromEntries((data || []).map(store => [store.id, store.name]));
+    }
+
     async function openTransferModal(itemId) {
     try {
         const modal = document.getElementById("transfer-modal");
@@ -45,13 +88,14 @@ window.transferModule = (function () {
     breakdownList.innerHTML = "";
     sourceSelect.innerHTML = `<option value="">-- Choose Source --</option>`;
     destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
+    const storeMap = await fetchTransferStores();
 
     // Load existing stock breakdown
     const { data: stockData, error: stockError } = await supabase
         .from("item_stock_locations")
         .select(`
         id, quantity, locked_by, locked_at,
-        location:location_id (id, location_name)
+        location:location_id (id, location_name, store_id, is_tray, tray_status, tray_current_store_id)
         `)
         .eq("item_id", itemId);
 
@@ -63,17 +107,21 @@ window.transferModule = (function () {
 
     stockData.forEach(loc => {
         const locked = loc.locked_by !== null;
+        const locationLabel = formatTransferLocation(loc.location, storeMap);
+        const quantity = Number(loc.quantity || 0);
         breakdownList.innerHTML += `
-        <li>
-            ${loc.location.location_name}: ${loc.quantity} 
-            ${locked ? "<span style='color:red;'>🔒 LOCKED</span>" : ""}
+        <li class="${locationLabel.isTray ? "is-tray" : ""}">
+            <strong>${escapeTransferHtml(locationLabel.title)}</strong>
+            <small>${escapeTransferHtml(locationLabel.meta || "Storage location")}</small>
+            <b>${quantity.toLocaleString()} unit${quantity === 1 ? "" : "s"}</b>
+            ${locked ? "<em>Locked</em>" : ""}
         </li>
         `;
 
-        if (loc.quantity > 0) {
+        if (quantity > 0) {
         sourceSelect.innerHTML += `
-            <option value="${loc.id}" data-available-qty="${loc.quantity}">
-            ${loc.location.location_name} (${loc.quantity})
+            <option value="${loc.id}" data-available-qty="${quantity}">
+            ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""} (${quantity})
             </option>
         `;
         }
@@ -82,7 +130,7 @@ window.transferModule = (function () {
     // 🚦 Now populate destination locations from the locations table
     const { data: locationsData, error: locationsError } = await supabase
         .from("locations")
-        .select("id, location_name")
+        .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
         .eq("active", true);
 
     if (locationsError || !locationsData) {
@@ -92,9 +140,10 @@ window.transferModule = (function () {
     }
 
     locationsData.forEach(loc => {
+        const locationLabel = formatTransferLocation(loc, storeMap);
         destSelect.innerHTML += `
         <option value="${loc.id}">
-            ${loc.location_name}
+            ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""}
         </option>
         `;
     });
@@ -143,9 +192,10 @@ window.transferModule = (function () {
             // 🚦 Rebuild destination dropdown excluding the selected source's location
             destSelect.innerHTML = `<option value="">-- Choose Destination --</option>`;
 
+            const storeMap = await fetchTransferStores();
             const { data: locationsData, error: locationsError } = await supabase
                 .from("locations")
-                .select("id, location_name")
+                .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
                 .eq("active", true);
 
             if (locationsError || !locationsData) {
@@ -159,9 +209,10 @@ window.transferModule = (function () {
                     // ✅ Skip source location from destination options
                     return;
                 }
+                const locationLabel = formatTransferLocation(loc, storeMap);
                 destSelect.innerHTML += `
                     <option value="${loc.id}">
-                    ${loc.location_name}
+                    ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""}
                     </option>
                 `;
             });
@@ -349,7 +400,11 @@ if (updatedItemError || !updatedItemData) {
   const idx = allItems.findIndex(it => it.id === currentItem.id);
   if (idx !== -1) {
     allItems[idx] = updatedItemData;
-    renderSingleInventoryCard(allItems[idx]); // ✅ refresh the card
+    if (typeof refreshItemById === "function") {
+      await refreshItemById(currentItem.id);
+    } else {
+      await loadAllItemsWithCache();
+    }
   }
 }
 
