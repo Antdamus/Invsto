@@ -33,6 +33,7 @@ let activeStoreOptions = [];
 let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
+const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
 let automaticDymoTimer = null;
 
 function escapeLocationDymoXml(value) {
@@ -282,6 +283,24 @@ let uploadedImages = [];
       sourcePath.split("/").pop() || `assisted_${index + 1}.jpg`
     );
     const destinationPath = `item_photos/${Date.now()}_assisted_${index + 1}_${sourceFileName}`;
+
+    try {
+      const { data, error } = await supabase.functions.invoke(IMAGE_PROCESS_FUNCTION_NAME, {
+        body: {
+          bucket: sourceBucket,
+          imagePath: sourcePath,
+          background: "copy-to-photos",
+        },
+      });
+
+      if (!error && data?.ok && data?.bucket === "photos" && data?.path) {
+        return data.path;
+      }
+
+      console.warn("Server-side assisted image copy did not complete; trying browser fallback.", error || data);
+    } catch (copyError) {
+      console.warn("Server-side assisted image copy failed; trying browser fallback.", copyError);
+    }
 
     let downloadedBlob = null;
     const { data: storageBlob, error: downloadError } = await supabase

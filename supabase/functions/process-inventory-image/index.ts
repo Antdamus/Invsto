@@ -8,12 +8,12 @@ const corsHeaders = {
 };
 
 const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos", "photos"]);
-const SUPPORTED_BACKGROUNDS = new Set(["black", "white", "edited", "uploaded"]);
+const SUPPORTED_BACKGROUNDS = new Set(["black", "white", "edited", "uploaded", "copy-to-photos"]);
 
 type RequestBody = {
   bucket?: string;
   imagePath?: string;
-  background?: "black" | "white" | "edited" | "uploaded";
+  background?: "black" | "white" | "edited" | "uploaded" | "copy-to-photos";
   imageBase64?: string;
   imageDataUrl?: string;
   processedImageBase64?: string;
@@ -117,6 +117,54 @@ async function fetchArrayBuffer(url: string) {
   return {
     bytes: new Uint8Array(await response.arrayBuffer()),
     contentType: response.headers.get("content-type") || "image/png",
+  };
+}
+
+async function copySourceImageToPhotosBucket(
+  supabase: ReturnType<typeof createClient>,
+  sourceBucket: string,
+  sourcePath: string
+) {
+  const { data: sourceBlob, error: downloadError } = await supabase.storage
+    .from(sourceBucket)
+    .download(sourcePath);
+
+  if (downloadError || !sourceBlob) {
+    throw new Error(downloadError?.message || "Could not download source image.");
+  }
+
+  const contentType = sourceBlob.type || "image/jpeg";
+  const extension = extensionForMime(contentType);
+  const originalName = safeFilePart(sourcePath.split("/").pop() || "assisted-image");
+  const outputPath = [
+    "item_photos",
+    `${new Date().toISOString().replace(/[:.]/g, "-")}_assisted_${originalName}.${extension}`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from("photos")
+    .upload(outputPath, sourceBlob, {
+      upsert: true,
+      contentType,
+    });
+
+  if (uploadError) {
+    throw new Error(uploadError.message);
+  }
+
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from("photos")
+    .createSignedUrl(outputPath, 60 * 10);
+
+  if (signedError || !signedData?.signedUrl) {
+    throw new Error(signedError?.message || "No signed URL returned for copied item photo.");
+  }
+
+  return {
+    bucket: "photos",
+    path: outputPath,
+    previewUrl: signedData.signedUrl,
+    mimeType: contentType,
   };
 }
 
@@ -228,7 +276,7 @@ serve(async (req) => {
     const body = (await req.json()) as RequestBody;
     const bucket = asTrimmedString(body.bucket);
     const imagePath = normalizePath(body.imagePath || "");
-    const background = asTrimmedString(body.background).toLowerCase() as "black" | "white" | "edited" | "uploaded";
+    const background = asTrimmedString(body.background).toLowerCase() as "black" | "white" | "edited" | "uploaded" | "copy-to-photos";
     let normalizedImage: { bytes: Uint8Array; contentType: string } | null;
     let processedImage: { bytes: Uint8Array; contentType: string } | null;
     try {
@@ -250,11 +298,11 @@ serve(async (req) => {
       return json(400, {
         ok: false,
         error: "missing_required_fields",
-        required: ["bucket", "imagePath", "background:black|white|edited|uploaded"],
+        required: ["bucket", "imagePath", "background:black|white|edited|uploaded|copy-to-photos"],
       });
     }
 
-    if (!normalizedImage && !processedImage) {
+    if (background !== "copy-to-photos" && !normalizedImage && !processedImage) {
       try {
         assertSupportedSourceImage(imagePath);
       } catch (error) {
@@ -275,6 +323,31 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+    if (background === "copy-to-photos") {
+      try {
+        const copied = await copySourceImageToPhotosBucket(supabase, bucket, imagePath);
+        return json(200, {
+          ok: true,
+          bucket: copied.bucket,
+          path: copied.path,
+          name: `item photo - ${imagePath.split("/").pop() || "assisted image"}`,
+          background,
+          previewUrl: copied.previewUrl,
+          mimeType: copied.mimeType,
+          createdAt: new Date().toISOString(),
+          processingMode: "server-side-copy",
+        });
+      } catch (error) {
+        return json(500, {
+          ok: false,
+          error: "copy_to_photos_failed",
+          detail: error instanceof Error ? error.message : String(error),
+          bucket,
+          imagePath,
+        });
+      }
+    }
 
     if (processedImage) {
       const extension = extensionForMime(processedImage.contentType);

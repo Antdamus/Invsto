@@ -1,5 +1,6 @@
 (() => {
   const INVENTORY_UPLOAD_BUCKET = "InventoryUpload";
+  const CAPTURE_PHOTOS_BUCKET = "capture-photos";
   const INVENTORY_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
   const AI_COPY_FUNCTION_NAME = "generate-inventory-copy";
   const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
@@ -1392,27 +1393,41 @@
 
     state.hasLoadedImagesOnce = true;
     setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Refresh Uploads", true);
-    setInlineStatus(elements.imageStatus, "Loading recent uploaded phone images from InventoryUpload...", "is-waiting");
+    setInlineStatus(elements.imageStatus, "Loading recent uploaded and captured images...", "is-waiting");
 
     try {
-      const { data, error } = await window.supabase.functions.invoke(
-        INVENTORY_UPLOAD_LIST_FUNCTION_NAME,
-        {
+      const responses = await Promise.all([
+        window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
           body: {
             bucket: INVENTORY_UPLOAD_BUCKET,
             limit: 12,
           },
+        }),
+        window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
+          body: {
+            bucket: CAPTURE_PHOTOS_BUCKET,
+            limit: 16,
+          },
+        }),
+      ]);
+
+      for (const response of responses) {
+        if (response.error) {
+          throw new Error(response.error.message || "Unable to load uploaded images.");
         }
-      );
-
-      console.log("InventoryUpload backend image list response", data);
-
-      if (error) {
-        throw new Error(error.message || "Unable to load uploaded images.");
       }
 
-      const normalizedImages = (Array.isArray(data?.images) ? data.images : [])
-        .map(normalizeImageRow)
+      const normalizedImages = responses
+        .flatMap((response) => {
+          const bucket = response.data?.bucket || INVENTORY_UPLOAD_BUCKET;
+          return (Array.isArray(response.data?.images) ? response.data.images : [])
+            .map((image) => ({ ...image, bucket }));
+        })
+        .map((image, index) => normalizeImageRow({
+          ...image,
+          storageBucket: image.bucket,
+          sourceType: image.bucket === CAPTURE_PHOTOS_BUCKET ? "recent-capture" : "recent-upload",
+        }, index))
         .filter((image) => image.path && image.previewUrl)
         .sort(compareNewestFirst);
 
@@ -1432,7 +1447,7 @@
       if (!normalizedImages.length) {
         setInlineStatus(
           elements.imageStatus,
-          "No uploaded phone images were returned from the backend. Refresh after the iPhone upload finishes.",
+          "No uploaded or captured phone images were returned. Refresh after the iPhone upload finishes.",
           "is-error"
         );
         return;
@@ -1441,18 +1456,18 @@
       if (options.refreshNotice) {
         setInlineStatus(
           elements.imageStatus,
-          `Loaded ${normalizedImages.length} recent uploaded phone image(s) from InventoryUpload.`,
+          `Loaded ${normalizedImages.length} recent uploaded/captured image(s).`,
           "is-success"
         );
       } else {
         setInlineStatus(
           elements.imageStatus,
-          `Latest uploaded phone image is ready for AI selection. ${state.saveSelectedUploadedImagePaths.length} image(s) are marked to save with this item.`,
+          `Latest uploaded or captured image is ready. ${state.saveSelectedUploadedImagePaths.length} image(s) are marked to save with this item.`,
           "is-success"
         );
       }
     } catch (error) {
-      console.error("Failed to load InventoryUpload images:", error);
+      console.error("Failed to load recent upload/capture images:", error);
       state.recentUploadedImages = [];
       state.aiSelectedUploadedImage = null;
       state.aiSelectedUploadedImagePath = "";
@@ -1463,7 +1478,7 @@
       renderUploadedImages(elements);
       setInlineStatus(
         elements.imageStatus,
-        `Could not load uploaded phone images from the backend: ${error.message || error}`,
+        `Could not load recent phone images from the backend: ${error.message || error}`,
         "is-error"
       );
     } finally {

@@ -7,7 +7,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ALLOWED_BUCKET = "InventoryUpload";
+const DEFAULT_BUCKET = "InventoryUpload";
+const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos"]);
 const IMAGE_NAME_REGEX = /\.(png|jpe?g|webp|gif|heic|heif)$/i;
 
 type RequestBody = {
@@ -62,6 +63,7 @@ function compareNewestFirst(a: ListedImage, b: ListedImage) {
 
 async function listImagesRecursively(
   supabase: ReturnType<typeof createClient>,
+  bucket: string,
   prefix = "",
   depth = 0,
   maxDepth = 4
@@ -69,7 +71,7 @@ async function listImagesRecursively(
   if (depth > maxDepth) return [];
 
   const { data, error } = await supabase.storage
-    .from(ALLOWED_BUCKET)
+    .from(bucket)
     .list(prefix, {
       limit: 100,
       sortBy: { column: "created_at", order: "desc" },
@@ -85,7 +87,7 @@ async function listImagesRecursively(
     const path = normalizePath(prefix, item.name);
 
     if (isFolderLike(item)) {
-      const nestedImages = await listImagesRecursively(supabase, path, depth + 1, maxDepth);
+      const nestedImages = await listImagesRecursively(supabase, bucket, path, depth + 1, maxDepth);
       images.push(...nestedImages);
       continue;
     }
@@ -109,10 +111,10 @@ serve(async (req) => {
 
   try {
     const body = (await req.json().catch(() => ({}))) as RequestBody;
-    const bucket = asTrimmedString(body.bucket || ALLOWED_BUCKET);
+    const bucket = asTrimmedString(body.bucket || DEFAULT_BUCKET);
     const limit = clampLimit(body.limit, 1, 20, 12);
 
-    if (bucket !== ALLOWED_BUCKET) {
+    if (!ALLOWED_BUCKETS.has(bucket)) {
       return json(400, { ok: false, error: "invalid_bucket" });
     }
 
@@ -124,19 +126,19 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const listedImages = await listImagesRecursively(supabase);
+    const listedImages = await listImagesRecursively(supabase, bucket);
     const recentImages = listedImages.sort(compareNewestFirst).slice(0, limit);
 
     if (recentImages.length === 0) {
       return json(200, {
         ok: true,
-        bucket: ALLOWED_BUCKET,
+        bucket,
         images: [],
       });
     }
 
     const { data: signedRows, error: signedError } = await supabase.storage
-      .from(ALLOWED_BUCKET)
+      .from(bucket)
       .createSignedUrls(
         recentImages.map((image) => image.path),
         60 * 10
@@ -157,7 +159,7 @@ serve(async (req) => {
 
     return json(200, {
       ok: true,
-      bucket: ALLOWED_BUCKET,
+      bucket,
       images: recentImages.map((image) => ({
         path: image.path,
         name: image.name,
