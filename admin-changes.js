@@ -52,6 +52,8 @@
       title: "Title",
       description: "Description",
       weight: "Weight",
+      stone_type: "Stone type",
+      item_length: "Length",
       cost: "Cost",
       sale_price: "Sale price",
       barcode: "Barcode",
@@ -69,6 +71,7 @@
       tray_weight_tolerance_grams: "Tray tolerance",
       max_capacity: "Max capacity",
       notes: "Notes",
+      reason: "Reason",
       record: "Record",
     };
     return names[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
@@ -118,6 +121,9 @@
 
   function mapInventoryChange(row) {
     const fields = changedFieldEntries(row.changed_fields);
+    if (row.reason) {
+      fields.push({ field: "reason", from: "-", to: row.reason });
+    }
     return {
       id: `inventory-${row.id}`,
       source: "inventory_change_log",
@@ -125,9 +131,9 @@
       label: row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
       title: row.summary || "Inventory edit",
       at: row.changed_at,
-      workerId: row.worker_id || "",
+      workerId: row.worker_id || row.signed_by || "",
       workerEmail: row.worker_email || "",
-      workerName: workerLabel(row.worker_id, row.worker_email),
+      workerName: workerLabel(row.worker_id || row.signed_by, row.worker_email || row.signed_by_email),
       storeId: row.store_id || "",
       storeName: storeLabel(row.store_id, row.store_name),
       itemId: row.item_id || "",
@@ -136,6 +142,8 @@
       locationId: row.location_id || "",
       locationName: row.location_name || "",
       fields,
+      reason: row.reason || "",
+      signedByEmail: row.signed_by_email || "",
       needsReview: row.action === "delete",
       searchText: "",
     };
@@ -336,6 +344,8 @@
         event.label,
         event.workerName,
         event.workerEmail,
+        event.reason,
+        event.signedByEmail,
         event.storeName,
         event.itemTitle,
         event.barcode,

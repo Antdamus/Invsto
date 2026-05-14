@@ -269,7 +269,7 @@
 
   <!--modal for putting password on pressing delete-->
   <div id="password-confirm-modal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-content stock-edit-modal-content">
       <span class="material-icons-outlined close-icon" id="close-password-modal">close</span>
   
       <h3 class="modal-title">
@@ -542,9 +542,15 @@
 
   <!-- editing modal -->
   <div id="editItemModal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-content stock-edit-modal-content">
       <span class="close-modal" id="closeEditModal" title="Close">&times;</span>
-      <h2>Edit Inventory Item</h2>
+      <div class="stock-edit-hero">
+        <div>
+          <span class="stock-edit-kicker">Inventory correction</span>
+          <h2>Edit Inventory Item</h2>
+          <p id="stock-edit-mode-note">Correct item details and sign the change before saving.</p>
+        </div>
+      </div>
 
       <form id="edit-item-form">
         <div class="form-content-wrapper">
@@ -556,6 +562,14 @@
 
           <label for="edit-weight">Weight:</label>
           <input type="number" id="edit-weight" name="weight" step="0.01" min="0">
+
+          <label for="edit-stone-type">Stone Type:</label>
+          <input type="text" id="edit-stone-type" name="stone_type" list="edit-stone-type-options" placeholder="VVS simulated diamonds">
+          <datalist id="edit-stone-type-options"></datalist>
+
+          <label for="edit-length">Length:</label>
+          <input type="text" id="edit-length" name="item_length" list="edit-length-options" placeholder="16 inch">
+          <datalist id="edit-length-options"></datalist>
 
           <label for="edit-barcode">Barcode (read-only):</label>
           <input type="text" id="edit-barcode" name="barcode" readonly>
@@ -579,6 +593,16 @@
 
           <label for="edit-stock-batch">Stock Batch Size Update:</label>
           <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
+
+          <section class="stock-edit-certification">
+            <h3>Signature</h3>
+            <p>Your password and reason certify why this correction was made.</p>
+            <label for="edit-change-password">Your Password:</label>
+            <input type="password" id="edit-change-password" autocomplete="current-password" placeholder="Sign this edit">
+            <label for="edit-change-reason">Reason for Change:</label>
+            <textarea id="edit-change-reason" rows="3" placeholder="Briefly explain what was corrected"></textarea>
+            <p id="edit-change-error" class="error-message"></p>
+          </section>
 
           <div class="photos-section-wrapper">
             <h3>Current Photos</h3>

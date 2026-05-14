@@ -33,6 +33,8 @@ const STOCK_WORKER_ITEM_SELECT = [
   "title",
   "description",
   "weight",
+  "stone_type",
+  "item_length",
   "sale_price",
   "barcode",
   "qr_code",

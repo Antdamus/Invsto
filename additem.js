@@ -1587,6 +1587,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const title = document.getElementById("title").value.trim();
   const description = document.getElementById("description").value.trim();
   const weight = parseFloat(document.getElementById("weight").value);
+  const stone_type = document.getElementById("assisted-stone-type")?.value?.trim() || null;
+  const item_length = document.getElementById("assisted-length")?.value?.trim() || null;
   const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
   // force sync dropdown selection into hidden input if user typed or skipped selection
   const categoryButton = document.getElementById("category-dropdown-toggle");
@@ -1671,6 +1673,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       title,
       description,
       weight,
+      stone_type,
+      item_length,
       price_per_weight,
       categories,
       cost,

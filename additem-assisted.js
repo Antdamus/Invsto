@@ -366,6 +366,7 @@
     getStoredStoneTypeHistory().forEach(addOption);
 
     (Array.isArray(rows) ? rows : []).forEach((item) => {
+      addOption(item?.stone_type);
       extractStoneTypesFromText(item?.title).forEach(addOption);
       extractStoneTypesFromText(item?.description).forEach(addOption);
       (Array.isArray(item?.categories) ? item.categories : []).forEach((category) => {
@@ -386,6 +387,7 @@
     getStoredLengthHistory().forEach(addOption);
 
     (Array.isArray(rows) ? rows : []).forEach((item) => {
+      addOption(item?.item_length);
       extractLengthsFromText(item?.title).forEach(addOption);
       extractLengthsFromText(item?.description).forEach(addOption);
       (Array.isArray(item?.categories) ? item.categories : []).forEach((category) => {
@@ -407,7 +409,7 @@
     try {
       const { data, error } = await window.supabase
         .from("item_types")
-        .select("title, description, categories")
+        .select("title, description, categories, stone_type, item_length")
         .limit(1000);
 
       if (error) throw error;

@@ -16,7 +16,7 @@ window.editCardModule = (function () {
         }
         return canViewSensitiveStockFields()
             ? "*"
-            : "id, title, description, weight, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, added_by, added_by_email";
+            : "id, title, description, weight, stone_type, item_length, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, added_by, added_by_email";
     }
 
     function setEditFieldVisible(fieldId, visible) {
@@ -32,12 +32,15 @@ window.editCardModule = (function () {
     function applyEditModalAccessMode() {
         const canSensitive = canViewSensitiveStockFields();
         const modalTitle = document.querySelector("#editItemModal h2");
-        if (modalTitle) modalTitle.textContent = canSensitive ? "Edit Inventory Item" : "Photo Settings";
+        if (modalTitle) modalTitle.textContent = canSensitive ? "Edit Inventory Item" : "Correct Item Details";
+        const modeNote = document.getElementById("stock-edit-mode-note");
+        if (modeNote) {
+            modeNote.textContent = canSensitive
+                ? "Update item details, pricing, labels, and photos with a signed audit trail."
+                : "Workers can correct title, description, weight, stone type, length, and photos with a signed audit trail.";
+        }
 
         [
-            "edit-title",
-            "edit-description",
-            "edit-weight",
             "edit-qr-type",
             "edit-qr",
             "edit-cost",
@@ -50,10 +53,87 @@ window.editCardModule = (function () {
         if (dymoButton) dymoButton.classList.toggle("worker-hidden-edit-field", !canSensitive);
 
         const saveButton = document.querySelector("#edit-item-form .save-edit-btn");
-        if (saveButton) saveButton.classList.toggle("worker-hidden-edit-field", !canSensitive);
+        if (saveButton) {
+            saveButton.classList.remove("worker-hidden-edit-field");
+            saveButton.textContent = "Save Signed Change";
+        }
 
         const fileWrapper = document.getElementById("edit-photos")?.closest(".file-input-wrapper");
         if (fileWrapper) fileWrapper.classList.toggle("worker-hidden-edit-field", !canSensitive);
+    }
+
+    function escapeEditHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function normalizeEditOption(value) {
+        return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    function extractStoneFromDescription(description) {
+        const text = String(description || "");
+        const explicit = text.match(/^\s*(?:stone|stones|gemstone|gemstones)\s*:\s*(.+)$/im)?.[1];
+        if (explicit) return normalizeEditOption(explicit);
+        const known = [
+            ["VVS Simulated Diamonds", /vvs\s+simulated\s+diamonds?/i],
+            ["Simulated Diamonds", /simulated\s+diamonds?/i],
+            ["Moissanite", /moissanite/i],
+            ["CZ", /\b(?:cz|cubic\s+zirconia)\b/i],
+            ["Rhinestone", /rhinestone/i],
+            ["No Stone", /\bno\s+stones?\b/i],
+        ];
+        return normalizeEditOption(known.find(([, pattern]) => pattern.test(text))?.[0] || "");
+    }
+
+    function extractLengthFromDescription(description) {
+        const text = String(description || "");
+        const explicit = text.match(/^\s*(?:length|chain length|necklace length|bracelet length)\s*:\s*(.+)$/im)?.[1];
+        if (explicit) return normalizeEditOption(explicit);
+        return normalizeEditOption(text.match(/\b\d+(?:\.\d+)?\s*(?:inch|inches|in\.|in|cm|mm|")\b/i)?.[0] || "");
+    }
+
+    async function loadEditDetailOptions() {
+        const stoneList = document.getElementById("edit-stone-type-options");
+        const lengthList = document.getElementById("edit-length-options");
+        if (!stoneList && !lengthList) return;
+
+        try {
+            const { data, error } = await supabase
+                .from("item_types")
+                .select("stone_type,item_length,description")
+                .limit(1000);
+            if (error) throw error;
+
+            const stones = new Set();
+            const lengths = new Set();
+            (data || []).forEach((row) => {
+                const stone = normalizeEditOption(row.stone_type || extractStoneFromDescription(row.description));
+                const length = normalizeEditOption(row.item_length || extractLengthFromDescription(row.description));
+                if (stone) stones.add(stone);
+                if (length) lengths.add(length);
+            });
+
+            if (stoneList) {
+                stoneList.innerHTML = [...stones].sort((a, b) => a.localeCompare(b))
+                    .map((value) => `<option value="${escapeEditHtml(value)}"></option>`)
+                    .join("");
+            }
+            if (lengthList) {
+                lengthList.innerHTML = [...lengths].sort((a, b) => {
+                    const an = Number(String(a).match(/\d+(?:\.\d+)?/)?.[0] || 0);
+                    const bn = Number(String(b).match(/\d+(?:\.\d+)?/)?.[0] || 0);
+                    return an - bn || a.localeCompare(b);
+                }).map((value) => `<option value="${escapeEditHtml(value)}"></option>`)
+                    .join("");
+            }
+        } catch (error) {
+            console.warn("Could not load edit detail options:", error);
+        }
     }
 
     //functions needes
@@ -222,16 +302,26 @@ window.editCardModule = (function () {
         document.getElementById("edit-title").value = item.title || "";
         document.getElementById("edit-description").value = item.description || "";
         document.getElementById("edit-weight").value = item.weight || "";
+        document.getElementById("edit-stone-type").value = item.stone_type || extractStoneFromDescription(item.description) || "";
+        document.getElementById("edit-length").value = item.item_length || extractLengthFromDescription(item.description) || "";
         document.getElementById("edit-cost").value = item.cost || "";
         document.getElementById("edit-sale-price").value = item.sale_price || "";
         document.getElementById("edit-price-per-weight").value = item.price_per_weight || "";
         document.getElementById("edit-stock-batch").value = item.stock_batch_size_update || "";
         document.getElementById("edit-photos").value = ""; // clear file input
+        document.getElementById("edit-change-password").value = "";
+        document.getElementById("edit-change-reason").value = "";
+        const editError = document.getElementById("edit-change-error");
+        if (editError) {
+            editError.textContent = "";
+            editError.classList.remove("show");
+        }
         document.getElementById("edit-barcode").value = item.barcode || "";
         document.getElementById("edit-qr-type").value = item.qr_type || "";
         document.getElementById("edit-qr").value = item.qr_code || "";
 
         applyEditModalAccessMode();
+        loadEditDetailOptions();
 
         // 🔹 Inject current photos preview
         const previewContainer = document.getElementById("current-photos-preview");
@@ -272,6 +362,15 @@ window.editCardModule = (function () {
     currentItemId = null;
     currentItemSnapshot = null;
     originalWeight = null;
+    const passwordInput = document.getElementById("edit-change-password");
+    const reasonInput = document.getElementById("edit-change-reason");
+    const editError = document.getElementById("edit-change-error");
+    if (passwordInput) passwordInput.value = "";
+    if (reasonInput) reasonInput.value = "";
+    if (editError) {
+        editError.textContent = "";
+        editError.classList.remove("show");
+    }
     }
 
     // 🔹 Save changes: update Supabase, handle DYMO & photos, refresh card
@@ -467,10 +566,6 @@ window.editCardModule = (function () {
 
     async function saveItemChanges(e) {
         e.preventDefault();
-        if (!canViewSensitiveStockFields()) {
-            alert("Only admins can edit item details. Workers can add, remove, and manage photos from the stock tools.");
-            return;
-        }
         if (!currentItemId) {
             console.warn("No item selected for editing.");
             return;
@@ -479,22 +574,60 @@ window.editCardModule = (function () {
         const title = document.getElementById("edit-title").value.trim();
         const description = document.getElementById("edit-description").value.trim();
         const weight = parseFloat(document.getElementById("edit-weight").value) || 0;
+        const stoneType = document.getElementById("edit-stone-type")?.value?.trim() || "";
+        const itemLength = document.getElementById("edit-length")?.value?.trim() || "";
         const cost = parseFloat(document.getElementById("edit-cost").value) || 0;
         const salePrice = parseFloat(document.getElementById("edit-sale-price").value) || 0;
         const pricePerWeight = parseFloat(document.getElementById("edit-price-per-weight").value) || 0;
         const stockBatch = parseInt(document.getElementById("edit-stock-batch").value, 10) || 0;
         const photosInput = document.getElementById("edit-photos");
+        const password = document.getElementById("edit-change-password")?.value?.trim() || "";
+        const reason = document.getElementById("edit-change-reason")?.value?.trim() || "";
+        const editError = document.getElementById("edit-change-error");
+        const submitBtn = document.querySelector("#edit-item-form .save-edit-btn");
+        const setEditError = (message) => {
+            if (!editError) {
+                if (message) alert(message);
+                return;
+            }
+            editError.textContent = message || "";
+            editError.classList.toggle("show", Boolean(message));
+        };
+
+        setEditError("");
+        if (!title) return setEditError("Title is required.");
+        if (!password) return setEditError("Enter your password to sign this edit.");
+        if (reason.length < 3) return setEditError("Add a brief reason for the change.");
+
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Verifying signature...";
+        }
+
+        const validPassword = await verifyPhotoDeletePassword(password);
+        if (!validPassword) {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Save Signed Change";
+            }
+            return setEditError("Incorrect password. Please try again.");
+        }
+        if (submitBtn) submitBtn.textContent = "Saving audited change...";
 
         // 🔄 Fetch latest item directly from database
         const { data: items, error: fetchError } = await supabase
             .from("item_types")
-            .select("*")
+            .select(getEditItemSelectColumns())
             .eq("id", currentItemId)
             .limit(1);
 
         if (fetchError || !items || items.length === 0) {
             console.error("❌ Failed to fetch item before saving:", fetchError);
-            alert("Failed to fetch current item data. Please try again.");
+            setEditError("Failed to fetch current item data. Please try again.");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Save Signed Change";
+            }
             return;
         }
 
@@ -504,7 +637,7 @@ window.editCardModule = (function () {
 
         // 
         // 🔹 Upload new DYMO label if one was generated
-        if (window.latestDymoXml && window.latestDymoUrl) {
+        if (canViewSensitiveStockFields() && window.latestDymoXml && window.latestDymoUrl) {
             console.log("⬆️ Uploading new DYMO label...");
 
             // Delete old DYMO file if it exists
@@ -524,7 +657,11 @@ window.editCardModule = (function () {
 
             if (uploadError) {
                 console.error("Error uploading new DYMO label:", uploadError);
-                alert("Failed to update DYMO label. Please try again.");
+                setEditError("Failed to update DYMO label. Please try again.");
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = "Save Signed Change";
+                }
                 return;
             }
 
@@ -547,7 +684,7 @@ window.editCardModule = (function () {
 
         // 🔹 Handle new photo uploads
         const uploadedPaths = [];
-        if (photosInput?.files?.length) {
+        if (canViewSensitiveStockFields() && photosInput?.files?.length) {
             for (let i = 0; i < photosInput.files.length; i++) {
             const photoFile = photosInput.files[i];
             const photoPath = `item_photos/${currentItemId}-${Date.now()}-${photoFile.name}`;
@@ -573,36 +710,58 @@ window.editCardModule = (function () {
         }
 
         const updates = {
-            title,
-            description,
-            weight,
-            cost,
-            sale_price: salePrice,
-            price_per_weight: pricePerWeight,
-            stock_batch_size_update: stockBatch,
-            dymo_label_url: newDymoLabelUrl,
-            photos: newPhotos,
+            _item_id: currentItemId,
+            _title: title,
+            _description: description,
+            _weight: weight,
+            _stone_type: stoneType,
+            _item_length: itemLength,
+            _qr_type: document.getElementById("edit-qr-type").value.trim() || null,
+            _qr_code: document.getElementById("edit-qr").value.trim() || null,
+            _cost: cost,
+            _sale_price: salePrice,
+            _price_per_weight: pricePerWeight,
+            _stock_batch_size_update: stockBatch,
+            _dymo_label_url: newDymoLabelUrl,
+            _photos: canViewSensitiveStockFields() ? newPhotos : null,
+            _reason: reason,
+            _signed_by_email: getAuthenticatedStockUser()?.email || null,
         };
 
-        const { error } = await supabase.from("item_types").update(updates).eq("id", currentItemId);
+        const { error } = await supabase.rpc("update_certified_item_details", updates);
 
         if (error) {
             console.error("Error updating item:", error);
-            alert("Failed to update item. Please try again.");
+            setEditError(error.message || "Failed to update item. Please try again.");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Save Signed Change";
+            }
             return;
         }
 
         await bumpInventoryVersion();
         await refreshItemById(currentItemId);
-        showToast("✅ Item updated successfully!");
+        showToast("Item updated and signed audit trail saved.");
 
         closeEditModal();
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Save Signed Change";
+        }
     }
 
     // 🔹 Setup all modal & edit button event listeners
     function setupEditCardListeners() {
         document.getElementById("closeEditModal")?.addEventListener("click", closeEditModal);
+        document.getElementById("cancelEditModal")?.addEventListener("click", closeEditModal);
         document.getElementById("edit-item-form")?.addEventListener("submit", saveItemChanges);
+        document.getElementById("edit-change-password")?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                document.getElementById("edit-item-form")?.requestSubmit();
+            }
+        });
 
         // Delegated listener: clicks on edit buttons
         document.addEventListener("click", (e) => {
