@@ -3041,6 +3041,7 @@ function stockHistoryFieldLabel(field) {
     deleted_by: "Deleted by",
     deletion_reason: "Deletion reason",
     deletion_status: "Deletion status",
+    deletion_stock_snapshot: "Removed stock placements",
     restored_by: "Restored by",
     restore_reason: "Restore reason",
   };
@@ -3100,6 +3101,10 @@ function compactStockHistoryValue(value) {
   if (Array.isArray(value)) {
     if (value.length && value.every(isStockHistoryPhotoPath)) {
       return `${value.length} photo${value.length === 1 ? "" : "s"}`;
+    }
+    if (value.length && value.every((entry) => entry && typeof entry === "object" && "location_id" in entry)) {
+      const units = value.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+      return `${value.length} placement${value.length === 1 ? "" : "s"} / ${units} unit${units === 1 ? "" : "s"}`;
     }
     return value.length ? value.join(", ") : "-";
   }
