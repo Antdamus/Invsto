@@ -27,6 +27,11 @@ const STOCK_CAPTURE_STATION_TABLE = "capture_stations";
 const STOCK_CAPTURE_POLL_INTERVAL_MS = 1500;
 const STOCK_CAPTURE_POLL_TIMEOUT_MS = 120000;
 const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
+const stockHistoryState = {
+  itemId: null,
+  events: [],
+  photoUrlCache: new Map(),
+};
 let stockBackgroundRemovalModulePromise = null;
 const STOCK_WORKER_ITEM_SELECT = [
   "id",
@@ -517,12 +522,19 @@ function buildLocationChips(item) {
       </button>
     `;
 
+    const historyBtn = canViewSensitiveStockData()
+      ? `<button class="stock-history-btn" data-id="${id}" title="View change history">
+          <i data-lucide="history"></i>
+        </button>`
+      : "";
+
 
     return `
       <div class="float-controls-inner">
         ${checkbox}
         ${favoriteBtn}
         ${photoBtn}
+        ${historyBtn}
         ${editBtn} <!-- 🆕 placed edit button with existing float controls -->
       </div>
     `;
@@ -664,6 +676,14 @@ function buildLocationChips(item) {
         const addPhotoTrigger = e.target.closest(".stock-add-photo-btn");
         if (addPhotoTrigger) {
           openStockPhotoManager(addPhotoTrigger.dataset.id);
+        }
+
+        const historyTrigger = e.target.closest(".stock-history-btn");
+        if (historyTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          openStockHistoryModal(historyTrigger.dataset.id);
+          return;
         }
 
         const barcodeTrigger = e.target.closest(".stock-barcode-btn");
@@ -2631,6 +2651,647 @@ function getStockItemById(itemId) {
 function getStockItemPhotoPaths(item) {
   return (Array.isArray(item?.photoPaths) ? item.photoPaths : Array.isArray(item?.photos) ? item.photos : [])
     .filter((path) => typeof path === "string" && path.includes("/"));
+}
+
+function formatStockHistoryDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function stockHistoryFieldLabel(field) {
+  const labels = {
+    title: "Title",
+    description: "Description",
+    weight: "Weight",
+    stone_type: "Stone type",
+    item_length: "Length",
+    cost: "Cost",
+    sale_price: "Sale price",
+    barcode: "Barcode",
+    qr_type: "QR type",
+    qr_code: "QR data",
+    categories: "Categories",
+    photos: "Photos",
+    photo_path: "Photo",
+    quarantine_path: "Quarantine copy",
+    location_id: "Location",
+    location_name: "Location",
+    quantity: "Quantity",
+    notes: "Notes",
+    reason: "Reason",
+    status: "Status",
+    record: "Record",
+    restored_at: "Restored",
+    deleted_by_email: "Deleted by",
+    restored_by_email: "Restored by",
+  };
+  return labels[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function isStockHistoryPhotoPath(value) {
+  return typeof value === "string"
+    && /(^item_photos\/|^photos\/|^deleted-item-photos\/|\/PHOTO-|\.jpe?g$|\.png$|\.webp$)/i.test(value);
+}
+
+function stockHistoryPhotoList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(isStockHistoryPhotoPath);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter(isStockHistoryPhotoPath);
+    } catch (_) {}
+    return isStockHistoryPhotoPath(trimmed) ? [trimmed] : [];
+  }
+  return [];
+}
+
+function stockHistoryPhotoDiff(fromValue, toValue) {
+  const from = stockHistoryPhotoList(fromValue);
+  const to = stockHistoryPhotoList(toValue);
+  const fromSet = new Set(from);
+  const toSet = new Set(to);
+  return {
+    from,
+    to,
+    added: to.filter((path) => !fromSet.has(path)),
+    removed: from.filter((path) => !toSet.has(path)),
+  };
+}
+
+function stockHistoryPhotoGroups(fields, fallbackLabel = "Photos") {
+  const groups = [];
+  (fields || []).forEach((field) => {
+    if (field.field !== "photos" && field.field !== "photo_path") return;
+    const diff = stockHistoryPhotoDiff(field.from, field.to);
+    if (diff.added.length) {
+      groups.push({ label: field.field === "photo_path" ? fallbackLabel : "Added photos", bucket: STOCK_PHOTO_BUCKET, paths: diff.added });
+    }
+    if (diff.removed.length) {
+      groups.push({ label: field.field === "photo_path" ? fallbackLabel : "Removed photos", bucket: STOCK_PHOTO_BUCKET, paths: diff.removed });
+    }
+  });
+  return groups;
+}
+
+function compactStockHistoryValue(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) {
+    if (value.length && value.every(isStockHistoryPhotoPath)) {
+      return `${value.length} photo${value.length === 1 ? "" : "s"}`;
+    }
+    return value.length ? value.join(", ") : "-";
+  }
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "object") {
+    if (value.location_name) return value.location_name;
+    if (value.title) return value.title;
+    if (value.name) return value.name;
+    if (value.id) return value.id;
+    return "Snapshot";
+  }
+  return String(value);
+}
+
+function stockHistoryChangedFieldEntries(changedFields) {
+  if (!changedFields || typeof changedFields !== "object") return [];
+  return Object.entries(changedFields).map(([field, change]) => ({
+    field,
+    from: change?.from,
+    to: change?.to,
+  }));
+}
+
+function stockHistoryFileName(path) {
+  return String(path || "").split("/").pop() || "Photo";
+}
+
+function stockHistoryActor(userId, email) {
+  if (currentUser?.id && userId === currentUser.id) return currentUser.email || email || "Current admin";
+  return email || "Unknown user";
+}
+
+async function stockHistorySelectOrEmpty(queryPromise, label) {
+  const { data, error } = await queryPromise;
+  if (error) {
+    console.warn(`Stock history: ${label} unavailable`, error);
+    return [];
+  }
+  return data || [];
+}
+
+function mapStockHistoryInventoryChange(row) {
+  const fields = stockHistoryChangedFieldEntries(row.changed_fields);
+  if (row.reason) fields.push({ field: "reason", from: "-", to: row.reason });
+  return {
+    id: `inventory-${row.id}`,
+    category: "inventory_edit",
+    label: row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
+    title: row.summary || "Inventory edit",
+    at: row.changed_at,
+    actor: stockHistoryActor(row.worker_id || row.signed_by, row.worker_email || row.signed_by_email),
+    source: "inventory change log",
+    changeLogId: row.id,
+    action: row.action || "",
+    fields,
+    photoVisuals: stockHistoryPhotoGroups(fields),
+    revertDirection: row.revert_direction || "",
+    revertedAt: row.reverted_at || "",
+    revertedByEmail: row.reverted_by_email || "",
+    revertCount: Number(row.revert_count || 0),
+    isCurrentlyReverted: row.revert_direction === "revert",
+    reversible: row.action === "update" && row.verified_method !== "admin_revert",
+  };
+}
+
+function mapStockHistoryCreatedEvent(item) {
+  if (!item?.created_at) return null;
+  return {
+    id: `created-${item.id}`,
+    category: "created_event",
+    label: "Created",
+    title: "Item card created",
+    at: item.created_at,
+    actor: stockHistoryActor(item.added_by, item.added_by_email),
+    source: "item record",
+    fields: [
+      { field: "title", from: "-", to: item.title || "-" },
+      { field: "barcode", from: "-", to: item.barcode || "-" },
+      { field: "weight", from: "-", to: item.weight ? `${item.weight} g` : "-" },
+      { field: "sale_price", from: "-", to: item.sale_price ? formatStockMoney(item.sale_price) : "-" },
+      ...(canViewSensitiveStockData() ? [{ field: "cost", from: "-", to: item.cost ? formatStockMoney(item.cost) : "-" }] : []),
+    ],
+    photoVisuals: stockHistoryPhotoGroups([{ field: "photos", from: [], to: getStockItemPhotoPaths(item) }], "Initial photos"),
+    reversible: false,
+  };
+}
+
+function mapStockHistoryStockEvent(row) {
+  const loc = row.locations || {};
+  const qty = Number(row.quantity || 0);
+  const action = String(row.action_type || "stock").replaceAll("_", " ");
+  return {
+    id: `stock-${row.id}`,
+    category: "stock_event",
+    label: action,
+    title: `${action} ${Math.abs(qty)} unit${Math.abs(qty) === 1 ? "" : "s"}`,
+    at: row.confirmed_at || row.timestamp,
+    actor: stockHistoryActor(row.user_id, row.email),
+    source: "stock transactions",
+    fields: [
+      { field: "quantity", from: "-", to: qty },
+      { field: "location_name", from: "-", to: loc.location_name || row.location_id || "-" },
+      { field: "notes", from: "-", to: row.notes || "-" },
+    ],
+    reversible: false,
+  };
+}
+
+function mapStockHistoryPhotoEvent(row) {
+  const restored = row.revert_direction === "revert" || row.status === "restored";
+  const visualPath = row.quarantine_path || row.photo_path || "";
+  const visualBucket = row.quarantine_path ? (row.quarantine_bucket || "photo-quarantine") : STOCK_PHOTO_BUCKET;
+  return {
+    id: `photo-${row.id}`,
+    category: "photo_event",
+    label: restored ? "Restored" : "Photo",
+    title: restored ? "Restored item photo" : "Removed item photo",
+    at: row.deleted_at,
+    actor: stockHistoryActor(row.deleted_by, row.deleted_by_email),
+    source: "photo deletion log",
+    logId: row.id,
+    photoPath: row.photo_path || "",
+    quarantineBucket: row.quarantine_bucket || "",
+    quarantinePath: row.quarantine_path || "",
+    fields: [
+      { field: "photo_path", from: row.photo_path || "-", to: restored ? row.photo_path || "-" : "-" },
+      { field: "status", from: "-", to: row.status || "-" },
+      { field: "quarantine_path", from: "-", to: row.quarantine_path || "Not quarantined" },
+      ...(row.restored_at ? [{ field: "restored_at", from: formatStockHistoryDate(row.deleted_at), to: formatStockHistoryDate(row.restored_at) }] : []),
+      { field: "reason", from: "-", to: row.reason || "-" },
+    ],
+    photoVisuals: visualPath ? [{
+      label: restored ? "Recoverable photo" : "Deleted photo",
+      bucket: visualBucket,
+      paths: [visualPath],
+      originalPath: row.photo_path || "",
+    }] : [],
+    revertDirection: row.revert_direction || "",
+    revertedAt: row.reverted_at || "",
+    revertedByEmail: row.reverted_by_email || "",
+    revertCount: Number(row.revert_count || 0),
+    isCurrentlyReverted: restored,
+    reversible: Boolean(row.photo_path && (row.quarantine_path || restored)),
+  };
+}
+
+function mapStockHistoryReversionEvent(row) {
+  const fields = stockHistoryChangedFieldEntries(row.changed_fields);
+  const direction = row.direction || "revert";
+  return {
+    id: `reversion-${row.id}`,
+    category: "revert_event",
+    label: direction === "reapply" ? "Reapplied" : "Reverted",
+    title: direction === "reapply" ? "Reapplied audited change" : "Reverted audited change",
+    at: row.performed_at,
+    actor: stockHistoryActor(row.performed_by, row.performed_by_email),
+    source: "change reversion log",
+    fields: row.reason ? [...fields, { field: "reason", from: "-", to: row.reason }] : fields,
+    photoVisuals: stockHistoryPhotoGroups(fields, direction === "reapply" ? "Reapplied photo" : "Restored photo"),
+    reversible: false,
+  };
+}
+
+function canRevertStockHistoryEvent(event) {
+  if (!canViewSensitiveStockData()) return false;
+  if (event.category === "inventory_edit") return event.reversible && event.changeLogId && event.action === "update";
+  if (event.category === "photo_event") {
+    if (!event.reversible || !event.logId || !event.photoPath) return false;
+    return event.isCurrentlyReverted || Boolean(event.quarantinePath);
+  }
+  return false;
+}
+
+function renderStockHistoryFields(fields = []) {
+  if (!fields.length) return `<div class="stock-history-field is-muted">No field details recorded.</div>`;
+  return fields.slice(0, 12).map((field) => {
+    const photoDiff = field.field === "photos" || field.field === "photo_path"
+      ? stockHistoryPhotoDiff(field.from, field.to)
+      : null;
+    const from = photoDiff ? `${photoDiff.from.length} photo${photoDiff.from.length === 1 ? "" : "s"}` : compactStockHistoryValue(field.from);
+    const to = photoDiff ? `${photoDiff.to.length} photo${photoDiff.to.length === 1 ? "" : "s"}` : compactStockHistoryValue(field.to);
+    return `
+      <div class="stock-history-field">
+        <span>${escapeStockHtml(stockHistoryFieldLabel(field.field))}</span>
+        <strong class="old">${escapeStockHtml(from)}</strong>
+        <em>to</em>
+        <strong class="new">${escapeStockHtml(to)}</strong>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderStockHistoryPhotoGroups(groups = []) {
+  const visibleGroups = groups
+    .map((group) => ({ ...group, paths: (group.paths || []).filter(Boolean) }))
+    .filter((group) => group.paths.length);
+  if (!visibleGroups.length) return "";
+
+  return `
+    <div class="stock-history-photos">
+      ${visibleGroups.map((group) => `
+        <section>
+          <span>${escapeStockHtml(group.label || "Photos")}</span>
+          <div class="stock-history-photo-strip">
+            ${group.paths.slice(0, 8).map((path) => `
+              <button type="button" class="stock-history-photo-thumb" data-history-photo-bucket="${escapeStockHtml(group.bucket || STOCK_PHOTO_BUCKET)}" data-history-photo-path="${escapeStockHtml(path)}" data-history-photo-name="${escapeStockHtml(stockHistoryFileName(group.originalPath || path))}">
+                <img alt="${escapeStockHtml(stockHistoryFileName(group.originalPath || path))}">
+                <small>${escapeStockHtml(stockHistoryFileName(group.originalPath || path))}</small>
+              </button>
+            `).join("")}
+            ${group.paths.length > 8 ? `<span class="stock-history-photo-more">+${group.paths.length - 8}</span>` : ""}
+          </div>
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStockHistoryActions(event) {
+  const pieces = [];
+  if (event.revertCount) {
+    pieces.push(`<span class="stock-history-revert-note">${event.isCurrentlyReverted ? "Currently reverted" : "Reapplied"}${event.revertedByEmail ? ` by ${escapeStockHtml(event.revertedByEmail)}` : ""}${event.revertedAt ? ` - ${escapeStockHtml(formatStockHistoryDate(event.revertedAt))}` : ""}</span>`);
+  }
+  if (canRevertStockHistoryEvent(event)) {
+    pieces.push(`<button type="button" class="stock-history-revert-btn" data-stock-history-revert-id="${escapeStockHtml(event.id)}">${event.isCurrentlyReverted ? "Reapply Change" : "Revert Change"}</button>`);
+  }
+  return pieces.length ? `<div class="stock-history-actions">${pieces.join("")}</div>` : "";
+}
+
+function renderStockHistoryCard(event) {
+  return `
+    <article class="stock-history-event ${escapeStockHtml(event.category)}">
+      <div class="stock-history-event-head">
+        <div>
+          <div class="stock-history-badges">
+            <span>${escapeStockHtml(event.label)}</span>
+          </div>
+          <h3>${escapeStockHtml(event.title)}</h3>
+          <p>${escapeStockHtml(event.source)} - ${escapeStockHtml(event.actor)}</p>
+        </div>
+        <time>${escapeStockHtml(formatStockHistoryDate(event.at))}</time>
+      </div>
+      ${renderStockHistoryPhotoGroups(event.photoVisuals)}
+      <div class="stock-history-fields">${renderStockHistoryFields(event.fields)}</div>
+      ${renderStockHistoryActions(event)}
+    </article>
+  `;
+}
+
+function ensureStockHistoryModal() {
+  let modal = document.getElementById("stock-history-modal");
+  if (modal) return modal;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="stock-history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-history-title">
+      <div class="stock-history-content">
+        <button type="button" id="close-stock-history-modal" class="stock-modal-close" title="Close">&times;</button>
+        <div class="stock-history-header">
+          <span>Item audit trail</span>
+          <h2 id="stock-history-title">Change History</h2>
+          <p id="stock-history-subtitle">Review every recorded change for this item.</p>
+        </div>
+        <p id="stock-history-status" class="stock-history-status">Loading history...</p>
+        <div id="stock-history-timeline" class="stock-history-timeline"></div>
+      </div>
+      <div id="stock-history-photo-preview" class="stock-history-photo-preview hidden">
+        <button type="button" class="stock-history-preview-backdrop" data-close-history-photo></button>
+        <div class="stock-history-preview-card">
+          <div class="stock-history-preview-head">
+            <strong id="stock-history-preview-title">Photo</strong>
+            <button type="button" data-close-history-photo>Close</button>
+          </div>
+          <img id="stock-history-preview-img" alt="Audit photo preview">
+        </div>
+      </div>
+    </div>
+  `);
+  modal = document.getElementById("stock-history-modal");
+  document.getElementById("close-stock-history-modal")?.addEventListener("click", closeStockHistoryModal);
+  modal?.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-close-history-photo]")) {
+      closeStockHistoryPhotoPreview();
+      return;
+    }
+    const photo = event.target.closest("[data-history-photo-path]");
+    if (photo) {
+      await openStockHistoryPhotoPreview(photo);
+      return;
+    }
+    const revertButton = event.target.closest("[data-stock-history-revert-id]");
+    if (revertButton) {
+      await performStockHistoryRevert(revertButton.dataset.stockHistoryRevertId, revertButton);
+    }
+  });
+  return modal;
+}
+
+function closeStockHistoryModal() {
+  document.getElementById("stock-history-modal")?.classList.add("hidden");
+  document.getElementById("stock-history-modal")?.classList.remove("show");
+  document.body.classList.remove("modal-open");
+  stockHistoryState.itemId = null;
+  stockHistoryState.events = [];
+  closeStockHistoryPhotoPreview();
+}
+
+async function signedStockHistoryPhotoUrl(bucket, path) {
+  const key = `${bucket}:${path}`;
+  if (stockHistoryState.photoUrlCache.has(key)) return stockHistoryState.photoUrlCache.get(key);
+  if (bucket === STOCK_PHOTO_BUCKET) {
+    const url = await getSignedUrl(path);
+    if (!url) throw new Error("Could not sign item photo.");
+    stockHistoryState.photoUrlCache.set(key, url);
+    return url;
+  }
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) throw error || new Error("Could not sign audit photo.");
+  stockHistoryState.photoUrlCache.set(key, data.signedUrl);
+  return data.signedUrl;
+}
+
+async function hydrateStockHistoryPhotos() {
+  const modal = document.getElementById("stock-history-modal");
+  if (!modal) return;
+  const thumbs = Array.from(modal.querySelectorAll("[data-history-photo-path]"));
+  await Promise.all(thumbs.map(async (thumb) => {
+    const img = thumb.querySelector("img");
+    const bucket = thumb.dataset.historyPhotoBucket || STOCK_PHOTO_BUCKET;
+    const path = thumb.dataset.historyPhotoPath || "";
+    if (!img || !path || thumb.dataset.loaded === "true") return;
+    try {
+      img.src = await signedStockHistoryPhotoUrl(bucket, path);
+      thumb.dataset.loaded = "true";
+    } catch (error) {
+      console.warn("Could not load stock history photo", error);
+      thumb.classList.add("is-missing");
+    }
+  }));
+}
+
+async function openStockHistoryPhotoPreview(button) {
+  const bucket = button.dataset.historyPhotoBucket || STOCK_PHOTO_BUCKET;
+  const path = button.dataset.historyPhotoPath || "";
+  const name = button.dataset.historyPhotoName || stockHistoryFileName(path);
+  if (!path) return;
+
+  const preview = document.getElementById("stock-history-photo-preview");
+  const title = document.getElementById("stock-history-preview-title");
+  const img = document.getElementById("stock-history-preview-img");
+  if (title) title.textContent = name;
+  if (img) {
+    img.removeAttribute("src");
+    img.alt = name;
+  }
+  preview?.classList.remove("hidden");
+
+  try {
+    const thumbImg = button.querySelector("img");
+    const url = button.dataset.loaded === "true" && thumbImg?.src ? thumbImg.src : await signedStockHistoryPhotoUrl(bucket, path);
+    if (img) img.src = url;
+  } catch (error) {
+    console.warn("Could not open stock history photo", error);
+    showToast("Could not open that audit photo.");
+    closeStockHistoryPhotoPreview();
+  }
+}
+
+function closeStockHistoryPhotoPreview() {
+  document.getElementById("stock-history-photo-preview")?.classList.add("hidden");
+}
+
+async function loadStockHistoryEvents(itemId, item = null) {
+  const [inventoryChanges, stockEvents, photoEvents, reversionEvents] = await Promise.all([
+    stockHistorySelectOrEmpty(
+      supabase.from("inventory_change_log")
+        .select("*")
+        .eq("item_id", itemId)
+        .order("changed_at", { ascending: false })
+        .limit(400),
+      "inventory changes"
+    ),
+    stockHistorySelectOrEmpty(
+      supabase.from("stock_transactions")
+        .select("id,item_id,location_id,quantity,action_type,confirmed_at,user_id,email,notes,method,timestamp,locations(location_name,location_code,store_id)")
+        .eq("item_id", itemId)
+        .order("confirmed_at", { ascending: false })
+        .limit(250),
+      "stock transactions"
+    ),
+    stockHistorySelectOrEmpty(
+      supabase.from("photo_deletion_log")
+        .select("*")
+        .eq("item_id", itemId)
+        .order("deleted_at", { ascending: false })
+        .limit(250),
+      "photo deletion log"
+    ),
+    stockHistorySelectOrEmpty(
+      supabase.from("change_reversion_log")
+        .select("*")
+        .eq("item_id", itemId)
+        .order("performed_at", { ascending: false })
+        .limit(250),
+      "change reversions"
+    ),
+  ]);
+
+  const creationFallback = inventoryChanges.some((row) => row.action === "insert")
+    ? null
+    : mapStockHistoryCreatedEvent(item);
+
+  return [
+    creationFallback,
+    ...inventoryChanges.filter((row) => row.verified_method !== "admin_revert").map(mapStockHistoryInventoryChange),
+    ...stockEvents.map(mapStockHistoryStockEvent),
+    ...photoEvents.map(mapStockHistoryPhotoEvent),
+    ...reversionEvents.map(mapStockHistoryReversionEvent),
+  ].filter(Boolean).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+}
+
+async function openStockHistoryModal(itemId) {
+  if (!canViewSensitiveStockData()) {
+    showToast("Only admins can view item change history.");
+    return;
+  }
+  const item = getStockItemById(itemId);
+  if (!item) {
+    showToast("Could not find this item in the current stock list.");
+    return;
+  }
+
+  const modal = ensureStockHistoryModal();
+  stockHistoryState.itemId = itemId;
+  document.getElementById("stock-history-title").textContent = item.title || "Item History";
+  document.getElementById("stock-history-subtitle").textContent = `${item.barcode ? `Barcode ${item.barcode} - ` : ""}${Number(item.stock || 0).toLocaleString()} currently in stock`;
+  document.getElementById("stock-history-status").textContent = "Loading item history...";
+  document.getElementById("stock-history-timeline").innerHTML = "";
+  modal.classList.remove("hidden");
+  modal.classList.add("show");
+  document.body.classList.add("modal-open");
+
+  try {
+    stockHistoryState.events = await loadStockHistoryEvents(itemId, item);
+    renderStockHistoryTimeline();
+  } catch (error) {
+    console.error("Could not load stock history", error);
+    document.getElementById("stock-history-status").textContent = error?.message || "Could not load item history.";
+  }
+}
+
+function renderStockHistoryTimeline() {
+  const status = document.getElementById("stock-history-status");
+  const timeline = document.getElementById("stock-history-timeline");
+  const events = stockHistoryState.events || [];
+  if (status) status.textContent = `${events.length} recorded event${events.length === 1 ? "" : "s"} for this item.`;
+  if (!timeline) return;
+  if (!events.length) {
+    timeline.innerHTML = `<div class="stock-history-empty">No recorded changes were found for this item yet.</div>`;
+    return;
+  }
+  timeline.innerHTML = events.map(renderStockHistoryCard).join("");
+  hydrateStockHistoryPhotos();
+}
+
+async function stockHistoryAdminEmail() {
+  const { data } = await supabase.auth.getUser();
+  return data?.user?.email || currentUser?.email || "";
+}
+
+async function copyStockHistoryQuarantineToPhotos(event) {
+  if (!event.quarantinePath) throw new Error("This deletion does not have a quarantined recovery copy.");
+  const signedUrl = await signedStockHistoryPhotoUrl(event.quarantineBucket || "photo-quarantine", event.quarantinePath);
+  const response = await fetch(signedUrl);
+  if (!response.ok) throw new Error(`Could not read quarantined photo (${response.status}).`);
+  const blob = await response.blob();
+  const { error } = await supabase.storage
+    .from(STOCK_PHOTO_BUCKET)
+    .upload(event.photoPath, blob, {
+      upsert: false,
+      contentType: blob.type || "application/octet-stream",
+    });
+  const alreadyExists = error && (String(error.statusCode || "") === "409" || /exists|duplicate/i.test(error.message || ""));
+  if (error && !alreadyExists) throw error;
+}
+
+async function removeStockHistoryVisiblePhoto(path) {
+  if (!path) return;
+  const { error } = await supabase.storage.from(STOCK_PHOTO_BUCKET).remove([path]);
+  if (error && !/not found|does not exist/i.test(error.message || "")) {
+    console.warn("Could not clean visible photo after reapply", error);
+  }
+  signedUrlCache.delete(path);
+}
+
+async function performStockHistoryRevert(eventId, button) {
+  const event = stockHistoryState.events.find((entry) => entry.id === eventId);
+  if (!event || !canRevertStockHistoryEvent(event)) return;
+
+  const direction = event.isCurrentlyReverted ? "reapply" : "revert";
+  const verb = direction === "reapply" ? "reapply" : "revert";
+  if (!window.confirm(`Are you sure you want to ${verb} this audited change?`)) return;
+
+  const originalText = button?.textContent || (direction === "reapply" ? "Reapply Change" : "Revert Change");
+  if (button) {
+    button.disabled = true;
+    button.textContent = direction === "reapply" ? "Reapplying..." : "Reverting...";
+  }
+
+  try {
+    const adminEmail = await stockHistoryAdminEmail();
+    if (event.category === "photo_event" && direction === "revert") {
+      await copyStockHistoryQuarantineToPhotos(event);
+    }
+
+    if (event.category === "inventory_edit") {
+      const { error } = await supabase.rpc("revert_inventory_change", {
+        _change_id: event.changeLogId,
+        _direction: direction,
+        _admin_email: adminEmail || null,
+      });
+      if (error) throw error;
+    } else if (event.category === "photo_event") {
+      const { error } = await supabase.rpc("revert_photo_deletion_change", {
+        _log_id: event.logId,
+        _direction: direction,
+        _admin_email: adminEmail || null,
+      });
+      if (error) throw error;
+      if (direction === "reapply") await removeStockHistoryVisiblePhoto(event.photoPath);
+    }
+
+    await bumpInventoryVersion([stockHistoryState.itemId]);
+    await refreshItemById(stockHistoryState.itemId);
+    stockHistoryState.events = await loadStockHistoryEvents(stockHistoryState.itemId, getStockItemById(stockHistoryState.itemId));
+    renderStockHistoryTimeline();
+    showToast(direction === "reapply" ? "Change reapplied." : "Change reverted.");
+  } catch (error) {
+    console.error("Could not revert stock history change", error);
+    showToast(error?.message || `Could not ${verb} this change.`);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function setStockPhotoStatus(message, type = "") {
