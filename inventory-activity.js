@@ -21,7 +21,8 @@ function waitForSupabaseReady(timeoutMs = 8000) {
 const state = {
   rows: [],
   filteredRows: [],
-  selectedDate: "",
+  selectedDateFrom: "",
+  selectedDateTo: "",
 };
 
 const fmtMoney = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -47,6 +48,29 @@ function dayWindowIso(dateValue) {
   const start = new Date(year, month - 1, day, 0, 0, 0, 0);
   const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
   return { startIso: start.toISOString(), endIso: end.toISOString(), start };
+}
+
+function dateRangeWindowIso(fromValue, toValue) {
+  const from = fromValue || localDateValue();
+  const to = toValue || from;
+  const normalizedFrom = from <= to ? from : to;
+  const normalizedTo = from <= to ? to : from;
+  const startWindow = dayWindowIso(normalizedFrom);
+  const endWindow = dayWindowIso(normalizedTo);
+  return {
+    from: normalizedFrom,
+    to: normalizedTo,
+    startIso: startWindow.startIso,
+    endIso: endWindow.endIso,
+    start: startWindow.start,
+    end: endWindow.start,
+  };
+}
+
+function formatDateRangeLabel(start, end) {
+  const sameDay = start.toDateString() === end.toDateString();
+  if (sameDay) return start.toLocaleDateString();
+  return `${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
 }
 
 function formatDateTime(iso) {
@@ -314,28 +338,32 @@ function applySearch() {
 
 async function refreshActivity() {
   const button = document.getElementById("refresh-activity");
-  const dateInput = document.getElementById("activity-date");
+  const fromInput = document.getElementById("activity-date-from");
+  const toInput = document.getElementById("activity-date-to");
   const subtitle = document.getElementById("activity-subtitle");
 
-  const selectedDate = dateInput?.value || localDateValue();
-  state.selectedDate = selectedDate;
-  const { startIso, endIso, start } = dayWindowIso(selectedDate);
+  const range = dateRangeWindowIso(fromInput?.value, toInput?.value);
+  state.selectedDateFrom = range.from;
+  state.selectedDateTo = range.to;
+  if (fromInput) fromInput.value = range.from;
+  if (toInput) toInput.value = range.to;
+  const rangeLabel = formatDateRangeLabel(range.start, range.end);
 
   setError("");
   if (button) button.disabled = true;
-  if (subtitle) subtitle.textContent = `Loading activity for ${start.toLocaleDateString()}...`;
+  if (subtitle) subtitle.textContent = `Loading activity for ${rangeLabel}...`;
 
   try {
     const [newItems, stockAdds] = await Promise.all([
-      loadNewItems(startIso, endIso),
-      loadStockAdds(startIso, endIso),
+      loadNewItems(range.startIso, range.endIso),
+      loadStockAdds(range.startIso, range.endIso),
     ]);
 
     state.rows = [...newItems, ...stockAdds]
       .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
 
     if (subtitle) {
-      subtitle.textContent = `${state.rows.length.toLocaleString()} event(s) for ${start.toLocaleDateString()}`;
+      subtitle.textContent = `${state.rows.length.toLocaleString()} event(s) for ${rangeLabel}`;
     }
     applySearch();
   } catch (error) {
@@ -363,11 +391,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   setActiveNavLink();
   setupNavigation();
 
-  const dateInput = document.getElementById("activity-date");
-  if (dateInput) dateInput.value = localDateValue();
+  const today = localDateValue();
+  const fromInput = document.getElementById("activity-date-from");
+  const toInput = document.getElementById("activity-date-to");
+  if (fromInput) fromInput.value = today;
+  if (toInput) toInput.value = today;
 
   document.getElementById("refresh-activity")?.addEventListener("click", refreshActivity);
-  document.getElementById("activity-date")?.addEventListener("change", refreshActivity);
+  document.getElementById("activity-date-from")?.addEventListener("change", refreshActivity);
+  document.getElementById("activity-date-to")?.addEventListener("change", refreshActivity);
   document.getElementById("activity-search")?.addEventListener("input", applySearch);
 
   await refreshActivity();

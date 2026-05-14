@@ -164,6 +164,53 @@
     return groups;
   }
 
+  function photoPathsFromSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return [];
+
+    const paths = [
+      ...toPhotoList(snapshot.photos),
+      ...toPhotoList(snapshot.photo_url),
+    ].filter((path) => path && !/^https?:\/\//i.test(path));
+
+    return [...new Set(paths)];
+  }
+
+  function itemDeletionPhotoVisuals(row, isDeletionEvent, isRestoreEvent) {
+    if (!isDeletionEvent) return [];
+
+    const snapshot = isRestoreEvent
+      ? (row.new_data || row.old_data)
+      : (row.old_data || row.new_data);
+    const paths = photoPathsFromSnapshot(snapshot);
+
+    if (!paths.length) return [];
+
+    return [{
+      label: isRestoreEvent ? "Restored item photos" : "Deleted item photos",
+      bucket: "photos",
+      paths,
+    }];
+  }
+
+  function itemDeletionReversionPhotoVisuals(row, fields = [], direction = "revert") {
+    const isDeletionReversion = row.table_name === "item_types"
+      && fields.some((field) => field.field === "deleted_at");
+    if (!isDeletionReversion) return [];
+
+    const snapshot = direction === "reapply"
+      ? (row.after_data || row.before_data)
+      : (row.before_data || row.after_data);
+    const paths = photoPathsFromSnapshot(snapshot);
+
+    if (!paths.length) return [];
+
+    return [{
+      label: direction === "reapply" ? "Reapplied deleted item photos" : "Recovered item photos",
+      bucket: "photos",
+      paths,
+    }];
+  }
+
   function fileNameFromPath(path) {
     return String(path || "").split("/").pop() || "Photo";
   }
@@ -235,7 +282,10 @@
       locationId: row.location_id || "",
       locationName: row.location_name || "",
       fields,
-      photoVisuals: photoGroupsFromFields(fields),
+      photoVisuals: [
+        ...itemDeletionPhotoVisuals(row, isDeletionEvent, isRestoreEvent),
+        ...photoGroupsFromFields(fields),
+      ],
       reason: row.reason || "",
       signedByEmail: row.signed_by_email || "",
       revertDirection: row.revert_direction || "",
@@ -432,7 +482,10 @@
       locationId: row.location_id || "",
       locationName: row.location_name || "",
       fields: row.reason ? [...fields, { field: "reason", from: "-", to: row.reason }] : fields,
-      photoVisuals: photoGroupsFromFields(fields, direction === "reapply" ? "Reapplied photo" : "Restored photo"),
+      photoVisuals: [
+        ...itemDeletionReversionPhotoVisuals(row, fields, direction),
+        ...photoGroupsFromFields(fields, direction === "reapply" ? "Reapplied photo" : "Restored photo"),
+      ],
       reason: row.reason || "",
       needsReview: false,
       searchText: "",
@@ -538,9 +591,19 @@
       ),
     ]);
 
+    const modificationChanges = inventoryChanges.filter((row) => {
+      if (row.verified_method === "admin_revert") return false;
+      return row.action !== "insert";
+    });
+    const modificationStockEvents = stockEvents.filter((row) => {
+      const action = String(row.action_type || "").toLowerCase();
+      const qty = Number(row.quantity || 0);
+      return !(action === "checkin" && qty > 0);
+    });
+
     state.events = [
-      ...inventoryChanges.filter((row) => row.verified_method !== "admin_revert").map(mapInventoryChange),
-      ...stockEvents.map(mapStockEvent),
+      ...modificationChanges.map(mapInventoryChange),
+      ...modificationStockEvents.map(mapStockEvent),
       ...photoEvents.map(mapPhotoEvent),
       ...trayEvents.map(mapTrayEvent),
       ...reversionEvents.map(mapReversionEvent),

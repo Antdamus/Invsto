@@ -283,12 +283,23 @@ let uploadedImages = [];
     );
     const destinationPath = `item_photos/${Date.now()}_assisted_${index + 1}_${sourceFileName}`;
 
-    const { data: downloadedBlob, error: downloadError } = await supabase
+    let downloadedBlob = null;
+    const { data: storageBlob, error: downloadError } = await supabase
       .storage
       .from(sourceBucket)
       .download(sourcePath);
 
-    if (downloadError || !downloadedBlob) {
+    if (!downloadError && storageBlob) {
+      downloadedBlob = storageBlob;
+    } else if (image?.previewUrl) {
+      const response = await fetch(image.previewUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download assisted image preview (${response.status}).`);
+      }
+      downloadedBlob = await response.blob();
+    }
+
+    if (!downloadedBlob) {
       throw new Error(downloadError?.message || "Failed to download assisted image.");
     }
 
@@ -305,6 +316,27 @@ let uploadedImages = [];
     }
 
     return destinationPath;
+  }
+
+  async function ensureItemPhotosSaved(item, photoPaths) {
+    const itemId = item?.id;
+    const paths = [...new Set((photoPaths || []).filter(Boolean))];
+    if (!itemId || !paths.length) return item?.photos || [];
+
+    const savedPhotos = Array.isArray(item?.photos) ? item.photos.filter(Boolean) : [];
+    const missing = paths.filter((path) => !savedPhotos.includes(path));
+    if (!missing.length) return savedPhotos;
+
+    const { data, error } = await supabase.rpc("append_item_photos", {
+      _item_id: itemId,
+      _photo_paths: missing,
+    });
+
+    if (error) {
+      throw new Error(error.message || "Item saved, but selected photos could not be attached.");
+    }
+
+    return Array.isArray(data) ? data : paths;
   }
 
 //#endregion
@@ -1609,6 +1641,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const photoFiles = photoInput?.files || [];
   const photoUrls = [];
   const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
+  let assistedCopySuccessCount = 0;
+  let assistedCopyFailureCount = 0;
   const photoStatus = document.getElementById("photo-status");
   if (photoStatus) photoStatus.innerHTML = "";
 
@@ -1645,18 +1679,24 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     try {
       const copiedPath = await copyAssistedImageToPhotosBucket(assistedImage, index);
       photoUrls.push(copiedPath);
+      assistedCopySuccessCount += 1;
       if (photoStatus) {
-        photoStatus.innerHTML += `? Included assisted image <strong>${assistedImage.name || copiedPath}</strong><br>`;
+        photoStatus.innerHTML += `Included assisted image <strong>${assistedImage.name || copiedPath}</strong><br>`;
       }
     } catch (assistedError) {
+      assistedCopyFailureCount += 1;
       console.error(`Assisted image copy failed for ${assistedImage?.path}:`, assistedError);
       if (photoStatus) {
-        photoStatus.innerHTML += `? Failed to include assisted image <strong>${assistedImage?.name || assistedImage?.path || `#${index + 1}`}</strong>: ${assistedError.message || assistedError}<br>`;
+        photoStatus.innerHTML += `Failed to include assisted image <strong>${assistedImage?.name || assistedImage?.path || `#${index + 1}`}</strong>: ${assistedError.message || assistedError}<br>`;
       }
     }
   }
 
   const finalPhotoPaths = [...new Set(photoUrls.filter(Boolean))];
+  if (assistedSelectedImages.length && assistedCopyFailureCount && !assistedCopySuccessCount && !photoFiles.length) {
+    alert("The selected assisted photos could not be saved to the item. Please try again before adding the item.");
+    return;
+  }
 
   let finalDymoPath;
   try {
@@ -1699,6 +1739,14 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
 
   const newItem = insertedItems[0];
+  try {
+    const savedPhotos = await ensureItemPhotosSaved(newItem, finalPhotoPaths);
+    newItem.photos = savedPhotos;
+  } catch (photoAttachError) {
+    console.error("Final item photo attach failed:", photoAttachError);
+    alert(photoAttachError.message || "Item saved, but selected photos could not be attached.");
+    return;
+  }
 
 // Hoisted so we can check it later (outside the try)
 let bulkRes = null;

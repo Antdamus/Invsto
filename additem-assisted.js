@@ -1004,9 +1004,11 @@
     releaseImagePreviewUrls(state.recentUploadedImages);
     state.recentUploadedImages = normalizedImages;
     state.hasLoadedImagesOnce = normalizedImages.length > 0;
-    state.saveSelectedUploadedImagePaths = normalizedImages
-      .map((image) => image.path)
-      .filter((path) => previousSaveSelections.has(path));
+    state.saveSelectedUploadedImagePaths = options.preserveSelection
+      ? normalizedImages
+        .map((image) => image.path)
+        .filter((path) => previousSaveSelections.has(path))
+      : normalizedImages.map((image) => image.path).filter(Boolean);
 
     const defaultAIPath = options.defaultAIPath && normalizedImages.some((image) => image.path === options.defaultAIPath)
       ? options.defaultAIPath
