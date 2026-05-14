@@ -1514,6 +1514,29 @@ svg.icon.spin {
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
 }
 
+.location-limit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.04);
+  color: #475467;
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.location-limit-toggle input {
+  accent-color: #b68a4a;
+}
+
+#form-add-location input:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
 .modal-actions {
   display: flex;
   justify-content: center;

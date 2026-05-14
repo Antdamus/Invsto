@@ -2694,7 +2694,7 @@ function closeBarcodeModal() {
 }
 
 function openStockDescriptionModal(itemId) {
-  const item = findStockItemById(itemId);
+  const item = getStockItemById(itemId);
   const modal = document.getElementById("stock-description-modal");
   if (!item || !modal) return;
 

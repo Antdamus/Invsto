@@ -1139,6 +1139,7 @@ let uploadedImages = [];
     const nameInput = document.getElementById("location-name");
     const barcodeInput = document.getElementById("location-barcode");
     const capacityInput = document.getElementById("location-capacity");
+    const capacityNoLimitInput = document.getElementById("location-capacity-no-limit");
     const photoInput = document.getElementById("location-photo");
     const previewWrapper = document.getElementById("photo-preview-wrapper");
     const previewImage = document.getElementById("photo-preview-image");
@@ -1152,6 +1153,8 @@ let uploadedImages = [];
     if (nameInput) nameInput.value = "";
     if (barcodeInput) barcodeInput.value = "";
     if (capacityInput) capacityInput.value = "";
+    if (capacityNoLimitInput) capacityNoLimitInput.checked = true;
+    syncAddLocationCapacityLimit();
     if (photoInput) photoInput.value = "";
     if (notesInput) notesInput.value = "";
     if (storeSelect) storeSelect.value = "";
@@ -1253,6 +1256,7 @@ let uploadedImages = [];
     const nameInput = document.getElementById("location-name");
     const barcodeInput = document.getElementById("location-barcode");
     const capacityInput = document.getElementById("location-capacity");
+    const capacityNoLimitInput = document.getElementById("location-capacity-no-limit");
     const photoInput = document.getElementById("location-photo");
     const previewWrapper = document.getElementById("photo-preview-wrapper");
     const previewImage = document.getElementById("photo-preview-image");
@@ -1263,6 +1267,7 @@ let uploadedImages = [];
     if (!modal || !form || form.dataset.bound === "true") return;
     form.dataset.bound = "true";
     populateLocationStoreSelect();
+    syncAddLocationCapacityLimit();
 
     photoInput?.addEventListener("change", () => {
       const file = photoInput.files?.[0];
@@ -1319,6 +1324,7 @@ let uploadedImages = [];
     });
 
     generateBtn?.addEventListener("click", generateAndRenderLocationBarcode);
+    capacityNoLimitInput?.addEventListener("change", syncAddLocationCapacityLimit);
     cancelBtn?.addEventListener("click", () => toggleAddLocationModal(false));
 
     form.addEventListener("submit", async (event) => {
@@ -1327,6 +1333,7 @@ let uploadedImages = [];
       const location_name = nameInput.value.trim();
       const location_code = barcodeInput.value.trim();
       const max_capacity = capacityInput.value.trim();
+      const capacityHasNoLimit = Boolean(capacityNoLimitInput?.checked);
       const notes = notesInput.value.trim();
       const photoFile = photoInput.files?.[0] || null;
       const store_id = storeSelect?.value?.trim() || null;
@@ -1385,7 +1392,7 @@ let uploadedImages = [];
         .insert({
           location_name,
           location_code,
-          max_capacity: max_capacity ? parseInt(max_capacity, 10) : null,
+          max_capacity: capacityHasNoLimit || !max_capacity ? null : parseInt(max_capacity, 10),
           notes,
           active: true,
           photo_url,
@@ -1475,6 +1482,17 @@ let uploadedImages = [];
     if (selectedValue) {
       setSelectedAdminLocation(selectedValue);
     }
+  }
+
+  function syncAddLocationCapacityLimit() {
+    const capacityInput = document.getElementById("location-capacity");
+    const capacityNoLimitInput = document.getElementById("location-capacity-no-limit");
+    if (!capacityInput || !capacityNoLimitInput) return;
+
+    const unlimited = Boolean(capacityNoLimitInput.checked);
+    capacityInput.disabled = unlimited;
+    capacityInput.placeholder = unlimited ? "No limit" : "";
+    if (unlimited) capacityInput.value = "";
   }
 
   //allow the thing to be opened

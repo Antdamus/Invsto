@@ -299,9 +299,11 @@ function getCreateModalElements() {
     storeSelect: document.getElementById("location-create-store"),
     typeInput: document.getElementById("location-create-type"),
     capacityInput: document.getElementById("location-create-capacity"),
+    capacityNoLimitInput: document.getElementById("location-create-capacity-no-limit"),
     barcodeInput: document.getElementById("location-create-barcode"),
     isTrayInput: document.getElementById("location-create-is-tray"),
     toleranceInput: document.getElementById("location-create-tray-tolerance"),
+    toleranceNoLimitInput: document.getElementById("location-create-tray-tolerance-no-limit"),
     notesInput: document.getElementById("location-create-notes"),
     photoInput: document.getElementById("location-create-photo"),
     photoPreview: document.getElementById("location-create-photo-preview"),
@@ -309,6 +311,36 @@ function getCreateModalElements() {
     status: document.getElementById("location-create-status"),
     dymoStatus: document.getElementById("location-create-dymo-status"),
   };
+}
+
+function syncLimitInput(input, checkbox, fallbackValue = "") {
+  if (!input || !checkbox) return;
+  const unlimited = Boolean(checkbox.checked);
+  input.disabled = unlimited;
+  input.placeholder = unlimited ? "No limit" : "";
+  if (unlimited) {
+    input.value = "";
+  } else if (!asTrimmedString(input.value) && fallbackValue !== "") {
+    input.value = fallbackValue;
+  }
+}
+
+function syncCreateLocationLimitControls() {
+  const elements = getCreateModalElements();
+  syncLimitInput(elements.capacityInput, elements.capacityNoLimitInput);
+  syncLimitInput(elements.toleranceInput, elements.toleranceNoLimitInput, "10");
+}
+
+function syncEditLocationLimitControls() {
+  syncLimitInput(
+    document.getElementById("location-edit-capacity"),
+    document.getElementById("location-edit-capacity-no-limit")
+  );
+  syncLimitInput(
+    document.getElementById("location-edit-tray-tolerance"),
+    document.getElementById("location-edit-tray-tolerance-no-limit"),
+    "10"
+  );
 }
 
 function buildLocationDymoXml(locationCode, locationName = "") {
@@ -522,11 +554,27 @@ function populateCreateLocationStoreSelect(selectedStoreId = "") {
   storeSelect.value = selectedStoreId || "";
 }
 
+function getNextTrayName() {
+  const highestTrayNumber = (Array.isArray(state.locations) ? state.locations : []).reduce((highest, location) => {
+    const name = asTrimmedString(location.location_name);
+    const match = name.match(/^tray\s*#?\s*0*(\d+)$/i);
+    if (!match) return highest;
+
+    const trayNumber = Number(match[1]);
+    return Number.isFinite(trayNumber) ? Math.max(highest, trayNumber) : highest;
+  }, 0);
+
+  return `Tray ${highestTrayNumber + 1}`;
+}
+
 function closeCreateLocationModal() {
   const elements = getCreateModalElements();
   elements.modal?.classList.add("hidden");
   elements.modal?.setAttribute("aria-hidden", "true");
   elements.form?.reset();
+  if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
+  if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
+  syncCreateLocationLimitControls();
   if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
   if (elements.status) elements.status.textContent = "";
   if (elements.dymoStatus) elements.dymoStatus.textContent = "DYMO label will be created on save";
@@ -549,11 +597,16 @@ function openCreateLocationModal({ tray = false } = {}) {
       : "Create a barcode-ready fixed location.";
   }
   if (elements.typeInput) elements.typeInput.value = createTray ? "tray" : "";
+  if (createTray && elements.nameInput) {
+    elements.nameInput.value = getNextTrayName();
+  }
   if (elements.isTrayInput) {
     elements.isTrayInput.checked = createTray;
     elements.isTrayInput.disabled = forceTray;
   }
-  if (elements.toleranceInput) elements.toleranceInput.value = "10";
+  if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
+  if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
+  syncCreateLocationLimitControls();
   if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
   if (elements.status) elements.status.textContent = "";
   generateCreateLocationBarcode();
@@ -626,9 +679,11 @@ async function saveCreatedLocation() {
   const storeId = asTrimmedString(elements.storeSelect?.value);
   const type = asTrimmedString(elements.typeInput?.value);
   const capacityValue = asTrimmedString(elements.capacityInput?.value);
+  const capacityHasNoLimit = Boolean(elements.capacityNoLimitInput?.checked);
   const locationCode = asTrimmedString(elements.barcodeInput?.value);
   const isTray = !locationsAccess.isAdmin ? true : Boolean(elements.isTrayInput?.checked);
   const toleranceValue = asTrimmedString(elements.toleranceInput?.value);
+  const toleranceHasNoLimit = Boolean(elements.toleranceNoLimitInput?.checked);
   const notes = asTrimmedString(elements.notesInput?.value);
   const photoFile = elements.photoInput?.files?.[0] || null;
 
@@ -656,12 +711,12 @@ async function saveCreatedLocation() {
       dymo_label_url: dymoPath,
       photo_url: photoPath,
       type: type || (isTray ? "tray" : null),
-      max_capacity: capacityValue ? Number(capacityValue) : null,
+      max_capacity: capacityHasNoLimit || !capacityValue ? null : Number(capacityValue),
       active: true,
       notes: notes || null,
       store_id: storeId || null,
       is_tray: isTray,
-      tray_weight_tolerance_grams: toleranceValue ? Number(toleranceValue) : 10,
+      tray_weight_tolerance_grams: toleranceHasNoLimit || !toleranceValue ? null : Number(toleranceValue),
       tray_current_store_id: isTray ? (storeId || null) : null,
     };
 
@@ -1069,7 +1124,7 @@ async function renderLocationDetail(locationId) {
         </div>
         <div class="location-detail-stat">
           <div class="location-detail-stat-label">Tolerance</div>
-          <div class="location-detail-stat-value">${formatWeight(location.tray_weight_tolerance_grams || 10)}</div>
+          <div class="location-detail-stat-value">${location.tray_weight_tolerance_grams === null || location.tray_weight_tolerance_grams === undefined ? "No limit" : formatWeight(location.tray_weight_tolerance_grams)}</div>
         </div>
         <div class="location-detail-stat">
           <div class="location-detail-stat-label">Estimated Contents</div>
@@ -1168,7 +1223,7 @@ async function renderLocationDetail(locationId) {
         </div>
         <div class="location-detail-stat">
           <div class="location-detail-stat-label">Max Capacity</div>
-          <div class="location-detail-stat-value">${location.max_capacity ?? "—"}</div>
+          <div class="location-detail-stat-value">${location.max_capacity === null || location.max_capacity === undefined ? "No limit" : location.max_capacity}</div>
         </div>
         <div class="location-detail-stat full">
           <div class="location-detail-stat-label">Notes</div>
@@ -1247,6 +1302,11 @@ async function renderLocationDetail(locationId) {
             <input type="number" id="location-edit-capacity" class="location-edit-input" value="${location.max_capacity ?? ""}" min="0" />
           </label>
 
+          <label class="location-edit-toggle location-limit-toggle">
+            <input type="checkbox" id="location-edit-capacity-no-limit" ${location.max_capacity === null || location.max_capacity === undefined ? "checked" : ""} />
+            <span>No capacity limit</span>
+          </label>
+
           <label class="location-edit-label full">
             <span>Notes</span>
             <textarea id="location-edit-notes" class="location-edit-textarea">${escapeHtml(location.notes || "")}</textarea>
@@ -1269,7 +1329,12 @@ async function renderLocationDetail(locationId) {
 
           <label class="location-edit-label">
             <span>Tray Tolerance (g)</span>
-            <input type="number" id="location-edit-tray-tolerance" class="location-edit-input" value="${location.tray_weight_tolerance_grams ?? 10}" min="0" step="0.01" />
+            <input type="number" id="location-edit-tray-tolerance" class="location-edit-input" value="${location.tray_weight_tolerance_grams ?? ""}" min="0" step="0.01" />
+          </label>
+
+          <label class="location-edit-toggle location-limit-toggle">
+            <input type="checkbox" id="location-edit-tray-tolerance-no-limit" ${location.tray_weight_tolerance_grams === null || location.tray_weight_tolerance_grams === undefined ? "checked" : ""} />
+            <span>No tray weight limit</span>
           </label>
         </div>
 
@@ -1301,6 +1366,7 @@ async function renderLocationDetail(locationId) {
       margin: 10,
     });
   }
+  syncEditLocationLimitControls();
 }
 
 async function saveLocationEdits(locationId) {
@@ -1312,10 +1378,12 @@ async function saveLocationEdits(locationId) {
   const storeId = asTrimmedString(document.getElementById("location-edit-store")?.value);
   const type = asTrimmedString(document.getElementById("location-edit-type")?.value);
   const capacityValue = asTrimmedString(document.getElementById("location-edit-capacity")?.value);
+  const capacityHasNoLimit = Boolean(document.getElementById("location-edit-capacity-no-limit")?.checked);
   const notes = asTrimmedString(document.getElementById("location-edit-notes")?.value);
   const active = Boolean(document.getElementById("location-edit-active")?.checked);
   const isTray = Boolean(document.getElementById("location-edit-is-tray")?.checked);
   const trayToleranceValue = asTrimmedString(document.getElementById("location-edit-tray-tolerance")?.value);
+  const trayToleranceHasNoLimit = Boolean(document.getElementById("location-edit-tray-tolerance-no-limit")?.checked);
   const photoFile = document.getElementById("location-edit-photo")?.files?.[0] || null;
 
   if (!name) {
@@ -1351,9 +1419,9 @@ async function saveLocationEdits(locationId) {
     notes: notes || null,
     active,
     photo_url: photoPath,
-    max_capacity: capacityValue ? Number(capacityValue) : null,
+    max_capacity: capacityHasNoLimit || !capacityValue ? null : Number(capacityValue),
     is_tray: isTray,
-    tray_weight_tolerance_grams: trayToleranceValue ? Number(trayToleranceValue) : 10,
+    tray_weight_tolerance_grams: trayToleranceHasNoLimit || !trayToleranceValue ? null : Number(trayToleranceValue),
     tray_current_store_id: isTray ? (location.tray_current_store_id || storeId || null) : null,
   };
 
@@ -1386,7 +1454,9 @@ async function saveTrayMovement(locationId) {
   const weightValue = asTrimmedString(document.getElementById("tray-movement-weight")?.value);
   const notes = asTrimmedString(document.getElementById("tray-movement-notes")?.value);
   const actualWeight = Number(weightValue);
-  const tolerance = Number(location.tray_weight_tolerance_grams || 10);
+  const tolerance = location.tray_weight_tolerance_grams === null || location.tray_weight_tolerance_grams === undefined
+    ? null
+    : Number(location.tray_weight_tolerance_grams);
 
   if (!storeId) {
     if (statusEl) statusEl.textContent = "Choose the store for this tray movement.";
@@ -1411,7 +1481,7 @@ async function saveTrayMovement(locationId) {
     ? Number(location.tray_last_checkout_weight)
     : null;
   const delta = expectedWeight === null ? null : Number((actualWeight - expectedWeight).toFixed(2));
-  const result = delta !== null && Math.abs(delta) > tolerance ? "mismatch" : "ok";
+  const result = delta !== null && Number.isFinite(tolerance) && Math.abs(delta) > tolerance ? "mismatch" : "ok";
   const trayStatus = action === "check_in"
     ? (result === "mismatch" ? "weight_mismatch" : "checked_in")
     : "checked_out";
@@ -1424,7 +1494,7 @@ async function saveTrayMovement(locationId) {
     expected_weight_grams: expectedWeight,
     actual_weight_grams: actualWeight,
     weight_delta_grams: delta,
-    tolerance_grams: tolerance,
+    tolerance_grams: Number.isFinite(tolerance) ? tolerance : null,
     result,
     notes: notes || null,
     performed_by: user?.id || null,
@@ -1542,6 +1612,14 @@ function bindEvents() {
     generateCreateLocationBarcode();
   });
 
+  document.getElementById("location-create-capacity-no-limit")?.addEventListener("change", () => {
+    syncCreateLocationLimitControls();
+  });
+
+  document.getElementById("location-create-tray-tolerance-no-limit")?.addEventListener("change", () => {
+    syncCreateLocationLimitControls();
+  });
+
   document.getElementById("location-create-photo")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0] || null;
     const preview = document.getElementById("location-create-photo-preview");
@@ -1621,6 +1699,15 @@ function bindEvents() {
     if (!form) return;
     event.preventDefault();
     await saveLocationEdits(form.dataset.locationId);
+  });
+
+  document.getElementById("location-detail-body")?.addEventListener("change", (event) => {
+    if (
+      event.target?.id === "location-edit-capacity-no-limit"
+      || event.target?.id === "location-edit-tray-tolerance-no-limit"
+    ) {
+      syncEditLocationLimitControls();
+    }
   });
 
   document.getElementById("location-detail-body")?.addEventListener("submit", async (event) => {

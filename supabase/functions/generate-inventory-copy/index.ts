@@ -17,6 +17,7 @@ type RequestBody = {
   purity?: string;
   weight?: number;
   stoneType?: string;
+  length?: string;
   notes?: string;
   category?: string;
   qrType?: string;
@@ -96,6 +97,7 @@ function buildPlaceholderCopy(body: Required<Pick<RequestBody, "material" | "pur
   const material = asTrimmedString(body.material);
   const purity = asTrimmedString(body.purity);
   const stoneType = asTrimmedString(body.stoneType);
+  const length = asTrimmedString(body.length);
   const notes = asTrimmedString(body.notes);
   const category = asTrimmedString(body.category);
   const itemType = detectKnownItemType(notes, category);
@@ -114,6 +116,10 @@ function buildPlaceholderCopy(body: Required<Pick<RequestBody, "material" | "pur
 
   if (stoneType) {
     descriptionParts.push(`Stone type provided by intake: ${stoneType}.`);
+  }
+
+  if (length) {
+    descriptionParts.push(`Length provided by intake: ${length}.`);
   }
 
   if (notes) {
@@ -204,6 +210,7 @@ Known metadata:
 - Purity: ${body.purity ?? ""}
 - Weight: ${body.weight ?? ""}
 - Stone type: ${body.stoneType ?? ""}
+- Length: ${body.length ?? ""}
 - Notes: ${body.notes ?? ""}
 - Category: ${body.category ?? ""}
 - QR type: ${body.qrType ?? ""}

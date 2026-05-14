@@ -241,6 +241,11 @@
             <input type="number" id="location-create-capacity" class="location-edit-input" min="0" />
           </label>
 
+          <label class="location-edit-toggle location-limit-toggle">
+            <input type="checkbox" id="location-create-capacity-no-limit" checked />
+            <span>No capacity limit</span>
+          </label>
+
           <label class="location-edit-label">
             <span>Barcode</span>
             <input type="text" id="location-create-barcode" class="location-edit-input" readonly />
@@ -249,6 +254,11 @@
           <label class="location-edit-label">
             <span>Tray Tolerance (g)</span>
             <input type="number" id="location-create-tray-tolerance" class="location-edit-input" min="0" step="0.01" value="10" />
+          </label>
+
+          <label class="location-edit-toggle location-limit-toggle">
+            <input type="checkbox" id="location-create-tray-tolerance-no-limit" checked />
+            <span>No tray weight limit</span>
           </label>
 
           <label class="location-edit-toggle full">

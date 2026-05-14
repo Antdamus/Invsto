@@ -15,6 +15,47 @@
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
   const AUTO_STRAIGHTEN_MIN_DEGREES = 1.25;
   const AUTO_STRAIGHTEN_MAX_DEGREES = 24;
+  const ASSISTED_LAST_STONE_TYPE_KEY = "og.addItem.assisted.lastStoneType";
+  const ASSISTED_STONE_TYPE_HISTORY_KEY = "og.addItem.assisted.stoneTypeHistory";
+  const ASSISTED_LAST_LENGTH_KEY = "og.addItem.assisted.lastLength";
+  const ASSISTED_LENGTH_HISTORY_KEY = "og.addItem.assisted.lengthHistory";
+  const ASSISTED_UPPERCASE_TOKENS = new Set(["VVS", "VS", "VS1", "VS2", "SI", "SI1", "SI2", "CZ", "AAA", "AA"]);
+  const ASSISTED_STONE_TYPE_MATCHERS = [
+    ["Cubic Zirconia", ["cubic zirconia", "cz"]],
+    ["Lab Diamond", ["lab diamond", "lab-grown diamond", "lab grown diamond"]],
+    ["Mother of Pearl", ["mother of pearl", "mother-of-pearl"]],
+    ["Lapis Lazuli", ["lapis lazuli"]],
+    ["Diamond", ["diamond"]],
+    ["Moissanite", ["moissanite"]],
+    ["Ruby", ["ruby"]],
+    ["Sapphire", ["sapphire"]],
+    ["Emerald", ["emerald"]],
+    ["Pearl", ["pearl"]],
+    ["Opal", ["opal"]],
+    ["Onyx", ["onyx"]],
+    ["Amethyst", ["amethyst"]],
+    ["Topaz", ["topaz"]],
+    ["Garnet", ["garnet"]],
+    ["Turquoise", ["turquoise"]],
+    ["Jade", ["jade"]],
+    ["Aquamarine", ["aquamarine"]],
+    ["Peridot", ["peridot"]],
+    ["Tanzanite", ["tanzanite"]],
+    ["Morganite", ["morganite"]],
+    ["Spinel", ["spinel"]],
+    ["Tourmaline", ["tourmaline"]],
+    ["Citrine", ["citrine"]],
+    ["Quartz", ["quartz"]],
+    ["Agate", ["agate"]],
+    ["Coral", ["coral"]],
+    ["Amber", ["amber"]],
+    ["Zircon", ["zircon"]],
+    ["Marcasite", ["marcasite"]],
+    ["Rhinestone", ["rhinestone"]],
+    ["Crystal", ["crystal"]],
+    ["Enamel", ["enamel"]],
+    ["No Stone", ["no stone", "no stones", "without stone", "without stones"]],
+  ];
   let backgroundRemovalModulePromise = null;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
@@ -82,6 +123,9 @@
       materialSelect: document.getElementById("assisted-material"),
       puritySelect: document.getElementById("assisted-purity"),
       stoneTypeInput: document.getElementById("assisted-stone-type"),
+      stoneTypeDatalist: document.getElementById("assisted-stone-type-options"),
+      lengthInput: document.getElementById("assisted-length"),
+      lengthDatalist: document.getElementById("assisted-length-options"),
       notesInput: document.getElementById("assisted-notes"),
       captureStationSelect: document.getElementById("assisted-capture-station"),
       refreshStationsButton: document.getElementById("assisted-refresh-stations"),
@@ -175,6 +219,256 @@
     const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
     const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
     return bTime - aTime;
+  }
+
+  function normalizeStoneTypeLabel(value) {
+    const text = asTrimmedString(value).replace(/\s+/g, " ");
+    if (!text) return "";
+    const known = ASSISTED_STONE_TYPE_MATCHERS.find(([label]) => label.toLowerCase() === text.toLowerCase());
+    if (known) return known[0];
+    return text
+      .split(" ")
+      .map((part) => {
+        if (!part) return "";
+        const normalizedPart = part.replace(/[.,;:]+$/g, "");
+        const upper = normalizedPart.toUpperCase();
+        if (ASSISTED_UPPERCASE_TOKENS.has(upper)) return upper;
+        return `${normalizedPart.charAt(0).toUpperCase()}${normalizedPart.slice(1).toLowerCase()}`;
+      })
+      .join(" ");
+  }
+
+  function getStoredStoneTypeHistory() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(ASSISTED_STONE_TYPE_HISTORY_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.map(normalizeStoneTypeLabel).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveStoneTypePreference(value) {
+    const normalized = normalizeStoneTypeLabel(value);
+    if (!normalized) return;
+
+    try {
+      window.localStorage?.setItem(ASSISTED_LAST_STONE_TYPE_KEY, normalized);
+      const history = [normalized, ...getStoredStoneTypeHistory().filter((entry) => entry.toLowerCase() !== normalized.toLowerCase())]
+        .slice(0, 40);
+      window.localStorage?.setItem(ASSISTED_STONE_TYPE_HISTORY_KEY, JSON.stringify(history));
+    } catch (error) {
+      console.warn("Could not store assisted stone type preference:", error);
+    }
+  }
+
+  function getLastStoneTypePreference() {
+    try {
+      return normalizeStoneTypeLabel(window.localStorage?.getItem(ASSISTED_LAST_STONE_TYPE_KEY) || "");
+    } catch {
+      return "";
+    }
+  }
+
+  function getStoredLengthHistory() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(ASSISTED_LENGTH_HISTORY_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.map(normalizeLengthLabel).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLengthPreference(value) {
+    const normalized = normalizeLengthLabel(value);
+    if (!normalized) return;
+
+    try {
+      window.localStorage?.setItem(ASSISTED_LAST_LENGTH_KEY, normalized);
+      const history = [normalized, ...getStoredLengthHistory().filter((entry) => entry.toLowerCase() !== normalized.toLowerCase())]
+        .slice(0, 40);
+      window.localStorage?.setItem(ASSISTED_LENGTH_HISTORY_KEY, JSON.stringify(history));
+    } catch (error) {
+      console.warn("Could not store assisted length preference:", error);
+    }
+  }
+
+  function getLastLengthPreference() {
+    try {
+      return normalizeLengthLabel(window.localStorage?.getItem(ASSISTED_LAST_LENGTH_KEY) || "");
+    } catch {
+      return "";
+    }
+  }
+
+  function extractStoneTypesFromText(value) {
+    const rawText = asTrimmedString(value);
+    const text = rawText.toLowerCase();
+    if (!text) return [];
+
+    const explicitStoneLines = rawText
+      .split(/\r?\n/)
+      .map((line) => line.match(/^\s*(?:stone|stones|gemstone|gemstones)\s*:\s*(.+)$/i)?.[1] || "")
+      .map((line) => line.replace(/\s*\([^)]*\)\s*/g, " ").replace(/[.;]+$/g, "").trim())
+      .filter(Boolean);
+
+    const knownMatches = ASSISTED_STONE_TYPE_MATCHERS
+      .filter(([, terms]) => terms.some((term) => {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text);
+      }))
+      .map(([label]) => label);
+
+    return [...explicitStoneLines, ...knownMatches];
+  }
+
+  function normalizeLengthLabel(value) {
+    const text = asTrimmedString(value).replace(/\s+/g, " ");
+    if (!text) return "";
+
+    return text
+      .replace(/\binches\b/gi, "inch")
+      .replace(/\bin\.\b/gi, "in")
+      .replace(/\b(\d+(?:\.\d+)?)\s*"\b/g, "$1 inch")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function extractLengthsFromText(value) {
+    const text = asTrimmedString(value);
+    if (!text) return [];
+
+    const options = [];
+    const add = (valueToAdd) => {
+      const normalized = normalizeLengthLabel(valueToAdd);
+      if (normalized) options.push(normalized);
+    };
+
+    text.split(/\r?\n/).forEach((line) => {
+      const explicit = line.match(/^\s*(?:length|chain length|necklace length|bracelet length)\s*:\s*(.+)$/i)?.[1];
+      if (explicit) add(explicit.replace(/[.;]+$/g, ""));
+    });
+
+    const lengthRegex = /\b\d+(?:\.\d+)?\s*(?:inch|inches|in\.|in|cm|mm|")\b/gi;
+    for (const match of text.matchAll(lengthRegex)) {
+      add(match[0]);
+    }
+
+    return options;
+  }
+
+  function buildStoneTypeOptionsFromRows(rows = []) {
+    const options = new Map();
+    const addOption = (value) => {
+      const normalized = normalizeStoneTypeLabel(value);
+      if (normalized) options.set(normalized.toLowerCase(), normalized);
+    };
+
+    getStoredStoneTypeHistory().forEach(addOption);
+
+    (Array.isArray(rows) ? rows : []).forEach((item) => {
+      extractStoneTypesFromText(item?.title).forEach(addOption);
+      extractStoneTypesFromText(item?.description).forEach(addOption);
+      (Array.isArray(item?.categories) ? item.categories : []).forEach((category) => {
+        extractStoneTypesFromText(category).forEach(addOption);
+      });
+    });
+
+    return [...options.values()].sort((a, b) => a.localeCompare(b));
+  }
+
+  function buildLengthOptionsFromRows(rows = []) {
+    const options = new Map();
+    const addOption = (value) => {
+      const normalized = normalizeLengthLabel(value);
+      if (normalized) options.set(normalized.toLowerCase(), normalized);
+    };
+
+    getStoredLengthHistory().forEach(addOption);
+
+    (Array.isArray(rows) ? rows : []).forEach((item) => {
+      extractLengthsFromText(item?.title).forEach(addOption);
+      extractLengthsFromText(item?.description).forEach(addOption);
+      (Array.isArray(item?.categories) ? item.categories : []).forEach((category) => {
+        extractLengthsFromText(category).forEach(addOption);
+      });
+    });
+
+    return [...options.values()].sort((a, b) => {
+      const aNumber = Number(String(a).match(/\d+(?:\.\d+)?/)?.[0] || 0);
+      const bNumber = Number(String(b).match(/\d+(?:\.\d+)?/)?.[0] || 0);
+      return aNumber - bNumber || a.localeCompare(b);
+    });
+  }
+
+  async function loadStoneTypeOptions(elements) {
+    if (!elements.stoneTypeDatalist && !elements.lengthDatalist) return;
+
+    let rows = [];
+    try {
+      const { data, error } = await window.supabase
+        .from("item_types")
+        .select("title, description, categories")
+        .limit(1000);
+
+      if (error) throw error;
+      rows = data || [];
+    } catch (error) {
+      console.warn("Could not load existing stone types from inventory:", error);
+    }
+
+    const options = buildStoneTypeOptionsFromRows(rows);
+    if (elements.stoneTypeDatalist) {
+      elements.stoneTypeDatalist.innerHTML = options
+        .map((option) => `<option value="${escapeHtml(option)}"></option>`)
+        .join("");
+    }
+
+    const lengthOptions = buildLengthOptionsFromRows(rows);
+    if (elements.lengthDatalist) {
+      elements.lengthDatalist.innerHTML = lengthOptions
+        .map((option) => `<option value="${escapeHtml(option)}"></option>`)
+        .join("");
+    }
+  }
+
+  function addStoneTypeOption(elements, value) {
+    const normalized = normalizeStoneTypeLabel(value);
+    if (!normalized || !elements.stoneTypeDatalist) return;
+
+    const exists = Array.from(elements.stoneTypeDatalist.options || [])
+      .some((option) => option.value.toLowerCase() === normalized.toLowerCase());
+    if (exists) return;
+
+    const option = document.createElement("option");
+    option.value = normalized;
+    elements.stoneTypeDatalist.appendChild(option);
+  }
+
+  function applyLastStoneTypePreference(elements) {
+    const lastStoneType = getLastStoneTypePreference();
+    if (elements.stoneTypeInput) {
+      elements.stoneTypeInput.value = lastStoneType;
+    }
+  }
+
+  function addLengthOption(elements, value) {
+    const normalized = normalizeLengthLabel(value);
+    if (!normalized || !elements.lengthDatalist) return;
+
+    const exists = Array.from(elements.lengthDatalist.options || [])
+      .some((option) => option.value.toLowerCase() === normalized.toLowerCase());
+    if (exists) return;
+
+    const option = document.createElement("option");
+    option.value = normalized;
+    elements.lengthDatalist.appendChild(option);
+  }
+
+  function applyLastLengthPreference(elements) {
+    const lastLength = getLastLengthPreference();
+    if (elements.lengthInput) {
+      elements.lengthInput.value = lastLength;
+    }
   }
 
   function normalizeImageRow(image, fallbackIndex) {
@@ -1076,6 +1370,7 @@
       purity: asTrimmedString(elements.puritySelect?.value),
       weight: resolveCurrentWeight(elements),
       stoneType: asTrimmedString(elements.stoneTypeInput?.value),
+      length: asTrimmedString(elements.lengthInput?.value),
       notes: asTrimmedString(elements.notesInput?.value),
       category: getCurrentCategory(elements),
       qrType: asTrimmedString(elements.qrTypeSelect?.value),
@@ -2140,6 +2435,14 @@
     if (state.isGeneratingCopy) return;
 
     const payload = collectAssistedWorkflowGenerationInputs(elements);
+    if (payload.stoneType) {
+      saveStoneTypePreference(payload.stoneType);
+      addStoneTypeOption(elements, payload.stoneType);
+    }
+    if (payload.length) {
+      saveLengthPreference(payload.length);
+      addLengthOption(elements, payload.length);
+    }
 
     if (!payload.imagePath) {
       setInlineStatus(elements.generateStatus, "Select an AI image before generating copy.", "is-error");
@@ -2248,7 +2551,8 @@
     state.saveSelectedUploadedImagePaths = [];
 
     applyDefaultSilver925Selection(elements);
-    if (elements.stoneTypeInput) elements.stoneTypeInput.value = "";
+    applyLastStoneTypePreference(elements);
+    applyLastLengthPreference(elements);
     if (elements.notesInput) elements.notesInput.value = "";
     if (elements.generatedTitleInput) elements.generatedTitleInput.value = "";
     if (elements.generatedDescriptionInput) elements.generatedDescriptionInput.value = "";
@@ -2345,12 +2649,37 @@
       );
     });
 
+    const persistCurrentStoneType = () => {
+      const stoneType = asTrimmedString(elements.stoneTypeInput?.value);
+      if (!stoneType) return;
+      saveStoneTypePreference(stoneType);
+      addStoneTypeOption(elements, stoneType);
+    };
+
     elements.stoneTypeInput?.addEventListener("input", () => {
       markGeneratedCopyNeedsRefresh(
         elements,
         "Stone type changed. Generate again to refresh the AI copy."
       );
     });
+    elements.stoneTypeInput?.addEventListener("change", persistCurrentStoneType);
+    elements.stoneTypeInput?.addEventListener("blur", persistCurrentStoneType);
+
+    const persistCurrentLength = () => {
+      const length = asTrimmedString(elements.lengthInput?.value);
+      if (!length) return;
+      saveLengthPreference(length);
+      addLengthOption(elements, length);
+    };
+
+    elements.lengthInput?.addEventListener("input", () => {
+      markGeneratedCopyNeedsRefresh(
+        elements,
+        "Length changed. Generate again to refresh the AI copy."
+      );
+    });
+    elements.lengthInput?.addEventListener("change", persistCurrentLength);
+    elements.lengthInput?.addEventListener("blur", persistCurrentLength);
 
     elements.notesInput?.addEventListener("input", () => {
       markGeneratedCopyNeedsRefresh(
@@ -2409,6 +2738,9 @@
     state.initialized = true;
     populateMaterialOptions(elements);
     applyDefaultSilver925Selection(elements);
+    await loadStoneTypeOptions(elements);
+    applyLastStoneTypePreference(elements);
+    applyLastLengthPreference(elements);
     updateSelectedImagePreview(elements);
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);

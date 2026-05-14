@@ -449,6 +449,16 @@
   accent-color: var(--gold);
 }
 
+.location-limit-toggle {
+  align-self: end;
+  min-height: 46px;
+}
+
+.location-edit-input:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
 .location-edit-actions {
   display: flex;
   justify-content: flex-end;

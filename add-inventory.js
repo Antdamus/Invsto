@@ -764,6 +764,8 @@ async function bumpInventoryVersion(changedIds = null) {
     const modal = document.getElementById("modal-add-location");
     const nameInput = document.getElementById("location-name");
     const storeSelect = document.getElementById("location-store");
+    const capacityInput = document.getElementById("location-capacity");
+    const capacityNoLimitInput = document.getElementById("location-capacity-no-limit");
   
     if (show) {
       const effectivePreset = (preset && (preset.locationName || preset.storeId))
@@ -773,6 +775,12 @@ async function bumpInventoryVersion(changedIds = null) {
       modal.classList.remove("hidden");
       updateBarcodeInputStateBasedOnModals();
       await populateLocationStoreSelect();
+      if (capacityNoLimitInput) capacityNoLimitInput.checked = true;
+      if (capacityInput) {
+        capacityInput.value = "";
+        capacityInput.disabled = true;
+        capacityInput.placeholder = "No limit";
+      }
       nameInput.value = effectivePreset.locationName || nameInput.value || "";
       if (storeSelect) {
         storeSelect.value = effectivePreset.storeId || storeSelect.value || "";
@@ -1043,6 +1051,7 @@ async function bumpInventoryVersion(changedIds = null) {
       const nameInput = document.getElementById("location-name");
       const barcodeInput = document.getElementById("location-barcode");
       const capacityInput = document.getElementById("location-capacity");
+      const capacityNoLimitInput = document.getElementById("location-capacity-no-limit");
       const photoInput = document.getElementById("location-photo");
       const previewWrapper = document.getElementById("photo-preview-wrapper");
       const previewImage = document.getElementById("photo-preview-image");
@@ -1065,6 +1074,14 @@ async function bumpInventoryVersion(changedIds = null) {
 
       const notesInput = document.getElementById("location-notes");
       const generateBtn = document.getElementById("btn-generate-location-barcode");
+
+      function syncLocationCapacityLimit() {
+        if (!capacityInput || !capacityNoLimitInput) return;
+        const unlimited = Boolean(capacityNoLimitInput.checked);
+        capacityInput.disabled = unlimited;
+        capacityInput.placeholder = unlimited ? "No limit" : "";
+        if (unlimited) capacityInput.value = "";
+      }
     
       // 🔁 Shared barcode generator
       function generateAndRenderLocationBarcode() {
@@ -1263,6 +1280,8 @@ async function bumpInventoryVersion(changedIds = null) {
         nameInput.value = "";
         barcodeInput.value = "";
         capacityInput.value = "";
+        if (capacityNoLimitInput) capacityNoLimitInput.checked = true;
+        syncLocationCapacityLimit();
         notesInput.value = "";
         photoInput.value = "";
         const storeSelect = document.getElementById("location-store");
@@ -1279,10 +1298,13 @@ async function bumpInventoryVersion(changedIds = null) {
         typeMenu.innerHTML = ""; // fully reset menu
 
       }
+      window.clearForm = clearForm;
     
       // 🧲 Generate on button click
       populateLocationStoreSelect();
+      syncLocationCapacityLimit();
       generateBtn.addEventListener("click", generateAndRenderLocationBarcode);
+      capacityNoLimitInput?.addEventListener("change", syncLocationCapacityLimit);
     
       cancelBtn.addEventListener("click", async () => {
         pendingAssignLocationDraft = null;
@@ -1295,6 +1317,7 @@ async function bumpInventoryVersion(changedIds = null) {
         const location_name = nameInput.value.trim();
         const location_code = barcodeInput.value.trim();
         const max_capacity = capacityInput.value.trim();
+        const capacityHasNoLimit = Boolean(capacityNoLimitInput?.checked);
         const notes = notesInput.value.trim();
         const photoFile = photoInput.files?.[0] || null;
         const store_id = document.getElementById("location-store")?.value?.trim() || null;
@@ -1353,7 +1376,7 @@ async function bumpInventoryVersion(changedIds = null) {
         const { error: insertError } = await supabase.from("locations").insert({
           location_name,
           location_code,
-          max_capacity: max_capacity ? parseInt(max_capacity) : null,
+          max_capacity: capacityHasNoLimit || !max_capacity ? null : parseInt(max_capacity, 10),
           notes,
           active: true,
           photo_url,

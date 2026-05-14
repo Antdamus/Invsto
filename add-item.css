@@ -441,6 +441,29 @@ input[type="file"].add-input::file-selector-button {
   cursor: pointer;
 }
 
+.add-limit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 10px 12px;
+  border: 1px solid rgba(244, 224, 190, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.add-limit-toggle input {
+  accent-color: var(--gold);
+}
+
+.add-input:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
 .auto-cost-toggle {
   display: flex;
   align-items: center;

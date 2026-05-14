@@ -140,8 +140,22 @@
                   type="text"
                   id="assisted-stone-type"
                   class="assisted-input"
+                  list="assisted-stone-type-options"
                   placeholder="Diamond, ruby, no stone, or leave blank"
                 />
+                <datalist id="assisted-stone-type-options"></datalist>
+              </label>
+
+              <label class="assisted-field" for="assisted-length">
+                <span class="assisted-label">Length (optional)</span>
+                <input
+                  type="text"
+                  id="assisted-length"
+                  class="assisted-input"
+                  list="assisted-length-options"
+                  placeholder="16 inch, 18 in, 7.5 inch, or leave blank"
+                />
+                <datalist id="assisted-length-options"></datalist>
               </label>
 
               <label class="assisted-field assisted-field-wide" for="assisted-notes">
@@ -613,6 +627,10 @@
 
           <label for="location-capacity">Max Capacity</label>
           <input type="number" id="location-capacity" name="max_capacity" min="0" class="add-input" />
+          <label class="add-limit-toggle">
+            <input type="checkbox" id="location-capacity-no-limit" checked />
+            <span>No capacity limit</span>
+          </label>
 
           <label for="location-photo">Photo</label>
           <input type="file" id="location-photo" name="photo" accept="image/*" class="add-input" />
