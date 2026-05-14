@@ -83,6 +83,30 @@
   background:rgba(214,178,94,.10);
 }
 
+.activity-type.deleted{
+  color:rgba(255,155,130,.96);
+  border-color:rgba(255,122,92,.34);
+  background:rgba(255,122,92,.12);
+}
+
+.activity-row-voided{
+  opacity:.78;
+}
+
+.activity-row-voided .activity-item strong{
+  text-decoration:line-through;
+  text-decoration-thickness:1px;
+  text-decoration-color:rgba(255,155,130,.72);
+}
+
+.activity-void-value{
+  display:inline-flex;
+  align-items:center;
+  white-space:nowrap;
+  color:rgba(255,188,166,.95);
+  font-weight:800;
+}
+
 .activity-item{
   display:flex;
   flex-direction:column;

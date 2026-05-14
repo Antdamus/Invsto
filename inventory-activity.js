@@ -83,6 +83,20 @@ function formatDateTime(iso) {
   });
 }
 
+function isSameLocalDate(value, reference) {
+  if (!value || !reference) return false;
+  const date = new Date(value);
+  const refDate = new Date(reference);
+  if (Number.isNaN(date.getTime()) || Number.isNaN(refDate.getTime())) return false;
+  return date.getFullYear() === refDate.getFullYear()
+    && date.getMonth() === refDate.getMonth()
+    && date.getDate() === refDate.getDate();
+}
+
+function isVoidedSameDayAdd(item, eventTime) {
+  return Boolean(item?.deleted_at && isSameLocalDate(item.deleted_at, eventTime));
+}
+
 function setError(message) {
   const el = document.getElementById("activity-error");
   if (!el) return;
@@ -157,28 +171,40 @@ function setupNavigation() {
 async function loadNewItems(startIso, endIso) {
   const { data, error } = await supabase
     .from("item_types")
-    .select("id, title, barcode, created_at, cost, sale_price, weight, categories, added_by, added_by_email")
+    .select("id, title, barcode, created_at, cost, sale_price, weight, categories, added_by, added_by_email, deleted_at, deleted_by_email, deletion_reason, deletion_status")
     .gte("created_at", startIso)
     .lt("created_at", endIso)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
 
-  return (data || []).map((item) => ({
-    id: `item-${item.id}`,
-    kind: "new",
-    kindLabel: "New Item",
-    time: item.created_at,
-    itemId: item.id,
-    title: item.title || "Untitled item",
-    barcode: item.barcode || "",
-    quantity: null,
-    location: "",
-    worker: item.added_by_email || item.added_by || "Unknown",
-    cost: Number(item.cost || 0),
-    value: Number(item.sale_price || 0),
-    notes: Array.isArray(item.categories) ? item.categories.join(", ") : "",
-  }));
+  return (data || []).map((item) => {
+    const deletedSameDay = isVoidedSameDayAdd(item, item.created_at);
+    const categoryNotes = Array.isArray(item.categories) ? item.categories.join(", ") : "";
+    return {
+      id: `item-${item.id}`,
+      kind: deletedSameDay ? "deleted" : "new",
+      kindLabel: deletedSameDay ? "Deleted Same Day" : "New Item",
+      time: item.created_at,
+      itemId: item.id,
+      title: item.title || "Untitled item",
+      barcode: item.barcode || "",
+      quantity: null,
+      location: "",
+      worker: item.added_by_email || item.added_by || "Unknown",
+      cost: Number(item.cost || 0),
+      value: Number(item.sale_price || 0),
+      metricCost: deletedSameDay ? 0 : Number(item.cost || 0),
+      metricValue: deletedSameDay ? 0 : Number(item.sale_price || 0),
+      metricQuantity: 0,
+      isVoided: deletedSameDay,
+      deletedAt: item.deleted_at || "",
+      deletedBy: item.deleted_by_email || "",
+      notes: deletedSameDay
+        ? `Deleted ${formatDateTime(item.deleted_at)}${item.deleted_by_email ? ` by ${item.deleted_by_email}` : ""}${item.deletion_reason ? ` - ${item.deletion_reason}` : ""}`
+        : categoryNotes,
+    };
+  });
 }
 
 async function loadStockAdds(startIso, endIso) {
@@ -196,7 +222,7 @@ async function loadStockAdds(startIso, endIso) {
       email,
       method,
       notes,
-      item_types(id, title, barcode, cost, sale_price),
+      item_types(id, title, barcode, cost, sale_price, deleted_at, deleted_by_email, deletion_reason, deletion_status),
       locations(id, location_name, location_code)
     `)
     .eq("action_type", "checkin")
@@ -213,11 +239,12 @@ async function loadStockAdds(startIso, endIso) {
     const qty = Number(tx.quantity || 0);
     const unitCost = Number(item.cost || 0);
     const unitValue = Number(item.sale_price || 0);
+    const deletedSameDay = isVoidedSameDayAdd(item, tx.confirmed_at || tx.timestamp);
 
     return {
       id: `stock-${tx.id}`,
-      kind: "stock",
-      kindLabel: "Inventory Added",
+      kind: deletedSameDay ? "deleted" : "stock",
+      kindLabel: deletedSameDay ? "Deleted Same Day" : "Inventory Added",
       time: tx.confirmed_at || tx.timestamp,
       itemId: tx.item_id,
       title: item.title || "Unknown item",
@@ -227,7 +254,15 @@ async function loadStockAdds(startIso, endIso) {
       worker: tx.email || tx.user_id || "Unknown",
       cost: unitCost * qty,
       value: unitValue * qty,
-      notes: tx.notes || tx.method || "",
+      metricCost: deletedSameDay ? 0 : unitCost * qty,
+      metricValue: deletedSameDay ? 0 : unitValue * qty,
+      metricQuantity: deletedSameDay ? 0 : qty,
+      isVoided: deletedSameDay,
+      deletedAt: item.deleted_at || "",
+      deletedBy: item.deleted_by_email || "",
+      notes: deletedSameDay
+        ? `Voided from totals. Deleted ${formatDateTime(item.deleted_at)}${item.deleted_by_email ? ` by ${item.deleted_by_email}` : ""}${item.deletion_reason ? ` - ${item.deletion_reason}` : ""}`
+        : tx.notes || tx.method || "",
     };
   });
 }
@@ -236,10 +271,12 @@ function renderMetrics(rows) {
   const container = document.getElementById("activity-metrics");
   if (!container) return;
 
-  const newItems = rows.filter((row) => row.kind === "new").length;
-  const stockEvents = rows.filter((row) => row.kind === "stock").length;
-  const quantityAdded = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-  const addedValue = rows.reduce((sum, row) => sum + Number(row.value || 0), 0);
+  const activeRows = rows.filter((row) => !row.isVoided);
+  const voidedRows = rows.filter((row) => row.isVoided);
+  const newItems = activeRows.filter((row) => row.kind === "new").length;
+  const stockEvents = activeRows.filter((row) => row.kind === "stock").length;
+  const quantityAdded = rows.reduce((sum, row) => sum + Number(row.metricQuantity || 0), 0);
+  const addedValue = rows.reduce((sum, row) => sum + Number(row.metricValue || 0), 0);
 
   container.innerHTML = `
     <div class="metric-card">
@@ -260,7 +297,12 @@ function renderMetrics(rows) {
     <div class="metric-card">
       <div class="metric-top"><div class="metric-label">Added Retail Value</div><div class="metric-icon">$</div></div>
       <div class="metric-value">${fmtMoney(addedValue)}</div>
-      <div class="metric-foot">Sale price times checked-in units</div>
+      <div class="metric-foot">${voidedRows.length ? `${voidedRows.length.toLocaleString()} same-day deletion${voidedRows.length === 1 ? "" : "s"} excluded` : "Sale price times checked-in units"}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-top"><div class="metric-label">Same-day Deleted</div><div class="metric-icon">VOID</div></div>
+      <div class="metric-value">${voidedRows.length.toLocaleString()}</div>
+      <div class="metric-foot">Shown below, excluded from totals</div>
     </div>
   `;
 }
@@ -275,7 +317,7 @@ function renderTable(rows) {
   }
 
   const tableRows = rows.map((row) => `
-    <tr>
+    <tr class="${row.isVoided ? "activity-row-voided" : ""}">
       <td>${escapeHtml(formatDateTime(row.time))}</td>
       <td><span class="activity-type ${row.kind}">${escapeHtml(row.kindLabel)}</span></td>
       <td>
@@ -288,7 +330,11 @@ function renderTable(rows) {
       <td>${escapeHtml(row.location || "--")}</td>
       <td>${escapeHtml(row.worker)}</td>
       <td>${fmtMoney(row.cost)}</td>
-      <td>${fmtMoney(row.value)}</td>
+      <td>
+        ${row.isVoided
+          ? `<span class="activity-void-value">${fmtMoney(row.value)} excluded</span>`
+          : fmtMoney(row.value)}
+      </td>
       <td>${escapeHtml(row.notes || "--")}</td>
     </tr>
   `).join("");
@@ -327,6 +373,7 @@ function applySearch() {
         row.location,
         row.worker,
         row.notes,
+        row.isVoided ? "deleted voided excluded" : "",
       ].join(" ").toLowerCase();
       return haystack.includes(query);
     });
