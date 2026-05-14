@@ -16,7 +16,10 @@ let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 const signedUrlCache = new Map();
 const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
 const STOCK_IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
+const STOCK_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
 const STOCK_PHOTO_BUCKET = "photos";
+const STOCK_CAPTURE_PHOTO_BUCKET = "capture-photos";
+const STOCK_INVENTORY_UPLOAD_BUCKET = "InventoryUpload";
 const STOCK_BACKGROUND_REMOVAL_MODULE_URL = "https://esm.sh/@imgly/background-removal@1.7.0?bundle";
 const STOCK_LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
 const STOCK_LOCAL_UPLOAD_MAX_SIDE = 2200;
@@ -29,6 +32,14 @@ const STOCK_CAPTURE_POLL_INTERVAL_MS = 1500;
 const STOCK_CAPTURE_POLL_TIMEOUT_MS = 120000;
 const STOCK_CAPTURE_PHOTO_SETTLE_MS = 4500;
 const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
+const STOCK_PROCESSED_BACKGROUND_PREFIX = "processed-backgrounds";
+const STOCK_DEFAULT_RECENT_PHOTO_LIMIT = 5;
+const STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM = {
+  width: 240,
+  height: 240,
+  resize: "cover",
+  quality: 55,
+};
 const stockHistoryState = {
   itemId: null,
   events: [],
@@ -3854,12 +3865,97 @@ async function uploadStockPhotoBlob(blob, fileName = "stock-photo.jpg", mimeType
   if (error) throw new Error(error.message || "Photo upload failed.");
 
   signedUrlCache.delete(uploadPath);
+  const [previewUrl, thumbnailUrl] = await Promise.all([
+    getSignedUrl(uploadPath),
+    createStockSignedImageUrl(STOCK_PHOTO_BUCKET, uploadPath, { transform: STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM }),
+  ]);
   return {
     path: uploadPath,
     name: fileName || safeName,
-    previewUrl: await getSignedUrl(uploadPath),
+    previewUrl,
+    thumbnailUrl: thumbnailUrl || previewUrl,
+    storageBucket: STOCK_PHOTO_BUCKET,
     sourceType: "uploaded",
   };
+}
+
+function getStockRecentPhotoLimit() {
+  const requestedLimit = Number(document.getElementById("stock-photo-recent-limit")?.value);
+  if (!Number.isFinite(requestedLimit)) return STOCK_DEFAULT_RECENT_PHOTO_LIMIT;
+  return Math.min(25, Math.max(1, Math.trunc(requestedLimit)));
+}
+
+async function createStockSignedImageUrl(bucket, path, options = {}) {
+  const normalizedBucket = String(bucket || STOCK_PHOTO_BUCKET).trim();
+  const normalizedPath = String(path || "").trim();
+  if (!normalizedBucket || !normalizedPath) return "";
+
+  const transform = options.transform;
+  try {
+    const storage = supabase.storage.from(normalizedBucket);
+    const { data, error } = transform
+      ? await storage.createSignedUrl(normalizedPath, 60 * 10, { transform })
+      : await storage.createSignedUrl(normalizedPath, 60 * 10);
+
+    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!transform) {
+      console.warn(`Could not sign stock image ${normalizedBucket}/${normalizedPath}:`, error);
+      return "";
+    }
+    console.warn(`Could not create stock thumbnail for ${normalizedBucket}/${normalizedPath}; falling back to full image.`, error);
+  } catch (error) {
+    if (!transform) {
+      console.warn(`Could not sign stock image ${normalizedBucket}/${normalizedPath}:`, error);
+      return "";
+    }
+    console.warn(`Could not create stock thumbnail for ${normalizedBucket}/${normalizedPath}; falling back to full image.`, error);
+  }
+
+  return createStockSignedImageUrl(normalizedBucket, normalizedPath);
+}
+
+function normalizeStockMediaImage(image, fallbackIndex = 0) {
+  const path = String(image?.path || image?.storage_path || "").trim();
+  const storageBucket = String(image?.storageBucket || image?.storage_bucket || STOCK_PHOTO_BUCKET).trim() || STOCK_PHOTO_BUCKET;
+  const previewUrl = String(image?.previewUrl || image?.fullUrl || "").trim();
+  const thumbnailUrl = String(image?.thumbnailUrl || image?.thumbUrl || "").trim() || previewUrl;
+  return {
+    path,
+    name: String(image?.name || image?.label || `Photo ${fallbackIndex + 1}`).trim(),
+    previewUrl,
+    thumbnailUrl,
+    storageBucket,
+    sourceType: String(image?.sourceType || "photo").trim(),
+    createdAt: String(image?.createdAt || image?.created_at || "").trim(),
+    updatedAt: String(image?.updatedAt || image?.createdAt || image?.created_at || "").trim(),
+    mimeType: String(image?.mimeType || image?.mime_type || "image/jpeg").trim(),
+    captureJobId: String(image?.captureJobId || image?.capture_job_id || "").trim(),
+    sortOrder: Number.isFinite(Number(image?.sortOrder ?? image?.sort_order))
+      ? Number(image?.sortOrder ?? image?.sort_order)
+      : fallbackIndex,
+  };
+}
+
+function getStockImageKey(image) {
+  return `${image?.storageBucket || STOCK_PHOTO_BUCKET}:${image?.path || ""}`;
+}
+
+function upsertStockStagedImages(images, options = {}) {
+  const incoming = (Array.isArray(images) ? images : [])
+    .map((image, index) => normalizeStockMediaImage(image, index))
+    .filter((image) => image.path && image.previewUrl);
+  if (!incoming.length) return 0;
+
+  for (const image of incoming) {
+    if (options.select) stockMediaState.selectedPaths.add(image.path);
+  }
+  stockMediaState.stagedImages = [...incoming, ...stockMediaState.stagedImages]
+    .filter((image, index, array) => {
+      const key = getStockImageKey(image);
+      return array.findIndex((entry) => getStockImageKey(entry) === key) === index;
+    });
+  renderStockPhotoManagerGrid();
+  return incoming.length;
 }
 
 async function getStockFunctionErrorDetail(error) {
@@ -3979,10 +4075,11 @@ function renderStockPhotoManagerGrid() {
 
   grid.innerHTML = stockMediaState.stagedImages.map((image, index) => {
     const isSelected = stockMediaState.selectedPaths.has(image.path);
+    const thumbnailUrl = image.thumbnailUrl || image.previewUrl || "";
     return `
       <article class="stock-photo-candidate ${isSelected ? "is-selected" : ""}" data-index="${index}">
         <button type="button" class="stock-photo-candidate-image" data-action="preview" data-index="${index}">
-          <img src="${escapeStockHtml(image.previewUrl || "")}" alt="${escapeStockHtml(image.name || "Item photo")}">
+          <img src="${escapeStockHtml(thumbnailUrl)}" alt="${escapeStockHtml(image.name || "Item photo")}" loading="lazy" decoding="async" fetchpriority="low">
         </button>
         <div class="stock-photo-candidate-body">
           <strong>${escapeStockHtml(image.name || "Item photo")}</strong>
@@ -4113,6 +4210,7 @@ async function saveStockPhotoEditorImage() {
 async function processStockStagedImage(index, background, options = {}) {
   const source = stockMediaState.stagedImages[index];
   if (!source || !source.path || !source.previewUrl) return null;
+  const sourceBucket = source.storageBucket || STOCK_PHOTO_BUCKET;
 
   stockMediaState.busy = true;
   setStockPhotoStatus(`Preparing ${background} background version...`, "waiting");
@@ -4128,7 +4226,7 @@ async function processStockStagedImage(index, background, options = {}) {
     });
     const { data, error } = await supabase.functions.invoke(STOCK_IMAGE_PROCESS_FUNCTION_NAME, {
       body: {
-        bucket: STOCK_PHOTO_BUCKET,
+        bucket: sourceBucket,
         imagePath: source.path,
         background,
         ...payload,
@@ -4140,11 +4238,19 @@ async function processStockStagedImage(index, background, options = {}) {
       throw new Error(data?.detail || data?.error || "Background processor returned no image.");
     }
 
-    signedUrlCache.delete(data.path);
+    const processedBucket = data.bucket || sourceBucket;
+    if (processedBucket === STOCK_PHOTO_BUCKET) signedUrlCache.delete(data.path);
+    const processedPreviewUrl = data.previewUrl || await createStockSignedImageUrl(processedBucket, data.path);
+    const processedThumbnailUrl = data.thumbnailUrl
+      || await createStockSignedImageUrl(processedBucket, data.path, { transform: STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM })
+      || processedPreviewUrl;
     const processed = {
       path: data.path,
       name: data.name || `${background} background`,
-      previewUrl: data.previewUrl || await getSignedUrl(data.path),
+      previewUrl: processedPreviewUrl,
+      thumbnailUrl: processedThumbnailUrl,
+      storageBucket: processedBucket,
+      mimeType: data.mimeType || "image/png",
       sourceType: `${background} background`,
     };
     stockMediaState.stagedImages.unshift(processed);
@@ -4221,16 +4327,105 @@ function closeStockPhotoManager() {
   resetStockPhotoProgress();
 }
 
+function findStockStagedImageByPath(path) {
+  return stockMediaState.stagedImages.find((image) => image.path === path) || null;
+}
+
+function sanitizeStockStorageFileName(fileName) {
+  return String(fileName || "stock-photo.jpg")
+    .replace(/[^\w.\-]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+async function copyStockStagedImageToPhotosBucket(image, index = 0) {
+  const sourceBucket = String(image?.storageBucket || STOCK_PHOTO_BUCKET).trim() || STOCK_PHOTO_BUCKET;
+  const sourcePath = String(image?.path || "").trim();
+  if (!sourcePath) throw new Error("Selected photo is missing storage metadata.");
+  if (sourceBucket === STOCK_PHOTO_BUCKET) return sourcePath;
+
+  try {
+    const { data, error } = await supabase.functions.invoke(STOCK_IMAGE_PROCESS_FUNCTION_NAME, {
+      body: {
+        bucket: sourceBucket,
+        imagePath: sourcePath,
+        background: "copy-to-photos",
+      },
+    });
+
+    if (!error && data?.ok && data?.bucket === STOCK_PHOTO_BUCKET && data?.path) {
+      return data.path;
+    }
+
+    console.warn("Server-side stock photo copy did not complete; trying browser fallback.", error || data);
+  } catch (copyError) {
+    console.warn("Server-side stock photo copy failed; trying browser fallback.", copyError);
+  }
+
+  let downloadedBlob = null;
+  const { data: storageBlob, error: downloadError } = await supabase
+    .storage
+    .from(sourceBucket)
+    .download(sourcePath);
+
+  if (!downloadError && storageBlob) {
+    downloadedBlob = storageBlob;
+  } else if (image?.previewUrl) {
+    const response = await fetch(image.previewUrl);
+    if (!response.ok) throw new Error(`Failed to download selected photo preview (${response.status}).`);
+    downloadedBlob = await response.blob();
+  }
+
+  if (!downloadedBlob) {
+    throw new Error(downloadError?.message || "Failed to download selected photo.");
+  }
+
+  const sourceFileName = sanitizeStockStorageFileName(
+    sourcePath.split("/").pop() || `stock_photo_${index + 1}.jpg`
+  );
+  const destinationPath = `item_photos/${stockMediaState.itemId}-${Date.now()}-${crypto.randomUUID()}-${sourceFileName}`;
+  const { error: uploadError } = await supabase
+    .storage
+    .from(STOCK_PHOTO_BUCKET)
+    .upload(destinationPath, downloadedBlob, {
+      upsert: true,
+      contentType: downloadedBlob.type || image?.mimeType || "image/jpeg",
+    });
+
+  if (uploadError) throw new Error(uploadError.message || "Failed to copy selected photo into item photos.");
+  return destinationPath;
+}
+
+async function resolveSelectedStockPhotoPathsForSave(selectedPaths) {
+  const resolvedPaths = [];
+  for (let index = 0; index < selectedPaths.length; index += 1) {
+    const selectedPath = selectedPaths[index];
+    const stagedImage = findStockStagedImageByPath(selectedPath);
+    if (!stagedImage) {
+      resolvedPaths.push(selectedPath);
+      continue;
+    }
+
+    setStockPhotoProgress(
+      15 + Math.round((index / Math.max(1, selectedPaths.length)) * 30),
+      `Preparing photo ${index + 1} of ${selectedPaths.length}...`,
+      true
+    );
+    resolvedPaths.push(await copyStockStagedImageToPhotosBucket(stagedImage, index));
+  }
+
+  return [...new Set(resolvedPaths.filter(Boolean))];
+}
+
 async function saveSelectedStockPhotos() {
   const itemId = stockMediaState.itemId;
-  const selectedPaths = [...stockMediaState.selectedPaths];
-  if (!itemId || !selectedPaths.length) {
+  const selectedSourcePaths = [...stockMediaState.selectedPaths];
+  if (!itemId || !selectedSourcePaths.length) {
     setStockPhotoStatus("Select at least one photo before saving.", "error");
     return;
   }
 
   const confirmed = window.confirm(
-    `Are you sure you want to add ${selectedPaths.length} selected photo${selectedPaths.length === 1 ? "" : "s"} to this item?`
+    `Are you sure you want to add ${selectedSourcePaths.length} selected photo${selectedSourcePaths.length === 1 ? "" : "s"} to this item?`
   );
   if (!confirmed) {
     setStockPhotoStatus("Photo save cancelled. Your selections are still here.", "waiting");
@@ -4238,6 +4433,18 @@ async function saveSelectedStockPhotos() {
   }
 
   setStockPhotoStatus("Saving selected photos to the item...", "waiting");
+  setStockPhotoProgress(10, "Preparing selected photos...", true);
+  let selectedPaths;
+  try {
+    selectedPaths = await resolveSelectedStockPhotoPathsForSave(selectedSourcePaths);
+  } catch (error) {
+    console.error("Stock photo copy before save failed:", error);
+    setStockPhotoStatus(error?.message || "Could not prepare selected photos for saving.", "error");
+    setStockPhotoProgress(100, "Photo preparation failed.", true);
+    return;
+  }
+  setStockPhotoProgress(52, "Attaching photos to item...", true);
+
   let saveResult;
   if (canViewSensitiveStockData()) {
     const { data: items, error: fetchError } = await supabase
@@ -4267,14 +4474,17 @@ async function saveSelectedStockPhotos() {
 
   if (error) {
     setStockPhotoStatus(error.message || "Could not save photos.", "error");
+    setStockPhotoProgress(100, "Photo save failed.", true);
     return;
   }
 
+  setStockPhotoProgress(82, "Refreshing item...", true);
   await bumpInventoryVersion([itemId]);
   await refreshItemById(itemId);
   window.dispatchEvent(new CustomEvent("stock:photos-added", {
     detail: { itemId, photoPaths: selectedPaths },
   }));
+  setStockPhotoProgress(100, "Photos saved.", true);
   showToast("Photos added to item.");
   closeStockPhotoManager();
 }
@@ -4517,18 +4727,183 @@ async function loadStockCaptureJobPhotos(jobId) {
   return Array.isArray(data) ? data : [];
 }
 
-async function importCapturedPhotoToStock(photo, index = 0) {
-  const bucket = String(photo?.storage_bucket || "").trim();
-  const path = String(photo?.storage_path || "").trim();
-  if (!bucket || !path) throw new Error("Captured photo is missing storage metadata.");
+async function stockCapturePhotoRowsToImages(rows, sourceType = "recent station capture") {
+  const images = [];
+  for (let index = 0; index < (rows || []).length; index += 1) {
+    const photo = rows[index];
+    const bucket = String(photo?.storage_bucket || "").trim();
+    const path = String(photo?.storage_path || "").trim();
+    if (!bucket || !path) continue;
 
-  const { data, error } = await supabase.storage.from(bucket).download(path);
-  if (error || !data) throw new Error(error?.message || "Could not download captured photo.");
+    const [previewUrl, thumbnailUrl] = await Promise.all([
+      createStockSignedImageUrl(bucket, path),
+      createStockSignedImageUrl(bucket, path, { transform: STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM }),
+    ]);
+    if (!previewUrl) continue;
 
-  const name = String(photo?.label || `camera-capture-${index + 1}.jpg`).trim();
-  const uploaded = await uploadStockPhotoBlob(data, name, photo?.mime_type || data.type || "image/jpeg");
-  uploaded.sourceType = "camera capture";
-  return uploaded;
+    images.push(normalizeStockMediaImage({
+      path,
+      name: String(photo?.label || `Camera photo ${index + 1}`).trim(),
+      previewUrl,
+      thumbnailUrl,
+      storageBucket: bucket,
+      sourceType,
+      createdAt: photo?.created_at,
+      updatedAt: photo?.created_at,
+      mimeType: photo?.mime_type || "image/jpeg",
+      captureJobId: photo?.capture_job_id,
+      sortOrder: photo?.sort_order,
+    }, index));
+  }
+  return images;
+}
+
+async function loadRecentStockStationCaptureImages(limit = STOCK_DEFAULT_RECENT_PHOTO_LIMIT) {
+  const station = getSelectedStockCaptureStation();
+  if (!station?.id) return [];
+
+  const { data, error } = await supabase
+    .from(STOCK_CAPTURE_PHOTO_TABLE)
+    .select(`
+      id,
+      capture_job_id,
+      sort_order,
+      is_primary,
+      storage_bucket,
+      storage_path,
+      mime_type,
+      label,
+      created_at,
+      capture_jobs!inner(id, station_id, requested_at, status)
+    `)
+    .eq("capture_jobs.station_id", station.id)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(error.message || "Failed to load recent station photos.");
+  return stockCapturePhotoRowsToImages(Array.isArray(data) ? data : [], "recent station capture");
+}
+
+function stockImageBasename(path) {
+  return String(path || "").trim().split("/").pop() || "";
+}
+
+function stripStockImageExtension(value) {
+  return String(value || "").trim().replace(/\.(png|jpe?g|webp|gif|heic|heif)$/i, "");
+}
+
+function safeStockProcessedToken(value) {
+  return stripStockImageExtension(value)
+    .replace(/[^\w.\-]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80)
+    .toLowerCase();
+}
+
+function getStockProcessedSourceTokens(images) {
+  const tokens = new Set();
+  for (const image of images || []) {
+    const basename = stockImageBasename(image?.path);
+    if (!basename) continue;
+    tokens.add(basename.toLowerCase());
+    tokens.add(stripStockImageExtension(basename).toLowerCase());
+    tokens.add(safeStockProcessedToken(basename));
+  }
+  return new Set([...tokens].filter((token) => token && token.length >= 8));
+}
+
+function stockImageLooksAssociatedWithSource(image, sourceTokens) {
+  const haystack = `${image?.path || ""} ${image?.name || ""}`.toLowerCase();
+  for (const token of sourceTokens || []) {
+    if (token && haystack.includes(token)) return true;
+  }
+  return false;
+}
+
+async function loadAssociatedStockProcessedImages(sourceImages, limit = STOCK_DEFAULT_RECENT_PHOTO_LIMIT) {
+  const sourceTokens = getStockProcessedSourceTokens(sourceImages);
+  if (!sourceTokens.size) return [];
+
+  const allowedProcessedBuckets = new Set([STOCK_CAPTURE_PHOTO_BUCKET, STOCK_INVENTORY_UPLOAD_BUCKET]);
+  const buckets = [
+    ...new Set(
+      sourceImages
+        .map((image) => image.storageBucket || STOCK_PHOTO_BUCKET)
+        .concat([STOCK_CAPTURE_PHOTO_BUCKET, STOCK_INVENTORY_UPLOAD_BUCKET])
+        .filter((bucket) => allowedProcessedBuckets.has(bucket))
+    ),
+  ];
+  const processedImages = [];
+
+  for (const bucketName of buckets) {
+    const { data, error } = await supabase.functions.invoke(STOCK_UPLOAD_LIST_FUNCTION_NAME, {
+      body: {
+        bucket: bucketName,
+        prefix: STOCK_PROCESSED_BACKGROUND_PREFIX,
+        limit: Math.min(80, Math.max(20, limit * 6)),
+      },
+    });
+
+    if (error) {
+      console.warn(`Could not load processed stock images from ${bucketName}:`, error);
+      continue;
+    }
+
+    const bucket = data?.bucket || bucketName;
+    const rows = Array.isArray(data?.images) ? data.images : [];
+    rows.forEach((row, index) => {
+      const image = normalizeStockMediaImage({
+        ...row,
+        storageBucket: bucket,
+        sourceType: String(row?.name || "").toLowerCase().includes("white")
+          ? "reloaded white background"
+          : "reloaded black background",
+      }, processedImages.length + index);
+      if (image.path && image.previewUrl && stockImageLooksAssociatedWithSource(image, sourceTokens)) {
+        processedImages.push(image);
+      }
+    });
+  }
+
+  return processedImages;
+}
+
+async function reloadRecentStockStationPhotos() {
+  if (stockMediaState.busy) return;
+  if (!stockMediaState.itemId) return;
+
+  const station = getSelectedStockCaptureStation();
+  if (!station) {
+    setStockPhotoStatus("Choose a camera station before reloading recent photos.", "error");
+    document.getElementById("stock-photo-camera-station")?.focus();
+    return;
+  }
+
+  stockMediaState.busy = true;
+  const limit = getStockRecentPhotoLimit();
+  setStockPhotoStatus(`Loading the last ${limit} photos from ${station.name || "this station"}...`, "waiting");
+  setStockPhotoProgress(15, "Loading recent station photos...", true);
+
+  try {
+    const recentImages = await loadRecentStockStationCaptureImages(limit);
+    setStockPhotoProgress(58, "Looking for processed versions...", true);
+    const processedImages = await loadAssociatedStockProcessedImages(recentImages, limit);
+    const addedCount = upsertStockStagedImages([...recentImages, ...processedImages], { select: false });
+    setStockPhotoStatus(
+      addedCount
+        ? `Loaded ${addedCount} reusable photo${addedCount === 1 ? "" : "s"} from ${station.name || "this station"}. Older photos were not auto-processed.`
+        : `No recent photos were found for ${station.name || "this station"}.`,
+      addedCount ? "success" : "waiting"
+    );
+    setStockPhotoProgress(100, "Recent photos loaded.", true);
+    setTimeout(resetStockPhotoProgress, 900);
+  } catch (error) {
+    console.error("Recent stock station photo reload failed:", error);
+    setStockPhotoStatus(error?.message || "Could not reload recent station photos.", "error");
+    setStockPhotoProgress(100, "Recent reload failed.", true);
+  } finally {
+    stockMediaState.busy = false;
+  }
 }
 
 async function requestStockCameraCapture() {
@@ -4580,15 +4955,18 @@ async function requestStockCameraCapture() {
     }
     if (!capturePhotos.length) throw new Error("Camera completed, but no uploaded photos were returned.");
 
-    for (let index = 0; index < capturePhotos.length; index += 1) {
-      const uploaded = await importCapturedPhotoToStock(capturePhotos[index], index);
-      stockMediaState.stagedImages.unshift(uploaded);
-      stockMediaState.selectedPaths.add(uploaded.path);
+    const capturedImages = await stockCapturePhotoRowsToImages(capturePhotos, "camera capture");
+    if (!capturedImages.length) throw new Error("Camera completed, but the uploaded photos could not be prepared.");
+
+    for (let index = 0; index < capturedImages.length; index += 1) {
+      const capturedImage = capturedImages[index];
+      stockMediaState.stagedImages.unshift(capturedImage);
+      stockMediaState.selectedPaths.add(capturedImage.path);
       renderStockPhotoManagerGrid();
       await processStockStagedImage(0, "black", { autoSelect: true, replaceSourceSelection: true });
     }
 
-    setStockPhotoStatus(`Loaded ${capturePhotos.length} camera photo${capturePhotos.length === 1 ? "" : "s"}.`, "success");
+    setStockPhotoStatus(`Loaded ${capturedImages.length} camera photo${capturedImages.length === 1 ? "" : "s"}.`, "success");
     setStockPhotoProgress(100, "Camera photos loaded.", true);
     setTimeout(resetStockPhotoProgress, 900);
   } catch (error) {
@@ -4674,6 +5052,12 @@ function setupStockMediaListeners() {
     setStockPhotoStatus(station
       ? `Camera requests will route to ${station.name || station.id}.`
       : "Choose which camera station should take this photo.", station ? "success" : "waiting");
+    if (station) {
+      reloadRecentStockStationPhotos().catch((error) => {
+        console.error("Failed to reload recent station photos after station change:", error);
+        setStockPhotoStatus(error?.message || "Could not reload recent station photos.", "error");
+      });
+    }
   });
   document.getElementById("stock-photo-camera-refresh")?.addEventListener("click", async () => {
     if (stockMediaState.busy) return;
@@ -4684,6 +5068,10 @@ function setupStockMediaListeners() {
       console.error("Failed to refresh stock capture stations:", error);
       setStockPhotoStatus(error?.message || "Could not refresh camera stations.", "error");
     }
+  });
+  document.getElementById("stock-photo-recent-reload")?.addEventListener("click", reloadRecentStockStationPhotos);
+  document.getElementById("stock-photo-recent-limit")?.addEventListener("change", () => {
+    if (getSelectedStockCaptureStation()) reloadRecentStockStationPhotos();
   });
   document.getElementById("stock-photo-camera-request")?.addEventListener("click", requestStockCameraCapture);
   document.getElementById("stock-photo-save-selection")?.addEventListener("click", saveSelectedStockPhotos);
