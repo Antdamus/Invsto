@@ -49,9 +49,9 @@
             <button
               type="button"
               id="workflow-tab-manual"
-              class="workflow-tab is-active"
+              class="workflow-tab"
               role="tab"
-              aria-selected="true"
+              aria-selected="false"
               aria-controls="workflow-panel-manual"
               data-workflow-target="manual"
             >
@@ -60,9 +60,9 @@
             <button
               type="button"
               id="workflow-tab-assisted"
-              class="workflow-tab"
+              class="workflow-tab is-active"
               role="tab"
-              aria-selected="false"
+              aria-selected="true"
               aria-controls="workflow-panel-assisted"
               data-workflow-target="assisted"
             >
@@ -77,6 +77,7 @@
           role="tabpanel"
           aria-labelledby="workflow-tab-manual"
           data-workflow-panel="manual"
+          hidden
         >
           <h2 class="workflow-panel-title">Existing Manual Add Item Flow</h2>
           <p class="workflow-panel-copy">
@@ -90,7 +91,6 @@
           role="tabpanel"
           aria-labelledby="workflow-tab-assisted"
           data-workflow-panel="assisted"
-          hidden
         >
           <div class="assisted-intake">
             <div class="assisted-copy">

@@ -25,7 +25,7 @@
 
   const state = {
     initialized: false,
-    activeWorkflow: "manual",
+    activeWorkflow: "assisted",
     recentUploadedImages: [],
     aiSelectedUploadedImage: null,
     aiSelectedUploadedImagePath: "",
@@ -2489,7 +2489,7 @@
 
     exposeModule(elements);
     resetAssistedWorkflow(elements);
-    setActiveWorkflow(elements, "manual");
+    setActiveWorkflow(elements, "assisted");
   }
 
   document.addEventListener("DOMContentLoaded", init);
