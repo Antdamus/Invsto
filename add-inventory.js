@@ -7,6 +7,138 @@ let pendingBulkItem = null; // item selected for a bulk bag
 let activeStoreOptions = [];
 let pendingAssignLocationDraft = null;
 
+function escapeLocationDymoXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function formatLocationDymoName(locationName, fallback = "LOCATION") {
+  const text = String(locationName || "").trim() || String(fallback || "").trim() || "LOCATION";
+  return text.toLocaleUpperCase("en-US");
+}
+
+function buildLocationDymoXml(locationCode, locationName = "") {
+  const safeLocationCode = escapeLocationDymoXml(locationCode);
+  const safeLocationName = escapeLocationDymoXml(formatLocationDymoName(locationName, locationCode));
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+        <DesktopLabel Version="1">
+          <DYMOLabel Version="4">
+            <Description>DYMO Label</Description>
+            <Orientation>Landscape</Orientation>
+            <LabelName>Address</LabelName>
+            <InitialLength>0</InitialLength>
+            <BorderStyle>SolidLine</BorderStyle>
+            <DYMORect>
+              <DYMOPoint>
+                <X>0.23</X>
+                <Y>0.060000002</Y>
+              </DYMOPoint>
+              <Size>
+                <Width>3.21</Width>
+                <Height>0.9966666</Height>
+              </Size>
+            </DYMORect>
+            <BorderColor>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </BorderColor>
+            <BorderThickness>1</BorderThickness>
+            <Show_Border>False</Show_Border>
+            <HasFixedLength>False</HasFixedLength>
+            <FixedLengthValue>0</FixedLengthValue>
+            <DynamicLayoutManager>
+              <RotationBehavior>ClearObjects</RotationBehavior>
+              <LabelObjects>
+                <BarcodeObject>
+                  <Name>BarcodeObject0</Name>
+                  <Brushes>
+                    <BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush>
+                    <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
+                    <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
+                    <FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
+                  </Brushes>
+                  <Rotation>Rotation0</Rotation>
+                  <OutlineThickness>1</OutlineThickness>
+                  <IsOutlined>False</IsOutlined>
+                  <BorderStyle>SolidLine</BorderStyle>
+                  <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
+                  <BarcodeFormat>Code128Auto</BarcodeFormat>
+                  <Data><DataString>${safeLocationCode}</DataString></Data>
+                  <HorizontalAlignment>Center</HorizontalAlignment>
+                  <VerticalAlignment>Middle</VerticalAlignment>
+                  <Size>AutoFit</Size>
+                  <TextPosition>Bottom</TextPosition>
+                  <FontInfo>
+                    <FontName>Arial</FontName>
+                    <FontSize>16</FontSize>
+                    <IsBold>False</IsBold>
+                    <IsItalic>False</IsItalic>
+                    <IsUnderline>False</IsUnderline>
+                    <FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush>
+                  </FontInfo>
+                  <ObjectLayout>
+                    <DYMOPoint><X>0.34072876</X><Y>0.1641666</Y></DYMOPoint>
+                    <Size><Width>2.8185425</Width><Height>0.68583345</Height></Size>
+                  </ObjectLayout>
+                </BarcodeObject>
+                <TextObject>
+                  <Name>TextObject0</Name>
+                  <Brushes>
+                    <BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush>
+                    <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
+                    <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
+                    <FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
+                  </Brushes>
+                  <Rotation>Rotation0</Rotation>
+                  <OutlineThickness>1</OutlineThickness>
+                  <IsOutlined>False</IsOutlined>
+                  <BorderStyle>SolidLine</BorderStyle>
+                  <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
+                  <HorizontalAlignment>Center</HorizontalAlignment>
+                  <VerticalAlignment>Middle</VerticalAlignment>
+                  <FitMode>AlwaysFit</FitMode>
+                  <IsVertical>False</IsVertical>
+                  <FormattedText>
+                    <FitMode>AlwaysFit</FitMode>
+                    <HorizontalAlignment>Center</HorizontalAlignment>
+                    <VerticalAlignment>Middle</VerticalAlignment>
+                    <IsVertical>False</IsVertical>
+                    <LineTextSpan>
+                      <TextSpan>
+                        <Text>${safeLocationName}</Text>
+                        <FontInfo>
+                          <FontName>Segoe UI</FontName>
+                          <FontSize>14.5</FontSize>
+                          <IsBold>False</IsBold>
+                          <IsItalic>False</IsItalic>
+                          <IsUnderline>False</IsUnderline>
+                          <FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush>
+                        </FontInfo>
+                      </TextSpan>
+                    </LineTextSpan>
+                  </FormattedText>
+                  <ObjectLayout>
+                    <DYMOPoint><X>0.9475001</X><Y>0.7875004</Y></DYMOPoint>
+                    <Size><Width>1.6050003</Width><Height>0.2691668</Height></Size>
+                  </ObjectLayout>
+                </TextObject>
+              </LabelObjects>
+            </DynamicLayoutManager>
+          </DYMOLabel>
+          <LabelApplication>Blank</LabelApplication>
+          <DataTable>
+            <Columns></Columns>
+            <Rows></Rows>
+          </DataTable>
+        </DesktopLabel>`;
+}
+
 async function loadActiveInventoryWorker(userId) {
   const { data: employee, error } = await supabase
     .from("employees")
@@ -195,6 +327,96 @@ async function bumpInventoryVersion(changedIds = null) {
     }
 
     return stores;
+  }
+
+  async function getCurrentInventoryUserIdentity() {
+    const existingUser = window.currentUser || null;
+    if (existingUser?.id || existingUser?.email) {
+      return {
+        id: existingUser.id || "",
+        email: existingUser.email || "",
+      };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) throw error;
+      const user = data?.user || null;
+      return {
+        id: user?.id || "",
+        email: user?.email || "",
+      };
+    } catch (error) {
+      console.warn("Could not resolve current user for store default:", error);
+      return { id: "", email: "" };
+    }
+  }
+
+  async function fetchStoreIdForLocationId(locationId) {
+    if (!locationId) return "";
+
+    const { data, error } = await supabase
+      .from("locations")
+      .select("store_id")
+      .eq("id", locationId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Could not resolve store for last stock location:", error);
+      return "";
+    }
+
+    return data?.store_id ? String(data.store_id) : "";
+  }
+
+  async function fetchLastStockPlacementStoreIdForCurrentUser() {
+    const identity = await getCurrentInventoryUserIdentity();
+    if (!identity.id && !identity.email) return "";
+
+    const applyUserFilter = (query) => {
+      if (identity.id) return query.eq("user_id", identity.id);
+      return query.eq("email", identity.email);
+    };
+
+    let query = supabase
+      .from("stock_transactions")
+      .select("location_id, timestamp, confirmed_at, locations(store_id)")
+      .eq("action_type", "checkin")
+      .gt("quantity", 0)
+      .not("location_id", "is", null)
+      .order("timestamp", { ascending: false })
+      .limit(25);
+
+    let { data, error } = await applyUserFilter(query);
+
+    if (error) {
+      console.warn("Could not fetch last user stock placement with store relation:", error);
+      query = supabase
+        .from("stock_transactions")
+        .select("location_id, timestamp, confirmed_at")
+        .eq("action_type", "checkin")
+        .gt("quantity", 0)
+        .not("location_id", "is", null)
+        .order("timestamp", { ascending: false })
+        .limit(25);
+
+      const fallback = await applyUserFilter(query);
+      data = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error) {
+      console.warn("Could not fetch last user stock placement:", error);
+      return "";
+    }
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const relatedLocation = Array.isArray(row.locations) ? row.locations[0] : row.locations;
+      const storeId = relatedLocation?.store_id || await fetchStoreIdForLocationId(row.location_id);
+      if (storeId) return String(storeId);
+    }
+
+    return "";
   }
 
   async function fetchAssignableLocations(storeId = "") {
@@ -600,7 +822,9 @@ async function bumpInventoryVersion(changedIds = null) {
     }
 
   
-    const preferredStoreId = lastUsed?.locations?.store_id || "";
+    const preferredStoreId = await fetchLastStockPlacementStoreIdForCurrentUser()
+      || lastUsed?.locations?.store_id
+      || "";
     await populateAssignLocationStoreFilter(preferredStoreId);
     if (storeSelect && preferredStoreId) {
       storeSelect.value = preferredStoreId;
@@ -955,6 +1179,7 @@ async function bumpInventoryVersion(changedIds = null) {
             <Rows></Rows>
           </DataTable>
         </DesktopLabel>`;
+        latestLocationDymoXml = buildLocationDymoXml(generatedCode, nameInput?.value || "");
 
         // Immediately upload DYMO file and show link
         (async () => {
@@ -1088,6 +1313,8 @@ async function bumpInventoryVersion(changedIds = null) {
     
         let photo_url = null;
         let dymo_label_url = null;
+
+        latestLocationDymoXml = buildLocationDymoXml(location_code, location_name);
 
         if (latestLocationDymoXml) {
           const labelPath = `labels/location_${Date.now()}.dymo`;

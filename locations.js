@@ -136,6 +136,20 @@ function asTrimmedString(value) {
   return String(value || "").trim();
 }
 
+function escapeLocationDymoXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function formatLocationDymoName(locationName, fallback = "LOCATION") {
+  const text = asTrimmedString(locationName) || asTrimmedString(fallback) || "LOCATION";
+  return text.toLocaleUpperCase("en-US");
+}
+
 function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -297,7 +311,10 @@ function getCreateModalElements() {
   };
 }
 
-function buildLocationDymoXml(locationCode) {
+function buildLocationDymoXml(locationCode, locationName = "") {
+  const safeLocationCode = escapeLocationDymoXml(locationCode);
+  const safeLocationName = escapeLocationDymoXml(formatLocationDymoName(locationName, locationCode));
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <DesktopLabel Version="1">
   <DYMOLabel Version="4">
@@ -361,7 +378,7 @@ function buildLocationDymoXml(locationCode) {
           </Margin>
           <BarcodeFormat>Code128Auto</BarcodeFormat>
           <Data>
-            <DataString>${locationCode}</DataString>
+            <DataString>${safeLocationCode}</DataString>
           </Data>
           <HorizontalAlignment>Center</HorizontalAlignment>
           <VerticalAlignment>Middle</VerticalAlignment>
@@ -381,8 +398,8 @@ function buildLocationDymoXml(locationCode) {
           </FontInfo>
           <ObjectLayout>
             <DYMOPoint>
-              <X>0.34072888</X>
-              <Y>0.21541661</Y>
+              <X>0.34072876</X>
+              <Y>0.1641666</Y>
             </DYMOPoint>
             <Size>
               <Width>2.8185425</Width>
@@ -390,6 +407,75 @@ function buildLocationDymoXml(locationCode) {
             </Size>
           </ObjectLayout>
         </BarcodeObject>
+        <TextObject>
+          <Name>TextObject0</Name>
+          <Brushes>
+            <BackgroundBrush>
+              <SolidColorBrush>
+                <Color A="0" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </BackgroundBrush>
+            <BorderBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </BorderBrush>
+            <StrokeBrush>
+              <SolidColorBrush>
+                <Color A="1" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </StrokeBrush>
+            <FillBrush>
+              <SolidColorBrush>
+                <Color A="0" R="0" G="0" B="0"></Color>
+              </SolidColorBrush>
+            </FillBrush>
+          </Brushes>
+          <Rotation>Rotation0</Rotation>
+          <OutlineThickness>1</OutlineThickness>
+          <IsOutlined>False</IsOutlined>
+          <BorderStyle>SolidLine</BorderStyle>
+          <Margin>
+            <DYMOThickness Left="0" Top="0" Right="0" Bottom="0" />
+          </Margin>
+          <HorizontalAlignment>Center</HorizontalAlignment>
+          <VerticalAlignment>Middle</VerticalAlignment>
+          <FitMode>AlwaysFit</FitMode>
+          <IsVertical>False</IsVertical>
+          <FormattedText>
+            <FitMode>AlwaysFit</FitMode>
+            <HorizontalAlignment>Center</HorizontalAlignment>
+            <VerticalAlignment>Middle</VerticalAlignment>
+            <IsVertical>False</IsVertical>
+            <LineTextSpan>
+              <TextSpan>
+                <Text>${safeLocationName}</Text>
+                <FontInfo>
+                  <FontName>Segoe UI</FontName>
+                  <FontSize>14.5</FontSize>
+                  <IsBold>False</IsBold>
+                  <IsItalic>False</IsItalic>
+                  <IsUnderline>False</IsUnderline>
+                  <FontBrush>
+                    <SolidColorBrush>
+                      <Color A="1" R="0" G="0" B="0"></Color>
+                    </SolidColorBrush>
+                  </FontBrush>
+                </FontInfo>
+              </TextSpan>
+            </LineTextSpan>
+          </FormattedText>
+          <ObjectLayout>
+            <DYMOPoint>
+              <X>0.9475001</X>
+              <Y>0.7875004</Y>
+            </DYMOPoint>
+            <Size>
+              <Width>1.6050003</Width>
+              <Height>0.2691668</Height>
+            </Size>
+          </ObjectLayout>
+        </TextObject>
       </LabelObjects>
     </DynamicLayoutManager>
   </DYMOLabel>
@@ -474,8 +560,8 @@ function openCreateLocationModal({ tray = false } = {}) {
   elements.nameInput?.focus();
 }
 
-async function uploadCreateLocationDymo(locationCode) {
-  const xml = buildLocationDymoXml(locationCode);
+async function uploadCreateLocationDymo(locationCode, locationName = "") {
+  const xml = buildLocationDymoXml(locationCode, locationName);
   const labelPath = `labels/location_${Date.now()}.dymo`;
   const blob = new Blob([xml], { type: "application/octet-stream" });
   const { error } = await supabase.storage
@@ -501,7 +587,7 @@ async function regenerateLocationDymoLabel(locationId) {
   setLocationDymoStatus("Generating a fresh LocationLabelSystem DYMO label...");
 
   const previousPath = location.dymo_label_url || "";
-  const labelPath = await uploadCreateLocationDymo(locationCode);
+  const labelPath = await uploadCreateLocationDymo(locationCode, location.location_name);
 
   const { error } = await supabase
     .from("locations")
@@ -560,7 +646,7 @@ async function saveCreatedLocation() {
 
   try {
     const [dymoPath, photoPath] = await Promise.all([
-      uploadCreateLocationDymo(locationCode),
+      uploadCreateLocationDymo(locationCode, locationName),
       uploadCreateLocationPhoto(photoFile),
     ]);
 
