@@ -14,6 +14,7 @@ const IMAGE_NAME_REGEX = /\.(png|jpe?g|webp|gif|heic|heif)$/i;
 type RequestBody = {
   bucket?: string;
   limit?: number;
+  prefix?: string;
 };
 
 type ListedImage = {
@@ -112,7 +113,8 @@ serve(async (req) => {
   try {
     const body = (await req.json().catch(() => ({}))) as RequestBody;
     const bucket = asTrimmedString(body.bucket || DEFAULT_BUCKET);
-    const limit = clampLimit(body.limit, 1, 20, 12);
+    const limit = clampLimit(body.limit, 1, 80, 12);
+    const prefix = asTrimmedString(body.prefix).replace(/^\/+|\/+$/g, "");
 
     if (!ALLOWED_BUCKETS.has(bucket)) {
       return json(400, { ok: false, error: "invalid_bucket" });
@@ -126,7 +128,7 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
-    const listedImages = await listImagesRecursively(supabase, bucket);
+    const listedImages = await listImagesRecursively(supabase, bucket, prefix);
     const recentImages = listedImages.sort(compareNewestFirst).slice(0, limit);
 
     if (recentImages.length === 0) {

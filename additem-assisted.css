@@ -207,6 +207,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
   padding: 20px;
   border-radius: 22px;
   background:
@@ -266,12 +267,38 @@
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
 }
 
 .assisted-file-upload-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.assisted-reload-count-control {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 224, 190, 0.14);
+  background: rgba(255, 248, 236, 0.045);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.assisted-reload-count-select {
+  min-height: 34px;
+  padding: 0 32px 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 224, 190, 0.16);
+  background: rgba(10, 9, 10, 0.92);
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
 }
 
 .assisted-section-title {
@@ -284,6 +311,7 @@
   display: grid;
   grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
   gap: 18px;
+  min-width: 0;
 }
 
 .assisted-image-sidebar {
@@ -379,6 +407,8 @@
   max-height: 480px;
   overflow-y: auto;
   padding-right: 4px;
+  min-height: 0;
+  contain: layout paint;
 }
 
 .assisted-uploaded-image-strip::-webkit-scrollbar {
@@ -392,6 +422,8 @@
 
 .assisted-thumb {
   position: relative;
+  flex: 0 0 auto;
+  min-height: 126px;
   padding: 10px;
   border: 1px solid rgba(244, 224, 190, 0.12);
   border-radius: 18px;
@@ -439,6 +471,7 @@
   grid-template-columns: 104px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
+  min-height: 104px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -744,8 +777,17 @@
   }
 
   .assisted-read-button,
-  .assisted-secondary-button {
+  .assisted-secondary-button,
+  .assisted-reload-count-control {
     width: 100%;
+  }
+
+  .assisted-reload-count-control {
+    justify-content: space-between;
+  }
+
+  .assisted-reload-count-select {
+    flex: 1;
   }
 
   .assisted-bg-tools {
@@ -771,10 +813,15 @@
 
   .assisted-thumb-main {
     grid-template-columns: 86px minmax(0, 1fr);
+    min-height: 86px;
   }
 
   .assisted-thumb-image {
     width: 86px;
     height: 86px;
+  }
+
+  .assisted-thumb {
+    min-height: 108px;
   }
 }

@@ -16,6 +16,8 @@
   const IMAGE_EDITOR_OUTPUT_SIZE = 1200;
   const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
+  const DEFAULT_RECENT_PHOTO_RELOAD_LIMIT = 5;
+  const PROCESSED_BACKGROUND_PREFIX = "processed-backgrounds";
   const AUTO_STRAIGHTEN_MIN_DEGREES = 1.25;
   const AUTO_STRAIGHTEN_MAX_DEGREES = 24;
   const ASSISTED_LAST_STONE_TYPE_KEY = "og.addItem.assisted.lastStoneType";
@@ -131,6 +133,7 @@
       lengthDatalist: document.getElementById("assisted-length-options"),
       notesInput: document.getElementById("assisted-notes"),
       captureStationSelect: document.getElementById("assisted-capture-station"),
+      recentPhotoLimitSelect: document.getElementById("assisted-recent-photo-limit"),
       refreshStationsButton: document.getElementById("assisted-refresh-stations"),
       readWeightButton: document.getElementById("assisted-read-weight"),
       manualWeightInput: document.getElementById("assisted-manual-weight"),
@@ -204,6 +207,12 @@
   function parseWeightInput(value) {
     const numericValue = Number(value);
     return Number.isFinite(numericValue) && numericValue > 0 ? Number(numericValue.toFixed(2)) : null;
+  }
+
+  function getRecentPhotoReloadLimit(elements) {
+    const requestedLimit = Number(elements.recentPhotoLimitSelect?.value);
+    if (!Number.isFinite(requestedLimit)) return DEFAULT_RECENT_PHOTO_RELOAD_LIMIT;
+    return Math.min(25, Math.max(1, Math.trunc(requestedLimit)));
   }
 
   function formatTimestamp(value) {
@@ -955,7 +964,7 @@
     return Array.isArray(data) ? data : [];
   }
 
-  async function downloadCaptureJobPhotos(photos) {
+  async function downloadCaptureJobPhotos(photos, options = {}) {
     const downloadedPhotos = [];
 
     for (let index = 0; index < photos.length; index += 1) {
@@ -964,11 +973,19 @@
       const path = asTrimmedString(photo?.storage_path);
 
       if (!bucket || !path) {
+        if (options.skipFailures) {
+          console.warn("Skipping capture photo with missing bucket or path:", photo);
+          continue;
+        }
         throw new Error("Capture photo metadata is missing bucket or path.");
       }
 
       const { data, error } = await window.supabase.storage.from(bucket).download(path);
       if (error || !data) {
+        if (options.skipFailures) {
+          console.warn(`Skipping capture photo ${index + 1}:`, error);
+          continue;
+        }
         throw new Error(error?.message || `Failed to download capture photo ${index + 1}.`);
       }
 
@@ -981,18 +998,111 @@
             updatedAt: asTrimmedString(photo?.created_at),
             previewUrl: URL.createObjectURL(data),
             storageBucket: bucket,
-            sourceType: "capture-job",
+            sourceType: asTrimmedString(options.sourceType) || "capture-job",
             sortOrder: Number(photo?.sort_order),
             isPrimary: Boolean(photo?.is_primary),
             captureJobId: asTrimmedString(photo?.capture_job_id),
             mimeType: asTrimmedString(photo?.mime_type) || data.type || "image/jpeg",
           },
-          index
+          downloadedPhotos.length
         )
       );
     }
 
     return downloadedPhotos;
+  }
+
+  async function loadRecentStationCaptureImages(elements, limit = 16) {
+    if (!state.captureStations.length) {
+      await loadActiveCaptureStations(elements, { silent: true });
+    }
+
+    const station = getSelectedCaptureStation();
+    if (!station?.id) {
+      return [];
+    }
+
+    const { data, error } = await window.supabase
+      .from(CAPTURE_PHOTO_TABLE)
+      .select(`
+        id,
+        capture_job_id,
+        sort_order,
+        is_primary,
+        storage_bucket,
+        storage_path,
+        file_size_bytes,
+        image_width,
+        image_height,
+        mime_type,
+        label,
+        created_at,
+        capture_jobs!inner(id, station_id, requested_at, status)
+      `)
+      .eq("capture_jobs.station_id", station.id)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new Error(error.message || "Failed to load recent station capture photos.");
+    }
+
+    return downloadCaptureJobPhotos(Array.isArray(data) ? data : [], {
+      skipFailures: true,
+      sourceType: "recent-station-capture",
+    });
+  }
+
+  function getImageBasename(path) {
+    return asTrimmedString(path).split("/").pop() || "";
+  }
+
+  function getProcessedSourceTokens(images) {
+    const tokens = new Set();
+    for (const image of images || []) {
+      const basename = getImageBasename(image?.path);
+      if (!basename) continue;
+      tokens.add(basename.toLowerCase());
+    }
+    return tokens;
+  }
+
+  function imageLooksAssociatedWithSource(image, sourceTokens) {
+    if (!sourceTokens?.size) return false;
+    const haystack = `${image?.path || ""} ${image?.name || ""}`.toLowerCase();
+    for (const token of sourceTokens) {
+      if (token && haystack.includes(token)) return true;
+    }
+    return false;
+  }
+
+  async function loadAssociatedProcessedBackgroundImages(sourceImages, limit) {
+    const sourceTokens = getProcessedSourceTokens(sourceImages);
+    if (!sourceTokens.size) return [];
+
+    const response = await window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
+      body: {
+        bucket: INVENTORY_UPLOAD_BUCKET,
+        prefix: PROCESSED_BACKGROUND_PREFIX,
+        limit: Math.min(80, Math.max(20, limit * 6)),
+      },
+    });
+
+    if (response.error) {
+      throw new Error(response.error.message || "Unable to load associated processed images.");
+    }
+
+    const bucket = response.data?.bucket || INVENTORY_UPLOAD_BUCKET;
+    return (Array.isArray(response.data?.images) ? response.data.images : [])
+      .map((image, index) => normalizeImageRow({
+        ...image,
+        storageBucket: bucket,
+        sourceType: asTrimmedString(image?.name).includes("white")
+          ? "processed-white-background"
+          : "processed-black-background",
+      }, index))
+      .filter((image) => image.path && image.previewUrl)
+      .filter((image) => imageLooksAssociatedWithSource(image, sourceTokens));
   }
 
   function applyRecentUploadedImages(elements, images, options = {}) {
@@ -1023,7 +1133,9 @@
     setAISelectedImage(elements, nextAIPath, { silent: true });
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
-    autoProcessBlackBackgroundImages(elements, normalizedImages);
+    if (options.autoProcess !== false) {
+      autoProcessBlackBackgroundImages(elements, normalizedImages);
+    }
   }
 
   async function hydrateCompletedCaptureJob(elements, completedJob, options = {}) {
@@ -1056,6 +1168,7 @@
     applyRecentUploadedImages(elements, downloadedImages, {
       preserveSelection: false,
       defaultAIPath: primaryImage?.path || "",
+      autoProcess: options.autoProcess !== false,
     });
 
     if (options.refreshNotice) {
@@ -1074,21 +1187,21 @@
   }
 
   async function reloadCompletedCapturePhotos(elements, options = {}) {
-    if (!state.latestCaptureJob?.id) {
-      setInlineStatus(
-        elements.imageStatus,
-        "No completed capture session is available yet. Run Read Weight to create a new capture job.",
-        "is-error"
-      );
-      return null;
+    if (options.recentOnly || !state.latestCaptureJob?.id) {
+      return loadRecentInventoryUploadImages(elements, {
+        refreshNotice: true,
+        preserveSelection: true,
+        autoProcess: false,
+      });
     }
 
-    setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Photos", true);
+    setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Recent Photos", true);
     setInlineStatus(elements.imageStatus, "Reloading the completed capture photo set...", "is-waiting");
 
     try {
       return await hydrateCompletedCaptureJob(elements, state.latestCaptureJob, {
         refreshNotice: options.refreshNotice !== false,
+        autoProcess: options.autoProcess !== false,
       });
     } catch (error) {
       console.error("Failed to reload capture photos:", error);
@@ -1099,7 +1212,7 @@
       );
       return null;
     } finally {
-      setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Photos", false);
+      setButtonBusy(elements.refreshImagesButton, "Reloading...", "Reload Recent Photos", false);
     }
   }
 
@@ -1388,53 +1501,90 @@
       return;
     }
 
-    const previousAIPath = state.aiSelectedUploadedImagePath;
-    const previousSaveSelections = new Set(state.saveSelectedUploadedImagePaths);
+    const preserveSelection = options.preserveSelection !== false;
+    const previousAIPath = preserveSelection ? state.aiSelectedUploadedImagePath : "";
+    const previousSaveSelections = preserveSelection
+      ? new Set(state.saveSelectedUploadedImagePaths)
+      : new Set();
 
     state.hasLoadedImagesOnce = true;
-    setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Refresh Uploads", true);
-    setInlineStatus(elements.imageStatus, "Loading recent uploaded and captured images...", "is-waiting");
+    setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Reload Recent Photos", true);
+    setInlineStatus(elements.imageStatus, "Loading recent station photos and their processed versions...", "is-waiting");
 
     try {
-      const responses = await Promise.all([
-        window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
-          body: {
-            bucket: INVENTORY_UPLOAD_BUCKET,
-            limit: 12,
-          },
-        }),
-        window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
-          body: {
-            bucket: CAPTURE_PHOTOS_BUCKET,
-            limit: 16,
-          },
-        }),
-      ]);
+      const reloadLimit = getRecentPhotoReloadLimit(elements);
+      const backendErrors = [];
+      let stationCaptureImages = [];
+      let processedImages = [];
+      let fallbackCaptureImages = [];
 
-      for (const response of responses) {
-        if (response.error) {
-          throw new Error(response.error.message || "Unable to load uploaded images.");
+      try {
+        stationCaptureImages = await loadRecentStationCaptureImages(elements, reloadLimit);
+      } catch (stationError) {
+        backendErrors.push(stationError);
+        console.warn("Could not load station capture images:", stationError);
+      }
+
+      if (stationCaptureImages.length) {
+        try {
+          processedImages = await loadAssociatedProcessedBackgroundImages(stationCaptureImages, reloadLimit);
+        } catch (processedError) {
+          backendErrors.push(processedError);
+          console.warn("Could not load associated processed background images:", processedError);
         }
       }
 
-      const normalizedImages = responses
-        .flatMap((response) => {
-          const bucket = response.data?.bucket || INVENTORY_UPLOAD_BUCKET;
-          return (Array.isArray(response.data?.images) ? response.data.images : [])
-            .map((image) => ({ ...image, bucket }));
-        })
-        .map((image, index) => normalizeImageRow({
-          ...image,
-          storageBucket: image.bucket,
-          sourceType: image.bucket === CAPTURE_PHOTOS_BUCKET ? "recent-capture" : "recent-upload",
-        }, index))
+      if (!stationCaptureImages.length) {
+        try {
+          const captureResponse = await window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
+            body: {
+              bucket: CAPTURE_PHOTOS_BUCKET,
+              limit: reloadLimit,
+            },
+          });
+          if (captureResponse.error) {
+            throw new Error(captureResponse.error.message || "Unable to load recent captured images.");
+          }
+          const bucket = captureResponse.data?.bucket || CAPTURE_PHOTOS_BUCKET;
+          fallbackCaptureImages = (Array.isArray(captureResponse.data?.images) ? captureResponse.data.images : [])
+            .map((image, index) => normalizeImageRow({
+              ...image,
+              storageBucket: bucket,
+              sourceType: "recent-capture",
+            }, index));
+        } catch (captureError) {
+          backendErrors.push(captureError);
+          console.warn("Could not load fallback captured images:", captureError);
+        }
+
+        if (fallbackCaptureImages.length) {
+          try {
+            processedImages = await loadAssociatedProcessedBackgroundImages(fallbackCaptureImages, reloadLimit);
+          } catch (processedError) {
+            backendErrors.push(processedError);
+            console.warn("Could not load fallback associated processed background images:", processedError);
+          }
+        }
+      }
+
+      const seenImages = new Set();
+      const normalizedImages = [...stationCaptureImages, ...processedImages, ...fallbackCaptureImages]
         .filter((image) => image.path && image.previewUrl)
+        .filter((image) => {
+          const key = `${image.storageBucket}:${image.path}`;
+          if (seenImages.has(key)) return false;
+          seenImages.add(key);
+          return true;
+        })
         .sort(compareNewestFirst);
 
+      releaseImagePreviewUrls(state.recentUploadedImages);
       state.recentUploadedImages = normalizedImages;
-      state.saveSelectedUploadedImagePaths = normalizedImages
-        .map((image) => image.path)
-        .filter((path) => previousSaveSelections.has(path));
+      state.saveSelectedUploadedImagePaths = preserveSelection
+        ? normalizedImages
+          .map((image) => image.path)
+          .filter((path) => previousSaveSelections.has(path))
+        : normalizedImages.map((image) => image.path).filter(Boolean);
 
       const nextAIPath = normalizedImages.some((image) => image.path === previousAIPath)
         ? previousAIPath
@@ -1443,8 +1593,14 @@
       setAISelectedImage(elements, nextAIPath, { silent: true });
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
+      if (options.autoProcess === true) {
+        autoProcessBlackBackgroundImages(elements, normalizedImages);
+      }
 
       if (!normalizedImages.length) {
+        if (backendErrors.length) {
+          throw backendErrors[0];
+        }
         setInlineStatus(
           elements.imageStatus,
           "No uploaded or captured phone images were returned. Refresh after the iPhone upload finishes.",
@@ -1454,9 +1610,12 @@
       }
 
       if (options.refreshNotice) {
+        const station = getSelectedCaptureStation();
+        const stationText = station?.name ? ` from ${station.name}` : "";
+        const processedText = processedImages.length ? `, including ${processedImages.length} processed version(s)` : "";
         setInlineStatus(
           elements.imageStatus,
-          `Loaded ${normalizedImages.length} recent uploaded/captured image(s).`,
+          `Loaded ${normalizedImages.length} recent image(s)${stationText}${processedText}. Older reloaded images were not auto-processed.`,
           "is-success"
         );
       } else {
@@ -1482,7 +1641,7 @@
         "is-error"
       );
     } finally {
-      setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Refresh Uploads", false);
+      setButtonBusy(elements.refreshImagesButton, "Refreshing...", "Reload Recent Photos", false);
     }
   }
 
@@ -2855,7 +3014,11 @@
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
       getAISelectedUploadedImagePath: () => state.aiSelectedUploadedImagePath,
-      refreshUploadedImages: () => reloadCompletedCapturePhotos(elements, { refreshNotice: true }),
+      refreshUploadedImages: () => reloadCompletedCapturePhotos(elements, {
+        refreshNotice: true,
+        autoProcess: false,
+        recentOnly: true,
+      }),
       loadActiveCaptureStations: () => loadActiveCaptureStations(elements, { silent: false }),
     };
   }
@@ -2893,7 +3056,11 @@
       });
     });
     elements.refreshImagesButton?.addEventListener("click", () => {
-      reloadCompletedCapturePhotos(elements, { refreshNotice: true });
+      reloadCompletedCapturePhotos(elements, {
+        refreshNotice: true,
+        autoProcess: false,
+        recentOnly: true,
+      });
     });
     elements.localImageUploadInput?.addEventListener("change", (event) => {
       handleLocalImageUpload(elements, event);

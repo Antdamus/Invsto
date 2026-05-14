@@ -211,7 +211,7 @@
                 <div>
                   <h3 id="assisted-upload-title" class="assisted-section-title">Captured Phone Images</h3>
                   <p class="assisted-section-copy">
-                    After a capture job finishes, the completed photo set is loaded from Supabase and shown here in capture order.
+                    After a capture job finishes, the completed photo set is loaded from Supabase. Reload Photos can also recover recent cloud images from earlier sessions.
                   </p>
                 </div>
                 <div class="assisted-upload-actions">
@@ -219,14 +219,23 @@
                     Upload From Documents
                     <input type="file" id="assisted-local-image-upload" accept="image/*" hidden />
                   </label>
+                  <label class="assisted-reload-count-control" for="assisted-recent-photo-limit">
+                    <span>Show</span>
+                    <select id="assisted-recent-photo-limit" class="assisted-reload-count-select">
+                      <option value="5" selected>Last 5</option>
+                      <option value="10">Last 10</option>
+                      <option value="16">Last 16</option>
+                      <option value="25">Last 25</option>
+                    </select>
+                  </label>
                   <button type="button" id="assisted-refresh-images" class="assisted-secondary-button">
-                    Reload Photos
+                    Reload Recent Photos
                   </button>
                 </div>
               </div>
 
               <p id="assisted-image-status" class="assisted-inline-status" aria-live="polite">
-                Waiting for the assisted workflow to load completed capture photos.
+                Waiting for the assisted workflow to load completed capture photos, or reload recent cloud photos from this station.
               </p>
 
               <div class="assisted-image-layout">
@@ -288,7 +297,7 @@
                   <div class="assisted-upload-browser-head">
                     <span class="assisted-card-kicker">Completed Capture Set</span>
                     <span class="assisted-card-helper">
-                      Click an image to set the AI image. Photos are pulled from the completed capture job and ordered by their recorded sort order.
+                      Click an image to set the AI image. New captures auto-process; reloaded older images stay unchanged unless you choose a background action.
                     </span>
                   </div>
                   <div
