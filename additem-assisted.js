@@ -8,7 +8,9 @@
   const CAPTURE_PHOTO_TABLE = "capture_job_photos";
   const CAPTURE_STATION_TABLE = "capture_stations";
   const CAPTURE_POLL_INTERVAL_MS = 1500;
-  const CAPTURE_POLL_TIMEOUT_MS = 120000;
+  const CAPTURE_POLL_TIMEOUT_MS = 300000;
+  const CAPTURE_PHOTO_SETTLE_MS = 4500;
+  const CAPTURE_FALLBACK_LOOKBACK_MS = 30000;
   const BACKGROUND_PROCESSING_MAX_SOURCE_SIDE = 1600;
   const IMAGE_EDITOR_OUTPUT_SIZE = 1200;
   const LOCAL_UPLOAD_MAX_DIRECT_BYTES = 7 * 1024 * 1024;
@@ -789,14 +791,87 @@
     return `Capture status: ${jobStatus || "unknown"}.`;
   }
 
-  async function pollCaptureJob(jobId, stationName = "") {
+  function captureJobHasUpload(job) {
+    const bucket = asTrimmedString(job?.storage_bucket);
+    const path = asTrimmedString(job?.storage_path);
+    return Boolean((bucket && path) || job?.upload_completed_at);
+  }
+
+  async function getCaptureJobPhotoCount(jobId) {
+    if (!jobId) return 0;
+
+    const { count, error } = await window.supabase
+      .from(CAPTURE_PHOTO_TABLE)
+      .select("id", { count: "exact", head: true })
+      .eq("capture_job_id", jobId);
+
+    if (error) {
+      console.warn("Could not check capture photo count:", error);
+      return 0;
+    }
+
+    return count || 0;
+  }
+
+  async function findRecentCaptureCompletion(stationId, requestedAt) {
+    if (!stationId || !requestedAt) return null;
+
+    const requestedMs = new Date(requestedAt).getTime();
+    const lookbackIso = Number.isFinite(requestedMs)
+      ? new Date(requestedMs - CAPTURE_FALLBACK_LOOKBACK_MS).toISOString()
+      : requestedAt;
+
+    const { data, error } = await window.supabase
+      .from(CAPTURE_JOB_TABLE)
+      .select(`
+        id,
+        station_id,
+        status,
+        storage_bucket,
+        storage_path,
+        capture_completed_at,
+        upload_completed_at,
+        mime_type,
+        file_size_bytes,
+        failure_code,
+        failure_message,
+        requested_at
+      `)
+      .eq("station_id", stationId)
+      .gte("requested_at", lookbackIso)
+      .order("requested_at", { ascending: false })
+      .limit(5);
+
+    if (error) {
+      console.warn("Could not check recent capture jobs:", error);
+      return null;
+    }
+
+    const jobs = Array.isArray(data) ? data : [];
+    for (const recentJob of jobs) {
+      if (recentJob.status === "failed") continue;
+      if (recentJob.status === "completed" || captureJobHasUpload(recentJob)) {
+        return { ...recentJob, status: "completed" };
+      }
+    }
+
+    return null;
+  }
+
+  async function pollCaptureJob(job, stationName = "") {
+    const jobId = typeof job === "object" ? job.id : job;
+    const stationId = typeof job === "object" ? job.station_id : "";
+    const requestedAt = typeof job === "object" ? job.requested_at : "";
     const startedAt = Date.now();
+    let lastPhotoCount = 0;
+    let lastPhotoChangeAt = startedAt;
 
     while ((Date.now() - startedAt) < CAPTURE_POLL_TIMEOUT_MS) {
       const { data, error } = await window.supabase
         .from(CAPTURE_JOB_TABLE)
         .select(`
           id,
+          station_id,
           status,
           storage_bucket,
           storage_path,
@@ -805,7 +880,8 @@
           mime_type,
           file_size_bytes,
           failure_code,
-          failure_message
+          failure_message,
+          requested_at
         `)
         .eq("id", jobId)
         .single();
@@ -818,9 +894,31 @@
         return data;
       }
 
+      const photoCount = await getCaptureJobPhotoCount(jobId);
+      if (photoCount !== lastPhotoCount) {
+        lastPhotoCount = photoCount;
+        lastPhotoChangeAt = Date.now();
+      }
+
+      if (captureJobHasUpload(data)) {
+        return { ...data, status: "completed" };
+      }
+
+      if (photoCount > 0 && (Date.now() - lastPhotoChangeAt) >= CAPTURE_PHOTO_SETTLE_MS) {
+        return { ...data, status: "completed" };
+      }
+
+      const fallbackJob = await findRecentCaptureCompletion(stationId || data.station_id, requestedAt || data.requested_at);
+      if (fallbackJob && fallbackJob.id !== jobId) {
+        return fallbackJob;
+      }
+
       const captureState = document.getElementById("assisted-capture-state");
       if (captureState) {
-        captureState.textContent = getCaptureStatusLabel(data.status, stationName);
+        const statusLabel = getCaptureStatusLabel(data.status, stationName);
+        captureState.textContent = photoCount > 0
+          ? `${statusLabel} ${photoCount} photo${photoCount === 1 ? "" : "s"} received; waiting for upload to finish...`
+          : statusLabel;
       }
 
       await delay(CAPTURE_POLL_INTERVAL_MS);
@@ -927,6 +1025,23 @@
 
   async function hydrateCompletedCaptureJob(elements, completedJob, options = {}) {
     const capturePhotos = await loadCaptureJobPhotos(completedJob.id);
+    const jobBucket = asTrimmedString(completedJob?.storage_bucket);
+    const jobPath = asTrimmedString(completedJob?.storage_path);
+
+    if (!capturePhotos.length && jobBucket && jobPath) {
+      capturePhotos.push({
+        capture_job_id: completedJob.id,
+        sort_order: 0,
+        is_primary: true,
+        storage_bucket: jobBucket,
+        storage_path: jobPath,
+        file_size_bytes: completedJob.file_size_bytes,
+        mime_type: completedJob.mime_type,
+        label: "Camera capture",
+        created_at: completedJob.upload_completed_at || completedJob.capture_completed_at || completedJob.requested_at,
+      });
+    }
+
     if (!capturePhotos.length) {
       throw new Error("Capture completed but no uploaded photos were returned for this job.");
     }
@@ -1005,7 +1120,7 @@
       })
     );
 
-    const completedJob = await pollCaptureJob(createdJob.id, station.name || "");
+    const completedJob = await pollCaptureJob(createdJob, station.name || "");
     state.activeCaptureJobId = "";
 
     if (completedJob.status === "failed") {
@@ -1013,8 +1128,9 @@
     }
 
     const captureResult = await hydrateCompletedCaptureJob(elements, completedJob, { refreshNotice: true });
-    elements.captureState.textContent = completedJob.storage_bucket
-      ? `Photo captured and uploaded to ${completedJob.storage_bucket}.`
+    const capturedCount = captureResult.images?.length || 0;
+    elements.captureState.textContent = capturedCount
+      ? `${capturedCount} photo${capturedCount === 1 ? "" : "s"} captured and uploaded.`
       : "Photo captured and uploaded.";
 
     return {
@@ -2370,10 +2486,10 @@
         weight: stableWeight,
       }, elements);
 
-      if (captureResult?.job?.storage_path) {
+      if (captureResult?.images?.length) {
         setInlineStatus(
           elements.imageStatus,
-          `Capture completed. Loaded ${captureResult.images?.length || 0} photo(s) from ${captureResult.job.storage_path}.`,
+          `Capture completed. Loaded ${captureResult.images.length} photo${captureResult.images.length === 1 ? "" : "s"}.`,
           "is-success"
         );
       }
@@ -2415,10 +2531,10 @@
         weightSource: "manual",
       }, elements);
 
-      if (captureResult?.job?.storage_path) {
+      if (captureResult?.images?.length) {
         setInlineStatus(
           elements.imageStatus,
-          `Capture completed. Loaded ${captureResult.images?.length || 0} photo(s) from ${captureResult.job.storage_path}.`,
+          `Capture completed. Loaded ${captureResult.images.length} photo${captureResult.images.length === 1 ? "" : "s"}.`,
           "is-success"
         );
       }

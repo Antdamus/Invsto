@@ -27,6 +27,7 @@ const STOCK_CAPTURE_PHOTO_TABLE = "capture_job_photos";
 const STOCK_CAPTURE_STATION_TABLE = "capture_stations";
 const STOCK_CAPTURE_POLL_INTERVAL_MS = 1500;
 const STOCK_CAPTURE_POLL_TIMEOUT_MS = 120000;
+const STOCK_CAPTURE_PHOTO_SETTLE_MS = 4500;
 const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
 const stockHistoryState = {
   itemId: null,
@@ -4439,6 +4440,8 @@ async function pollStockCaptureJob(job, station = {}) {
   const stationName = station.name || "";
   const requestedAt = job?.requested_at || "";
   const startedAt = Date.now();
+  let lastPhotoCount = 0;
+  let lastPhotoChangeAt = startedAt;
 
   while ((Date.now() - startedAt) < STOCK_CAPTURE_POLL_TIMEOUT_MS) {
     const { data, error } = await supabase
@@ -4462,7 +4465,15 @@ async function pollStockCaptureJob(job, station = {}) {
 
     if (error || !data) throw new Error(error?.message || "Failed to poll capture job.");
     if (data.status === "completed" || data.status === "failed") return data;
-    if (stockCaptureJobHasUpload(data) || await getStockCaptureJobPhotoCount(jobId)) {
+    const photoCount = await getStockCaptureJobPhotoCount(jobId);
+    if (photoCount !== lastPhotoCount) {
+      lastPhotoCount = photoCount;
+      lastPhotoChangeAt = Date.now();
+    }
+    if (stockCaptureJobHasUpload(data)) {
+      return { ...data, status: "completed" };
+    }
+    if (photoCount > 0 && (Date.now() - lastPhotoChangeAt) >= STOCK_CAPTURE_PHOTO_SETTLE_MS) {
       return { ...data, status: "completed" };
     }
 
@@ -4479,8 +4490,11 @@ async function pollStockCaptureJob(job, station = {}) {
         : data.status === "uploading"
           ? `Camera is uploading${stationLabel}...`
           : `Capture status: ${data.status || "waiting"}`;
-    setStockPhotoStatus(label, "waiting");
-    setStockPhotoProgress(data.status === "queued" ? 20 : data.status === "capturing" ? 45 : 68, label, true);
+    const progressLabel = photoCount > 0
+      ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received; waiting for upload to finish...`
+      : label;
+    setStockPhotoStatus(progressLabel, "waiting");
+    setStockPhotoProgress(data.status === "queued" ? 20 : data.status === "capturing" ? 45 : 68, progressLabel, true);
     await delayStockCapture(STOCK_CAPTURE_POLL_INTERVAL_MS);
   }
 
