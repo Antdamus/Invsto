@@ -34,7 +34,9 @@ let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
+const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
 let automaticDymoTimer = null;
+let addItemSuccessReloadTimer = null;
 
 function escapeLocationDymoXml(value) {
   return String(value ?? "")
@@ -200,6 +202,82 @@ let uploadedImages = [];
   }
 
   window.showToast = showToast;
+
+  function scrollAddItemPageToTop() {
+    try {
+      window.history.scrollRestoration = "manual";
+    } catch (_) {}
+
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+
+  function restoreTopAfterSuccessfulReload() {
+    try {
+      if (window.sessionStorage?.getItem(ADD_ITEM_RELOAD_TOP_KEY) !== "true") return;
+      window.sessionStorage.removeItem(ADD_ITEM_RELOAD_TOP_KEY);
+    } catch (_) {
+      return;
+    }
+
+    scrollAddItemPageToTop();
+    window.requestAnimationFrame(() => {
+      scrollAddItemPageToTop();
+    });
+  }
+
+  function reloadAddItemPageForNextItem() {
+    if (addItemSuccessReloadTimer) {
+      clearTimeout(addItemSuccessReloadTimer);
+      addItemSuccessReloadTimer = null;
+    }
+
+    try {
+      window.sessionStorage?.setItem(ADD_ITEM_RELOAD_TOP_KEY, "true");
+    } catch (_) {}
+
+    scrollAddItemPageToTop();
+    if (window.location.hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+    window.location.reload();
+  }
+
+  function showItemSaveSuccessModal(item, options = {}) {
+    const modal = document.getElementById("item-save-success-modal");
+    const titleEl = document.getElementById("item-save-success-name");
+    const barcodeEl = document.getElementById("item-save-success-barcode");
+    const copyEl = document.getElementById("item-save-success-copy");
+    const continueButton = document.getElementById("item-save-success-continue");
+
+    if (!modal) {
+      reloadAddItemPageForNextItem();
+      return;
+    }
+
+    const photoCount = Number(options.photoCount || 0);
+    const stockInfo = options.stockInfo || null;
+    const photoLabel = `${photoCount} photo${photoCount === 1 ? "" : "s"}`;
+    const stockLabel = stockInfo?.quantity
+      ? ` Stock placement: ${stockInfo.quantity} unit${Number(stockInfo.quantity) === 1 ? "" : "s"} to ${stockInfo.location_name || "selected location"}.`
+      : "";
+
+    if (titleEl) titleEl.textContent = item?.title || "New item";
+    if (barcodeEl) barcodeEl.textContent = item?.barcode ? `Barcode ${item.barcode}` : "Barcode ready";
+    if (copyEl) {
+      copyEl.textContent = `The item, DYMO label, and ${photoLabel} were saved successfully.${stockLabel} Reloading a fresh add-item page now.`;
+    }
+
+    continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });
+
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+    continueButton?.focus();
+
+    addItemSuccessReloadTimer = window.setTimeout(reloadAddItemPageForNextItem, 2600);
+  }
 
   //obtain unique categories to display in the tab
   async function fetchUniqueCategories() {
@@ -1827,8 +1905,6 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   delete pendingStockAssignments[newItem.barcode];
 }
 
-  alert("✅ Item successfully added!");
-
   document.getElementById("add-item-form").reset();
   document.dispatchEvent(new Event("add-item-form:reset"));
   previewContainer.innerHTML = "";
@@ -1840,10 +1916,15 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   autoCostCheckbox.checked = true;
   applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
   await bumpInventoryVersion();
+  showItemSaveSuccessModal(newItem, {
+    photoCount: finalPhotoPaths.length,
+    stockInfo,
+  });
 });
 
 // === DOM Loader ===
 document.addEventListener("DOMContentLoaded", async () => {
+  restoreTopAfterSuccessfulReload();
   await waitForSupabaseInit(); // ✅ Supabase is initialized
 
   try {

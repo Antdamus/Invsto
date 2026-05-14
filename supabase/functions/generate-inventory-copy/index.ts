@@ -221,6 +221,7 @@ Write:
 
 Use the structured metadata as source of truth.
 Use the selected image to identify visible style, shape, finish, setting, and item type.
+If prominent/main stones or diamonds are visible, comment on their visible color or tone in buyer-friendly language.
 Make the description feel premium, elegant, and commercially appealing, while remaining factually restrained.
 
 Return valid JSON only with exactly:
@@ -303,14 +304,26 @@ The description should focus on:
 - silhouette
 - styling versatility
 - sparkle or texture if clearly visible
+- visible color or tone of any prominent/main diamonds or stones
 - craftsmanship language only when visually supported
 - weight in a natural way when helpful
+
+Stone and diamond color guidance:
+- If there are prominent/main stones, diamonds, or simulated diamonds visible in the image, include a natural buyer-facing note about their visible color, tone, or color impression.
+- Use language such as "bright white sparkle", "icy clear stones", "warm champagne-toned stones", "deep green center stone", "blue accent stones", or similar wording only when visually supported.
+- If the user provided stone type metadata, combine it with the visible color/tone when useful.
+- If the photo shows a center stone or main stone, mention its visible color/tone when it is reasonably clear.
+- If stones are very small, unclear, colorless, or hard to judge from the photo, use cautious language such as "clear-looking stones" or omit the color note.
+- Do not assign formal diamond color grades such as D, E, F, G, H, I, or fancy-color grading unless the user explicitly provided that grade.
+- Do not assert that stones are natural diamonds, lab diamonds, or genuine gemstones unless the structured metadata says so.
+- Do not overstate color if lighting, reflection, or image quality makes the color uncertain.
 
 Important truthfulness rules:
 - Do not invent brand names
 - Do not invent designer associations
 - Do not invent provenance, rarity, or exclusivity
 - Do not assert gemstone authenticity unless explicitly provided
+- Do not assign formal diamond color grades from the image
 - Do not invent metal or purity if not provided
 - Do not invent dimensions if not known
 - Do not invent stone type if not provided
@@ -357,6 +370,7 @@ Use the image mainly to determine:
 - structure
 - finish
 - setting/look
+- visible stone or diamond color/tone when prominent enough to assess
 - overall aesthetic presence
 
 If the image clearly shows a specific item type, prefer that over vague wording.

@@ -664,6 +664,27 @@
 
   <div id="toast-container" class="toast-container"></div>
 
+  <div id="item-save-success-modal" class="modal hidden item-save-success-modal" aria-hidden="true">
+    <div class="item-save-success-dialog" role="dialog" aria-modal="true" aria-labelledby="item-save-success-title">
+      <div class="item-save-success-mark" aria-hidden="true">OK</div>
+      <p class="modal-kicker">Item Created</p>
+      <h2 id="item-save-success-title" class="item-save-success-title">Item saved successfully</h2>
+      <p id="item-save-success-copy" class="item-save-success-copy">
+        The item, label, photos, and stock details were saved successfully. Preparing a fresh add-item page now.
+      </p>
+      <div class="item-save-success-summary" aria-live="polite">
+        <span id="item-save-success-name">New item</span>
+        <span id="item-save-success-barcode">Barcode ready</span>
+      </div>
+      <div class="item-save-success-progress" aria-hidden="true">
+        <span></span>
+      </div>
+      <button type="button" id="item-save-success-continue" class="add-button">
+        Start Next Item
+      </button>
+    </div>
+  </div>
+
   <div id="assisted-image-editor-modal" class="modal hidden assisted-editor-modal" aria-hidden="true">
     <div class="assisted-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="assisted-editor-title">
       <div class="assisted-editor-header">
