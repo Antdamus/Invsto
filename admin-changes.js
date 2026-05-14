@@ -4,6 +4,7 @@
     employees: [],
     stores: [],
     events: [],
+    photoUrlCache: new Map(),
   };
 
   const qs = (id) => document.getElementById(id);
@@ -72,6 +73,11 @@
       max_capacity: "Max capacity",
       notes: "Notes",
       reason: "Reason",
+      photo_path: "Photo",
+      quarantine_path: "Quarantine copy",
+      restored_at: "Restored",
+      deleted_by_email: "Deleted by",
+      restored_by_email: "Restored by",
       record: "Record",
     };
     return names[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
@@ -79,7 +85,12 @@
 
   function compactValue(value) {
     if (value === null || value === undefined || value === "") return "-";
-    if (Array.isArray(value)) return value.length ? value.join(", ") : "-";
+    if (Array.isArray(value)) {
+      if (value.length && value.every(isPhotoPath)) {
+        return `${value.length} photo${value.length === 1 ? "" : "s"}`;
+      }
+      return value.length ? value.join(", ") : "-";
+    }
     if (typeof value === "boolean") return value ? "Yes" : "No";
     if (typeof value === "object") {
       if (value.location_name) return value.location_name;
@@ -89,6 +100,66 @@
       return "Snapshot";
     }
     return String(value);
+  }
+
+  function isPhotoPath(value) {
+    return typeof value === "string"
+      && /(^item_photos\/|^photos\/|^deleted-item-photos\/|\/PHOTO-|\.jpe?g$|\.png$|\.webp$)/i.test(value);
+  }
+
+  function toPhotoList(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(isPhotoPath);
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.filter(isPhotoPath);
+      } catch (_) {}
+      return isPhotoPath(trimmed) ? [trimmed] : [];
+    }
+    return [];
+  }
+
+  function diffPhotoLists(fromValue, toValue) {
+    const from = toPhotoList(fromValue);
+    const to = toPhotoList(toValue);
+    const fromSet = new Set(from);
+    const toSet = new Set(to);
+    return {
+      from,
+      to,
+      added: to.filter((path) => !fromSet.has(path)),
+      removed: from.filter((path) => !toSet.has(path)),
+    };
+  }
+
+  function photoGroupsFromFields(fields, fallbackLabel = "Photos") {
+    const groups = [];
+    (fields || []).forEach((field) => {
+      if (field.field !== "photos" && field.field !== "photo_path") return;
+      const diff = diffPhotoLists(field.from, field.to);
+      if (diff.added.length) {
+        groups.push({
+          label: field.field === "photo_path" ? fallbackLabel : "Added photos",
+          bucket: "photos",
+          paths: diff.added,
+        });
+      }
+      if (diff.removed.length) {
+        groups.push({
+          label: field.field === "photo_path" ? fallbackLabel : "Removed photos",
+          bucket: "photos",
+          paths: diff.removed,
+        });
+      }
+    });
+    return groups;
+  }
+
+  function fileNameFromPath(path) {
+    return String(path || "").split("/").pop() || "Photo";
   }
 
   function normalizeEmployee(row) {
@@ -124,13 +195,18 @@
     if (row.reason) {
       fields.push({ field: "reason", from: "-", to: row.reason });
     }
+    const isCurrentlyReverted = row.revert_direction === "revert";
     return {
       id: `inventory-${row.id}`,
+      changeLogId: row.id,
       source: "inventory_change_log",
       category: "inventory_edit",
       label: row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
       title: row.summary || "Inventory edit",
       at: row.changed_at,
+      action: row.action || "",
+      tableName: row.table_name || "",
+      recordId: row.record_id || "",
       workerId: row.worker_id || row.signed_by || "",
       workerEmail: row.worker_email || "",
       workerName: workerLabel(row.worker_id || row.signed_by, row.worker_email || row.signed_by_email),
@@ -142,8 +218,15 @@
       locationId: row.location_id || "",
       locationName: row.location_name || "",
       fields,
+      photoVisuals: photoGroupsFromFields(fields),
       reason: row.reason || "",
       signedByEmail: row.signed_by_email || "",
+      revertDirection: row.revert_direction || "",
+      revertedAt: row.reverted_at || "",
+      revertedByEmail: row.reverted_by_email || "",
+      revertCount: Number(row.revert_count || 0),
+      isCurrentlyReverted,
+      reversible: row.action === "update",
       needsReview: row.action === "delete",
       searchText: "",
     };
@@ -183,13 +266,19 @@
   }
 
   function mapPhotoEvent(row) {
-    const needsReview = row.status !== "completed" || row.storage_error || row.storage_removed === false;
+    const restored = row.revert_direction === "revert" || row.status === "restored";
+    const needsReview = !restored && (row.status !== "completed" || row.storage_error || row.storage_removed === false);
+    const deletedAt = formatDateTime(row.deleted_at);
+    const restoredAt = formatDateTime(row.restored_at);
+    const visualPath = row.quarantine_path || row.photo_path || "";
+    const visualBucket = row.quarantine_path ? (row.quarantine_bucket || "photo-quarantine") : "photos";
     return {
       id: `photo-${row.id}`,
+      logId: row.id,
       source: "photo_deletion_log",
       category: "photo_event",
-      label: "Photo",
-      title: "Removed item photo",
+      label: restored ? "Restored" : "Photo",
+      title: restored ? "Restored item photo" : "Removed item photo",
       at: row.deleted_at,
       workerId: row.deleted_by || "",
       workerEmail: row.deleted_by_email || "",
@@ -202,13 +291,74 @@
       locationId: "",
       locationName: "",
       fields: [
-        { field: "photo_path", from: row.photo_path || "-", to: "Removed" },
+        { field: "photo_path", from: row.photo_path || "-", to: restored ? row.photo_path || "-" : "-" },
         { field: "status", from: "-", to: row.status || "-" },
+        { field: "quarantine_path", from: "-", to: row.quarantine_path || "Not quarantined" },
+        ...(row.restored_at ? [{ field: "restored_at", from: deletedAt, to: restoredAt }] : []),
+        ...(row.restored_at ? [{ field: "deleted_by_email", from: "-", to: row.deleted_by_email || "-" }] : []),
+        ...(row.restored_at ? [{ field: "restored_by_email", from: "-", to: row.restored_by_email || "-" }] : []),
         { field: "reason", from: "-", to: row.reason || "-" },
       ],
+      photoPath: row.photo_path || "",
+      quarantineBucket: row.quarantine_bucket || "",
+      quarantinePath: row.quarantine_path || "",
+      photoVisuals: visualPath ? [{
+        label: restored ? "Recoverable photo" : "Deleted photo",
+        bucket: visualBucket,
+        paths: [visualPath],
+        originalPath: row.photo_path || "",
+      }] : [],
+      restoredAt: row.restored_at || "",
+      status: row.status || "",
+      revertDirection: row.revert_direction || "",
+      revertedAt: row.reverted_at || "",
+      revertedByEmail: row.reverted_by_email || "",
+      revertCount: Number(row.revert_count || 0),
+      isCurrentlyReverted: restored,
+      reversible: Boolean(row.photo_path && (row.quarantine_path || restored)),
       needsReview: !!needsReview,
       searchText: "",
     };
+  }
+
+  function canRevertChangeEvent(event) {
+    if (event.category === "inventory_edit") {
+      return event.reversible && event.changeLogId && event.action === "update";
+    }
+    if (event.category === "photo_event") {
+      if (!event.reversible || !event.logId || !event.photoPath) return false;
+      if (event.isCurrentlyReverted) return true;
+      return Boolean(event.quarantinePath);
+    }
+    return false;
+  }
+
+  function renderChangeActions(event) {
+    const notes = [];
+    if (event.revertCount) {
+      notes.push(`
+        <span class="change-restore-note">
+          ${event.isCurrentlyReverted ? "Currently reverted" : "Reapplied"}${event.revertedByEmail ? ` by ${escapeHtml(event.revertedByEmail)}` : ""}${event.revertedAt ? ` - ${escapeHtml(formatDateTime(event.revertedAt))}` : ""}
+        </span>
+      `);
+    }
+
+    if (canRevertChangeEvent(event)) {
+      const label = event.isCurrentlyReverted ? "Reapply Change" : "Revert Change";
+      notes.push(`
+        <button type="button" class="change-action-btn revert-change-btn" data-revert-event-id="${escapeHtml(event.id)}">
+          ${escapeHtml(label)}
+        </button>
+      `);
+    } else if (event.category === "photo_event" && !event.quarantinePath && !event.isCurrentlyReverted) {
+      notes.push(`<span class="change-restore-note muted">No recovery copy available</span>`);
+    }
+
+    if (notes.length) {
+      return `<div class="change-actions">${notes.join("")}</div>`;
+    }
+
+    return "";
   }
 
   function mapTrayEvent(row) {
@@ -238,6 +388,35 @@
         { field: "result", from: "-", to: row.result || "-" },
       ],
       needsReview: row.result && row.result !== "ok",
+      searchText: "",
+    };
+  }
+
+  function mapReversionEvent(row) {
+    const fields = changedFieldEntries(row.changed_fields);
+    const direction = row.direction || "revert";
+    return {
+      id: `reversion-${row.id}`,
+      reversionId: row.id,
+      source: "change_reversion_log",
+      category: "revert_event",
+      label: direction === "reapply" ? "Reapplied" : "Reverted",
+      title: direction === "reapply" ? "Reapplied audited change" : "Reverted audited change",
+      at: row.performed_at,
+      workerId: row.performed_by || "",
+      workerEmail: row.performed_by_email || "",
+      workerName: workerLabel(row.performed_by, row.performed_by_email),
+      storeId: row.store_id || "",
+      storeName: storeLabel(row.store_id, row.store_name),
+      itemId: row.item_id || "",
+      itemTitle: row.item_title || "",
+      barcode: row.item_barcode || "",
+      locationId: row.location_id || "",
+      locationName: row.location_name || "",
+      fields: row.reason ? [...fields, { field: "reason", from: "-", to: row.reason }] : fields,
+      photoVisuals: photoGroupsFromFields(fields, direction === "reapply" ? "Reapplied photo" : "Restored photo"),
+      reason: row.reason || "",
+      needsReview: false,
       searchText: "",
     };
   }
@@ -294,7 +473,7 @@
 
     if (status) status.textContent = "Loading change history...";
 
-    const [inventoryChanges, stockEvents, photoEvents, trayEvents] = await Promise.all([
+    const [inventoryChanges, stockEvents, photoEvents, trayEvents, reversionEvents] = await Promise.all([
       selectOrEmpty(
         client.from("inventory_change_log")
           .select("*")
@@ -316,8 +495,7 @@
       selectOrEmpty(
         client.from("photo_deletion_log")
           .select("*")
-          .gte("deleted_at", fromIso)
-          .lte("deleted_at", toIso)
+          .or(`and(deleted_at.gte.${fromIso},deleted_at.lte.${toIso}),and(restored_at.gte.${fromIso},restored_at.lte.${toIso})`)
           .order("deleted_at", { ascending: false })
           .limit(200),
         "photo deletion log"
@@ -331,13 +509,23 @@
           .limit(250),
         "tray movements"
       ),
+      selectOrEmpty(
+        client.from("change_reversion_log")
+          .select("*")
+          .gte("performed_at", fromIso)
+          .lte("performed_at", toIso)
+          .order("performed_at", { ascending: false })
+          .limit(250),
+        "change reversions"
+      ),
     ]);
 
     state.events = [
-      ...inventoryChanges.map(mapInventoryChange),
+      ...inventoryChanges.filter((row) => row.verified_method !== "admin_revert").map(mapInventoryChange),
       ...stockEvents.map(mapStockEvent),
       ...photoEvents.map(mapPhotoEvent),
       ...trayEvents.map(mapTrayEvent),
+      ...reversionEvents.map(mapReversionEvent),
     ].map((event) => {
       const parts = [
         event.title,
@@ -390,8 +578,11 @@
     if (!fields.length) return `<div class="change-field muted">No field details available.</div>`;
 
     return fields.slice(0, 10).map((field) => {
-      const from = compactValue(field.from);
-      const to = compactValue(field.to);
+      const photoDiff = field.field === "photos" || field.field === "photo_path"
+        ? diffPhotoLists(field.from, field.to)
+        : null;
+      const from = photoDiff ? `${photoDiff.from.length} photo${photoDiff.from.length === 1 ? "" : "s"}` : compactValue(field.from);
+      const to = photoDiff ? `${photoDiff.to.length} photo${photoDiff.to.length === 1 ? "" : "s"}` : compactValue(field.to);
       return `
         <div class="change-field">
           <span class="change-field-name">${escapeHtml(formatFieldName(field.field))}</span>
@@ -403,12 +594,144 @@
     }).join("");
   }
 
+  function renderPhotoVisuals(groups = []) {
+    const visibleGroups = groups
+      .map((group) => ({
+        ...group,
+        paths: (group.paths || []).filter(Boolean),
+      }))
+      .filter((group) => group.paths.length);
+
+    if (!visibleGroups.length) return "";
+
+    return `
+      <div class="change-photo-panel">
+        ${visibleGroups.map((group) => `
+          <div class="change-photo-group">
+            <span>${escapeHtml(group.label || "Photos")}</span>
+            <div class="change-photo-strip">
+              ${group.paths.slice(0, 8).map((path) => `
+                <figure class="change-photo-thumb" title="Open full photo">
+                  <img alt="${escapeHtml(fileNameFromPath(group.originalPath || path))}"
+                    data-change-photo-bucket="${escapeHtml(group.bucket || "photos")}"
+                    data-change-photo-path="${escapeHtml(path)}"
+                    data-change-photo-name="${escapeHtml(fileNameFromPath(group.originalPath || path))}">
+                  <figcaption>${escapeHtml(fileNameFromPath(group.originalPath || path))}</figcaption>
+                </figure>
+              `).join("")}
+              ${group.paths.length > 8 ? `<span class="change-photo-more">+${group.paths.length - 8}</span>` : ""}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  async function signedPhotoUrl(bucket, path) {
+    const key = `${bucket}:${path}`;
+    if (state.photoUrlCache.has(key)) return state.photoUrlCache.get(key);
+
+    const { data, error } = await sb().storage.from(bucket).createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
+      throw error || new Error("Signed photo URL was not returned.");
+    }
+
+    state.photoUrlCache.set(key, data.signedUrl);
+    return data.signedUrl;
+  }
+
+  function ensureChangePhotoViewer() {
+    let viewer = qs("changePhotoViewer");
+    if (viewer) return viewer;
+
+    document.body.insertAdjacentHTML("beforeend", `
+      <div id="changePhotoViewer" class="change-photo-viewer hidden" role="dialog" aria-modal="true" aria-label="Photo preview">
+        <button type="button" class="change-photo-viewer-backdrop" data-close-change-photo-viewer aria-label="Close photo preview"></button>
+        <div class="change-photo-viewer-card">
+          <div class="change-photo-viewer-head">
+            <div>
+              <span>Photo Preview</span>
+              <strong id="changePhotoViewerTitle">Selected photo</strong>
+            </div>
+            <button type="button" class="change-photo-viewer-close" data-close-change-photo-viewer aria-label="Close photo preview">Close</button>
+          </div>
+          <div class="change-photo-viewer-stage">
+            <img id="changePhotoViewerImg" alt="Selected audit photo">
+          </div>
+        </div>
+      </div>
+    `);
+
+    viewer = qs("changePhotoViewer");
+    viewer?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-change-photo-viewer]")) {
+        closeChangePhotoViewer();
+      }
+    });
+    return viewer;
+  }
+
+  function closeChangePhotoViewer() {
+    const viewer = qs("changePhotoViewer");
+    if (!viewer) return;
+    viewer.classList.add("hidden");
+    viewer.classList.remove("show");
+    document.body.classList.remove("change-photo-viewer-open");
+  }
+
+  async function openChangePhotoViewer(img) {
+    const path = img?.dataset?.changePhotoPath || "";
+    if (!path) return;
+
+    const viewer = ensureChangePhotoViewer();
+    const title = qs("changePhotoViewerTitle");
+    const preview = qs("changePhotoViewerImg");
+    const bucket = img.dataset.changePhotoBucket || "photos";
+    const name = img.dataset.changePhotoName || fileNameFromPath(path);
+
+    if (title) title.textContent = name;
+    if (preview) {
+      preview.removeAttribute("src");
+      preview.alt = name;
+    }
+
+    viewer?.classList.remove("hidden");
+    viewer?.classList.add("show");
+    document.body.classList.add("change-photo-viewer-open");
+
+    try {
+      const url = img.dataset.loaded === "true" && img.src ? img.src : await signedPhotoUrl(bucket, path);
+      if (preview) preview.src = url;
+    } catch (error) {
+      console.warn("Could not open change photo preview", error);
+      window.alert("Could not open this photo preview.");
+      closeChangePhotoViewer();
+    }
+  }
+
+  async function hydrateChangePhotos() {
+    const images = Array.from(document.querySelectorAll("img[data-change-photo-path]"));
+    await Promise.all(images.map(async (img) => {
+      const bucket = img.dataset.changePhotoBucket || "photos";
+      const path = img.dataset.changePhotoPath || "";
+      if (!path || img.dataset.loaded === "true") return;
+
+      try {
+        img.src = await signedPhotoUrl(bucket, path);
+        img.dataset.loaded = "true";
+      } catch (error) {
+        console.warn("Could not load change photo preview", error);
+        img.closest(".change-photo-thumb")?.classList.add("is-missing");
+      }
+    }));
+  }
+
   function renderChangeCard(event) {
     const itemLine = [
       event.itemTitle,
       event.barcode ? `Barcode ${event.barcode}` : "",
       event.locationName ? `Location ${event.locationName}` : "",
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(" - ");
 
     return `
       <article class="change-card${event.needsReview ? " needs-review" : ""}">
@@ -429,11 +752,112 @@
           <div><span>Source</span><strong>${escapeHtml(event.source.replaceAll("_", " "))}</strong></div>
           <div><span>Record</span><strong>${escapeHtml(event.itemTitle || event.locationName || event.itemId || event.locationId || "-")}</strong></div>
         </div>
+        ${renderPhotoVisuals(event.photoVisuals)}
         <div class="change-fields">
           ${renderFieldRows(event.fields)}
         </div>
+        ${renderChangeActions(event)}
       </article>
     `;
+  }
+
+  async function currentAdminEmail(client) {
+    const { data } = await client.auth.getUser();
+    return data?.user?.email || "";
+  }
+
+  async function copyQuarantinedPhotoToVisibleBucket(event) {
+    if (!event.quarantinePath) {
+      throw new Error("This deletion does not have a quarantined recovery copy.");
+    }
+
+    const client = sb();
+    const quarantineBucket = event.quarantineBucket || "photo-quarantine";
+    const { data: signed, error: signedError } = await client.storage
+      .from(quarantineBucket)
+      .createSignedUrl(event.quarantinePath, 300);
+    if (signedError) throw signedError;
+
+    const response = await fetch(signed?.signedUrl);
+    if (!response?.ok) {
+      throw new Error(`Could not read quarantined image (${response?.status || "network error"}).`);
+    }
+
+    const blob = await response.blob();
+    const { error: uploadError } = await client.storage
+      .from("photos")
+      .upload(event.photoPath, blob, {
+        upsert: false,
+        contentType: blob.type || "application/octet-stream",
+      });
+    const alreadyRestored = uploadError && (
+      String(uploadError.statusCode || "") === "409"
+      || /exists|duplicate/i.test(uploadError.message || "")
+    );
+    if (uploadError && !alreadyRestored) throw uploadError;
+  }
+
+  async function removeVisiblePhotoStorage(path) {
+    if (!path) return;
+    const { error } = await sb().storage.from("photos").remove([path]);
+    if (error && !/not found|does not exist/i.test(error.message || "")) {
+      console.warn("Visible photo storage cleanup failed", error);
+    }
+  }
+
+  async function performRevertChange(eventId, button) {
+    const event = state.events.find((entry) => entry.id === eventId);
+    if (!event || !canRevertChangeEvent(event)) return;
+
+    const direction = event.isCurrentlyReverted ? "reapply" : "revert";
+    const verb = direction === "reapply" ? "reapply" : "revert";
+    const itemName = event.itemTitle || event.locationName || "this record";
+    if (!window.confirm(`Are you sure you want to ${verb} this change for ${itemName}?`)) return;
+
+    const client = sb();
+    const originalText = button?.textContent || (direction === "reapply" ? "Reapply Change" : "Revert Change");
+    if (button) {
+      button.disabled = true;
+      button.textContent = direction === "reapply" ? "Reapplying..." : "Reverting...";
+    }
+
+    try {
+      const adminEmail = await currentAdminEmail(client);
+
+      if (event.category === "photo_event" && direction === "revert") {
+        await copyQuarantinedPhotoToVisibleBucket(event);
+      }
+
+      if (event.category === "inventory_edit") {
+        const { error } = await client.rpc("revert_inventory_change", {
+          _change_id: event.changeLogId,
+          _direction: direction,
+          _admin_email: adminEmail || null,
+        });
+        if (error) throw error;
+      } else if (event.category === "photo_event") {
+        const { error } = await client.rpc("revert_photo_deletion_change", {
+          _log_id: event.logId,
+          _direction: direction,
+          _admin_email: adminEmail || null,
+        });
+        if (error) throw error;
+
+        if (direction === "reapply") {
+          await removeVisiblePhotoStorage(event.photoPath);
+        }
+      }
+
+      await loadEvents();
+    } catch (error) {
+      console.error("Change revert failed", error);
+      window.alert(`Could not ${verb} this change: ${error?.message || "Unknown error"}`);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
   }
 
   function renderChanges() {
@@ -462,6 +886,7 @@
     }
 
     timeline.innerHTML = events.map(renderChangeCard).join("");
+    hydrateChangePhotos();
   }
 
   function bindEvents() {
@@ -477,6 +902,22 @@
 
     ["changesDateFrom", "changesDateTo"].forEach((id) => {
       qs(id)?.addEventListener("change", loadEvents);
+    });
+
+    qs("changesTimeline")?.addEventListener("click", async (event) => {
+      const photo = event.target.closest("img[data-change-photo-path]");
+      if (photo) {
+        await openChangePhotoViewer(photo);
+        return;
+      }
+
+      const button = event.target.closest("[data-revert-event-id]");
+      if (!button) return;
+      await performRevertChange(button.dataset.revertEventId, button);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeChangePhotoViewer();
     });
   }
 

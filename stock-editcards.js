@@ -5,6 +5,7 @@ window.editCardModule = (function () {
     let deletedPhotos = new Set();
     let currentItemSnapshot = null;
     let activePhotoDeleteRequest = null;
+    let pendingEditSignature = null;
 
     function canViewSensitiveStockFields() {
         return Boolean(window.stockAccess?.canViewSensitive);
@@ -362,15 +363,7 @@ window.editCardModule = (function () {
     currentItemId = null;
     currentItemSnapshot = null;
     originalWeight = null;
-    const passwordInput = document.getElementById("edit-change-password");
-    const reasonInput = document.getElementById("edit-change-reason");
-    const editError = document.getElementById("edit-change-error");
-    if (passwordInput) passwordInput.value = "";
-    if (reasonInput) reasonInput.value = "";
-    if (editError) {
-        editError.textContent = "";
-        editError.classList.remove("show");
-    }
+        closeEditSignatureConfirmModal();
     }
 
     // 🔹 Save changes: update Supabase, handle DYMO & photos, refresh card
@@ -404,6 +397,45 @@ window.editCardModule = (function () {
         return null;
     }
 
+    function buildPhotoQuarantinePath(itemId, auditId, originalPath) {
+        const fileName = String(originalPath || "photo")
+            .split("/")
+            .pop()
+            .replace(/[^a-z0-9._-]/gi, "_")
+            .slice(0, 120) || "photo";
+        return `deleted-item-photos/${itemId}/${auditId}/${Date.now()}-${fileName}`;
+    }
+
+    async function quarantinePhotoBeforeRemoval(item, photoPath, auditId) {
+        const signedUrl = await getSignedUrl(photoPath);
+        if (!signedUrl) {
+            throw new Error("Could not create a signed URL for the original photo.");
+        }
+
+        const response = await fetch(signedUrl);
+        if (!response.ok) {
+            throw new Error(`Could not download the original photo for quarantine (${response.status}).`);
+        }
+
+        const blob = await response.blob();
+        const quarantinePath = buildPhotoQuarantinePath(item.id, auditId, photoPath);
+        const { error } = await supabase.storage
+            .from("photo-quarantine")
+            .upload(quarantinePath, blob, {
+                upsert: false,
+                contentType: blob.type || "application/octet-stream",
+            });
+
+        if (error) {
+            throw new Error(error.message || "Could not quarantine the photo before deletion.");
+        }
+
+        return {
+            bucket: "photo-quarantine",
+            path: quarantinePath,
+        };
+    }
+
     function closePhotoDeleteConfirmModal() {
         document.getElementById("photo-delete-confirm-modal")?.classList.add("hidden");
         document.getElementById("photo-delete-confirm-modal")?.classList.remove("show");
@@ -417,6 +449,48 @@ window.editCardModule = (function () {
             errorMsg.classList.remove("show");
         }
         activePhotoDeleteRequest = null;
+    }
+
+    function setEditSignatureError(message) {
+        const editError = document.getElementById("edit-change-error");
+        if (!editError) {
+            if (message) alert(message);
+            return;
+        }
+        editError.textContent = message || "";
+        editError.classList.toggle("show", Boolean(message));
+    }
+
+    function openEditSignatureConfirmModal() {
+        const modal = document.getElementById("edit-signature-confirm-modal");
+        const passwordInput = document.getElementById("edit-change-password");
+        const reasonInput = document.getElementById("edit-change-reason");
+        if (!modal) return;
+
+        if (passwordInput) passwordInput.value = "";
+        if (reasonInput) reasonInput.value = "";
+        setEditSignatureError("");
+        modal.classList.remove("hidden");
+        modal.classList.add("show");
+        passwordInput?.focus();
+    }
+
+    function closeEditSignatureConfirmModal() {
+        const modal = document.getElementById("edit-signature-confirm-modal");
+        modal?.classList.add("hidden");
+        modal?.classList.remove("show");
+        pendingEditSignature = null;
+        setEditSignatureError("");
+    }
+
+    function confirmEditSignatureAndSubmit() {
+        const password = document.getElementById("edit-change-password")?.value?.trim() || "";
+        const reason = document.getElementById("edit-change-reason")?.value?.trim() || "";
+        if (!password) return setEditSignatureError("Enter your password to sign this edit.");
+        if (reason.length < 3) return setEditSignatureError("Add a brief reason for the change.");
+
+        pendingEditSignature = { password, reason };
+        document.getElementById("edit-item-form")?.requestSubmit();
     }
 
     function openPhotoDeleteConfirmModal(path, thumbElement) {
@@ -517,6 +591,14 @@ window.editCardModule = (function () {
                 throw new Error(auditError?.message || "Could not create the photo deletion audit trail.");
             }
 
+            const quarantine = await quarantinePhotoBeforeRemoval(item, request.photoPath, auditRow.id);
+            await supabase.from("photo_deletion_log").update({
+                status: "quarantined",
+                quarantine_bucket: quarantine.bucket,
+                quarantine_path: quarantine.path,
+                quarantined_at: new Date().toISOString(),
+            }).eq("id", auditRow.id);
+
             const updateResult = canViewSensitiveStockFields()
                 ? await supabase
                     .from("item_types")
@@ -550,11 +632,21 @@ window.editCardModule = (function () {
             await bumpInventoryVersion();
             await refreshItemById(item.id);
             showToast(storageError
-                ? "Photo removed from item, but storage cleanup needs review."
-                : "Photo removed and audit trail saved.");
+                ? "Photo hidden and quarantined, but original storage cleanup needs review."
+                : "Photo hidden, quarantined, and audit trail saved.");
             closePhotoDeleteConfirmModal();
         } catch (error) {
             console.error("Photo deletion failed:", error);
+            if (activePhotoDeleteRequest?.itemId && activePhotoDeleteRequest?.photoPath) {
+                try {
+                    await supabase.from("photo_deletion_log").update({
+                        status: "failed",
+                        storage_error: error?.message || "Photo deletion failed",
+                    }).eq("item_id", activePhotoDeleteRequest.itemId)
+                      .eq("photo_path", activePhotoDeleteRequest.photoPath)
+                      .eq("status", "requested");
+                } catch (_) {}
+            }
             if (errorMsg) {
                 errorMsg.textContent = error?.message || "Could not remove the photo.";
                 errorMsg.classList.add("show");
@@ -581,27 +673,34 @@ window.editCardModule = (function () {
         const pricePerWeight = parseFloat(document.getElementById("edit-price-per-weight").value) || 0;
         const stockBatch = parseInt(document.getElementById("edit-stock-batch").value, 10) || 0;
         const photosInput = document.getElementById("edit-photos");
-        const password = document.getElementById("edit-change-password")?.value?.trim() || "";
-        const reason = document.getElementById("edit-change-reason")?.value?.trim() || "";
-        const editError = document.getElementById("edit-change-error");
+        const signature = pendingEditSignature;
+        pendingEditSignature = null;
+        const password = signature?.password || "";
+        const reason = signature?.reason || "";
         const submitBtn = document.querySelector("#edit-item-form .save-edit-btn");
-        const setEditError = (message) => {
-            if (!editError) {
-                if (message) alert(message);
-                return;
-            }
-            editError.textContent = message || "";
-            editError.classList.toggle("show", Boolean(message));
-        };
+        const confirmSignatureBtn = document.getElementById("confirm-edit-signature");
 
-        setEditError("");
-        if (!title) return setEditError("Title is required.");
-        if (!password) return setEditError("Enter your password to sign this edit.");
-        if (reason.length < 3) return setEditError("Add a brief reason for the change.");
+        setEditSignatureError("");
+        if (!title) {
+            alert("Title is required.");
+            return;
+        }
+
+        if (!signature) {
+            openEditSignatureConfirmModal();
+            return;
+        }
+
+        if (!password) return setEditSignatureError("Enter your password to sign this edit.");
+        if (reason.length < 3) return setEditSignatureError("Add a brief reason for the change.");
 
         if (submitBtn) {
             submitBtn.disabled = true;
             submitBtn.textContent = "Verifying signature...";
+        }
+        if (confirmSignatureBtn) {
+            confirmSignatureBtn.disabled = true;
+            confirmSignatureBtn.textContent = "Verifying...";
         }
 
         const validPassword = await verifyPhotoDeletePassword(password);
@@ -610,7 +709,11 @@ window.editCardModule = (function () {
                 submitBtn.disabled = false;
                 submitBtn.textContent = "Save Signed Change";
             }
-            return setEditError("Incorrect password. Please try again.");
+            if (confirmSignatureBtn) {
+                confirmSignatureBtn.disabled = false;
+                confirmSignatureBtn.textContent = "Sign and Save";
+            }
+            return setEditSignatureError("Incorrect password. Please try again.");
         }
         if (submitBtn) submitBtn.textContent = "Saving audited change...";
 
@@ -623,10 +726,14 @@ window.editCardModule = (function () {
 
         if (fetchError || !items || items.length === 0) {
             console.error("❌ Failed to fetch item before saving:", fetchError);
-            setEditError("Failed to fetch current item data. Please try again.");
+            setEditSignatureError("Failed to fetch current item data. Please try again.");
             if (submitBtn) {
                 submitBtn.disabled = false;
                 submitBtn.textContent = "Save Signed Change";
+            }
+            if (confirmSignatureBtn) {
+                confirmSignatureBtn.disabled = false;
+                confirmSignatureBtn.textContent = "Sign and Save";
             }
             return;
         }
@@ -657,10 +764,14 @@ window.editCardModule = (function () {
 
             if (uploadError) {
                 console.error("Error uploading new DYMO label:", uploadError);
-                setEditError("Failed to update DYMO label. Please try again.");
+                setEditSignatureError("Failed to update DYMO label. Please try again.");
                 if (submitBtn) {
                     submitBtn.disabled = false;
                     submitBtn.textContent = "Save Signed Change";
+                }
+                if (confirmSignatureBtn) {
+                    confirmSignatureBtn.disabled = false;
+                    confirmSignatureBtn.textContent = "Sign and Save";
                 }
                 return;
             }
@@ -678,7 +789,7 @@ window.editCardModule = (function () {
         const updatedPhotos = existingItem.photos || [];
         for (const path of deletedPhotos) {
             console.log(`🗑️ Deleting removed photo: ${path}`);
-            await supabase.storage.from("photos").remove([path]);
+            console.log(`Keeping removed photo file for recovery: ${path}`);
         }
         deletedPhotos.clear();
 
@@ -706,7 +817,7 @@ window.editCardModule = (function () {
         );
         for (const oldPath of photosToRemove) {
         console.log(`🗑️ Deleting replaced photo: ${oldPath}`);
-        await supabase.storage.from("photos").remove([oldPath]);
+        console.log(`Keeping removed photo file for recovery: ${oldPath}`);
         }
 
         const updates = {
@@ -732,10 +843,14 @@ window.editCardModule = (function () {
 
         if (error) {
             console.error("Error updating item:", error);
-            setEditError(error.message || "Failed to update item. Please try again.");
+            setEditSignatureError(error.message || "Failed to update item. Please try again.");
             if (submitBtn) {
                 submitBtn.disabled = false;
                 submitBtn.textContent = "Save Signed Change";
+            }
+            if (confirmSignatureBtn) {
+                confirmSignatureBtn.disabled = false;
+                confirmSignatureBtn.textContent = "Sign and Save";
             }
             return;
         }
@@ -744,10 +859,15 @@ window.editCardModule = (function () {
         await refreshItemById(currentItemId);
         showToast("Item updated and signed audit trail saved.");
 
+        closeEditSignatureConfirmModal();
         closeEditModal();
         if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.textContent = "Save Signed Change";
+        }
+        if (confirmSignatureBtn) {
+            confirmSignatureBtn.disabled = false;
+            confirmSignatureBtn.textContent = "Sign and Save";
         }
     }
 
@@ -756,10 +876,13 @@ window.editCardModule = (function () {
         document.getElementById("closeEditModal")?.addEventListener("click", closeEditModal);
         document.getElementById("cancelEditModal")?.addEventListener("click", closeEditModal);
         document.getElementById("edit-item-form")?.addEventListener("submit", saveItemChanges);
+        document.getElementById("close-edit-signature-confirm")?.addEventListener("click", closeEditSignatureConfirmModal);
+        document.getElementById("cancel-edit-signature-confirm")?.addEventListener("click", closeEditSignatureConfirmModal);
+        document.getElementById("confirm-edit-signature")?.addEventListener("click", confirmEditSignatureAndSubmit);
         document.getElementById("edit-change-password")?.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
                 event.preventDefault();
-                document.getElementById("edit-item-form")?.requestSubmit();
+                confirmEditSignatureAndSubmit();
             }
         });
 

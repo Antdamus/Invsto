@@ -595,13 +595,8 @@
           <input type="number" id="edit-stock-batch" name="stock_batch" step="1" min="0">
 
           <section class="stock-edit-certification">
-            <h3>Signature</h3>
-            <p>Your password and reason certify why this correction was made.</p>
-            <label for="edit-change-password">Your Password:</label>
-            <input type="password" id="edit-change-password" autocomplete="current-password" placeholder="Sign this edit">
-            <label for="edit-change-reason">Reason for Change:</label>
-            <textarea id="edit-change-reason" rows="3" placeholder="Briefly explain what was corrected"></textarea>
-            <p id="edit-change-error" class="error-message"></p>
+            <h3>Signature required</h3>
+            <p>Click save when the correction looks right. The system will then ask for your password and a brief reason before anything is changed.</p>
           </section>
 
           <div class="photos-section-wrapper">
@@ -612,7 +607,7 @@
             </div>
           </div>
 
-          <button type="submit" class="save-edit-btn">💾 Save Changes</button>
+          <button type="submit" class="save-edit-btn">Save Signed Change</button>
         </div>
       </form>
     </div>
@@ -620,6 +615,23 @@
 
   <!-- 🔄 Modal: Transfer Stock Between Locations -->
   <!-- Full-size stock photo viewer -->
+  <div id="edit-signature-confirm-modal" class="modal hidden">
+    <div class="edit-signature-confirm-content">
+      <button type="button" id="close-edit-signature-confirm" class="stock-modal-close" title="Close">&times;</button>
+      <h3>Sign Item Correction</h3>
+      <p id="edit-signature-confirm-summary">Confirm this correction with your password and a short reason. This will be visible in the admin Changes tracker.</p>
+      <label for="edit-change-password">Your Password</label>
+      <input type="password" id="edit-change-password" autocomplete="current-password" placeholder="Enter your password">
+      <label for="edit-change-reason">Reason for Change</label>
+      <textarea id="edit-change-reason" rows="4" placeholder="Briefly explain what was corrected"></textarea>
+      <p id="edit-change-error" class="error-message"></p>
+      <div class="edit-signature-confirm-actions">
+        <button type="button" id="cancel-edit-signature-confirm" class="stock-secondary-btn">Cancel</button>
+        <button type="button" id="confirm-edit-signature" class="stock-primary-btn">Sign and Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="photo-delete-confirm-modal" class="modal hidden">
     <div class="photo-delete-confirm-content">
       <button type="button" id="close-photo-delete-confirm" class="stock-modal-close" title="Close">&times;</button>

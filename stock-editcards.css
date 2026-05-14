@@ -409,6 +409,10 @@
   z-index: 1300;
 }
 
+#edit-signature-confirm-modal {
+  z-index: 1500;
+}
+
 #editItemModal .stock-edit-modal-content {
   width: min(1040px, calc(100vw - 28px));
   max-width: 1040px;
@@ -543,6 +547,10 @@
   box-shadow: 0 14px 35px rgba(15, 23, 42, 0.06);
 }
 
+#editItemModal .stock-edit-certification {
+  display: block;
+}
+
 #editItemModal .photos-section-wrapper h3,
 #editItemModal .stock-edit-certification h3 {
   margin: 0 0 6px;
@@ -554,6 +562,10 @@
 .stock-edit-certification p {
   margin: 0 0 14px;
   color: #667085;
+}
+
+#editItemModal .stock-edit-certification p {
+  margin: 0;
 }
 
 .stock-edit-actions {
@@ -590,6 +602,83 @@
   font-weight: 800;
 }
 
+.edit-signature-confirm-content {
+  width: min(520px, calc(100vw - 28px));
+  padding: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 22px;
+  background: #fff;
+  color: #101828;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.28);
+  position: relative;
+}
+
+.edit-signature-confirm-content h3 {
+  margin: 0 42px 8px 0;
+  font-size: 1.35rem;
+  color: #101828;
+}
+
+.edit-signature-confirm-content p {
+  margin: 0 0 18px;
+  color: #667085;
+  line-height: 1.45;
+}
+
+.edit-signature-confirm-content label {
+  display: block;
+  margin: 14px 0 7px;
+  color: #344054;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.edit-signature-confirm-content input,
+.edit-signature-confirm-content textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 13px;
+  background: #fff;
+  color: #101828;
+  box-sizing: border-box;
+}
+
+.edit-signature-confirm-content textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.edit-signature-confirm-content input:focus,
+.edit-signature-confirm-content textarea:focus {
+  border-color: rgba(17, 24, 39, 0.5);
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.1);
+  outline: none;
+}
+
+.edit-signature-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.edit-signature-confirm-actions .stock-primary-btn,
+.edit-signature-confirm-actions .stock-secondary-btn {
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 18px;
+}
+
+#edit-signature-confirm-modal #edit-change-error.show {
+  display: block;
+  margin: 10px 0 0;
+  color: #b42318;
+  font-weight: 800;
+}
+
 @media (max-width: 760px) {
   #editItemModal .stock-edit-modal-content {
     width: calc(100vw - 16px);
@@ -617,6 +706,15 @@
 
   #editItemModal .save-edit-btn,
   #editItemModal .stock-secondary-btn {
+    width: 100%;
+  }
+
+  .edit-signature-confirm-actions {
+    flex-direction: column-reverse;
+  }
+
+  .edit-signature-confirm-actions .stock-primary-btn,
+  .edit-signature-confirm-actions .stock-secondary-btn {
     width: 100%;
   }
 }

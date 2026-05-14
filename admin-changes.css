@@ -196,6 +196,11 @@
   color: #9d174d;
 }
 
+.change-badge.revert_event {
+  background: #e0f2fe;
+  color: #075985;
+}
+
 .change-badge.review {
   background: #fff1f2;
   color: #be123c;
@@ -238,6 +243,251 @@
   display: grid;
   gap: 8px;
   padding: 16px 20px 20px;
+}
+
+.change-photo-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px 20px 0;
+}
+
+.change-photo-group {
+  display: grid;
+  gap: 8px;
+}
+
+.change-photo-group > span {
+  color: #344054;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.change-photo-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+}
+
+.change-photo-thumb {
+  flex: 0 0 112px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(16, 24, 40, 0.1);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f8fafc, #ffffff);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+  cursor: zoom-in;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.change-photo-thumb:hover {
+  border-color: rgba(214, 177, 94, 0.45);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+  transform: translateY(-1px);
+}
+
+.change-photo-thumb img {
+  display: block;
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+  background:
+    linear-gradient(45deg, #f2f4f7 25%, transparent 25%),
+    linear-gradient(-45deg, #f2f4f7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f2f4f7 75%),
+    linear-gradient(-45deg, transparent 75%, #f2f4f7 75%);
+  background-color: #fff;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.change-photo-thumb figcaption {
+  overflow: hidden;
+  padding: 7px 8px 8px;
+  color: #475467;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-photo-thumb.is-missing img {
+  background: #fff1f2;
+}
+
+.change-photo-thumb.is-missing figcaption::before {
+  content: "Preview unavailable - ";
+}
+
+.change-photo-more {
+  align-self: center;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 900;
+}
+
+.change-photo-viewer-open {
+  overflow: hidden;
+}
+
+.change-photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.change-photo-viewer.hidden {
+  display: none;
+}
+
+.change-photo-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(2, 6, 23, 0.78);
+  cursor: zoom-out;
+}
+
+.change-photo-viewer-card {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 20px;
+  background: #0b0f17;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+}
+
+.change-photo-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.change-photo-viewer-head span {
+  display: block;
+  color: #d6b15e;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.change-photo-viewer-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #f8fafc;
+  font-size: 0.98rem;
+  line-height: 1.3;
+}
+
+.change-photo-viewer-close {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.change-photo-viewer-stage {
+  display: grid;
+  place-items: center;
+  min-height: 280px;
+  padding: 18px;
+  background:
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.04) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.04) 75%);
+  background-color: #05070b;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
+}
+
+.change-photo-viewer-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(92vh - 104px);
+  object-fit: contain;
+  border-radius: 10px;
+  background: #000;
+}
+
+.change-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+.change-action-btn {
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 1px solid rgba(16, 24, 40, 0.12);
+  border-radius: 999px;
+  background: #101828;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.change-action-btn:hover {
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.24);
+  transform: translateY(-1px);
+}
+
+.change-action-btn:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
+.restore-photo-btn,
+.revert-change-btn {
+  background: linear-gradient(135deg, #101828, #263238);
+}
+
+.change-restore-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgba(2, 122, 72, 0.16);
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #027a48;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.change-restore-note.muted {
+  border-color: rgba(102, 112, 133, 0.18);
+  background: #f2f4f7;
+  color: #667085;
 }
 
 .change-field {
@@ -350,6 +600,10 @@
   .change-field-value {
     white-space: normal;
   }
+
+  .change-actions {
+    padding: 0 20px 20px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -398,6 +652,63 @@
 
   .change-field-value {
     white-space: normal;
+  }
+
+  .change-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 0 14px 16px;
+  }
+
+  .change-action-btn,
+  .change-restore-note {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .change-photo-panel {
+    padding: 14px 14px 0;
+  }
+
+  .change-photo-thumb,
+  .change-photo-thumb img {
+    width: 96px;
+  }
+
+  .change-photo-thumb {
+    flex-basis: 96px;
+  }
+
+  .change-photo-thumb img {
+    height: 96px;
+  }
+
+  .change-photo-viewer {
+    padding: 10px;
+  }
+
+  .change-photo-viewer-card {
+    width: 100%;
+    max-height: 94vh;
+    border-radius: 16px;
+  }
+
+  .change-photo-viewer-head {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .change-photo-viewer-close {
+    width: 100%;
+  }
+
+  .change-photo-viewer-stage {
+    padding: 10px;
+  }
+
+  .change-photo-viewer-stage img {
+    max-height: calc(94vh - 138px);
   }
 
   .change-meta-grid strong {
