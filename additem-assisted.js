@@ -18,6 +18,12 @@
   const LOCAL_UPLOAD_MAX_SIDE = 2200;
   const DEFAULT_RECENT_PHOTO_RELOAD_LIMIT = 5;
   const PROCESSED_BACKGROUND_PREFIX = "processed-backgrounds";
+  const THUMBNAIL_SIGNED_URL_TRANSFORM = {
+    width: 240,
+    height: 240,
+    resize: "cover",
+    quality: 55,
+  };
   const AUTO_STRAIGHTEN_MIN_DEGREES = 1.25;
   const AUTO_STRAIGHTEN_MAX_DEGREES = 24;
   const ASSISTED_LAST_STONE_TYPE_KEY = "og.addItem.assisted.lastStoneType";
@@ -62,6 +68,7 @@
     ["No Stone", ["no stone", "no stones", "without stone", "without stones"]],
   ];
   let backgroundRemovalModulePromise = null;
+  let backgroundRemovalPreloadQueued = false;
   const MATERIAL_PURITY_OPTIONS = {
     Gold: ["10K", "14K", "18K", "22K", "24K"],
     Silver: ["925", "950", "Fine Silver"],
@@ -491,13 +498,16 @@
     const updatedAt = asTrimmedString(image?.updatedAt);
     const createdAt = asTrimmedString(image?.createdAt);
     const numericSortOrder = Number(image?.sortOrder);
+    const previewUrl = asTrimmedString(image?.previewUrl || image?.fullUrl || image?.fullPreviewUrl);
+    const thumbnailUrl = asTrimmedString(image?.thumbnailUrl || image?.thumbUrl) || previewUrl;
 
     return {
       path,
       name,
       createdAt,
       updatedAt: updatedAt || createdAt,
-      previewUrl: asTrimmedString(image?.previewUrl),
+      previewUrl,
+      thumbnailUrl,
       storageBucket: asTrimmedString(image?.storageBucket || image?.storage_bucket) || INVENTORY_UPLOAD_BUCKET,
       sourceType: asTrimmedString(image?.sourceType) || "inventory-upload",
       sortOrder: Number.isFinite(numericSortOrder) ? numericSortOrder : fallbackIndex,
@@ -651,11 +661,13 @@
 
   function releaseImagePreviewUrls(images = state.recentUploadedImages) {
     for (const image of images) {
-      const previewUrl = asTrimmedString(image?.previewUrl);
-      if (previewUrl.startsWith("blob:")) {
-        try {
-          URL.revokeObjectURL(previewUrl);
-        } catch (_) {}
+      for (const previewUrl of [image?.previewUrl, image?.thumbnailUrl]) {
+        const url = asTrimmedString(previewUrl);
+        if (url.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (_) {}
+        }
       }
     }
   }
@@ -964,8 +976,73 @@
     return Array.isArray(data) ? data : [];
   }
 
-  async function downloadCaptureJobPhotos(photos, options = {}) {
+  function groupPathsByBucket(photos) {
+    const bucketPaths = new Map();
+    for (const photo of photos || []) {
+      const bucket = asTrimmedString(photo?.storage_bucket);
+      const path = asTrimmedString(photo?.storage_path);
+      if (!bucket || !path) continue;
+      if (!bucketPaths.has(bucket)) bucketPaths.set(bucket, []);
+      bucketPaths.get(bucket).push(path);
+    }
+    return bucketPaths;
+  }
+
+  async function createSignedImageUrl(bucket, path, options = {}) {
+    const transform = options.transform;
+
+    try {
+      const storage = window.supabase.storage.from(bucket);
+      const { data, error } = transform
+        ? await storage.createSignedUrl(path, 60 * 10, { transform })
+        : await storage.createSignedUrl(path, 60 * 10);
+
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+
+      if (!transform) {
+        console.warn(`Could not create signed URL for ${bucket}/${path}:`, error);
+        return "";
+      }
+
+      console.warn(`Could not create transformed signed URL for ${bucket}/${path}; using full image URL.`, error);
+    } catch (error) {
+      if (!transform) {
+        console.warn(`Could not create signed URL for ${bucket}/${path}:`, error);
+        return "";
+      }
+
+      console.warn(`Could not create transformed signed URL for ${bucket}/${path}; using full image URL.`, error);
+    }
+
+    return createSignedImageUrl(bucket, path);
+  }
+
+  async function createCapturePhotoSignedUrlMaps(photos) {
+    const fullUrlByKey = new Map();
+    const thumbnailUrlByKey = new Map();
+    const groupedPaths = groupPathsByBucket(photos);
+
+    for (const [bucket, paths] of groupedPaths.entries()) {
+      for (const path of [...new Set(paths)]) {
+        const key = `${bucket}:${path}`;
+        const [fullUrl, thumbnailUrl] = await Promise.all([
+          createSignedImageUrl(bucket, path),
+          createSignedImageUrl(bucket, path, { transform: THUMBNAIL_SIGNED_URL_TRANSFORM }),
+        ]);
+
+        if (fullUrl) fullUrlByKey.set(key, fullUrl);
+        if (thumbnailUrl) thumbnailUrlByKey.set(key, thumbnailUrl);
+      }
+    }
+
+    return { fullUrlByKey, thumbnailUrlByKey };
+  }
+
+  async function loadCaptureJobPhotoImages(photos, options = {}) {
     const downloadedPhotos = [];
+    const { fullUrlByKey, thumbnailUrlByKey } = await createCapturePhotoSignedUrlMaps(photos);
 
     for (let index = 0; index < photos.length; index += 1) {
       const photo = photos[index];
@@ -980,13 +1057,23 @@
         throw new Error("Capture photo metadata is missing bucket or path.");
       }
 
-      const { data, error } = await window.supabase.storage.from(bucket).download(path);
-      if (error || !data) {
-        if (options.skipFailures) {
-          console.warn(`Skipping capture photo ${index + 1}:`, error);
-          continue;
+      const signedKey = `${bucket}:${path}`;
+      let previewUrl = fullUrlByKey.get(signedKey) || "";
+      let thumbnailUrl = thumbnailUrlByKey.get(signedKey) || previewUrl;
+      let mimeType = asTrimmedString(photo?.mime_type) || "image/jpeg";
+
+      if (!previewUrl) {
+        const { data, error } = await window.supabase.storage.from(bucket).download(path);
+        if (error || !data) {
+          if (options.skipFailures) {
+            console.warn(`Skipping capture photo ${index + 1}:`, error);
+            continue;
+          }
+          throw new Error(error?.message || `Failed to download capture photo ${index + 1}.`);
         }
-        throw new Error(error?.message || `Failed to download capture photo ${index + 1}.`);
+        previewUrl = URL.createObjectURL(data);
+        thumbnailUrl = previewUrl;
+        mimeType = asTrimmedString(photo?.mime_type) || data.type || "image/jpeg";
       }
 
       downloadedPhotos.push(
@@ -996,13 +1083,14 @@
             name: asTrimmedString(photo?.label) || `Capture ${index + 1}`,
             createdAt: asTrimmedString(photo?.created_at),
             updatedAt: asTrimmedString(photo?.created_at),
-            previewUrl: URL.createObjectURL(data),
+            previewUrl,
+            thumbnailUrl,
             storageBucket: bucket,
             sourceType: asTrimmedString(options.sourceType) || "capture-job",
             sortOrder: Number(photo?.sort_order),
             isPrimary: Boolean(photo?.is_primary),
             captureJobId: asTrimmedString(photo?.capture_job_id),
-            mimeType: asTrimmedString(photo?.mime_type) || data.type || "image/jpeg",
+            mimeType,
           },
           downloadedPhotos.length
         )
@@ -1047,7 +1135,7 @@
       throw new Error(error.message || "Failed to load recent station capture photos.");
     }
 
-    return downloadCaptureJobPhotos(Array.isArray(data) ? data : [], {
+    return loadCaptureJobPhotoImages(Array.isArray(data) ? data : [], {
       skipFailures: true,
       sourceType: "recent-station-capture",
     });
@@ -1057,14 +1145,28 @@
     return asTrimmedString(path).split("/").pop() || "";
   }
 
+  function stripImageExtension(value) {
+    return asTrimmedString(value).replace(/\.(png|jpe?g|webp|gif|heic|heif)$/i, "");
+  }
+
+  function safeProcessedSourceToken(value) {
+    return stripImageExtension(value)
+      .replace(/[^\w.\-]+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 80)
+      .toLowerCase();
+  }
+
   function getProcessedSourceTokens(images) {
     const tokens = new Set();
     for (const image of images || []) {
       const basename = getImageBasename(image?.path);
       if (!basename) continue;
       tokens.add(basename.toLowerCase());
+      tokens.add(stripImageExtension(basename).toLowerCase());
+      tokens.add(safeProcessedSourceToken(basename));
     }
-    return tokens;
+    return new Set([...tokens].filter((token) => token && token.length >= 8));
   }
 
   function imageLooksAssociatedWithSource(image, sourceTokens) {
@@ -1080,29 +1182,45 @@
     const sourceTokens = getProcessedSourceTokens(sourceImages);
     if (!sourceTokens.size) return [];
 
-    const response = await window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
-      body: {
-        bucket: INVENTORY_UPLOAD_BUCKET,
-        prefix: PROCESSED_BACKGROUND_PREFIX,
-        limit: Math.min(80, Math.max(20, limit * 6)),
-      },
-    });
+    const sourceBuckets = [
+      ...new Set(
+        sourceImages
+          .map((image) => asTrimmedString(image?.storageBucket) || INVENTORY_UPLOAD_BUCKET)
+          .concat([INVENTORY_UPLOAD_BUCKET, CAPTURE_PHOTOS_BUCKET])
+      ),
+    ];
 
-    if (response.error) {
-      throw new Error(response.error.message || "Unable to load associated processed images.");
+    const processedImages = [];
+    for (const bucketName of sourceBuckets) {
+      const response = await window.supabase.functions.invoke(INVENTORY_UPLOAD_LIST_FUNCTION_NAME, {
+        body: {
+          bucket: bucketName,
+          prefix: PROCESSED_BACKGROUND_PREFIX,
+          limit: Math.min(80, Math.max(20, limit * 6)),
+        },
+      });
+
+      if (response.error) {
+        console.warn(`Unable to load associated processed images from ${bucketName}:`, response.error);
+        continue;
+      }
+
+      const bucket = response.data?.bucket || bucketName;
+      processedImages.push(
+        ...(Array.isArray(response.data?.images) ? response.data.images : [])
+          .map((image, index) => normalizeImageRow({
+            ...image,
+            storageBucket: bucket,
+            sourceType: asTrimmedString(image?.name).includes("white")
+              ? "processed-white-background"
+              : "processed-black-background",
+          }, processedImages.length + index))
+          .filter((image) => image.path && image.previewUrl)
+          .filter((image) => imageLooksAssociatedWithSource(image, sourceTokens))
+      );
     }
 
-    const bucket = response.data?.bucket || INVENTORY_UPLOAD_BUCKET;
-    return (Array.isArray(response.data?.images) ? response.data.images : [])
-      .map((image, index) => normalizeImageRow({
-        ...image,
-        storageBucket: bucket,
-        sourceType: asTrimmedString(image?.name).includes("white")
-          ? "processed-white-background"
-          : "processed-black-background",
-      }, index))
-      .filter((image) => image.path && image.previewUrl)
-      .filter((image) => imageLooksAssociatedWithSource(image, sourceTokens));
+    return processedImages;
   }
 
   function applyRecentUploadedImages(elements, images, options = {}) {
@@ -1161,7 +1279,7 @@
       throw new Error("Capture completed but no uploaded photos were returned for this job.");
     }
 
-    const downloadedImages = await downloadCaptureJobPhotos(capturePhotos);
+    const downloadedImages = await loadCaptureJobPhotoImages(capturePhotos);
     const primaryImage = downloadedImages.find((image) => image.isPrimary) || downloadedImages[0] || null;
 
     state.latestCaptureJob = completedJob;
@@ -1469,7 +1587,7 @@
             aria-label="Use ${escapeHtml(image.name)} as the AI description image"
           >
             <span class="assisted-thumb-image">
-              <img src="${escapeHtml(image.previewUrl)}" alt="${escapeHtml(image.name)}" loading="lazy" />
+              <img src="${escapeHtml(image.thumbnailUrl || image.previewUrl)}" alt="${escapeHtml(image.name)}" loading="lazy" decoding="async" fetchpriority="low" />
               <span class="assisted-thumb-save-ribbon" aria-hidden="true">SAVE</span>
             </span>
             <span class="assisted-thumb-meta">
@@ -1827,10 +1945,49 @@
   async function loadBackgroundRemoval() {
     if (!backgroundRemovalModulePromise) {
       backgroundRemovalModulePromise = import(BACKGROUND_REMOVAL_MODULE_URL)
-        .then((module) => module.default || module.removeBackground || module);
+        .then((module) => module.default || module.removeBackground || module)
+        .catch((error) => {
+          backgroundRemovalModulePromise = null;
+          throw error;
+        });
     }
 
     return backgroundRemovalModulePromise;
+  }
+
+  function preloadBackgroundRemoval(elements) {
+    if (backgroundRemovalPreloadQueued || state.isProcessingImage || state.isAutoBlackProcessing) {
+      return;
+    }
+
+    backgroundRemovalPreloadQueued = true;
+
+    const runPreload = () => {
+      loadBackgroundRemoval()
+        .then(() => {
+          if (!state.isProcessingImage && !state.isAutoBlackProcessing && elements.bgStatus) {
+            const currentStatus = asTrimmedString(elements.bgStatus.textContent).toLowerCase();
+            if (!currentStatus.includes("processing") && !currentStatus.includes("removing")) {
+              setInlineStatus(
+                elements.bgStatus,
+                "Background tools are ready for faster black/white processing.",
+                "is-success"
+              );
+            }
+          }
+        })
+        .catch((error) => {
+          backgroundRemovalPreloadQueued = false;
+          console.warn("Background removal preload failed:", error);
+        });
+    };
+
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(runPreload, { timeout: 4000 });
+      return;
+    }
+
+    window.setTimeout(runPreload, 600);
   }
 
   async function createObjectUrlForCanvas(previewUrl) {
@@ -2895,6 +3052,10 @@
           "is-error"
         );
       });
+    }
+
+    if (isAssisted) {
+      preloadBackgroundRemoval(elements);
     }
   }
 

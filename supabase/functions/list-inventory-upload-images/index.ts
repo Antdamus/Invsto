@@ -10,6 +10,12 @@ const corsHeaders = {
 const DEFAULT_BUCKET = "InventoryUpload";
 const ALLOWED_BUCKETS = new Set(["InventoryUpload", "capture-photos"]);
 const IMAGE_NAME_REGEX = /\.(png|jpe?g|webp|gif|heic|heif)$/i;
+const THUMBNAIL_TRANSFORM = {
+  width: 240,
+  height: 240,
+  resize: "cover",
+  quality: 55,
+};
 
 type RequestBody = {
   bucket?: string;
@@ -60,6 +66,27 @@ function compareNewestFirst(a: ListedImage, b: ListedImage) {
   const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
   const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
   return bTime - aTime;
+}
+
+async function createSignedImageUrl(
+  supabase: ReturnType<typeof createClient>,
+  bucket: string,
+  path: string,
+  transform?: Record<string, unknown>
+) {
+  try {
+    const storage = supabase.storage.from(bucket);
+    const { data, error } = transform
+      ? await storage.createSignedUrl(path, 60 * 10, { transform })
+      : await storage.createSignedUrl(path, 60 * 10);
+
+    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!transform) return "";
+  } catch (_) {
+    if (!transform) return "";
+  }
+
+  return createSignedImageUrl(supabase, bucket, path);
 }
 
 async function listImagesRecursively(
@@ -139,36 +166,28 @@ serve(async (req) => {
       });
     }
 
-    const { data: signedRows, error: signedError } = await supabase.storage
-      .from(bucket)
-      .createSignedUrls(
-        recentImages.map((image) => image.path),
-        60 * 10
-      );
+    const images = await Promise.all(
+      recentImages.map(async (image) => {
+        const [previewUrl, thumbnailUrl] = await Promise.all([
+          createSignedImageUrl(supabase, bucket, image.path),
+          createSignedImageUrl(supabase, bucket, image.path, THUMBNAIL_TRANSFORM),
+        ]);
 
-    if (signedError || !signedRows) {
-      return json(500, {
-        ok: false,
-        error: "image_sign_failed",
-        detail: signedError?.message || "No signed URLs returned",
-      });
-    }
-
-    const previewUrlByPath = new Map<string, string>();
-    for (const row of signedRows) {
-      previewUrlByPath.set(row.path, row.signedUrl || "");
-    }
+        return {
+          path: image.path,
+          name: image.name,
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt,
+          previewUrl,
+          thumbnailUrl: thumbnailUrl || previewUrl,
+        };
+      })
+    );
 
     return json(200, {
       ok: true,
       bucket,
-      images: recentImages.map((image) => ({
-        path: image.path,
-        name: image.name,
-        createdAt: image.createdAt,
-        updatedAt: image.updatedAt,
-        previewUrl: previewUrlByPath.get(image.path) || "",
-      })),
+      images,
     });
   } catch (error) {
     return json(500, {

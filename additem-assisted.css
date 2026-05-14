@@ -424,6 +424,8 @@
   position: relative;
   flex: 0 0 auto;
   min-height: 126px;
+  content-visibility: auto;
+  contain-intrinsic-size: 126px;
   padding: 10px;
   border: 1px solid rgba(244, 224, 190, 0.12);
   border-radius: 18px;
