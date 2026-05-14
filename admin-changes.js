@@ -78,6 +78,12 @@
       restored_at: "Restored",
       deleted_by_email: "Deleted by",
       restored_by_email: "Restored by",
+      deleted_at: "Deleted at",
+      deleted_by: "Deleted by",
+      deletion_reason: "Deletion reason",
+      deletion_status: "Deletion status",
+      restored_by: "Restored by",
+      restore_reason: "Restore reason",
       record: "Record",
     };
     return names[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
@@ -190,19 +196,30 @@
     }));
   }
 
+  function isInventoryDeletionFields(fields = []) {
+    return fields.some((field) => field.field === "deleted_at");
+  }
+
+  function isInventoryRestoreFields(fields = []) {
+    const deletedAt = fields.find((field) => field.field === "deleted_at");
+    return Boolean(deletedAt && deletedAt.from && !deletedAt.to);
+  }
+
   function mapInventoryChange(row) {
     const fields = changedFieldEntries(row.changed_fields);
     if (row.reason) {
       fields.push({ field: "reason", from: "-", to: row.reason });
     }
+    const isDeletionEvent = row.table_name === "item_types" && row.action === "update" && isInventoryDeletionFields(fields);
+    const isRestoreEvent = isDeletionEvent && isInventoryRestoreFields(fields);
     const isCurrentlyReverted = row.revert_direction === "revert";
     return {
       id: `inventory-${row.id}`,
       changeLogId: row.id,
       source: "inventory_change_log",
       category: "inventory_edit",
-      label: row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
-      title: row.summary || "Inventory edit",
+      label: isDeletionEvent ? (isRestoreEvent ? "Restored" : "Deleted") : row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
+      title: isDeletionEvent ? (isRestoreEvent ? "Restored item card" : "Deleted item card") : row.summary || "Inventory edit",
       at: row.changed_at,
       action: row.action || "",
       tableName: row.table_name || "",
@@ -226,8 +243,9 @@
       revertedByEmail: row.reverted_by_email || "",
       revertCount: Number(row.revert_count || 0),
       isCurrentlyReverted,
+      isDeletionEvent,
       reversible: row.action === "update",
-      needsReview: row.action === "delete",
+      needsReview: row.action === "delete" || (isDeletionEvent && !isRestoreEvent),
       searchText: "",
     };
   }
@@ -829,7 +847,8 @@
       }
 
       if (event.category === "inventory_edit") {
-        const { error } = await client.rpc("revert_inventory_change", {
+        const rpcName = event.isDeletionEvent ? "revert_inventory_deletion" : "revert_inventory_change";
+        const { error } = await client.rpc(rpcName, {
           _change_id: event.changeLogId,
           _direction: direction,
           _admin_email: adminEmail || null,

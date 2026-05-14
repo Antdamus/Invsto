@@ -8,6 +8,7 @@ let currentEmployee = null;
 let stockAccess = { role: "", isAdmin: false, canViewSensitive: false };
 let selectedItems = new Set();         // Tracks currently selected items for bulk actions
 let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
+let showDeletedItems = false;
 let activeDropdown = null;
 let failedAttempts = 0;            // 🚫 Track how many wrong passwords
 let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
@@ -117,19 +118,57 @@ function canViewSensitiveStockData() {
   return Boolean(stockAccess?.canViewSensitive);
 }
 
+function isStockItemDeleted(item) {
+  return Boolean(item?.deleted_at);
+}
+
+function isSameLocalCalendarDay(value, reference = new Date()) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toLocaleDateString() === reference.toLocaleDateString();
+}
+
+function canWorkerDeleteStockItem(item) {
+  if (!currentUser || !item || isStockItemDeleted(item)) return false;
+  const createdByCurrentUser = item.added_by === currentUser.id
+    || (item.added_by_email && currentUser.email && item.added_by_email === currentUser.email);
+  return Boolean(createdByCurrentUser && isSameLocalCalendarDay(item.created_at));
+}
+
+function canDeleteStockItem(item) {
+  if (!item || isStockItemDeleted(item)) return false;
+  return canViewSensitiveStockData() || canWorkerDeleteStockItem(item);
+}
+
+function canRestoreStockItem(item) {
+  return canViewSensitiveStockData() && isStockItemDeleted(item);
+}
+
 function getStockItemSelectColumns() {
   return canViewSensitiveStockData() ? "*" : STOCK_WORKER_ITEM_SELECT;
 }
 
 function getStockCacheKey() {
-  return canViewSensitiveStockData() ? "cachedAllItemsAdmin" : "cachedAllItemsWorker";
+  const base = canViewSensitiveStockData() ? "cachedAllItemsAdmin" : "cachedAllItemsWorker";
+  return showDeletedItems ? `${base}Deleted` : base;
 }
 
 function applyStockAccessUi() {
   document.body.classList.remove("stock-access-loading");
   document.body.classList.toggle("worker-stock-view", !canViewSensitiveStockData());
+  document.body.classList.toggle("stock-deleted-view", canViewSensitiveStockData() && showDeletedItems);
+
+  const deletedToggleWrap = document.getElementById("deleted-items-toggle-wrap");
+  if (deletedToggleWrap) {
+    deletedToggleWrap.classList.toggle("hidden-sensitive-filter", !canViewSensitiveStockData());
+  }
+  const deletedToggleControl = document.getElementById("show-deleted-items");
+  if (deletedToggleControl) deletedToggleControl.checked = canViewSensitiveStockData() && showDeletedItems;
 
   if (!canViewSensitiveStockData()) {
+    showDeletedItems = false;
+    if (deletedToggleControl) deletedToggleControl.checked = false;
     const backButton = document.querySelector(".back-button");
     if (backButton) {
       backButton.setAttribute("href", "worker-dashboard.html");
@@ -312,6 +351,7 @@ function buildLocationChips(item) {
       const stockClass = stock === 0 ? "stock-zero" : "";
       const tooltip = item.stock_tooltip || "";
       const showSensitive = canViewSensitiveStockData();
+      const isDeleted = isStockItemDeleted(item);
       const descriptionText = String(item.description || "").trim() || "No description recorded.";
       const hasFullDescription = Boolean(String(item.description || "").trim());
       const stockLabel = `
@@ -341,6 +381,7 @@ function buildLocationChips(item) {
     
         return `
         <div class="stock-content">
+          ${isDeleted ? `<div class="stock-deleted-banner">Deleted ${escapeStockHtml(formatStockHistoryDate(item.deleted_at))}${item.deleted_by_email ? ` by ${escapeStockHtml(item.deleted_by_email)}` : ""}</div>` : ""}
           <div class="stock-card-headline">
             <h2>${escapeStockHtml(item.title || "Untitled item")}</h2>
             ${stockLabel}
@@ -358,7 +399,7 @@ function buildLocationChips(item) {
           <div class="stock-location-section">
             <div class="stock-section-row">
               <span>Locations</span>
-              <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
+              ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `<button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>`}
             </div>
             <div class="stock-location-chips">${buildLocationChips(item)}</div>
           </div>
@@ -497,34 +538,48 @@ function buildLocationChips(item) {
   * isSelected boolean
   * is favoried another boolean
   */
-  function buildFloatControls(id, isSelected, isFavorited) {
+  function buildFloatControls(item, isSelected, isFavorited) {
+    const id = item?.id || "";
+    const deleted = isStockItemDeleted(item);
     const checkbox = `
       <input type="checkbox" class="select-checkbox" data-id="${id}" ${isSelected ? "checked" : ""}>
     `;
 
-    const favoriteBtn = currentUser
+    const favoriteBtn = currentUser && !deleted
       ? `<button class="favorite-btn" data-id="${id}" title="Add to favorites">
           ${isFavorited ? '★' : '☆'}
         </button>`
       : '';
 
-    const editBtn = `
+    const editBtn = !deleted ? `
       <button class="edit-item-btn" data-id="${id}" title="Edit this item">
         <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-pencil-line" width="20" height="20" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
         </svg>
       </button>
-    `;
+    ` : "";
 
-    const photoBtn = `
+    const photoBtn = !deleted ? `
       <button class="stock-add-photo-btn" data-id="${id}" title="Add item photos">
         <i data-lucide="camera"></i>
       </button>
-    `;
+    ` : "";
 
     const historyBtn = canViewSensitiveStockData()
       ? `<button class="stock-history-btn" data-id="${id}" title="View change history">
           <i data-lucide="history"></i>
+        </button>`
+      : "";
+
+    const deleteBtn = canDeleteStockItem(item)
+      ? `<button class="stock-delete-item-btn" data-id="${id}" title="Delete item">
+          <i data-lucide="trash-2"></i>
+        </button>`
+      : "";
+
+    const restoreBtn = canRestoreStockItem(item)
+      ? `<button class="stock-restore-item-btn" data-id="${id}" title="Restore deleted item">
+          <i data-lucide="rotate-ccw"></i>
         </button>`
       : "";
 
@@ -535,6 +590,8 @@ function buildLocationChips(item) {
         ${favoriteBtn}
         ${photoBtn}
         ${historyBtn}
+        ${restoreBtn}
+        ${deleteBtn}
         ${editBtn} <!-- 🆕 placed edit button with existing float controls -->
       </div>
     `;
@@ -554,9 +611,10 @@ function buildLocationChips(item) {
     const isSelected = selectedItems.has(item.id);
     if (isFavorited) card.classList.add("favorited");
     if (isSelected) card.classList.add("selected");
+    if (isStockItemDeleted(item)) card.classList.add("is-deleted");
 
     const photoCarousel = await buildCarousel(item, index);
-    const floatControls = buildFloatControls(item.id, isSelected, isFavorited);
+    const floatControls = buildFloatControls(item, isSelected, isFavorited);
     const content = buildCardContent(item);
 
     card.innerHTML = `
@@ -683,6 +741,22 @@ function buildLocationChips(item) {
           e.preventDefault();
           e.stopPropagation();
           openStockHistoryModal(historyTrigger.dataset.id);
+          return;
+        }
+
+        const restoreTrigger = e.target.closest(".stock-restore-item-btn");
+        if (restoreTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          restoreInventoryItemsFlow([restoreTrigger.dataset.id]);
+          return;
+        }
+
+        const deleteTrigger = e.target.closest(".stock-delete-item-btn");
+        if (deleteTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          deleteInventoryItemsFlow([deleteTrigger.dataset.id]);
           return;
         }
 
@@ -1392,6 +1466,22 @@ function buildLocationChips(item) {
         handleFilterChange();                 // 🔄 Re-render filtered results accordingly
       });
     }
+    const deletedToggle = document.getElementById("show-deleted-items");
+    if (deletedToggle) {
+      deletedToggle.addEventListener("change", async (e) => {
+        if (!canViewSensitiveStockData()) {
+          e.target.checked = false;
+          showDeletedItems = false;
+          return;
+        }
+        showDeletedItems = e.target.checked;
+        selectedItems.clear();
+        applyStockAccessUi();
+        sessionStorage.removeItem(getStockCacheKey());
+        await refreshInventoryUI();
+        updateBulkToolbar();
+      });
+    }
   }
 
   /**function to set up event listenes to the tabs to switch filter sections, and the match-All toggle
@@ -1731,15 +1821,236 @@ function buildLocationChips(item) {
     return !error; // ✅ valid if no error
   }
   
+  function closeInventorySignatureModal() {
+    const modal = document.getElementById("password-confirm-modal");
+    modal?.classList.remove("show");
+    modal?.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+  }
+
+  function requestInventorySignature({
+    title = "Confirm Inventory Change",
+    description = "Enter your password and a brief reason to certify this action.",
+    confirmText = "Confirm",
+    defaultReason = "",
+  } = {}) {
+    return new Promise((resolve) => {
+      const now = Date.now();
+      const modal = document.getElementById("password-confirm-modal");
+      const titleEl = document.getElementById("password-confirm-title");
+      const descEl = document.getElementById("password-confirm-desc");
+      const input = document.getElementById("password-input");
+      const reasonInput = document.getElementById("delete-reason-input");
+      const confirmBtn = document.getElementById("confirm-password-btn");
+      const cancelBtn = document.getElementById("cancel-password-btn");
+      const closeBtn = document.getElementById("close-password-modal");
+      const errorMsg = document.getElementById("password-error");
+      const lockoutMsg = document.getElementById("lockout-message");
+
+      if (!modal || !input || !reasonInput || !confirmBtn || !cancelBtn || !errorMsg || !lockoutMsg) {
+        resolve(null);
+        return;
+      }
+
+      const cleanup = (value) => {
+        confirmBtn.onclick = null;
+        cancelBtn.onclick = null;
+        if (closeBtn) closeBtn.onclick = null;
+        input.onkeydown = null;
+        closeInventorySignatureModal();
+        resolve(value);
+      };
+
+      if (lockoutUntil && now < lockoutUntil) {
+        const secondsLeft = Math.ceil((lockoutUntil - now) / 1000);
+        lockoutMsg.textContent = `Locked out. Try again in ${secondsLeft}s`;
+        lockoutMsg.classList.add("show");
+        errorMsg.classList.remove("show");
+        modal.classList.add("show");
+        modal.classList.remove("hidden");
+        document.body.classList.add("modal-open");
+        setTimeout(() => cleanup(null), 1800);
+        return;
+      }
+
+      if (titleEl) titleEl.textContent = title;
+      if (descEl) descEl.textContent = description;
+      confirmBtn.textContent = confirmText;
+      input.value = "";
+      reasonInput.value = defaultReason;
+      errorMsg.textContent = "";
+      errorMsg.classList.remove("show");
+      lockoutMsg.textContent = "";
+      lockoutMsg.classList.remove("show");
+      modal.classList.add("show");
+      modal.classList.remove("hidden");
+      document.body.classList.add("modal-open");
+      input.focus();
+
+      cancelBtn.onclick = () => cleanup(null);
+      if (closeBtn) closeBtn.onclick = () => cleanup(null);
+      confirmBtn.onclick = async () => {
+        const password = input.value.trim();
+        const reason = reasonInput.value.trim();
+        if (!password) {
+          errorMsg.textContent = "Password is required.";
+          errorMsg.classList.add("show");
+          return;
+        }
+        if (reason.length < 3) {
+          errorMsg.textContent = "Please add a brief reason.";
+          errorMsg.classList.add("show");
+          return;
+        }
+
+        const isValid = await validatePassword(password);
+        if (!isValid) {
+          failedAttempts += 1;
+          if (failedAttempts >= 3) {
+            lockoutUntil = Date.now() + 30000;
+            errorMsg.classList.remove("show");
+            lockoutMsg.textContent = "Too many attempts. Locked for 30s.";
+            lockoutMsg.classList.add("show");
+            setTimeout(() => cleanup(null), 1800);
+            return;
+          }
+          errorMsg.textContent = "Incorrect password.";
+          errorMsg.classList.add("show");
+          return;
+        }
+
+        failedAttempts = 0;
+        lockoutUntil = null;
+        cleanup({ reason, signedByEmail: currentUser?.email || "" });
+      };
+
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") confirmBtn.click();
+      };
+    });
+  }
+
+  async function recordLegacyDeletionLog(idsToDelete, itemsToLog) {
+    try {
+      let location = { lat: null, lng: null };
+      try {
+        location = await getUserLocation();
+      } catch (error) {
+        console.warn("Deletion location was not available:", error);
+      }
+      await supabase.from("deletion_log").insert({
+        user_id: currentUser?.id || null,
+        deleted_ids: idsToDelete,
+        deleted_data: itemsToLog,
+        timestamp: new Date().toISOString(),
+        location_lat: location.lat,
+        location_lng: location.lng,
+      });
+    } catch (error) {
+      console.warn("Legacy deletion log insert failed:", error);
+    }
+  }
+
+  async function refreshInventoryAfterItemVisibilityChange(ids = []) {
+    ids.forEach((id) => selectedItems.delete(id));
+    await bumpInventoryVersion(ids);
+    await refreshInventoryUI();
+    updateBulkToolbar();
+  }
+
+  async function deleteInventoryItemsFlow(itemIds) {
+    const ids = [...new Set((itemIds || []).filter(Boolean))];
+    if (!ids.length) return;
+
+    const items = ids.map((id) => getStockItemById(id)).filter(Boolean);
+    if (!items.length) {
+      showToast("Could not find the selected item.");
+      return;
+    }
+
+    if (!canViewSensitiveStockData() && items.some((item) => !canWorkerDeleteStockItem(item))) {
+      showToast("Workers can only delete items they created today.");
+      return;
+    }
+
+    const signed = await requestInventorySignature({
+      title: ids.length === 1 ? "Confirm Item Deletion" : "Confirm Bulk Deletion",
+      description: ids.length === 1
+        ? "This will hide the item from stock and record a reversible deletion trail."
+        : `This will hide ${ids.length} selected items from stock and record a reversible deletion trail.`,
+      confirmText: ids.length === 1 ? "Delete Item" : "Delete Selected",
+    });
+    if (!signed) return;
+
+    showLoading();
+    try {
+      const { error } = await supabase.rpc("delete_inventory_items", {
+        _item_ids: ids,
+        _reason: signed.reason,
+        _signed_by_email: signed.signedByEmail,
+      });
+      if (error) throw error;
+
+      await recordLegacyDeletionLog(ids, items);
+      await refreshInventoryAfterItemVisibilityChange(ids);
+      showToast(ids.length === 1 ? "Item deleted. Admins can restore it from history." : `${ids.length} items deleted. Admins can restore them.`);
+    } catch (error) {
+      console.error("Inventory deletion failed:", error);
+      showToast(error?.message || "Could not delete selected item.");
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function restoreInventoryItemsFlow(itemIds) {
+    if (!canViewSensitiveStockData()) {
+      showToast("Only admins can restore deleted items.");
+      return;
+    }
+    const ids = [...new Set((itemIds || []).filter(Boolean))];
+    if (!ids.length) return;
+
+    const signed = await requestInventorySignature({
+      title: ids.length === 1 ? "Restore Deleted Item" : "Restore Deleted Items",
+      description: ids.length === 1
+        ? "This will bring the deleted item back into the active stock view and record the restore."
+        : `This will bring ${ids.length} deleted items back into active stock and record the restore.`,
+      confirmText: ids.length === 1 ? "Restore Item" : "Restore Selected",
+    });
+    if (!signed) return;
+
+    showLoading();
+    try {
+      const { error } = await supabase.rpc("restore_inventory_items", {
+        _item_ids: ids,
+        _reason: signed.reason,
+        _signed_by_email: signed.signedByEmail,
+      });
+      if (error) throw error;
+
+      await refreshInventoryAfterItemVisibilityChange(ids);
+      showToast(ids.length === 1 ? "Item restored." : `${ids.length} items restored.`);
+    } catch (error) {
+      console.error("Inventory restore failed:", error);
+      showToast(error?.message || "Could not restore selected item.");
+    } finally {
+      hideLoading();
+    }
+  }
+
   //function to count how many items have been selected
   function updateBulkToolbar() {
     const toolbar = document.getElementById("bulk-toolbar");
     const count = document.getElementById("selected-count");
+    const deleteBtn = document.getElementById("bulk-delete");
+    const restoreBtn = document.getElementById("bulk-restore");
     const selectedCount = selectedItems.size;
 
     count.textContent = `${selectedCount} selected`;
     toolbar.classList.toggle("show", selectedCount > 0);
     toolbar.classList.toggle("hide", selectedCount === 0);
+    if (deleteBtn) deleteBtn.classList.toggle("hidden", showDeletedItems);
+    if (restoreBtn) restoreBtn.classList.toggle("hidden", !showDeletedItems || !canViewSensitiveStockData());
   } 
 
   //function activated upon selecting checkbox
@@ -1825,6 +2136,10 @@ function buildLocationChips(item) {
     // 🔴 Event listener for the "Delete" button in the bulk toolbar
     // ✅ Bulk Delete: Show password confirmation before deletion
     document.getElementById("bulk-delete")?.addEventListener("click", async () => {
+      if (selectedItems.size === 0) return;
+      await deleteInventoryItemsFlow(Array.from(selectedItems));
+      return;
+
       if (!canViewSensitiveStockData()) {
         showToast("Only admins can delete stock items.");
         return;
@@ -1924,10 +2239,7 @@ function buildLocationChips(item) {
         const idsToDelete = Array.from(selectedItems);
         const itemsToLog = allItems.filter(item => idsToDelete.includes(item.id));
     
-        const { error } = await supabase
-          .from("item_types")
-          .delete()
-          .in("id", idsToDelete);
+        const { error } = { error: new Error("Legacy hard-delete path disabled. Use deleteInventoryItemsFlow().") };
     
         if (!error) {
           await supabase.from("deletion_log").insert({
@@ -1958,6 +2270,11 @@ function buildLocationChips(item) {
     
     
     // ⭐ Add or remove favorites in bulk
+    document.getElementById("bulk-restore")?.addEventListener("click", async () => {
+      if (selectedItems.size === 0) return;
+      await restoreInventoryItemsFlow(Array.from(selectedItems));
+    });
+
     document.getElementById("bulk-favorite")?.addEventListener("click", async () => {
       if (!currentUser || selectedItems.size === 0) return;
 
@@ -2013,8 +2330,7 @@ function buildLocationChips(item) {
   const closePasswordModalBtn = document.getElementById("close-password-modal");
   if (closePasswordModalBtn) {
     closePasswordModalBtn.addEventListener("click", () => {
-      document.getElementById("password-confirm-modal")?.classList.remove("show");
-      document.body.classList.remove("modal-open");
+      closeInventorySignatureModal();
     });
   }
 
@@ -2449,17 +2765,46 @@ async function refreshItemById(itemId) {
   console.log(`🔄 Refreshing item by ID: ${itemId}`);
 
   // Step 1: Fetch the updated item
-  const { data: items, error: itemError } = await supabase
+  let refreshQuery = supabase
     .from("item_types")
     .select(getStockItemSelectColumns())
     .eq("id", itemId);
+  refreshQuery = canViewSensitiveStockData() && showDeletedItems
+    ? refreshQuery.not("deleted_at", "is", null)
+    : refreshQuery.is("deleted_at", null);
+
+  let { data: items, error: itemError } = await refreshQuery;
+
+  if (itemError && /deleted_at|deletion_status/i.test(itemError.message || "")) {
+    const retry = await supabase
+      .from("item_types")
+      .select(getStockItemSelectColumns())
+      .eq("id", itemId);
+    items = retry.data;
+    itemError = retry.error;
+  }
 
   if (itemError || !items || items.length === 0) {
-    console.error("❌ Failed to fetch item:", itemError);
+    if (itemError) console.error("❌ Failed to fetch item:", itemError);
+    allItems = allItems.filter((entry) => entry.id !== itemId);
+    document.querySelector(`.stock-card[data-item-id="${itemId}"]`)?.remove();
+    selectedItems.delete(itemId);
+    updateBulkToolbar();
     return;
   }
 
   const item = items[0];
+  const shouldShowItem = canViewSensitiveStockData() && showDeletedItems
+    ? isStockItemDeleted(item)
+    : !isStockItemDeleted(item);
+
+  if (!shouldShowItem) {
+    allItems = allItems.filter((entry) => entry.id !== itemId);
+    document.querySelector(`.stock-card[data-item-id="${itemId}"]`)?.remove();
+    selectedItems.delete(itemId);
+    updateBulkToolbar();
+    return;
+  }
 
   // Step 2: Sign photo URLs
   if (Array.isArray(item.photos)) {
@@ -2691,6 +3036,12 @@ function stockHistoryFieldLabel(field) {
     restored_at: "Restored",
     deleted_by_email: "Deleted by",
     restored_by_email: "Restored by",
+    deleted_at: "Deleted at",
+    deleted_by: "Deleted by",
+    deletion_reason: "Deletion reason",
+    deletion_status: "Deletion status",
+    restored_by: "Restored by",
+    restore_reason: "Restore reason",
   };
   return labels[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
@@ -2771,6 +3122,15 @@ function stockHistoryChangedFieldEntries(changedFields) {
   }));
 }
 
+function isStockHistoryDeletionFields(fields = []) {
+  return fields.some((field) => field.field === "deleted_at");
+}
+
+function isStockHistoryRestoreFields(fields = []) {
+  const deletedAt = fields.find((field) => field.field === "deleted_at");
+  return Boolean(deletedAt && deletedAt.from && !deletedAt.to);
+}
+
 function stockHistoryFileName(path) {
   return String(path || "").split("/").pop() || "Photo";
 }
@@ -2792,11 +3152,13 @@ async function stockHistorySelectOrEmpty(queryPromise, label) {
 function mapStockHistoryInventoryChange(row) {
   const fields = stockHistoryChangedFieldEntries(row.changed_fields);
   if (row.reason) fields.push({ field: "reason", from: "-", to: row.reason });
+  const isDeletionEvent = row.table_name === "item_types" && row.action === "update" && isStockHistoryDeletionFields(fields);
+  const isRestoreEvent = isDeletionEvent && isStockHistoryRestoreFields(fields);
   return {
     id: `inventory-${row.id}`,
     category: "inventory_edit",
-    label: row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
-    title: row.summary || "Inventory edit",
+    label: isDeletionEvent ? (isRestoreEvent ? "Restored" : "Deleted") : row.action === "insert" ? "Created" : row.action === "delete" ? "Deleted" : "Edited",
+    title: isDeletionEvent ? (isRestoreEvent ? "Restored item card" : "Deleted item card") : row.summary || "Inventory edit",
     at: row.changed_at,
     actor: stockHistoryActor(row.worker_id || row.signed_by, row.worker_email || row.signed_by_email),
     source: "inventory change log",
@@ -2809,6 +3171,7 @@ function mapStockHistoryInventoryChange(row) {
     revertedByEmail: row.reverted_by_email || "",
     revertCount: Number(row.revert_count || 0),
     isCurrentlyReverted: row.revert_direction === "revert",
+    isDeletionEvent,
     reversible: row.action === "update" && row.verified_method !== "admin_revert",
   };
 }
@@ -3262,7 +3625,8 @@ async function performStockHistoryRevert(eventId, button) {
     }
 
     if (event.category === "inventory_edit") {
-      const { error } = await supabase.rpc("revert_inventory_change", {
+      const rpcName = event.isDeletionEvent ? "revert_inventory_deletion" : "revert_inventory_change";
+      const { error } = await supabase.rpc(rpcName, {
         _change_id: event.changeLogId,
         _direction: direction,
         _admin_email: adminEmail || null,
@@ -4410,9 +4774,23 @@ function extractUniqueFromArrayColumn(data, column) {
 // ✅ Side-effect-free: Doesn't modify state or interact with the DOM
 async function fetchStockItems() {
   // Step 1: Get base item data
-  const { data: items, error: itemError } = await supabase
+  let itemQuery = supabase
     .from("item_types")
     .select(getStockItemSelectColumns());
+  itemQuery = canViewSensitiveStockData() && showDeletedItems
+    ? itemQuery.not("deleted_at", "is", null)
+    : itemQuery.is("deleted_at", null);
+
+  let { data: items, error: itemError } = await itemQuery;
+
+  if (itemError && /deleted_at|deletion_status/i.test(itemError.message || "")) {
+    console.warn("Deletion columns are not available yet; load will use the unfiltered item list until the migration is pushed.", itemError);
+    const retry = await supabase
+      .from("item_types")
+      .select(getStockItemSelectColumns());
+    items = (retry.data || []).filter((item) => !isStockItemDeleted(item));
+    itemError = retry.error;
+  }
 
   if (itemError || !items) {
     console.error("❌ Failed to fetch item types:", itemError);

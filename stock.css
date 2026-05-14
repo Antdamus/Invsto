@@ -976,6 +976,10 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   animation: controlFadeIn 0.4s ease both;
 }
 
+.bulk-toolbar button.hidden {
+  display: none !important;
+}
+
 .bulk-toolbar button::before {
   content: "";
   position: absolute;
@@ -1081,6 +1085,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 
 #bulk-delete svg   { stroke: #cc3a2f; }
+#bulk-restore svg  { stroke: #047857; }
 #bulk-export svg   { stroke: #1877e0; }
 #bulk-clear svg    { stroke: #c0392b; }
 #bulk-favorite svg { stroke: #f7b731; }
@@ -1343,6 +1348,48 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   border: 2px solid gold;
   box-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
   animation: glowFade 1.5s ease-out;
+}
+
+.stock-card.is-deleted {
+  border: 1px solid rgba(190, 18, 60, 0.24);
+  background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(255,241,242,.92));
+}
+
+.stock-card.is-deleted .stock-image-container {
+  opacity: .62;
+  filter: grayscale(.25);
+}
+
+.stock-deleted-banner {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 12px;
+  padding: 7px 10px;
+  border: 1px solid rgba(190,18,60,.18);
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: .74rem;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.stock-deleted-lock {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: .78rem;
+  font-weight: 900;
+}
+
+.stock-card.is-deleted .category-chips .custom-dropdown,
+.stock-card.is-deleted .remove-category-btn {
+  display: none !important;
 }
 
 @keyframes glowFade {
@@ -1894,6 +1941,24 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2);
 }
 
+.stock-deleted-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid rgba(190,18,60,.18);
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #9f1239;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.stock-deleted-toggle input {
+  accent-color: #be123c;
+}
+
 .pagination-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -2287,7 +2352,9 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .stock-add-photo-btn,
-.stock-history-btn {
+.stock-history-btn,
+.stock-delete-item-btn,
+.stock-restore-item-btn {
   display: inline-grid;
   place-items: center;
   width: 34px;
@@ -2300,7 +2367,9 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .stock-add-photo-btn:hover,
-.stock-history-btn:hover {
+.stock-history-btn:hover,
+.stock-delete-item-btn:hover,
+.stock-restore-item-btn:hover {
   background: #fff;
   box-shadow: 0 8px 18px rgba(0,0,0,.12);
   transform: translateY(-1px);
@@ -2309,13 +2378,25 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 .stock-add-photo-btn svg,
 .stock-add-photo-btn i,
 .stock-history-btn svg,
-.stock-history-btn i {
+.stock-history-btn i,
+.stock-delete-item-btn svg,
+.stock-delete-item-btn i,
+.stock-restore-item-btn svg,
+.stock-restore-item-btn i {
   width: 17px;
   height: 17px;
 }
 
 .stock-history-btn {
   color: #075985;
+}
+
+.stock-delete-item-btn {
+  color: #be123c;
+}
+
+.stock-restore-item-btn {
+  color: #047857;
 }
 
 .stock-barcode-btn {
@@ -2607,6 +2688,28 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font: 800 .95rem system-ui, sans-serif;
 }
 
+.delete-reason-label {
+  display: block;
+  margin: 14px 0 6px;
+  color: #3f4148;
+  font-family: system-ui, sans-serif;
+  font-size: .74rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.delete-reason-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 82px;
+  resize: vertical;
+  border: 1px solid rgba(17,24,39,.16);
+  border-radius: 14px;
+  padding: 11px 12px;
+  font: 800 .95rem system-ui, sans-serif;
+}
+
 .photo-delete-confirm-actions {
   display: flex;
   justify-content: flex-end;
@@ -2626,8 +2729,9 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 .stock-access-loading input[name="costMin"],
 .stock-access-loading input[name="costMax"],
 .stock-access-loading #bulk-delete,
+.stock-access-loading #bulk-restore,
 .stock-access-loading #bulk-export,
-.worker-stock-view #bulk-delete,
+.worker-stock-view #bulk-restore,
 .worker-stock-view #bulk-export,
 .worker-stock-view #bulk-category-container,
 .worker-stock-view .remove-category-btn,

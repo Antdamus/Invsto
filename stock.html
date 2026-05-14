@@ -203,6 +203,10 @@
       <button id="bulk-delete" title="Delete">
         <i data-lucide="trash-2" class="icon"></i> Delete
       </button>
+
+      <button id="bulk-restore" title="Restore deleted items">
+        <i data-lucide="rotate-ccw" class="icon"></i> Restore
+      </button>
     
       <button id="bulk-export" title="Export CVS">
         <i data-lucide="download" class="icon"></i> Export
@@ -239,6 +243,10 @@
           <option value="24">24</option>
         </select>
       </div>
+      <label id="deleted-items-toggle-wrap" class="stock-deleted-toggle hidden-sensitive-filter">
+        <input type="checkbox" id="show-deleted-items">
+        <span>Show deleted</span>
+      </label>
       <div id="pagination-buttons" class="pagination-buttons"></div>
     </div>
 
@@ -272,19 +280,22 @@
     <div class="modal-content stock-edit-modal-content">
       <span class="material-icons-outlined close-icon" id="close-password-modal">close</span>
   
-      <h3 class="modal-title">
+      <h3 class="modal-title" id="password-confirm-title">
         <span class="material-icons-outlined" style="vertical-align: middle; font-size: 1.6rem; color: #ffb100; margin-right: 6px;">
           lock
         </span>
         Confirm Deletion
       </h3>
   
-      <p class="modal-desc">Please enter your password to confirm this action.</p>
+      <p class="modal-desc" id="password-confirm-desc">Please enter your password to confirm this action.</p>
   
       <div style="display: flex; align-items: center; gap: 8px;">
         <span class="material-icons-outlined" style="font-size: 1.4rem; color: #777;">vpn_key</span>
         <input type="password" id="password-input" placeholder="Your password" class="password-input" />
       </div>
+
+      <label for="delete-reason-input" class="delete-reason-label">Reason</label>
+      <textarea id="delete-reason-input" class="delete-reason-input" rows="3" placeholder="Briefly explain why this item is being deleted or restored"></textarea>
   
       <div class="modal-actions" style="margin-top: 20px;">
         <button id="confirm-password-btn" class="confirm-btn" title="confirm button">✅ Confirm</button>
