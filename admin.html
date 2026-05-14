@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="admin-payroll.css" />
   <link rel="stylesheet" href="admin-taxdocs.css" />
   <link rel="stylesheet" href="admin-users.css" />
+  <link rel="stylesheet" href="admin-changes.css" />
 </head>
 
 <body>
@@ -50,6 +51,7 @@
         <button type="button" id="tabPayroll" class="tab" role="tab" aria-selected="false" aria-controls="panelPayroll">Payroll (biweekly)</button>
         <button type="button" id="tabSchedule" class="tab" role="tab" aria-selected="false" aria-controls="panelSchedule">Schedule</button>
         <button type="button" id="tabStores" class="tab" role="tab" aria-selected="false" aria-controls="panelStores">Stores</button>
+        <button type="button" id="tabChanges" class="tab" role="tab" aria-selected="false" aria-controls="panelChanges">Changes</button>
         <button type="button" id="tabAgreements" class="tab" role="tab" aria-selected="false" aria-controls="panelAgreements">Agreements</button>
         <button type="button" id="tabTaxDocs" class="tab" role="tab" aria-selected="false" aria-controls="panelTaxDocs">Tax Docs</button>
         <button type="button" id="tabUsers" class="tab" role="tab" aria-selected="false" aria-controls="panelUsers">Users</button>
@@ -637,6 +639,79 @@
           Stores control geofencing, schedule enforcement, and paid break caps. Employee assignments are set on schedules (recurring + overrides).
         </p>
       </section>
+
+      <!-- ===== Changes panel ===== -->
+      <section id="panelChanges" class="panel hidden" role="tabpanel" aria-labelledby="tabChanges">
+        <header class="panel-head changes-head">
+          <div>
+            <h2>Changes</h2>
+            <p class="changes-subtitle">Review inventory edits, stock movement, tray checks, and photo removals by worker, date, and store.</p>
+          </div>
+          <div class="panel-actions">
+            <button id="changesRefreshBtn" class="btn ghost" type="button">Refresh</button>
+          </div>
+        </header>
+
+        <section class="changes-kpis" aria-label="Change summary">
+          <article class="changes-kpi">
+            <span>Total changes</span>
+            <strong id="changesKpiTotal">-</strong>
+          </article>
+          <article class="changes-kpi">
+            <span>Inventory edits</span>
+            <strong id="changesKpiEdits">-</strong>
+          </article>
+          <article class="changes-kpi">
+            <span>Stock events</span>
+            <strong id="changesKpiStock">-</strong>
+          </article>
+          <article class="changes-kpi">
+            <span>Needs review</span>
+            <strong id="changesKpiReview">-</strong>
+          </article>
+        </section>
+
+        <section class="changes-filters" aria-label="Change filters">
+          <label class="filter">
+            <span>From</span>
+            <input id="changesDateFrom" type="date" />
+          </label>
+          <label class="filter">
+            <span>To</span>
+            <input id="changesDateTo" type="date" />
+          </label>
+          <label class="filter">
+            <span>Worker</span>
+            <select id="changesWorkerFilter">
+              <option value="">All workers</option>
+            </select>
+          </label>
+          <label class="filter">
+            <span>Store</span>
+            <select id="changesStoreFilter">
+              <option value="">All stores</option>
+            </select>
+          </label>
+          <label class="filter">
+            <span>Type</span>
+            <select id="changesTypeFilter">
+              <option value="">All changes</option>
+              <option value="inventory_edit">Inventory edits</option>
+              <option value="stock_event">Stock movement</option>
+              <option value="tray_event">Tray movement</option>
+              <option value="photo_event">Photo removal</option>
+              <option value="review">Needs review</option>
+            </select>
+          </label>
+          <label class="filter grow">
+            <span>Search</span>
+            <input id="changesSearchInput" type="search" placeholder="Item, barcode, location, worker, field..." />
+          </label>
+        </section>
+
+        <div id="changesStatus" class="changes-status">Open Changes to load today's activity.</div>
+        <section id="changesTimeline" class="changes-timeline" aria-live="polite"></section>
+      </section>
     </section>
     <!-- /#adminApp -->
 
@@ -700,6 +775,7 @@
       </header>
       <div class="sheet-body">
         <button class="sheet-link" type="button" data-tab="stores">🏬 Stores</button>
+        <button class="sheet-link" type="button" data-tab="changes">Changes</button>
         <button class="sheet-link" type="button" data-tab="agreements">📝 Agreements</button>
         <button class="sheet-link" type="button" data-tab="taxdocs">📄 Tax Docs</button>
       </div>
@@ -1075,6 +1151,7 @@
   <script src="admin-agreements.js"></script>
   <script src="admin-shell.js" defer></script>
   <script src="admin-schedule.js"></script>
+  <script src="admin-changes.js"></script>
   <script type="module" src="admin.js"></script>
   <script src="admin-users.js" defer></script>
 

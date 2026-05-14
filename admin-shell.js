@@ -55,6 +55,7 @@
     schedule: "tabSchedule",
     users: "tabUsers",
     stores: "tabStores",
+    changes: "tabChanges",
     agreements: "tabAgreements",
     taxdocs: "tabTaxDocs",
   };

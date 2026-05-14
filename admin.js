@@ -555,7 +555,8 @@ function showPanel(id){
     panelOverview: 'overview',
     panelPayroll: 'payroll',
     panelSchedule: 'schedule',
-    panelStores: 'stores'
+    panelStores: 'stores',
+    panelChanges: 'changes'
   };
   const key = map[id];
   if (key) activateTab(key);
@@ -1427,6 +1428,7 @@ function activateTab(which){
     { key:'payroll',  btn:'tabPayroll',  panel:'panelPayroll' },
     { key:'schedule', btn:'tabSchedule', panel:'panelSchedule' },
     { key:'stores',   btn:'tabStores',   panel:'panelStores' },
+    { key:'changes', btn:'tabChanges', panel:'panelChanges' },
     { key:'users',    btn:'tabUsers',    panel:'panelUsers' }, // ✅ NEW
     { key:'taxdocs',  btn:'tabTaxDocs',  panel:'panelTaxDocs' },
     { key:'agreements', btn:'tabAgreements', panel:'panelAgreements' },
@@ -1445,6 +1447,7 @@ function activateTab(which){
 }
 
 let _payrollInitialized = false;
+let _changesInitialized = false;
 function wireTabs(){
   qs('tabOverview')?.addEventListener('click', ()=> activateTab('overview'));
   qs('tabPayroll')?.addEventListener('click', async ()=>{
@@ -1456,6 +1459,13 @@ function wireTabs(){
   });
   qs('tabSchedule')?.addEventListener('click', ()=> activateTab('schedule'));
   qs('tabStores')?.addEventListener('click',   ()=> activateTab('stores'));
+  qs('tabChanges')?.addEventListener('click', async () => {
+    activateTab('changes');
+    if (_changesInitialized) return;
+    _changesInitialized = true;
+    try { await window.initChangesTab?.(); }
+    catch (e) { console.error(e); showToast('Failed to load Changes','err'); }
+  });
   qs('tabAgreements')?.addEventListener('click', ()=> activateTab('agreements'));
   qs('tabUsers')?.addEventListener('click',    ()=> activateTab('users')); // ✅ NEW
   let _taxDocsInitialized = false;
