@@ -2417,7 +2417,9 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 .stock-photo-viewer-content,
 .stock-photo-manager-content,
 .stock-barcode-content,
-.stock-description-modal-content {
+.stock-description-modal-content,
+.stock-photo-inspector-content,
+.stock-photo-save-confirm-content {
   position: relative;
   width: min(1040px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -2644,6 +2646,158 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   grid-column: 1 / -1;
   background: #16171b;
   color: #fff;
+}
+
+#stock-photo-inspector-modal {
+  z-index: 10050;
+  background: rgba(6, 7, 10, .76);
+}
+
+.stock-photo-inspector-content {
+  width: min(980px, calc(100vw - 28px));
+  padding: 18px;
+  background: #f8f8fa;
+}
+
+.stock-photo-inspector-header,
+.stock-photo-save-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.stock-photo-inspector-header span,
+.stock-photo-confirm-eyebrow {
+  display: block;
+  color: #8b6d21;
+  font-family: system-ui, sans-serif;
+  font-size: .72rem;
+  font-weight: 950;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.stock-photo-inspector-header h3,
+.stock-photo-save-confirm-content h3 {
+  margin: 3px 0 4px;
+  color: #151519;
+  font-size: 1.45rem;
+}
+
+.stock-photo-inspector-header p,
+.stock-photo-save-confirm-content p {
+  margin: 0;
+  color: #61646d;
+  font-family: system-ui, sans-serif;
+  font-size: .92rem;
+}
+
+.stock-photo-inspector-stage {
+  display: grid;
+  place-items: center;
+  height: min(68vh, 680px);
+  margin-top: 16px;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 20px;
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.05) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.05) 25%, transparent 25%),
+    #0b0b0f;
+  background-size: 20px 20px;
+}
+
+.stock-photo-inspector-stage img {
+  width: 100%;
+  max-width: 900px;
+  max-height: none;
+  border-radius: 14px;
+  box-shadow: 0 24px 55px rgba(0,0,0,.42);
+  transform: none;
+}
+
+.stock-photo-inspector-stage img:hover {
+  transform: none;
+}
+
+.stock-photo-inspector-controls {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  font-family: system-ui, sans-serif;
+}
+
+.stock-photo-inspector-controls label {
+  color: #3f4148;
+  font-weight: 900;
+}
+
+.stock-photo-inspector-controls input[type="range"] {
+  width: 100%;
+}
+
+#stock-photo-save-confirm-modal {
+  z-index: 10060;
+  background: rgba(8, 8, 12, .7);
+}
+
+.stock-photo-save-confirm-content {
+  width: min(620px, calc(100vw - 28px));
+}
+
+.stock-photo-save-confirm-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.stock-photo-save-confirm-strip img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,.08);
+  box-shadow: none;
+}
+
+.stock-photo-save-confirm-strip img:hover {
+  transform: none;
+}
+
+.stock-photo-save-confirm-content label {
+  display: block;
+  margin: 12px 0 6px;
+  color: #283044;
+  font-family: system-ui, sans-serif;
+  font-size: .74rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.stock-photo-save-confirm-content input,
+.stock-photo-save-confirm-content textarea {
+  width: 100%;
+  border: 1px solid rgba(17,24,39,.16);
+  border-radius: 14px;
+  background: #fff;
+  color: #151519;
+  padding: 12px 14px;
+  font-family: system-ui, sans-serif;
+}
+
+.stock-photo-save-confirm-content textarea {
+  resize: vertical;
+  min-height: 92px;
+}
+
+.stock-photo-save-confirm-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .photo-delete-confirm-content {
@@ -3665,6 +3819,20 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   }
 
   .stock-camera-request-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .stock-photo-inspector-header,
+  .stock-photo-save-confirm-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stock-photo-inspector-stage {
+    height: 54vh;
+  }
+
+  .stock-photo-inspector-controls {
     grid-template-columns: 1fr;
   }
 

@@ -674,6 +674,47 @@
     </div>
   </div>
 
+  <div id="stock-photo-inspector-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-photo-inspector-title">
+    <div class="stock-photo-inspector-content">
+      <button type="button" id="close-stock-photo-inspector" class="stock-modal-close" title="Close">&times;</button>
+      <div class="stock-photo-inspector-header">
+        <div>
+          <span>Photo inspection</span>
+          <h3 id="stock-photo-inspector-title">Review Photo</h3>
+          <p id="stock-photo-inspector-meta">Zoom in before deciding whether to include this image.</p>
+        </div>
+        <button type="button" id="stock-photo-inspector-use" class="stock-primary-btn">Use This Photo</button>
+      </div>
+      <div class="stock-photo-inspector-stage">
+        <img id="stock-photo-inspector-image" src="" alt="Full size item photo">
+      </div>
+      <div class="stock-photo-inspector-controls">
+        <label for="stock-photo-inspector-zoom">Zoom</label>
+        <input type="range" id="stock-photo-inspector-zoom" min="1" max="4" step="0.05" value="1">
+        <button type="button" id="stock-photo-inspector-reset" class="stock-secondary-btn">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stock-photo-save-confirm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-photo-save-confirm-title">
+    <div class="stock-photo-save-confirm-content">
+      <button type="button" id="close-stock-photo-save-confirm" class="stock-modal-close" title="Close">&times;</button>
+      <span class="stock-photo-confirm-eyebrow">Signed photo addition</span>
+      <h3 id="stock-photo-save-confirm-title">Add Selected Photos?</h3>
+      <p id="stock-photo-save-confirm-summary">Confirm the selected photos, then sign with your password so the change is recorded.</p>
+      <div id="stock-photo-save-confirm-strip" class="stock-photo-save-confirm-strip"></div>
+      <label for="stock-photo-save-password">Your Password</label>
+      <input type="password" id="stock-photo-save-password" autocomplete="current-password" placeholder="Sign this photo addition">
+      <label for="stock-photo-save-reason">Reason</label>
+      <textarea id="stock-photo-save-reason" rows="3" placeholder="Briefly explain why these photos are being added"></textarea>
+      <p id="stock-photo-save-error" class="error-message"></p>
+      <div class="stock-photo-save-confirm-actions">
+        <button type="button" id="cancel-stock-photo-save-confirm" class="stock-secondary-btn">Cancel</button>
+        <button type="button" id="confirm-stock-photo-save" class="stock-primary-btn">Sign and Add Photos</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add stock photos modal -->
   <div id="stock-photo-manager-modal" class="modal hidden">
     <div class="stock-photo-manager-content">

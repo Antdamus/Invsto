@@ -735,9 +735,11 @@ let uploadedImages = [];
     setSelectedAdminLocation("");
     modal.dataset.itemId = itemId;
     modal.classList.remove("hidden");
+    openAdminLocationScannerSearch({ clearSearch: true });
 
     const preferredStoreId = await fetchLastStockPlacementStoreIdForCurrentUser();
     await populateAdminLocationDropdown("", preferredStoreId);
+    openAdminLocationScannerSearch();
   }
 
 
@@ -966,6 +968,85 @@ let uploadedImages = [];
     }
   }
 
+  function focusAdminStockQuantityInput() {
+    const quantityInput = document.getElementById("admin-stock-quantity");
+    if (!quantityInput) return;
+
+    setTimeout(() => {
+      quantityInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      quantityInput.focus({ preventScroll: true });
+      quantityInput.select?.();
+    }, 80);
+  }
+
+  function selectAdminLocationForStock(location, { clearSearch = true } = {}) {
+    if (!location) return;
+
+    setSelectedAdminLocation(location);
+
+    const searchInput = document.getElementById("admin-location-dropdown-search");
+    if (clearSearch && searchInput) {
+      searchInput.value = "";
+    }
+    renderAdminLocationDropdownOptions(searchInput?.value || "");
+    focusAdminStockQuantityInput();
+  }
+
+  function getFilteredAdminLocationOptions(searchTerm = "") {
+    const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
+    const selectedStoreId = String(document.getElementById("admin-location-store-filter")?.value || "").trim();
+
+    return activeAdminLocationOptions.filter((location) => {
+      if (selectedStoreId && location.storeId !== selectedStoreId) return false;
+
+      const haystack = [
+        location.name,
+        location.code,
+        location.type,
+        location.storeName,
+      ].join(" ").toLowerCase();
+
+      return !normalizedSearch || haystack.includes(normalizedSearch);
+    });
+  }
+
+  function findScannedAdminLocationMatch(searchTerm = "") {
+    const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
+    if (!normalizedSearch) return null;
+
+    const filteredLocations = getFilteredAdminLocationOptions(searchTerm);
+    const exactMatch = filteredLocations.find((location) => {
+      return [location.name, location.code, location.id]
+        .filter(Boolean)
+        .some((value) => String(value).trim().toLowerCase() === normalizedSearch);
+    });
+
+    if (exactMatch) return exactMatch;
+    return filteredLocations.length === 1 ? filteredLocations[0] : null;
+  }
+
+  function openAdminLocationScannerSearch({ clearSearch = false } = {}) {
+    const menu = document.getElementById("admin-location-dropdown-menu");
+    if (!menu) return;
+
+    buildAdminLocationDropdownShell();
+
+    const searchInput = document.getElementById("admin-location-dropdown-search");
+    if (clearSearch && searchInput) {
+      searchInput.value = "";
+    }
+
+    renderAdminLocationDropdownOptions(searchInput?.value || "");
+    menu.classList.add("show");
+    menu.scrollTop = 0;
+
+    setTimeout(() => {
+      const currentSearchInput = document.getElementById("admin-location-dropdown-search");
+      currentSearchInput?.focus({ preventScroll: true });
+      currentSearchInput?.select?.();
+    }, 100);
+  }
+
   function populateAdminLocationStoreFilter(locations, selectedStoreId = "") {
     const select = document.getElementById("admin-location-store-filter");
     if (!select) return;
@@ -1156,19 +1237,7 @@ let uploadedImages = [];
     if (!container) return;
 
     const normalizedSearch = String(searchTerm || "").trim().toLowerCase();
-    const selectedStoreId = String(document.getElementById("admin-location-store-filter")?.value || "").trim();
-    const filteredLocations = activeAdminLocationOptions.filter((location) => {
-      if (selectedStoreId && location.storeId !== selectedStoreId) return false;
-
-      const haystack = [
-        location.name,
-        location.code,
-        location.type,
-        location.storeName,
-      ].join(" ").toLowerCase();
-
-      return !normalizedSearch || haystack.includes(normalizedSearch);
-    });
+    const filteredLocations = getFilteredAdminLocationOptions(searchTerm);
 
     const exactMatch = activeAdminLocationOptions.some((location) => {
       return location.name.toLowerCase() === normalizedSearch || location.code.toLowerCase() === normalizedSearch;
@@ -1219,6 +1288,21 @@ let uploadedImages = [];
       renderAdminLocationDropdownOptions(event.target.value);
     });
 
+    input?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+
+      event.preventDefault();
+      const location = findScannedAdminLocationMatch(event.target.value);
+      if (!location) {
+        showToast("Scan or search a matching location, then select it.");
+        return;
+      }
+
+      selectAdminLocationForStock(location);
+      showToast(`Selected location: ${location.name}${location.code ? ` (${location.code})` : ""}`);
+      menu.classList.remove("show");
+    });
+
     container.addEventListener("click", (event) => {
       const newLocationEl = event.target.closest("[data-new-location]");
       if (newLocationEl) {
@@ -1235,10 +1319,9 @@ let uploadedImages = [];
       const location = activeAdminLocationOptions.find((entry) => entry.id === optionEl.dataset.locationId);
       if (!location) return;
 
-      setSelectedAdminLocation(location);
+      selectAdminLocationForStock(location);
       showToast(`Selected location: ${location.name}${location.code ? ` (${location.code})` : ""}`);
       menu.classList.remove("show");
-      renderAdminLocationDropdownOptions(input?.value || "");
     });
   }
 
@@ -1254,6 +1337,11 @@ let uploadedImages = [];
             id="admin-location-dropdown-search"
             class="dropdown-search"
             placeholder="Search location, barcode, store, or type..."
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            inputmode="search"
           >
         </div>
         <div class="dropdown-options-container"></div>
@@ -1542,11 +1630,7 @@ let uploadedImages = [];
       showToast("Location saved!");
       toggleAddLocationModal(false);
       await populateAdminLocationDropdown(insertedLocation.location_name);
-      setSelectedAdminLocation(insertedLocation.location_name);
-
-      const quantityInput = document.getElementById("admin-stock-quantity");
-      quantityInput?.focus();
-      quantityInput?.select?.();
+      selectAdminLocationForStock(insertedLocation.location_name);
     });
   }
 
@@ -1638,7 +1722,11 @@ let uploadedImages = [];
     document.addEventListener("click", (e) => {
       if (e.target.id === "admin-location-dropdown-toggle") {
         const menu = document.getElementById("admin-location-dropdown-menu");
-        menu.classList.toggle("show");
+        if (menu.classList.contains("show")) {
+          menu.classList.remove("show");
+        } else {
+          openAdminLocationScannerSearch();
+        }
       }
     });
   }
@@ -1655,7 +1743,19 @@ let uploadedImages = [];
     storeFilter?.addEventListener("change", () => {
       const searchInput = document.getElementById("admin-location-dropdown-search");
       renderAdminLocationDropdownOptions(searchInput?.value || "");
+      openAdminLocationScannerSearch();
     });
+
+    const quantityInput = document.getElementById("admin-stock-quantity");
+    if (quantityInput && quantityInput.dataset.enterBound !== "true") {
+      quantityInput.dataset.enterBound = "true";
+      quantityInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+
+        event.preventDefault();
+        confirmBtn?.click();
+      });
+    }
 
     confirmBtn.onclick = async () => {
       const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";

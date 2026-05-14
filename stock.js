@@ -85,6 +85,10 @@ const stockMediaState = {
     offsetY: 0,
     rotation: 0,
   },
+  inspector: {
+    index: -1,
+    zoom: 1,
+  },
 };
 
 const manualEbaySaleState = {
@@ -4096,6 +4100,65 @@ function renderStockPhotoManagerGrid() {
   }).join("");
 }
 
+function setStockPhotoSelection(path, selected = true) {
+  if (!path) return;
+  if (selected) stockMediaState.selectedPaths.add(path);
+  else stockMediaState.selectedPaths.delete(path);
+  renderStockPhotoManagerGrid();
+}
+
+function setStockPhotoInspectorZoom(value = 1) {
+  const zoom = Math.max(1, Math.min(4, Number(value) || 1));
+  stockMediaState.inspector.zoom = zoom;
+  const image = document.getElementById("stock-photo-inspector-image");
+  const slider = document.getElementById("stock-photo-inspector-zoom");
+  if (image) {
+    image.style.width = `${Math.round(zoom * 100)}%`;
+    image.style.maxWidth = `${Math.round(zoom * 900)}px`;
+  }
+  if (slider && Number(slider.value) !== zoom) slider.value = String(zoom);
+}
+
+function closeStockPhotoInspector() {
+  const modal = document.getElementById("stock-photo-inspector-modal");
+  const image = document.getElementById("stock-photo-inspector-image");
+  modal?.classList.add("hidden");
+  modal?.classList.remove("show");
+  if (image) image.removeAttribute("src");
+  stockMediaState.inspector = { index: -1, zoom: 1 };
+  if (!document.getElementById("stock-photo-manager-modal")?.classList.contains("show")) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
+function openStockPhotoInspector(index) {
+  const image = stockMediaState.stagedImages[index];
+  if (!image?.previewUrl) return;
+
+  stockMediaState.inspector = { index, zoom: 1 };
+  const modal = document.getElementById("stock-photo-inspector-modal");
+  const imageEl = document.getElementById("stock-photo-inspector-image");
+  const title = document.getElementById("stock-photo-inspector-title");
+  const meta = document.getElementById("stock-photo-inspector-meta");
+  const useButton = document.getElementById("stock-photo-inspector-use");
+
+  if (title) title.textContent = image.name || "Review Photo";
+  if (meta) {
+    meta.textContent = `${image.sourceType || "photo"}${image.updatedAt ? ` - ${formatStockHistoryDate(image.updatedAt)}` : ""}`;
+  }
+  if (imageEl) {
+    imageEl.src = image.previewUrl;
+    imageEl.alt = image.name || "Full size item photo";
+  }
+  if (useButton) {
+    useButton.textContent = stockMediaState.selectedPaths.has(image.path) ? "Selected" : "Use This Photo";
+  }
+  setStockPhotoInspectorZoom(1);
+  modal?.classList.remove("hidden");
+  modal?.classList.add("show");
+  document.body.classList.add("modal-open");
+}
+
 function closeStockPhotoEditor() {
   const editor = document.getElementById("stock-photo-editor");
   editor?.classList.add("hidden");
@@ -4323,6 +4386,8 @@ function closeStockPhotoManager() {
   document.getElementById("stock-photo-manager-modal")?.classList.add("hidden");
   document.getElementById("stock-photo-manager-modal")?.classList.remove("show");
   document.body.classList.remove("modal-open");
+  closeStockPhotoInspector();
+  closeStockPhotoSaveConfirmModal();
   closeStockPhotoEditor();
   resetStockPhotoProgress();
 }
@@ -4416,6 +4481,106 @@ async function resolveSelectedStockPhotoPathsForSave(selectedPaths) {
   return [...new Set(resolvedPaths.filter(Boolean))];
 }
 
+function closeStockPhotoSaveConfirmModal() {
+  const modal = document.getElementById("stock-photo-save-confirm-modal");
+  modal?.classList.add("hidden");
+  modal?.classList.remove("show");
+  if (!document.getElementById("stock-photo-manager-modal")?.classList.contains("show")) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
+function requestStockPhotoSaveSignature(selectedPaths = []) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("stock-photo-save-confirm-modal");
+    const summary = document.getElementById("stock-photo-save-confirm-summary");
+    const strip = document.getElementById("stock-photo-save-confirm-strip");
+    const passwordInput = document.getElementById("stock-photo-save-password");
+    const reasonInput = document.getElementById("stock-photo-save-reason");
+    const errorMsg = document.getElementById("stock-photo-save-error");
+    const confirmBtn = document.getElementById("confirm-stock-photo-save");
+    const cancelBtn = document.getElementById("cancel-stock-photo-save-confirm");
+    const closeBtn = document.getElementById("close-stock-photo-save-confirm");
+
+    if (!modal || !passwordInput || !reasonInput || !confirmBtn || !cancelBtn || !errorMsg) {
+      resolve(null);
+      return;
+    }
+
+    const selectedImages = selectedPaths
+      .map((path) => findStockStagedImageByPath(path))
+      .filter(Boolean);
+    const count = selectedImages.length || selectedPaths.length;
+
+    if (summary) {
+      summary.textContent = `You are adding ${count} selected photo${count === 1 ? "" : "s"} to this item. Sign this change so it appears clearly in the audit trail.`;
+    }
+    if (strip) {
+      strip.innerHTML = selectedImages.slice(0, 8).map((image) => `
+        <img src="${escapeStockHtml(image.thumbnailUrl || image.previewUrl || "")}" alt="${escapeStockHtml(image.name || "Selected photo")}">
+      `).join("");
+    }
+
+    passwordInput.value = "";
+    reasonInput.value = `Added ${count} selected item photo${count === 1 ? "" : "s"} from the stock photo manager.`;
+    errorMsg.textContent = "";
+    errorMsg.classList.remove("show");
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = "Sign and Add Photos";
+
+    const cleanup = (value) => {
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      if (closeBtn) closeBtn.onclick = null;
+      passwordInput.onkeydown = null;
+      closeStockPhotoSaveConfirmModal();
+      resolve(value);
+    };
+
+    cancelBtn.onclick = () => cleanup(null);
+    if (closeBtn) closeBtn.onclick = () => cleanup(null);
+    confirmBtn.onclick = async () => {
+      const password = passwordInput.value.trim();
+      const reason = reasonInput.value.trim();
+      if (!password) {
+        errorMsg.textContent = "Password is required.";
+        errorMsg.classList.add("show");
+        return;
+      }
+      if (reason.length < 3) {
+        errorMsg.textContent = "Please add a brief reason.";
+        errorMsg.classList.add("show");
+        return;
+      }
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Signing...";
+      const isValid = await validatePassword(password);
+      if (!isValid) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Sign and Add Photos";
+        errorMsg.textContent = "Incorrect password.";
+        errorMsg.classList.add("show");
+        return;
+      }
+
+      cleanup({ reason, signedByEmail: currentUser?.email || "" });
+    };
+
+    passwordInput.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmBtn.click();
+      }
+    };
+
+    modal.classList.remove("hidden");
+    modal.classList.add("show");
+    document.body.classList.add("modal-open");
+    passwordInput.focus();
+  });
+}
+
 async function saveSelectedStockPhotos() {
   const itemId = stockMediaState.itemId;
   const selectedSourcePaths = [...stockMediaState.selectedPaths];
@@ -4424,10 +4589,8 @@ async function saveSelectedStockPhotos() {
     return;
   }
 
-  const confirmed = window.confirm(
-    `Are you sure you want to add ${selectedSourcePaths.length} selected photo${selectedSourcePaths.length === 1 ? "" : "s"} to this item?`
-  );
-  if (!confirmed) {
+  const signed = await requestStockPhotoSaveSignature(selectedSourcePaths);
+  if (!signed) {
     setStockPhotoStatus("Photo save cancelled. Your selections are still here.", "waiting");
     return;
   }
@@ -4445,30 +4608,12 @@ async function saveSelectedStockPhotos() {
   }
   setStockPhotoProgress(52, "Attaching photos to item...", true);
 
-  let saveResult;
-  if (canViewSensitiveStockData()) {
-    const { data: items, error: fetchError } = await supabase
-      .from("item_types")
-      .select("id, photos")
-      .eq("id", itemId)
-      .limit(1);
-
-    if (fetchError || !items?.length) {
-      saveResult = { error: fetchError || new Error("Could not load the item before saving.") };
-    } else {
-      const existingPhotos = Array.isArray(items[0].photos) ? items[0].photos : [];
-      const nextPhotos = [...new Set([...existingPhotos, ...selectedPaths])];
-      saveResult = await supabase
-        .from("item_types")
-        .update({ photos: nextPhotos })
-        .eq("id", itemId);
-    }
-  } else {
-    saveResult = await supabase.rpc("append_item_photos", {
-      _item_id: itemId,
-      _photo_paths: selectedPaths,
-    });
-  }
+  const saveResult = await supabase.rpc("append_item_photos", {
+    _item_id: itemId,
+    _photo_paths: selectedPaths,
+    _reason: signed.reason,
+    _signed_by_email: signed.signedByEmail,
+  });
 
   const { error } = saveResult;
 
@@ -5032,6 +5177,28 @@ function closeStockPhotoViewer() {
 function setupStockMediaListeners() {
   document.getElementById("close-stock-photo-viewer")?.addEventListener("click", closeStockPhotoViewer);
   document.getElementById("close-stock-photo-manager")?.addEventListener("click", closeStockPhotoManager);
+  document.getElementById("close-stock-photo-inspector")?.addEventListener("click", closeStockPhotoInspector);
+  document.getElementById("stock-photo-inspector-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "stock-photo-inspector-modal") closeStockPhotoInspector();
+  });
+  document.getElementById("stock-photo-inspector-zoom")?.addEventListener("input", (event) => {
+    setStockPhotoInspectorZoom(event.target.value);
+  });
+  document.getElementById("stock-photo-inspector-reset")?.addEventListener("click", () => {
+    setStockPhotoInspectorZoom(1);
+  });
+  document.getElementById("stock-photo-inspector-use")?.addEventListener("click", () => {
+    const image = stockMediaState.stagedImages[stockMediaState.inspector.index];
+    if (!image?.path) return;
+    setStockPhotoSelection(image.path, true);
+    setStockPhotoStatus("Photo selected. Save selected photos when you are ready to sign the change.", "success");
+    closeStockPhotoInspector();
+  });
+  document.getElementById("stock-photo-save-confirm-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "stock-photo-save-confirm-modal") {
+      document.getElementById("cancel-stock-photo-save-confirm")?.click();
+    }
+  });
   document.getElementById("close-stock-barcode-modal")?.addEventListener("click", closeBarcodeModal);
   document.getElementById("close-stock-description-modal")?.addEventListener("click", closeStockDescriptionModal);
   document.getElementById("stock-description-modal")?.addEventListener("click", (event) => {
@@ -5117,7 +5284,7 @@ function setupStockMediaListeners() {
     } else if (action === "edit") {
       await openStockPhotoEditor(index);
     } else if (action === "preview") {
-      window.open(image.previewUrl, "_blank", "noopener,noreferrer");
+      openStockPhotoInspector(index);
     }
   });
 }
