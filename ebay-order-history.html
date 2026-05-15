@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - eBay Order History</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="ebay-order-history.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Order History</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="locations.html">Locations</a>
+      <a href="add-item.html">Add Item</a>
+      <a href="add-inventory.html">Add Inventory</a>
+      <a href="inventory-activity.html">Daily Adds</a>
+      <a href="stock.html">Stock</a>
+      <a href="pending-orders.html">Pending Orders</a>
+      <a href="ebay-order-history.html" class="active">Order History</a>
+      <a href="timeclock.html">Timesheet</a>
+      <a href="admin.html">Admin</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="admin.html">
+            <i class="ti ti-settings"></i>
+            <span class="link-text">Admin</span>
+          </a>
+          <a class="nav-link" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+          <a class="nav-link" href="locations.html">
+            <i class="ti ti-map-pin"></i>
+            <span class="link-text">Locations</span>
+          </a>
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i>
+            <span class="link-text">Add Item</span>
+          </a>
+          <a class="nav-link" href="add-inventory.html">
+            <i class="ti ti-box-seam"></i>
+            <span class="link-text">Add Inventory</span>
+          </a>
+          <a class="nav-link" href="inventory-activity.html">
+            <i class="ti ti-report-analytics"></i>
+            <span class="link-text">Daily Adds</span>
+          </a>
+          <a class="nav-link" href="stock.html">
+            <i class="ti ti-archive"></i>
+            <span class="link-text">Stock</span>
+          </a>
+          <a class="nav-link" href="pending-orders.html">
+            <i class="ti ti-truck-delivery"></i>
+            <span class="link-text">Pending Orders</span>
+          </a>
+          <a class="nav-link active" href="ebay-order-history.html">
+            <i class="ti ti-history"></i>
+            <span class="link-text">Order History</span>
+          </a>
+          <a class="nav-link" href="timeclock.html">
+            <i class="ti ti-clock"></i>
+            <span class="link-text">Timesheet</span>
+          </a>
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="history-greeting">eBay Order History</strong>
+            <div class="sub">Admin shipping monitor - completed, canceled, and reverted orders</div>
+          </div>
+          <div class="header-pills" aria-label="Page context">
+            <div class="pill">Scope: <b>eBay</b></div>
+            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill" id="history-date-pill">Date: <b>-</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content order-history-content">
+        <section class="order-history-hero">
+          <div>
+            <span class="eyebrow">Order Oversight</span>
+            <h1>Shipped and Closed Orders</h1>
+            <p>Review who packed each order, money totals, admin closeouts, cancellations, and reversals.</p>
+          </div>
+          <div class="history-actions">
+            <button id="refresh-history" type="button" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+            <a href="pending-orders.html" class="secondary-btn">
+              <i data-lucide="truck"></i>
+              Pending Orders
+            </a>
+          </div>
+        </section>
+
+        <section class="history-filters" aria-label="Order history filters">
+          <label>
+            From
+            <input id="history-from" type="date" />
+          </label>
+          <label>
+            To
+            <input id="history-to" type="date" />
+          </label>
+          <label>
+            Worker/Admin
+            <select id="history-worker">
+              <option value="">All workers</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="history-status">
+              <option value="all">All closed</option>
+              <option value="fulfilled">Shipped</option>
+              <option value="cancelled">Canceled</option>
+              <option value="admin_closeout">Admin packed/no inventory</option>
+              <option value="reverted">Reversals only</option>
+            </select>
+          </label>
+          <label class="wide">
+            Search
+            <input id="history-search" type="search" placeholder="Buyer, order #, title, item #, worker..." autocomplete="off" />
+          </label>
+        </section>
+
+        <section class="history-summary-grid" aria-label="Order history totals">
+          <div class="history-summary-card">
+            <span>Orders Shipped</span>
+            <strong id="summary-shipped-orders">0</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Lines Shipped</span>
+            <strong id="summary-shipped-lines">0</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Gross Total</span>
+            <strong id="summary-gross">$0.00</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Estimated Payout</span>
+            <strong id="summary-payout">$0.00</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Admin Closeouts</span>
+            <strong id="summary-admin-closeouts">0</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Canceled Lines</span>
+            <strong id="summary-cancelled">0</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Reversals</span>
+            <strong id="summary-reversals">0</strong>
+          </div>
+        </section>
+
+        <section class="history-board">
+          <div class="history-board-head">
+            <div>
+              <span class="eyebrow">Closed Orders</span>
+              <h2>Shipment Ledger</h2>
+            </div>
+            <span id="history-count" class="history-count">0 orders</span>
+          </div>
+          <div id="history-list" class="history-list">
+            <div class="history-empty">Loading order history...</div>
+          </div>
+        </section>
+
+        <section class="history-board">
+          <div class="history-board-head">
+            <div>
+              <span class="eyebrow">Admin Trail</span>
+              <h2>Closeout and Reversal Events</h2>
+            </div>
+          </div>
+          <div id="event-list" class="event-list">
+            <div class="history-empty">Loading admin events...</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="revert-order-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="revert-order-title">
+    <div class="history-modal-card">
+      <button id="close-revert-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Admin Reversal</span>
+      <h2 id="revert-order-title">Revert order</h2>
+      <p id="revert-order-subtitle">This will reopen the selected line(s) and restore stock when inventory was removed.</p>
+      <div id="revert-order-list" class="revert-order-list"></div>
+      <label class="modal-field">
+        Reversal Note
+        <textarea id="revert-note" rows="3" placeholder="Explain why this order is being reverted"></textarea>
+      </label>
+      <label class="modal-field">
+        Admin Password
+        <input id="revert-password" type="password" autocomplete="current-password" placeholder="Sign this reversal" />
+      </label>
+      <p id="revert-error" class="history-error"></p>
+      <div class="history-modal-actions">
+        <button id="cancel-revert" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-revert" type="button" class="primary-btn">Sign and Revert</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="ebay-order-history.js"></script>
+</body>
+</html>

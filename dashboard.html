@@ -34,6 +34,7 @@
       <a href="inventory-activity.html">Daily Adds</a>
       <a href="stock.html">Stock</a>
       <a href="pending-orders.html">Pending Orders</a>
+      <a href="ebay-order-history.html">Order History</a>
       <a href="timeclock.html">Timesheet</a>
       <a href="admin.html">Admin</a>
       <a href="#" id="logout-mobile">Logout</a>
@@ -87,6 +88,11 @@
             <span class="link-text">Pending Orders</span>
           </a>
 
+          <a class="nav-link" href="ebay-order-history.html">
+            <i class="ti ti-history"></i>
+            <span class="link-text">Order History</span>
+          </a>
+
           <a class="nav-link" href="timeclock.html">
             <i class="ti ti-clock"></i>
             <span class="link-text">Timesheet</span>
@@ -127,6 +133,32 @@
           </div>
           <div id="urgent-orders-container" class="urgent-orders-grid">
             <div class="urgent-orders-empty">Loading urgent orders...</div>
+          </div>
+        </section>
+
+        <section class="section dashboard-directory-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Admin Directory</h3>
+              <div class="section-sub">Fast access to packing, shipped orders, and audit review</div>
+            </div>
+          </div>
+          <div class="dashboard-directory-grid">
+            <a class="dashboard-directory-card" href="pending-orders.html">
+              <span>Pack</span>
+              <strong>Pending Orders</strong>
+              <small>Scan and confirm eBay bundles</small>
+            </a>
+            <a class="dashboard-directory-card" href="ebay-order-history.html">
+              <span>Monitor</span>
+              <strong>Order History</strong>
+              <small>Shipped totals, cancellations, admin closeouts, and reversals</small>
+            </a>
+            <a class="dashboard-directory-card" href="admin.html">
+              <span>Audit</span>
+              <strong>Changes</strong>
+              <small>Review inventory edits and corrections</small>
+            </a>
           </div>
         </section>
 
