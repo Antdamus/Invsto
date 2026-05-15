@@ -12,6 +12,7 @@ let showDeletedItems = false;
 let activeDropdown = null;
 let inventoryRealtimeRefreshInFlight = null;
 let inventoryFocusRefreshTimer = null;
+let stockListRenderToken = 0;
 let failedAttempts = 0;            // 🚫 Track how many wrong passwords
 let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 // 🔒 In-memory cache for signed photo URLs
@@ -719,18 +720,26 @@ function buildLocationChips(item) {
 
 
   //function needed to create the HTML all the stock cards available
-  async function renderStockItems(data, containerIDToInjectCards = "stock-container") {
+  async function renderStockItems(data, containerIDToInjectCards = "stock-container", renderToken = ++stockListRenderToken) {
     const grid = document.getElementById(containerIDToInjectCards);
+    if (!grid || renderToken !== stockListRenderToken) return;
     grid.innerHTML = "";
+
+    if (!data.length) {
+      grid.innerHTML = `<div class="stock-empty-state">No stock items match the current barcode or filters.</div>`;
+      return;
+    }
 
     const fragment = document.createDocumentFragment();
 
     for (let index = 0; index < data.length; index++) {
       const item = data[index];
       const card = await renderStockCard(item, index);
+      if (renderToken !== stockListRenderToken) return;
       fragment.appendChild(card);
     }
 
+    if (renderToken !== stockListRenderToken) return;
     grid.appendChild(fragment);
     if (window.lucide) lucide.createIcons();
   }
@@ -1200,6 +1209,7 @@ function buildLocationChips(item) {
     //    - `renderStockItems()`: shows the paginated items on screen
     //    - `renderPaginationControls()`: updates the pagination buttons
     async function paginateAndRender(data) {
+      const renderToken = ++stockListRenderToken;
       // Total number of items and pages based on current page size
       const totalItems = data.length;
       const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -1215,7 +1225,8 @@ function buildLocationChips(item) {
       const paginatedItems = data.slice(start, end);
 
       // 🔁 Render those items into the grid or list
-      await renderStockItems(paginatedItems);
+      await renderStockItems(paginatedItems, "stock-container", renderToken);
+      if (renderToken !== stockListRenderToken) return;
 
       // 🔁 Render the pagination controls (e.g. page buttons)
       renderPaginationControls(totalPages);
