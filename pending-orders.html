@@ -45,6 +45,23 @@
         <div><span>Selected Order</span><strong id="summary-selected">None</strong></div>
       </section>
 
+      <section id="order-import-panel" class="import-panel hidden" aria-label="Import eBay orders">
+        <div>
+          <span class="eyebrow">Admin Import</span>
+          <h2>Upload eBay Orders Report</h2>
+          <p>Import pending order lines from the eBay CSV. Existing order numbers are skipped automatically.</p>
+        </div>
+        <div class="import-actions">
+          <label class="file-picker">
+            <input id="ebay-orders-file" type="file" accept=".csv,text/csv" />
+            <i data-lucide="upload"></i>
+            Choose CSV
+          </label>
+          <button id="import-ebay-orders" type="button" class="primary-btn">Import Orders</button>
+        </div>
+        <p id="import-status" class="import-status"></p>
+      </section>
+
       <section class="workspace-grid">
         <aside class="orders-panel">
           <div class="panel-head">

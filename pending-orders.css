@@ -197,6 +197,7 @@ h1 {
 }
 
 .summary-strip div,
+.import-panel,
 .orders-panel,
 .fulfillment-panel,
 .order-detail-card,
@@ -230,6 +231,77 @@ h1 {
   display: block;
   margin-top: 6px;
   font-size: 1.6rem;
+}
+
+.import-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 20px;
+}
+
+.import-panel h2 {
+  margin-bottom: 4px;
+}
+
+.import-panel p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.import-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.file-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 900;
+  overflow: hidden;
+}
+
+.file-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-picker svg {
+  width: 17px;
+  height: 17px;
+}
+
+.import-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-height: 1.3rem;
+  color: var(--muted);
+}
+
+.import-status.is-error {
+  color: var(--danger);
+}
+
+.import-status.is-success {
+  color: var(--green);
 }
 
 .workspace-grid {
@@ -552,8 +624,17 @@ textarea:focus {
   }
 
   .workspace-grid,
-  .summary-strip {
+  .summary-strip,
+  .import-panel {
     grid-template-columns: 1fr;
+  }
+
+  .import-actions {
+    justify-content: stretch;
+  }
+
+  .import-actions > * {
+    flex: 1 1 220px;
   }
 
   .orders-panel {

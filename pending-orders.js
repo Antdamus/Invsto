@@ -63,6 +63,14 @@ function setStatus(message = "", type = "info") {
   el.classList.toggle("is-error", type === "error");
 }
 
+function setImportStatus(message = "", type = "info") {
+  const el = $("import-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
 function getOrderFromLine(line) {
   const order = line?.ebay_orders || line?.order || {};
   return Array.isArray(order) ? order[0] || {} : order;
@@ -95,6 +103,16 @@ async function loadCurrentWorker() {
   return true;
 }
 
+function canImportOrders() {
+  return String(state.employee?.role || "").toLowerCase() === "admin";
+}
+
+function setupImportVisibility() {
+  const panel = $("order-import-panel");
+  if (!panel) return;
+  panel.classList.toggle("hidden", !canImportOrders());
+}
+
 function normalizeLine(line) {
   const order = getOrderFromLine(line);
   return {
@@ -110,6 +128,267 @@ function normalizeLine(line) {
       line.custom_label,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        value += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        value += char;
+      }
+      continue;
+    }
+
+    if (char === '"') quoted = true;
+    else if (char === ",") {
+      row.push(value);
+      value = "";
+    } else if (char === "\n") {
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+    } else if (char !== "\r") {
+      value += char;
+    }
+  }
+
+  if (value || row.length) {
+    row.push(value);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function rowsFromEbayCsv(text) {
+  const parsed = parseCsv(text);
+  const headerIndex = parsed.findIndex((row) =>
+    row.some((cell) => String(cell).trim() === "Order Number")
+    && row.some((cell) => String(cell).trim() === "Item Title")
+  );
+
+  if (headerIndex < 0) {
+    throw new Error("Could not find the eBay orders header row. Make sure this is the Orders Report CSV.");
+  }
+
+  const headers = parsed[headerIndex].map((cell) => String(cell || "").trim());
+  return parsed.slice(headerIndex + 1).map((row) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      if (header) record[header] = row[index] ?? "";
+    });
+    return record;
+  });
+}
+
+function csvCell(row, ...names) {
+  for (const name of names) {
+    if (row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") {
+      return String(row[name]).trim();
+    }
+  }
+  return "";
+}
+
+function parseEbayDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const match = text.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{2,4})$/);
+  if (match) {
+    const months = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+    };
+    const month = months[match[1].toLowerCase()];
+    const day = Number(match[2]);
+    const rawYear = Number(match[3]);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    if (month !== undefined && day > 0) {
+      return new Date(Date.UTC(year, month, day, 12, 0, 0)).toISOString();
+    }
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function toNumber(value) {
+  return Number(parseMoney(value).toFixed(2));
+}
+
+function buildOrderImportPayload(rows) {
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const orderNumber = csvCell(row, "Order Number");
+    const itemTitle = csvCell(row, "Item Title");
+    if (!orderNumber || !itemTitle) return;
+
+    if (!grouped.has(orderNumber)) {
+      grouped.set(orderNumber, {
+        source: row,
+        lines: [],
+        orderNumber,
+      });
+    }
+    grouped.get(orderNumber).lines.push(row);
+  });
+
+  const orders = [...grouped.values()].map((group) => {
+    const first = group.source;
+    const orderTotals = group.lines.reduce((totals, line) => {
+      totals.shipping += toNumber(csvCell(line, "Shipping And Handling"));
+      totals.sellerTax += toNumber(csvCell(line, "Seller Collected Tax"));
+      totals.ebayTax += toNumber(csvCell(line, "eBay Collected Tax"));
+      totals.ebayCharges += toNumber(csvCell(line, "eBay Collected Charges"));
+      totals.total += toNumber(csvCell(line, "Total Price"));
+      return totals;
+    }, { shipping: 0, sellerTax: 0, ebayTax: 0, ebayCharges: 0, total: 0 });
+
+    return {
+      order: {
+        order_number: group.orderNumber,
+        sales_record_number: csvCell(first, "Sales Record Number"),
+        buyer_username: csvCell(first, "Buyer Username"),
+        buyer_name: csvCell(first, "Buyer Name"),
+        buyer_email: csvCell(first, "Buyer Email"),
+        item_location: csvCell(first, "Item Location"),
+        item_zip_code: csvCell(first, "Item Zip Code"),
+        item_country: csvCell(first, "Item Country"),
+        payment_method: csvCell(first, "Payment Method"),
+        sale_date: parseEbayDate(csvCell(first, "Sale Date")),
+        paid_on_date: parseEbayDate(csvCell(first, "Paid On Date")),
+        ship_by_date: parseEbayDate(csvCell(first, "Ship By Date")),
+        shipped_on_date: parseEbayDate(csvCell(first, "Shipped On Date")),
+        tracking_number: csvCell(first, "Tracking Number"),
+        shipping_service: csvCell(first, "Shipping Service"),
+        shipping_and_handling: orderTotals.shipping,
+        seller_collected_tax: orderTotals.sellerTax,
+        ebay_collected_tax: orderTotals.ebayTax,
+        ebay_collected_charges: orderTotals.ebayCharges,
+        total_price: orderTotals.total,
+        net_payout: toNumber(csvCell(first, "Payout Amount", "Net Amount")) || null,
+        status: "pending",
+        imported_by: state.user?.id || null,
+        raw_payload: { source: "ebay_orders_report_csv", first_row: first },
+      },
+      lines: group.lines.map((line) => ({
+        item_number: csvCell(line, "Item Number"),
+        transaction_id: csvCell(line, "Transaction ID"),
+        item_title: csvCell(line, "Item Title"),
+        custom_label: csvCell(line, "Custom Label", "My Item Note"),
+        quantity: Math.max(1, parseInt(csvCell(line, "Quantity") || "1", 10) || 1),
+        sold_for: toNumber(csvCell(line, "Sold For")),
+        shipping_and_handling: toNumber(csvCell(line, "Shipping And Handling")),
+        total_price: toNumber(csvCell(line, "Total Price")),
+        net_payout: toNumber(csvCell(line, "Payout Amount", "Net Amount")) || null,
+        line_status: "pending",
+        raw_payload: line,
+      })),
+    };
+  });
+
+  return orders;
+}
+
+async function loadExistingOrderNumbers(orderNumbers) {
+  const existing = new Set();
+  for (let index = 0; index < orderNumbers.length; index += 100) {
+    const chunk = orderNumbers.slice(index, index + 100);
+    const { data, error } = await supabase
+      .from("ebay_orders")
+      .select("order_number")
+      .in("order_number", chunk);
+
+    if (error) throw error;
+    (data || []).forEach((row) => existing.add(row.order_number));
+  }
+  return existing;
+}
+
+async function importEbayOrdersFromCsv() {
+  if (!canImportOrders()) {
+    setImportStatus("Only admins can import eBay order reports.", "error");
+    return;
+  }
+
+  const file = $("ebay-orders-file")?.files?.[0];
+  if (!file) {
+    setImportStatus("Choose the eBay Orders Report CSV first.", "error");
+    return;
+  }
+
+  const button = $("import-ebay-orders");
+  button.disabled = true;
+  setImportStatus("Reading eBay orders report...");
+  let insertedOrderIds = [];
+
+  try {
+    const text = await file.text();
+    const rows = rowsFromEbayCsv(text);
+    const payload = buildOrderImportPayload(rows);
+    if (!payload.length) throw new Error("No usable eBay order rows were found in that CSV.");
+
+    const incomingNumbers = [...new Set(payload.map((entry) => entry.order.order_number))];
+    const existing = await loadExistingOrderNumbers(incomingNumbers);
+    const fresh = payload.filter((entry) => !existing.has(entry.order.order_number));
+    const skipped = payload.length - fresh.length;
+
+    if (!fresh.length) {
+      setImportStatus(`No new orders imported. ${skipped} duplicate order(s) were already in the system.`, "success");
+      await loadOrders();
+      return;
+    }
+
+    const { data: insertedOrders, error: orderError } = await supabase
+      .from("ebay_orders")
+      .insert(fresh.map((entry) => entry.order))
+      .select("id, order_number");
+
+    if (orderError) throw orderError;
+    insertedOrderIds = (insertedOrders || []).map((order) => order.id).filter(Boolean);
+
+    const orderIdByNumber = new Map((insertedOrders || []).map((order) => [order.order_number, order.id]));
+    const lineRows = fresh.flatMap((entry) => {
+      const orderId = orderIdByNumber.get(entry.order.order_number);
+      return entry.lines.map((line) => ({ ...line, order_id: orderId }));
+    }).filter((line) => line.order_id);
+
+    const { error: lineError } = await supabase
+      .from("ebay_order_lines")
+      .insert(lineRows);
+
+    if (lineError) {
+      if (insertedOrderIds.length) {
+        await supabase.from("ebay_orders").delete().in("id", insertedOrderIds);
+      }
+      throw lineError;
+    }
+
+    setImportStatus(`Imported ${insertedOrders.length} new order(s) and ${lineRows.length} line item(s). Skipped ${skipped} duplicate order(s).`, "success");
+    $("ebay-orders-file").value = "";
+    await loadOrders();
+  } catch (error) {
+    console.error("eBay order import failed:", error);
+    setImportStatus(error.message || "Could not import eBay orders.", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadOrders() {
@@ -577,6 +856,11 @@ function clearSelection() {
 
 function setupListeners() {
   $("refresh-orders")?.addEventListener("click", loadOrders);
+  $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
+  $("ebay-orders-file")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    setImportStatus(file ? `Ready to import ${file.name}. Duplicate eBay order numbers will be skipped.` : "");
+  });
   $("order-search")?.addEventListener("input", applyOrderFilters);
   $("order-status-filter")?.addEventListener("change", loadOrders);
   $("find-item")?.addEventListener("click", searchInventoryItems);
@@ -610,6 +894,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
   const ok = await loadCurrentWorker();
   if (!ok) return;
+  setupImportVisibility();
   setupListeners();
   await loadOrders();
   if (window.lucide) window.lucide.createIcons();
