@@ -429,6 +429,16 @@ h1 {
 
 .filter-row {
   margin: 14px 0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.filter-row input {
+  flex: 2 1 260px;
+}
+
+.filter-row select {
+  flex: 1 1 160px;
 }
 
 input,
@@ -510,6 +520,52 @@ textarea:focus {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+}
+
+.buyer-order-card.is-overdue {
+  border-color: rgba(255, 123, 123, 0.42);
+  box-shadow: inset 4px 0 0 rgba(255, 123, 123, 0.72);
+}
+
+.buyer-order-card.is-due-today {
+  border-color: rgba(227, 189, 119, 0.42);
+  box-shadow: inset 4px 0 0 rgba(227, 189, 119, 0.72);
+}
+
+.buyer-card-alerts {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.urgency-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.urgency-pill svg {
+  width: 14px;
+  height: 14px;
+}
+
+.urgency-overdue {
+  border: 1px solid rgba(255, 123, 123, 0.34);
+  background: rgba(255, 123, 123, 0.12);
+  color: #ffd1d1;
+}
+
+.urgency-today {
+  border: 1px solid rgba(227, 189, 119, 0.36);
+  background: rgba(227, 189, 119, 0.12);
+  color: var(--gold-strong);
 }
 
 .buyer-card-head strong {

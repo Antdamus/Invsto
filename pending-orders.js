@@ -13,6 +13,7 @@ const state = {
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
+  orderSort: "due_asc",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -81,6 +82,45 @@ function sameLocalDay(value, reference = new Date()) {
   return date.getFullYear() === reference.getFullYear()
     && date.getMonth() === reference.getMonth()
     && date.getDate() === reference.getDate();
+}
+
+function startOfLocalDay(value = new Date()) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function getShipTimestamp(value) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const date = new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+}
+
+function getOrderUrgency(value) {
+  if (!value) return null;
+  const shipBy = new Date(value);
+  if (Number.isNaN(shipBy.getTime())) return null;
+
+  const shipDay = startOfLocalDay(shipBy);
+  const today = startOfLocalDay();
+  if (shipDay < today) {
+    return {
+      level: "overdue",
+      label: "Past due",
+      icon: "alert-triangle",
+    };
+  }
+
+  if (sameLocalDay(shipBy)) {
+    return {
+      level: "today",
+      label: "Due today",
+      icon: "clock",
+    };
+  }
+
+  return null;
 }
 
 function setStatus(message = "", type = "info") {
@@ -206,7 +246,32 @@ function setupImportVisibility() {
   document.querySelectorAll(".admin-money-field").forEach((field) => {
     field.classList.toggle("hidden", !isAdminUser());
   });
+  setupOrderSortOptions();
   renderAdminOrderActions();
+}
+
+function setupOrderSortOptions() {
+  const select = $("order-sort");
+  if (!select) return;
+
+  const current = select.value || state.orderSort || "due_asc";
+  const options = [
+    ["due_asc", "Due date soonest"],
+    ["buyer_asc", "Username A to Z"],
+    ["buyer_desc", "Username Z to A"],
+  ];
+
+  if (isAdminUser()) {
+    options.push(["total_desc", "Order total high to low"]);
+    options.push(["total_asc", "Order total low to high"]);
+  }
+
+  select.innerHTML = options
+    .map(([value, label]) => `<option value="${value}">${label}</option>`)
+    .join("");
+
+  state.orderSort = options.some(([value]) => value === current) ? current : "due_asc";
+  select.value = state.orderSort;
 }
 
 async function loadCheckoutStores() {
@@ -703,8 +768,9 @@ function applyOrderFilters() {
 }
 
 function renderSummaryStrip() {
-  const pending = state.orders.filter((line) => line.line_status !== "fulfilled").length;
-  const shipToday = state.orders.filter((line) => sameLocalDay(line.order?.ship_by_date)).length;
+  const openLines = state.orders.filter(isOpenOrderLine);
+  const pending = openLines.length;
+  const shipToday = openLines.filter((line) => sameLocalDay(line.order?.ship_by_date)).length;
   $("summary-pending").textContent = String(pending);
   $("summary-ship-today").textContent = String(shipToday);
   $("summary-selected").textContent = state.selectedLine ? getBuyerLabel(state.selectedLine) : "None";
@@ -731,7 +797,7 @@ function groupLinesByBuyer(lines) {
     const group = groups.get(key);
     group.lines.push(line);
     if (line.order?.order_number) group.orderNumbers.add(line.order.order_number);
-    if (line.line_status !== "fulfilled") group.pendingCount += 1;
+    if (isOpenOrderLine(line)) group.pendingCount += 1;
     group.totalQuantity += Number(line.quantity || 0);
     group.totalValue += Number(line.total_price || line.sold_for || 0);
 
@@ -742,10 +808,23 @@ function groupLinesByBuyer(lines) {
     }
   });
 
-  return [...groups.values()].sort((a, b) => {
-    const aTime = a.nextShipBy ? new Date(a.nextShipBy).getTime() : Number.MAX_SAFE_INTEGER;
-    const bTime = b.nextShipBy ? new Date(b.nextShipBy).getTime() : Number.MAX_SAFE_INTEGER;
-    return aTime - bTime || a.buyer.localeCompare(b.buyer);
+  return sortBuyerGroups([...groups.values()]);
+}
+
+function sortBuyerGroups(groups) {
+  const sort = $("order-sort")?.value || state.orderSort || "due_asc";
+  state.orderSort = sort;
+
+  const byBuyer = (a, b) => a.buyer.localeCompare(b.buyer, undefined, { sensitivity: "base" });
+  const byDue = (a, b) => getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy);
+  const byTotal = (a, b) => Number(a.totalValue || 0) - Number(b.totalValue || 0);
+
+  return groups.sort((a, b) => {
+    if (sort === "buyer_asc") return byBuyer(a, b) || byDue(a, b);
+    if (sort === "buyer_desc") return byBuyer(b, a) || byDue(a, b);
+    if (sort === "total_desc" && isAdminUser()) return byTotal(b, a) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "total_asc" && isAdminUser()) return byTotal(a, b) || byDue(a, b) || byBuyer(a, b);
+    return byDue(a, b) || byBuyer(a, b);
   });
 }
 
@@ -868,8 +947,16 @@ function renderOrders() {
 
   list.innerHTML = "";
   groups.forEach((group) => {
+    const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
+    const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
+    const urgencyMarkup = urgency ? `
+      <span class="urgency-pill urgency-${urgency.level}">
+        <i data-lucide="${urgency.icon}"></i>
+        ${escapeHtml(urgency.label)}
+      </span>
+    ` : "";
     const card = document.createElement("article");
-    card.className = `buyer-order-card ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    card.className = `buyer-order-card ${urgencyClass} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
     card.innerHTML = `
       <div class="buyer-card-head">
         <div>
@@ -877,7 +964,10 @@ function renderOrders() {
           <strong>${escapeHtml(group.buyer)}</strong>
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
-        <span class="status-badge">${group.pendingCount} pending</span>
+        <div class="buyer-card-alerts">
+          ${urgencyMarkup}
+          <span class="status-badge">${group.pendingCount} pending</span>
+        </div>
       </div>
       <div class="buyer-card-meta">
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
@@ -950,6 +1040,8 @@ function renderOrders() {
 
     list.appendChild(card);
   });
+
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function selectOrderLine(lineId) {
@@ -1691,6 +1783,10 @@ function setupListeners() {
   });
   $("order-search")?.addEventListener("input", applyOrderFilters);
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("order-sort")?.addEventListener("change", (event) => {
+    state.orderSort = event.target.value;
+    applyOrderFilters();
+  });
   $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
   $("admin-clear-order-selection")?.addEventListener("click", clearAdminOrderSelection);
   $("admin-mark-packed-no-stock")?.addEventListener("click", () => openAdminOrderCloseoutModal("fulfilled_no_inventory"));
