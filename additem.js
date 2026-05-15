@@ -2015,7 +2015,7 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   }
   autoCostCheckbox.checked = true;
   applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
-  await bumpInventoryVersion();
+  await bumpInventoryVersion([newItem.id]);
   showItemSaveSuccessModal(newItem, {
     photoCount: finalPhotoPaths.length,
     stockInfo,

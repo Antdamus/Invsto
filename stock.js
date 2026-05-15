@@ -10,6 +10,8 @@ let selectedItems = new Set();         // Tracks currently selected items for bu
 let showOnlyFavorites = false;         // Flag to toggle "Show Only Favorites"
 let showDeletedItems = false;
 let activeDropdown = null;
+let inventoryRealtimeRefreshInFlight = null;
+let inventoryFocusRefreshTimer = null;
 let failedAttempts = 0;            // 🚫 Track how many wrong passwords
 let lockoutUntil = null;           // ⏳ Timestamp until which delete is locked
 // 🔒 In-memory cache for signed photo URLs
@@ -2776,6 +2778,35 @@ async function getCurrentInventoryVersionFromSupabase() {
   return data.inventory_version;
 }
 
+function getCachedInventoryVersion() {
+  try {
+    const cached = sessionStorage.getItem(getStockCacheKey());
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return parsed?.version || null;
+  } catch (error) {
+    console.warn("Could not read cached inventory version:", error);
+    return null;
+  }
+}
+
+async function writeCurrentInventoryCache() {
+  const version = await getCurrentInventoryVersionFromSupabase();
+  if (!version) return;
+
+  sessionStorage.setItem(getStockCacheKey(), JSON.stringify({
+    version,
+    data: allItems
+  }));
+}
+
+function renderCurrentInventoryItems() {
+  const filtered = getFilteredItems(allItems);
+  applySortAndRender(filtered);
+  updateFilterChips(getActiveFilters());
+  updateBulkToolbar();
+}
+
 //function to only refresh one item at a time
 async function refreshItemById(itemId) {
   console.log(`🔄 Refreshing item by ID: ${itemId}`);
@@ -2805,7 +2836,8 @@ async function refreshItemById(itemId) {
     allItems = allItems.filter((entry) => entry.id !== itemId);
     document.querySelector(`.stock-card[data-item-id="${itemId}"]`)?.remove();
     selectedItems.delete(itemId);
-    updateBulkToolbar();
+    await writeCurrentInventoryCache();
+    renderCurrentInventoryItems();
     return;
   }
 
@@ -2818,7 +2850,8 @@ async function refreshItemById(itemId) {
     allItems = allItems.filter((entry) => entry.id !== itemId);
     document.querySelector(`.stock-card[data-item-id="${itemId}"]`)?.remove();
     selectedItems.delete(itemId);
-    updateBulkToolbar();
+    await writeCurrentInventoryCache();
+    renderCurrentInventoryItems();
     return;
   }
 
@@ -2893,6 +2926,7 @@ async function refreshItemById(itemId) {
 
   // Step 4: Update it in allItems
   const index = allItems.findIndex(i => i.id === itemId);
+  const isNewItem = index === -1;
   if (index !== -1) {
     allItems[index] = item;
   } else {
@@ -2905,16 +2939,12 @@ async function refreshItemById(itemId) {
     const newCard = await renderStockCard(item, allItems.findIndex(i => i.id === itemId));
     if (newCard) oldCard.replaceWith(newCard);
     window.lucide.createIcons();
+  } else if (isNewItem) {
+    renderCurrentInventoryItems();
   }
   
   //step 6, update the cache
-  const version = await getCurrentInventoryVersionFromSupabase();
-  if (version) {
-    sessionStorage.setItem(getStockCacheKey(), JSON.stringify({
-      version,
-      data: allItems
-    }));
-  }
+  await writeCurrentInventoryCache();
 
   console.log("✅ Item refreshed in place:", item.title);
 }
@@ -5530,24 +5560,66 @@ async function bumpInventoryVersion(changedIds = null) {
 
 
 //function to listen to changes in cache version
+async function refreshInventoryFromRealtime(payload = {}) {
+  const changedIds = payload.new?.changed_item_ids;
+  const uniqueChangedIds = Array.isArray(changedIds)
+    ? [...new Set(changedIds.map((id) => String(id || "").trim()).filter(Boolean))]
+    : [];
+
+  if (uniqueChangedIds.length > 0) {
+    console.log("Targeted inventory refresh for items:", uniqueChangedIds);
+    await Promise.all(uniqueChangedIds.map((id) => refreshItemById(id)));
+    renderCurrentInventoryItems();
+    return;
+  }
+
+  console.log("Inventory version changed without item ids. Refreshing full stock UI.");
+  await refreshInventoryUI();
+}
+
+function queueInventoryRealtimeRefresh(payload = {}) {
+  inventoryRealtimeRefreshInFlight = (inventoryRealtimeRefreshInFlight || Promise.resolve())
+    .then(() => refreshInventoryFromRealtime(payload))
+    .catch((error) => {
+      console.error("Inventory realtime refresh failed:", error);
+    });
+}
+
+async function refreshInventoryIfCacheVersionChanged() {
+  const currentVersion = await getCurrentInventoryVersionFromSupabase();
+  if (!currentVersion) return;
+
+  const cachedVersion = getCachedInventoryVersion();
+  if (cachedVersion !== currentVersion) {
+    console.log("Inventory version changed while this tab was idle. Refreshing stock UI.");
+    await refreshInventoryUI();
+  }
+}
+
+function setupInventoryFocusRefresh() {
+  const scheduleCheck = () => {
+    window.clearTimeout(inventoryFocusRefreshTimer);
+    inventoryFocusRefreshTimer = window.setTimeout(() => {
+      refreshInventoryIfCacheVersionChanged().catch((error) => {
+        console.error("Inventory focus refresh failed:", error);
+      });
+    }, 250);
+  };
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleCheck();
+  });
+  window.addEventListener("focus", scheduleCheck);
+}
+
 function setupInventoryRealtimeListener() {
   const channel = supabase
     .channel("inventory_version")
     .on(
       "postgres_changes",
-      { event: "*", schema: "public", table: "metadata" },
+      { event: "UPDATE", schema: "public", table: "metadata", filter: "id=eq.inventory" },
       payload => {
-        console.log("🔔 Realtime: inventory version changed!", payload);
-
-        const changedIds = payload.new?.changed_item_ids;
-
-        if (Array.isArray(changedIds) && changedIds.length > 0) {
-          console.log("🎯 Targeted refresh for items:", changedIds);
-          changedIds.forEach(id => refreshItemById(id));
-        } else {
-          console.log("🔄 No item IDs provided, reloading entire inventory.");
-          loadAllItemsWithCache();
-        }
+        queueInventoryRealtimeRefresh(payload);
       }
     )
     .subscribe();
@@ -6119,9 +6191,7 @@ async function loadCategories(items) {
 // 🔹 to re render a refreshed inventory
 async function refreshInventoryUI() {
   await loadAllItemsWithCache(); // populates allItems globally
-  const filtered = getFilteredItems(allItems);
-  applySortAndRender(filtered);
-  updateFilterChips(getActiveFilters());
+  renderCurrentInventoryItems();
 }
 
 // 🔸 Load categories from Supabase and render dropdown in the
@@ -6268,6 +6338,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadAllItemsWithCache();
   await checkoutModule.loadCreditTiers();
   setupInventoryRealtimeListener();
+  setupInventoryFocusRefresh();
   await checkoutModule.loadCartFromStorage();  // handles image signing + UI
 
   //#region step 3 create all the necessary drop downs for the system
