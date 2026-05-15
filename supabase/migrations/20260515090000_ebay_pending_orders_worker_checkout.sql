@@ -249,6 +249,19 @@ begin
     _net_payout,
     v_line.net_payout,
     case
+      when coalesce(v_line.total_price, 0) > 0 and coalesce(v_order.total_price, 0) > 0
+        then greatest(round(
+          v_line.total_price
+          - (coalesce(v_order.ebay_collected_tax, 0) * (v_line.total_price / v_order.total_price))
+          - (coalesce(v_order.ebay_collected_charges, 0) * (v_line.total_price / v_order.total_price))
+          - (coalesce(v_order.seller_collected_tax, 0) * (v_line.total_price / v_order.total_price)),
+          2
+        ), 0)
+      when coalesce(v_line.total_price, 0) > 0
+        then v_line.total_price
+      else null
+    end,
+    case
       when coalesce(v_order.net_payout, 0) > 0 and coalesce(v_order.total_price, 0) > 0
         then round(v_order.net_payout * (v_line_total / v_order.total_price), 2)
       else null
@@ -320,7 +333,7 @@ begin
       v_fee_percent,
       v_net_payout,
       false,
-      'password',
+      'authenticated_session',
       v_now,
       v_now
     )
@@ -420,7 +433,7 @@ begin
     v_snapshot,
     false,
     coalesce(v_notes, 'Worker fulfilled pending eBay order'),
-    'password',
+    'authenticated_session',
     v_now,
     v_now,
     nullif(_signed_by_email, ''),

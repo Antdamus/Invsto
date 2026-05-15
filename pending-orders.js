@@ -7,6 +7,10 @@ const state = {
   selectedItem: null,
   stockRows: [],
   selectedStockRow: null,
+  activeBuyerKey: "",
+  stagedFulfillments: new Map(),
+  pendingItemCandidate: null,
+  quantityAutoTimer: null,
   busy: false,
 };
 
@@ -48,6 +52,23 @@ function formatDate(value) {
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function firstItemPhoto(item) {
+  const photos = Array.isArray(item?.photos) ? item.photos : [];
+  return photos.find(Boolean) || item?.photo_url || "";
+}
+
+async function resolvePhotoUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const cleanPath = String(path).replace(/^photos\//, "");
+  const { data, error } = await supabase.storage.from("photos").createSignedUrl(cleanPath, 3600);
+  if (error) {
+    console.warn("Could not sign item photo:", error);
+    return "";
+  }
+  return data?.signedUrl || "";
+}
+
 function sameLocalDay(value, reference = new Date()) {
   if (!value) return false;
   const date = new Date(value);
@@ -71,6 +92,17 @@ function setImportStatus(message = "", type = "info") {
   el.classList.toggle("is-success", type === "success");
 }
 
+function openModal(id) {
+  $(id)?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+}
+
+function closeModal(id) {
+  $(id)?.classList.add("hidden");
+  if (!$("item-confirm-modal")?.classList.contains("hidden") || !$("bundle-review-modal")?.classList.contains("hidden")) return;
+  document.body.classList.remove("modal-open");
+}
+
 function getOrderFromLine(line) {
   const order = line?.ebay_orders || line?.order || {};
   return Array.isArray(order) ? order[0] || {} : order;
@@ -78,6 +110,15 @@ function getOrderFromLine(line) {
 
 function getRemainingLineQuantity(line) {
   return Math.max(0, Number(line?.quantity || 0) - Number(line?.fulfilled_quantity || 0));
+}
+
+function getBuyerKey(line) {
+  const username = String(line?.order?.buyer_username || "").trim().toLowerCase();
+  return username || `order:${line?.order?.order_number || line?.order_id || "unknown"}`;
+}
+
+function getBuyerLabel(line) {
+  return String(line?.order?.buyer_username || "").trim() || "No buyer username";
 }
 
 async function loadCurrentWorker() {
@@ -107,10 +148,17 @@ function canImportOrders() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
 }
 
+function isAdminUser() {
+  return canImportOrders();
+}
+
 function setupImportVisibility() {
   const panel = $("order-import-panel");
   if (!panel) return;
   panel.classList.toggle("hidden", !canImportOrders());
+  document.querySelectorAll(".admin-money-field").forEach((field) => {
+    field.classList.toggle("hidden", !isAdminUser());
+  });
 }
 
 function setupDashboardShell() {
@@ -262,6 +310,18 @@ function toNumber(value) {
   return Number(parseMoney(value).toFixed(2));
 }
 
+function estimateEbayPayoutFromRow(row) {
+  const explicit = toNumber(csvCell(row, "Payout Amount", "Net Amount"));
+  if (explicit > 0) return explicit;
+
+  const total = toNumber(csvCell(row, "Total Price"));
+  const ebayTax = toNumber(csvCell(row, "eBay Collected Tax"));
+  const sellerTax = toNumber(csvCell(row, "Seller Collected Tax"));
+  const ebayCharges = toNumber(csvCell(row, "eBay Collected Charges"));
+  const estimate = total - ebayTax - sellerTax - ebayCharges;
+  return Number(Math.max(0, estimate).toFixed(2));
+}
+
 function buildOrderImportPayload(rows) {
   const grouped = new Map();
 
@@ -288,8 +348,9 @@ function buildOrderImportPayload(rows) {
       totals.ebayTax += toNumber(csvCell(line, "eBay Collected Tax"));
       totals.ebayCharges += toNumber(csvCell(line, "eBay Collected Charges"));
       totals.total += toNumber(csvCell(line, "Total Price"));
+      totals.payout += estimateEbayPayoutFromRow(line);
       return totals;
-    }, { shipping: 0, sellerTax: 0, ebayTax: 0, ebayCharges: 0, total: 0 });
+    }, { shipping: 0, sellerTax: 0, ebayTax: 0, ebayCharges: 0, total: 0, payout: 0 });
 
     return {
       order: {
@@ -313,7 +374,7 @@ function buildOrderImportPayload(rows) {
         ebay_collected_tax: orderTotals.ebayTax,
         ebay_collected_charges: orderTotals.ebayCharges,
         total_price: orderTotals.total,
-        net_payout: toNumber(csvCell(first, "Payout Amount", "Net Amount")) || null,
+        net_payout: orderTotals.payout || null,
         status: "pending",
         imported_by: state.user?.id || null,
         raw_payload: { source: "ebay_orders_report_csv", first_row: first },
@@ -327,7 +388,7 @@ function buildOrderImportPayload(rows) {
         sold_for: toNumber(csvCell(line, "Sold For")),
         shipping_and_handling: toNumber(csvCell(line, "Shipping And Handling")),
         total_price: toNumber(csvCell(line, "Total Price")),
-        net_payout: toNumber(csvCell(line, "Payout Amount", "Net Amount")) || null,
+        net_payout: estimateEbayPayoutFromRow(line) || null,
         line_status: "pending",
         raw_payload: line,
       })),
@@ -426,6 +487,18 @@ async function loadOrders() {
   const status = $("order-status-filter")?.value || "pending";
   const list = $("orders-list");
   if (list) list.innerHTML = `<div class="empty-state">Loading pending orders...</div>`;
+  const admin = isAdminUser();
+  const moneyLineFields = admin ? `
+      sold_for,
+      shipping_and_handling,
+      total_price,
+      net_payout,` : "";
+  const moneyOrderFields = admin ? `
+        payment_method,
+        shipping_and_handling,
+        ebay_collected_tax,
+        total_price,
+        net_payout,` : "";
 
   let query = supabase
     .from("ebay_order_lines")
@@ -437,10 +510,7 @@ async function loadOrders() {
       item_title,
       custom_label,
       quantity,
-      sold_for,
-      shipping_and_handling,
-      total_price,
-      net_payout,
+      ${moneyLineFields}
       line_status,
       internal_item_id,
       fulfilled_quantity,
@@ -451,14 +521,10 @@ async function loadOrders() {
         order_number,
         sales_record_number,
         buyer_username,
-        payment_method,
         sale_date,
         paid_on_date,
         ship_by_date,
-        shipping_and_handling,
-        ebay_collected_tax,
-        total_price,
-        net_payout,
+        ${moneyOrderFields}
         status
       )
     `)
@@ -484,6 +550,13 @@ async function loadOrders() {
   applyOrderFilters();
 }
 
+function clearOrderSearch({ apply = true } = {}) {
+  const input = $("order-search");
+  if (!input || !input.value) return;
+  input.value = "";
+  if (apply) applyOrderFilters();
+}
+
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
   state.filteredOrders = term
@@ -499,44 +572,168 @@ function renderSummaryStrip() {
   const shipToday = state.orders.filter((line) => sameLocalDay(line.order?.ship_by_date)).length;
   $("summary-pending").textContent = String(pending);
   $("summary-ship-today").textContent = String(shipToday);
-  $("summary-selected").textContent = state.selectedLine?.order?.order_number || "None";
-  $("order-count-pill").textContent = String(state.filteredOrders.length);
+  $("summary-selected").textContent = state.selectedLine ? getBuyerLabel(state.selectedLine) : "None";
+  $("order-count-pill").textContent = String(groupLinesByBuyer(state.filteredOrders).length);
+}
+
+function groupLinesByBuyer(lines) {
+  const groups = new Map();
+  lines.forEach((line) => {
+    const key = getBuyerKey(line);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        buyer: getBuyerLabel(line),
+        lines: [],
+        orderNumbers: new Set(),
+        pendingCount: 0,
+        totalQuantity: 0,
+        totalValue: 0,
+        nextShipBy: null,
+      });
+    }
+
+    const group = groups.get(key);
+    group.lines.push(line);
+    if (line.order?.order_number) group.orderNumbers.add(line.order.order_number);
+    if (line.line_status !== "fulfilled") group.pendingCount += 1;
+    group.totalQuantity += Number(line.quantity || 0);
+    group.totalValue += Number(line.total_price || line.sold_for || 0);
+
+    const shipBy = line.order?.ship_by_date ? new Date(line.order.ship_by_date) : null;
+    if (shipBy && !Number.isNaN(shipBy.getTime())) {
+      const current = group.nextShipBy ? new Date(group.nextShipBy) : null;
+      if (!current || shipBy < current) group.nextShipBy = line.order.ship_by_date;
+    }
+  });
+
+  return [...groups.values()].sort((a, b) => {
+    const aTime = a.nextShipBy ? new Date(a.nextShipBy).getTime() : Number.MAX_SAFE_INTEGER;
+    const bTime = b.nextShipBy ? new Date(b.nextShipBy).getTime() : Number.MAX_SAFE_INTEGER;
+    return aTime - bTime || a.buyer.localeCompare(b.buyer);
+  });
+}
+
+function getBuyerLines(key = state.activeBuyerKey) {
+  if (!key) return [];
+  return state.orders.filter((line) => getBuyerKey(line) === key);
+}
+
+function getNextPackableLine(key = state.activeBuyerKey, excludeId = "") {
+  return getBuyerLines(key).find((line) =>
+    line.id !== excludeId
+    && line.line_status !== "fulfilled"
+    && !state.stagedFulfillments.has(line.id)
+  );
+}
+
+function renderBuyerBundlePanel() {
+  const panel = $("buyer-bundle-panel");
+  if (!panel || !state.selectedLine) return;
+  const lines = getBuyerLines(getBuyerKey(state.selectedLine));
+  const stagedCount = lines.filter((line) => state.stagedFulfillments.has(line.id)).length;
+  const pendingCount = lines.filter((line) => line.line_status !== "fulfilled").length;
+
+  panel.innerHTML = `
+    <div class="bundle-head">
+      <div>
+        <span class="eyebrow">Packing Bundle</span>
+        <strong>${escapeHtml(getBuyerLabel(state.selectedLine))}</strong>
+      </div>
+      <span>${stagedCount} staged / ${pendingCount} pending</span>
+    </div>
+    <div class="bundle-lines">
+      ${lines.map((line) => {
+        const staged = state.stagedFulfillments.get(line.id);
+        const selected = state.selectedLine?.id === line.id;
+        const status = line.line_status === "fulfilled" ? "Fulfilled" : staged ? "Staged" : selected ? "Scanning now" : "Waiting";
+        return `
+          <button type="button" class="bundle-line ${selected ? "is-selected" : ""} ${staged ? "is-staged" : ""}" data-line-id="${escapeHtml(line.id)}">
+            <span>
+              <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+              <small>${escapeHtml(line.order?.order_number || "No order")} - Qty ${Number(line.quantity || 1)}${staged ? ` - ${escapeHtml(staged.row.locationLabel)}` : ""}</small>
+            </span>
+            <b>${escapeHtml(status)}</b>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  panel.querySelectorAll(".bundle-line").forEach((button) => {
+    button.addEventListener("click", () => selectOrderLine(button.dataset.lineId));
+  });
 }
 
 function renderOrders() {
   const list = $("orders-list");
   if (!list) return;
 
-  if (!state.filteredOrders.length) {
+  const groups = groupLinesByBuyer(state.filteredOrders);
+  if (!groups.length) {
     list.innerHTML = `<div class="empty-state">No orders match this view.</div>`;
     return;
   }
 
   list.innerHTML = "";
-  state.filteredOrders.forEach((line) => {
-    const order = line.order || {};
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `order-card ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
-    button.innerHTML = `
-      <div class="order-card-top">
-        <strong>${escapeHtml(order.order_number || "No order number")}</strong>
-        <span>${escapeHtml(line.line_status || "pending")}</span>
+  groups.forEach((group) => {
+    const card = document.createElement("article");
+    card.className = `buyer-order-card ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    card.innerHTML = `
+      <div class="buyer-card-head">
+        <div>
+          <span class="buyer-kicker">Buyer username</span>
+          <strong>${escapeHtml(group.buyer)}</strong>
+          <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
+        </div>
+        <span class="status-badge">${group.pendingCount} pending</span>
       </div>
-      <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-      <small>${escapeHtml(order.buyer_username || "No buyer username")} - ${formatMoney(line.sold_for)} - Qty ${Number(line.quantity || 1)}</small>
-      <small>Ship by ${escapeHtml(formatDate(order.ship_by_date))}</small>
+      <div class="buyer-card-meta">
+        <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
+        ${isAdminUser() ? `<span>${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
+      </div>
+      <div class="buyer-line-list"></div>
     `;
-    button.addEventListener("click", () => selectOrderLine(line.id));
-    list.appendChild(button);
+
+    const lineList = card.querySelector(".buyer-line-list");
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      const nextLine = group.lines.find((line) => line.line_status !== "fulfilled" && !state.stagedFulfillments.has(line.id)) || group.lines[0];
+      if (nextLine) selectOrderLine(nextLine.id);
+    });
+
+    group.lines.forEach((line) => {
+      const order = line.order || {};
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `buyer-line-btn ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      button.innerHTML = `
+        <span>
+          <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+          <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+        </span>
+        <b>${escapeHtml(line.line_status || "pending")}</b>
+      `;
+      button.addEventListener("click", () => selectOrderLine(line.id));
+      lineList.appendChild(button);
+    });
+
+    list.appendChild(card);
   });
 }
 
 function selectOrderLine(lineId) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line) return;
+  clearQuantityAutoStage();
+
+  const nextBuyerKey = getBuyerKey(line);
+  if (state.activeBuyerKey && state.activeBuyerKey !== nextBuyerKey && state.stagedFulfillments.size) {
+    state.stagedFulfillments.clear();
+  }
 
   state.selectedLine = line;
+  state.activeBuyerKey = nextBuyerKey;
   state.selectedItem = null;
   state.stockRows = [];
   state.selectedStockRow = null;
@@ -545,26 +742,25 @@ function selectOrderLine(lineId) {
   $("fulfillment-workflow")?.classList.remove("hidden");
   renderOrders();
   renderSelectedOrder();
+  renderBuyerBundlePanel();
   resetFulfillmentInputs();
   renderSelectionSummary();
   renderItemResults([]);
   renderLocationResults([]);
   renderSummaryStrip();
 
-  const preferredSearch = line.custom_label || line.item_title || "";
-  $("item-scan").value = preferredSearch;
+  $("item-scan").value = "";
   setTimeout(() => $("item-scan")?.focus(), 80);
 }
 
 function resetFulfillmentInputs() {
   const line = state.selectedLine;
   const remaining = getRemainingLineQuantity(line) || Number(line?.quantity || 1) || 1;
+  clearQuantityAutoStage();
   $("location-scan").value = "";
-  $("fulfill-quantity").value = String(Math.max(1, remaining));
+  $("fulfill-quantity").value = "1";
   $("fulfill-quantity").max = String(Math.max(1, remaining));
   $("fulfill-sold-price").value = Number(line?.sold_for || 0).toFixed(2);
-  $("fulfill-payout").value = line?.net_payout ? Number(line.net_payout).toFixed(2) : "";
-  $("fulfill-password").value = "";
   $("fulfill-notes").value = "";
   setStatus("");
 }
@@ -576,6 +772,7 @@ function renderSelectedOrder() {
   $("selected-order-title").textContent = order.order_number || "eBay order";
   $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
+  $("money-grid")?.classList.toggle("hidden", !isAdminUser());
   $("detail-sold-for").textContent = formatMoney(line.sold_for);
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
   $("detail-total").textContent = formatMoney(line.total_price || order.total_price || line.sold_for);
@@ -622,7 +819,7 @@ function renderItemResults(items, message = "No matching inventory items.") {
       <strong>${escapeHtml(item.title || "Untitled item")}</strong>
       <span>${escapeHtml(item.barcode || "No barcode")} - ${formatMoney(item.sale_price)} - ${Number(item.weight || 0).toFixed(2)} g</span>
     `;
-    button.addEventListener("click", () => selectInventoryItem(item));
+    button.addEventListener("click", () => openItemConfirmModal(item));
     container.appendChild(button);
   });
 }
@@ -650,6 +847,40 @@ function renderLocationResults(rows, message = "No source locations loaded yet."
   });
 }
 
+async function openItemConfirmModal(item) {
+  state.pendingItemCandidate = item;
+  $("item-confirm-name").textContent = item.title || "Untitled item";
+  $("item-confirm-barcode").textContent = item.barcode ? `Barcode ${item.barcode}` : "No barcode recorded";
+  $("item-confirm-description").textContent = item.description || "No description recorded.";
+  const image = $("item-confirm-image");
+  if (image) {
+    image.removeAttribute("src");
+    image.alt = item.title || "Inventory item";
+  }
+  openModal("item-confirm-modal");
+  setTimeout(() => $("confirm-item-choice")?.focus(), 80);
+
+  const url = await resolvePhotoUrl(firstItemPhoto(item));
+  if (state.pendingItemCandidate?.id === item.id && image) {
+    if (url) image.src = url;
+    else image.removeAttribute("src");
+  }
+}
+
+function closeItemConfirmModal() {
+  state.pendingItemCandidate = null;
+  closeModal("item-confirm-modal");
+  setTimeout(() => $("item-scan")?.focus(), 80);
+}
+
+async function confirmItemCandidate() {
+  const item = state.pendingItemCandidate;
+  if (!item) return;
+  state.pendingItemCandidate = null;
+  closeModal("item-confirm-modal");
+  await selectInventoryItem(item);
+}
+
 function sanitizeSearchTerm(term) {
   return String(term || "").trim().replace(/[%,]/g, " ");
 }
@@ -657,7 +888,7 @@ function sanitizeSearchTerm(term) {
 async function searchInventoryItems() {
   const term = sanitizeSearchTerm($("item-scan")?.value || "");
   if (!term) {
-    setStatus("Scan a barcode or type part of the item title.", "error");
+    setStatus("Scan a barcode or search by item name / description.", "error");
     return;
   }
 
@@ -665,7 +896,7 @@ async function searchInventoryItems() {
 
   let exact = await supabase
     .from("item_types")
-    .select("id,title,description,barcode,sale_price,photos,categories,weight")
+    .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
     .eq("barcode", term)
     .is("deleted_at", null)
     .limit(1);
@@ -673,20 +904,20 @@ async function searchInventoryItems() {
   if (exact.error && /deleted_at/i.test(exact.error.message || "")) {
     exact = await supabase
       .from("item_types")
-      .select("id,title,description,barcode,sale_price,photos,categories,weight")
+      .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
       .eq("barcode", term)
       .limit(1);
   }
 
   if (!exact.error && exact.data?.length === 1) {
-    await selectInventoryItem(exact.data[0]);
+    await openItemConfirmModal(exact.data[0]);
     return;
   }
 
   const pattern = `%${term}%`;
   let { data, error } = await supabase
     .from("item_types")
-    .select("id,title,description,barcode,sale_price,photos,categories,weight")
+    .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
     .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
     .is("deleted_at", null)
     .limit(25);
@@ -694,7 +925,7 @@ async function searchInventoryItems() {
   if (error && /deleted_at/i.test(error.message || "")) {
     const retry = await supabase
       .from("item_types")
-      .select("id,title,description,barcode,sale_price,photos,categories,weight")
+      .select("id,title,description,barcode,sale_price,photo_url,photos,categories,weight")
       .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
       .limit(25);
     data = retry.data;
@@ -708,7 +939,7 @@ async function searchInventoryItems() {
   }
 
   const items = data || [];
-  if (items.length === 1) await selectInventoryItem(items[0]);
+  if (items.length === 1) await openItemConfirmModal(items[0]);
   else {
     renderItemResults(items, "No item found. Try scanning the internal barcode.");
     setStatus(items.length ? `${items.length} item matches. Choose the exact item being shipped.` : "No item found.", items.length ? "info" : "error");
@@ -718,7 +949,6 @@ async function searchInventoryItems() {
 async function selectInventoryItem(item) {
   state.selectedItem = item;
   state.selectedStockRow = null;
-  $("item-scan").value = item.barcode || item.title || "";
   renderItemResults([item]);
   renderSelectionSummary();
   await loadStockRowsForItem(item.id);
@@ -753,24 +983,42 @@ async function loadStockRowsForItem(itemId) {
   }
 
   state.stockRows = (data || []).map(normalizeStockRow);
-  if (state.stockRows.length === 1) {
-    selectStockRow(state.stockRows[0]);
-  } else {
-    renderLocationResults(state.stockRows, "This item has no available stock.");
-    setStatus(state.stockRows.length ? "Choose or scan the source tray/location." : "No stock is available for this item.", state.stockRows.length ? "info" : "error");
-    setTimeout(() => $("location-scan")?.focus(), 80);
-  }
+  renderLocationResults(state.stockRows, "This item has no available stock.");
+  setStatus(state.stockRows.length ? "Scan the source tray/location for this item." : "No stock is available for this item.", state.stockRows.length ? "info" : "error");
+  setTimeout(() => $("location-scan")?.focus(), 80);
 }
 
 function selectStockRow(row) {
   state.selectedStockRow = row;
   $("location-scan").value = row.location_code || row.location_name || "";
   const qtyInput = $("fulfill-quantity");
-  if (qtyInput) qtyInput.max = String(Math.max(1, Number(row.quantity || 1)));
+  if (qtyInput) {
+    qtyInput.value = "1";
+    qtyInput.max = String(Math.max(1, Number(row.quantity || 1)));
+  }
   renderLocationResults(state.stockRows);
   renderSelectionSummary();
-  setStatus("Source selected. Review quantity, payout, then sign.");
-  setTimeout(() => $("fulfill-password")?.focus(), 80);
+  setStatus("Source selected. Quantity is ready; staging automatically in 2 seconds.");
+  setTimeout(() => {
+    qtyInput?.focus();
+    qtyInput?.select();
+  }, 60);
+  scheduleQuantityAutoStage();
+}
+
+function clearQuantityAutoStage() {
+  if (state.quantityAutoTimer) {
+    clearTimeout(state.quantityAutoTimer);
+    state.quantityAutoTimer = null;
+  }
+}
+
+function scheduleQuantityAutoStage() {
+  clearQuantityAutoStage();
+  state.quantityAutoTimer = setTimeout(() => {
+    state.quantityAutoTimer = null;
+    stageCurrentLine({ autoAdvance: true, autoReview: true });
+  }, 2000);
 }
 
 function searchSourceLocation() {
@@ -795,15 +1043,6 @@ function searchSourceLocation() {
   }
 }
 
-async function verifyPassword(password) {
-  if (!state.user?.email || !password) return false;
-  const { error } = await supabase.auth.signInWithPassword({
-    email: state.user.email,
-    password,
-  });
-  return !error;
-}
-
 async function bumpInventoryVersion(changedIds = []) {
   const payload = {
     inventory_version: crypto.randomUUID(),
@@ -813,72 +1052,171 @@ async function bumpInventoryVersion(changedIds = []) {
   if (error) console.warn("Failed to bump inventory version:", error);
 }
 
-async function fulfillSelectedOrder() {
-  if (state.busy) return;
+function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
+  clearQuantityAutoStage();
   const line = state.selectedLine;
   const item = state.selectedItem;
   const row = state.selectedStockRow;
   const qty = Math.max(1, parseInt($("fulfill-quantity")?.value || "1", 10) || 1);
-  const soldPrice = parseMoney($("fulfill-sold-price")?.value);
-  const payoutRaw = $("fulfill-payout")?.value || "";
-  const payout = payoutRaw ? parseMoney(payoutRaw) : null;
-  const password = $("fulfill-password")?.value || "";
-  const notes = String($("fulfill-notes")?.value || "").trim();
+  const remainingLineQty = getRemainingLineQuantity(line);
 
   if (!line) return setStatus("Select an eBay order first.", "error");
-  const remainingLineQty = getRemainingLineQuantity(line);
-  if (!item) return setStatus("Select the inventory item being shipped.", "error");
-  if (!row) return setStatus("Select the source tray/location.", "error");
+  if (!item) return setStatus("Scan or select the inventory item first.", "error");
+  if (!row) return setStatus("Scan or select the source tray/location.", "error");
   if (remainingLineQty <= 0) return setStatus("This eBay line is already fulfilled.", "error");
   if (qty > remainingLineQty) return setStatus(`Only ${remainingLineQty} unit(s) remain on that eBay line.`, "error");
   if (qty > Number(row.quantity || 0)) return setStatus(`Only ${row.quantity} available at that source.`, "error");
-  if (!soldPrice) return setStatus("Enter the sold price.", "error");
-  if (!password) return setStatus("Enter your password to sign the fulfillment.", "error");
+
+  state.stagedFulfillments.set(line.id, {
+    line,
+    item,
+    row,
+    qty,
+    soldPrice: isAdminUser() ? parseMoney($("fulfill-sold-price")?.value) || null : null,
+    payout: null,
+  });
+
+  renderOrders();
+  renderBuyerBundlePanel();
+  renderSelectionSummary();
+
+  const nextLine = getNextPackableLine(getBuyerKey(line), line.id);
+  if (autoAdvance && nextLine) {
+    selectOrderLine(nextLine.id);
+    setStatus("Item staged. Scan the next item for this buyer.");
+    return;
+  }
+
+  setStatus(nextLine ? "Item staged. Choose the next line or confirm the packed bundle." : "All available lines for this buyer are staged. Confirm the packed bundle.");
+  if (autoReview && !nextLine) {
+    setTimeout(() => openBundleReviewModal(), 120);
+    return;
+  }
+  setTimeout(() => (nextLine ? $("item-scan") : $("fulfill-order"))?.focus(), 80);
+}
+
+function getActiveStagedFulfillments() {
+  return [...state.stagedFulfillments.values()].filter((entry) =>
+    !state.activeBuyerKey || getBuyerKey(entry.line) === state.activeBuyerKey
+  );
+}
+
+function closeBundleReviewModal() {
+  closeModal("bundle-review-modal");
+  setTimeout(() => $("fulfill-order")?.focus(), 80);
+}
+
+async function renderBundleReviewList(staged) {
+  const list = $("bundle-review-list");
+  if (!list) return;
+
+  list.replaceChildren();
+  staged.forEach((entry) => {
+    const card = document.createElement("article");
+    card.className = "bundle-review-item";
+    card.innerHTML = `
+      <div class="bundle-review-thumb"><span>No photo</span></div>
+      <div class="bundle-review-copy">
+        <strong>${escapeHtml(entry.item.title || entry.line.item_title || "Untitled item")}</strong>
+        <span>${escapeHtml(entry.item.barcode || entry.line.custom_label || entry.line.item_number || "No barcode")}</span>
+        <small>${escapeHtml(entry.row.locationLabel)} - Qty ${Number(entry.qty || 1).toLocaleString()}</small>
+      </div>
+    `;
+    list.appendChild(card);
+
+    resolvePhotoUrl(firstItemPhoto(entry.item)).then((url) => {
+      if (!url || !card.isConnected) return;
+      const thumb = card.querySelector(".bundle-review-thumb");
+      if (thumb) {
+        thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(entry.item.title || "Packed item")}" />`;
+      }
+    });
+  });
+}
+
+function openBundleReviewModal() {
+  const staged = getActiveStagedFulfillments();
+  if (!staged.length) {
+    setStatus("Stage at least one packed item first.", "error");
+    return;
+  }
+
+  const buyer = state.selectedLine ? getBuyerLabel(state.selectedLine) : "selected buyer";
+  const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+  $("bundle-review-subtitle").textContent = `${buyer} - ${staged.length} line(s), ${totalQty} total unit(s). Press Enter to confirm after review.`;
+  renderBundleReviewList(staged);
+  openModal("bundle-review-modal");
+  setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
+}
+
+async function fulfillSelectedOrder({ skipReview = false } = {}) {
+  if (state.busy) return;
+  const notes = String($("fulfill-notes")?.value || "").trim();
+  const staged = getActiveStagedFulfillments();
+
+  if (!staged.length) return setStatus("Stage at least one packed item first.", "error");
+  if (!skipReview) {
+    openBundleReviewModal();
+    return;
+  }
 
   state.busy = true;
+  closeModal("bundle-review-modal");
   $("fulfill-order").disabled = true;
-  setStatus("Signing and fulfilling order...");
+  $("stage-current-line").disabled = true;
+  setStatus(`Confirming and removing ${staged.length} packed item(s)...`);
 
   try {
-    const valid = await verifyPassword(password);
-    if (!valid) throw new Error("Incorrect password. Please try again.");
+    const changedItemIds = [];
+    for (const entry of staged) {
+      const { error } = await supabase.rpc("fulfill_ebay_order_line", {
+        _order_line_id: entry.line.id,
+        _item_id: entry.item.id,
+        _stock_location_row_id: entry.row.id,
+        _quantity: entry.qty,
+        _sold_price: entry.soldPrice,
+        _net_payout: entry.payout,
+        _notes: notes || null,
+        _signed_by_email: state.user.email,
+      });
 
-    const { data, error } = await supabase.rpc("fulfill_ebay_order_line", {
-      _order_line_id: line.id,
-      _item_id: item.id,
-      _stock_location_row_id: row.id,
-      _quantity: qty,
-      _sold_price: soldPrice,
-      _net_payout: payout,
-      _notes: notes || null,
-      _signed_by_email: state.user.email,
-    });
+      if (error) throw error;
+      changedItemIds.push(entry.item.id);
+    }
 
-    if (error) throw error;
-
-    await bumpInventoryVersion([item.id]);
-    setStatus("Order fulfilled. Stock was removed and signed.", "info");
+    await bumpInventoryVersion([...new Set(changedItemIds)]);
+    state.stagedFulfillments.clear();
+    setStatus("Packed bundle confirmed. Stock was removed and signed.", "info");
     await loadOrders();
 
-    const result = Array.isArray(data) ? data[0] : data;
-    const fulfilledLineId = result?.order_line_id || line.id;
-    const stillVisible = state.orders.some((entry) => entry.id === fulfilledLineId);
-    if (stillVisible) selectOrderLine(fulfilledLineId);
-    else clearSelection();
+    const nextBuyerLine = getNextPackableLine(state.activeBuyerKey);
+    if (nextBuyerLine) {
+      selectOrderLine(nextBuyerLine.id);
+      setStatus("Bundle partially done. Next pending item for this buyer is ready.");
+      return;
+    }
+
+    clearSelection();
   } catch (error) {
     console.error("Pending order fulfillment failed:", error);
     setStatus(error.message || "Could not fulfill this order.", "error");
   } finally {
     state.busy = false;
     $("fulfill-order").disabled = false;
+    $("stage-current-line").disabled = false;
   }
 }
 
 function clearSelection() {
+  clearQuantityAutoStage();
   state.selectedLine = null;
   state.selectedItem = null;
   state.selectedStockRow = null;
   state.stockRows = [];
+  state.activeBuyerKey = "";
+  state.stagedFulfillments.clear();
+  closeModal("item-confirm-modal");
+  closeModal("bundle-review-modal");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   renderOrders();
@@ -886,7 +1224,10 @@ function clearSelection() {
 }
 
 function setupListeners() {
-  $("refresh-orders")?.addEventListener("click", loadOrders);
+  $("refresh-orders")?.addEventListener("click", async () => {
+    clearOrderSearch({ apply: false });
+    await loadOrders();
+  });
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -896,8 +1237,15 @@ function setupListeners() {
   $("order-status-filter")?.addEventListener("change", loadOrders);
   $("find-item")?.addEventListener("click", searchInventoryItems);
   $("find-location")?.addEventListener("click", searchSourceLocation);
+  $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
+  $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
+  $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
+  $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);
+  $("confirm-bundle-review")?.addEventListener("click", () => fulfillSelectedOrder({ skipReview: true }));
+  $("cancel-bundle-review")?.addEventListener("click", closeBundleReviewModal);
+  $("close-bundle-review")?.addEventListener("click", closeBundleReviewModal);
 
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -913,10 +1261,52 @@ function setupListeners() {
     }
   });
 
-  $("fulfill-password")?.addEventListener("keydown", (event) => {
+  $("fulfill-quantity")?.addEventListener("input", () => {
+    if (state.selectedStockRow) scheduleQuantityAutoStage();
+  });
+
+  $("fulfill-quantity")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
+      stageCurrentLine({ autoAdvance: true, autoReview: true });
+    }
+  });
+
+  $("fulfill-notes")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
       fulfillSelectedOrder();
+    }
+  });
+
+  $("item-confirm-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "item-confirm-modal") closeItemConfirmModal();
+  });
+
+  $("bundle-review-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "bundle-review-modal") closeBundleReviewModal();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!$("item-confirm-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        confirmItemCandidate();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeItemConfirmModal();
+      }
+      return;
+    }
+
+    if (!$("bundle-review-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        fulfillSelectedOrder({ skipReview: true });
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeBundleReviewModal();
+      }
     }
   });
 }
@@ -928,6 +1318,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
+  clearOrderSearch({ apply: false });
   await loadOrders();
   if (window.lucide) window.lucide.createIcons();
 });

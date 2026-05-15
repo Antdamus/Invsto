@@ -96,7 +96,7 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="pending-greeting">Pending eBay Orders</strong>
-            <div class="sub">Order fulfillment - scan, pack, and sign removals</div>
+            <div class="sub">Order fulfillment - scan, pack, and confirm removals</div>
           </div>
           <div class="header-pills" aria-label="Page context">
             <div class="pill">Scope: <b>eBay</b></div>
@@ -110,7 +110,7 @@
         <div>
           <span class="eyebrow">Order Fulfillment</span>
           <h1>Pending eBay Orders</h1>
-          <p>Scan the actual item being shipped, choose the source tray or location, then sign the removal.</p>
+          <p>Scan the actual item being shipped, choose the source tray or location, then confirm the packed bundle.</p>
         </div>
         <div class="header-actions">
           <button type="button" id="refresh-orders" class="secondary-btn">
@@ -158,7 +158,16 @@
           </div>
 
           <div class="filter-row">
-            <input id="order-search" type="search" placeholder="Search order, title, buyer, item number..." autocomplete="off" />
+            <input
+              id="order-search"
+              name="pending-orders-search"
+              type="search"
+              placeholder="Search order, title, buyer, item number..."
+              autocomplete="new-password"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+            />
             <select id="order-status-filter" aria-label="Order status">
               <option value="pending">Pending</option>
               <option value="all">All open</option>
@@ -189,12 +198,14 @@
                 <span id="selected-order-status" class="status-badge">Pending</span>
               </div>
 
-              <div class="money-grid">
+              <div id="money-grid" class="money-grid">
                 <div><span>Sold For</span><strong id="detail-sold-for">$0.00</strong></div>
                 <div><span>Shipping</span><strong id="detail-shipping">$0.00</strong></div>
                 <div><span>Total</span><strong id="detail-total">$0.00</strong></div>
-                <div><span>Bank / Payout</span><strong id="detail-payout">Not imported</strong></div>
+                <div><span>Estimated Payout</span><strong id="detail-payout">Auto</strong></div>
               </div>
+
+              <div id="buyer-bundle-panel" class="buyer-bundle-panel"></div>
             </section>
 
             <section class="scan-card">
@@ -206,7 +217,7 @@
                 </div>
               </div>
               <div class="scan-row">
-                <input id="item-scan" type="search" placeholder="Scan item barcode or search title" autocomplete="off" />
+                <input id="item-scan" type="search" placeholder="Scan barcode or search item name / description" autocomplete="off" />
                 <button id="find-item" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="item-results" class="result-list"></div>
@@ -235,8 +246,8 @@
               <div class="step-head">
                 <span>3</span>
                 <div>
-                  <h3>Sign and Remove Stock</h3>
-                  <p>The removal will be tied to this worker, order, item, and exact tray/location.</p>
+                  <h3>Confirm and Remove Stock</h3>
+                  <p>The removal will be tied to the signed-in account, order, item, and exact tray/location.</p>
                 </div>
               </div>
               <div class="sign-grid">
@@ -244,17 +255,9 @@
                   Quantity
                   <input id="fulfill-quantity" type="number" min="1" step="1" value="1" />
                 </label>
-                <label>
+                <label class="admin-money-field">
                   Unit Sold Price
                   <input id="fulfill-sold-price" type="number" min="0" step="0.01" />
-                </label>
-                <label>
-                  Amount Into Account
-                  <input id="fulfill-payout" type="number" min="0" step="0.01" placeholder="Optional" />
-                </label>
-                <label>
-                  Your Password
-                  <input id="fulfill-password" type="password" autocomplete="current-password" placeholder="Sign this fulfillment" />
                 </label>
                 <label class="wide">
                   Note
@@ -264,7 +267,8 @@
               <p id="fulfill-status" class="fulfill-status"></p>
               <div class="fulfill-actions">
                 <button id="clear-selection" type="button" class="secondary-btn">Clear</button>
-                <button id="fulfill-order" type="button" class="primary-btn">Fulfill and Remove Stock</button>
+                <button id="stage-current-line" type="button" class="secondary-btn">Stage Item</button>
+                <button id="fulfill-order" type="button" class="primary-btn">Confirm Packed Bundle</button>
               </div>
             </section>
           </div>
@@ -272,6 +276,42 @@
       </section>
     </main>
   </div>
+  </div>
+
+  <div id="item-confirm-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="item-confirm-title">
+    <div class="packing-modal-card">
+      <button id="close-item-confirm" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Confirm Item</span>
+      <h2 id="item-confirm-title">Confirm scanned item</h2>
+      <div class="item-confirm-layout">
+        <div class="item-confirm-image-wrap">
+          <img id="item-confirm-image" alt="" />
+        </div>
+        <div class="item-confirm-copy">
+          <strong id="item-confirm-name">Item</strong>
+          <span id="item-confirm-barcode">Barcode</span>
+          <p id="item-confirm-description"></p>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="cancel-item-confirm" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-item-choice" type="button" class="primary-btn">Confirm Item</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="bundle-review-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="bundle-review-title">
+    <div class="packing-modal-card bundle-review-card">
+      <button id="close-bundle-review" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Final Review</span>
+      <h2 id="bundle-review-title">Confirm packed bundle</h2>
+      <p id="bundle-review-subtitle">Review the selected items before stock is removed.</p>
+      <div id="bundle-review-list" class="bundle-review-list"></div>
+      <div class="modal-actions">
+        <button id="cancel-bundle-review" type="button" class="secondary-btn">Keep Editing</button>
+        <button id="confirm-bundle-review" type="button" class="primary-btn">Confirm Packed Bundle</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
