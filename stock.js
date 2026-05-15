@@ -110,12 +110,50 @@ const TRAY_STATUS_LABELS = {
 function buildStockLocationLabel(location, storeMap = {}) {
   if (!location) return "Unknown Location";
   const locationName = location.location_name || "Unknown Location";
-  if (!location.is_tray) return locationName;
+  const homeStore = storeMap[location.store_id] || storeMap[location.parent_store_id] || "Unassigned";
 
-  const homeStore = storeMap[location.store_id] || "Unassigned";
+  if (!location.is_tray && location.parent_location_id) {
+    const parentName = location.parent_location_name || "parent location";
+    return `${locationName} (Container - ${parentName} - ${homeStore})`;
+  }
+
+  if (!location.is_tray) return `${locationName}${homeStore !== "Unassigned" ? ` - ${homeStore}` : ""}`;
+
   const currentStore = storeMap[location.tray_current_store_id] || homeStore;
   const status = TRAY_STATUS_LABELS[location.tray_status] || "Tray";
   return `${locationName} (Tray - ${status} - Current: ${currentStore} - Home: ${homeStore})`;
+}
+
+function buildStockLocationMap(locations = [], stores = []) {
+  const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
+  const rawLocationMap = Object.fromEntries((locations || []).map(loc => [loc.id, loc]));
+
+  return Object.fromEntries((locations || []).map((loc) => {
+    const parent = rawLocationMap[loc.parent_location_id] || null;
+    const enriched = {
+      ...loc,
+      parent_location_name: parent?.location_name || "",
+      parent_location_code: parent?.location_code || "",
+      parent_store_id: parent?.store_id || "",
+    };
+    const effectiveStore = storeMap[enriched.store_id] || storeMap[enriched.parent_store_id] || "";
+    const parentName = enriched.parent_location_name || "";
+    const storagePath = enriched.is_tray
+      ? `${storeMap[enriched.tray_current_store_id] || effectiveStore || "Unassigned"} > ${enriched.location_name || "Unnamed tray"}`
+      : enriched.parent_location_id
+        ? `${effectiveStore || "Unassigned"} > ${parentName || "Unassigned parent"} > ${enriched.location_name || "Unnamed container"}`
+        : `${effectiveStore || "Unassigned"} > ${enriched.location_name || "Unnamed location"}`;
+
+    return [loc.id, {
+      ...enriched,
+      label: buildStockLocationLabel(enriched, storeMap),
+      store_name: effectiveStore,
+      current_store: storeMap[enriched.tray_current_store_id] || effectiveStore || "",
+      tray_status_label: TRAY_STATUS_LABELS[enriched.tray_status] || "Tray",
+      storage_path: storagePath,
+      is_container: Boolean(enriched.parent_location_id) && !enriched.is_tray,
+    }];
+  }));
 }
 
 function escapeStockHtml(value) {
@@ -236,9 +274,9 @@ function buildLocationChips(item) {
   }
 
   return details.slice(0, 4).map((entry) => `
-    <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""}">
+    <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""} ${entry.is_container ? "is-container" : ""}">
       <strong>${escapeStockHtml(entry.location_name || "Unknown")}</strong>
-      <small>${entry.is_tray ? `${escapeStockHtml(entry.tray_status_label || "Tray")} - ${escapeStockHtml(entry.current_store || "Unassigned")}` : escapeStockHtml(entry.store_name || "Fixed location")}</small>
+      <small>${escapeStockHtml(entry.storage_path || (entry.is_tray ? `${entry.tray_status_label || "Tray"} - ${entry.current_store || "Unassigned"}` : entry.store_name || "Fixed location"))}</small>
       <b>${Number(entry.quantity || 0).toLocaleString()}</b>
     </span>
   `).join("") + (details.length > 4
@@ -2881,21 +2919,14 @@ async function refreshItemById(itemId) {
     const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
       supabase
         .from("locations")
-        .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id"),
+        .select("*"),
       supabase
         .from("store_locations")
         .select("id, name"),
     ]);
 
     if (!locError && !storeError && locations) {
-      const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
-      const locationMap = Object.fromEntries(locations.map(loc => [loc.id, {
-        ...loc,
-        label: buildStockLocationLabel(loc, storeMap),
-        store_name: storeMap[loc.store_id] || "",
-        current_store: storeMap[loc.tray_current_store_id] || storeMap[loc.store_id] || "",
-        tray_status_label: TRAY_STATUS_LABELS[loc.tray_status] || "Tray",
-      }]));
+      const locationMap = buildStockLocationMap(locations, stores);
       const breakdown = {};
       const locationDetails = [];
       let total = 0;
@@ -2912,6 +2943,8 @@ async function refreshItemById(itemId) {
           current_store: locationInfo.current_store || "",
           tray_status_label: locationInfo.tray_status_label || "",
           is_tray: Boolean(locationInfo.is_tray),
+          is_container: Boolean(locationInfo.is_container),
+          storage_path: locationInfo.storage_path || "",
           quantity,
         });
       });
@@ -5432,7 +5465,7 @@ async function fetchStockItems() {
   const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
     supabase
       .from("locations")
-      .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id"),
+      .select("*"),
     supabase
       .from("store_locations")
       .select("id, name"),
@@ -5443,14 +5476,7 @@ async function fetchStockItems() {
     return items;
   }
 
-  const storeMap = Object.fromEntries((stores || []).map(store => [store.id, store.name]));
-  const locationMap = Object.fromEntries(locations.map(loc => [loc.id, {
-    ...loc,
-    label: buildStockLocationLabel(loc, storeMap),
-    store_name: storeMap[loc.store_id] || "",
-    current_store: storeMap[loc.tray_current_store_id] || storeMap[loc.store_id] || "",
-    tray_status_label: TRAY_STATUS_LABELS[loc.tray_status] || "Tray",
-  }]));
+  const locationMap = buildStockLocationMap(locations, stores);
 
   // Step 4: Aggregate stock per item
   const stockMap = {};
@@ -5469,6 +5495,8 @@ async function fetchStockItems() {
       current_store: locationInfo.current_store || "",
       tray_status_label: locationInfo.tray_status_label || "",
       is_tray: Boolean(locationInfo.is_tray),
+      is_container: Boolean(locationInfo.is_container),
+      storage_path: locationInfo.storage_path || "",
       quantity,
     });
   });
@@ -5782,8 +5810,11 @@ async function selectManualSaleItem(item) {
 
 function normalizeManualSaleStockRow(row) {
   const loc = row.location || {};
-  const status = loc.is_tray ? (TRAY_STATUS_LABELS[loc.tray_status] || "Tray") : "Location";
-  const locationLabel = loc.is_tray ? `${loc.location_name || "Unnamed tray"} (${status})` : (loc.location_name || "Unnamed location");
+  const status = loc.is_tray ? (TRAY_STATUS_LABELS[loc.tray_status] || "Tray") : loc.parent_location_id ? "Container" : "Location";
+  const parentLabel = loc.parent_location_name ? ` in ${loc.parent_location_name}` : "";
+  const locationLabel = loc.is_tray
+    ? `${loc.location_name || "Unnamed tray"} (${status})`
+    : `${loc.location_name || "Unnamed location"} (${status}${parentLabel})`;
   return { ...row, location_id: row.location_id || loc.id, location_name: loc.location_name || "", location_code: loc.location_code || "", is_tray: Boolean(loc.is_tray), tray_status: loc.tray_status || "", locationLabel };
 }
 
@@ -5791,7 +5822,7 @@ async function loadManualSaleStockRows(itemId) {
   setManualSaleStatus("Loading available trays and locations...");
   const { data, error } = await supabase
     .from("item_stock_locations")
-    .select(`id, item_id, location_id, quantity, location:location_id (id, location_name, location_code, is_tray, tray_status, tray_current_store_id, store_id)`)
+    .select(`id, item_id, location_id, quantity, location:location_id (*)`)
     .eq("item_id", itemId)
     .gt("quantity", 0);
   if (error) {

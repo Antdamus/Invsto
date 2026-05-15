@@ -2231,6 +2231,11 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   background: #f3f8ff;
 }
 
+.stock-location-chip.is-container {
+  border-color: rgba(150, 112, 40, .22);
+  background: #fff8ec;
+}
+
 .stock-location-empty,
 .stock-location-more {
   color: #74747a;

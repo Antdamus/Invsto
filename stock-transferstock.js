@@ -15,15 +15,19 @@ window.transferModule = (function () {
 
     function formatTransferLocation(location, storeMap = {}) {
         if (!location) return { title: "Unknown location", meta: "", isTray: false };
-        const homeStore = storeMap[location.store_id] || "Unassigned";
+        const homeStore = storeMap[location.store_id] || storeMap[location.parent_store_id] || "Unassigned";
         const currentStore = storeMap[location.tray_current_store_id] || homeStore;
         const isTray = Boolean(location.is_tray);
+        const isContainer = Boolean(location.parent_location_id) && !isTray;
         return {
             title: location.location_name || "Unknown location",
             meta: isTray
                 ? `Tray - ${TRAY_STATUS_LABELS[location.tray_status] || "Tray"} - Current: ${currentStore}`
-                : homeStore,
+                : isContainer
+                    ? `Container - ${location.parent_location_name || "parent location"} - ${homeStore}`
+                    : homeStore,
             isTray,
+            isContainer,
         };
     }
 
@@ -146,7 +150,7 @@ window.transferModule = (function () {
             ] = await Promise.all([
                 supabase
                     .from("locations")
-                    .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
+                    .select("*")
                     .eq("id", locationId)
                     .maybeSingle(),
                 supabase
@@ -310,7 +314,7 @@ window.transferModule = (function () {
         .from("item_stock_locations")
         .select(`
         id, quantity, locked_by, locked_at,
-        location:location_id (id, location_name, store_id, is_tray, tray_status, tray_current_store_id)
+        location:location_id (*)
         `)
         .eq("item_id", itemId);
 
@@ -336,7 +340,7 @@ window.transferModule = (function () {
         if (quantity > 0) {
         sourceSelect.innerHTML += `
             <option value="${loc.id}" data-available-qty="${quantity}">
-            ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""} (${quantity})
+            ${locationLabel.title}${locationLabel.isTray || locationLabel.isContainer ? ` - ${locationLabel.meta}` : ""} (${quantity})
             </option>
         `;
         }
@@ -345,7 +349,7 @@ window.transferModule = (function () {
     // 🚦 Now populate destination locations from the locations table
     const { data: locationsData, error: locationsError } = await supabase
         .from("locations")
-        .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
+        .select("*")
         .eq("active", true);
 
     if (locationsError || !locationsData) {
@@ -358,7 +362,7 @@ window.transferModule = (function () {
         const locationLabel = formatTransferLocation(loc, storeMap);
         destSelect.innerHTML += `
         <option value="${loc.id}">
-            ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""}
+            ${locationLabel.title}${locationLabel.isTray || locationLabel.isContainer ? ` - ${locationLabel.meta}` : ""}
         </option>
         `;
     });
@@ -417,7 +421,7 @@ window.transferModule = (function () {
             const storeMap = await fetchTransferStores();
             const { data: locationsData, error: locationsError } = await supabase
                 .from("locations")
-                .select("id, location_name, store_id, is_tray, tray_status, tray_current_store_id")
+                .select("*")
                 .eq("active", true);
 
             if (locationsError || !locationsData) {
@@ -434,7 +438,7 @@ window.transferModule = (function () {
                 const locationLabel = formatTransferLocation(loc, storeMap);
                 destSelect.innerHTML += `
                     <option value="${loc.id}">
-                    ${locationLabel.title}${locationLabel.isTray ? ` - ${locationLabel.meta}` : ""}
+                    ${locationLabel.title}${locationLabel.isTray || locationLabel.isContainer ? ` - ${locationLabel.meta}` : ""}
                     </option>
                 `;
             });

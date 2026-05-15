@@ -958,7 +958,9 @@ async function selectInventoryItem(item) {
 
 function normalizeStockRow(row) {
   const loc = row.location || {};
-  const trayLabel = loc.is_tray ? (loc.tray_status === "checked_out" ? "Checked out tray" : "Tray") : "Location";
+  const trayLabel = loc.is_tray
+    ? (loc.tray_status === "checked_out" ? "Checked out tray" : "Tray")
+    : loc.parent_location_id ? "Container" : "Location";
   return {
     ...row,
     location_id: row.location_id || loc.id,
@@ -969,10 +971,10 @@ function normalizeStockRow(row) {
 }
 
 async function loadStockRowsForItem(itemId) {
-  setStatus("Loading source trays and locations...");
+  setStatus("Loading source trays, containers, and locations...");
   const { data, error } = await supabase
     .from("item_stock_locations")
-    .select("id,item_id,location_id,quantity,location:location_id(id,location_name,location_code,is_tray,tray_status,store_id,tray_current_store_id)")
+    .select("id,item_id,location_id,quantity,location:location_id(*)")
     .eq("item_id", itemId)
     .gt("quantity", 0);
 
@@ -986,7 +988,7 @@ async function loadStockRowsForItem(itemId) {
 
   state.stockRows = (data || []).map(normalizeStockRow);
   renderLocationResults(state.stockRows, "This item has no available stock.");
-  setStatus(state.stockRows.length ? "Scan the source tray/location for this item." : "No stock is available for this item.", state.stockRows.length ? "info" : "error");
+  setStatus(state.stockRows.length ? "Scan the source tray, container, or location for this item." : "No stock is available for this item.", state.stockRows.length ? "info" : "error");
   setTimeout(() => $("location-scan")?.focus(), 80);
 }
 

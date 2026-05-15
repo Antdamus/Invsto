@@ -123,6 +123,18 @@ const state = {
   dymoUrls: new Map(),
 };
 
+const DEFAULT_LOCATION_TYPES = [
+  "Table",
+  "Vault",
+  "Safe",
+  "Shelf",
+  "Case",
+  "Bag",
+  "Container",
+  "Tray",
+  "Bin",
+];
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -172,6 +184,11 @@ function formatDateTime(value) {
   });
 }
 
+function isTrayToleranceNotNullError(error) {
+  return error?.code === "23502"
+    && /tray_weight_tolerance_grams/i.test(error?.message || error?.details || "");
+}
+
 function getLocationDisplayDate(location) {
   return location.updated_at || location.recentActivityAt || location.created_at || "";
 }
@@ -204,6 +221,147 @@ function getTrayCurrentStoreLabel(location) {
   return asTrimmedString(location?.tray_current_store_name)
     || getStoreNameById(location?.tray_current_store_id)
     || getStoreLabel(location);
+}
+
+function getLocationRole(location) {
+  if (location?.is_tray) return "tray";
+  const role = asTrimmedString(location?.location_role);
+  if (role) return role;
+  return location?.parent_location_id ? "container" : "storage_location";
+}
+
+function getLocationRoleLabel(location) {
+  const role = getLocationRole(location);
+  if (role === "tray") return "Mobile Tray";
+  if (role === "container") return "Bag / Container";
+  return "Fixed Location";
+}
+
+function isContainerLocation(location) {
+  return getLocationRole(location) === "container";
+}
+
+function getLocationPathLabel(location) {
+  if (!location) return "Unassigned";
+  const store = getStoreLabel(location);
+  if (location.is_tray) {
+    return `${getTrayCurrentStoreLabel(location)} > ${location.location_name || "Unnamed tray"}`;
+  }
+  if (isContainerLocation(location)) {
+    const parent = asTrimmedString(location.parent_location_name) || "Unassigned parent";
+    return `${store} > ${parent} > ${location.location_name || "Unnamed container"}`;
+  }
+  return `${store} > ${location.location_name || "Unnamed location"}`;
+}
+
+function getParentLocationCandidates(currentLocationId = "") {
+  return state.locations
+    .filter((location) => {
+      if (String(location.id) === String(currentLocationId)) return false;
+      if (location.active === false) return false;
+      return !location.is_tray && getLocationRole(location) !== "container";
+    })
+    .sort((a, b) => getLocationPathLabel(a).localeCompare(getLocationPathLabel(b)));
+}
+
+function buildParentLocationOptionsMarkup(selectedValue = "", currentLocationId = "") {
+  return [`<option value="">No parent location</option>`]
+    .concat(
+      getParentLocationCandidates(currentLocationId).map((location) => {
+        const selected = String(location.id) === String(selectedValue) ? ' selected' : "";
+        return `<option value="${escapeHtml(location.id)}"${selected}>${escapeHtml(getLocationPathLabel(location))}</option>`;
+      })
+    )
+    .join("");
+}
+
+function getLocationNameTemplates(currentLocationId = "", storeId = "") {
+  const templates = new Map();
+  const selectedStoreId = asTrimmedString(storeId);
+
+  state.locations.forEach((location) => {
+    if (String(location.id) === String(currentLocationId)) return;
+    if (selectedStoreId && asTrimmedString(location.store_id) !== selectedStoreId) return;
+    const name = asTrimmedString(location.location_name);
+    const match = name.match(/^(.*?)(\d+)(.*)$/);
+    if (!match) return;
+
+    const prefix = match[1] || "";
+    const suffix = match[3] || "";
+    const number = Number(match[2]);
+    if (!Number.isFinite(number)) return;
+
+    const key = `${prefix}#${suffix}`.replace(/\s+/g, " ").trim().toLowerCase();
+    const existing = templates.get(key) || {
+      template: `${prefix}#${suffix}`.replace(/\s+/g, " ").trim(),
+      prefix,
+      suffix,
+      maxNumber: 0,
+    };
+    existing.maxNumber = Math.max(existing.maxNumber, number);
+    templates.set(key, existing);
+  });
+
+  return [...templates.values()]
+    .map((entry) => ({
+      template: entry.template,
+      nextName: `${entry.prefix}${entry.maxNumber + 1}${entry.suffix}`.replace(/\s+/g, " ").trim(),
+    }))
+    .sort((a, b) => a.template.localeCompare(b.template));
+}
+
+function hideLocationNameSuggestions(container) {
+  if (!container) return;
+  container.classList.add("hidden");
+  container.replaceChildren();
+}
+
+function renderLocationNameSuggestions(input, container, currentLocationId = "", storeId = "") {
+  if (!input || !container) return;
+
+  const term = asTrimmedString(input.value).toLowerCase();
+  const termTemplate = term.replace(/\d+/g, "#");
+  const suggestions = getLocationNameTemplates(currentLocationId, storeId)
+    .filter((entry) => {
+      if (!term) return true;
+      return entry.template.toLowerCase().includes(term)
+        || entry.template.toLowerCase().includes(termTemplate)
+        || entry.nextName.toLowerCase().includes(term);
+    })
+    .slice(0, 8);
+
+  if (!suggestions.length) {
+    hideLocationNameSuggestions(container);
+    return;
+  }
+
+  container.innerHTML = suggestions.map((entry) => `
+    <button type="button" data-location-name-suggestion="${escapeHtml(entry.nextName)}">
+      <strong>${escapeHtml(entry.template)}</strong>
+      <span>${escapeHtml(entry.nextName)}</span>
+    </button>
+  `).join("");
+  container.classList.remove("hidden");
+}
+
+function setupLocationNameSuggestions(input, container, currentLocationId = "", getStoreId = () => "") {
+  if (!input || !container || input.dataset.nameSuggestionsBound === "true") return;
+  input.dataset.nameSuggestionsBound = "true";
+
+  input.addEventListener("focus", () => renderLocationNameSuggestions(input, container, currentLocationId, getStoreId()));
+  input.addEventListener("input", () => renderLocationNameSuggestions(input, container, currentLocationId, getStoreId()));
+  input.addEventListener("blur", () => {
+    setTimeout(() => hideLocationNameSuggestions(container), 140);
+  });
+
+  container.addEventListener("mousedown", (event) => {
+    const button = event.target.closest("[data-location-name-suggestion]");
+    if (!button) return;
+    event.preventDefault();
+    input.value = button.getAttribute("data-location-name-suggestion") || "";
+    hideLocationNameSuggestions(container);
+    input.focus();
+  });
 }
 
 function formatWeight(value) {
@@ -298,6 +456,7 @@ function getCreateModalElements() {
     nameInput: document.getElementById("location-create-name"),
     storeSelect: document.getElementById("location-create-store"),
     typeInput: document.getElementById("location-create-type"),
+    parentSelect: document.getElementById("location-create-parent"),
     capacityInput: document.getElementById("location-create-capacity"),
     capacityNoLimitInput: document.getElementById("location-create-capacity-no-limit"),
     barcodeInput: document.getElementById("location-create-barcode"),
@@ -554,6 +713,23 @@ function populateCreateLocationStoreSelect(selectedStoreId = "") {
   storeSelect.value = selectedStoreId || "";
 }
 
+function populateCreateParentLocationSelect(selectedParentId = "") {
+  const { parentSelect } = getCreateModalElements();
+  if (!parentSelect) return;
+
+  parentSelect.innerHTML = buildParentLocationOptionsMarkup(selectedParentId);
+  parentSelect.value = selectedParentId || "";
+}
+
+function syncCreateContainerStoreFromParent() {
+  const elements = getCreateModalElements();
+  const parentId = asTrimmedString(elements.parentSelect?.value);
+  const parentLocation = state.locations.find((location) => String(location.id) === String(parentId));
+  if (parentLocation?.store_id && elements.storeSelect) {
+    elements.storeSelect.value = parentLocation.store_id;
+  }
+}
+
 function getNextTrayName() {
   const highestTrayNumber = (Array.isArray(state.locations) ? state.locations : []).reduce((highest, location) => {
     const name = asTrimmedString(location.location_name);
@@ -572,6 +748,8 @@ function closeCreateLocationModal() {
   elements.modal?.classList.add("hidden");
   elements.modal?.setAttribute("aria-hidden", "true");
   elements.form?.reset();
+  if (elements.parentSelect) elements.parentSelect.innerHTML = "";
+  hideLocationNameSuggestions(document.getElementById("location-create-name-suggestions"));
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
   if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
   syncCreateLocationLimitControls();
@@ -580,25 +758,36 @@ function closeCreateLocationModal() {
   if (elements.dymoStatus) elements.dymoStatus.textContent = "DYMO label will be created on save";
 }
 
-function openCreateLocationModal({ tray = false } = {}) {
+function openCreateLocationModal({ tray = false, container = false } = {}) {
   const elements = getCreateModalElements();
   if (!elements.modal) return;
   const forceTray = !locationsAccess.isAdmin;
   const createTray = tray || forceTray;
+  const createContainer = !createTray && Boolean(container);
 
   elements.form?.reset();
   populateCreateLocationStoreSelect();
+  populateCreateParentLocationSelect();
   elements.modal.classList.remove("hidden");
   elements.modal.setAttribute("aria-hidden", "false");
-  if (elements.title) elements.title.textContent = createTray ? "Create Tray" : "Create Location";
+  if (elements.title) {
+    elements.title.textContent = createTray ? "Create Tray" : createContainer ? "Create Container" : "Create Location";
+  }
   if (elements.subtitle) {
     elements.subtitle.textContent = createTray
       ? "Create a barcode-ready mobile tray that can be checked in and out."
-      : "Create a barcode-ready fixed location.";
+      : createContainer
+        ? "Create a barcode-ready bag or container nested inside a table, vault, shelf, or safe."
+        : "Create a barcode-ready fixed table, vault, shelf, case, or safe.";
   }
-  if (elements.typeInput) elements.typeInput.value = createTray ? "tray" : "";
+  if (elements.typeInput) elements.typeInput.value = createTray ? "tray" : createContainer ? "container" : "";
   if (createTray && elements.nameInput) {
     elements.nameInput.value = getNextTrayName();
+  }
+  if (createContainer && elements.parentSelect) {
+    elements.parentSelect.required = true;
+  } else if (elements.parentSelect) {
+    elements.parentSelect.required = false;
   }
   if (elements.isTrayInput) {
     elements.isTrayInput.checked = createTray;
@@ -610,7 +799,23 @@ function openCreateLocationModal({ tray = false } = {}) {
   if (elements.photoPreview) elements.photoPreview.textContent = "No photo selected.";
   if (elements.status) elements.status.textContent = "";
   generateCreateLocationBarcode();
-  elements.nameInput?.focus();
+  setupLocationNameSuggestions(
+    elements.nameInput,
+    document.getElementById("location-create-name-suggestions"),
+    "",
+    () => elements.storeSelect?.value || ""
+  );
+  renderLocationNameSuggestions(
+    elements.nameInput,
+    document.getElementById("location-create-name-suggestions"),
+    "",
+    elements.storeSelect?.value || ""
+  );
+  if (createContainer && elements.parentSelect) {
+    elements.parentSelect.focus();
+  } else {
+    elements.nameInput?.focus();
+  }
 }
 
 async function uploadCreateLocationDymo(locationCode, locationName = "") {
@@ -678,10 +883,15 @@ async function saveCreatedLocation() {
   const locationName = asTrimmedString(elements.nameInput?.value);
   const storeId = asTrimmedString(elements.storeSelect?.value);
   const type = asTrimmedString(elements.typeInput?.value);
+  const parentLocationId = asTrimmedString(elements.parentSelect?.value);
   const capacityValue = asTrimmedString(elements.capacityInput?.value);
   const capacityHasNoLimit = Boolean(elements.capacityNoLimitInput?.checked);
   const locationCode = asTrimmedString(elements.barcodeInput?.value);
   const isTray = !locationsAccess.isAdmin ? true : Boolean(elements.isTrayInput?.checked);
+  const isContainer = !isTray && Boolean(parentLocationId);
+  const parentLocation = parentLocationId
+    ? state.locations.find((location) => String(location.id) === String(parentLocationId))
+    : null;
   const toleranceValue = asTrimmedString(elements.toleranceInput?.value);
   const toleranceHasNoLimit = Boolean(elements.toleranceNoLimitInput?.checked);
   const notes = asTrimmedString(elements.notesInput?.value);
@@ -692,7 +902,12 @@ async function saveCreatedLocation() {
     return;
   }
 
-  if (state.stores.length > 0 && !storeId) {
+  if (isContainer && !parentLocation) {
+    if (elements.status) elements.status.textContent = "Choose the table, vault, shelf, or safe that holds this container.";
+    return;
+  }
+
+  if (state.stores.length > 0 && !storeId && !parentLocation?.store_id) {
     if (elements.status) elements.status.textContent = "Choose the store for this location.";
     return;
   }
@@ -710,21 +925,32 @@ async function saveCreatedLocation() {
       location_code: locationCode,
       dymo_label_url: dymoPath,
       photo_url: photoPath,
-      type: type || (isTray ? "tray" : null),
+      type: type || (isTray ? "tray" : isContainer ? "container" : null),
+      location_role: isTray ? "tray" : isContainer ? "container" : "storage_location",
+      parent_location_id: isContainer ? parentLocationId : null,
+      container_kind: isContainer ? (type || "container") : null,
       max_capacity: capacityHasNoLimit || !capacityValue ? null : Number(capacityValue),
       active: true,
       notes: notes || null,
-      store_id: storeId || null,
+      store_id: storeId || parentLocation?.store_id || null,
       is_tray: isTray,
       tray_weight_tolerance_grams: toleranceHasNoLimit || !toleranceValue ? null : Number(toleranceValue),
       tray_current_store_id: isTray ? (storeId || null) : null,
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("locations")
       .insert(payload)
       .select("id")
       .single();
+
+    if (error && !isTray && isTrayToleranceNotNullError(error)) {
+      ({ data, error } = await supabase
+        .from("locations")
+        .insert({ ...payload, tray_weight_tolerance_grams: 10 })
+        .select("id")
+        .single());
+    }
 
     if (error || !data) throw error || new Error("Location was not returned after saving.");
 
@@ -744,6 +970,7 @@ function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
   const itemMap = new Map((itemTypes || []).map((item) => [item.id, item]));
   const stockByLocation = new Map();
   const storeMap = new Map((stores || []).map((store) => [store.id, store]));
+  const rawLocationMap = new Map((locations || []).map((location) => [location.id, location]));
 
   for (const row of stockRows || []) {
     const locationId = row.location_id;
@@ -796,16 +1023,28 @@ function normalizeLocationsData(locations, stockRows, itemTypes, stores) {
       .sort()
       .pop() || "";
 
-    return {
+    const parentLocation = rawLocationMap.get(location.parent_location_id) || null;
+    const effectiveStoreId = location.store_id || parentLocation?.store_id || "";
+    const effectiveStoreName = storeMap.get(effectiveStoreId)?.name || "";
+    const normalized = {
       ...location,
-      store_name: storeMap.get(location.store_id)?.name || "",
+      location_role: getLocationRole(location),
+      store_id: effectiveStoreId || location.store_id || "",
+      store_name: effectiveStoreName || storeMap.get(location.store_id)?.name || "",
       tray_current_store_name: storeMap.get(location.tray_current_store_id)?.name || "",
+      parent_location_name: parentLocation?.location_name || "",
+      parent_location_code: parentLocation?.location_code || "",
+      parent_location_type: parentLocation?.type || "",
+      parent_store_id: parentLocation?.store_id || "",
+      parent_store_name: parentLocation?.store_id ? storeMap.get(parentLocation.store_id)?.name || "" : "",
       itemRows,
       distinctItemTypes: itemRows.length,
       totalQuantity,
       recentActivityAt,
       notesPreview: asTrimmedString(location.notes).slice(0, 120),
     };
+    normalized.storage_path = getLocationPathLabel(normalized);
+    return normalized;
   });
 }
 
@@ -833,6 +1072,7 @@ async function loadLocationsData() {
   state.stores = Array.isArray(stores) ? stores : [];
   state.locations = normalizeLocationsData(locations, stockRows, itemTypes, state.stores);
   populateStoreFilter();
+  populateLocationTypeDatalist();
   populateTypeFilter();
   renderSummaryCards();
   renderLocationsTable();
@@ -853,13 +1093,31 @@ function populateStoreFilter() {
   storeFilter.value = state.filters.store;
 }
 
+function getLocationTypeOptions() {
+  const options = new Map();
+  DEFAULT_LOCATION_TYPES.forEach((type) => options.set(type.toLowerCase(), type));
+  state.locations.forEach((location) => {
+    const type = asTrimmedString(location.type);
+    if (type) options.set(type.toLowerCase(), type);
+  });
+  return [...options.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function populateLocationTypeDatalist() {
+  const list = document.getElementById("location-type-options");
+  if (!list) return;
+
+  list.innerHTML = getLocationTypeOptions()
+    .map((type) => `<option value="${escapeHtml(type)}"></option>`)
+    .join("");
+}
+
 function populateTypeFilter() {
   const typeFilter = document.getElementById("locations-type-filter");
   if (!typeFilter) return;
 
   const currentValue = state.filters.type;
-  const types = [...new Set(state.locations.map((location) => asTrimmedString(location.type)).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
+  const types = getLocationTypeOptions();
 
   typeFilter.innerHTML = ['<option value="">All types</option>']
     .concat(types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`))
@@ -878,6 +1136,9 @@ function getFilteredLocations() {
       location.notes,
       location.type,
       location.store_name,
+      location.parent_location_name,
+      location.storage_path,
+      getLocationRoleLabel(location),
     ].some((value) => asTrimmedString(value).toLowerCase().includes(searchTerm));
 
     const matchesStore = !state.filters.store || asTrimmedString(location.store_id) === state.filters.store;
@@ -914,6 +1175,7 @@ function renderSummaryCards() {
   const activeLocations = state.locations.filter((location) => location.active !== false).length;
   const totalStockUnits = state.locations.reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0);
   const trayLocations = state.locations.filter((location) => location.is_tray);
+  const containerLocations = state.locations.filter((location) => isContainerLocation(location));
   const trayAlerts = trayLocations.filter((location) => ["checked_out", "in_transfer", "weight_mismatch"].includes(location.tray_status)).length;
   const representedStores = new Set(state.locations.map((location) => asTrimmedString(location.store_id)).filter(Boolean)).size;
   const recentThreshold = Date.now() - (1000 * 60 * 60 * 24 * 14);
@@ -967,6 +1229,15 @@ function renderSummaryCards() {
       <div class="metric-value">${trayLocations.length.toLocaleString()}</div>
       <div class="metric-foot">${trayAlerts.toLocaleString()} tray(s) checked out, in transfer, or weight flagged</div>
     </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <div class="metric-label">Bags / Containers</div>
+        <div class="metric-icon">Box</div>
+      </div>
+      <div class="metric-value">${containerLocations.length.toLocaleString()}</div>
+      <div class="metric-foot">Nested storage units inside tables, vaults, shelves, or safes</div>
+    </div>
   `;
 }
 
@@ -995,14 +1266,15 @@ function renderLocationsTable() {
       <td>
         <button type="button" class="location-row-action" data-open-location="${escapeHtml(location.id)}">
           <span class="location-row-title">${escapeHtml(location.location_name || "Unnamed Location")}</span>
-          <span class="location-row-sub">${escapeHtml(location.location_code || "No barcode")} • ${escapeHtml(location.notesPreview || "No notes recorded.")}</span>
+          <span class="location-row-sub">${escapeHtml(location.location_code || "No barcode")} - ${escapeHtml(location.storage_path || getLocationPathLabel(location))}</span>
         </button>
       </td>
       <td>
         <span class="locations-pill is-store">${escapeHtml(getStoreLabel(location))}</span>
       </td>
       <td>
-        <span class="locations-pill is-type">${escapeHtml(location.type || "Uncategorized")}</span>
+        <span class="locations-pill is-type">${escapeHtml(getLocationRoleLabel(location))}</span>
+        ${location.type ? `<span class="locations-pill is-asset">${escapeHtml(location.type)}</span>` : ""}
       </td>
       <td>
         <span class="locations-pill ${location.active === false ? "is-inactive" : "is-active"}">
@@ -1222,6 +1494,14 @@ async function renderLocationDetail(locationId) {
           <div class="location-detail-stat-value">${escapeHtml(location.type || "—")}</div>
         </div>
         <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Storage Role</div>
+          <div class="location-detail-stat-value">${escapeHtml(getLocationRoleLabel(location))}</div>
+        </div>
+        <div class="location-detail-stat full">
+          <div class="location-detail-stat-label">Storage Path</div>
+          <div class="location-detail-stat-value">${escapeHtml(location.storage_path || getLocationPathLabel(location))}</div>
+        </div>
+        <div class="location-detail-stat">
           <div class="location-detail-stat-label">Max Capacity</div>
           <div class="location-detail-stat-value">${location.max_capacity === null || location.max_capacity === undefined ? "No limit" : location.max_capacity}</div>
         </div>
@@ -1283,6 +1563,7 @@ async function renderLocationDetail(locationId) {
           <label class="location-edit-label">
             <span>Location Name</span>
             <input type="text" id="location-edit-name" class="location-edit-input" value="${escapeHtml(location.location_name || "")}" />
+            <div id="location-edit-name-suggestions" class="location-name-suggestions hidden"></div>
           </label>
 
           <label class="location-edit-label">
@@ -1294,7 +1575,14 @@ async function renderLocationDetail(locationId) {
 
           <label class="location-edit-label">
             <span>Type</span>
-            <input type="text" id="location-edit-type" class="location-edit-input" value="${escapeHtml(location.type || "")}" placeholder="Shelf, safe, tray, bin" />
+            <input type="text" id="location-edit-type" class="location-edit-input" list="location-type-options" value="${escapeHtml(location.type || "")}" placeholder="Choose or type a new type" />
+          </label>
+
+          <label class="location-edit-label full">
+            <span>Parent Table / Vault / Location</span>
+            <select id="location-edit-parent" class="location-edit-select">
+              ${buildParentLocationOptionsMarkup(asTrimmedString(location.parent_location_id), location.id)}
+            </select>
           </label>
 
           <label class="location-edit-label">
@@ -1366,6 +1654,12 @@ async function renderLocationDetail(locationId) {
       margin: 10,
     });
   }
+  setupLocationNameSuggestions(
+    document.getElementById("location-edit-name"),
+    document.getElementById("location-edit-name-suggestions"),
+    location.id,
+    () => document.getElementById("location-edit-store")?.value || ""
+  );
   syncEditLocationLimitControls();
 }
 
@@ -1377,6 +1671,10 @@ async function saveLocationEdits(locationId) {
   const name = asTrimmedString(document.getElementById("location-edit-name")?.value);
   const storeId = asTrimmedString(document.getElementById("location-edit-store")?.value);
   const type = asTrimmedString(document.getElementById("location-edit-type")?.value);
+  const parentLocationId = asTrimmedString(document.getElementById("location-edit-parent")?.value);
+  const parentLocation = parentLocationId
+    ? state.locations.find((entry) => String(entry.id) === String(parentLocationId))
+    : null;
   const capacityValue = asTrimmedString(document.getElementById("location-edit-capacity")?.value);
   const capacityHasNoLimit = Boolean(document.getElementById("location-edit-capacity-no-limit")?.checked);
   const notes = asTrimmedString(document.getElementById("location-edit-notes")?.value);
@@ -1388,6 +1686,11 @@ async function saveLocationEdits(locationId) {
 
   if (!name) {
     if (statusEl) statusEl.textContent = "Location name is required.";
+    return;
+  }
+
+  if (parentLocationId && !parentLocation) {
+    if (statusEl) statusEl.textContent = "Choose a valid parent table, vault, shelf, or safe.";
     return;
   }
 
@@ -1414,8 +1717,11 @@ async function saveLocationEdits(locationId) {
 
   const updatePayload = {
     location_name: name,
-    store_id: storeId || null,
+    store_id: storeId || parentLocation?.store_id || null,
     type: type || null,
+    location_role: isTray ? "tray" : parentLocationId ? "container" : "storage_location",
+    parent_location_id: isTray ? null : parentLocationId || null,
+    container_kind: !isTray && parentLocationId ? (type || "container") : null,
     notes: notes || null,
     active,
     photo_url: photoPath,
@@ -1425,12 +1731,21 @@ async function saveLocationEdits(locationId) {
     tray_current_store_id: isTray ? (location.tray_current_store_id || storeId || null) : null,
   };
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("locations")
     .update(updatePayload)
     .eq("id", locationId)
     .select("*")
     .single();
+
+  if (error && !isTray && isTrayToleranceNotNullError(error)) {
+    ({ data, error } = await supabase
+      .from("locations")
+      .update({ ...updatePayload, tray_weight_tolerance_grams: 10 })
+      .eq("id", locationId)
+      .select("*")
+      .single());
+  }
 
   if (error || !data) {
     console.error("Location update failed:", error);
@@ -1600,6 +1915,10 @@ function bindEvents() {
     openCreateLocationModal({ tray: false });
   });
 
+  document.getElementById("locations-create-container")?.addEventListener("click", () => {
+    openCreateLocationModal({ container: true });
+  });
+
   document.getElementById("locations-create-tray")?.addEventListener("click", () => {
     openCreateLocationModal({ tray: true });
   });
@@ -1618,6 +1937,25 @@ function bindEvents() {
 
   document.getElementById("location-create-tray-tolerance-no-limit")?.addEventListener("change", () => {
     syncCreateLocationLimitControls();
+  });
+
+  document.getElementById("location-create-parent")?.addEventListener("change", () => {
+    syncCreateContainerStoreFromParent();
+    renderLocationNameSuggestions(
+      document.getElementById("location-create-name"),
+      document.getElementById("location-create-name-suggestions"),
+      "",
+      document.getElementById("location-create-store")?.value || ""
+    );
+  });
+
+  document.getElementById("location-create-store")?.addEventListener("change", () => {
+    renderLocationNameSuggestions(
+      document.getElementById("location-create-name"),
+      document.getElementById("location-create-name-suggestions"),
+      "",
+      document.getElementById("location-create-store")?.value || ""
+    );
   });
 
   document.getElementById("location-create-photo")?.addEventListener("change", (event) => {
@@ -1707,6 +2045,15 @@ function bindEvents() {
       || event.target?.id === "location-edit-tray-tolerance-no-limit"
     ) {
       syncEditLocationLimitControls();
+    }
+
+    if (event.target?.id === "location-edit-store") {
+      renderLocationNameSuggestions(
+        document.getElementById("location-edit-name"),
+        document.getElementById("location-edit-name-suggestions"),
+        document.getElementById("location-edit-form")?.dataset.locationId || "",
+        event.target.value || ""
+      );
     }
   });
 

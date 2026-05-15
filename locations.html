@@ -112,6 +112,9 @@
               <button type="button" id="locations-create-location" class="locations-toolbar-button">
                 Create Location
               </button>
+              <button type="button" id="locations-create-container" class="locations-toolbar-button">
+                Create Container
+              </button>
               <button type="button" id="locations-create-tray" class="locations-toolbar-button locations-toolbar-button-primary">
                 Create Tray
               </button>
@@ -224,6 +227,7 @@
           <label class="location-edit-label">
             <span>Name</span>
             <input type="text" id="location-create-name" class="location-edit-input" placeholder="Tray 1, Front Case, Safe Shelf A" required />
+            <div id="location-create-name-suggestions" class="location-name-suggestions hidden"></div>
           </label>
 
           <label class="location-edit-label">
@@ -233,7 +237,12 @@
 
           <label class="location-edit-label">
             <span>Type</span>
-            <input type="text" id="location-create-type" class="location-edit-input" placeholder="tray, shelf, safe, bin" />
+            <input type="text" id="location-create-type" class="location-edit-input" list="location-type-options" placeholder="Choose or type a new type" />
+          </label>
+
+          <label class="location-edit-label full">
+            <span>Parent Table / Vault / Location</span>
+            <select id="location-create-parent" class="location-edit-select"></select>
           </label>
 
           <label class="location-edit-label">
@@ -318,6 +327,8 @@
       </div>
     </div>
   </aside>
+
+  <datalist id="location-type-options"></datalist>
 
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
