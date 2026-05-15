@@ -116,6 +116,155 @@ function fmtDate(iso) {
   return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sameLocalDay(a, b = new Date()) {
+  if (!a) return false;
+  const date = new Date(a);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getFullYear() === b.getFullYear()
+    && date.getMonth() === b.getMonth()
+    && date.getDate() === b.getDate();
+}
+
+function getOrderFromLine(line) {
+  const order = line?.ebay_orders || line?.order || {};
+  return Array.isArray(order) ? order[0] || {} : order;
+}
+
+function getRemainingLineQuantity(line) {
+  return Math.max(0, Number(line?.quantity || 0) - Number(line?.fulfilled_quantity || 0));
+}
+
+function getUrgentOrderState(shipByDate) {
+  if (!shipByDate) return { label: "No ship date", className: "is-normal", rank: 4, dueDate: null };
+
+  const now = new Date();
+  const dueDate = new Date(shipByDate);
+  if (Number.isNaN(dueDate.getTime())) return { label: "No ship date", className: "is-normal", rank: 4, dueDate: null };
+
+  const msUntilDue = dueDate.getTime() - now.getTime();
+  if (msUntilDue < 0) return { label: "Overdue", className: "is-overdue", rank: 0, dueDate };
+  if (sameLocalDay(dueDate, now)) return { label: "Due today", className: "is-today", rank: 1, dueDate };
+  if (msUntilDue <= 48 * 60 * 60 * 1000) return { label: "Due soon", className: "is-soon", rank: 2, dueDate };
+  return { label: "Upcoming", className: "is-normal", rank: 3, dueDate };
+}
+
+function formatShipBy(value) {
+  if (!value) return "No ship date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No ship date";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function groupUrgentOrderLines(lines) {
+  const groups = new Map();
+  (lines || []).forEach((line) => {
+    const order = getOrderFromLine(line);
+    const key = order.id || order.order_number || line.order_id || line.id;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        buyer: order.buyer_username || "No buyer username",
+        orderNumber: order.order_number || "eBay order",
+        shipByDate: order.ship_by_date || null,
+        pendingLines: 0,
+        remainingQty: 0,
+        titles: [],
+      });
+    }
+
+    const group = groups.get(key);
+    const remaining = getRemainingLineQuantity(line);
+    if (remaining <= 0) return;
+    group.pendingLines += 1;
+    group.remainingQty += remaining;
+    if (line.item_title) group.titles.push(line.item_title);
+  });
+
+  return [...groups.values()]
+    .filter((group) => group.pendingLines > 0)
+    .map((group) => ({ ...group, urgency: getUrgentOrderState(group.shipByDate) }))
+    .sort((a, b) => {
+      if (a.urgency.rank !== b.urgency.rank) return a.urgency.rank - b.urgency.rank;
+      const aTime = a.urgency.dueDate?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      const bTime = b.urgency.dueDate?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+}
+
+async function loadWorkerUrgentOrders() {
+  const container = $("worker-urgent-orders-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading urgent orders...</div>`;
+
+  const { data, error } = await window.supabase
+    .from("ebay_order_lines")
+    .select(`
+      id,
+      order_id,
+      item_title,
+      quantity,
+      fulfilled_quantity,
+      line_status,
+      ebay_orders!inner(
+        id,
+        order_number,
+        buyer_username,
+        ship_by_date,
+        status
+      )
+    `)
+    .in("line_status", ["pending", "partially_fulfilled"])
+    .limit(300);
+
+  if (error) {
+    console.error("Failed to load urgent eBay orders:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load urgent eBay orders.</div>`;
+    return;
+  }
+
+  const groups = groupUrgentOrderLines(data || []);
+  const urgentGroups = groups.filter((group) => group.urgency.rank <= 2).slice(0, 6);
+
+  if (!urgentGroups.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No orders are overdue or due in the next 48 hours.</div>`;
+    return;
+  }
+
+  container.innerHTML = urgentGroups.map((group) => {
+    const titlePreview = group.titles.slice(0, 2).join(" / ") || "Pending item";
+    const extra = group.titles.length > 2 ? ` +${group.titles.length - 2} more` : "";
+    return `
+      <a class="urgent-order-card ${group.urgency.className}" href="pending-orders.html">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(group.buyer)}</strong>
+            <span>${escapeHtml(group.orderNumber)}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(group.urgency.label)}</span>
+        </div>
+        <small>${escapeHtml(titlePreview)}${escapeHtml(extra)}</small>
+        <div class="urgent-order-meta">
+          <span>Ship by <b>${escapeHtml(formatShipBy(group.shipByDate))}</b></span>
+          <span><b>${group.pendingLines}</b> line(s) / <b>${group.remainingQty}</b> unit(s)</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** ---------- UI helpers ---------- */
 function setSoftError(msg) {
   const el = $("soft-error");
@@ -687,6 +836,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     state.employee = employee;
     await enforceContractorAgreementGate(window.supabase);
+    await loadWorkerUrgentOrders();
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();

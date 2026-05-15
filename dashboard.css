@@ -525,6 +525,120 @@ body::before{
   color:var(--muted);
 }
 
+/* ---------- Urgent Orders ---------- */
+.urgent-orders-section {
+  border-color: rgba(255, 195, 90, .24);
+  background:
+    radial-gradient(900px 220px at 0% 0%, rgba(255, 196, 87, .15), transparent 56%),
+    radial-gradient(700px 180px at 100% 20%, rgba(255, 85, 85, .08), transparent 58%),
+    rgba(255,255,255,.035);
+}
+
+.urgent-orders-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(214,178,94,.28);
+  background: rgba(214,178,94,.1);
+  color: rgba(255,236,190,.96);
+  font-size: .88rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.urgent-orders-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.urgent-order-card,
+.urgent-orders-empty {
+  min-width: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.22);
+  color: rgba(242,243,245,.9);
+}
+
+.urgent-order-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  text-decoration: none;
+  transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+}
+
+.urgent-order-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(214,178,94,.34);
+  background: rgba(214,178,94,.08);
+}
+
+.urgent-order-card.is-overdue {
+  border-color: rgba(255, 111, 111, .34);
+}
+
+.urgent-order-card.is-today {
+  border-color: rgba(255, 195, 90, .42);
+}
+
+.urgent-order-top,
+.urgent-order-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.urgent-order-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(214,178,94,.14);
+  color: rgba(255,236,190,.96);
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.urgent-order-card.is-overdue .urgent-order-badge {
+  background: rgba(255, 111, 111, .14);
+  color: #ffb4b4;
+}
+
+.urgent-order-card strong {
+  display: block;
+  min-width: 0;
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.urgent-order-card span,
+.urgent-order-card small {
+  display: block;
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.urgent-order-meta b {
+  color: rgba(242,243,245,.96);
+}
+
+.urgent-orders-empty {
+  grid-column: 1 / -1;
+  padding: 16px;
+  color: var(--muted);
+}
+
 /* ---------- Chart ---------- */
 .chart-wrap{
   padding:16px;
@@ -587,6 +701,7 @@ body::before{
 /* ---------- Responsive ---------- */
 @media (max-width: 980px){
   .metric-card{ grid-column: span 6; }
+  .urgent-orders-grid{ grid-template-columns: 1fr; }
 }
 @media (max-width: 768px){
   .mobile-header{ display:flex; }

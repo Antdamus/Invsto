@@ -11,6 +11,8 @@ const state = {
   selectedStockRow: null,
   activeBuyerKey: "",
   stagedFulfillments: new Map(),
+  adminSelectedLineIds: new Set(),
+  adminCloseoutAction: "",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -103,7 +105,11 @@ function openModal(id) {
 
 function closeModal(id) {
   $(id)?.classList.add("hidden");
-  if (!$("item-confirm-modal")?.classList.contains("hidden") || !$("bundle-review-modal")?.classList.contains("hidden")) return;
+  if (
+    !$("item-confirm-modal")?.classList.contains("hidden")
+    || !$("bundle-review-modal")?.classList.contains("hidden")
+    || !$("admin-order-closeout-modal")?.classList.contains("hidden")
+  ) return;
   document.body.classList.remove("modal-open");
 }
 
@@ -195,11 +201,12 @@ function isAdminUser() {
 
 function setupImportVisibility() {
   const panel = $("order-import-panel");
-  if (!panel) return;
-  panel.classList.toggle("hidden", !canImportOrders());
+  if (panel) panel.classList.toggle("hidden", !canImportOrders());
+  $("admin-order-actions-panel")?.classList.toggle("hidden", !isAdminUser());
   document.querySelectorAll(".admin-money-field").forEach((field) => {
     field.classList.toggle("hidden", !isAdminUser());
   });
+  renderAdminOrderActions();
 }
 
 async function loadCheckoutStores() {
@@ -692,6 +699,7 @@ function applyOrderFilters() {
 
   renderOrders();
   renderSummaryStrip();
+  renderAdminOrderActions();
 }
 
 function renderSummaryStrip() {
@@ -749,9 +757,65 @@ function getBuyerLines(key = state.activeBuyerKey) {
 function getNextPackableLine(key = state.activeBuyerKey, excludeId = "") {
   return getBuyerLines(key).find((line) =>
     line.id !== excludeId
-    && line.line_status !== "fulfilled"
+    && isOpenOrderLine(line)
     && !state.stagedFulfillments.has(line.id)
   );
+}
+
+function isOpenOrderLine(line) {
+  return line && !["fulfilled", "cancelled", "skipped"].includes(String(line.line_status || "").toLowerCase());
+}
+
+function isAdminCloseoutSelectable(line) {
+  return isAdminUser()
+    && isOpenOrderLine(line);
+}
+
+function getSelectedAdminLines() {
+  return state.orders.filter((line) => state.adminSelectedLineIds.has(line.id) && isAdminCloseoutSelectable(line));
+}
+
+function pruneAdminSelection() {
+  const validIds = new Set(state.orders.filter(isAdminCloseoutSelectable).map((line) => line.id));
+  [...state.adminSelectedLineIds].forEach((lineId) => {
+    if (!validIds.has(lineId)) state.adminSelectedLineIds.delete(lineId);
+  });
+}
+
+function renderAdminOrderActions() {
+  const panel = $("admin-order-actions-panel");
+  if (!panel || !isAdminUser()) return;
+
+  pruneAdminSelection();
+  const count = state.adminSelectedLineIds.size;
+  const countEl = $("admin-order-selected-count");
+  if (countEl) countEl.textContent = `${count} selected`;
+
+  $("admin-clear-order-selection")?.toggleAttribute("disabled", count === 0);
+  $("admin-mark-packed-no-stock")?.toggleAttribute("disabled", count === 0);
+  $("admin-mark-cancelled")?.toggleAttribute("disabled", count === 0);
+}
+
+function setAdminLineSelection(lineId, checked) {
+  if (checked) state.adminSelectedLineIds.add(lineId);
+  else state.adminSelectedLineIds.delete(lineId);
+  renderOrders();
+  renderAdminOrderActions();
+}
+
+function setAdminGroupSelection(group, checked) {
+  group.lines.filter(isAdminCloseoutSelectable).forEach((line) => {
+    if (checked) state.adminSelectedLineIds.add(line.id);
+    else state.adminSelectedLineIds.delete(line.id);
+  });
+  renderOrders();
+  renderAdminOrderActions();
+}
+
+function clearAdminOrderSelection() {
+  state.adminSelectedLineIds.clear();
+  renderOrders();
+  renderAdminOrderActions();
 }
 
 function renderBuyerBundlePanel() {
@@ -819,29 +883,68 @@ function renderOrders() {
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
         ${isAdminUser() ? `<span>${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
       </div>
+      ${isAdminUser() ? `
+        <div class="buyer-card-admin-row">
+          <label class="admin-group-select">
+            <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
+            Select pending lines
+          </label>
+        </div>
+      ` : ""}
       <div class="buyer-line-list"></div>
     `;
 
     const lineList = card.querySelector(".buyer-line-list");
+    const groupCheckbox = card.querySelector("[data-admin-group-select]");
+    if (groupCheckbox) {
+      const selectable = group.lines.filter(isAdminCloseoutSelectable);
+      const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
+      groupCheckbox.checked = selectable.length > 0 && selected.length === selectable.length;
+      groupCheckbox.indeterminate = selected.length > 0 && selected.length < selectable.length;
+      groupCheckbox.disabled = selectable.length === 0;
+      groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
+      groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
+    }
+
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
-      const nextLine = group.lines.find((line) => line.line_status !== "fulfilled" && !state.stagedFulfillments.has(line.id)) || group.lines[0];
+      if (event.target.closest("input")) return;
+      if (event.target.closest(".buyer-line-btn")) return;
+      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
       if (nextLine) selectOrderLine(nextLine.id);
     });
 
     group.lines.forEach((line) => {
       const order = line.order || {};
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `buyer-line-btn ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      const button = document.createElement(isAdminUser() ? "div" : "button");
+      if (button.tagName === "BUTTON") button.type = "button";
+      else {
+        button.setAttribute("role", "button");
+        button.tabIndex = 0;
+      }
+      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      const adminSelect = isAdminUser() ? `
+        <label class="admin-order-select" title="Select for admin closeout">
+          <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
+        </label>
+      ` : "";
       button.innerHTML = `
+        ${adminSelect}
         <span>
           <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
           <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
+      const lineCheckbox = button.querySelector("[data-admin-line-select]");
+      lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
+      lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
       button.addEventListener("click", () => selectOrderLine(line.id));
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        selectOrderLine(line.id);
+      });
       lineList.appendChild(button);
     });
 
@@ -1330,6 +1433,132 @@ function closeBundleReviewModal() {
   setTimeout(() => $("fulfill-order")?.focus(), 80);
 }
 
+function closeAdminOrderCloseoutModal() {
+  state.adminCloseoutAction = "";
+  closeModal("admin-order-closeout-modal");
+}
+
+function getAdminCloseoutActionCopy(action) {
+  if (action === "cancelled") {
+    return {
+      title: "Mark selected orders canceled",
+      subtitle: "These lines will be removed from the pending queue as canceled. No stock will be removed.",
+      notePlaceholder: "Example: Buyer canceled on eBay / order refunded.",
+      button: "Sign and Mark Canceled",
+    };
+  }
+
+  return {
+    title: "Confirm packed without stock removal",
+    subtitle: "Use this only when the order was shipped but the sold item was not represented in inventory.",
+    notePlaceholder: "Example: Item sold and shipped outside inventory records.",
+    button: "Sign and Confirm Packed",
+  };
+}
+
+function renderAdminCloseoutList(lines) {
+  const list = $("admin-order-closeout-list");
+  if (!list) return;
+  list.replaceChildren();
+
+  lines.forEach((line) => {
+    const order = line.order || {};
+    const card = document.createElement("article");
+    card.className = "bundle-review-item";
+    card.innerHTML = `
+      <div class="bundle-review-thumb"><span>eBay</span></div>
+      <div class="bundle-review-copy">
+        <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+        <span>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
+        <small>Qty ${Number(getRemainingLineQuantity(line) || line.quantity || 1).toLocaleString()} - ${escapeHtml(line.line_status || "pending")}</small>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function openAdminOrderCloseoutModal(action) {
+  if (!isAdminUser()) return;
+  const lines = getSelectedAdminLines();
+  if (!lines.length) {
+    setImportStatus("Select at least one pending order line first.", "error");
+    return;
+  }
+
+  state.adminCloseoutAction = action;
+  const copy = getAdminCloseoutActionCopy(action);
+  $("admin-order-closeout-title").textContent = copy.title;
+  $("admin-order-closeout-subtitle").textContent = `${copy.subtitle} ${lines.length} line(s) selected.`;
+  $("admin-order-closeout-note").value = "";
+  $("admin-order-closeout-note").placeholder = copy.notePlaceholder;
+  $("admin-order-closeout-password").value = "";
+  $("admin-order-closeout-error").textContent = "";
+  $("confirm-admin-order-closeout").textContent = copy.button;
+  renderAdminCloseoutList(lines);
+  openModal("admin-order-closeout-modal");
+  setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
+}
+
+async function verifyAdminPassword(password) {
+  if (!state.user?.email || !password) return false;
+  const { error } = await supabase.auth.signInWithPassword({
+    email: state.user.email,
+    password,
+  });
+  return !error;
+}
+
+async function confirmAdminOrderCloseout() {
+  if (!isAdminUser() || state.busy) return;
+  const lines = getSelectedAdminLines();
+  const note = String($("admin-order-closeout-note")?.value || "").trim();
+  const password = String($("admin-order-closeout-password")?.value || "").trim();
+  const errorEl = $("admin-order-closeout-error");
+
+  if (!lines.length) {
+    if (errorEl) errorEl.textContent = "Select at least one pending order line.";
+    return;
+  }
+  if (!note) {
+    if (errorEl) errorEl.textContent = "A note is required.";
+    $("admin-order-closeout-note")?.focus();
+    return;
+  }
+  if (!password) {
+    if (errorEl) errorEl.textContent = "Password is required.";
+    $("admin-order-closeout-password")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    if (errorEl) errorEl.textContent = "";
+    $("confirm-admin-order-closeout").disabled = true;
+
+    const valid = await verifyAdminPassword(password);
+    if (!valid) throw new Error("Incorrect password. Please try again.");
+
+    const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
+      _order_line_ids: lines.map((line) => line.id),
+      _action: state.adminCloseoutAction,
+      _notes: note,
+      _signed_by_email: state.user.email,
+    });
+    if (error) throw error;
+
+    closeAdminOrderCloseoutModal();
+    clearAdminOrderSelection();
+    setImportStatus(`Closed ${data?.[0]?.updated_lines || lines.length} order line(s).`, "success");
+    await loadOrders();
+  } catch (error) {
+    console.error("Admin order closeout failed:", error);
+    if (errorEl) errorEl.textContent = error.message || "Could not close selected orders.";
+  } finally {
+    state.busy = false;
+    $("confirm-admin-order-closeout").disabled = false;
+  }
+}
+
 async function renderBundleReviewList(staged) {
   const list = $("bundle-review-list");
   if (!list) return;
@@ -1463,6 +1692,12 @@ function setupListeners() {
   $("order-search")?.addEventListener("input", applyOrderFilters);
   $("order-status-filter")?.addEventListener("change", loadOrders);
   $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
+  $("admin-clear-order-selection")?.addEventListener("click", clearAdminOrderSelection);
+  $("admin-mark-packed-no-stock")?.addEventListener("click", () => openAdminOrderCloseoutModal("fulfilled_no_inventory"));
+  $("admin-mark-cancelled")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled"));
+  $("close-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
+  $("cancel-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
+  $("confirm-admin-order-closeout")?.addEventListener("click", confirmAdminOrderCloseout);
   $("find-item")?.addEventListener("click", () => {
     clearItemSearchTimer();
     searchInventoryItems();
@@ -1522,7 +1757,29 @@ function setupListeners() {
     if (event.target.id === "bundle-review-modal") closeBundleReviewModal();
   });
 
+  $("admin-order-closeout-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();
+  });
+
+  $("admin-order-closeout-password")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmAdminOrderCloseout();
+    }
+  });
+
   document.addEventListener("keydown", (event) => {
+    if (!$("admin-order-closeout-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        confirmAdminOrderCloseout();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeAdminOrderCloseoutModal();
+      }
+      return;
+    }
+
     if (!$("item-confirm-modal")?.classList.contains("hidden")) {
       if (event.key === "Enter") {
         event.preventDefault();

@@ -161,6 +161,20 @@
         <p id="import-status" class="import-status"></p>
       </section>
 
+      <section id="admin-order-actions-panel" class="admin-order-actions hidden" aria-label="Admin order closeout actions">
+        <div>
+          <span class="eyebrow">Admin Closeout</span>
+          <h2>Close Orders Without Stock Removal</h2>
+          <p>Select one or more pending order lines, then mark them shipped without inventory removal or canceled with a signed note.</p>
+        </div>
+        <div class="admin-order-actions-controls">
+          <span id="admin-order-selected-count" class="count-pill">0 selected</span>
+          <button id="admin-clear-order-selection" type="button" class="secondary-btn">Clear</button>
+          <button id="admin-mark-packed-no-stock" type="button" class="secondary-btn">Confirm Packed</button>
+          <button id="admin-mark-cancelled" type="button" class="secondary-btn danger-btn">Mark Canceled</button>
+        </div>
+      </section>
+
       <section class="workspace-grid">
         <aside class="orders-panel">
           <div class="panel-head">
@@ -324,6 +338,29 @@
       <div class="modal-actions">
         <button id="cancel-bundle-review" type="button" class="secondary-btn">Keep Editing</button>
         <button id="confirm-bundle-review" type="button" class="primary-btn">Confirm Packed Bundle</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="admin-order-closeout-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="admin-order-closeout-title">
+    <div class="packing-modal-card bundle-review-card">
+      <button id="close-admin-order-closeout" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Admin Signature</span>
+      <h2 id="admin-order-closeout-title">Close selected orders</h2>
+      <p id="admin-order-closeout-subtitle">A note and password are required.</p>
+      <div id="admin-order-closeout-list" class="bundle-review-list"></div>
+      <label class="modal-field">
+        Note
+        <textarea id="admin-order-closeout-note" rows="3" placeholder="Explain why this order is being closed without normal inventory removal"></textarea>
+      </label>
+      <label class="modal-field">
+        Admin Password
+        <input id="admin-order-closeout-password" type="password" autocomplete="current-password" placeholder="Sign this order closeout" />
+      </label>
+      <p id="admin-order-closeout-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-admin-order-closeout" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-admin-order-closeout" type="button" class="primary-btn">Sign and Close</button>
       </div>
     </div>
   </div>
