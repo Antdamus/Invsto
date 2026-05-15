@@ -1,0 +1,463 @@
+.storage-transfer-top-btn {
+  border-color: rgba(15, 23, 42, .08) !important;
+  background: linear-gradient(135deg, #111827, #2f3542) !important;
+  color: #fff !important;
+  font-weight: 800;
+}
+
+.storage-transfer-content,
+.storage-transfer-confirm-content {
+  width: min(1120px, calc(100vw - 28px));
+  max-height: min(92vh, 920px);
+  overflow: auto;
+  padding: 26px;
+  border-radius: 28px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(214, 178, 94, .18), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(246,247,250,.98));
+  box-shadow: 0 28px 80px rgba(15, 23, 42, .32);
+  color: #111827;
+}
+
+.storage-transfer-confirm-content {
+  width: min(620px, calc(100vw - 28px));
+}
+
+.storage-transfer-header {
+  padding-right: 42px;
+  margin-bottom: 18px;
+}
+
+.storage-transfer-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: #9a6d1f;
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.storage-transfer-header h2,
+.storage-transfer-confirm-content h3 {
+  margin: 0 0 6px;
+  color: #111827;
+  font-size: clamp(1.8rem, 3vw, 2.65rem);
+  line-height: 1.02;
+}
+
+.storage-transfer-header p {
+  margin: 0;
+  color: #667085;
+  line-height: 1.5;
+}
+
+.storage-transfer-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 6px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, .05);
+}
+
+.storage-transfer-mode-toggle button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #475467;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.storage-transfer-mode-toggle button.is-active {
+  background: linear-gradient(135deg, #111827, #2f3542);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .14);
+}
+
+.storage-transfer-flow.hidden {
+  display: none;
+}
+
+.storage-transfer-scans,
+.storage-transfer-body {
+  display: grid;
+  gap: 16px;
+}
+
+.storage-transfer-scans {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.storage-transfer-scans.is-return {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.storage-transfer-body {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, .75fr);
+  align-items: start;
+}
+
+.storage-transfer-panel {
+  min-width: 0;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  background: rgba(255,255,255,.7);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, .07);
+}
+
+.storage-transfer-panel label,
+.storage-transfer-confirm-content label {
+  display: block;
+  margin-bottom: 8px;
+  color: #344054;
+  font-size: .82rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.storage-transfer-scan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.storage-transfer-scan-row input,
+#storage-transfer-quantity,
+#storage-transfer-notes,
+#return-transfer-quantity,
+#return-transfer-notes,
+#storage-transfer-password {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(17, 24, 39, .12);
+  border-radius: 15px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  padding: 11px 13px;
+  box-sizing: border-box;
+}
+
+.storage-transfer-scan-row input:focus,
+#storage-transfer-quantity:focus,
+#storage-transfer-notes:focus,
+#return-transfer-quantity:focus,
+#return-transfer-notes:focus,
+#storage-transfer-password:focus {
+  outline: none;
+  border-color: rgba(214, 178, 94, .55);
+  box-shadow: 0 0 0 4px rgba(214, 178, 94, .13);
+}
+
+#storage-transfer-notes,
+#return-transfer-notes {
+  resize: vertical;
+  min-height: 90px;
+}
+
+.storage-transfer-summary-card,
+.storage-transfer-selected-card {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  background: linear-gradient(135deg, rgba(249,250,251,.96), rgba(255,255,255,.78));
+}
+
+.storage-transfer-summary-card.is-empty,
+.storage-transfer-selected-card.is-empty,
+.storage-transfer-empty {
+  color: #667085;
+  border-style: dashed;
+}
+
+.storage-transfer-summary-card.has-error {
+  border-color: rgba(220, 38, 38, .28);
+  background: #fff7f7;
+}
+
+.storage-transfer-summary-card span,
+.storage-transfer-selected-card span,
+.storage-transfer-bag-head span,
+.storage-transfer-confirm-summary span {
+  display: block;
+  color: #9a6d1f;
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.storage-transfer-summary-card strong,
+.storage-transfer-selected-card strong,
+.storage-transfer-bag-head strong,
+.storage-transfer-confirm-summary strong {
+  display: block;
+  margin-top: 4px;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.storage-transfer-summary-card small,
+.storage-transfer-selected-card small,
+.storage-transfer-bag-head small,
+.storage-transfer-confirm-summary small {
+  display: block;
+  margin-top: 4px;
+  color: #667085;
+  line-height: 1.45;
+}
+
+.storage-transfer-alert {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(220, 38, 38, .08);
+  color: #991b1b;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.storage-transfer-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.storage-transfer-section-head span {
+  color: #111827;
+  font-weight: 900;
+  font-size: 1.05rem;
+}
+
+.storage-transfer-section-head small {
+  color: #667085;
+  text-align: right;
+  line-height: 1.35;
+}
+
+.storage-transfer-bags {
+  display: grid;
+  gap: 12px;
+}
+
+.storage-transfer-bag-card {
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.96), rgba(249,250,251,.88));
+}
+
+.storage-transfer-bag-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(17, 24, 39, .08);
+}
+
+.storage-transfer-bag-head > div {
+  min-width: 0;
+}
+
+.storage-transfer-bag-head b {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #344054;
+  font-size: .8rem;
+}
+
+.storage-transfer-item-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.storage-transfer-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  border-radius: 16px;
+  background: #fff;
+  color: #111827;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.storage-transfer-item-row:hover,
+.storage-transfer-item-row:focus-visible,
+.storage-transfer-item-row.is-selected {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: rgba(214, 178, 94, .55);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, .08);
+}
+
+.storage-transfer-item-row span {
+  min-width: 0;
+}
+
+.storage-transfer-item-row strong,
+.storage-transfer-item-row small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-transfer-item-row small {
+  color: #667085;
+  margin-top: 3px;
+}
+
+.storage-transfer-item-row b {
+  flex: 0 0 auto;
+  color: #0f172a;
+}
+
+.storage-transfer-empty {
+  padding: 16px;
+  border: 1px dashed rgba(17, 24, 39, .14);
+  border-radius: 18px;
+  background: rgba(249,250,251,.76);
+  line-height: 1.5;
+}
+
+.storage-transfer-empty.is-small {
+  padding: 12px;
+}
+
+.storage-transfer-review {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.storage-transfer-selected-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(17, 24, 39, .08);
+}
+
+.storage-transfer-selected-meta b,
+.storage-transfer-selected-meta span {
+  color: #344054;
+  font-size: .86rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.storage-transfer-hint,
+.storage-transfer-status {
+  color: #667085;
+  font-size: .9rem;
+  line-height: 1.45;
+}
+
+.storage-transfer-status[data-tone="error"],
+.storage-transfer-confirm-content .error-message {
+  color: #b42318;
+}
+
+.storage-transfer-status[data-tone="success"] {
+  color: #027a48;
+}
+
+.storage-transfer-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.storage-transfer-confirm-summary > div {
+  min-width: 0;
+  padding: 13px;
+  border-radius: 16px;
+  border: 1px solid rgba(17, 24, 39, .08);
+  background: #f9fafb;
+}
+
+.storage-transfer-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .storage-transfer-scans,
+  .storage-transfer-scans.is-return,
+  .storage-transfer-body,
+  .storage-transfer-confirm-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-transfer-review {
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .storage-transfer-content,
+  .storage-transfer-confirm-content {
+    width: calc(100vw - 16px);
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .storage-transfer-mode-toggle {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-transfer-scan-row,
+  .storage-transfer-bag-head,
+  .storage-transfer-section-head,
+  .storage-transfer-item-row,
+  .storage-transfer-selected-meta {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .storage-transfer-section-head small {
+    text-align: left;
+  }
+
+  .storage-transfer-item-row strong,
+  .storage-transfer-item-row small {
+    white-space: normal;
+  }
+
+  .storage-transfer-confirm-actions .stock-secondary-btn,
+  .storage-transfer-confirm-actions .stock-primary-btn {
+    width: 100%;
+  }
+}

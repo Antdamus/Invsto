@@ -6578,6 +6578,10 @@ populateDropdowns({
       transferModule.setupListeners();
 
     //#endregion 
+
+    //#region event listener for storage-to-tray replenishment
+      window.storageTransferModule?.setup();
+    //#endregion
   //#endregion
 
   //step 6 ensure there is function to update the toolbar

@@ -118,6 +118,11 @@ const state = {
     active: "",
     sort: "recent",
   },
+  browser: {
+    storeId: "",
+    mode: "",
+    parentId: "",
+  },
   locationPhotoUrls: new Map(),
   itemPhotoUrls: new Map(),
   dymoUrls: new Map(),
@@ -134,6 +139,8 @@ const DEFAULT_LOCATION_TYPES = [
   "Tray",
   "Bin",
 ];
+
+const UNASSIGNED_STORE_BROWSER_ID = "__unassigned_store__";
 
 function escapeHtml(value) {
   return String(value || "")
@@ -252,6 +259,165 @@ function getLocationPathLabel(location) {
     return `${store} > ${parent} > ${location.location_name || "Unnamed container"}`;
   }
   return `${store} > ${location.location_name || "Unnamed location"}`;
+}
+
+function getLocationBrowserStoreId(location) {
+  if (!location) return "";
+  if (location.is_tray) {
+    return asTrimmedString(location.tray_current_store_id || location.store_id);
+  }
+  return asTrimmedString(location.store_id);
+}
+
+function toBrowserStoreKey(storeId) {
+  return asTrimmedString(storeId) || UNASSIGNED_STORE_BROWSER_ID;
+}
+
+function fromBrowserStoreKey(storeKey) {
+  return storeKey === UNASSIGNED_STORE_BROWSER_ID ? "" : asTrimmedString(storeKey);
+}
+
+function getLocationBrowserStoreName(storeId) {
+  const resolvedStoreId = fromBrowserStoreKey(storeId);
+  return resolvedStoreId ? (getStoreNameById(resolvedStoreId) || "Unknown Store") : "Unassigned";
+}
+
+function isTopLevelStorageLocation(location) {
+  return !location?.is_tray && !isContainerLocation(location);
+}
+
+function locationMatchesSearch(location, searchTerm = state.filters.search.toLowerCase()) {
+  if (!searchTerm) return true;
+
+  return [
+    location.location_name,
+    location.location_code,
+    location.notes,
+    location.type,
+    location.store_name,
+    getTrayCurrentStoreLabel(location),
+    location.parent_location_name,
+    location.storage_path,
+    getLocationRoleLabel(location),
+  ].some((value) => asTrimmedString(value).toLowerCase().includes(searchTerm));
+}
+
+function locationMatchesTypeFilter(location) {
+  const selectedType = asTrimmedString(state.filters.type).toLowerCase();
+  if (!selectedType) return true;
+
+  return asTrimmedString(location.type).toLowerCase() === selectedType
+    || getLocationRoleLabel(location).toLowerCase() === selectedType;
+}
+
+function locationMatchesActiveFilter(location) {
+  const isActive = location.active !== false;
+  return !state.filters.active
+    || (state.filters.active === "active" && isActive)
+    || (state.filters.active === "inactive" && !isActive);
+}
+
+function locationMatchesBrowserFilters(location, { ignoreStore = false } = {}) {
+  const matchesStore = ignoreStore
+    || !state.filters.store
+    || getLocationBrowserStoreId(location) === state.filters.store;
+
+  return matchesStore
+    && locationMatchesSearch(location)
+    && locationMatchesTypeFilter(location)
+    && locationMatchesActiveFilter(location);
+}
+
+function sortLocationsForBrowser(locations) {
+  return [...locations].sort((a, b) => {
+    if (state.filters.sort === "name") {
+      return asTrimmedString(a.location_name).localeCompare(asTrimmedString(b.location_name));
+    }
+    if (state.filters.sort === "quantity") {
+      return Number(b.totalQuantity || 0) - Number(a.totalQuantity || 0);
+    }
+    if (state.filters.sort === "items") {
+      return Number(b.distinctItemTypes || 0) - Number(a.distinctItemTypes || 0);
+    }
+    return compareRecent(a, b);
+  });
+}
+
+function getBrowserLocationsForStore(storeId) {
+  const resolvedStoreId = fromBrowserStoreKey(storeId);
+  return sortLocationsForBrowser(state.locations.filter((location) => {
+    return getLocationBrowserStoreId(location) === resolvedStoreId
+      && locationMatchesBrowserFilters(location, { ignoreStore: true });
+  }));
+}
+
+function summarizeLocationGroup(locations) {
+  return {
+    total: locations.length,
+    trays: locations.filter((location) => location.is_tray).length,
+    topLocations: locations.filter((location) => isTopLevelStorageLocation(location)).length,
+    containers: locations.filter((location) => isContainerLocation(location)).length,
+    itemTypes: locations.reduce((sum, location) => sum + Number(location.distinctItemTypes || 0), 0),
+    units: locations.reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0),
+  };
+}
+
+function getLocationBrowserStoreSummaries() {
+  const searchTerm = state.filters.search.toLowerCase();
+  const hasLocationFilters = Boolean(state.filters.type || state.filters.active);
+  const storeNames = new Map();
+
+  state.stores.forEach((store) => {
+    storeNames.set(store.id, store.name || "Unknown Store");
+  });
+
+  state.locations.forEach((location) => {
+    const storeId = toBrowserStoreKey(getLocationBrowserStoreId(location));
+    if (!storeNames.has(storeId)) {
+      storeNames.set(storeId, getLocationBrowserStoreName(storeId));
+    }
+  });
+
+  return [...storeNames.entries()]
+    .filter(([storeId, storeName]) => {
+      if (state.filters.store && storeId !== state.filters.store) return false;
+      const locations = getBrowserLocationsForStore(storeId);
+      const storeMatchesSearch = searchTerm && asTrimmedString(storeName).toLowerCase().includes(searchTerm);
+      return locations.length || storeMatchesSearch || (!searchTerm && !hasLocationFilters);
+    })
+    .map(([storeId, storeName]) => {
+      const locations = getBrowserLocationsForStore(storeId);
+      return {
+        storeId,
+        storeName,
+        locations,
+        summary: summarizeLocationGroup(locations),
+      };
+    })
+    .sort((a, b) => a.storeName.localeCompare(b.storeName));
+}
+
+function getBrowserBreadcrumbMarkup(parts) {
+  return `
+    <div class="locations-browser-breadcrumb">
+      ${parts.map((part, index) => {
+        const isLast = index === parts.length - 1;
+        if (!part.action || isLast) {
+          return `<span class="${isLast ? "is-current" : ""}">${escapeHtml(part.label)}</span>`;
+        }
+        return `<button type="button" data-browser-back="${escapeHtml(part.action)}">${escapeHtml(part.label)}</button>`;
+      }).join('<span class="locations-browser-separator">/</span>')}
+    </div>
+  `;
+}
+
+function getBrowserStatMarkup(label, value) {
+  return `
+    <div class="locations-browser-stat">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
 }
 
 function getParentLocationCandidates(currentLocationId = "") {
@@ -1127,44 +1293,7 @@ function populateTypeFilter() {
 }
 
 function getFilteredLocations() {
-  const searchTerm = state.filters.search.toLowerCase();
-
-  const filtered = state.locations.filter((location) => {
-    const matchesSearch = !searchTerm || [
-      location.location_name,
-      location.location_code,
-      location.notes,
-      location.type,
-      location.store_name,
-      location.parent_location_name,
-      location.storage_path,
-      getLocationRoleLabel(location),
-    ].some((value) => asTrimmedString(value).toLowerCase().includes(searchTerm));
-
-    const matchesStore = !state.filters.store || asTrimmedString(location.store_id) === state.filters.store;
-    const matchesType = !state.filters.type || asTrimmedString(location.type) === state.filters.type;
-    const isActive = location.active !== false;
-    const matchesActive = !state.filters.active
-      || (state.filters.active === "active" && isActive)
-      || (state.filters.active === "inactive" && !isActive);
-
-    return matchesSearch && matchesStore && matchesType && matchesActive;
-  });
-
-  filtered.sort((a, b) => {
-    if (state.filters.sort === "name") {
-      return asTrimmedString(a.location_name).localeCompare(asTrimmedString(b.location_name));
-    }
-    if (state.filters.sort === "quantity") {
-      return Number(b.totalQuantity || 0) - Number(a.totalQuantity || 0);
-    }
-    if (state.filters.sort === "items") {
-      return Number(b.distinctItemTypes || 0) - Number(a.distinctItemTypes || 0);
-    }
-    return compareRecent(a, b);
-  });
-
-  return filtered;
+  return sortLocationsForBrowser(state.locations.filter((location) => locationMatchesBrowserFilters(location)));
 }
 
 function renderSummaryCards() {
@@ -1241,67 +1370,347 @@ function renderSummaryCards() {
   `;
 }
 
-function renderLocationsTable() {
-  const tbody = document.getElementById("locations-table-body");
-  if (!tbody) return;
+function renderBrowserHeader({ title, subtitle, breadcrumb, actions = "" }) {
+  return `
+    <div class="locations-browser-head">
+      <div>
+        ${breadcrumb || ""}
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(subtitle)}</p>
+      </div>
+      ${actions ? `<div class="locations-browser-actions">${actions}</div>` : ""}
+    </div>
+  `;
+}
 
-  const filtered = getFilteredLocations();
+function renderBrowserEmpty(message) {
+  return `<div class="locations-browser-empty">${escapeHtml(message)}</div>`;
+}
 
-  if (!filtered.length) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="9">
-          <div class="location-detail-empty">No locations match the current filters.</div>
-        </td>
-      </tr>
-    `;
-    setListStatus("No locations match the current filters.");
-    return;
+function renderLocationContentsPreview(location) {
+  const rows = Array.isArray(location.itemRows) ? location.itemRows.slice(0, 3) : [];
+  if (!rows.length) {
+    return `<div class="locations-browser-contents-empty">No stock recorded here yet.</div>`;
   }
 
-  setListStatus(`${filtered.length} location(s) shown.`);
+  return `
+    <div class="locations-browser-contents">
+      ${rows.map((item) => `
+        <div class="locations-browser-content-row">
+          <div>
+            <strong>${escapeHtml(item.title || "Untitled Item")}</strong>
+            <span>${escapeHtml(item.barcode || "No barcode")}</span>
+          </div>
+          <b>Qty ${Number(item.quantity || 0).toLocaleString()}</b>
+        </div>
+      `).join("")}
+      ${location.itemRows.length > rows.length ? `
+        <div class="locations-browser-more">${Number(location.itemRows.length - rows.length).toLocaleString()} more item type(s)</div>
+      ` : ""}
+    </div>
+  `;
+}
 
-  tbody.innerHTML = filtered.map((location) => `
-    <tr>
-      <td>
-        <button type="button" class="location-row-action" data-open-location="${escapeHtml(location.id)}">
-          <span class="location-row-title">${escapeHtml(location.location_name || "Unnamed Location")}</span>
-          <span class="location-row-sub">${escapeHtml(location.location_code || "No barcode")} - ${escapeHtml(location.storage_path || getLocationPathLabel(location))}</span>
-        </button>
-      </td>
-      <td>
-        <span class="locations-pill is-store">${escapeHtml(getStoreLabel(location))}</span>
-      </td>
-      <td>
-        <span class="locations-pill is-type">${escapeHtml(getLocationRoleLabel(location))}</span>
-        ${location.type ? `<span class="locations-pill is-asset">${escapeHtml(location.type)}</span>` : ""}
-      </td>
-      <td>
+function renderLocationBrowserCard(location, { showContainersAction = false, containerCount = 0 } = {}) {
+  const roleClass = location.is_tray
+    ? "is-tray"
+    : isContainerLocation(location)
+      ? "is-container"
+      : "is-location";
+  const estimatedWeight = location.is_tray ? calculateTrayEstimatedWeight(location) : null;
+
+  return `
+    <article class="locations-browser-card ${roleClass}">
+      <div class="locations-browser-card-top">
+        <div>
+          <div class="locations-browser-kicker">${escapeHtml(getLocationRoleLabel(location))}</div>
+          <h5>${escapeHtml(location.location_name || "Unnamed Location")}</h5>
+          <p>${escapeHtml(location.storage_path || getLocationPathLabel(location))}</p>
+        </div>
+        <span class="locations-browser-code">${escapeHtml(location.location_code || "No barcode")}</span>
+      </div>
+
+      <div class="locations-browser-pill-row">
         <span class="locations-pill ${location.active === false ? "is-inactive" : "is-active"}">
           ${location.active === false ? "Inactive" : "Active"}
         </span>
+        ${location.type ? `<span class="locations-pill is-type">${escapeHtml(location.type)}</span>` : ""}
         ${location.is_tray ? `
           <span class="locations-pill is-tray-status ${location.tray_status === "weight_mismatch" ? "is-tray-alert" : ""}">
             ${escapeHtml(getTrayStatusLabel(location))}
           </span>
         ` : ""}
-      </td>
-      <td>
-        <div class="locations-assets">
-          <span class="locations-pill is-asset">${location.location_code ? "Barcode Ready" : "No Barcode"}</span>
-          <span class="locations-pill is-asset">${location.dymo_label_url ? "DYMO Ready" : "No DYMO"}</span>
-        </div>
-      </td>
-      <td>${Number(location.distinctItemTypes || 0).toLocaleString()}</td>
-      <td>${Number(location.totalQuantity || 0).toLocaleString()}</td>
-      <td>${escapeHtml(formatDateTime(getLocationDisplayDate(location)))}</td>
-      <td>
+      </div>
+
+      <div class="locations-browser-stats">
+        ${getBrowserStatMarkup("Items", Number(location.distinctItemTypes || 0).toLocaleString())}
+        ${getBrowserStatMarkup("Qty", Number(location.totalQuantity || 0).toLocaleString())}
+        ${showContainersAction ? getBrowserStatMarkup("Containers", Number(containerCount || 0).toLocaleString()) : ""}
+        ${location.is_tray ? getBrowserStatMarkup("Est. Weight", formatWeight(estimatedWeight)) : ""}
+        ${getBrowserStatMarkup("Updated", formatDateTime(getLocationDisplayDate(location)))}
+      </div>
+
+      ${renderLocationContentsPreview(location)}
+
+      <div class="locations-browser-card-actions">
+        ${showContainersAction ? `
+          <button type="button" class="locations-action-button is-primary" data-browser-parent-id="${escapeHtml(location.id)}">
+            View Containers
+          </button>
+        ` : ""}
         <button type="button" class="locations-action-button" data-open-location="${escapeHtml(location.id)}">
           View / Edit
         </button>
-      </td>
-    </tr>
-  `).join("");
+      </div>
+    </article>
+  `;
+}
+
+function renderStoresBrowser(container, summaries) {
+  if (!summaries.length) {
+    setListStatus("No stores match the current filters.");
+    container.innerHTML = renderBrowserEmpty("No stores match the current filters.");
+    return;
+  }
+
+  setListStatus(`${summaries.length} store(s) shown. Choose a store to browse trays or storage locations.`);
+
+  container.innerHTML = `
+    ${renderBrowserHeader({
+      title: "Browse by Store",
+      subtitle: "Start with a store, then choose mobile trays or fixed storage locations.",
+      breadcrumb: getBrowserBreadcrumbMarkup([{ label: "Stores" }]),
+    })}
+    <div class="locations-browser-grid is-stores">
+      ${summaries.map(({ storeId, storeName, summary }) => `
+        <article class="locations-browser-card is-store">
+          <div class="locations-browser-card-top">
+            <div>
+              <div class="locations-browser-kicker">Store</div>
+              <h5>${escapeHtml(storeName)}</h5>
+              <p>${Number(summary.total || 0).toLocaleString()} storage destination(s)</p>
+            </div>
+          </div>
+          <div class="locations-browser-stats">
+            ${getBrowserStatMarkup("Locations", Number(summary.topLocations || 0).toLocaleString())}
+            ${getBrowserStatMarkup("Trays", Number(summary.trays || 0).toLocaleString())}
+            ${getBrowserStatMarkup("Containers", Number(summary.containers || 0).toLocaleString())}
+            ${getBrowserStatMarkup("Units", Number(summary.units || 0).toLocaleString())}
+          </div>
+          <div class="locations-browser-card-actions">
+            <button type="button" class="locations-action-button is-primary" data-browser-store-id="${escapeHtml(storeId)}">
+              Open Store
+            </button>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStoreChoiceBrowser(container, storeId) {
+  const storeName = getLocationBrowserStoreName(storeId);
+  const locations = getBrowserLocationsForStore(storeId);
+  const summary = summarizeLocationGroup(locations);
+
+  setListStatus(`${storeName}: choose trays or parent locations.`);
+
+  container.innerHTML = `
+    ${renderBrowserHeader({
+      title: storeName,
+      subtitle: "Choose whether you want working trays or the fixed storage hierarchy.",
+      breadcrumb: getBrowserBreadcrumbMarkup([
+        { label: "Stores", action: "stores" },
+        { label: storeName },
+      ]),
+      actions: `<button type="button" class="locations-action-button" data-browser-back="stores">All Stores</button>`,
+    })}
+    <div class="locations-browser-grid is-modes">
+      <article class="locations-browser-card is-mode">
+        <div class="locations-browser-card-top">
+          <div>
+            <div class="locations-browser-kicker">Working inventory</div>
+            <h5>Trays</h5>
+            <p>Mobile trays currently assigned to this store.</p>
+          </div>
+        </div>
+        <div class="locations-browser-stats">
+          ${getBrowserStatMarkup("Trays", Number(summary.trays || 0).toLocaleString())}
+          ${getBrowserStatMarkup("Units", Number(locations.filter((location) => location.is_tray).reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0)).toLocaleString())}
+        </div>
+        <div class="locations-browser-card-actions">
+          <button type="button" class="locations-action-button is-primary" data-browser-mode="trays">View Trays</button>
+        </div>
+      </article>
+
+      <article class="locations-browser-card is-mode">
+        <div class="locations-browser-card-top">
+          <div>
+            <div class="locations-browser-kicker">Storage hierarchy</div>
+            <h5>Locations</h5>
+            <p>Tables, vaults, safes, shelves, and their nested containers.</p>
+          </div>
+        </div>
+        <div class="locations-browser-stats">
+          ${getBrowserStatMarkup("Parent Locations", Number(summary.topLocations || 0).toLocaleString())}
+          ${getBrowserStatMarkup("Containers", Number(summary.containers || 0).toLocaleString())}
+          ${getBrowserStatMarkup("Units", Number(locations.filter((location) => !location.is_tray).reduce((sum, location) => sum + Number(location.totalQuantity || 0), 0)).toLocaleString())}
+        </div>
+        <div class="locations-browser-card-actions">
+          <button type="button" class="locations-action-button is-primary" data-browser-mode="locations">View Locations</button>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderTrayBrowser(container, storeId) {
+  const storeName = getLocationBrowserStoreName(storeId);
+  const trays = getBrowserLocationsForStore(storeId).filter((location) => location.is_tray);
+
+  setListStatus(`${trays.length} tray(s) shown for ${storeName}.`);
+
+  container.innerHTML = `
+    ${renderBrowserHeader({
+      title: `${storeName} Trays`,
+      subtitle: "Mobile trays currently checked in or assigned to this store.",
+      breadcrumb: getBrowserBreadcrumbMarkup([
+        { label: "Stores", action: "stores" },
+        { label: storeName, action: "store" },
+        { label: "Trays" },
+      ]),
+      actions: `<button type="button" class="locations-action-button" data-browser-back="store">Back</button>`,
+    })}
+    ${trays.length ? `
+      <div class="locations-browser-grid is-locations">
+        ${trays.map((location) => renderLocationBrowserCard(location)).join("")}
+      </div>
+    ` : renderBrowserEmpty("No trays match the current filters in this store.")}
+  `;
+}
+
+function renderParentLocationsBrowser(container, storeId) {
+  const storeName = getLocationBrowserStoreName(storeId);
+  const resolvedStoreId = fromBrowserStoreKey(storeId);
+  const storeLocations = getBrowserLocationsForStore(storeId);
+  const allContainers = storeLocations.filter((location) => isContainerLocation(location));
+  const parents = sortLocationsForBrowser(state.locations.filter((location) => {
+    if (getLocationBrowserStoreId(location) !== resolvedStoreId || !isTopLevelStorageLocation(location)) return false;
+    const matchingContainers = allContainers.filter((containerLocation) => {
+      return String(containerLocation.parent_location_id || "") === String(location.id);
+    });
+    return locationMatchesBrowserFilters(location, { ignoreStore: true }) || matchingContainers.length;
+  }));
+
+  setListStatus(`${parents.length} parent location(s) shown for ${storeName}.`);
+
+  container.innerHTML = `
+    ${renderBrowserHeader({
+      title: `${storeName} Locations`,
+      subtitle: "Open a parent location to see the bags and containers inside it.",
+      breadcrumb: getBrowserBreadcrumbMarkup([
+        { label: "Stores", action: "stores" },
+        { label: storeName, action: "store" },
+        { label: "Locations" },
+      ]),
+      actions: `<button type="button" class="locations-action-button" data-browser-back="store">Back</button>`,
+    })}
+    ${parents.length ? `
+      <div class="locations-browser-grid is-locations">
+        ${parents.map((location) => {
+          const containerCount = allContainers.filter((containerLocation) => String(containerLocation.parent_location_id || "") === String(location.id)).length;
+          return renderLocationBrowserCard(location, { showContainersAction: true, containerCount });
+        }).join("")}
+      </div>
+    ` : renderBrowserEmpty("No parent locations match the current filters in this store.")}
+  `;
+}
+
+function renderContainersBrowser(container, storeId, parentId) {
+  const storeName = getLocationBrowserStoreName(storeId);
+  const parent = state.locations.find((location) => String(location.id) === String(parentId));
+
+  if (!parent) {
+    state.browser.parentId = "";
+    renderParentLocationsBrowser(container, storeId);
+    return;
+  }
+
+  const containers = getBrowserLocationsForStore(storeId).filter((location) => {
+    return isContainerLocation(location) && String(location.parent_location_id || "") === String(parentId);
+  });
+
+  setListStatus(`${containers.length} container(s) shown inside ${parent.location_name || "this location"}.`);
+
+  container.innerHTML = `
+    ${renderBrowserHeader({
+      title: parent.location_name || "Parent Location",
+      subtitle: "Containers nested inside this storage location.",
+      breadcrumb: getBrowserBreadcrumbMarkup([
+        { label: "Stores", action: "stores" },
+        { label: storeName, action: "store" },
+        { label: "Locations", action: "locations" },
+        { label: parent.location_name || "Parent Location" },
+      ]),
+      actions: `
+        <button type="button" class="locations-action-button" data-open-location="${escapeHtml(parent.id)}">View Parent</button>
+        <button type="button" class="locations-action-button" data-browser-back="locations">Back</button>
+      `,
+    })}
+    <article class="locations-browser-parent-summary">
+      ${renderLocationBrowserCard(parent)}
+    </article>
+    ${containers.length ? `
+      <div class="locations-browser-grid is-locations">
+        ${containers.map((location) => renderLocationBrowserCard(location)).join("")}
+      </div>
+    ` : renderBrowserEmpty("No containers match the current filters inside this location.")}
+  `;
+}
+
+function renderLocationsTable() {
+  const browser = document.getElementById("locations-browser");
+  if (!browser) return;
+
+  if (state.filters.store && state.browser.storeId !== state.filters.store) {
+    state.browser.storeId = state.filters.store;
+    state.browser.mode = "";
+    state.browser.parentId = "";
+  }
+
+  const storeSummaries = getLocationBrowserStoreSummaries();
+  const resolvedSelectedStoreId = fromBrowserStoreKey(state.browser.storeId);
+  const selectedStoreExists = !state.browser.storeId
+    || storeSummaries.some((summary) => summary.storeId === state.browser.storeId)
+    || state.locations.some((location) => getLocationBrowserStoreId(location) === resolvedSelectedStoreId);
+
+  if (!selectedStoreExists) {
+    state.browser.storeId = "";
+    state.browser.mode = "";
+    state.browser.parentId = "";
+  }
+
+  if (!state.browser.storeId) {
+    renderStoresBrowser(browser, storeSummaries);
+    return;
+  }
+
+  if (!state.browser.mode) {
+    renderStoreChoiceBrowser(browser, state.browser.storeId);
+    return;
+  }
+
+  if (state.browser.mode === "trays") {
+    renderTrayBrowser(browser, state.browser.storeId);
+    return;
+  }
+
+  if (state.browser.parentId) {
+    renderContainersBrowser(browser, state.browser.storeId, state.browser.parentId);
+    return;
+  }
+
+  renderParentLocationsBrowser(browser, state.browser.storeId);
 }
 
 function closeLocationDetail() {
@@ -1894,6 +2303,9 @@ function bindEvents() {
 
   document.getElementById("locations-store-filter")?.addEventListener("change", (event) => {
     state.filters.store = event.target.value;
+    state.browser.storeId = event.target.value || "";
+    state.browser.mode = "";
+    state.browser.parentId = "";
     renderLocationsTable();
   });
 
@@ -1986,7 +2398,55 @@ function bindEvents() {
     await saveCreatedLocation();
   });
 
-  document.getElementById("locations-table-body")?.addEventListener("click", async (event) => {
+  document.getElementById("locations-browser")?.addEventListener("click", async (event) => {
+    const backTrigger = event.target.closest("[data-browser-back]");
+    if (backTrigger) {
+      const target = backTrigger.getAttribute("data-browser-back");
+      if (target === "stores") {
+        state.browser.storeId = "";
+        state.browser.mode = "";
+        state.browser.parentId = "";
+        if (state.filters.store) {
+          state.filters.store = "";
+          const storeFilter = document.getElementById("locations-store-filter");
+          if (storeFilter) storeFilter.value = "";
+        }
+      } else if (target === "store") {
+        state.browser.mode = "";
+        state.browser.parentId = "";
+      } else if (target === "locations") {
+        state.browser.mode = "locations";
+        state.browser.parentId = "";
+      }
+      renderLocationsTable();
+      return;
+    }
+
+    const storeTrigger = event.target.closest("[data-browser-store-id]");
+    if (storeTrigger) {
+      state.browser.storeId = storeTrigger.getAttribute("data-browser-store-id") || "";
+      state.browser.mode = "";
+      state.browser.parentId = "";
+      renderLocationsTable();
+      return;
+    }
+
+    const modeTrigger = event.target.closest("[data-browser-mode]");
+    if (modeTrigger) {
+      state.browser.mode = modeTrigger.getAttribute("data-browser-mode") || "";
+      state.browser.parentId = "";
+      renderLocationsTable();
+      return;
+    }
+
+    const parentTrigger = event.target.closest("[data-browser-parent-id]");
+    if (parentTrigger) {
+      state.browser.mode = "locations";
+      state.browser.parentId = parentTrigger.getAttribute("data-browser-parent-id") || "";
+      renderLocationsTable();
+      return;
+    }
+
     const trigger = event.target.closest("[data-open-location]");
     if (!trigger) return;
     await renderLocationDetail(trigger.getAttribute("data-open-location"));

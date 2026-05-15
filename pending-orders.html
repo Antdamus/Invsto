@@ -130,6 +130,20 @@
         <div><span>Selected Order</span><strong id="summary-selected">None</strong></div>
       </section>
 
+      <section class="checkout-store-panel" aria-label="Checkout store">
+        <div>
+          <span class="eyebrow">Packing Store</span>
+          <h2>Checkout Location</h2>
+          <p>Select where this checkout is happening. Only tray stock checked into this store will be available for packing.</p>
+        </div>
+        <label>
+          Store
+          <select id="checkout-store-select" aria-label="Checkout store">
+            <option value="">Select checkout store</option>
+          </select>
+        </label>
+      </section>
+
       <section id="order-import-panel" class="import-panel hidden" aria-label="Import eBay orders">
         <div>
           <span class="eyebrow">Admin Import</span>
@@ -227,12 +241,12 @@
               <div class="step-head">
                 <span>2</span>
                 <div>
-                  <h3>Choose Source Tray or Location</h3>
-                  <p>After item selection, scan the tray/location label or choose from current stock.</p>
+                  <h3>Confirm Source Tray</h3>
+                  <p>After item selection, the tray is auto-selected when it is the only valid tray in the checkout store.</p>
                 </div>
               </div>
               <div class="scan-row">
-                <input id="location-scan" type="search" placeholder="Scan tray or location barcode" autocomplete="off" />
+                <input id="location-scan" type="search" placeholder="Scan tray barcode if more than one source appears" autocomplete="off" />
                 <button id="find-location" type="button" class="secondary-btn">Find</button>
               </div>
               <div id="location-results" class="result-list"></div>

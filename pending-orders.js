@@ -3,6 +3,8 @@ const state = {
   employee: null,
   orders: [],
   filteredOrders: [],
+  stores: [],
+  checkoutStoreId: "",
   selectedLine: null,
   selectedItem: null,
   stockRows: [],
@@ -11,6 +13,7 @@ const state = {
   stagedFulfillments: new Map(),
   pendingItemCandidate: null,
   itemSearchTimer: null,
+  locationSearchTimer: null,
   quantityAutoTimer: null,
   busy: false,
 };
@@ -122,6 +125,43 @@ function getBuyerLabel(line) {
   return String(line?.order?.buyer_username || "").trim() || "No buyer username";
 }
 
+function getCheckoutStoreStorageKey() {
+  return `og-pending-orders-checkout-store:${state.user?.id || "anonymous"}`;
+}
+
+function readSavedCheckoutStoreId() {
+  try {
+    return localStorage.getItem(getCheckoutStoreStorageKey()) || "";
+  } catch (error) {
+    console.warn("Could not read saved checkout store:", error);
+    return "";
+  }
+}
+
+function saveCheckoutStoreId(storeId) {
+  try {
+    if (storeId) localStorage.setItem(getCheckoutStoreStorageKey(), storeId);
+    else localStorage.removeItem(getCheckoutStoreStorageKey());
+  } catch (error) {
+    console.warn("Could not save checkout store:", error);
+  }
+}
+
+function getCheckoutStore() {
+  return state.stores.find((store) => store.id === state.checkoutStoreId) || null;
+}
+
+function getCheckoutStoreName(storeId = state.checkoutStoreId) {
+  return state.stores.find((store) => store.id === storeId)?.name || "";
+}
+
+function requireCheckoutStore() {
+  if (state.checkoutStoreId) return true;
+  setStatus("Select the checkout store before scanning items.", "error");
+  $("checkout-store-select")?.focus();
+  return false;
+}
+
 async function loadCurrentWorker() {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData?.session) {
@@ -160,6 +200,92 @@ function setupImportVisibility() {
   document.querySelectorAll(".admin-money-field").forEach((field) => {
     field.classList.toggle("hidden", !isAdminUser());
   });
+}
+
+async function loadCheckoutStores() {
+  const select = $("checkout-store-select");
+  if (select) select.disabled = true;
+
+  const { data, error } = await supabase
+    .from("store_locations")
+    .select("id, name, active")
+    .eq("active", true)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("Failed to load checkout stores:", error);
+    state.stores = [];
+    setStatus("Could not load checkout stores.", "error");
+    if (select) select.disabled = false;
+    return;
+  }
+
+  state.stores = data || [];
+  const savedStoreId = readSavedCheckoutStoreId();
+  const savedStore = state.stores.find((store) => store.id === savedStoreId);
+  state.checkoutStoreId = savedStore?.id || (state.stores.length === 1 ? state.stores[0].id : "");
+  if (state.checkoutStoreId) saveCheckoutStoreId(state.checkoutStoreId);
+  renderCheckoutStoreSelect();
+}
+
+function renderCheckoutStoreSelect() {
+  const select = $("checkout-store-select");
+  if (!select) return;
+
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select checkout store";
+  select.appendChild(placeholder);
+
+  state.stores.forEach((store) => {
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name || "Unnamed store";
+    select.appendChild(option);
+  });
+
+  select.value = state.checkoutStoreId || "";
+  select.disabled = false;
+  updateCheckoutStoreGate();
+}
+
+function updateCheckoutStoreGate() {
+  const hasStore = Boolean(state.checkoutStoreId);
+  $("item-scan")?.toggleAttribute("disabled", !hasStore);
+  $("find-item")?.toggleAttribute("disabled", !hasStore);
+  $("location-scan")?.toggleAttribute("disabled", !hasStore);
+  $("find-location")?.toggleAttribute("disabled", !hasStore);
+  $("stage-current-line")?.toggleAttribute("disabled", !hasStore);
+  $("fulfill-order")?.toggleAttribute("disabled", !hasStore);
+}
+
+async function handleCheckoutStoreChange() {
+  const nextStoreId = $("checkout-store-select")?.value || "";
+  state.checkoutStoreId = nextStoreId;
+  saveCheckoutStoreId(nextStoreId);
+  clearQuantityAutoStage();
+  clearItemSearchTimer();
+  clearLocationSearchTimer();
+  state.selectedItem = null;
+  state.selectedStockRow = null;
+  state.stockRows = [];
+  if (state.stagedFulfillments.size) state.stagedFulfillments.clear();
+  renderBuyerBundlePanel();
+  renderSelectionSummary();
+  renderItemResults([]);
+  renderLocationResults([]);
+  if ($("item-scan")) $("item-scan").value = "";
+  if ($("location-scan")) $("location-scan").value = "";
+  updateCheckoutStoreGate();
+
+  if (!nextStoreId) {
+    setStatus("Select the checkout store before scanning items.", "error");
+    return;
+  }
+
+  setStatus(`Checkout store set to ${getCheckoutStoreName(nextStoreId)}.`, "info");
+  setTimeout(() => $("item-scan")?.focus(), 80);
 }
 
 function setupDashboardShell() {
@@ -727,6 +853,7 @@ function selectOrderLine(lineId) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line) return;
   clearItemSearchTimer();
+  clearLocationSearchTimer();
   clearQuantityAutoStage();
 
   const nextBuyerKey = getBuyerKey(line);
@@ -752,6 +879,12 @@ function selectOrderLine(lineId) {
   renderSummaryStrip();
 
   $("item-scan").value = "";
+  updateCheckoutStoreGate();
+  if (!state.checkoutStoreId) {
+    setStatus("Select the checkout store before scanning this order.", "error");
+    setTimeout(() => $("checkout-store-select")?.focus(), 80);
+    return;
+  }
   setTimeout(() => $("item-scan")?.focus(), 80);
 }
 
@@ -792,12 +925,13 @@ function renderSelectionSummary() {
 
   const item = state.selectedItem;
   const row = state.selectedStockRow;
+  const sourceLabel = row?.locationLabel || (state.checkoutStoreId ? `Choose tray in ${getCheckoutStoreName()}` : "Select checkout store");
   summary.innerHTML = `
     <strong>${escapeHtml(item.title || "Untitled inventory item")}</strong>
     <div class="selection-grid">
       <span><small>Barcode</small><b>${escapeHtml(item.barcode || "-")}</b></span>
       <span><small>Retail</small><b>${formatMoney(item.sale_price)}</b></span>
-      <span><small>Source</small><b>${escapeHtml(row?.locationLabel || "Choose tray/location")}</b></span>
+      <span><small>Source</small><b>${escapeHtml(sourceLabel)}</b></span>
       <span><small>Available</small><b>${row ? Number(row.quantity || 0).toLocaleString() : "-"}</b></span>
     </div>
   `;
@@ -888,6 +1022,8 @@ function sanitizeSearchTerm(term) {
 }
 
 async function searchInventoryItems() {
+  if (!requireCheckoutStore()) return;
+
   const term = sanitizeSearchTerm($("item-scan")?.value || "");
   if (!term) {
     setStatus("Scan a barcode or search by item name / description.", "error");
@@ -949,6 +1085,7 @@ async function searchInventoryItems() {
 }
 
 async function selectInventoryItem(item) {
+  if (!requireCheckoutStore()) return;
   state.selectedItem = item;
   state.selectedStockRow = null;
   renderItemResults([item]);
@@ -958,20 +1095,33 @@ async function selectInventoryItem(item) {
 
 function normalizeStockRow(row) {
   const loc = row.location || {};
-  const trayLabel = loc.is_tray
+  const isTray = loc.is_tray || loc.location_role === "tray";
+  const storeId = isTray ? (loc.tray_current_store_id || loc.store_id || "") : (loc.store_id || "");
+  const storeName = getCheckoutStoreName(storeId);
+  const trayLabel = isTray
     ? (loc.tray_status === "checked_out" ? "Checked out tray" : "Tray")
     : loc.parent_location_id ? "Container" : "Location";
   return {
     ...row,
+    isTray,
+    store_id: storeId,
+    tray_status: loc.tray_status || "",
     location_id: row.location_id || loc.id,
     location_name: loc.location_name || "",
     location_code: loc.location_code || "",
-    locationLabel: `${loc.location_name || "Unnamed location"}${loc.location_code ? ` (${loc.location_code})` : ""} - ${trayLabel}`,
+    locationLabel: `${loc.location_name || "Unnamed location"}${loc.location_code ? ` (${loc.location_code})` : ""} - ${trayLabel}${storeName ? ` - ${storeName}` : ""}`,
   };
 }
 
 async function loadStockRowsForItem(itemId) {
-  setStatus("Loading source trays, containers, and locations...");
+  if (!requireCheckoutStore()) {
+    state.stockRows = [];
+    renderLocationResults([], "Select a checkout store before loading source trays.");
+    return;
+  }
+
+  const storeName = getCheckoutStore()?.name || "the selected store";
+  setStatus(`Loading source trays in ${storeName}...`);
   const { data, error } = await supabase
     .from("item_stock_locations")
     .select("id,item_id,location_id,quantity,location:location_id(*)")
@@ -986,13 +1136,31 @@ async function loadStockRowsForItem(itemId) {
     return;
   }
 
-  state.stockRows = (data || []).map(normalizeStockRow);
-  renderLocationResults(state.stockRows, "This item has no available stock.");
-  setStatus(state.stockRows.length ? "Scan the source tray, container, or location for this item." : "No stock is available for this item.", state.stockRows.length ? "info" : "error");
+  state.stockRows = (data || [])
+    .map(normalizeStockRow)
+    .filter((row) => {
+      return row.isTray
+        && row.store_id === state.checkoutStoreId
+        && row.tray_status !== "checked_out";
+    });
+
+  renderLocationResults(state.stockRows, `This item is not available in any checked-in tray at ${storeName}.`);
+
+  if (!state.stockRows.length) {
+    setStatus(`No checked-in tray at ${storeName} currently holds this item.`, "error");
+    return;
+  }
+
+  if (state.stockRows.length === 1) {
+    selectStockRow(state.stockRows[0], { automatic: true });
+    return;
+  }
+
+  setStatus(`${state.stockRows.length} source trays in ${storeName}. Scan the tray label or choose one.`, "info");
   setTimeout(() => $("location-scan")?.focus(), 80);
 }
 
-function selectStockRow(row) {
+function selectStockRow(row, { automatic = false } = {}) {
   state.selectedStockRow = row;
   $("location-scan").value = row.location_code || row.location_name || "";
   const qtyInput = $("fulfill-quantity");
@@ -1002,7 +1170,9 @@ function selectStockRow(row) {
   }
   renderLocationResults(state.stockRows);
   renderSelectionSummary();
-  setStatus("Source selected. Quantity is ready; staging automatically in 2 seconds.");
+  setStatus(automatic
+    ? "Only one valid tray was found in this store. It was selected automatically; staging in 1 second unless quantity changes."
+    : "Source selected. Quantity is ready; staging automatically in 1 second.");
   setTimeout(() => {
     qtyInput?.focus();
     qtyInput?.select();
@@ -1022,13 +1192,20 @@ function scheduleQuantityAutoStage() {
   state.quantityAutoTimer = setTimeout(() => {
     state.quantityAutoTimer = null;
     stageCurrentLine({ autoAdvance: true, autoReview: true });
-  }, 2000);
+  }, 1000);
 }
 
 function clearItemSearchTimer() {
   if (state.itemSearchTimer) {
     clearTimeout(state.itemSearchTimer);
     state.itemSearchTimer = null;
+  }
+}
+
+function clearLocationSearchTimer() {
+  if (state.locationSearchTimer) {
+    clearTimeout(state.locationSearchTimer);
+    state.locationSearchTimer = null;
   }
 }
 
@@ -1045,10 +1222,29 @@ function scheduleItemSearch() {
   }, 1500);
 }
 
+function scheduleSourceLocationSearch() {
+  clearLocationSearchTimer();
+  const term = String($("location-scan")?.value || "").trim();
+  if (!term) return;
+
+  state.locationSearchTimer = setTimeout(() => {
+    state.locationSearchTimer = null;
+    const currentTerm = String($("location-scan")?.value || "").trim();
+    if (currentTerm) searchSourceLocation();
+  }, 1000);
+}
+
 function searchSourceLocation() {
+  clearLocationSearchTimer();
+  if (!requireCheckoutStore()) return;
+
   const term = String($("location-scan")?.value || "").trim().toLowerCase();
   if (!term) {
-    setStatus("Scan or type a tray/location barcode.", "error");
+    if (state.stockRows.length === 1) {
+      selectStockRow(state.stockRows[0], { automatic: true });
+      return;
+    }
+    setStatus("Scan or type a tray barcode.", "error");
     return;
   }
 
@@ -1062,8 +1258,8 @@ function searchSourceLocation() {
 
   if (matches.length === 1) selectStockRow(matches[0]);
   else {
-    renderLocationResults(matches, "That tray/location does not currently hold this item.");
-    setStatus(matches.length ? `${matches.length} source matches. Choose one.` : "No matching source for this item.", matches.length ? "info" : "error");
+    renderLocationResults(matches, "That tray does not currently hold this item in the selected store.");
+    setStatus(matches.length ? `${matches.length} source tray matches. Choose one.` : "No matching source tray for this item in the selected store.", matches.length ? "info" : "error");
   }
 }
 
@@ -1085,8 +1281,12 @@ function stageCurrentLine({ autoAdvance = false, autoReview = false } = {}) {
   const remainingLineQty = getRemainingLineQuantity(line);
 
   if (!line) return setStatus("Select an eBay order first.", "error");
+  if (!state.checkoutStoreId) return setStatus("Select the checkout store first.", "error");
   if (!item) return setStatus("Scan or select the inventory item first.", "error");
-  if (!row) return setStatus("Scan or select the source tray/location.", "error");
+  if (!row) return setStatus("Scan or select the source tray.", "error");
+  if (!row.isTray || row.store_id !== state.checkoutStoreId || row.tray_status === "checked_out") {
+    return setStatus("The selected source must be a checked-in tray in the checkout store.", "error");
+  }
   if (remainingLineQty <= 0) return setStatus("This eBay line is already fulfilled.", "error");
   if (qty > remainingLineQty) return setStatus(`Only ${remainingLineQty} unit(s) remain on that eBay line.`, "error");
   if (qty > Number(row.quantity || 0)) return setStatus(`Only ${row.quantity} available at that source.`, "error");
@@ -1193,7 +1393,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   try {
     const changedItemIds = [];
     for (const entry of staged) {
-      const { error } = await supabase.rpc("fulfill_ebay_order_line", {
+      const { error } = await supabase.rpc("fulfill_ebay_order_line_for_store", {
         _order_line_id: entry.line.id,
         _item_id: entry.item.id,
         _stock_location_row_id: entry.row.id,
@@ -1202,6 +1402,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
         _net_payout: entry.payout,
         _notes: notes || null,
         _signed_by_email: state.user.email,
+        _checkout_store_id: state.checkoutStoreId,
       });
 
       if (error) throw error;
@@ -1233,6 +1434,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
 
 function clearSelection() {
   clearItemSearchTimer();
+  clearLocationSearchTimer();
   clearQuantityAutoStage();
   state.selectedLine = null;
   state.selectedItem = null;
@@ -1260,6 +1462,7 @@ function setupListeners() {
   });
   $("order-search")?.addEventListener("input", applyOrderFilters);
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
   $("find-item")?.addEventListener("click", () => {
     clearItemSearchTimer();
     searchInventoryItems();
@@ -1291,6 +1494,7 @@ function setupListeners() {
       searchSourceLocation();
     }
   });
+  $("location-scan")?.addEventListener("input", scheduleSourceLocationSearch);
 
   $("fulfill-quantity")?.addEventListener("input", () => {
     if (state.selectedStockRow) scheduleQuantityAutoStage();
@@ -1349,6 +1553,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
+  await loadCheckoutStores();
   clearOrderSearch({ apply: false });
   await loadOrders();
   if (window.lucide) window.lucide.createIcons();

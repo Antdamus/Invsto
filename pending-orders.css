@@ -207,6 +207,7 @@ h1 {
 
 .summary-strip div,
 .import-panel,
+.checkout-store-panel,
 .orders-panel,
 .fulfillment-panel,
 .order-detail-card,
@@ -250,6 +251,33 @@ h1 {
   margin-bottom: 18px;
   padding: 18px;
   border-radius: 20px;
+}
+
+.checkout-store-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 20px;
+}
+
+.checkout-store-panel h2 {
+  margin-bottom: 4px;
+}
+
+.checkout-store-panel p {
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.checkout-store-panel label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 900;
 }
 
 .import-panel h2 {
@@ -978,7 +1006,8 @@ body.modal-open {
 
   .workspace-grid,
   .summary-strip,
-  .import-panel {
+  .import-panel,
+  .checkout-store-panel {
     grid-template-columns: 1fr;
   }
 
