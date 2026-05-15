@@ -10,6 +10,7 @@ const state = {
   activeBuyerKey: "",
   stagedFulfillments: new Map(),
   pendingItemCandidate: null,
+  itemSearchTimer: null,
   quantityAutoTimer: null,
   busy: false,
 };
@@ -725,6 +726,7 @@ function renderOrders() {
 function selectOrderLine(lineId) {
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line) return;
+  clearItemSearchTimer();
   clearQuantityAutoStage();
 
   const nextBuyerKey = getBuyerKey(line);
@@ -1021,6 +1023,26 @@ function scheduleQuantityAutoStage() {
   }, 2000);
 }
 
+function clearItemSearchTimer() {
+  if (state.itemSearchTimer) {
+    clearTimeout(state.itemSearchTimer);
+    state.itemSearchTimer = null;
+  }
+}
+
+function scheduleItemSearch() {
+  clearItemSearchTimer();
+  const term = sanitizeSearchTerm($("item-scan")?.value || "");
+  if (!term || !$("item-confirm-modal")?.classList.contains("hidden")) return;
+
+  state.itemSearchTimer = setTimeout(() => {
+    state.itemSearchTimer = null;
+    if (!$("item-confirm-modal")?.classList.contains("hidden")) return;
+    const currentTerm = sanitizeSearchTerm($("item-scan")?.value || "");
+    if (currentTerm) searchInventoryItems();
+  }, 1500);
+}
+
 function searchSourceLocation() {
   const term = String($("location-scan")?.value || "").trim().toLowerCase();
   if (!term) {
@@ -1208,6 +1230,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
 }
 
 function clearSelection() {
+  clearItemSearchTimer();
   clearQuantityAutoStage();
   state.selectedLine = null;
   state.selectedItem = null;
@@ -1235,7 +1258,10 @@ function setupListeners() {
   });
   $("order-search")?.addEventListener("input", applyOrderFilters);
   $("order-status-filter")?.addEventListener("change", loadOrders);
-  $("find-item")?.addEventListener("click", searchInventoryItems);
+  $("find-item")?.addEventListener("click", () => {
+    clearItemSearchTimer();
+    searchInventoryItems();
+  });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
@@ -1250,9 +1276,12 @@ function setupListeners() {
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
+      clearItemSearchTimer();
       searchInventoryItems();
     }
   });
+
+  $("item-scan")?.addEventListener("input", scheduleItemSearch);
 
   $("location-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
