@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Pending Orders</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="pending-orders.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="pending-shell">
+    <aside class="pending-sidebar">
+      <a class="pending-logo" href="worker-dashboard.html">OG</a>
+      <nav>
+        <a href="worker-dashboard.html">Dashboard</a>
+        <a href="stock.html">Stock</a>
+        <a href="locations.html">Trays</a>
+        <a href="pending-orders.html" class="active">Pending Orders</a>
+      </nav>
+    </aside>
+
+    <main class="pending-main">
+      <header class="pending-header">
+        <div>
+          <span class="eyebrow">Worker Fulfillment</span>
+          <h1>Pending eBay Orders</h1>
+          <p>Scan the actual item being shipped, choose the source tray or location, then sign the removal.</p>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="refresh-orders" class="secondary-btn">
+            <i data-lucide="refresh-cw"></i>
+            Refresh
+          </button>
+          <a href="worker-dashboard.html" class="secondary-btn">
+            <i data-lucide="arrow-left"></i>
+            Back
+          </a>
+        </div>
+      </header>
+
+      <section class="summary-strip" id="summary-strip">
+        <div><span>Pending Lines</span><strong id="summary-pending">0</strong></div>
+        <div><span>Ship Today</span><strong id="summary-ship-today">0</strong></div>
+        <div><span>Selected Order</span><strong id="summary-selected">None</strong></div>
+      </section>
+
+      <section class="workspace-grid">
+        <aside class="orders-panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Queue</span>
+              <h2>Orders to Pack</h2>
+            </div>
+            <span id="order-count-pill" class="count-pill">0</span>
+          </div>
+
+          <div class="filter-row">
+            <input id="order-search" type="search" placeholder="Search order, title, buyer, item number..." autocomplete="off" />
+            <select id="order-status-filter" aria-label="Order status">
+              <option value="pending">Pending</option>
+              <option value="all">All open</option>
+              <option value="fulfilled">Fulfilled</option>
+            </select>
+          </div>
+
+          <div id="orders-list" class="orders-list">
+            <div class="empty-state">Loading pending orders...</div>
+          </div>
+        </aside>
+
+        <section class="fulfillment-panel">
+          <div id="selected-order-empty" class="selected-empty">
+            <i data-lucide="package-search"></i>
+            <h2>Select an order</h2>
+            <p>Choose an eBay order line from the queue, then scan the actual inventory item being shipped.</p>
+          </div>
+
+          <div id="fulfillment-workflow" class="hidden">
+            <section class="order-detail-card">
+              <div class="detail-head">
+                <div>
+                  <span class="eyebrow">eBay Order</span>
+                  <h2 id="selected-order-title">Order</h2>
+                  <p id="selected-order-subtitle"></p>
+                </div>
+                <span id="selected-order-status" class="status-badge">Pending</span>
+              </div>
+
+              <div class="money-grid">
+                <div><span>Sold For</span><strong id="detail-sold-for">$0.00</strong></div>
+                <div><span>Shipping</span><strong id="detail-shipping">$0.00</strong></div>
+                <div><span>Total</span><strong id="detail-total">$0.00</strong></div>
+                <div><span>Bank / Payout</span><strong id="detail-payout">Not imported</strong></div>
+              </div>
+            </section>
+
+            <section class="scan-card">
+              <div class="step-head">
+                <span>1</span>
+                <div>
+                  <h3>Scan or Find Inventory Item</h3>
+                  <p>Use the internal barcode whenever possible. Mystery box orders can be matched manually.</p>
+                </div>
+              </div>
+              <div class="scan-row">
+                <input id="item-scan" type="search" placeholder="Scan item barcode or search title" autocomplete="off" />
+                <button id="find-item" type="button" class="secondary-btn">Find</button>
+              </div>
+              <div id="item-results" class="result-list"></div>
+            </section>
+
+            <section class="scan-card">
+              <div class="step-head">
+                <span>2</span>
+                <div>
+                  <h3>Choose Source Tray or Location</h3>
+                  <p>After item selection, scan the tray/location label or choose from current stock.</p>
+                </div>
+              </div>
+              <div class="scan-row">
+                <input id="location-scan" type="search" placeholder="Scan tray or location barcode" autocomplete="off" />
+                <button id="find-location" type="button" class="secondary-btn">Find</button>
+              </div>
+              <div id="location-results" class="result-list"></div>
+            </section>
+
+            <section id="selection-summary" class="selection-summary">
+              No item selected yet.
+            </section>
+
+            <section class="sign-card">
+              <div class="step-head">
+                <span>3</span>
+                <div>
+                  <h3>Sign and Remove Stock</h3>
+                  <p>The removal will be tied to this worker, order, item, and exact tray/location.</p>
+                </div>
+              </div>
+              <div class="sign-grid">
+                <label>
+                  Quantity
+                  <input id="fulfill-quantity" type="number" min="1" step="1" value="1" />
+                </label>
+                <label>
+                  Unit Sold Price
+                  <input id="fulfill-sold-price" type="number" min="0" step="0.01" />
+                </label>
+                <label>
+                  Amount Into Account
+                  <input id="fulfill-payout" type="number" min="0" step="0.01" placeholder="Optional" />
+                </label>
+                <label>
+                  Your Password
+                  <input id="fulfill-password" type="password" autocomplete="current-password" placeholder="Sign this fulfillment" />
+                </label>
+                <label class="wide">
+                  Note
+                  <textarea id="fulfill-notes" rows="2" placeholder="Optional packing note"></textarea>
+                </label>
+              </div>
+              <p id="fulfill-status" class="fulfill-status"></p>
+              <div class="fulfill-actions">
+                <button id="clear-selection" type="button" class="secondary-btn">Clear</button>
+                <button id="fulfill-order" type="button" class="primary-btn">Fulfill and Remove Stock</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="pending-orders.js"></script>
+</body>
+</html>
