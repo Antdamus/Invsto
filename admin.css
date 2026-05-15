@@ -81,6 +81,10 @@ html,body{
 .btn:active{ transform:translateY(0) scale(.99); }
 .btn.ghost{ background:transparent; color:var(--muted); }
 .btn.small{ padding:6px 8px; font-size:12px; }
+.admin-link-btn,
+.admin-sheet-link{
+  text-decoration:none;
+}
 
 /* Premium primary button (Invite worker, etc.) */
 .btn.primary{

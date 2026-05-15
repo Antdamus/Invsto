@@ -4,26 +4,111 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OG Jewelry - Pending Orders</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="pending-orders.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
-  <div class="pending-shell">
-    <aside class="pending-sidebar">
-      <a class="pending-logo" href="worker-dashboard.html">OG</a>
-      <nav>
-        <a href="worker-dashboard.html">Dashboard</a>
-        <a href="stock.html">Stock</a>
-        <a href="locations.html">Trays</a>
-        <a href="pending-orders.html" class="active">Pending Orders</a>
-      </nav>
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Pending Orders</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="admin.html">Admin</a>
+      <a href="locations.html">Locations</a>
+      <a href="add-item.html">Add Item</a>
+      <a href="add-inventory.html">Add Inventory</a>
+      <a href="inventory-activity.html">Daily Adds</a>
+      <a href="stock.html">Stock</a>
+      <a href="pending-orders.html" class="active">Pending Orders</a>
+      <a href="timeclock.html">Timesheet</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="admin.html">
+            <i class="ti ti-settings"></i>
+            <span class="link-text">Admin</span>
+          </a>
+
+          <a class="nav-link" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+
+          <a class="nav-link" href="locations.html">
+            <i class="ti ti-map-pin"></i>
+            <span class="link-text">Locations</span>
+          </a>
+
+          <a class="nav-link" href="add-item.html">
+            <i class="ti ti-plus"></i>
+            <span class="link-text">Add Item</span>
+          </a>
+
+          <a class="nav-link" href="add-inventory.html">
+            <i class="ti ti-box-seam"></i>
+            <span class="link-text">Add Inventory</span>
+          </a>
+
+          <a class="nav-link" href="inventory-activity.html">
+            <i class="ti ti-report-analytics"></i>
+            <span class="link-text">Daily Adds</span>
+          </a>
+
+          <a class="nav-link" href="stock.html">
+            <i class="ti ti-archive"></i>
+            <span class="link-text">Stock</span>
+          </a>
+
+          <a class="nav-link active" href="pending-orders.html">
+            <i class="ti ti-truck-delivery"></i>
+            <span class="link-text">Pending Orders</span>
+          </a>
+
+          <a class="nav-link" href="timeclock.html">
+            <i class="ti ti-clock"></i>
+            <span class="link-text">Timesheet</span>
+          </a>
+
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
     </aside>
 
-    <main class="pending-main">
-      <header class="pending-header">
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="pending-greeting">Pending eBay Orders</strong>
+            <div class="sub">Order fulfillment - scan, pack, and sign removals</div>
+          </div>
+          <div class="header-pills" aria-label="Page context">
+            <div class="pill">Scope: <b>eBay</b></div>
+            <div class="pill">Mode: <b>Inventory</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content pending-content">
+        <section class="pending-header">
         <div>
-          <span class="eyebrow">Worker Fulfillment</span>
+          <span class="eyebrow">Order Fulfillment</span>
           <h1>Pending eBay Orders</h1>
           <p>Scan the actual item being shipped, choose the source tray or location, then sign the removal.</p>
         </div>
@@ -32,12 +117,12 @@
             <i data-lucide="refresh-cw"></i>
             Refresh
           </button>
-          <a href="worker-dashboard.html" class="secondary-btn">
+          <a href="dashboard.html" class="secondary-btn">
             <i data-lucide="arrow-left"></i>
             Back
           </a>
         </div>
-      </header>
+        </section>
 
       <section class="summary-strip" id="summary-strip">
         <div><span>Pending Lines</span><strong id="summary-pending">0</strong></div>
@@ -186,6 +271,7 @@
         </section>
       </section>
     </main>
+  </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>

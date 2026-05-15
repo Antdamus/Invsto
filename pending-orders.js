@@ -113,6 +113,37 @@ function setupImportVisibility() {
   panel.classList.toggle("hidden", !canImportOrders());
 }
 
+function setupDashboardShell() {
+  const greeting = $("pending-greeting");
+  if (greeting) {
+    const name = state.employee?.display_name ? `, ${state.employee.display_name}` : "";
+    greeting.textContent = `Pending eBay Orders${name}`;
+  }
+
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    const href = (link.getAttribute("href") || "").split("/").pop();
+    link.classList.toggle("active", href === "pending-orders.html");
+  });
+
+  document.querySelectorAll(".mobile-nav-links a").forEach((link) => {
+    const href = (link.getAttribute("href") || "").split("/").pop();
+    link.classList.toggle("active", href === "pending-orders.html");
+  });
+
+  $("menu-toggle")?.addEventListener("click", () => {
+    $("mobile-menu")?.classList.toggle("show");
+  });
+
+  const signOut = async (event) => {
+    event.preventDefault();
+    await supabase.auth.signOut();
+    window.location.href = "index.html";
+  };
+
+  $("logout")?.addEventListener("click", signOut);
+  $("logout-mobile")?.addEventListener("click", signOut);
+}
+
 function normalizeLine(line) {
   const order = getOrderFromLine(line);
   return {
@@ -894,6 +925,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
   const ok = await loadCurrentWorker();
   if (!ok) return;
+  setupDashboardShell();
   setupImportVisibility();
   setupListeners();
   await loadOrders();
