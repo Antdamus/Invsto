@@ -201,6 +201,39 @@ function canRestoreStockItem(item) {
   return canViewSensitiveStockData() && isStockItemDeleted(item);
 }
 
+function normalizeStockBarcode(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "");
+}
+
+function isLikelyScannedBarcodeQuery(value) {
+  const normalized = normalizeStockBarcode(value);
+  return normalized.length >= 8 && /^[a-z0-9]+$/.test(normalized);
+}
+
+function matchesStockBarcode(item, query) {
+  const rawQuery = String(query || "").trim().toLowerCase();
+  if (!rawQuery) return true;
+
+  const itemBarcode = normalizeStockBarcode(item?.barcode);
+  const normalizedQuery = normalizeStockBarcode(rawQuery);
+  if (!itemBarcode || !normalizedQuery) return false;
+
+  if (isLikelyScannedBarcodeQuery(rawQuery)) {
+    return itemBarcode === normalizedQuery;
+  }
+
+  return itemBarcode.includes(normalizedQuery);
+}
+
+function compareStockBarcode(item, query) {
+  const itemBarcode = normalizeStockBarcode(item?.barcode);
+  const normalizedQuery = normalizeStockBarcode(query);
+  return Boolean(itemBarcode && normalizedQuery && itemBarcode === normalizedQuery);
+}
+
 function getStockItemSelectColumns() {
   return canViewSensitiveStockData() ? "*" : STOCK_WORKER_ITEM_SELECT;
 }
@@ -966,7 +999,7 @@ function buildLocationChips(item) {
         return (
           (!filters.title || item.title?.toLowerCase().includes(filters.title)) &&
           (!filters.description || item.description?.toLowerCase().includes(filters.description)) &&
-          (!filters.barcode || item.barcode?.toLowerCase().includes(filters.barcode)) &&
+          (!filters.barcode || matchesStockBarcode(item, filters.barcode)) &&
           (!filters.distributor || item.distributor_name?.toLowerCase().includes(filters.distributor)) &&
 
           (filters.weightMin !== null ? item.weight >= filters.weightMin : true) &&
@@ -5778,7 +5811,7 @@ function renderManualSaleLocationResults(rows, message = "No stock locations fou
 function findManualSaleItems(term) {
   const q = String(term || "").trim().toLowerCase();
   if (!q) return [];
-  const exact = allItems.filter((item) => String(item.barcode || "").trim().toLowerCase() === q || String(item.id || "").toLowerCase() === q);
+  const exact = allItems.filter((item) => compareStockBarcode(item, q) || String(item.id || "").toLowerCase() === q);
   if (exact.length) return exact;
   return allItems.filter((item) =>
     String(item.barcode || "").toLowerCase().includes(q) ||
