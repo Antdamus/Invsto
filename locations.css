@@ -1235,6 +1235,48 @@
   border-radius: 14px;
 }
 
+.location-parent-scan {
+  position: relative;
+  padding: 14px;
+  border: 1px solid rgba(214,178,94,.22);
+  border-radius: 16px;
+  background: rgba(214,178,94,.07);
+}
+
+.location-parent-scan .location-edit-input {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.location-parent-scan-status {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.35;
+}
+
+.location-parent-scan.is-verified {
+  border-color: rgba(69,214,154,.36);
+  background: rgba(69,214,154,.08);
+}
+
+.location-parent-scan.is-verified .location-parent-scan-status {
+  color: #9cf2ca;
+}
+
+.location-parent-scan.is-error {
+  border-color: rgba(255,121,121,.42);
+  background: rgba(255,121,121,.08);
+}
+
+.location-parent-scan.is-error .location-parent-scan-status {
+  color: #ffb5b5;
+}
+
 @media (max-width: 1200px) {
   .location-detail-drawer {
     z-index: 90;

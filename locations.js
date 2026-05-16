@@ -623,6 +623,9 @@ function getCreateModalElements() {
     storeSelect: document.getElementById("location-create-store"),
     typeInput: document.getElementById("location-create-type"),
     parentSelect: document.getElementById("location-create-parent"),
+    parentScanWrap: document.getElementById("location-create-parent-scan-wrap"),
+    parentScanInput: document.getElementById("location-create-parent-scan"),
+    parentScanStatus: document.getElementById("location-create-parent-scan-status"),
     capacityInput: document.getElementById("location-create-capacity"),
     capacityNoLimitInput: document.getElementById("location-create-capacity-no-limit"),
     barcodeInput: document.getElementById("location-create-barcode"),
@@ -896,6 +899,130 @@ function syncCreateContainerStoreFromParent() {
   }
 }
 
+function getCreateTypeLower() {
+  return asTrimmedString(getCreateModalElements().typeInput?.value).toLowerCase();
+}
+
+function typeImpliesContainer(typeLower = getCreateTypeLower()) {
+  return ["bag", "container", "bin", "box", "pouch", "case bag"].some((keyword) => typeLower.includes(keyword));
+}
+
+function setCreateModalMode(mode) {
+  const elements = getCreateModalElements();
+  const normalizedMode = ["tray", "container", "location"].includes(mode) ? mode : "location";
+  if (elements.form) elements.form.dataset.createMode = normalizedMode;
+
+  const isTrayMode = normalizedMode === "tray";
+  const isContainerMode = normalizedMode === "container";
+
+  if (elements.title) {
+    elements.title.textContent = isTrayMode ? "Create Tray" : isContainerMode ? "Create Container" : "Create Location";
+  }
+  if (elements.subtitle) {
+    elements.subtitle.textContent = isTrayMode
+      ? "Create a barcode-ready mobile tray that can be checked in and out."
+      : isContainerMode
+        ? "Create a barcode-ready bag or container nested inside a table, vault, shelf, or safe."
+        : "Create a barcode-ready fixed table, vault, shelf, case, or safe.";
+  }
+
+  if (elements.parentSelect) {
+    elements.parentSelect.required = isContainerMode;
+  }
+  if (elements.isTrayInput) {
+    elements.isTrayInput.checked = isTrayMode;
+  }
+}
+
+function inferCreateModalMode() {
+  const elements = getCreateModalElements();
+  const parentId = asTrimmedString(elements.parentSelect?.value);
+  const typeLower = getCreateTypeLower();
+
+  if (parentId || typeImpliesContainer(typeLower)) return "container";
+  if (elements.isTrayInput?.checked || typeLower === "tray") return "tray";
+  return elements.form?.dataset.createMode || "location";
+}
+
+function syncCreateModalMode(options = {}) {
+  const mode = inferCreateModalMode();
+  const elements = getCreateModalElements();
+
+  if (mode === "container" && elements.isTrayInput?.checked) {
+    elements.isTrayInput.checked = false;
+  }
+  if (mode === "tray" && elements.parentSelect?.value) {
+    elements.parentSelect.value = "";
+    if (elements.parentScanInput) elements.parentScanInput.value = "";
+  }
+
+  setCreateModalMode(mode);
+  updateCreateParentScanUi({ focus: options.focusParentScan });
+  return mode;
+}
+
+function normalizeScannedLocationCode(value) {
+  return asTrimmedString(value).toUpperCase();
+}
+
+function getCreateParentLocation() {
+  const { parentSelect } = getCreateModalElements();
+  const parentId = asTrimmedString(parentSelect?.value);
+  if (!parentId) return null;
+  return state.locations.find((location) => String(location.id) === String(parentId)) || null;
+}
+
+function shouldRequireCreateParentBarcodeScan() {
+  const elements = getCreateModalElements();
+  const parentId = asTrimmedString(elements.parentSelect?.value);
+  const mode = elements.form?.dataset.createMode || inferCreateModalMode();
+  return !locationsAccess.isAdmin && mode === "container" && Boolean(parentId);
+}
+
+function updateCreateParentScanUi(options = {}) {
+  const elements = getCreateModalElements();
+  if (!elements.parentScanWrap || !elements.parentScanInput || !elements.parentScanStatus) return false;
+
+  const required = shouldRequireCreateParentBarcodeScan();
+  const parentLocation = getCreateParentLocation();
+  elements.parentScanWrap.classList.toggle("hidden", !required);
+  elements.parentScanInput.required = required;
+  elements.parentScanInput.disabled = false;
+  elements.parentScanInput.readOnly = false;
+
+  if (!required) {
+    elements.parentScanInput.value = "";
+    elements.parentScanWrap.classList.remove("is-verified", "is-error");
+    elements.parentScanStatus.textContent = "Select a parent location, then scan its label before saving this container.";
+    return true;
+  }
+
+  const expectedCode = normalizeScannedLocationCode(parentLocation?.location_code);
+  const scannedCode = normalizeScannedLocationCode(elements.parentScanInput.value);
+  const verified = Boolean(expectedCode && scannedCode && scannedCode === expectedCode);
+
+  elements.parentScanWrap.classList.toggle("is-verified", verified);
+  elements.parentScanWrap.classList.toggle("is-error", Boolean(scannedCode && !verified));
+
+  if (!parentLocation) {
+    elements.parentScanStatus.textContent = "Choose the parent location first.";
+  } else if (!expectedCode) {
+    elements.parentScanStatus.textContent = "This parent location does not have a barcode. Choose a barcode-ready parent location.";
+  } else if (!scannedCode) {
+    elements.parentScanStatus.textContent = `Scan the label for ${parentLocation.location_name || "the selected parent"} before saving.`;
+  } else if (verified) {
+    elements.parentScanStatus.textContent = "Parent barcode verified.";
+  } else {
+    elements.parentScanStatus.textContent = "Scanned barcode does not match the selected parent location.";
+  }
+
+  if (required && options.focus && parentLocation) {
+    window.setTimeout(() => elements.parentScanInput?.focus(), 50);
+  }
+
+  return verified;
+}
+
 function getNextTrayName() {
   const highestTrayNumber = (Array.isArray(state.locations) ? state.locations : []).reduce((highest, location) => {
     const name = asTrimmedString(location.location_name);
@@ -915,6 +1042,12 @@ function closeCreateLocationModal() {
   elements.modal?.setAttribute("aria-hidden", "true");
   elements.form?.reset();
   if (elements.parentSelect) elements.parentSelect.innerHTML = "";
+  if (elements.parentScanInput) elements.parentScanInput.value = "";
+  elements.parentScanWrap?.classList.add("hidden");
+  elements.parentScanWrap?.classList.remove("is-verified", "is-error");
+  if (elements.parentScanStatus) {
+    elements.parentScanStatus.textContent = "Select a parent location, then scan its label before saving this container.";
+  }
   hideLocationNameSuggestions(document.getElementById("location-create-name-suggestions"));
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
   if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
@@ -935,29 +1068,17 @@ function openCreateLocationModal({ tray = false, container = false } = {}) {
   populateCreateParentLocationSelect();
   elements.modal.classList.remove("hidden");
   elements.modal.setAttribute("aria-hidden", "false");
-  if (elements.title) {
-    elements.title.textContent = createTray ? "Create Tray" : createContainer ? "Create Container" : "Create Location";
-  }
-  if (elements.subtitle) {
-    elements.subtitle.textContent = createTray
-      ? "Create a barcode-ready mobile tray that can be checked in and out."
-      : createContainer
-        ? "Create a barcode-ready bag or container nested inside a table, vault, shelf, or safe."
-        : "Create a barcode-ready fixed table, vault, shelf, case, or safe.";
-  }
   if (elements.typeInput) elements.typeInput.value = createTray ? "tray" : createContainer ? "container" : "";
   if (createTray && elements.nameInput) {
     elements.nameInput.value = getNextTrayName();
   }
-  if (createContainer && elements.parentSelect) {
-    elements.parentSelect.required = true;
-  } else if (elements.parentSelect) {
-    elements.parentSelect.required = false;
-  }
+  if (elements.parentScanInput) elements.parentScanInput.value = "";
   if (elements.isTrayInput) {
     elements.isTrayInput.checked = createTray;
     elements.isTrayInput.disabled = false;
   }
+  setCreateModalMode(createTray ? "tray" : createContainer ? "container" : "location");
+  updateCreateParentScanUi();
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
   if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
   syncCreateLocationLimitControls();
@@ -1052,8 +1173,9 @@ async function saveCreatedLocation() {
   const capacityValue = asTrimmedString(elements.capacityInput?.value);
   const capacityHasNoLimit = Boolean(elements.capacityNoLimitInput?.checked);
   const locationCode = asTrimmedString(elements.barcodeInput?.value);
-  const isTray = Boolean(elements.isTrayInput?.checked);
-  const isContainer = !isTray && Boolean(parentLocationId);
+  const createMode = syncCreateModalMode();
+  const isTray = createMode === "tray";
+  const isContainer = createMode === "container";
   const parentLocation = parentLocationId
     ? state.locations.find((location) => String(location.id) === String(parentLocationId))
     : null;
@@ -1070,6 +1192,16 @@ async function saveCreatedLocation() {
   if (isContainer && !parentLocation) {
     if (elements.status) elements.status.textContent = "Choose the table, vault, shelf, or safe that holds this container.";
     return;
+  }
+
+  if (isContainer && shouldRequireCreateParentBarcodeScan()) {
+    const parentScanVerified = updateCreateParentScanUi({ focus: true });
+    if (!parentScanVerified) {
+      if (elements.status) {
+        elements.status.textContent = "Scan the selected parent location barcode before saving this container.";
+      }
+      return;
+    }
   }
 
   if (state.stores.length > 0 && !storeId && !parentLocation?.store_id) {
@@ -2352,6 +2484,9 @@ function bindEvents() {
 
   document.getElementById("location-create-parent")?.addEventListener("change", () => {
     syncCreateContainerStoreFromParent();
+    const parentScan = document.getElementById("location-create-parent-scan");
+    if (parentScan) parentScan.value = "";
+    syncCreateModalMode({ focusParentScan: true });
     renderLocationNameSuggestions(
       document.getElementById("location-create-name"),
       document.getElementById("location-create-name-suggestions"),
@@ -2361,6 +2496,7 @@ function bindEvents() {
   });
 
   document.getElementById("location-create-store")?.addEventListener("change", () => {
+    syncCreateModalMode();
     renderLocationNameSuggestions(
       document.getElementById("location-create-name"),
       document.getElementById("location-create-name-suggestions"),
@@ -2384,6 +2520,41 @@ function bindEvents() {
       preview.innerHTML = `<img src="${escapeHtml(loadEvent.target?.result || "")}" alt="Location preview" />`;
     };
     reader.readAsDataURL(file);
+  });
+
+  document.getElementById("location-create-type")?.addEventListener("input", () => {
+    syncCreateModalMode({ focusParentScan: false });
+  });
+
+  document.getElementById("location-create-is-tray")?.addEventListener("change", (event) => {
+    if (event.target.checked) {
+      const parentSelect = document.getElementById("location-create-parent");
+      const parentScan = document.getElementById("location-create-parent-scan");
+      if (parentSelect) parentSelect.value = "";
+      if (parentScan) parentScan.value = "";
+      setCreateModalMode("tray");
+    } else {
+      syncCreateModalMode();
+    }
+    updateCreateParentScanUi();
+  });
+
+  document.getElementById("location-create-parent-scan")?.addEventListener("input", () => {
+    updateCreateParentScanUi();
+  });
+
+  document.getElementById("location-create-parent-scan")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!updateCreateParentScanUi()) return;
+
+    const nameInput = document.getElementById("location-create-name");
+    if (nameInput && !asTrimmedString(nameInput.value)) {
+      nameInput.focus();
+      return;
+    }
+
+    document.getElementById("location-create-type")?.focus();
   });
 
   document.getElementById("location-create-modal")?.addEventListener("click", (event) => {
