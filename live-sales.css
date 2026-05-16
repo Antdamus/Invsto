@@ -118,7 +118,8 @@ body.live-session-active:not(.live-label-step) .live-grid,
 body:not(.live-session-active) #bag-label-panel,
 body:not(.live-session-active) #scan-stage,
 body.live-session-active #session-setup-panel,
-body.live-session-active:not(.live-label-step) #bag-label-panel {
+body.live-session-active:not(.live-label-step) #bag-label-panel,
+body.live-label-step #scan-stage {
   display: none;
 }
 
@@ -127,7 +128,11 @@ body.live-label-step .live-grid {
 }
 
 body.live-label-step #bag-label-panel {
-  max-width: 760px;
+  max-width: 940px;
+}
+
+body.live-label-step #current-lot-card {
+  display: none;
 }
 
 .scan-workspace {
@@ -232,6 +237,114 @@ body.live-label-step #bag-label-panel {
 
 .step-copy {
   margin: -6px 0 16px;
+}
+
+.label-review-block {
+  display: grid;
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.confirm-auction-card {
+  border: 1px solid rgba(231, 192, 114, 0.28);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(231, 192, 114, 0.12), rgba(255, 255, 255, 0.04));
+  padding: 18px;
+}
+
+.confirm-auction-card span {
+  display: block;
+  color: var(--live-gold);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.confirm-auction-card strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--live-text);
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 1;
+}
+
+.label-review-manifest {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.label-review-count {
+  display: block;
+  margin-top: 4px;
+  color: var(--live-muted);
+  font-size: 0.95rem;
+}
+
+.label-review-item {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 12px;
+}
+
+.label-review-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: var(--live-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.label-review-thumb button {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.label-review-thumb img,
+.label-review-thumb button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.label-review-copy {
+  min-width: 0;
+}
+
+.label-review-copy strong,
+.label-review-copy span,
+.label-review-copy small {
+  display: block;
+}
+
+.label-review-copy span,
+.label-review-copy small {
+  color: var(--live-muted);
+}
+
+.label-review-qty {
+  border: 1px solid rgba(231, 192, 114, 0.28);
+  border-radius: 999px;
+  background: rgba(231, 192, 114, 0.1);
+  color: var(--live-gold);
+  padding: 8px 12px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .shortcut-strip {
@@ -541,6 +654,17 @@ body.live-label-step #bag-label-panel {
   box-shadow: 0 0 0 3px rgba(231, 192, 114, 0.12);
 }
 
+.manifest-qty-input::-webkit-outer-spin-button,
+.manifest-qty-input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.manifest-qty-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
 .tiny-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
@@ -709,6 +833,20 @@ body.live-label-step #bag-label-panel {
 
   .manifest-item {
     grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .label-review-item {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .label-review-thumb {
+    width: 56px;
+    height: 56px;
+  }
+
+  .label-review-qty {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .selected-match-card,

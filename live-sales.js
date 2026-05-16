@@ -388,7 +388,7 @@ function updateScanGate() {
   );
   $("item-scan")?.toggleAttribute("disabled", !enabled);
   $("scan-item")?.toggleAttribute("disabled", !enabled);
-  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !state.lotItems.length);
+  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !getManifestGroups().length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
 }
 
@@ -398,6 +398,7 @@ function renderAll() {
   renderSummary();
   renderCurrentLot();
   renderManifest();
+  renderLabelReview();
   renderSelectedItem();
   renderSourceRows();
   updateScanGate();
@@ -653,6 +654,59 @@ function getManifestGroups() {
 
 function getManifestGroupByKey(key) {
   return getManifestGroups().find((group) => group.key === key) || null;
+}
+
+function renderLabelReview() {
+  const numberEl = $("confirm-auction-number");
+  const list = $("label-review-manifest");
+  const countEl = $("label-review-count");
+  const auctionNumber = $("auction-number")?.value?.trim() || state.currentLot?.auction_number || "-";
+  if (numberEl) numberEl.textContent = auctionNumber || "-";
+  if (!list) return;
+
+  list.replaceChildren();
+  if (!state.currentLot) {
+    if (countEl) countEl.textContent = "0 items";
+    list.innerHTML = `<div class="empty-state">No bag selected.</div>`;
+    return;
+  }
+
+  const groups = getManifestGroups();
+  if (!groups.length) {
+    if (countEl) countEl.textContent = "0 items";
+    list.innerHTML = `<div class="empty-state">No bag items yet.</div>`;
+    return;
+  }
+
+  const totalUnits = groups.reduce((sum, group) => sum + Number(group.quantity || 0), 0);
+  if (countEl) {
+    countEl.textContent = `${groups.length.toLocaleString()} item type${groups.length === 1 ? "" : "s"} / ${totalUnits.toLocaleString()} total unit${totalUnits === 1 ? "" : "s"}`;
+  }
+
+  groups.forEach((group) => {
+    const item = group.item || {};
+    const loc = group.sourceLocation || {};
+    const row = document.createElement("article");
+    row.className = "label-review-item";
+    row.innerHTML = `
+      <div class="label-review-thumb"><span>No photo</span></div>
+      <div class="label-review-copy">
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <span>${escapeHtml(item.barcode || "-")}</span>
+        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
+      </div>
+      <div class="label-review-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
+    `;
+    list.appendChild(row);
+
+    resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+      if (!url || !row.isConnected) return;
+      const thumb = row.querySelector(".label-review-thumb");
+      if (!thumb) return;
+      thumb.innerHTML = `<button type="button" aria-label="Open ${escapeHtml(item.title || "item")} image"><img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Item preview")}" /></button>`;
+      thumb.querySelector("button")?.addEventListener("click", () => openLivePhotoModal(url, item.title || "Item preview"));
+    });
+  });
 }
 
 async function startSession() {
@@ -1506,12 +1560,13 @@ function finishBagScanning() {
       auctionInput.select();
     }, 80);
   }
+  renderLabelReview();
   setStatus("Confirm the auction number. Press Enter to generate the DYMO label and start the next bag.", "success");
 }
 
 async function finalizeCurrentBag() {
   if (!state.currentLot || state.busy) return;
-  if (!state.lotItems.length) {
+  if (!getManifestGroups().length) {
     setStatus("This bag has no items yet.", "error");
     setFlowStep("scan");
     setTimeout(() => focusItemScanner(), 80);
@@ -1619,12 +1674,18 @@ function setupListeners() {
       else createOrLoadLot();
     }
   });
+  $("auction-number")?.addEventListener("input", renderLabelReview);
 
   $("label-free-text")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && state.flowStep === "label") {
       event.preventDefault();
       finalizeCurrentBag();
     }
+  });
+  $("back-to-scan")?.addEventListener("click", () => {
+    setFlowStep("scan");
+    setStatus("Back in scan mode. Add the missing item, then press Enter on an empty scanner to confirm again.", "success");
+    setTimeout(() => focusItemScanner(), 80);
   });
 
   $("item-scan")?.addEventListener("keydown", (event) => {

@@ -143,7 +143,7 @@
               </div>
               <span id="lot-status-pill" class="status-pill">No bag selected</span>
             </div>
-            <p class="step-copy">Type or confirm the auction number, then press Enter. The DYMO label is generated automatically and the next bag is prepared.</p>
+            <p class="step-copy">Review the auction number and every item in this bag. Press Enter or confirm when it is correct, or go back to scan more items.</p>
             <label>
               Auction Number
               <input id="auction-number" type="text" placeholder="Scan or type auction number" autocomplete="off" />
@@ -152,9 +152,22 @@
               Small Label Text
               <input id="label-free-text" type="text" placeholder="Optional free text" autocomplete="off" />
             </label>
+            <section class="label-review-block" aria-label="Auction bag review">
+              <div class="confirm-auction-card">
+                <span>Auction Number</span>
+                <strong id="confirm-auction-number">-</strong>
+              </div>
+              <div>
+                <span class="eyebrow">Items To Print On This Bag</span>
+                <strong id="label-review-count" class="label-review-count">0 items</strong>
+                <div id="label-review-manifest" class="label-review-manifest">
+                  <div class="empty-state">No bag items yet.</div>
+                </div>
+              </div>
+            </section>
             <div class="button-row">
-              <button id="generate-live-label" type="button" class="primary-btn">Print Label + Next Bag</button>
-              <button id="create-lot" type="button" class="secondary-btn">Load Bag Manually</button>
+              <button id="generate-live-label" type="button" class="primary-btn">Confirm Auction + Print Label</button>
+              <button id="back-to-scan" type="button" class="secondary-btn">Back to Scan More Items</button>
             </div>
             <div id="label-status" class="status-line"></div>
             <div id="current-lot-card" class="current-lot-card empty">Create a bag to begin scanning items.</div>
