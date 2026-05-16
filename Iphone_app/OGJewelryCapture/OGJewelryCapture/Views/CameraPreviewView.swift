@@ -1,13 +1,16 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
     let isTapToFocusEnabled: Bool
     let isPinchToZoomEnabled: Bool
+    let isHardwareShutterEnabled: Bool
     let zoomFactor: CGFloat
     let onTapToFocus: ((CGPoint) -> Void)?
     let onPinchToZoom: ((CGFloat) -> Void)?
+    let onHardwareShutter: (() -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -15,9 +18,11 @@ struct CameraPreviewView: UIViewRepresentable {
         view.videoPreviewLayer.session = session
         view.isTapToFocusEnabled = isTapToFocusEnabled
         view.isPinchToZoomEnabled = isPinchToZoomEnabled
+        view.isHardwareShutterEnabled = isHardwareShutterEnabled
         view.zoomFactor = zoomFactor
         view.onTapToFocus = onTapToFocus
         view.onPinchToZoom = onPinchToZoom
+        view.onHardwareShutter = onHardwareShutter
         return view
     }
 
@@ -26,9 +31,11 @@ struct CameraPreviewView: UIViewRepresentable {
         uiView.videoPreviewLayer.videoGravity = .resizeAspect
         uiView.isTapToFocusEnabled = isTapToFocusEnabled
         uiView.isPinchToZoomEnabled = isPinchToZoomEnabled
+        uiView.isHardwareShutterEnabled = isHardwareShutterEnabled
         uiView.zoomFactor = zoomFactor
         uiView.onTapToFocus = onTapToFocus
         uiView.onPinchToZoom = onPinchToZoom
+        uiView.onHardwareShutter = onHardwareShutter
     }
 }
 
@@ -41,10 +48,15 @@ final class PreviewView: UIView {
         didSet { pinchGestureRecognizer.isEnabled = isPinchToZoomEnabled }
     }
 
+    var isHardwareShutterEnabled = false {
+        didSet { updateHardwareShutterInteraction() }
+    }
+
     var zoomFactor: CGFloat = 1.0
 
     var onTapToFocus: ((CGPoint) -> Void)?
     var onPinchToZoom: ((CGFloat) -> Void)?
+    var onHardwareShutter: (() -> Void)?
 
     private let tapGestureRecognizer = UITapGestureRecognizer()
     private let pinchGestureRecognizer = UIPinchGestureRecognizer()
@@ -59,6 +71,7 @@ final class PreviewView: UIView {
         return view
     }()
     private var pinchStartZoomFactor: CGFloat = 1.0
+    private var captureEventInteraction: Any?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -91,6 +104,7 @@ final class PreviewView: UIView {
         addGestureRecognizer(pinchGestureRecognizer)
 
         addSubview(focusIndicatorView)
+        updateHardwareShutterInteraction()
     }
 
     @objc
@@ -130,5 +144,23 @@ final class PreviewView: UIView {
         UIView.animate(withDuration: 0.22, delay: 0.85, options: [.curveEaseIn]) {
             self.focusIndicatorView.alpha = 0
         }
+    }
+
+    private func updateHardwareShutterInteraction() {
+        guard #available(iOS 17.2, *) else { return }
+
+        let interaction: AVCaptureEventInteraction
+        if let existingInteraction = captureEventInteraction as? AVCaptureEventInteraction {
+            interaction = existingInteraction
+        } else {
+            interaction = AVCaptureEventInteraction { [weak self] event in
+                guard event.phase == .ended else { return }
+                self?.onHardwareShutter?()
+            }
+            addInteraction(interaction)
+            captureEventInteraction = interaction
+        }
+
+        interaction.isEnabled = isHardwareShutterEnabled
     }
 }

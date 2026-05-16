@@ -111,6 +111,7 @@ final class ReadyViewModel: ObservableObject {
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
     private var autoListenTask: Task<Void, Never>?
+    private var lastHardwareShutterCaptureAt: Date?
 
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
@@ -122,6 +123,7 @@ final class ReadyViewModel: ObservableObject {
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
     private static let autoListenEnabledKey = "ready.autoListenEnabled"
     private static let autoListenInterval: Duration = .seconds(5)
+    private static let hardwareShutterDebounceInterval: TimeInterval = 0.75
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
     private static let operatorCancelledFailureCode = "cancelled_by_operator"
     private static let operatorCancelledFailureMessage = "Operator cancelled capture"
@@ -276,14 +278,21 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func triggerManualCapture() {
-        guard captureMode == .manual else { return }
-        guard let job = pendingJob else { return }
-        guard case .waitingForManualCapture = captureState else { return }
+        triggerCaptureNow()
+    }
 
-        pendingAutoCaptureTask?.cancel()
-        pendingAutoCaptureTask = Task { [weak self] in
-            await self?.performCapture(for: job)
+    func triggerHardwareShutterCapture() {
+        guard canTriggerHardwareShutterCapture else { return }
+
+        let now = Date()
+        if let lastHardwareShutterCaptureAt,
+           now.timeIntervalSince(lastHardwareShutterCaptureAt) < Self.hardwareShutterDebounceInterval
+        {
+            return
         }
+
+        lastHardwareShutterCaptureAt = now
+        triggerCaptureNow()
     }
 
     func focusPreview(at devicePoint: CGPoint) async {
@@ -596,6 +605,16 @@ final class ReadyViewModel: ObservableObject {
                 activeJobID = nil
                 pendingJob = nil
             }
+        }
+    }
+
+    private func triggerCaptureNow() {
+        guard let job = captureReadyJob else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        captureState = .capturing(job)
+        pendingAutoCaptureTask = Task { [weak self] in
+            await self?.performCapture(for: job)
         }
     }
 
@@ -1043,12 +1062,28 @@ final class ReadyViewModel: ObservableObject {
         return "Cancel Job fails the active capture request, clears local session photos, and returns this station to listening."
     }
 
+    var canTriggerHardwareShutterCapture: Bool {
+        captureReadyJob != nil
+    }
+
     private var canAcceptIncomingJobs: Bool {
         switch captureState {
         case .idle, .listening:
             return activeJobID == nil
         case .captureRequested, .waitingForManualCapture, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             return false
+        }
+    }
+
+    private var captureReadyJob: CaptureJob? {
+        guard let pendingJob else { return nil }
+
+        switch captureState {
+        case let .captureRequested(job), let .waitingForManualCapture(job):
+            guard job.id == pendingJob.id else { return nil }
+            return job
+        case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
+            return nil
         }
     }
 }

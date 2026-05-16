@@ -389,6 +389,7 @@ struct ReadyView: View {
             session: session,
             isTapToFocusEnabled: viewModel.isTapToFocusEnabledForCurrentState,
             isPinchToZoomEnabled: isPreviewZoomEnabled,
+            isHardwareShutterEnabled: isHardwareShutterEnabled,
             zoomFactor: viewModel.zoomFactor,
             onTapToFocus: viewModel.isTapToFocusEnabledForCurrentState ? { devicePoint in
                 _ = Task {
@@ -397,6 +398,9 @@ struct ReadyView: View {
             } : nil,
             onPinchToZoom: isPreviewZoomEnabled ? { zoomFactor in
                 viewModel.updatePreviewZoom(to: zoomFactor)
+            } : nil,
+            onHardwareShutter: isHardwareShutterEnabled ? {
+                viewModel.triggerHardwareShutterCapture()
             } : nil
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -810,6 +814,10 @@ struct ReadyView: View {
         case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             false
         }
+    }
+
+    private var isHardwareShutterEnabled: Bool {
+        previewedPhotoID == nil && viewModel.canTriggerHardwareShutterCapture
     }
 
     private var isReadyToAddAnotherPhoto: Bool {
