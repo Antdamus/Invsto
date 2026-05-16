@@ -59,6 +59,29 @@ struct CaptureJobRepository {
         return jobs.first
     }
 
+    func claimNewestCaptureJobForStation(stationID: UUID) async throws -> CaptureJob? {
+        let params = ClaimNewestCaptureJobForStationParams(stationID: stationID)
+
+        do {
+            let claimResults: [ClaimNewestCaptureJobForStationResponse] = try await client
+                .rpc("claim_newest_capture_job_for_station", params: params)
+                .execute()
+                .value
+
+            guard let claimResult = claimResults.first else {
+                return nil
+            }
+
+            guard let job = try await fetchJob(id: claimResult.jobID) else {
+                throw RepositoryError.transitionRejected
+            }
+
+            return job
+        } catch let error as PostgrestError where Self.isNoClaimableJobError(error) {
+            return nil
+        }
+    }
+
     func fetchJob(id: UUID) async throws -> CaptureJob? {
         let jobs: [CaptureJob] = try await client
             .from("capture_jobs")
@@ -223,6 +246,19 @@ struct CaptureJobRepository {
             .execute()
             .value
     }
+
+    private static func isNoClaimableJobError(_ error: PostgrestError) -> Bool {
+        if error.code == "PGRST116" || error.code == "P0002" {
+            return true
+        }
+
+        let message = error.message.lowercased()
+        return message.contains("no claimable")
+            || message.contains("no pending")
+            || message.contains("no queued")
+            || message.contains("no capture job")
+            || message.contains("not_found")
+    }
 }
 
 private struct UpdateCaptureJobLifecycleParams: Encodable, Sendable {
@@ -262,6 +298,41 @@ private struct UpdateCaptureJobLifecycleParams: Encodable, Sendable {
         try container.encodeIfPresent(mimeType, forKey: .mimeType)
         try container.encodeIfPresent(captureCompletedAt, forKey: .captureCompletedAt)
         try container.encodeIfPresent(uploadCompletedAt, forKey: .uploadCompletedAt)
+    }
+}
+
+private struct ClaimNewestCaptureJobForStationParams: Encodable, Sendable {
+    let stationID: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case stationID = "_station_id"
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stationID, forKey: .stationID)
+    }
+}
+
+private struct ClaimNewestCaptureJobForStationResponse: Decodable, Sendable {
+    let jobID: UUID
+    let stationID: UUID
+    let status: CaptureJobStatus
+    let requestedAt: Date
+    let targetSwitched: Bool
+    let originalActiveJobID: UUID?
+    let supersededCount: Int
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case stationID = "station_id"
+        case status
+        case requestedAt = "requested_at"
+        case targetSwitched = "target_switched"
+        case originalActiveJobID = "original_active_job_id"
+        case supersededCount = "superseded_count"
+        case message
     }
 }
 

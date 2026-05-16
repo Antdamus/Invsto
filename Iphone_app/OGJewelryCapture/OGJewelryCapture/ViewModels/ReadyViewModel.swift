@@ -116,7 +116,7 @@ final class ReadyViewModel: ObservableObject {
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
     private var hasStarted = false
-    private var isPendingJobRefreshInFlight = false
+    private var isClaimingNewestJob = false
 
     private static let captureModeKey = "ready.captureMode"
     private static let captureResolutionModeKey = "ready.captureResolutionMode"
@@ -218,7 +218,7 @@ final class ReadyViewModel: ObservableObject {
             },
             onJobDetected: { [weak self] job in
                 Task { @MainActor [weak self] in
-                    await self?.handleIncomingJob(job)
+                    await self?.handleRealtimeCaptureCandidate(job)
                 }
             }
         )
@@ -314,20 +314,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func refreshPendingJob() async {
-        guard !isPendingJobRefreshInFlight else { return }
-        guard canAcceptIncomingJobs else { return }
-
-        isPendingJobRefreshInFlight = true
-
-        do {
-            if let job = try await repository.fetchNextPendingJob(for: station.id) {
-                await handleIncomingJob(job)
-            }
-        } catch {
-            listenerState = .error(error.localizedDescription)
-        }
-
-        isPendingJobRefreshInFlight = false
+        await claimNewestPendingJobForCapture(reportErrorToListener: true)
     }
 
     private func pollPendingJobForAutoListen() async {
@@ -341,18 +328,18 @@ final class ReadyViewModel: ObservableObject {
             return
         }
 
-        guard !isPendingJobRefreshInFlight else {
+        guard !isClaimingNewestJob else {
             autoListenStatus = .waiting
             return
         }
 
         autoListenStatus = .checking
-        isPendingJobRefreshInFlight = true
+        isClaimingNewestJob = true
         var didFail = false
 
         defer {
             lastAutoListenCheckAt = Date()
-            isPendingJobRefreshInFlight = false
+            isClaimingNewestJob = false
 
             if !didFail, isAutoListenEnabled {
                 autoListenStatus = canAcceptIncomingJobs ? .waiting : .paused
@@ -362,8 +349,8 @@ final class ReadyViewModel: ObservableObject {
         }
 
         do {
-            if let job = try await repository.fetchNextPendingJob(for: station.id) {
-                await handleIncomingJob(job)
+            if let job = try await repository.claimNewestCaptureJobForStation(stationID: station.id) {
+                await beginCaptureWithClaimedNewestJob(job)
             }
         } catch {
             if canAcceptIncomingJobs {
@@ -492,15 +479,45 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    private func handleIncomingJob(_ job: CaptureJob) async {
+    private func handleRealtimeCaptureCandidate(_ job: CaptureJob) async {
         guard job.stationID == station.id else { return }
         guard job.isCaptureRequestCandidate else { return }
         guard !handledJobIDs.contains(job.id) else { return }
         guard activeJobID == nil else { return }
         guard canAcceptIncomingJobs else { return }
 
+        await claimNewestPendingJobForCapture(reportErrorToListener: true)
+    }
+
+    private func claimNewestPendingJobForCapture(reportErrorToListener: Bool) async {
+        guard !isClaimingNewestJob else { return }
+        guard canAcceptIncomingJobs else { return }
+
+        isClaimingNewestJob = true
+        defer {
+            isClaimingNewestJob = false
+        }
+
+        do {
+            if let job = try await repository.claimNewestCaptureJobForStation(stationID: station.id) {
+                await beginCaptureWithClaimedNewestJob(job)
+            }
+        } catch {
+            if reportErrorToListener, canAcceptIncomingJobs {
+                listenerState = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func beginCaptureWithClaimedNewestJob(_ job: CaptureJob) async {
+        guard job.stationID == station.id else { return }
+        guard !handledJobIDs.contains(job.id) else { return }
+        guard activeJobID == nil else { return }
+        guard canAcceptIncomingJobs else { return }
+
         pendingAutoCaptureTask?.cancel()
         activeJobID = job.id
+        handledJobIDs.insert(job.id)
         pendingJob = job
         activeSession = LocalCaptureSession(
             jobID: job.id,
@@ -510,52 +527,36 @@ final class ReadyViewModel: ObservableObject {
         )
         finishJobMessage = nil
 
-        do {
-            let claimed = try await repository.claimJobForCapture(id: job.id)
-            guard claimed else {
-                captureState = .listening
+        cameraAvailability = await cameraService.prepareIfNeeded()
+        await cameraService.updateCaptureResolutionMode(captureResolutionMode)
+        cameraModeStatus = await cameraService.currentCameraModeStatus()
+        await refreshZoomState(resetToDefault: true)
+
+        switch cameraAvailability {
+        case .ready, .simulatorFallback:
+            transitionToCapture(for: job)
+        case let .unavailable(message):
+            let failureAccepted = await failJob(
+                jobID: job.id,
+                code: "camera_unavailable",
+                message: message,
+                clearLocalSession: true
+            )
+            if failureAccepted {
                 activeJobID = nil
                 pendingJob = nil
-                activeSession = nil
-                return
             }
-
-            cameraAvailability = await cameraService.prepareIfNeeded()
-            await cameraService.updateCaptureResolutionMode(captureResolutionMode)
-            cameraModeStatus = await cameraService.currentCameraModeStatus()
-            await refreshZoomState(resetToDefault: true)
-
-            switch cameraAvailability {
-            case .ready, .simulatorFallback:
-                transitionToCapture(for: job)
-            case let .unavailable(message):
-                let failureAccepted = await failJob(
-                    jobID: job.id,
-                    code: "camera_unavailable",
-                    message: message,
-                    clearLocalSession: true
-                )
-                if failureAccepted {
-                    activeJobID = nil
-                    pendingJob = nil
-                }
-            case .unknown:
-                let failureAccepted = await failJob(
-                    jobID: job.id,
-                    code: "camera_unavailable",
-                    message: CameraCaptureServiceError.cameraUnavailable.localizedDescription,
-                    clearLocalSession: true
-                )
-                if failureAccepted {
-                    activeJobID = nil
-                    pendingJob = nil
-                }
+        case .unknown:
+            let failureAccepted = await failJob(
+                jobID: job.id,
+                code: "camera_unavailable",
+                message: CameraCaptureServiceError.cameraUnavailable.localizedDescription,
+                clearLocalSession: true
+            )
+            if failureAccepted {
+                activeJobID = nil
+                pendingJob = nil
             }
-        } catch {
-            captureState = .failed(jobID: job.id, message: error.localizedDescription)
-            clearLocalSession(jobID: job.id)
-            activeJobID = nil
-            pendingJob = nil
         }
     }
 
