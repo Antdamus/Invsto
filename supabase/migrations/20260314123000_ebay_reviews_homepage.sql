@@ -1,5 +1,4 @@
 create extension if not exists pgcrypto;
-
 create table if not exists public.ebay_reviews (
   id uuid primary key default gen_random_uuid(),
   source text not null default 'ebay',
@@ -28,7 +27,6 @@ create table if not exists public.ebay_reviews (
   constraint ebay_reviews_star_rating_check
     check (star_rating between 1 and 5)
 );
-
 create table if not exists public.ebay_review_sync_runs (
   id uuid primary key default gen_random_uuid(),
   source text not null default 'ebay',
@@ -46,19 +44,14 @@ create table if not exists public.ebay_review_sync_runs (
   constraint ebay_review_sync_runs_status_check
     check (status in ('running', 'succeeded', 'failed'))
 );
-
 create index if not exists ebay_reviews_homepage_idx
   on public.ebay_reviews (approved_for_homepage, is_active, rating_type);
-
 create index if not exists ebay_reviews_featured_rank_idx
   on public.ebay_reviews (featured_rank asc nulls last, review_date desc);
-
 create index if not exists ebay_reviews_has_photo_idx
   on public.ebay_reviews (has_photo desc, review_date desc);
-
 create index if not exists ebay_review_sync_runs_status_idx
   on public.ebay_review_sync_runs (status, started_at desc);
-
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -68,13 +61,11 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists trg_ebay_reviews_updated_at on public.ebay_reviews;
 create trigger trg_ebay_reviews_updated_at
 before update on public.ebay_reviews
 for each row
 execute function public.set_updated_at();
-
 create or replace function public.get_storefront_testimonials(p_limit integer default 8)
 returns table (
   id uuid,
@@ -120,6 +111,5 @@ as $$
   order by r.featured_rank asc nulls last, r.review_date desc nulls last
   limit greatest(coalesce(p_limit, 8), 1);
 $$;
-
 revoke all on public.get_storefront_testimonials(integer) from public;
 grant execute on function public.get_storefront_testimonials(integer) to anon, authenticated, service_role;
