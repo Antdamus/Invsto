@@ -266,7 +266,7 @@ let uploadedImages = [];
     if (titleEl) titleEl.textContent = item?.title || "New item";
     if (barcodeEl) barcodeEl.textContent = item?.barcode ? `Barcode ${item.barcode}` : "Barcode ready";
     if (copyEl) {
-      copyEl.textContent = `The item, DYMO label, and ${photoLabel} were saved successfully.${stockLabel} Reloading a fresh add-item page now.`;
+      copyEl.textContent = `The item, DYMO label, and ${photoLabel} were saved successfully.${stockLabel} A completely fresh form with a new barcode and new label state is loading now.`;
     }
 
     continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });
@@ -316,6 +316,82 @@ let uploadedImages = [];
     } else {
       console.log("🔁 Inventory version updated", payload);
     }
+  }
+
+  function clearAutomaticDymoGeneration() {
+    if (automaticDymoTimer) {
+      window.clearTimeout(automaticDymoTimer);
+      automaticDymoTimer = null;
+    }
+  }
+
+  async function ensureCurrentDymoLabelForSubmit(barcode) {
+    const normalizedBarcode = String(barcode || "").trim();
+    if (!normalizedBarcode) {
+      throw new Error("Please generate or scan a barcode before submitting.");
+    }
+
+    const prepared = window.dymoModule?.getPreparedDymoLabel?.() || {
+      xml: window.latestDymoXml || "",
+      url: window.latestDymoUrl || "",
+      barcode: window.latestDymoBarcode || "",
+    };
+
+    if (
+      !prepared.xml ||
+      !prepared.url ||
+      !prepared.url.includes("labels/") ||
+      prepared.barcode !== normalizedBarcode
+    ) {
+      await window.dymoModule.generateDymoLabelFromForm({
+        downloadPreview: false,
+        silent: true,
+      });
+    }
+
+    const refreshed = window.dymoModule?.getPreparedDymoLabel?.() || {
+      xml: window.latestDymoXml || "",
+      url: window.latestDymoUrl || "",
+      barcode: window.latestDymoBarcode || "",
+    };
+
+    if (!refreshed.xml || !refreshed.url || !refreshed.url.includes("labels/")) {
+      throw new Error("The DYMO label could not be prepared. Please try again.");
+    }
+
+    if (refreshed.barcode && refreshed.barcode !== normalizedBarcode) {
+      throw new Error(`The staged DYMO label belongs to ${refreshed.barcode}, but this item is using ${normalizedBarcode}.`);
+    }
+
+    return refreshed;
+  }
+
+  async function attachDymoLabelToSavedItem(itemId, barcode) {
+    void itemId;
+    return dymoModule.uploadFinalDymoLabel({
+      expectedBarcode: barcode,
+      skipItemPathCheck: true,
+    });
+  }
+
+  function resetAddItemDraftStateAfterSuccess() {
+    clearAutomaticDymoGeneration();
+    document.getElementById("add-item-form")?.reset();
+    document.dispatchEvent(new Event("add-item-form:reset"));
+    if (previewContainer) previewContainer.innerHTML = "";
+    uploadedImages = [];
+    window.dymoModule?.clearPendingDymoLabel?.({
+      statusMessage: "Fresh barcode and label will be prepared after the page reloads.",
+    });
+    window.latestDymoXml = "";
+    window.latestDymoUrl = "";
+    window.latestDymoBarcode = "";
+    window.latestDymoGeneratedAt = "";
+    latestDymoXml = "";
+    if (pricePerWeightInput && pricePerWeightInput.dataset.autoSilver925 !== "true") {
+      pricePerWeightInput.value = "";
+    }
+    if (autoCostCheckbox) autoCostCheckbox.checked = true;
   }
 
 
@@ -1800,16 +1876,30 @@ let uploadedImages = [];
 // === FORM SUBMIT ===
 document.getElementById("add-item-form")?.addEventListener("submit", async (e) => {
   e.preventDefault();
+  const addItemForm = e.currentTarget;
+  if (addItemForm?.dataset.saving === "true") return;
+
+  if (addItemForm) addItemForm.dataset.saving = "true";
+  const submitButton = addItemForm?.querySelector('button[type="submit"]');
+  const originalSubmitText = submitButton?.textContent || "";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Saving Item...";
+  }
+  const releaseAddItemSubmit = () => {
+    if (addItemForm) delete addItemForm.dataset.saving;
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalSubmitText;
+    }
+  };
+  clearAutomaticDymoGeneration();
+
   // Check category selection
   const categoryValue = document.getElementById("category").value.trim();
   if (!categoryValue) {
     showToast("❌ Please select or create a category.");
-    return;
-  }
-
-  // Check DYMO label generation
-  if (!window.latestDymoUrl || typeof window.latestDymoUrl !== "string" || !window.latestDymoUrl.includes("labels/")) {
-    showToast("❌ Please generate the DYMO label before submitting.");
+    releaseAddItemSubmit();
     return;
   }
 
@@ -1833,7 +1923,31 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const distributor_phone = document.getElementById("distributor-phone").value.trim();
   const distributor_notes = document.getElementById("distributor-notes").value.trim();
   const qr_code = document.getElementById("qr-code").value.trim();
-  const barcode = barcodeInput.value;
+  let barcode = barcodeInput.value.trim();
+
+  if (!barcode) {
+    barcode = generateNewItemBarcode({ generateDymo: false });
+  }
+
+  try {
+    const duplicateBarcode = await dymoModule.barcodeExists(barcode);
+    if (duplicateBarcode) {
+      window.dymoModule?.clearPendingDymoLabel?.({
+        statusMessage: "That barcode already exists. A fresh barcode was generated.",
+      });
+      generateNewItemBarcode({ generateDymo: true });
+      alert(`Barcode "${barcode}" already exists in inventory. I generated a new barcode for this item; please review it and submit again.`);
+      releaseAddItemSubmit();
+      return;
+    }
+
+    await ensureCurrentDymoLabelForSubmit(barcode);
+  } catch (dymoPrepError) {
+    console.error("DYMO preparation failed:", dymoPrepError);
+    alert(`Failed to prepare DYMO label: ${dymoPrepError.message || dymoPrepError}`);
+    releaseAddItemSubmit();
+    return;
+  }
 
   const photoFiles = photoInput?.files || [];
   const photoUrls = [];
@@ -1892,17 +2006,9 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const finalPhotoPaths = [...new Set(photoUrls.filter(Boolean))];
   if (assistedSelectedImages.length && assistedCopyFailureCount && !assistedCopySuccessCount && !photoFiles.length) {
     alert("The selected assisted photos could not be saved to the item. Please try again before adding the item.");
+    releaseAddItemSubmit();
     return;
   }
-
-  let finalDymoPath;
-  try {
-    finalDymoPath = await dymoModule.uploadFinalDymoLabel();
-  } catch (err) {
-    alert(`❌ Failed to upload DYMO label: ${err.message || err}`);
-    return;
-  }
-
 
   const { data: insertedItems, error } = await supabase
     .from("item_types")
@@ -1931,17 +2037,44 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     .limit(1);
 
   if (error || !insertedItems || insertedItems.length === 0) {
+    if (error?.code === "23505" || /duplicate|unique/i.test(error?.message || "")) {
+      window.dymoModule?.clearPendingDymoLabel?.({
+        statusMessage: "That barcode was already saved. A fresh barcode was generated.",
+      });
+      generateNewItemBarcode({ generateDymo: true });
+    }
     alert("Failed to save item: " + (error?.message || "Unknown error"));
+    releaseAddItemSubmit();
     return;
   }
 
   const newItem = insertedItems[0];
+
+  try {
+    const finalDymoPath = await attachDymoLabelToSavedItem(newItem.id, barcode);
+    newItem.dymo_label_url = finalDymoPath;
+  } catch (err) {
+    alert(`❌ Item was saved, but the DYMO label could not be attached: ${err.message || err}`);
+    releaseAddItemSubmit();
+    return;
+  }
+
+  try {
+    window.dymoModule?.downloadPreparedDymoLabel?.(
+      window.dymoModule?.makeSafeDymoDownloadName?.(barcode) || `${barcode}.dymo`
+    );
+  } catch (downloadError) {
+    console.warn("DYMO label saved, but the browser did not start the download:", downloadError);
+    showToast("DYMO label was saved. If the download did not start, open it from the saved item.");
+  }
+
   try {
     const savedPhotos = await ensureItemPhotosSaved(newItem, finalPhotoPaths);
     newItem.photos = savedPhotos;
   } catch (photoAttachError) {
     console.error("Final item photo attach failed:", photoAttachError);
     alert(photoAttachError.message || "Item saved, but selected photos could not be attached.");
+    releaseAddItemSubmit();
     return;
   }
 
@@ -2005,16 +2138,7 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   delete pendingStockAssignments[newItem.barcode];
 }
 
-  document.getElementById("add-item-form").reset();
-  document.dispatchEvent(new Event("add-item-form:reset"));
-  previewContainer.innerHTML = "";
-  uploadedImages = [];
-  latestDymoXml = "";
-  if (pricePerWeightInput.dataset.autoSilver925 !== "true") {
-    pricePerWeightInput.value = "";
-  }
-  autoCostCheckbox.checked = true;
-  applyDefaultItemAutomation({ generateBarcode: true, generateDymo: true });
+  resetAddItemDraftStateAfterSuccess();
   await bumpInventoryVersion([newItem.id]);
   showItemSaveSuccessModal(newItem, {
     photoCount: finalPhotoPaths.length,

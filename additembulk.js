@@ -176,7 +176,12 @@ window.addItemBulkModule = (function () {
     // 1) Upload the DYMO label (if one was generated during Save click)
     let bagLabelUrl = null;
     try {
-      if (window.dymoModule?.uploadFinalDymoLabel && window.latestDymoXml && window.latestDymoUrl) {
+      if (
+        window.dymoModule?.uploadFinalDymoLabel &&
+        window.latestDymoXml &&
+        window.latestDymoUrl &&
+        window.latestDymoBarcode === bagBarcode
+      ) {
         bagLabelUrl = await dymoModule.uploadFinalDymoLabel(); // uses latestDymoXml/Url
       }
     } catch (e) {
@@ -402,6 +407,8 @@ window.addItemBulkModule = (function () {
       // Store in globals so we can upload later with the SAME helper
       window.latestDymoXml = templateXml;
       window.latestDymoUrl = labelPath;
+      window.latestDymoBarcode = bagBarcode;
+      window.latestDymoGeneratedAt = new Date().toISOString();
 
       statusEl && (statusEl.textContent = "✅ DYMO label generated & downloaded. It will be saved on submit.");
       return { labelPath, downloaded: true };

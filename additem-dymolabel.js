@@ -717,6 +717,55 @@ window.dymoModule = (function () {
 
     }
 
+    function setDymoStatus(message) {
+        const statusEl = document.getElementById("dymo-status");
+        if (statusEl) statusEl.innerText = message || "";
+    }
+
+    function clearPendingDymoLabel(options = {}) {
+        window.latestDymoXml = "";
+        window.latestDymoUrl = "";
+        window.latestDymoBarcode = "";
+        window.latestDymoGeneratedAt = "";
+
+        if (options.statusMessage !== undefined) {
+            setDymoStatus(options.statusMessage);
+        }
+    }
+
+    function getPreparedDymoLabel() {
+        return {
+            xml: window.latestDymoXml || "",
+            url: window.latestDymoUrl || "",
+            barcode: window.latestDymoBarcode || "",
+            generatedAt: window.latestDymoGeneratedAt || "",
+        };
+    }
+
+    function makeSafeDymoDownloadName(barcode) {
+        const safeBarcode = String(barcode || "OGJewelryLabel")
+            .trim()
+            .replace(/[^\w.-]+/g, "_")
+            .replace(/^_+|_+$/g, "");
+        return `${safeBarcode || "OGJewelryLabel"}.dymo`;
+    }
+
+    function downloadPreparedDymoLabel(filename = "") {
+        if (!window.latestDymoXml) {
+            throw new Error("No DYMO label is ready to download.");
+        }
+
+        const blob = new Blob([window.latestDymoXml], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || makeSafeDymoDownloadName(window.latestDymoBarcode);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
     async function generateDymoLabelFromForm(options = {}) {
         const { downloadPreview = true, silent = false } = options;
         const barcodeEl = document.getElementById("scanned-barcode");
@@ -761,12 +810,14 @@ window.dymoModule = (function () {
 
         window.latestDymoXml = templateXml;
         window.latestDymoUrl = labelPath;
+        window.latestDymoBarcode = barcode;
+        window.latestDymoGeneratedAt = new Date().toISOString();
 
         console.log(`✅ DYMO label generated, path reserved: ${labelPath}`);
         if (statusEl) {
             statusEl.innerText = downloadPreview
-                ? "✅ DYMO label generated & ready for final upload."
-                : "✅ DYMO label auto-generated & ready for final upload.";
+                ? "✅ DYMO label generated for preview. It will be saved after the item is added."
+                : "✅ DYMO label staged. It will be saved only after the item is added.";
         }
 
         return { templateXml, labelPath };
@@ -782,46 +833,7 @@ window.dymoModule = (function () {
 
         button.addEventListener("click", async () => {
             try {
-                await generateDymoLabelFromForm({ downloadPreview: true });
-                return;
-                const barcode = barcodeInput.value || "OG" + Date.now();
-
-                const exists = await dymoModule.barcodeExists(barcode);
-                if (exists) {
-                    alert(`❌ Barcode "${barcode}" already exists in inventory. Please generate a new one.`);
-                    return;
-                }
-
-                const qr = qrInput.value.trim() || (
-                    typeqr === "website"
-                        ? WEBSITE_QR_URL
-                        : "https://ogjewelry.store/auth?id=" + barcode
-                );
-                const price = document.getElementById("weight").value?.trim() || "0.0"; // pass weight as price
-
-                const { templateXml, labelPath } = await dymoModule.generateAndUploadDymoLabel({
-                    barcode, qr, price, typeqr,
-                });
-
-                // ✅ Download label locally for preview only
-                const blob = new Blob([templateXml], { type: "application/octet-stream" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "OGJewelryLabel.dymo";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-
-                // ✅ Save XML and reserved path for later upload on final submit
-                window.latestDymoXml = templateXml;
-                window.latestDymoUrl = labelPath;
-
-                console.log(`✅ DYMO label generated, path reserved: ${labelPath}`);
-                document.getElementById("dymo-status").innerText =
-                    "✅ DYMO label generated & ready for final upload.";
-
+                await generateDymoLabelFromForm({ downloadPreview: false });
             } catch (err) {
                 console.error("❌ DYMO generation failed:", err);
                 alert(`DYMO generation failed: ${err.message || err}`);
@@ -830,16 +842,24 @@ window.dymoModule = (function () {
     }
 
     // In additem-dymolabel.js, inside window.dymoModule = (function() { ... }) block
-    async function uploadFinalDymoLabel() {
+    async function uploadFinalDymoLabel(options = {}) {
+        const expectedBarcode = String(options.expectedBarcode || "").trim();
+        const skipItemPathCheck = options.skipItemPathCheck === true;
         if (!window.latestDymoXml || !window.latestDymoUrl) {
             throw new Error("No DYMO label generated. Please generate it first before submitting.");
         }
 
+        if (expectedBarcode && window.latestDymoBarcode && window.latestDymoBarcode !== expectedBarcode) {
+            throw new Error(`The staged DYMO label is for barcode "${window.latestDymoBarcode}", not "${expectedBarcode}". Please regenerate it.`);
+        }
+
         const blob = new Blob([window.latestDymoXml], { type: "application/octet-stream" });
 
-        const exists = await dymoModule.dymoLabelExists(window.latestDymoUrl);
-        if (exists) {
-            throw new Error(`DYMO label path "${window.latestDymoUrl}" already exists.`);
+        if (!skipItemPathCheck) {
+            const exists = await dymoModule.dymoLabelExists(window.latestDymoUrl);
+            if (exists) {
+                throw new Error(`DYMO label path "${window.latestDymoUrl}" already exists.`);
+            }
         }
 
         const { error: uploadError } = await supabase
@@ -862,6 +882,10 @@ window.dymoModule = (function () {
     barcodeExists, 
     dymoLabelExists, 
     setupGenerateDymoButtonListener, 
-    uploadFinalDymoLabel 
+    uploadFinalDymoLabel,
+    clearPendingDymoLabel,
+    getPreparedDymoLabel,
+    downloadPreparedDymoLabel,
+    makeSafeDymoDownloadName,
 };
 })();
