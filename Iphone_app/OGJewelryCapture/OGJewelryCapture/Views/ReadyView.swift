@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct ReadyView: View {
@@ -23,7 +24,7 @@ struct ReadyView: View {
 
     var body: some View {
         List {
-            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto {
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveJob {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(viewModel.station.name)
@@ -44,7 +45,7 @@ struct ReadyView: View {
                 }
             }
 
-            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto {
+            if !viewModel.isShowingPersistentResult && !viewModel.isReviewingCapturedPhoto && !viewModel.hasActiveJob {
                 Section("Listener") {
                     LabeledContent("Station", value: viewModel.station.name)
                     LabeledContent("Employee", value: viewModel.employee.displayName)
@@ -152,207 +153,11 @@ struct ReadyView: View {
             }
 
             if viewModel.hasActiveJob && !viewModel.isShowingPersistentResult {
-                Section("Active Job") {
-                    LabeledContent("Job", value: viewModel.activeJobReference)
-                    LabeledContent("State", value: viewModel.captureState.label)
-
-                    if let cancelJobAvailabilityMessage = viewModel.cancelJobAvailabilityMessage {
-                        Text(cancelJobAvailabilityMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button("Cancel Job", role: .destructive) {
-                        isShowingCancelConfirmation = true
-                    }
-                    .buttonStyle(OGActionButtonStyle(role: .destructive))
-                    .disabled(!viewModel.canCancelActiveJob)
+                Section {
+                    activeCaptureStation
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
                 }
-                .listRowBackground(OGVisualStyle.panel)
-            }
-
-            if let activeSession = viewModel.activeSession, !viewModel.isShowingPersistentResult {
-                Section("Active Session") {
-                    LabeledContent("Job", value: pendingJobReference)
-                    LabeledContent("Kept Photos", value: "\(activeSession.keptPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
-                    LabeledContent("Capture Quality", value: activeSession.resolutionMode.label)
-
-                    if let primaryPhoto = activeSession.primaryPhoto {
-                        LabeledContent("Primary", value: "Photo \(primaryPhoto.sortOrder + 1)")
-                    }
-
-                    if activeSession.keptPhotos.isEmpty {
-                        Text("No kept photos yet. Capture and keep at least one photo to enable Finish Job.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(activeSession.keptPhotos) { photo in
-                            VStack(alignment: .leading, spacing: 12) {
-                                if let image = photo.previewImage {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                }
-
-                                HStack {
-                                    Text("Photo \(photo.sortOrder + 1)")
-                                        .font(.headline)
-
-                                    if photo.isPrimary {
-                                        Text("Primary")
-                                            .font(.caption.weight(.semibold))
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(OGVisualStyle.gold.opacity(0.18), in: Capsule())
-                                            .foregroundStyle(OGVisualStyle.goldSoft)
-                                    }
-                                }
-
-                                LabeledContent("Captured", value: photo.capturedAt.formatted(date: .abbreviated, time: .standard))
-                                LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: photo.fileSizeBytes, countStyle: .file))
-                                LabeledContent("Dimensions", value: photoDimensionsLabel(photo))
-                                LabeledContent("Type", value: photo.mimeType)
-
-                                if photo.isSimulatorFallback {
-                                    Text("Captured using the simulator fallback path.")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Button("Delete Photo", role: .destructive) {
-                                    viewModel.deleteKeptPhoto(photo)
-                                }
-                                .buttonStyle(OGActionButtonStyle(role: .destructive))
-                            }
-                            .padding(.vertical, 4)
-                            .padding(14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(OGVisualStyle.panelElevated)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .stroke(OGVisualStyle.strokeStrong, lineWidth: 1)
-                                    )
-                            )
-                        }
-                    }
-
-                    if !viewModel.canAddMoreSessionPhotos {
-                        Text("Soft max reached. Delete a kept photo before capturing another one.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if !activeSession.keptPhotos.isEmpty {
-                        Button("Add Another Photo") {
-                            viewModel.addAnotherPhoto()
-                        }
-                        .buttonStyle(OGActionButtonStyle(role: .primary))
-                        .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
-                    }
-
-                    Button("Finish Job") {
-                        viewModel.finishJob()
-                    }
-                    .buttonStyle(OGActionButtonStyle(role: .primary))
-                    .disabled(!viewModel.canFinishJob)
-
-                    if let finishJobMessage = viewModel.finishJobMessage {
-                        Text(finishJobMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .listRowBackground(OGVisualStyle.panel)
-            }
-
-            if shouldShowPreview, let session = viewModel.previewSession {
-                Section("Live Preview") {
-                    CameraPreviewView(
-                        session: session,
-                        isTapToFocusEnabled: viewModel.isTapToFocusEnabledForCurrentState,
-                        isPinchToZoomEnabled: isPreviewZoomEnabled,
-                        zoomFactor: viewModel.zoomFactor,
-                        onTapToFocus: viewModel.isTapToFocusEnabledForCurrentState ? { devicePoint in
-                            _ = Task {
-                                await viewModel.focusPreview(at: devicePoint)
-                            }
-                        } : nil,
-                        onPinchToZoom: isPreviewZoomEnabled ? { zoomFactor in
-                            viewModel.updatePreviewZoom(to: zoomFactor)
-                        } : nil
-                    )
-                    .frame(height: 320)
-                    .overlay(alignment: .topTrailing) {
-                        if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
-                            Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.ultraThinMaterial, in: Capsule())
-                                .padding(12)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-
-                    if viewModel.isTapToFocusEnabledForCurrentState {
-                        Text(previewInteractionHint)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
-                        Text("Pinch the preview to adjust framing before capture.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if case .waitingForManualCapture = viewModel.captureState {
-                        Button("Capture Photo") {
-                            viewModel.triggerManualCapture()
-                        }
-                        .buttonStyle(OGActionButtonStyle(role: .primary))
-                    }
-                }
-                .listRowBackground(OGVisualStyle.panel)
-            }
-
-            if viewModel.isReviewingCapturedPhoto {
-                Section("Review Capture") {
-                    if let image = resultPreviewImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                    }
-
-                    LabeledContent("Station", value: viewModel.station.name)
-                    LabeledContent("Connection", value: viewModel.listenerState.label)
-                    LabeledContent("Capture State", value: viewModel.captureState.label)
-                    LabeledContent("Mode", value: viewModel.captureMode.label)
-                    LabeledContent("Capture Quality", value: activeQualityLabel)
-
-                    if let latestLocalResult = viewModel.latestLocalResult {
-                        LabeledContent("Job", value: String(latestLocalResult.jobID.uuidString.prefix(8)).uppercased())
-                        LabeledContent("Captured", value: latestLocalResult.capturedAt.formatted(date: .abbreviated, time: .standard))
-                        LabeledContent("Bytes", value: ByteCountFormatter.string(fromByteCount: latestLocalResult.fileSizeBytes, countStyle: .file))
-                    }
-
-                    Text("Keep stores this photo locally in the active session. Discard clears only this new capture and returns to the same job without uploading.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    Button("Keep") {
-                        viewModel.keepCapturedPhoto()
-                    }
-                    .buttonStyle(OGActionButtonStyle(role: .primary))
-
-                    Button("Discard / Retake", role: .destructive) {
-                        viewModel.discardCapturedPhoto()
-                    }
-                    .buttonStyle(OGActionButtonStyle(role: .destructive))
-                }
-                .listRowBackground(OGVisualStyle.panel)
+                .listRowBackground(Color.clear)
             }
 
             if viewModel.isShowingPersistentResult {
@@ -458,12 +263,337 @@ struct ReadyView: View {
         }
     }
 
-    private var activeQualityLabel: String {
-        viewModel.activeSession?.resolutionMode.label ?? viewModel.captureResolutionMode.label
+    private var activeCaptureStation: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            activeCaptureHeader
+            activeMediaArea
+            activeCaptureActions
+
+            if let activeSession = viewModel.activeSession {
+                keptPhotoSummary(activeSession)
+            }
+
+            activeJobFooterActions
+        }
+        .ogCard(elevated: true, padding: 14)
     }
 
-    private var pendingJobReference: String {
-        viewModel.activeSession.map { String($0.jobID.uuidString.prefix(8)).uppercased() } ?? viewModel.activeJobReference
+    private var activeCaptureHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Job \(viewModel.activeJobReference)")
+                        .font(.system(.title3, design: .serif).weight(.bold))
+                        .foregroundStyle(OGVisualStyle.textPrimary)
+
+                    Text(viewModel.station.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(OGVisualStyle.textSecondary)
+                }
+
+                Spacer(minLength: 12)
+
+                Text("Photos: \(viewModel.sessionPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(OGVisualStyle.gold.opacity(0.18), in: Capsule())
+                    .foregroundStyle(OGVisualStyle.goldSoft)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    activeCapturePill(viewModel.captureMode.label, systemImage: "camera.aperture")
+                    activeCapturePill(activeQualityLabel, systemImage: "photo")
+                    activeCapturePill(viewModel.captureState.label, systemImage: "circle.dotted")
+                }
+
+                Text("\(viewModel.cameraModeStatus.activeCameraLabel) · \(viewModel.autoListenStatus.label)")
+                    .font(.caption)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func activeCapturePill(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(OGVisualStyle.panel, in: Capsule())
+            .foregroundStyle(OGVisualStyle.goldSoft)
+    }
+
+    @ViewBuilder
+    private var activeMediaArea: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(OGVisualStyle.panel)
+
+                switch viewModel.captureState {
+                case .reviewingCapture:
+                    if let image = resultPreviewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        activeMediaPlaceholder(title: "Review Capture", message: "Captured photo is loading.")
+                    }
+                case .uploadingFinalSet:
+                    activeMediaPlaceholder(title: "Finishing Job", message: uploadProgressText)
+                case .sessionReady:
+                    if let image = viewModel.activeSession?.keptPhotos.last?.previewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        activeMediaPlaceholder(title: "Ready For Capture", message: "Capture and keep at least one photo.")
+                    }
+                default:
+                    if shouldShowPreview, let session = viewModel.previewSession {
+                        livePreview(session)
+                    } else {
+                        activeMediaPlaceholder(title: viewModel.captureState.label, message: activeMediaStatusText)
+                    }
+                }
+            }
+            .frame(height: 330)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(OGVisualStyle.strokeStrong, lineWidth: 1)
+            )
+
+            if let mediaHint = activeMediaHint {
+                Text(mediaHint)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+    }
+
+    private func livePreview(_ session: AVCaptureSession) -> some View {
+        CameraPreviewView(
+            session: session,
+            isTapToFocusEnabled: viewModel.isTapToFocusEnabledForCurrentState,
+            isPinchToZoomEnabled: isPreviewZoomEnabled,
+            zoomFactor: viewModel.zoomFactor,
+            onTapToFocus: viewModel.isTapToFocusEnabledForCurrentState ? { devicePoint in
+                _ = Task {
+                    await viewModel.focusPreview(at: devicePoint)
+                }
+            } : nil,
+            onPinchToZoom: isPreviewZoomEnabled ? { zoomFactor in
+                viewModel.updatePreviewZoom(to: zoomFactor)
+            } : nil
+        )
+        .overlay(alignment: .topTrailing) {
+            if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
+                Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(12)
+            }
+        }
+    }
+
+    private func activeMediaPlaceholder(title: String, message: String) -> some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .tint(OGVisualStyle.gold)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(OGVisualStyle.textPrimary)
+
+            Text(message)
+                .font(.footnote)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(OGVisualStyle.textSecondary)
+                .padding(.horizontal, 20)
+        }
+    }
+
+    @ViewBuilder
+    private var activeCaptureActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch viewModel.captureState {
+            case .waitingForManualCapture:
+                Button("Capture Photo") {
+                    viewModel.triggerManualCapture()
+                }
+                .buttonStyle(OGActionButtonStyle(role: .primary))
+            case .captureRequested:
+                Text("Auto capture is armed for \(viewModel.autoCaptureDelay.formatted(.number.precision(.fractionLength(1)))) seconds.")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.goldSoft)
+            case .capturing:
+                Text("Capturing photo...")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.goldSoft)
+            case .reviewingCapture:
+                HStack(spacing: 10) {
+                    Button("Keep") {
+                        viewModel.keepCapturedPhoto()
+                    }
+                    .buttonStyle(OGActionButtonStyle(role: .primary))
+
+                    Button("Discard / Retake", role: .destructive) {
+                        viewModel.discardCapturedPhoto()
+                    }
+                    .buttonStyle(OGActionButtonStyle(role: .destructive))
+                }
+            case .sessionReady:
+                Button("Add Another Photo") {
+                    viewModel.addAnotherPhoto()
+                }
+                .buttonStyle(OGActionButtonStyle(role: .primary))
+                .disabled(!viewModel.canAddMoreSessionPhotos || !isReadyToAddAnotherPhoto)
+            case .uploadingFinalSet:
+                Text(uploadProgressText)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.goldSoft)
+            case .idle, .listening, .completed, .failed:
+                EmptyView()
+            }
+
+            if let actionHelpText {
+                Text(actionHelpText)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+    }
+
+    private func keptPhotoSummary(_ activeSession: LocalCaptureSession) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Kept Photos")
+                    .font(.headline)
+                    .foregroundStyle(OGVisualStyle.textPrimary)
+
+                Spacer()
+
+                Text("\(activeSession.keptPhotoCount)/\(LocalCaptureSession.softMaxPhotoCount)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+
+            if activeSession.keptPhotos.isEmpty {
+                Text("No kept photos yet.")
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(activeSession.keptPhotos) { photo in
+                            compactKeptPhotoCard(photo)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            if !viewModel.canAddMoreSessionPhotos {
+                Text("Soft max reached. Delete a kept photo before capturing another one.")
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(OGVisualStyle.panel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(OGVisualStyle.stroke, lineWidth: 1)
+                )
+        )
+    }
+
+    private func compactKeptPhotoCard(_ photo: LocalSessionPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(OGVisualStyle.panelElevated)
+
+                if let image = photo.previewImage {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
+
+                if photo.isPrimary {
+                    Text("Primary")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(OGVisualStyle.gold.opacity(0.9), in: Capsule())
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .padding(6)
+                }
+            }
+            .frame(width: 112, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            Text("Photo \(photo.sortOrder + 1)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(OGVisualStyle.textPrimary)
+
+            Button("Delete", role: .destructive) {
+                viewModel.deleteKeptPhoto(photo)
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .tint(OGVisualStyle.destructive)
+        }
+        .frame(width: 112, alignment: .leading)
+    }
+
+    private var activeJobFooterActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Button("Finish Job") {
+                    viewModel.finishJob()
+                }
+                .buttonStyle(OGActionButtonStyle(role: .primary))
+                .disabled(!canFinishJobFromActiveSurface)
+
+                Button("Cancel Job", role: .destructive) {
+                    isShowingCancelConfirmation = true
+                }
+                .buttonStyle(OGActionButtonStyle(role: .destructive))
+                .disabled(!viewModel.canCancelActiveJob)
+            }
+
+            if let finishJobMessage = viewModel.finishJobMessage {
+                Text(finishJobMessage)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            } else if !canFinishJobFromActiveSurface {
+                Text(finishDisabledReason)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+
+            if let cancelJobAvailabilityMessage = viewModel.cancelJobAvailabilityMessage {
+                Text(cancelJobAvailabilityMessage)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+    }
+
+    private var activeQualityLabel: String {
+        viewModel.activeSession?.resolutionMode.label ?? viewModel.captureResolutionMode.label
     }
 
     private var shouldShowPreview: Bool {
@@ -473,6 +603,85 @@ struct ReadyView: View {
         case .idle, .listening, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
             false
         }
+    }
+
+    private var activeMediaStatusText: String {
+        switch viewModel.captureState {
+        case .sessionReady:
+            "Ready for the next photo."
+        case .uploadingFinalSet:
+            uploadProgressText
+        case .capturing:
+            "Saving the current frame for review."
+        default:
+            "Preparing the capture station."
+        }
+    }
+
+    private var activeMediaHint: String? {
+        switch viewModel.captureState {
+        case .captureRequested, .waitingForManualCapture:
+            previewInteractionHint
+        case .reviewingCapture:
+            "Review this capture before adding it to the local photo set."
+        case .sessionReady:
+            "The last kept photo is shown here. Add another photo or finish the job."
+        case .uploadingFinalSet:
+            nil
+        case .idle, .listening, .capturing, .completed, .failed:
+            nil
+        }
+    }
+
+    private var actionHelpText: String? {
+        switch viewModel.captureState {
+        case .captureRequested:
+            "Cancel Job remains available while auto capture is waiting."
+        case .waitingForManualCapture:
+            "Tap Capture Photo when framing and focus look right."
+        case .reviewingCapture:
+            "Keep stores this photo locally. Discard clears only this new capture and returns to the same job."
+        case .sessionReady:
+            "Kept photos stay local until Finish Job uploads the approved set."
+        case .uploadingFinalSet:
+            nil
+        case .idle, .listening, .capturing, .completed, .failed:
+            nil
+        }
+    }
+
+    private var uploadProgressText: String {
+        if let activeSession = viewModel.activeSession {
+            return "Uploading \(activeSession.keptPhotoCount) kept photo\(activeSession.keptPhotoCount == 1 ? "" : "s") and finalizing."
+        }
+
+        return "Uploading kept photos and finalizing."
+    }
+
+    private var canFinishJobFromActiveSurface: Bool {
+        guard viewModel.canFinishJob else { return false }
+
+        if case .reviewingCapture = viewModel.captureState {
+            return false
+        }
+
+        return true
+    }
+
+    private var finishDisabledReason: String {
+        if viewModel.isReviewingCapturedPhoto {
+            return "Keep or discard the current capture before finishing the job."
+        }
+
+        if viewModel.sessionPhotoCount == 0 {
+            return "Finish Job enables after at least one photo is kept."
+        }
+
+        if viewModel.isUploadingFinalSet {
+            return "Finish Job is already uploading."
+        }
+
+        return "Finish Job is temporarily unavailable."
     }
 
     private var previewInteractionHint: String {
@@ -545,10 +754,6 @@ struct ReadyView: View {
         viewModel.latestUploadResult?.previewImage ?? viewModel.latestLocalResult?.previewImage
     }
 
-    private func photoDimensionsLabel(_ photo: LocalSessionPhoto) -> String {
-        guard photo.imageWidth > 0, photo.imageHeight > 0 else { return "Unknown" }
-        return "\(photo.imageWidth) × \(photo.imageHeight)"
-    }
 }
 
 #Preview {
