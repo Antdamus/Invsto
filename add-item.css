@@ -686,6 +686,14 @@ input[type="file"].add-input::file-selector-button {
   color: var(--text-muted);
 }
 
+.inline-status-success {
+  color: var(--success);
+}
+
+.inline-status-error {
+  color: var(--danger);
+}
+
 .custom-dropdown {
   position: relative;
   width: 100%;
@@ -1158,6 +1166,78 @@ input[type="file"].add-input::file-selector-button {
   font-weight: 800;
 }
 
+.item-label-print-panel {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 20px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(244, 224, 190, 0.14);
+  background: rgba(255, 248, 236, 0.055);
+  text-align: left;
+}
+
+.item-label-print-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
+  gap: 14px;
+  align-items: end;
+}
+
+.item-label-print-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.item-label-print-head strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
+.item-label-print-input {
+  display: grid;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.item-label-print-input input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(244, 224, 190, 0.2);
+  background: rgba(10, 8, 11, 0.72);
+  color: var(--text);
+  font: inherit;
+}
+
+.item-label-print-formula {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.item-label-print-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.item-label-print-actions .add-button,
+.item-label-print-actions .add-button-secondary {
+  width: 100%;
+  min-height: 48px;
+  white-space: normal;
+}
+
 .item-save-success-progress {
   height: 6px;
   margin: 0 0 20px;
@@ -1174,6 +1254,10 @@ input[type="file"].add-input::file-selector-button {
   background: linear-gradient(90deg, #b48b4b, #f0d49b);
   transform-origin: left center;
   animation: itemSaveSuccessProgress 2.4s linear forwards;
+}
+
+.item-save-success-modal .item-save-success-progress {
+  display: none;
 }
 
 .hidden,
@@ -1328,7 +1412,13 @@ input[type="file"].add-input::file-selector-button {
   .btn-location-confirm,
   .btn-location-cancel,
   .generate-barcode-btn,
-  .item-save-success-dialog .add-button {
+  .item-save-success-dialog .add-button,
+  .item-save-success-dialog .add-button-secondary {
     width: 100%;
+  }
+
+  .item-label-print-head,
+  .item-label-print-actions {
+    grid-template-columns: 1fr;
   }
 }

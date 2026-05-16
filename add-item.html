@@ -675,11 +675,33 @@
       <div class="item-save-success-summary" aria-live="polite">
         <span id="item-save-success-name">New item</span>
         <span id="item-save-success-barcode">Barcode ready</span>
+        <span id="item-save-success-stock">Inventory quantity ready</span>
+      </div>
+      <div class="item-label-print-panel" aria-live="polite">
+        <div class="item-label-print-head">
+          <div>
+            <span class="item-label-print-kicker">Label Printing</span>
+            <strong id="item-label-print-count">0 labels recommended</strong>
+          </div>
+          <label for="item-labels-per-order" class="item-label-print-input">
+            <span>Labels per order</span>
+            <input id="item-labels-per-order" type="number" min="1" step="1" value="2" />
+          </label>
+        </div>
+        <p id="item-label-print-formula" class="item-label-print-formula">
+          Inventory quantity divided by labels per order.
+        </p>
+        <div class="item-label-print-actions">
+          <button type="button" id="item-label-print-batch" class="add-button">Print Recommended Labels</button>
+          <button type="button" id="item-label-print-one" class="add-button-secondary">Just Print One</button>
+          <button type="button" id="item-label-print-later" class="add-button-secondary">Not at This Time</button>
+        </div>
+        <p id="item-label-print-status" class="inline-status inline-status-muted"></p>
       </div>
       <div class="item-save-success-progress" aria-hidden="true">
         <span></span>
       </div>
-      <button type="button" id="item-save-success-continue" class="add-button">
+      <button type="button" id="item-save-success-continue" class="add-button hidden">
         Start Next Item
       </button>
     </div>

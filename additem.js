@@ -37,6 +37,7 @@ const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
 const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
 let automaticDymoTimer = null;
 let addItemSuccessReloadTimer = null;
+let latestItemLabelPrintState = null;
 
 function escapeLocationDymoXml(value) {
   return String(value ?? "")
@@ -244,39 +245,261 @@ let uploadedImages = [];
     window.location.reload();
   }
 
+  function getSavedInventoryQuantity(options = {}) {
+    const stockQuantity = Number(options.stockInfo?.quantity);
+    const bulkQuantity = Number(options.bulkInfo?.data?.estimated_qty);
+    if (Number.isFinite(bulkQuantity) && bulkQuantity > 0) return Math.floor(bulkQuantity);
+    if (Number.isFinite(stockQuantity) && stockQuantity > 0) return Math.floor(stockQuantity);
+    return 1;
+  }
+
+  function getLabelPrintElements() {
+    return {
+      labelsPerOrderInput: document.getElementById("item-labels-per-order"),
+      countEl: document.getElementById("item-label-print-count"),
+      formulaEl: document.getElementById("item-label-print-formula"),
+      statusEl: document.getElementById("item-label-print-status"),
+      batchButton: document.getElementById("item-label-print-batch"),
+      oneButton: document.getElementById("item-label-print-one"),
+      laterButton: document.getElementById("item-label-print-later"),
+    };
+  }
+
+  function getLabelsPerOrderValue() {
+    const input = document.getElementById("item-labels-per-order");
+    const value = Math.floor(Number(input?.value || 2));
+    return Number.isFinite(value) && value > 0 ? value : 2;
+  }
+
+  function getRecommendedLabelCount() {
+    const quantity = Math.max(1, Number(latestItemLabelPrintState?.inventoryQuantity || 1));
+    const labelsPerOrder = getLabelsPerOrderValue();
+    return Math.max(1, Math.ceil(quantity / labelsPerOrder));
+  }
+
+  function updateLabelPrintEstimate() {
+    const state = latestItemLabelPrintState;
+    const elements = getLabelPrintElements();
+    if (!state) return;
+
+    const quantity = Math.max(1, Number(state.inventoryQuantity || 1));
+    const labelsPerOrder = getLabelsPerOrderValue();
+    const recommendedCount = getRecommendedLabelCount();
+    const labelWord = recommendedCount === 1 ? "label" : "labels";
+
+    if (elements.countEl) {
+      elements.countEl.textContent = `${recommendedCount.toLocaleString()} ${labelWord} recommended`;
+    }
+    if (elements.formulaEl) {
+      elements.formulaEl.textContent = `${quantity.toLocaleString()} inventory unit${quantity === 1 ? "" : "s"} / ${labelsPerOrder.toLocaleString()} label${labelsPerOrder === 1 ? "" : "s"} per order = ${recommendedCount.toLocaleString()} ${labelWord}.`;
+    }
+    if (elements.batchButton) {
+      elements.batchButton.textContent = `Print ${recommendedCount.toLocaleString()} ${labelWord}`;
+    }
+  }
+
+  function setLabelPrintBusy(isBusy) {
+    const elements = getLabelPrintElements();
+    [elements.batchButton, elements.oneButton, elements.laterButton, elements.labelsPerOrderInput]
+      .filter(Boolean)
+      .forEach((element) => {
+        element.disabled = Boolean(isBusy);
+      });
+  }
+
+  function setLabelPrintStatus(message = "", type = "info") {
+    const statusEl = document.getElementById("item-label-print-status");
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.toggle("inline-status-muted", type !== "error" && type !== "success");
+    statusEl.classList.toggle("inline-status-error", type === "error");
+    statusEl.classList.toggle("inline-status-success", type === "success");
+  }
+
+  async function copyTextToClipboard(text) {
+    const value = String(text || "").trim();
+    if (!value) return false;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (_) {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      return copied;
+    }
+  }
+
+  function isMissingLabelPreferenceStorage(error) {
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+    return /set_item_label_print_preference|label_print_strategy|labels_per_order|label_print_quantity|collective_label_only|schema cache|could not find|function/i.test(text);
+  }
+
+  async function recordItemLabelPreference(strategy, printQuantity, labelsPerOrder, notes = "") {
+    const state = latestItemLabelPrintState;
+    if (!state?.item?.id) return false;
+
+    const payload = {
+      _item_id: state.item.id,
+      _strategy: strategy,
+      _labels_per_order: labelsPerOrder,
+      _label_print_quantity: printQuantity,
+      _notes: notes,
+    };
+
+    const { error } = await supabase.rpc("set_item_label_print_preference", payload);
+    if (!error) return true;
+
+    if (!isMissingLabelPreferenceStorage(error)) throw error;
+
+    const fallbackUpdate = {
+      label_print_strategy: strategy,
+      labels_per_order: labelsPerOrder,
+      label_print_quantity: strategy === "deferred" ? null : printQuantity,
+      label_printed_at: strategy === "deferred" ? null : new Date().toISOString(),
+      label_printed_by: currentUser?.id || null,
+      label_printed_by_email: currentUser?.email || null,
+      collective_label_only: strategy === "collective_only",
+      label_print_notes: notes || null,
+    };
+
+    const { error: updateError } = await supabase
+      .from("item_types")
+      .update(fallbackUpdate)
+      .eq("id", state.item.id);
+
+    if (updateError) {
+      console.warn("Label print preference could not be recorded until migration is pushed:", updateError);
+      return false;
+    }
+
+    return true;
+  }
+
+  function scheduleReloadAfterLabelDecision(delayMs = 1200) {
+    if (addItemSuccessReloadTimer) clearTimeout(addItemSuccessReloadTimer);
+    addItemSuccessReloadTimer = window.setTimeout(reloadAddItemPageForNextItem, delayMs);
+  }
+
+  async function printSavedItemLabels(copies, strategy) {
+    const state = latestItemLabelPrintState;
+    if (!state?.dymoXml) {
+      throw new Error("The saved DYMO label is not available for printing.");
+    }
+
+    return window.dymoModule.printDymoLabelXml(state.dymoXml, {
+      copies,
+      onProgress: (current, total, printer) => {
+        setLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
+      },
+    });
+  }
+
+  async function handleLabelPrintDecision(strategy) {
+    const state = latestItemLabelPrintState;
+    if (!state) return;
+
+    const labelsPerOrder = getLabelsPerOrderValue();
+    const printQuantity = strategy === "individual_batch" ? getRecommendedLabelCount() : strategy === "collective_only" ? 1 : null;
+
+    setLabelPrintBusy(true);
+    try {
+      if (strategy === "deferred") {
+        const copied = await copyTextToClipboard(state.item?.barcode);
+        const recorded = await recordItemLabelPreference("deferred", null, labelsPerOrder, "Label printing deferred; barcode copied.");
+        setLabelPrintStatus(`${copied ? "Barcode copied to clipboard." : "Could not copy barcode automatically."}${recorded ? "" : " Label preference will record after the migration is pushed."}`, copied ? "success" : "error");
+        scheduleReloadAfterLabelDecision(copied ? 1100 : 2200);
+        return;
+      }
+
+      await printSavedItemLabels(printQuantity, strategy);
+      const notes = strategy === "collective_only"
+        ? "Printed one collective label; item should not receive individual labels."
+        : `Printed recommended label batch after add-item save.`;
+      const recorded = await recordItemLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
+      setLabelPrintStatus(`Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}.${recorded ? " Reloading for the next item..." : " Label tag will record after the migration is pushed. Reloading..."}`, "success");
+      scheduleReloadAfterLabelDecision(recorded ? 1300 : 2400);
+    } catch (error) {
+      console.error("Label print decision failed:", error);
+      setLabelPrintStatus(`Could not complete label printing: ${error?.message || error}`, "error");
+      setLabelPrintBusy(false);
+    }
+  }
+
+  function bindItemLabelPrintModalControls() {
+    const elements = getLabelPrintElements();
+    elements.labelsPerOrderInput?.addEventListener("input", updateLabelPrintEstimate);
+    if (elements.batchButton) {
+      elements.batchButton.onclick = () => handleLabelPrintDecision("individual_batch");
+    }
+    if (elements.oneButton) {
+      elements.oneButton.onclick = () => handleLabelPrintDecision("collective_only");
+    }
+    if (elements.laterButton) {
+      elements.laterButton.onclick = () => handleLabelPrintDecision("deferred");
+    }
+  }
+
   function showItemSaveSuccessModal(item, options = {}) {
     const modal = document.getElementById("item-save-success-modal");
     const titleEl = document.getElementById("item-save-success-name");
     const barcodeEl = document.getElementById("item-save-success-barcode");
+    const stockEl = document.getElementById("item-save-success-stock");
     const copyEl = document.getElementById("item-save-success-copy");
     const continueButton = document.getElementById("item-save-success-continue");
+    const labelsPerOrderInput = document.getElementById("item-labels-per-order");
 
     if (!modal) {
       reloadAddItemPageForNextItem();
       return;
     }
 
+    if (addItemSuccessReloadTimer) {
+      clearTimeout(addItemSuccessReloadTimer);
+      addItemSuccessReloadTimer = null;
+    }
+
     const photoCount = Number(options.photoCount || 0);
     const stockInfo = options.stockInfo || null;
+    const inventoryQuantity = getSavedInventoryQuantity(options);
     const photoLabel = `${photoCount} photo${photoCount === 1 ? "" : "s"}`;
     const stockLabel = stockInfo?.quantity
       ? ` Stock placement: ${stockInfo.quantity} unit${Number(stockInfo.quantity) === 1 ? "" : "s"} to ${stockInfo.location_name || "selected location"}.`
       : "";
 
+    latestItemLabelPrintState = {
+      item,
+      dymoXml: options.dymoXml || "",
+      dymoPath: options.dymoPath || item?.dymo_label_url || "",
+      inventoryQuantity,
+    };
+
     if (titleEl) titleEl.textContent = item?.title || "New item";
     if (barcodeEl) barcodeEl.textContent = item?.barcode ? `Barcode ${item.barcode}` : "Barcode ready";
+    if (stockEl) stockEl.textContent = `${inventoryQuantity.toLocaleString()} inventory unit${inventoryQuantity === 1 ? "" : "s"} just added`;
     if (copyEl) {
-      copyEl.textContent = `The item, DYMO label, and ${photoLabel} were saved successfully.${stockLabel} A completely fresh form with a new barcode and new label state is loading now.`;
+      copyEl.textContent = `The item, DYMO label, and ${photoLabel} were saved successfully.${stockLabel} Choose how many physical labels should print before the form resets for the next item.`;
     }
+
+    if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
+    bindItemLabelPrintModalControls();
+    updateLabelPrintEstimate();
+    setLabelPrintStatus("Ready to print through DYMO Connect.");
+    setLabelPrintBusy(false);
 
     continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });
 
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("modal-open");
-    continueButton?.focus();
-
-    addItemSuccessReloadTimer = window.setTimeout(reloadAddItemPageForNextItem, 2600);
+    document.getElementById("item-label-print-batch")?.focus();
   }
 
   //obtain unique categories to display in the tab
@@ -2059,14 +2282,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     return;
   }
 
-  try {
-    window.dymoModule?.downloadPreparedDymoLabel?.(
-      window.dymoModule?.makeSafeDymoDownloadName?.(barcode) || `${barcode}.dymo`
-    );
-  } catch (downloadError) {
-    console.warn("DYMO label saved, but the browser did not start the download:", downloadError);
-    showToast("DYMO label was saved. If the download did not start, open it from the saved item.");
-  }
+  const savedDymoXml = window.latestDymoXml || "";
+  const savedDymoPath = newItem.dymo_label_url || window.latestDymoUrl || "";
 
   try {
     const savedPhotos = await ensureItemPhotosSaved(newItem, finalPhotoPaths);
@@ -2143,6 +2360,9 @@ if (stockInfo && (bulkRes?.skipped === true))  {
   showItemSaveSuccessModal(newItem, {
     photoCount: finalPhotoPaths.length,
     stockInfo,
+    bulkInfo: bulkRes,
+    dymoXml: savedDymoXml,
+    dymoPath: savedDymoPath,
   });
 });
 

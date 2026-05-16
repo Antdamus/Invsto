@@ -766,6 +766,113 @@ window.dymoModule = (function () {
         URL.revokeObjectURL(url);
     }
 
+    function getDymoFramework() {
+        return window.dymo?.label?.framework || null;
+    }
+
+    function normalizeDymoPrinters(printers) {
+        if (!printers) return [];
+        if (Array.isArray(printers)) return printers.filter(Boolean);
+
+        if (typeof printers.length === "number") {
+            const list = [];
+            for (let index = 0; index < printers.length; index += 1) {
+                const printer = typeof printers.item === "function" ? printers.item(index) : printers[index];
+                if (printer) list.push(printer);
+            }
+            if (list.length) return list;
+        }
+
+        return Object.keys(printers)
+            .map((key) => printers[key])
+            .filter((printer) => printer && typeof printer === "object" && printer.name);
+    }
+
+    async function ensureDymoFrameworkReady() {
+        const framework = getDymoFramework();
+        if (!framework) {
+            throw new Error("DYMO Connect is not available in this browser. Make sure DYMO Connect/Web Service is running.");
+        }
+
+        if (typeof framework.init !== "function") return framework;
+
+        await new Promise((resolve, reject) => {
+            let settled = false;
+            const timeout = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                resolve();
+            }, 3500);
+
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                resolve();
+            };
+
+            try {
+                const initResult = framework.init(finish);
+                if (initResult && typeof initResult.then === "function") {
+                    initResult.then(finish).catch((error) => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timeout);
+                        reject(error);
+                    });
+                }
+            } catch (error) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                reject(error);
+            }
+        });
+
+        return framework;
+    }
+
+    async function printDymoLabelXml(labelXml, options = {}) {
+        const copies = Math.max(1, Math.floor(Number(options.copies) || 1));
+        const preferredPrinterName = String(options.printerName || "").trim();
+        const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+        const framework = await ensureDymoFrameworkReady();
+
+        if (typeof framework.getPrinters !== "function" || typeof framework.openLabelXml !== "function") {
+            throw new Error("DYMO Connect print functions are not available.");
+        }
+
+        const printers = normalizeDymoPrinters(framework.getPrinters());
+        const printer = printers.find((entry) => preferredPrinterName && entry.name === preferredPrinterName)
+            || printers.find((entry) => /labelwriter/i.test(`${entry.printerType || ""} ${entry.modelName || ""} ${entry.name || ""}`))
+            || printers[0];
+
+        if (!printer?.name) {
+            throw new Error("No DYMO printer was found. Open DYMO Connect and confirm the printer is available.");
+        }
+
+        const label = framework.openLabelXml(labelXml);
+        if (!label || typeof label.print !== "function") {
+            throw new Error("The DYMO label could not be opened for printing.");
+        }
+
+        for (let index = 0; index < copies; index += 1) {
+            onProgress?.(index + 1, copies, printer);
+            label.print(printer.name);
+            // Give DYMO Connect a small breath between jobs so larger batches do not get dropped.
+            await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+
+        return { printerName: printer.name, copies };
+    }
+
+    async function printPreparedDymoLabel(options = {}) {
+        if (!window.latestDymoXml) {
+            throw new Error("No DYMO label is ready to print.");
+        }
+        return printDymoLabelXml(window.latestDymoXml, options);
+    }
+
     async function generateDymoLabelFromForm(options = {}) {
         const { downloadPreview = true, silent = false } = options;
         const barcodeEl = document.getElementById("scanned-barcode");
@@ -887,5 +994,7 @@ window.dymoModule = (function () {
     getPreparedDymoLabel,
     downloadPreparedDymoLabel,
     makeSafeDymoDownloadName,
+    printDymoLabelXml,
+    printPreparedDymoLabel,
 };
 })();
