@@ -446,6 +446,35 @@ body.live-label-step #current-lot-card {
   background: rgba(231, 192, 114, 0.12);
 }
 
+.source-btn.is-storage-source {
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.source-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  width: max-content;
+  margin-right: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(231, 192, 114, 0.28);
+  background: rgba(231, 192, 114, 0.1);
+  color: var(--live-gold);
+  padding: 3px 7px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.source-kind-badge.is-storage,
+.source-kind-badge.is-container {
+  border-color: rgba(96, 165, 250, 0.3);
+  background: rgba(96, 165, 250, 0.12);
+  color: #bfdbfe;
+}
+
 .session-btn small,
 .source-btn span,
 .manifest-item small,

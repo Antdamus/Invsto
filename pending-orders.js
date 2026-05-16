@@ -86,6 +86,26 @@ function formatElapsed(seconds) {
   return `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
+function getSourceRole(source = {}) {
+  if (source.is_tray || source.location_role === "tray") return "tray";
+  if (source.location_role === "container") return "container";
+  return "storage_location";
+}
+
+function getSourceKindLabel(source = {}) {
+  const role = getSourceRole(source);
+  if (role === "tray") return "Tray";
+  if (role === "container") return "Storage Container";
+  return "Storage";
+}
+
+function getSourceKindClass(source = {}) {
+  const role = getSourceRole(source);
+  if (role === "tray") return "is-tray";
+  if (role === "container") return "is-container";
+  return "is-storage";
+}
+
 function sameLocalDay(value, reference = new Date()) {
   if (!value) return false;
   const date = new Date(value);
@@ -1527,7 +1547,7 @@ async function loadLiveLotItems(lotId) {
     .select(`
       *,
       item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
-      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role)
+      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
     `)
     .eq("lot_id", lotId)
     .order("scanned_at", { ascending: true });
@@ -1633,12 +1653,13 @@ function renderLiveLotPanel() {
       ${state.selectedLiveLotItems.map((entry) => {
         const item = entry.item || {};
         const loc = entry.source_location || {};
+        const sourceKind = getSourceKindLabel(loc);
         return `
           <article class="live-lot-item" data-live-lot-item="${escapeHtml(entry.id)}">
             <div class="live-lot-thumb"><span>No photo</span></div>
             <div>
               <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-              <small>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(loc.location_name || "Unknown source")} - minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+              <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(loc.location_name || "Unknown source")} - minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
             </div>
             <b>${escapeHtml(entry.status || "reserved")}</b>
           </article>
@@ -1892,6 +1913,7 @@ async function renderLiveLotBundleReviewList(items) {
   items.forEach((entry) => {
     const item = entry.item || {};
     const loc = entry.source_location || {};
+    const sourceKind = getSourceKindLabel(loc);
     const card = document.createElement("article");
     card.className = "bundle-review-item";
     card.innerHTML = `
@@ -1899,7 +1921,7 @@ async function renderLiveLotBundleReviewList(items) {
       <div class="bundle-review-copy">
         <strong>${escapeHtml(item.title || "Untitled live-sale item")}</strong>
         <span>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()}</span>
-        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `- ${escapeHtml(loc.location_code)}` : ""} - live minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+        <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `- ${escapeHtml(loc.location_code)}` : ""} - live minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
       </div>
     `;
     list.appendChild(card);
@@ -1960,7 +1982,7 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
-      const { error } = await supabase.rpc("fulfill_ebay_order_line_with_live_lot", {
+      const { error } = await supabase.rpc("fulfill_ebay_order_line_with_live_lot_for_store", {
         _order_line_id: state.selectedLine.id,
         _lot_id: state.selectedLiveLot.id,
         _notes: notes || null,

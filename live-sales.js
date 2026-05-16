@@ -90,6 +90,26 @@ function getSessionStoreName(session = state.currentSession) {
   return session?.store_id ? getStoreName(session.store_id) : "No store";
 }
 
+function getSourceRole(source = {}) {
+  if (source.is_tray || source.location_role === "tray") return "tray";
+  if (source.location_role === "container") return "container";
+  return "storage_location";
+}
+
+function getSourceKindLabel(source = {}) {
+  const role = getSourceRole(source);
+  if (role === "tray") return "Tray";
+  if (role === "container") return "Storage Container";
+  return "Storage";
+}
+
+function getSourceKindClass(source = {}) {
+  const role = getSourceRole(source);
+  if (role === "tray") return "is-tray";
+  if (role === "container") return "is-container";
+  return "is-storage";
+}
+
 function formatSessionTitleDate(value = new Date()) {
   const weekday = value.toLocaleDateString([], { weekday: "long" });
   const date = value.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
@@ -519,7 +539,7 @@ async function loadLotItems() {
     .select(`
       *,
       item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
-      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role)
+      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
     `)
     .eq("lot_id", state.currentLot.id)
     .order("scanned_at", { ascending: true });
@@ -558,13 +578,14 @@ function renderManifest() {
   activeGroups.forEach((group) => {
     const item = group.item || {};
     const loc = group.sourceLocation || {};
+    const sourceKind = getSourceKindLabel(loc);
     const article = document.createElement("article");
     article.className = "manifest-item";
     article.innerHTML = `
       <div class="manifest-thumb"><span>No photo</span></div>
       <div class="manifest-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-        <span>${escapeHtml(item.barcode || "-")} - ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</span>
+        <span><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(item.barcode || "-")} - ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</span>
         <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))}</small>
       </div>
       <div class="manifest-actions">
@@ -686,6 +707,7 @@ function renderLabelReview() {
   groups.forEach((group) => {
     const item = group.item || {};
     const loc = group.sourceLocation || {};
+    const sourceKind = getSourceKindLabel(loc);
     const row = document.createElement("article");
     row.className = "label-review-item";
     row.innerHTML = `
@@ -693,7 +715,7 @@ function renderLabelReview() {
       <div class="label-review-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${escapeHtml(item.barcode || "-")}</span>
-        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
+        <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
       </div>
       <div class="label-review-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
     `;
@@ -1083,7 +1105,7 @@ function renderSelectedItem() {
     <div class="match-copy">
       <strong>${escapeHtml(state.selectedItem.title || "Untitled item")}</strong>
       <span>${escapeHtml(state.selectedItem.barcode || "-")} - ${Number(state.selectedItem.weight || 0).toFixed(2)} g</span>
-      <small>${escapeHtml(state.selectedSourceRow?.locationLabel || "Choose source tray")}</small>
+      <small>${escapeHtml(state.selectedSourceRow?.locationLabel || "Choose source")}</small>
     </div>
   `;
   hydrateItemPhoto({
@@ -1095,7 +1117,7 @@ function renderSelectedItem() {
 
 async function loadSourceRowsForItem(item) {
   if (!item?.id) return;
-  setStatus("Loading source trays for the scanned item...");
+  setStatus("Loading source stock for the scanned item...");
 
   const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
     supabase
@@ -1111,7 +1133,7 @@ async function loadSourceRowsForItem(item) {
 
   if (rowError) {
     console.error("Live sale source row load failed:", rowError);
-    setStatus(rowError.message || "Could not load source trays.", "error");
+    setStatus(rowError.message || "Could not load source stock.", "error");
     return;
   }
 
@@ -1125,48 +1147,60 @@ async function loadSourceRowsForItem(item) {
   ]));
 
   const sessionStoreId = state.currentSession?.store_id || "";
-  state.sourceRows = (rows || [])
+  const eligibleRows = (rows || [])
     .map((row) => normalizeSourceRow(row))
     .filter((row) => {
       const inStore = !sessionStoreId || row.store_id === sessionStoreId;
-      return row.isTray && inStore && row.tray_status !== "checked_out" && row.available_quantity > 0;
+      const validTray = row.isTray && row.tray_status !== "checked_out";
+      const validStorage = !row.isTray && ["storage_location", "container"].includes(row.source_role);
+      return inStore && (validTray || validStorage) && row.available_quantity > 0;
     });
 
+  const trayRows = eligibleRows.filter((row) => row.isTray);
+  const storageRows = eligibleRows.filter((row) => !row.isTray);
+  state.sourceRows = trayRows.length ? trayRows : storageRows;
   state.selectedSourceRow = state.sourceRows.length === 1 ? state.sourceRows[0] : null;
   renderSourceRows();
   renderSelectedItem();
 
   if (state.selectedSourceRow) {
+    const sourceKind = state.selectedSourceRow.isTray ? "tray source" : `${state.selectedSourceRow.source_kind_label.toLowerCase()} source`;
     if (state.flowStep === "scan") {
-      setStatus("Only one available tray source was found. Reserving it now...", "success");
+      setStatus(`Only one available ${sourceKind} was found. Reserving it now...`, "success");
       await reserveSelectedItem({ auto: true });
     } else {
-      setStatus("Only one available tray source was found.", "success");
+      setStatus(`Only one available ${sourceKind} was found.`, "success");
     }
   } else if (state.sourceRows.length) {
-    setStatus(`${state.sourceRows.length} source trays found. Choose the tray the item came from; one unit will be added.`, "info");
+    const hasStorageFallback = state.sourceRows.some((row) => !row.isTray);
+    setStatus(`${state.sourceRows.length} ${hasStorageFallback ? "storage/container source(s)" : "source tray(s)"} found. Choose the exact source; one unit will be added.`, "info");
   } else {
-    setStatus("This item has no unreserved stock in a checked-in tray for this live sale store.", "error");
+    setStatus("This item has no unreserved stock in a checked-in tray or storage/container for this live sale store.", "error");
   }
 }
 
 function normalizeSourceRow(row) {
   const loc = row.location || {};
-  const isTray = Boolean(loc.is_tray || loc.location_role === "tray");
+  const sourceRole = getSourceRole(loc);
+  const isTray = sourceRole === "tray";
   const storeId = isTray ? (loc.tray_current_store_id || loc.store_id || "") : (loc.store_id || "");
   const reserved = state.sourceReservations.get(row.id) || 0;
   const available = Math.max(0, Number(row.quantity || 0) - reserved);
   const storeName = getStoreName(storeId);
+  const sourceKindLabel = getSourceKindLabel(loc);
+  const defaultName = isTray ? "Unnamed tray" : sourceRole === "container" ? "Unnamed container" : "Unnamed storage";
   return {
     ...row,
     isTray,
+    source_role: sourceRole,
+    source_kind_label: sourceKindLabel,
     store_id: storeId,
     tray_status: loc.tray_status || "",
     location_name: loc.location_name || "",
     location_code: loc.location_code || "",
     reserved_quantity: reserved,
     available_quantity: available,
-    locationLabel: `${loc.location_name || "Unnamed tray"}${loc.location_code ? ` (${loc.location_code})` : ""}${storeName ? ` - ${storeName}` : ""}`,
+    locationLabel: `${loc.location_name || defaultName}${loc.location_code ? ` (${loc.location_code})` : ""} - ${sourceKindLabel}${storeName ? ` - ${storeName}` : ""}`,
   };
 }
 
@@ -1181,7 +1215,7 @@ function renderSourceRows() {
   }
 
   if (!state.sourceRows.length) {
-    container.innerHTML = `<div class="empty-state">No available checked-in tray source found.</div>`;
+    container.innerHTML = `<div class="empty-state">No available checked-in tray or storage/container source found.</div>`;
     updateScanGate();
     return;
   }
@@ -1189,10 +1223,10 @@ function renderSourceRows() {
   state.sourceRows.forEach((row) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `source-btn ${state.selectedSourceRow?.id === row.id ? "is-selected" : ""}`;
+    button.className = `source-btn ${row.isTray ? "" : "is-storage-source"} ${state.selectedSourceRow?.id === row.id ? "is-selected" : ""}`;
     button.innerHTML = `
       <span>
-        <strong>${escapeHtml(row.locationLabel)}</strong>
+        <strong><b class="source-kind-badge ${getSourceKindClass(row.location || {})}">${escapeHtml(row.source_kind_label)}</b> ${escapeHtml(row.locationLabel)}</strong>
         <small>${Number(row.available_quantity || 0).toLocaleString()} available after ${Number(row.reserved_quantity || 0).toLocaleString()} reserved</small>
       </span>
       <b>Select</b>
@@ -1201,7 +1235,7 @@ function renderSourceRows() {
       state.selectedSourceRow = row;
       renderSourceRows();
       renderSelectedItem();
-      setStatus("Source tray selected. Adding one unit to the bag...", "success");
+      setStatus(`${row.source_kind_label} selected. Adding one unit to the bag...`, "success");
       reserveSelectedItem({ auto: true });
     });
     container.appendChild(button);
@@ -1212,7 +1246,7 @@ function renderSourceRows() {
 
 async function reserveSelectedItem(options = {}) {
   if (!state.currentLot || !state.selectedItem || !state.selectedSourceRow || state.busy) {
-    setStatus("Scan an item and choose its source tray first.", "error");
+    setStatus("Scan an item and choose its source first.", "error");
     return;
   }
 

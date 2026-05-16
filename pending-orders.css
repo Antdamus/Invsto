@@ -958,6 +958,30 @@ textarea:focus {
   color: #64748b;
 }
 
+.source-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  width: max-content;
+  margin-right: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 134, 39, 0.24);
+  background: rgba(180, 134, 39, 0.1);
+  color: #8a5f13;
+  padding: 2px 7px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.source-kind-badge.is-storage,
+.source-kind-badge.is-container {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+}
+
 .live-lot-items {
   display: grid;
   gap: 8px;
