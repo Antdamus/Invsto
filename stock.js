@@ -87,6 +87,7 @@ const stockMediaState = {
     offsetX: 0,
     offsetY: 0,
     rotation: 0,
+    backgroundFill: "black",
   },
   inspector: {
     index: -1,
@@ -4305,6 +4306,7 @@ function closeStockPhotoEditor() {
     offsetX: 0,
     offsetY: 0,
     rotation: 0,
+    backgroundFill: "black",
   };
 }
 
@@ -4312,6 +4314,37 @@ function syncStockEditorControls() {
   document.getElementById("stock-photo-editor-zoom").value = String(stockMediaState.editor.zoom);
   document.getElementById("stock-photo-editor-x").value = String(stockMediaState.editor.offsetX);
   document.getElementById("stock-photo-editor-y").value = String(stockMediaState.editor.offsetY);
+  syncStockEditorFillControls();
+}
+
+function inferStockEditorBackgroundFill(image) {
+  const sourceType = String(image?.sourceType || "").toLowerCase();
+  const name = String(image?.name || "").toLowerCase();
+  const path = String(image?.path || "").toLowerCase();
+  const joined = `${sourceType} ${name} ${path}`;
+  if (joined.includes("white")) return "white";
+  if (joined.includes("black")) return "black";
+  return "black";
+}
+
+function getStockEditorBackgroundColor() {
+  return stockMediaState.editor.backgroundFill === "white" ? "#ffffff" : "#000000";
+}
+
+function syncStockEditorFillControls() {
+  const isWhite = stockMediaState.editor.backgroundFill === "white";
+  const blackButton = document.getElementById("stock-photo-editor-fill-black");
+  const whiteButton = document.getElementById("stock-photo-editor-fill-white");
+  blackButton?.classList.toggle("is-active", !isWhite);
+  whiteButton?.classList.toggle("is-active", isWhite);
+  blackButton?.setAttribute("aria-pressed", String(!isWhite));
+  whiteButton?.setAttribute("aria-pressed", String(isWhite));
+}
+
+function setStockEditorBackgroundFill(fill) {
+  stockMediaState.editor.backgroundFill = fill === "white" ? "white" : "black";
+  syncStockEditorFillControls();
+  drawStockPhotoEditor();
 }
 
 function drawStockPhotoEditor() {
@@ -4331,8 +4364,7 @@ function drawStockPhotoEditor() {
   const x = size / 2 + stockMediaState.editor.offsetX * maxOffset;
   const y = size / 2 + stockMediaState.editor.offsetY * maxOffset;
 
-  context.clearRect(0, 0, size, size);
-  context.fillStyle = "#101014";
+  context.fillStyle = getStockEditorBackgroundColor();
   context.fillRect(0, 0, size, size);
   context.save();
   context.translate(x, y);
@@ -4357,6 +4389,7 @@ async function openStockPhotoEditor(index) {
       offsetX: 0,
       offsetY: 0,
       rotation: 0,
+      backgroundFill: inferStockEditorBackgroundFill(image),
     };
     document.getElementById("stock-photo-editor")?.classList.remove("hidden");
     syncStockEditorControls();
@@ -5401,6 +5434,12 @@ function setupStockMediaListeners() {
     stockMediaState.editor.rotation = 0;
     syncStockEditorControls();
     drawStockPhotoEditor();
+  });
+  document.getElementById("stock-photo-editor-fill-black")?.addEventListener("click", () => {
+    setStockEditorBackgroundFill("black");
+  });
+  document.getElementById("stock-photo-editor-fill-white")?.addEventListener("click", () => {
+    setStockEditorBackgroundFill("white");
   });
   document.getElementById("stock-photo-editor-save")?.addEventListener("click", saveStockPhotoEditorImage);
   document.getElementById("stock-photo-manager-grid")?.addEventListener("click", async (event) => {

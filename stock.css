@@ -2637,6 +2637,14 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font-weight: 900;
 }
 
+.stock-photo-editor-fill {
+  display: grid;
+  gap: 8px;
+  color: #3f4148;
+  font-size: .84rem;
+  font-weight: 900;
+}
+
 .stock-photo-editor-controls input[type="range"] {
   width: 100%;
 }
@@ -2656,6 +2664,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font-family: system-ui, sans-serif;
   font-weight: 900;
   cursor: pointer;
+}
+
+.stock-photo-editor-buttons button.is-active {
+  border-color: rgba(0,113,227,.36);
+  background: #e8f2ff;
+  color: #005bb5;
 }
 
 #stock-photo-editor-save {
