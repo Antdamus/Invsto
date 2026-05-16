@@ -18,6 +18,9 @@ const state = {
   itemSearchTimer: null,
   locationSearchTimer: null,
   quantityAutoTimer: null,
+  liveLotSearchTimer: null,
+  selectedLiveLot: null,
+  selectedLiveLotItems: [],
   busy: false,
 };
 
@@ -74,6 +77,13 @@ async function resolvePhotoUrl(path) {
     return "";
   }
   return data?.signedUrl || "";
+}
+
+function formatElapsed(seconds) {
+  const safe = Math.max(0, Number(seconds || 0));
+  const minutes = Math.floor(safe / 60);
+  const remaining = Math.floor(safe % 60);
+  return `${minutes}:${String(remaining).padStart(2, "0")}`;
 }
 
 function sameLocalDay(value, reference = new Date()) {
@@ -342,6 +352,7 @@ async function handleCheckoutStoreChange() {
   state.selectedItem = null;
   state.selectedStockRow = null;
   state.stockRows = [];
+  clearLiveLotSelection({ render: true });
   if (state.stagedFulfillments.size) state.stagedFulfillments.clear();
   renderBuyerBundlePanel();
   renderSelectionSummary();
@@ -1171,7 +1182,7 @@ function renderLocationResults(rows, message = "No source locations loaded yet."
     button.className = `result-btn ${state.selectedStockRow?.id === row.id ? "is-selected" : ""}`;
     button.innerHTML = `
       <strong>${escapeHtml(row.locationLabel)}</strong>
-      <span>${Number(row.quantity || 0).toLocaleString()} available${row.location_code ? ` - ${escapeHtml(row.location_code)}` : ""}</span>
+      <span>${Number(row.quantity || 0).toLocaleString()} available${Number(row.reserved_quantity || 0) > 0 ? ` - ${Number(row.reserved_quantity || 0).toLocaleString()} reserved live` : ""}${row.location_code ? ` - ${escapeHtml(row.location_code)}` : ""}</span>
     `;
     button.addEventListener("click", () => selectStockRow(row));
     container.appendChild(button);
@@ -1317,11 +1328,17 @@ async function loadStockRowsForItem(itemId) {
 
   const storeName = getCheckoutStore()?.name || "the selected store";
   setStatus(`Loading source trays in ${storeName}...`);
-  const { data, error } = await supabase
-    .from("item_stock_locations")
-    .select("id,item_id,location_id,quantity,location:location_id(*)")
-    .eq("item_id", itemId)
-    .gt("quantity", 0);
+  const [{ data, error }, { data: reservations, error: reservationError }] = await Promise.all([
+    supabase
+      .from("item_stock_locations")
+      .select("id,item_id,location_id,quantity,location:location_id(*)")
+      .eq("item_id", itemId)
+      .gt("quantity", 0),
+    supabase
+      .from("active_stock_reservations")
+      .select("stock_location_row_id,reserved_quantity")
+      .eq("item_id", itemId),
+  ]);
 
   if (error) {
     console.error("Source location load failed:", error);
@@ -1331,12 +1348,31 @@ async function loadStockRowsForItem(itemId) {
     return;
   }
 
+  if (reservationError) {
+    console.warn("Could not load active reservations for pending checkout:", reservationError);
+  }
+
+  const reservationMap = new Map((reservations || []).map((entry) => [
+    entry.stock_location_row_id,
+    Number(entry.reserved_quantity || 0),
+  ]));
+
   state.stockRows = (data || [])
+    .map((row) => {
+      const reserved = reservationMap.get(row.id) || 0;
+      return {
+        ...row,
+        physical_quantity: Number(row.quantity || 0),
+        reserved_quantity: reserved,
+        quantity: Math.max(0, Number(row.quantity || 0) - reserved),
+      };
+    })
     .map(normalizeStockRow)
     .filter((row) => {
       return row.isTray
         && row.store_id === state.checkoutStoreId
-        && row.tray_status !== "checked_out";
+        && row.tray_status !== "checked_out"
+        && Number(row.quantity || 0) > 0;
     });
 
   renderLocationResults(state.stockRows, `This item is not available in any checked-in tray at ${storeName}.`);
@@ -1404,6 +1440,13 @@ function clearLocationSearchTimer() {
   }
 }
 
+function clearLiveLotSearchTimer() {
+  if (state.liveLotSearchTimer) {
+    clearTimeout(state.liveLotSearchTimer);
+    state.liveLotSearchTimer = null;
+  }
+}
+
 function scheduleItemSearch() {
   clearItemSearchTimer();
   const term = sanitizeSearchTerm($("item-scan")?.value || "");
@@ -1427,6 +1470,18 @@ function scheduleSourceLocationSearch() {
     const currentTerm = String($("location-scan")?.value || "").trim();
     if (currentTerm) searchSourceLocation();
   }, 1000);
+}
+
+function scheduleLiveLotSearch() {
+  clearLiveLotSearchTimer();
+  const term = String($("live-lot-scan")?.value || "").trim();
+  if (!term) return;
+
+  state.liveLotSearchTimer = setTimeout(() => {
+    state.liveLotSearchTimer = null;
+    const currentTerm = String($("live-lot-scan")?.value || "").trim();
+    if (currentTerm) loadLiveLotByScan(currentTerm);
+  }, 700);
 }
 
 function searchSourceLocation() {
@@ -1456,6 +1511,151 @@ function searchSourceLocation() {
     renderLocationResults(matches, "That tray does not currently hold this item in the selected store.");
     setStatus(matches.length ? `${matches.length} source tray matches. Choose one.` : "No matching source tray for this item in the selected store.", matches.length ? "info" : "error");
   }
+}
+
+function clearLiveLotSelection({ render = true } = {}) {
+  clearLiveLotSearchTimer();
+  state.selectedLiveLot = null;
+  state.selectedLiveLotItems = [];
+  if ($("live-lot-scan")) $("live-lot-scan").value = "";
+  if (render) renderLiveLotPanel();
+}
+
+async function loadLiveLotItems(lotId) {
+  const { data, error } = await supabase
+    .from("live_sale_lot_items")
+    .select(`
+      *,
+      item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
+      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role)
+    `)
+    .eq("lot_id", lotId)
+    .order("scanned_at", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+function getLiveLotSearchTerms(lot) {
+  return [
+    lot?.auction_number,
+    lot?.lot_code,
+  ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+}
+
+function selectLikelyLineForLiveLot(lot) {
+  if (!lot || state.selectedLine) return;
+  const terms = getLiveLotSearchTerms(lot);
+  if (!terms.length) return;
+  const line = state.orders.find((entry) =>
+    isOpenOrderLine(entry)
+    && terms.some((term) => entry.searchText.includes(term))
+  );
+  if (line) selectOrderLine(line.id);
+}
+
+async function loadLiveLotByScan(rawTerm = "") {
+  if (!requireCheckoutStore()) return;
+  const term = String(rawTerm || $("live-lot-scan")?.value || "").trim();
+  if (!term) {
+    setStatus("Scan the auction number or live bag ID first.", "error");
+    return;
+  }
+
+  try {
+    setStatus("Loading live-sale bag...");
+    let result = await supabase
+      .from("live_sale_lots")
+      .select("*, live_sale_sessions(id,session_code,title,store_id,started_at,status)")
+      .eq("lot_code", term)
+      .maybeSingle();
+
+    if (result.error) throw result.error;
+
+    let lot = result.data;
+    if (!lot) {
+      result = await supabase
+        .from("live_sale_lots")
+        .select("*, live_sale_sessions(id,session_code,title,store_id,started_at,status)")
+        .eq("auction_number", term)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (result.error) throw result.error;
+      lot = result.data;
+    }
+
+    if (!lot) {
+      clearLiveLotSelection({ render: true });
+      setStatus("No live-sale bag matched that scan.", "error");
+      return;
+    }
+
+    const session = Array.isArray(lot.live_sale_sessions) ? lot.live_sale_sessions[0] : lot.live_sale_sessions;
+    if (session?.store_id && session.store_id !== state.checkoutStoreId) {
+      throw new Error("This bag belongs to a different live-sale store than the selected checkout store.");
+    }
+
+    state.selectedLiveLot = { ...lot, session };
+    state.selectedLiveLotItems = await loadLiveLotItems(lot.id);
+    renderLiveLotPanel();
+    selectLikelyLineForLiveLot(state.selectedLiveLot);
+    setStatus("Live-sale bag loaded. Review the manifest and confirm the packed bundle.", "info");
+  } catch (error) {
+    console.error("Live-sale bag load failed:", error);
+    setStatus(error.message || "Could not load that live-sale bag.", "error");
+  }
+}
+
+function renderLiveLotPanel() {
+  const panel = $("live-lot-panel");
+  if (!panel) return;
+
+  if (!state.selectedLiveLot) {
+    panel.className = "live-lot-panel";
+    panel.textContent = "No live auction bag loaded.";
+    return;
+  }
+
+  const lot = state.selectedLiveLot;
+  const reserved = state.selectedLiveLotItems.filter((entry) => entry.status === "reserved");
+  const totalQty = reserved.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+  panel.className = "live-lot-panel is-loaded";
+  panel.innerHTML = `
+    <div class="live-lot-head">
+      <div>
+        <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
+        <small>Bag ${escapeHtml(lot.lot_code || "-")} - ${escapeHtml(lot.session?.session_code || "No session")} - Started ${escapeHtml(formatDate(lot.session?.started_at))}</small>
+      </div>
+      <span class="live-lot-badge">${reserved.length} item type(s) / ${totalQty} unit(s)</span>
+    </div>
+    <div class="live-lot-items">
+      ${state.selectedLiveLotItems.map((entry) => {
+        const item = entry.item || {};
+        const loc = entry.source_location || {};
+        return `
+          <article class="live-lot-item" data-live-lot-item="${escapeHtml(entry.id)}">
+            <div class="live-lot-thumb"><span>No photo</span></div>
+            <div>
+              <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+              <small>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(loc.location_name || "Unknown source")} - minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+            </div>
+            <b>${escapeHtml(entry.status || "reserved")}</b>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  state.selectedLiveLotItems.forEach((entry) => {
+    const card = panel.querySelector(`[data-live-lot-item="${CSS.escape(entry.id)}"]`);
+    const item = entry.item || {};
+    resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+      if (!url || !card?.isConnected) return;
+      const thumb = card.querySelector(".live-lot-thumb");
+      if (thumb) thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Live-sale item")}" />`;
+    });
+  });
 }
 
 async function bumpInventoryVersion(changedIds = []) {
@@ -1679,17 +1879,59 @@ async function renderBundleReviewList(staged) {
   });
 }
 
+function getActiveLiveLotReservedItems() {
+  if (!state.selectedLiveLot) return [];
+  return state.selectedLiveLotItems.filter((entry) => entry.status === "reserved");
+}
+
+async function renderLiveLotBundleReviewList(items) {
+  const list = $("bundle-review-list");
+  if (!list) return;
+  list.replaceChildren();
+
+  items.forEach((entry) => {
+    const item = entry.item || {};
+    const loc = entry.source_location || {};
+    const card = document.createElement("article");
+    card.className = "bundle-review-item";
+    card.innerHTML = `
+      <div class="bundle-review-thumb"><span>No photo</span></div>
+      <div class="bundle-review-copy">
+        <strong>${escapeHtml(item.title || "Untitled live-sale item")}</strong>
+        <span>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()}</span>
+        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `- ${escapeHtml(loc.location_code)}` : ""} - live minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+      </div>
+    `;
+    list.appendChild(card);
+
+    resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+      if (!url || !card.isConnected) return;
+      const thumb = card.querySelector(".bundle-review-thumb");
+      if (thumb) {
+        thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Packed live-sale item")}" />`;
+      }
+    });
+  });
+}
+
 function openBundleReviewModal() {
   const staged = getActiveStagedFulfillments();
-  if (!staged.length) {
+  const liveItems = getActiveLiveLotReservedItems();
+  if (!staged.length && !liveItems.length) {
     setStatus("Stage at least one packed item first.", "error");
     return;
   }
 
   const buyer = state.selectedLine ? getBuyerLabel(state.selectedLine) : "selected buyer";
-  const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
-  $("bundle-review-subtitle").textContent = `${buyer} - ${staged.length} line(s), ${totalQty} total unit(s). Press Enter to confirm after review.`;
-  renderBundleReviewList(staged);
+  if (liveItems.length && !staged.length) {
+    const totalQty = liveItems.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+    $("bundle-review-subtitle").textContent = `${buyer} - live-sale bag ${state.selectedLiveLot.lot_code}, auction ${state.selectedLiveLot.auction_number}. ${liveItems.length} item type(s), ${totalQty} unit(s).`;
+    renderLiveLotBundleReviewList(liveItems);
+  } else {
+    const totalQty = staged.reduce((sum, entry) => sum + Number(entry.qty || 0), 0);
+    $("bundle-review-subtitle").textContent = `${buyer} - ${staged.length} line(s), ${totalQty} total unit(s). Press Enter to confirm after review.`;
+    renderBundleReviewList(staged);
+  }
   openModal("bundle-review-modal");
   setTimeout(() => $("confirm-bundle-review")?.focus(), 80);
 }
@@ -1698,8 +1940,9 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   if (state.busy) return;
   const notes = String($("fulfill-notes")?.value || "").trim();
   const staged = getActiveStagedFulfillments();
+  const liveItems = getActiveLiveLotReservedItems();
 
-  if (!staged.length) return setStatus("Stage at least one packed item first.", "error");
+  if (!staged.length && !liveItems.length) return setStatus("Stage at least one packed item first.", "error");
   if (!skipReview) {
     openBundleReviewModal();
     return;
@@ -1709,25 +1952,43 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
   closeModal("bundle-review-modal");
   $("fulfill-order").disabled = true;
   $("stage-current-line").disabled = true;
-  setStatus(`Confirming and removing ${staged.length} packed item(s)...`);
+  setStatus(liveItems.length && !staged.length
+    ? `Confirming live-sale bag and removing ${liveItems.length} reserved item type(s)...`
+    : `Confirming and removing ${staged.length} packed item(s)...`);
 
   try {
     const changedItemIds = [];
-    for (const entry of staged) {
-      const { error } = await supabase.rpc("fulfill_ebay_order_line_for_store", {
-        _order_line_id: entry.line.id,
-        _item_id: entry.item.id,
-        _stock_location_row_id: entry.row.id,
-        _quantity: entry.qty,
-        _sold_price: entry.soldPrice,
-        _net_payout: entry.payout,
+    if (liveItems.length && !staged.length) {
+      if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
+      const { error } = await supabase.rpc("fulfill_ebay_order_line_with_live_lot", {
+        _order_line_id: state.selectedLine.id,
+        _lot_id: state.selectedLiveLot.id,
         _notes: notes || null,
         _signed_by_email: state.user.email,
         _checkout_store_id: state.checkoutStoreId,
       });
-
       if (error) throw error;
-      changedItemIds.push(entry.item.id);
+      liveItems.forEach((entry) => {
+        if (entry.item_id) changedItemIds.push(entry.item_id);
+      });
+      clearLiveLotSelection({ render: true });
+    } else {
+      for (const entry of staged) {
+        const { error } = await supabase.rpc("fulfill_ebay_order_line_for_store", {
+          _order_line_id: entry.line.id,
+          _item_id: entry.item.id,
+          _stock_location_row_id: entry.row.id,
+          _quantity: entry.qty,
+          _sold_price: entry.soldPrice,
+          _net_payout: entry.payout,
+          _notes: notes || null,
+          _signed_by_email: state.user.email,
+          _checkout_store_id: state.checkoutStoreId,
+        });
+
+        if (error) throw error;
+        changedItemIds.push(entry.item.id);
+      }
     }
 
     await bumpInventoryVersion([...new Set(changedItemIds)]);
@@ -1763,6 +2024,7 @@ function clearSelection() {
   state.stockRows = [];
   state.activeBuyerKey = "";
   state.stagedFulfillments.clear();
+  clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
   $("selected-order-empty")?.classList.remove("hidden");
@@ -1798,6 +2060,10 @@ function setupListeners() {
     clearItemSearchTimer();
     searchInventoryItems();
   });
+  $("find-live-lot")?.addEventListener("click", () => {
+    clearLiveLotSearchTimer();
+    loadLiveLotByScan();
+  });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
@@ -1818,6 +2084,15 @@ function setupListeners() {
   });
 
   $("item-scan")?.addEventListener("input", scheduleItemSearch);
+
+  $("live-lot-scan")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      clearLiveLotSearchTimer();
+      loadLiveLotByScan();
+    }
+  });
+  $("live-lot-scan")?.addEventListener("input", scheduleLiveLotSearch);
 
   $("location-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

@@ -1,0 +1,1089 @@
+"use strict";
+
+const state = {
+  user: null,
+  employee: null,
+  stores: [],
+  sessions: [],
+  currentSession: null,
+  currentLot: null,
+  lotItems: [],
+  selectedItem: null,
+  sourceRows: [],
+  selectedSourceRow: null,
+  sourceReservations: new Map(),
+  itemSearchTimer: null,
+  busy: false,
+};
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function waitForSupabaseReady() {
+  return new Promise((resolve) => {
+    if (window.supabase) return resolve(window.supabase);
+    document.addEventListener("supabase-ready", () => resolve(window.supabase), { once: true });
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escapeXml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function formatElapsed(seconds) {
+  const safe = Math.max(0, Number(seconds || 0));
+  const minutes = Math.floor(safe / 60);
+  const remaining = Math.floor(safe % 60);
+  return `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function setStatus(message = "", type = "info") {
+  const el = $("live-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function setLabelStatus(message = "", type = "info") {
+  const el = $("label-status");
+  if (!el) return;
+  el.innerHTML = message;
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function getStoreName(storeId) {
+  return state.stores.find((store) => store.id === storeId)?.name || "";
+}
+
+function getSessionStoreName(session = state.currentSession) {
+  return session?.store_id ? getStoreName(session.store_id) : "No store";
+}
+
+function canManageLiveSales() {
+  return Boolean(state.employee);
+}
+
+async function loadCurrentWorker() {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData?.session) {
+    window.location.href = "index.html";
+    return false;
+  }
+
+  state.user = sessionData.session.user;
+  const { data: employee, error } = await supabase
+    .from("employees")
+    .select("id, display_name, role, active")
+    .eq("user_id", state.user.id)
+    .maybeSingle();
+
+  if (error || !employee || employee.active === false) {
+    window.location.href = "index.html";
+    return false;
+  }
+
+  state.employee = employee;
+  return true;
+}
+
+function setupShell() {
+  const name = state.employee?.display_name ? `, ${state.employee.display_name}` : "";
+  const greeting = $("live-sales-greeting");
+  if (greeting) greeting.textContent = `Live Sales${name}`;
+
+  document.querySelectorAll(".nav-link").forEach((link) => {
+    const href = (link.getAttribute("href") || "").split("/").pop();
+    link.classList.toggle("active", href === "live-sales.html");
+  });
+
+  document.querySelectorAll(".mobile-nav-links a").forEach((link) => {
+    const href = (link.getAttribute("href") || "").split("/").pop();
+    link.classList.toggle("active", href === "live-sales.html");
+  });
+
+  $("menu-toggle")?.addEventListener("click", () => {
+    $("mobile-menu")?.classList.toggle("show");
+  });
+
+  const signOut = async (event) => {
+    event.preventDefault();
+    await supabase.auth.signOut();
+    window.location.href = "index.html";
+  };
+
+  $("logout")?.addEventListener("click", signOut);
+  $("logout-mobile")?.addEventListener("click", signOut);
+}
+
+async function loadStores() {
+  const { data, error } = await supabase
+    .from("store_locations")
+    .select("id, name, active")
+    .eq("active", true)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("Live sale store load failed:", error);
+    state.stores = [];
+    return;
+  }
+
+  state.stores = data || [];
+  renderStoreSelect();
+}
+
+function renderStoreSelect() {
+  const select = $("session-store-select");
+  if (!select) return;
+  select.replaceChildren();
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select store";
+  select.appendChild(placeholder);
+
+  state.stores.forEach((store) => {
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name || "Unnamed store";
+    select.appendChild(option);
+  });
+
+  if (state.currentSession?.store_id) select.value = state.currentSession.store_id;
+}
+
+async function loadSessions({ keepSelection = true } = {}) {
+  const { data, error } = await supabase
+    .from("live_sale_sessions")
+    .select("*")
+    .eq("status", "active")
+    .order("started_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    console.warn("Live sale session load failed:", error);
+    state.sessions = [];
+  } else {
+    state.sessions = data || [];
+  }
+
+  if (keepSelection && state.currentSession) {
+    const stillActive = state.sessions.find((session) => session.id === state.currentSession.id);
+    state.currentSession = stillActive || state.sessions[0] || null;
+  } else {
+    state.currentSession = state.sessions[0] || null;
+  }
+
+  if (!state.currentSession) state.currentLot = null;
+  renderSessions();
+  renderStoreSelect();
+  await loadLotItems();
+}
+
+function renderSessions() {
+  const list = $("active-session-list");
+  if (list) {
+    list.replaceChildren();
+    if (!state.sessions.length) {
+      list.innerHTML = `<div class="empty-state">No active live session yet.</div>`;
+    } else {
+      state.sessions.forEach((session) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `session-btn ${state.currentSession?.id === session.id ? "is-selected" : ""}`;
+        button.innerHTML = `
+          <span>
+            <strong>${escapeHtml(session.title || "Live Sale")}</strong>
+            <small>${escapeHtml(session.session_code || "")} - ${escapeHtml(getStoreName(session.store_id) || "No store")} - ${escapeHtml(formatDate(session.started_at))}</small>
+          </span>
+          <b>Use</b>
+        `;
+        button.addEventListener("click", async () => {
+          state.currentSession = session;
+          state.currentLot = null;
+          clearScan();
+          renderAll();
+          await loadLotItems();
+          $("auction-number")?.focus();
+        });
+        list.appendChild(button);
+      });
+    }
+  }
+
+  const pill = $("session-status-pill");
+  if (pill) {
+    pill.textContent = state.currentSession
+      ? `${state.currentSession.session_code} - ${getSessionStoreName()}`
+      : "No active show";
+    pill.classList.toggle("is-active", Boolean(state.currentSession));
+  }
+}
+
+function renderSummary() {
+  $("summary-session").textContent = state.currentSession?.session_code || "None";
+  $("summary-lot").textContent = state.currentLot?.auction_number || "None";
+  $("summary-reserved").textContent = String(state.lotItems.reduce((sum, item) => (
+    item.status === "reserved" ? sum + Number(item.quantity || 0) : sum
+  ), 0));
+}
+
+function renderCurrentLot() {
+  const card = $("current-lot-card");
+  const pill = $("lot-status-pill");
+  if (!card || !pill) return;
+
+  if (!state.currentLot) {
+    card.className = "current-lot-card empty";
+    card.textContent = "Create a bag to begin scanning items.";
+    pill.textContent = "No bag selected";
+    pill.className = "status-pill";
+    return;
+  }
+
+  card.className = "current-lot-card";
+  card.innerHTML = `
+    <strong>Auction ${escapeHtml(state.currentLot.auction_number)}</strong>
+    <span>Bag ID ${escapeHtml(state.currentLot.lot_code)} - ${escapeHtml(state.currentLot.status || "open")}</span>
+    <small>${state.currentLot.label_path ? `DYMO label: ${escapeHtml(state.currentLot.label_path)}` : "DYMO label has not been generated yet."}</small>
+  `;
+  pill.textContent = state.currentLot.status === "packed" ? "Packed" : "Ready to scan";
+  pill.className = `status-pill ${state.currentLot.status === "packed" ? "" : "is-ready"}`;
+}
+
+function updateScanGate() {
+  const enabled = Boolean(state.currentSession && state.currentLot && state.currentLot.status !== "packed");
+  $("item-scan")?.toggleAttribute("disabled", !enabled);
+  $("scan-item")?.toggleAttribute("disabled", !enabled);
+  $("reserve-quantity")?.toggleAttribute("disabled", !enabled);
+  $("reserve-item")?.toggleAttribute("disabled", !enabled || !state.selectedItem || !state.selectedSourceRow);
+  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot);
+  $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
+}
+
+function renderAll() {
+  renderSessions();
+  renderSummary();
+  renderCurrentLot();
+  renderManifest();
+  renderSelectedItem();
+  renderSourceRows();
+  updateScanGate();
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function firstItemPhoto(item) {
+  const photos = Array.isArray(item?.photos) ? item.photos : [];
+  return photos.find(Boolean) || item?.photo_url || "";
+}
+
+async function resolvePhotoUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const cleanPath = String(path).replace(/^photos\//, "");
+  const { data, error } = await supabase.storage.from("photos").createSignedUrl(cleanPath, 3600);
+  if (error) return "";
+  return data?.signedUrl || "";
+}
+
+async function loadLotItems() {
+  if (!state.currentLot) {
+    state.lotItems = [];
+    renderAll();
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("live_sale_lot_items")
+    .select(`
+      *,
+      item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
+      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role)
+    `)
+    .eq("lot_id", state.currentLot.id)
+    .order("scanned_at", { ascending: true });
+
+  if (error) {
+    console.warn("Live sale lot items failed to load:", error);
+    state.lotItems = [];
+  } else {
+    state.lotItems = data || [];
+  }
+
+  renderAll();
+}
+
+function renderManifest() {
+  const list = $("lot-manifest");
+  if (!list) return;
+  list.replaceChildren();
+
+  if (!state.currentLot) {
+    list.innerHTML = `<div class="empty-state">No bag selected.</div>`;
+    return;
+  }
+
+  if (!state.lotItems.length) {
+    list.innerHTML = `<div class="empty-state">This bag has no reserved items yet.</div>`;
+    return;
+  }
+
+  state.lotItems.forEach((entry) => {
+    const item = entry.item || {};
+    const loc = entry.source_location || {};
+    const article = document.createElement("article");
+    article.className = "manifest-item";
+    article.innerHTML = `
+      <div class="manifest-thumb"><span>No photo</span></div>
+      <div class="manifest-copy">
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <span>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(entry.status || "reserved")}</span>
+        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""} - Live minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+      </div>
+      <div class="manifest-actions">
+        ${entry.status === "reserved" ? `<button type="button" class="tiny-btn" data-release-lot-item="${escapeHtml(entry.id)}">Release</button>` : ""}
+      </div>
+    `;
+    list.appendChild(article);
+    resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+      if (!url || !article.isConnected) return;
+      const thumb = article.querySelector(".manifest-thumb");
+      if (thumb) thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Reserved item")}" />`;
+    });
+  });
+
+  list.querySelectorAll("[data-release-lot-item]").forEach((button) => {
+    button.addEventListener("click", () => releaseLotItem(button.getAttribute("data-release-lot-item")));
+  });
+}
+
+async function startSession() {
+  if (state.busy) return;
+  const storeId = $("session-store-select")?.value || "";
+  const title = $("session-title")?.value?.trim() || "Live Sale";
+  const notes = $("session-notes")?.value?.trim() || null;
+
+  if (!storeId) {
+    setStatus("Select the store where the live sale is happening.", "error");
+    $("session-store-select")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setStatus("Starting live sale session...");
+    const { data, error } = await supabase.rpc("start_live_sale_session", {
+      _title: title,
+      _store_id: storeId,
+      _notes: notes,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    state.currentSession = Array.isArray(data) ? data[0] : data;
+    state.currentLot = null;
+    await loadSessions({ keepSelection: true });
+    setStatus("Live sale session started. Enter the auction number for the first bag.", "success");
+    setTimeout(() => $("auction-number")?.focus(), 80);
+  } catch (error) {
+    console.error("Start live sale session failed:", error);
+    setStatus(error.message || "Could not start the live sale session.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function endSession() {
+  if (!state.currentSession || state.busy) return;
+  const ok = window.confirm("End the active live sale session? Existing reserved bags will remain reserved.");
+  if (!ok) return;
+
+  try {
+    state.busy = true;
+    const { error } = await supabase.rpc("end_live_sale_session", {
+      _session_id: state.currentSession.id,
+      _notes: $("session-notes")?.value?.trim() || null,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    state.currentSession = null;
+    state.currentLot = null;
+    clearScan();
+    await loadSessions({ keepSelection: false });
+    setStatus("Live sale session ended.", "success");
+  } catch (error) {
+    console.error("End live sale session failed:", error);
+    setStatus(error.message || "Could not end the live sale session.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function createOrLoadLot() {
+  if (!state.currentSession) {
+    setStatus("Start or select a live sale session first.", "error");
+    return;
+  }
+
+  const auctionNumber = $("auction-number")?.value?.trim();
+  if (!auctionNumber) {
+    setStatus("Enter the auction number first.", "error");
+    $("auction-number")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setStatus("Creating or loading auction bag...");
+    const { data, error } = await supabase.rpc("create_live_sale_lot", {
+      _session_id: state.currentSession.id,
+      _auction_number: auctionNumber,
+      _notes: null,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    state.currentLot = Array.isArray(data) ? data[0] : data;
+    clearScan();
+    await loadLotItems();
+    setStatus("Bag is ready. Scan the first item barcode.", "success");
+    setTimeout(() => $("item-scan")?.focus(), 80);
+  } catch (error) {
+    console.error("Create live sale lot failed:", error);
+    setStatus(error.message || "Could not create the auction bag.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
+function sanitizeSearchTerm(value) {
+  return String(value || "").trim().replace(/[%,]/g, " ");
+}
+
+async function findItemForScan() {
+  if (!state.currentLot) {
+    setStatus("Create or load an auction bag first.", "error");
+    return;
+  }
+
+  const term = sanitizeSearchTerm($("item-scan")?.value || "");
+  if (!term) {
+    setStatus("Scan an item barcode.", "error");
+    return;
+  }
+
+  setStatus("Finding scanned item...");
+  state.selectedItem = null;
+  state.selectedSourceRow = null;
+  state.sourceRows = [];
+  renderSelectedItem();
+  renderSourceRows();
+
+  let exact = await supabase
+    .from("item_types")
+    .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+    .eq("barcode", term)
+    .is("deleted_at", null)
+    .limit(1);
+
+  if (exact.error && /deleted_at/i.test(exact.error.message || "")) {
+    exact = await supabase
+      .from("item_types")
+      .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+      .eq("barcode", term)
+      .limit(1);
+  }
+
+  if (!exact.error && exact.data?.length === 1) {
+    state.selectedItem = exact.data[0];
+    renderSelectedItem();
+    await loadSourceRowsForItem(state.selectedItem);
+    return;
+  }
+
+  const pattern = `%${term}%`;
+  let { data, error } = await supabase
+    .from("item_types")
+    .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+    .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
+    .is("deleted_at", null)
+    .limit(10);
+
+  if (error && /deleted_at/i.test(error.message || "")) {
+    const retry = await supabase
+      .from("item_types")
+      .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+      .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
+      .limit(10);
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    console.error("Live sale item search failed:", error);
+    setStatus(error.message || "Could not search inventory.", "error");
+    return;
+  }
+
+  const items = data || [];
+  if (items.length === 1) {
+    state.selectedItem = items[0];
+    renderSelectedItem();
+    await loadSourceRowsForItem(state.selectedItem);
+    return;
+  }
+
+  if (!items.length) {
+    setStatus("No item matched that scan.", "error");
+    return;
+  }
+
+  renderItemChoices(items);
+  setStatus(`${items.length} items matched. Choose the exact item.`, "info");
+}
+
+function renderItemChoices(items) {
+  const card = $("item-match-card");
+  if (!card) return;
+  card.className = "match-card";
+  card.innerHTML = items.map((item) => `
+    <button type="button" class="source-btn" data-pick-item="${escapeHtml(item.id)}">
+      <span>
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <small>${escapeHtml(item.barcode || "-")} - ${Number(item.weight || 0).toFixed(2)} g</small>
+      </span>
+      <b>Use</b>
+    </button>
+  `).join("");
+
+  card.querySelectorAll("[data-pick-item]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const item = items.find((entry) => entry.id === button.getAttribute("data-pick-item"));
+      if (!item) return;
+      state.selectedItem = item;
+      renderSelectedItem();
+      await loadSourceRowsForItem(item);
+    });
+  });
+}
+
+function renderSelectedItem() {
+  const card = $("item-match-card");
+  if (!card) return;
+
+  if (!state.selectedItem) {
+    card.className = "match-card empty";
+    card.textContent = state.currentLot ? "Scan an item barcode." : "Scan an item after a bag is selected.";
+    updateScanGate();
+    return;
+  }
+
+  card.className = "match-card";
+  card.innerHTML = `
+    <strong>${escapeHtml(state.selectedItem.title || "Untitled item")}</strong>
+    <span>${escapeHtml(state.selectedItem.barcode || "-")} - ${Number(state.selectedItem.weight || 0).toFixed(2)} g</span>
+    <small>${escapeHtml(state.selectedSourceRow?.locationLabel || "Choose source tray")}</small>
+  `;
+  updateScanGate();
+}
+
+async function loadSourceRowsForItem(item) {
+  if (!item?.id) return;
+  setStatus("Loading source trays for the scanned item...");
+
+  const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
+    supabase
+      .from("item_stock_locations")
+      .select("id,item_id,location_id,quantity,location:location_id(*)")
+      .eq("item_id", item.id)
+      .gt("quantity", 0),
+    supabase
+      .from("active_stock_reservations")
+      .select("stock_location_row_id,reserved_quantity")
+      .eq("item_id", item.id),
+  ]);
+
+  if (rowError) {
+    console.error("Live sale source row load failed:", rowError);
+    setStatus(rowError.message || "Could not load source trays.", "error");
+    return;
+  }
+
+  if (reservationError) {
+    console.warn("Reservation overlay not available yet:", reservationError);
+  }
+
+  state.sourceReservations = new Map((reservations || []).map((entry) => [
+    entry.stock_location_row_id,
+    Number(entry.reserved_quantity || 0),
+  ]));
+
+  const sessionStoreId = state.currentSession?.store_id || "";
+  state.sourceRows = (rows || [])
+    .map((row) => normalizeSourceRow(row))
+    .filter((row) => {
+      const inStore = !sessionStoreId || row.store_id === sessionStoreId;
+      return row.isTray && inStore && row.tray_status !== "checked_out" && row.available_quantity > 0;
+    });
+
+  state.selectedSourceRow = state.sourceRows.length === 1 ? state.sourceRows[0] : null;
+  renderSourceRows();
+  renderSelectedItem();
+
+  if (state.selectedSourceRow) {
+    setStatus("Only one available tray source was found. Quantity is ready.", "success");
+    $("reserve-quantity")?.focus();
+    $("reserve-quantity")?.select();
+  } else if (state.sourceRows.length) {
+    setStatus(`${state.sourceRows.length} source trays found. Choose the tray the item came from.`, "info");
+  } else {
+    setStatus("This item has no unreserved stock in a checked-in tray for this live sale store.", "error");
+  }
+}
+
+function normalizeSourceRow(row) {
+  const loc = row.location || {};
+  const isTray = Boolean(loc.is_tray || loc.location_role === "tray");
+  const storeId = isTray ? (loc.tray_current_store_id || loc.store_id || "") : (loc.store_id || "");
+  const reserved = state.sourceReservations.get(row.id) || 0;
+  const available = Math.max(0, Number(row.quantity || 0) - reserved);
+  const storeName = getStoreName(storeId);
+  return {
+    ...row,
+    isTray,
+    store_id: storeId,
+    tray_status: loc.tray_status || "",
+    location_name: loc.location_name || "",
+    location_code: loc.location_code || "",
+    reserved_quantity: reserved,
+    available_quantity: available,
+    locationLabel: `${loc.location_name || "Unnamed tray"}${loc.location_code ? ` (${loc.location_code})` : ""}${storeName ? ` - ${storeName}` : ""}`,
+  };
+}
+
+function renderSourceRows() {
+  const container = $("source-results");
+  if (!container) return;
+  container.replaceChildren();
+
+  if (!state.selectedItem) {
+    updateScanGate();
+    return;
+  }
+
+  if (!state.sourceRows.length) {
+    container.innerHTML = `<div class="empty-state">No available checked-in tray source found.</div>`;
+    updateScanGate();
+    return;
+  }
+
+  state.sourceRows.forEach((row) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `source-btn ${state.selectedSourceRow?.id === row.id ? "is-selected" : ""}`;
+    button.innerHTML = `
+      <span>
+        <strong>${escapeHtml(row.locationLabel)}</strong>
+        <small>${Number(row.available_quantity || 0).toLocaleString()} available after ${Number(row.reserved_quantity || 0).toLocaleString()} reserved</small>
+      </span>
+      <b>Select</b>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedSourceRow = row;
+      renderSourceRows();
+      renderSelectedItem();
+      setStatus("Source tray selected. Confirm the quantity and reserve.", "success");
+      $("reserve-quantity")?.focus();
+      $("reserve-quantity")?.select();
+    });
+    container.appendChild(button);
+  });
+
+  updateScanGate();
+}
+
+async function reserveSelectedItem() {
+  if (!state.currentLot || !state.selectedItem || !state.selectedSourceRow || state.busy) {
+    setStatus("Scan an item and choose its source tray first.", "error");
+    return;
+  }
+
+  const qty = Math.max(1, parseInt($("reserve-quantity")?.value || "1", 10) || 1);
+  if (qty > Number(state.selectedSourceRow.available_quantity || 0)) {
+    setStatus(`Only ${state.selectedSourceRow.available_quantity} unreserved unit(s) are available at that source.`, "error");
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setStatus("Reserving item into live-sale bag...");
+    const { error } = await supabase.rpc("reserve_live_sale_item", {
+      _lot_id: state.currentLot.id,
+      _item_barcode: state.selectedItem.barcode,
+      _stock_location_row_id: state.selectedSourceRow.id,
+      _quantity: qty,
+      _signed_by_email: state.user?.email || null,
+      _notes: null,
+    });
+    if (error) throw error;
+
+    await bumpInventoryVersion([state.selectedItem.id]);
+    clearScan();
+    await reloadCurrentLot();
+    await loadLotItems();
+    setStatus("Item reserved in the bag. Scan the next item or generate the label.", "success");
+    setTimeout(() => $("item-scan")?.focus(), 80);
+  } catch (error) {
+    console.error("Live sale item reservation failed:", error);
+    setStatus(error.message || "Could not reserve the item.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function reloadCurrentLot() {
+  if (!state.currentLot?.id) return;
+  const { data, error } = await supabase
+    .from("live_sale_lots")
+    .select("*")
+    .eq("id", state.currentLot.id)
+    .maybeSingle();
+  if (!error && data) state.currentLot = data;
+}
+
+function clearScan() {
+  if (state.itemSearchTimer) {
+    clearTimeout(state.itemSearchTimer);
+    state.itemSearchTimer = null;
+  }
+  state.selectedItem = null;
+  state.sourceRows = [];
+  state.selectedSourceRow = null;
+  if ($("item-scan")) $("item-scan").value = "";
+  if ($("reserve-quantity")) $("reserve-quantity").value = "1";
+  renderSelectedItem();
+  renderSourceRows();
+  updateScanGate();
+}
+
+async function releaseLotItem(lotItemId) {
+  if (!lotItemId) return;
+  const ok = window.confirm("Release this item from the auction bag reservation?");
+  if (!ok) return;
+
+  try {
+    const { data, error } = await supabase.rpc("release_live_sale_lot_item", {
+      _lot_item_id: lotItemId,
+      _notes: "Released from live-sale bag before packing",
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    const changedItemId = Array.isArray(data) ? data[0]?.item_id : data?.item_id;
+    await bumpInventoryVersion(changedItemId ? [changedItemId] : []);
+    await reloadCurrentLot();
+    await loadLotItems();
+    setStatus("Reservation released.", "success");
+  } catch (error) {
+    console.error("Release live sale item failed:", error);
+    setStatus(error.message || "Could not release that reservation.", "error");
+  }
+}
+
+async function cancelCurrentLot() {
+  if (!state.currentLot) return;
+  const note = window.prompt("Why is this auction bag being canceled?");
+  if (!note || note.trim().length < 3) {
+    setStatus("A short cancellation note is required.", "error");
+    return;
+  }
+
+  try {
+    const changedIds = state.lotItems.map((entry) => entry.item_id).filter(Boolean);
+    const { error } = await supabase.rpc("cancel_live_sale_lot", {
+      _lot_id: state.currentLot.id,
+      _notes: note.trim(),
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    await bumpInventoryVersion(changedIds);
+    state.currentLot = null;
+    state.lotItems = [];
+    clearScan();
+    renderAll();
+    setStatus("Auction bag canceled and reservations released.", "success");
+  } catch (error) {
+    console.error("Cancel live sale lot failed:", error);
+    setStatus(error.message || "Could not cancel this auction bag.", "error");
+  }
+}
+
+async function bumpInventoryVersion(changedIds = []) {
+  const payload = {
+    inventory_version: crypto.randomUUID(),
+    changed_item_ids: Array.isArray(changedIds) && changedIds.length ? changedIds : null,
+  };
+  const { error } = await supabase.from("metadata").update(payload).eq("id", "inventory");
+  if (error) console.warn("Failed to bump inventory version:", error);
+}
+
+function qrObject(name, value, x, y, width, height) {
+  const safe = escapeXml(value);
+  return `
+    <QRCodeObject>
+      <Name>${name}</Name>
+      <Brushes>
+        <BackgroundBrush><SolidColorBrush><Color A="1" R="1" G="1" B="1"></Color></SolidColorBrush></BackgroundBrush>
+        <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
+        <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
+        <FillBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
+      </Brushes>
+      <Rotation>Rotation0</Rotation>
+      <OutlineThickness>1</OutlineThickness>
+      <IsOutlined>False</IsOutlined>
+      <BorderStyle>SolidLine</BorderStyle>
+      <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
+      <BarcodeFormat>QRCode</BarcodeFormat>
+      <Data><DataString>${safe}</DataString></Data>
+      <HorizontalAlignment>Center</HorizontalAlignment>
+      <VerticalAlignment>Middle</VerticalAlignment>
+      <Size>AutoFit</Size>
+      <EQRCodeType>QRCodeText</EQRCodeType>
+      <TextDataHolder><Value>${safe}</Value></TextDataHolder>
+      <ObjectLayout>
+        <DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint>
+        <Size><Width>${width}</Width><Height>${height}</Height></Size>
+      </ObjectLayout>
+    </QRCodeObject>
+  `;
+}
+
+function textObject(name, value, x, y, fontSize = "4") {
+  const safe = escapeXml(value);
+  return `
+    <TextObject>
+      <Name>${name}</Name>
+      <Brushes>
+        <BackgroundBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></BackgroundBrush>
+        <BorderBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderBrush>
+        <StrokeBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></StrokeBrush>
+        <FillBrush><SolidColorBrush><Color A="0" R="0" G="0" B="0"></Color></SolidColorBrush></FillBrush>
+      </Brushes>
+      <Rotation>Rotation90</Rotation>
+      <OutlineThickness>1</OutlineThickness>
+      <IsOutlined>False</IsOutlined>
+      <BorderStyle>SolidLine</BorderStyle>
+      <Margin><DYMOThickness Left="0" Top="0" Right="0" Bottom="0" /></Margin>
+      <HorizontalAlignment>Center</HorizontalAlignment>
+      <VerticalAlignment>Bottom</VerticalAlignment>
+      <FitMode>None</FitMode>
+      <IsVertical>False</IsVertical>
+      <FormattedText>
+        <FitMode>None</FitMode>
+        <HorizontalAlignment>Center</HorizontalAlignment>
+        <VerticalAlignment>Bottom</VerticalAlignment>
+        <IsVertical>False</IsVertical>
+        <LineTextSpan>
+          <TextSpan>
+            <Text>${safe}</Text>
+            <FontInfo>
+              <FontName>Segoe UI</FontName>
+              <FontSize>${fontSize}</FontSize>
+              <IsBold>True</IsBold>
+              <IsItalic>False</IsItalic>
+              <IsUnderline>False</IsUnderline>
+              <FontBrush><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></FontBrush>
+            </FontInfo>
+          </TextSpan>
+        </LineTextSpan>
+      </FormattedText>
+      <ObjectLayout>
+        <DYMOPoint><X>${x}</X><Y>${y}</Y></DYMOPoint>
+        <Size><Width>0.12500001</Width><Height>0.378334</Height></Size>
+      </ObjectLayout>
+    </TextObject>
+  `;
+}
+
+function buildLiveAuctionDymoXml({ auctionNumber, lotCode, freeText }) {
+  const auctionValue = String(auctionNumber || "").trim();
+  const lotValue = String(lotCode || "").trim();
+  const rightText = String(freeText || auctionValue || "AUCTION").trim().toUpperCase().slice(0, 18);
+  const leftText = lotValue.toUpperCase().slice(0, 18);
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<DesktopLabel Version="1">
+  <DYMOLabel Version="4">
+    <Description>DYMO Label</Description>
+    <Orientation>Portrait</Orientation>
+    <LabelName>Jewelry30299</LabelName>
+    <InitialLength>0</InitialLength>
+    <BorderStyle>SolidLine</BorderStyle>
+    <DYMORect>
+      <DYMOPoint><X>0.040000137</X><Y>0.060000002</Y></DYMOPoint>
+      <Size><Width>2.0433333</Width><Height>0.75666666</Height></Size>
+    </DYMORect>
+    <BorderColor><SolidColorBrush><Color A="1" R="0" G="0" B="0"></Color></SolidColorBrush></BorderColor>
+    <BorderThickness>1</BorderThickness>
+    <Show_Border>False</Show_Border>
+    <HasFixedLength>False</HasFixedLength>
+    <FixedLengthValue>0</FixedLengthValue>
+    <DynamicLayoutManager>
+      <RotationBehavior>ClearObjects</RotationBehavior>
+      <LabelObjects>
+        ${qrObject("QRCodeObject0", auctionValue, "1.5044161", "0.06538457", "0.28525865", "0.32408708")}
+        ${qrObject("QRCodeObject1", auctionValue, "1.5044161", "0.47906214", "0.3110023", "0.29687557")}
+        ${textObject("TextObject0", rightText, "1.4095135", "0.43833333", "4.8")}
+        ${qrObject("QRCodeObject2", lotValue, "0.26554355", "0.47743064", "0.30536497", "0.30013865")}
+        ${qrObject("QRCodeObject3", lotValue, "0.2628106", "0.09862068", "0.308098", "0.290851")}
+        ${textObject("TextObject4", leftText, "0.13781057", "0.43833315", "4")}
+      </LabelObjects>
+    </DynamicLayoutManager>
+  </DYMOLabel>
+  <LabelApplication>Blank</LabelApplication>
+  <DataTable><Columns></Columns><Rows></Rows></DataTable>
+</DesktopLabel>`;
+}
+
+function downloadTextFile(text, filename) {
+  const blob = new Blob([text], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+async function generateLiveLabel() {
+  if (!state.currentLot) {
+    setLabelStatus("Create or load an auction bag first.", "error");
+    return;
+  }
+
+  try {
+    setLabelStatus("Generating DYMO label...");
+    const freeText = $("label-free-text")?.value?.trim() || state.currentLot.auction_number;
+    const xml = buildLiveAuctionDymoXml({
+      auctionNumber: state.currentLot.auction_number,
+      lotCode: state.currentLot.lot_code,
+      freeText,
+    });
+    const safeLot = String(state.currentLot.lot_code || "live-bag").replace(/[^a-z0-9_-]+/gi, "_");
+    const labelPath = `labels/live_sale_${safeLot}_${Date.now()}.dymo`;
+    const blob = new Blob([xml], { type: "application/octet-stream" });
+
+    const { error: uploadError } = await supabase.storage
+      .from("dymo-labels")
+      .upload(labelPath, blob, { upsert: true, contentType: "application/octet-stream" });
+    if (uploadError) throw uploadError;
+
+    const { data, error } = await supabase.rpc("set_live_sale_lot_label", {
+      _lot_id: state.currentLot.id,
+      _label_path: labelPath,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    state.currentLot = Array.isArray(data) ? data[0] : data;
+    renderAll();
+
+    downloadTextFile(xml, `LiveSale_${state.currentLot.auction_number}_${state.currentLot.lot_code}.dymo`);
+    const signed = await supabase.storage.from("dymo-labels").createSignedUrl(labelPath, 3600);
+    const openLink = signed.data?.signedUrl
+      ? ` <a href="${escapeHtml(signed.data.signedUrl)}" target="_blank" rel="noreferrer">Open uploaded label</a>`
+      : "";
+    setLabelStatus(`DYMO label generated and uploaded.${openLink}`, "success");
+  } catch (error) {
+    console.error("Generate live sale label failed:", error);
+    setLabelStatus(error.message || "Could not generate the DYMO label.", "error");
+  }
+}
+
+function scheduleItemSearch() {
+  if (state.itemSearchTimer) clearTimeout(state.itemSearchTimer);
+  const term = sanitizeSearchTerm($("item-scan")?.value || "");
+  if (!term) return;
+  state.itemSearchTimer = setTimeout(() => {
+    state.itemSearchTimer = null;
+    if (sanitizeSearchTerm($("item-scan")?.value || "")) findItemForScan();
+  }, 750);
+}
+
+function setupListeners() {
+  $("refresh-live-sales")?.addEventListener("click", async () => {
+    await loadStores();
+    await loadSessions();
+    if (state.currentLot) await reloadCurrentLot();
+    await loadLotItems();
+    setStatus("Live sales refreshed.", "success");
+  });
+  $("start-session")?.addEventListener("click", startSession);
+  $("end-session")?.addEventListener("click", endSession);
+  $("create-lot")?.addEventListener("click", createOrLoadLot);
+  $("generate-live-label")?.addEventListener("click", generateLiveLabel);
+  $("scan-item")?.addEventListener("click", findItemForScan);
+  $("reserve-item")?.addEventListener("click", reserveSelectedItem);
+  $("clear-scan")?.addEventListener("click", () => {
+    clearScan();
+    setStatus("");
+  });
+  $("cancel-lot")?.addEventListener("click", cancelCurrentLot);
+
+  $("auction-number")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      createOrLoadLot();
+    }
+  });
+
+  $("item-scan")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (state.itemSearchTimer) clearTimeout(state.itemSearchTimer);
+      findItemForScan();
+    }
+  });
+  $("item-scan")?.addEventListener("input", scheduleItemSearch);
+
+  $("reserve-quantity")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      reserveSelectedItem();
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  await waitForSupabaseReady();
+  const ok = await loadCurrentWorker();
+  if (!ok || !canManageLiveSales()) return;
+  setupShell();
+  setupListeners();
+  await loadStores();
+  await loadSessions({ keepSelection: false });
+  renderAll();
+  if (window.lucide) window.lucide.createIcons();
+});

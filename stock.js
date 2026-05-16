@@ -310,7 +310,7 @@ function buildLocationChips(item) {
   return details.slice(0, 4).map((entry) => `
     <span class="stock-location-chip ${entry.is_tray ? "is-tray" : ""} ${entry.is_container ? "is-container" : ""}">
       <strong>${escapeStockHtml(entry.location_name || "Unknown")}</strong>
-      <small>${escapeStockHtml(entry.storage_path || (entry.is_tray ? `${entry.tray_status_label || "Tray"} - ${entry.current_store || "Unassigned"}` : entry.store_name || "Fixed location"))}</small>
+      <small>${escapeStockHtml(entry.storage_path || (entry.is_tray ? `${entry.tray_status_label || "Tray"} - ${entry.current_store || "Unassigned"}` : entry.store_name || "Fixed location"))}${Number(entry.reserved_quantity || 0) > 0 ? ` - ${Number(entry.reserved_quantity || 0).toLocaleString()} reserved` : ""}</small>
       <b>${Number(entry.quantity || 0).toLocaleString()}</b>
     </span>
   `).join("") + (details.length > 4
@@ -2882,6 +2882,27 @@ async function writeCurrentInventoryCache() {
   }));
 }
 
+async function fetchActiveReservationMap(itemId = null) {
+  try {
+    let query = supabase
+      .from("active_stock_reservations")
+      .select("stock_location_row_id,item_id,reserved_quantity");
+    if (itemId) query = query.eq("item_id", itemId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return new Map((data || []).map((entry) => [
+      entry.stock_location_row_id,
+      {
+        item_id: entry.item_id,
+        reserved_quantity: Number(entry.reserved_quantity || 0),
+      },
+    ]));
+  } catch (error) {
+    console.warn("Active reservation overlay is not available yet:", error);
+    return new Map();
+  }
+}
+
 function renderCurrentInventoryItems() {
   const filtered = getFilteredItems(allItems);
   applySortAndRender(filtered);
@@ -2956,7 +2977,7 @@ async function refreshItemById(itemId) {
   // Step 3: Get stock info
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
-    .select("item_id, quantity, location_id")
+    .select("id, item_id, quantity, location_id")
     .eq("item_id", itemId);
 
   if (!stockError && stockData) {
@@ -2975,12 +2996,17 @@ async function refreshItemById(itemId) {
       const locationDetails = [];
       let total = 0;
 
-      stockData.forEach(({ quantity, location_id }) => {
+      const reservations = await fetchActiveReservationMap(itemId);
+
+      stockData.forEach(({ id, quantity, location_id }) => {
         const locationInfo = locationMap[location_id] || {};
         const locName = locationInfo.label || "Unknown Location";
-        total += quantity;
-        breakdown[locName] = (breakdown[locName] || 0) + quantity;
+        const reserved = reservations.get(id)?.reserved_quantity || 0;
+        const available = Math.max(0, Number(quantity || 0) - reserved);
+        total += available;
+        breakdown[locName] = (breakdown[locName] || 0) + available;
         locationDetails.push({
+          stock_location_row_id: id,
           location_id,
           location_name: locationInfo.location_name || locName,
           store_name: locationInfo.store_name || "",
@@ -2989,7 +3015,9 @@ async function refreshItemById(itemId) {
           is_tray: Boolean(locationInfo.is_tray),
           is_container: Boolean(locationInfo.is_container),
           storage_path: locationInfo.storage_path || "",
-          quantity,
+          quantity: available,
+          physical_quantity: Number(quantity || 0),
+          reserved_quantity: reserved,
         });
       });
 
@@ -5498,7 +5526,7 @@ async function fetchStockItems() {
   // Step 2: Fetch stock quantities
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
-    .select("item_id, quantity, location_id");
+    .select("id, item_id, quantity, location_id");
 
   if (stockError || !stockData) {
     console.error("❌ Failed to fetch stock quantities:", stockError);
@@ -5521,18 +5549,22 @@ async function fetchStockItems() {
   }
 
   const locationMap = buildStockLocationMap(locations, stores);
+  const reservations = await fetchActiveReservationMap();
 
   // Step 4: Aggregate stock per item
   const stockMap = {};
-  stockData.forEach(({ item_id, quantity, location_id }) => {
+  stockData.forEach(({ id, item_id, quantity, location_id }) => {
     const locationInfo = locationMap[location_id] || {};
     const locName = locationInfo.label || "Unknown Location";
+    const reserved = reservations.get(id)?.reserved_quantity || 0;
+    const available = Math.max(0, Number(quantity || 0) - reserved);
     if (!stockMap[item_id]) {
       stockMap[item_id] = { total: 0, breakdown: {}, details: [] };
     }
-    stockMap[item_id].total += quantity;
-    stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + quantity;
+    stockMap[item_id].total += available;
+    stockMap[item_id].breakdown[locName] = (stockMap[item_id].breakdown[locName] || 0) + available;
     stockMap[item_id].details.push({
+      stock_location_row_id: id,
       location_id,
       location_name: locationInfo.location_name || locName,
       store_name: locationInfo.store_name || "",
@@ -5541,7 +5573,9 @@ async function fetchStockItems() {
       is_tray: Boolean(locationInfo.is_tray),
       is_container: Boolean(locationInfo.is_container),
       storage_path: locationInfo.storage_path || "",
-      quantity,
+      quantity: available,
+      physical_quantity: Number(quantity || 0),
+      reserved_quantity: reserved,
     });
   });
 
@@ -5813,7 +5847,7 @@ function renderManualSaleLocationResults(rows, message = "No stock locations fou
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `manual-sale-result-btn ${manualEbaySaleState.selectedStockRow?.id === row.id ? "is-selected" : ""}`;
-    btn.innerHTML = `<strong>${escapeStockHtml(row.locationLabel)}</strong><span>${Number(row.quantity || 0).toLocaleString()} available${row.location_code ? ` - ${escapeStockHtml(row.location_code)}` : ""}</span>`;
+    btn.innerHTML = `<strong>${escapeStockHtml(row.locationLabel)}</strong><span>${Number(row.quantity || 0).toLocaleString()} available${Number(row.reserved_quantity || 0) > 0 ? ` - ${Number(row.reserved_quantity || 0).toLocaleString()} reserved live` : ""}${row.location_code ? ` - ${escapeStockHtml(row.location_code)}` : ""}</span>`;
     btn.addEventListener("click", () => selectManualSaleStockRow(row));
     container.appendChild(btn);
   });
@@ -5864,11 +5898,14 @@ function normalizeManualSaleStockRow(row) {
 
 async function loadManualSaleStockRows(itemId) {
   setManualSaleStatus("Loading available trays and locations...");
-  const { data, error } = await supabase
-    .from("item_stock_locations")
-    .select(`id, item_id, location_id, quantity, location:location_id (*)`)
-    .eq("item_id", itemId)
-    .gt("quantity", 0);
+  const [{ data, error }, reservations] = await Promise.all([
+    supabase
+      .from("item_stock_locations")
+      .select(`id, item_id, location_id, quantity, location:location_id (*)`)
+      .eq("item_id", itemId)
+      .gt("quantity", 0),
+    fetchActiveReservationMap(itemId),
+  ]);
   if (error) {
     console.error("Manual eBay sale location load failed:", error);
     manualEbaySaleState.stockRows = [];
@@ -5876,7 +5913,18 @@ async function loadManualSaleStockRows(itemId) {
     setManualSaleStatus(error.message || "Could not load source locations.", "error");
     return;
   }
-  manualEbaySaleState.stockRows = (data || []).map(normalizeManualSaleStockRow);
+  manualEbaySaleState.stockRows = (data || [])
+    .map((row) => {
+      const reserved = reservations.get(row.id)?.reserved_quantity || 0;
+      return {
+        ...row,
+        physical_quantity: Number(row.quantity || 0),
+        reserved_quantity: reserved,
+        quantity: Math.max(0, Number(row.quantity || 0) - reserved),
+      };
+    })
+    .filter((row) => Number(row.quantity || 0) > 0)
+    .map(normalizeManualSaleStockRow);
   if (manualEbaySaleState.stockRows.length === 1) selectManualSaleStockRow(manualEbaySaleState.stockRows[0]);
   else {
     renderManualSaleLocationResults(manualEbaySaleState.stockRows);

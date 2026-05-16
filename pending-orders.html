@@ -27,6 +27,7 @@
       <a href="add-inventory.html">Add Inventory</a>
       <a href="inventory-activity.html">Daily Adds</a>
       <a href="stock.html">Stock</a>
+      <a href="live-sales.html">Live Sales</a>
       <a href="pending-orders.html" class="active">Pending Orders</a>
       <a href="timeclock.html">Timesheet</a>
       <a href="#" id="logout-mobile">Logout</a>
@@ -71,6 +72,11 @@
           <a class="nav-link" href="stock.html">
             <i class="ti ti-archive"></i>
             <span class="link-text">Stock</span>
+          </a>
+
+          <a class="nav-link" href="live-sales.html">
+            <i class="ti ti-qrcode"></i>
+            <span class="link-text">Live Sales</span>
           </a>
 
           <a class="nav-link active" href="pending-orders.html">
@@ -239,6 +245,23 @@
               </div>
 
               <div id="buyer-bundle-panel" class="buyer-bundle-panel"></div>
+            </section>
+
+            <section class="scan-card live-bag-card">
+              <div class="step-head">
+                <span>Bag</span>
+                <div>
+                  <h3>Scan Live Auction Label</h3>
+                  <p>Scan the auction number or bag ID. If the bag is correct, confirm it against this eBay order.</p>
+                </div>
+              </div>
+              <div class="scan-row">
+                <input id="live-lot-scan" type="search" placeholder="Scan auction number or LIVE bag ID" autocomplete="off" />
+                <button id="find-live-lot" type="button" class="secondary-btn">Load Bag</button>
+              </div>
+              <div id="live-lot-panel" class="live-lot-panel">
+                No live auction bag loaded.
+              </div>
             </section>
 
             <section class="scan-card">

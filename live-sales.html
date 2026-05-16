@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Live Sales</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="live-sales.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Live Sales</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="worker-dashboard.html">My Dashboard</a>
+      <a href="dashboard.html">Admin Dashboard</a>
+      <a href="stock.html">Stock</a>
+      <a href="live-sales.html" class="active">Live Sales</a>
+      <a href="pending-orders.html">Pending Orders</a>
+      <a href="locations.html">Trays</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="worker-dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">My Dashboard</span>
+          </a>
+          <a class="nav-link" href="stock.html">
+            <i class="ti ti-archive"></i>
+            <span class="link-text">Stock</span>
+          </a>
+          <a class="nav-link active" href="live-sales.html">
+            <i class="ti ti-qrcode"></i>
+            <span class="link-text">Live Sales</span>
+          </a>
+          <a class="nav-link" href="pending-orders.html">
+            <i class="ti ti-truck-delivery"></i>
+            <span class="link-text">Pending Orders</span>
+          </a>
+          <a class="nav-link" href="locations.html">
+            <i class="ti ti-map-pin"></i>
+            <span class="link-text">Trays</span>
+          </a>
+          <a class="nav-link" href="dashboard.html" title="Admins only">
+            <i class="ti ti-shield-lock"></i>
+            <span class="link-text">Admin</span>
+          </a>
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="live-sales-greeting">Live Sales</strong>
+            <div class="sub">Reserve items into auction bags, print labels, and preserve the packing trail.</div>
+          </div>
+          <div class="header-pills" aria-label="Page context">
+            <div class="pill">Scope: <b>Live</b></div>
+            <div class="pill">Mode: <b>Reserved Stock</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content live-sales-content">
+        <section class="live-hero">
+          <div>
+            <span class="eyebrow">Live Auction Workflow</span>
+            <h1>Scan Items Into Auction Bags</h1>
+            <p>Start a show session, create an auction bag, scan the jewelry into it, and print the label before the order is packed later.</p>
+          </div>
+          <div class="hero-actions">
+            <button id="refresh-live-sales" type="button" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+            <a href="pending-orders.html" class="secondary-btn">
+              <i data-lucide="package-check"></i>
+              Pending Orders
+            </a>
+          </div>
+        </section>
+
+        <section class="summary-strip live-summary-strip">
+          <div><span>Active Session</span><strong id="summary-session">None</strong></div>
+          <div><span>Current Bag</span><strong id="summary-lot">None</strong></div>
+          <div><span>Reserved Units</span><strong id="summary-reserved">0</strong></div>
+        </section>
+
+        <section class="live-grid">
+          <article class="live-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Session</span>
+                <h2>Show Session</h2>
+              </div>
+              <span id="session-status-pill" class="status-pill">No active show</span>
+            </div>
+            <div class="form-grid">
+              <label>
+                Store
+                <select id="session-store-select">
+                  <option value="">Select store</option>
+                </select>
+              </label>
+              <label>
+                Session Title
+                <input id="session-title" type="text" placeholder="Friday live show" />
+              </label>
+            </div>
+            <textarea id="session-notes" rows="2" placeholder="Optional show notes"></textarea>
+            <div class="button-row">
+              <button id="start-session" type="button" class="primary-btn">Start Session</button>
+              <button id="end-session" type="button" class="secondary-btn">End Session</button>
+            </div>
+            <div id="active-session-list" class="session-list"></div>
+          </article>
+
+          <article class="live-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Auction Bag</span>
+                <h2>Bag Label</h2>
+              </div>
+              <span id="lot-status-pill" class="status-pill">No bag selected</span>
+            </div>
+            <label>
+              Auction Number
+              <input id="auction-number" type="text" placeholder="Scan or type auction number" autocomplete="off" />
+            </label>
+            <label>
+              Small Label Text
+              <input id="label-free-text" type="text" placeholder="Optional free text" autocomplete="off" />
+            </label>
+            <div class="button-row">
+              <button id="create-lot" type="button" class="primary-btn">Create / Load Bag</button>
+              <button id="generate-live-label" type="button" class="secondary-btn">Generate DYMO Label</button>
+            </div>
+            <div id="label-status" class="status-line"></div>
+            <div id="current-lot-card" class="current-lot-card empty">Create a bag to begin scanning items.</div>
+          </article>
+        </section>
+
+        <section class="scan-workspace">
+          <article class="live-panel scan-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Scan</span>
+                <h2>Add Item to Current Bag</h2>
+              </div>
+              <span class="status-pill">Reserved only</span>
+            </div>
+            <div class="scan-row">
+              <input id="item-scan" type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
+              <button id="scan-item" type="button" class="secondary-btn" disabled>Scan</button>
+            </div>
+            <div id="item-match-card" class="match-card empty">Scan an item after a bag is selected.</div>
+            <div id="source-results" class="source-results"></div>
+            <label class="quantity-field">
+              Quantity
+              <input id="reserve-quantity" type="number" min="1" step="1" value="1" disabled />
+            </label>
+            <div class="button-row">
+              <button id="reserve-item" type="button" class="primary-btn" disabled>Reserve Into Bag</button>
+              <button id="clear-scan" type="button" class="secondary-btn">Clear</button>
+            </div>
+            <p id="live-status" class="status-line"></p>
+          </article>
+
+          <article class="live-panel manifest-panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Manifest</span>
+                <h2>Current Bag Contents</h2>
+              </div>
+              <button id="cancel-lot" type="button" class="secondary-btn danger-btn">Cancel Bag</button>
+            </div>
+            <div id="lot-manifest" class="manifest-list">
+              <div class="empty-state">No bag selected.</div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="supabase.js"></script>
+  <script src="live-sales.js"></script>
+</body>
+</html>
