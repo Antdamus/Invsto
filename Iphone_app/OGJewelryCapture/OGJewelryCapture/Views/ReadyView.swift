@@ -336,8 +336,8 @@ struct ReadyView: View {
     private var activeMediaArea: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(OGVisualStyle.panel)
+                Rectangle()
+                    .fill(Color.black)
 
                 switch viewModel.captureState {
                 case .reviewingCapture:
@@ -364,9 +364,8 @@ struct ReadyView: View {
             }
             .aspectRatio(3.0 / 4.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                Rectangle()
                     .stroke(OGVisualStyle.strokeStrong, lineWidth: 1)
             )
 
@@ -400,6 +399,8 @@ struct ReadyView: View {
                 viewModel.updatePreviewZoom(to: zoomFactor)
             } : nil
         )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
         .overlay(alignment: .topTrailing) {
             if isPreviewZoomEnabled, viewModel.zoomRange.upperBound > 1.0 {
                 Text("\(Double(viewModel.zoomFactor).formatted(.number.precision(.fractionLength(1))))x")
