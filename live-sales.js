@@ -1519,6 +1519,18 @@ function safeDymoFilename(value) {
     .slice(0, 80) || "label";
 }
 
+function getLiveSaleLabelBaseName() {
+  const showTitle = state.currentSession?.title || state.currentSession?.session_code || "Live_Show";
+  const auctionNumber = state.currentLot?.auction_number || "Auction";
+  const lotCode = state.currentLot?.lot_code || "Bag";
+  return [
+    "LiveSale",
+    safeDymoFilename(showTitle),
+    `Auction_${safeDymoFilename(auctionNumber)}`,
+    safeDymoFilename(lotCode),
+  ].join("_");
+}
+
 async function generateLiveLabel(options = {}) {
   if (!state.currentLot) {
     setLabelStatus("Create or load an auction bag first.", "error");
@@ -1533,8 +1545,8 @@ async function generateLiveLabel(options = {}) {
       lotCode: state.currentLot.lot_code,
       freeText,
     });
-    const safeLot = String(state.currentLot.lot_code || "live-bag").replace(/[^a-z0-9_-]+/gi, "_");
-    const labelPath = `labels/live_sale_${safeLot}_${Date.now()}.dymo`;
+    const labelBaseName = getLiveSaleLabelBaseName();
+    const labelPath = `labels/${labelBaseName}_${Date.now()}.dymo`;
     const blob = new Blob([xml], { type: "application/octet-stream" });
 
     const { error: uploadError } = await supabase.storage
@@ -1551,7 +1563,7 @@ async function generateLiveLabel(options = {}) {
     state.currentLot = Array.isArray(data) ? data[0] : data;
     renderAll();
 
-    const downloadName = `LiveSale_${safeDymoFilename(state.currentLot.auction_number)}_${safeDymoFilename(state.currentLot.lot_code)}.dymo`;
+    const downloadName = `${labelBaseName}.dymo`;
     downloadTextFile(xml, downloadName);
     const signed = await supabase.storage.from("dymo-labels").createSignedUrl(labelPath, 3600);
     const openLink = signed.data?.signedUrl

@@ -7,7 +7,7 @@ This helper makes the live-sale flow print labels with almost no seller friction
 The live-sale page downloads labels named like:
 
 ```text
-LiveSale_102_LIVE-20260516-0001.dymo
+LiveSale_Friday_May_16_2026_8_30_PM_eBay_Auction_102_LIVE-20260516-0001.dymo
 ```
 
 The helper watches the folder you select for `LiveSale_*.dymo`, sends matching files to the default Windows print handler, then moves them to:
