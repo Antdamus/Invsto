@@ -54,6 +54,11 @@ struct ReadyView: View {
                     LabeledContent("Camera Path", value: viewModel.cameraModeStatus.activeCameraLabel)
                     LabeledContent("Mode", value: viewModel.captureMode.label)
                     LabeledContent("Capture Quality", value: activeQualityLabel)
+                    LabeledContent("Auto Listen", value: viewModel.autoListenStatus.label)
+
+                    if let lastAutoListenCheckAt = viewModel.lastAutoListenCheckAt {
+                        LabeledContent("Last Auto Check", value: lastAutoListenCheckAt.formatted(date: .omitted, time: .standard))
+                    }
 
                     if let role = viewModel.employee.role, !role.isEmpty {
                         LabeledContent("Role", value: role)
@@ -76,6 +81,12 @@ struct ReadyView: View {
                 .listRowBackground(OGVisualStyle.panel)
 
                 Section("Capture Controls") {
+                    Toggle("Auto Listen", isOn: autoListenBinding)
+
+                    Text(autoListenHelpText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
                     Picker("Capture Mode", selection: captureModeBinding) {
                         ForEach(ReadyViewModel.CaptureMode.allCases) { mode in
                             Text(mode.label).tag(mode)
@@ -398,7 +409,7 @@ struct ReadyView: View {
             }
 
             Section {
-                Button("Refresh Listener / Jobs") {
+                Button("Refresh Now") {
                     Task {
                         await onRefreshStations()
                         await viewModel.refreshPendingJob()
@@ -497,6 +508,23 @@ struct ReadyView: View {
             get: { viewModel.captureMode },
             set: { viewModel.updateCaptureMode($0) }
         )
+    }
+
+    private var autoListenBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isAutoListenEnabled },
+            set: { viewModel.updateAutoListenEnabled($0) }
+        )
+    }
+
+    private var autoListenHelpText: String {
+        if viewModel.isAutoListenEnabled {
+            return viewModel.lastAutoListenCheckAt.map {
+                "Auto Listen is \(viewModel.autoListenStatus.label.lowercased()). Last checked \($0.formatted(date: .omitted, time: .standard))."
+            } ?? "Auto Listen is \(viewModel.autoListenStatus.label.lowercased())."
+        }
+
+        return "Auto Listen is off. Realtime listener and Refresh Now remain available."
     }
 
     private var captureResolutionModeBinding: Binding<CaptureResolutionMode> {

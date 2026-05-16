@@ -58,6 +58,29 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
+    enum AutoListenStatus: Equatable {
+        case off
+        case waiting
+        case checking
+        case paused
+        case error(String)
+
+        var label: String {
+            switch self {
+            case .off:
+                "Off"
+            case .waiting:
+                "Checking every 5s"
+            case .checking:
+                "Checking now"
+            case .paused:
+                "Paused until listening"
+            case let .error(message):
+                "Check failed: \(message)"
+            }
+        }
+    }
+
     @Published private(set) var listenerState: CaptureListenerState = .idle
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var cameraAvailability: CameraAvailability = .unknown
@@ -71,6 +94,9 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var zoomFactor: CGFloat
     @Published private(set) var zoomRange: ClosedRange<CGFloat>
     @Published private(set) var finishJobMessage: String?
+    @Published private(set) var isAutoListenEnabled: Bool
+    @Published private(set) var autoListenStatus: AutoListenStatus = .off
+    @Published private(set) var lastAutoListenCheckAt: Date?
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -84,14 +110,18 @@ final class ReadyViewModel: ObservableObject {
 
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
+    private var autoListenTask: Task<Void, Never>?
 
     private var handledJobIDs = Set<UUID>()
     private var activeJobID: UUID?
     private var hasStarted = false
+    private var isPendingJobRefreshInFlight = false
 
     private static let captureModeKey = "ready.captureMode"
     private static let captureResolutionModeKey = "ready.captureResolutionMode"
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
+    private static let autoListenEnabledKey = "ready.autoListenEnabled"
+    private static let autoListenInterval: Duration = .seconds(5)
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
     private static let operatorCancelledFailureCode = "cancelled_by_operator"
     private static let operatorCancelledFailureMessage = "Operator cancelled capture"
@@ -118,6 +148,7 @@ final class ReadyViewModel: ObservableObject {
         self.userDefaults = userDefaults
         self.captureMode = CaptureMode(rawValue: userDefaults.string(forKey: Self.captureModeKey) ?? "") ?? .auto
         self.captureResolutionMode = CaptureResolutionMode(rawValue: userDefaults.string(forKey: Self.captureResolutionModeKey) ?? "") ?? .standard
+        self.isAutoListenEnabled = userDefaults.object(forKey: Self.autoListenEnabledKey) as? Bool ?? false
         self.zoomFactor = CameraZoomState.unavailable.factor
         self.zoomRange = CameraZoomState.unavailable.range
 
@@ -130,6 +161,7 @@ final class ReadyViewModel: ObservableObject {
         let listener = listener
         let cameraService = cameraService
         pendingAutoCaptureTask?.cancel()
+        autoListenTask?.cancel()
 
         Task {
             await listener.stopListening()
@@ -190,10 +222,12 @@ final class ReadyViewModel: ObservableObject {
         )
 
         await refreshPendingJob()
+        updateAutoListenPolling()
     }
 
     func stop() async {
         pendingAutoCaptureTask?.cancel()
+        stopAutoListenPolling()
         await listener.stopListening()
         cameraService.stopSession()
         pendingJob = nil
@@ -202,6 +236,14 @@ final class ReadyViewModel: ObservableObject {
         zoomRange = CameraZoomState.unavailable.range
         cameraModeStatus = .unknown
         hasStarted = false
+    }
+
+    func updateAutoListenEnabled(_ isEnabled: Bool) {
+        guard isAutoListenEnabled != isEnabled else { return }
+
+        isAutoListenEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.autoListenEnabledKey)
+        updateAutoListenPolling()
     }
 
     func updateCaptureMode(_ mode: CaptureMode) {
@@ -263,12 +305,62 @@ final class ReadyViewModel: ObservableObject {
     }
 
     func refreshPendingJob() async {
+        guard !isPendingJobRefreshInFlight else { return }
+        guard canAcceptIncomingJobs else { return }
+
+        isPendingJobRefreshInFlight = true
+
         do {
             if let job = try await repository.fetchNextPendingJob(for: station.id) {
                 await handleIncomingJob(job)
             }
         } catch {
             listenerState = .error(error.localizedDescription)
+        }
+
+        isPendingJobRefreshInFlight = false
+    }
+
+    private func pollPendingJobForAutoListen() async {
+        guard isAutoListenEnabled else {
+            autoListenStatus = .off
+            return
+        }
+
+        guard canAcceptIncomingJobs else {
+            autoListenStatus = .paused
+            return
+        }
+
+        guard !isPendingJobRefreshInFlight else {
+            autoListenStatus = .waiting
+            return
+        }
+
+        autoListenStatus = .checking
+        isPendingJobRefreshInFlight = true
+        var didFail = false
+
+        defer {
+            lastAutoListenCheckAt = Date()
+            isPendingJobRefreshInFlight = false
+
+            if !didFail, isAutoListenEnabled {
+                autoListenStatus = canAcceptIncomingJobs ? .waiting : .paused
+            } else if !didFail {
+                autoListenStatus = .off
+            }
+        }
+
+        do {
+            if let job = try await repository.fetchNextPendingJob(for: station.id) {
+                await handleIncomingJob(job)
+            }
+        } catch {
+            if canAcceptIncomingJobs {
+                didFail = true
+                autoListenStatus = .error(error.localizedDescription)
+            }
         }
     }
 
@@ -855,6 +947,39 @@ final class ReadyViewModel: ObservableObject {
 
     private func refreshCameraModeStatus() async {
         cameraModeStatus = await cameraService.currentCameraModeStatus()
+    }
+
+    private func updateAutoListenPolling() {
+        guard hasStarted, isAutoListenEnabled else {
+            stopAutoListenPolling()
+            return
+        }
+
+        startAutoListenPollingIfNeeded()
+    }
+
+    private func startAutoListenPollingIfNeeded() {
+        guard autoListenTask == nil else { return }
+
+        autoListenStatus = canAcceptIncomingJobs ? .waiting : .paused
+        autoListenTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: Self.autoListenInterval)
+                } catch {
+                    return
+                }
+
+                guard !Task.isCancelled else { return }
+                await self?.pollPendingJobForAutoListen()
+            }
+        }
+    }
+
+    private func stopAutoListenPolling() {
+        autoListenTask?.cancel()
+        autoListenTask = nil
+        autoListenStatus = .off
     }
 
     var isShowingPersistentResult: Bool {
