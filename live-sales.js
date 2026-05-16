@@ -1511,6 +1511,14 @@ function downloadTextFile(text, filename) {
   URL.revokeObjectURL(url);
 }
 
+function safeDymoFilename(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "label";
+}
+
 async function generateLiveLabel(options = {}) {
   if (!state.currentLot) {
     setLabelStatus("Create or load an auction bag first.", "error");
@@ -1543,12 +1551,13 @@ async function generateLiveLabel(options = {}) {
     state.currentLot = Array.isArray(data) ? data[0] : data;
     renderAll();
 
-    downloadTextFile(xml, `LiveSale_${state.currentLot.auction_number}_${state.currentLot.lot_code}.dymo`);
+    const downloadName = `LiveSale_${safeDymoFilename(state.currentLot.auction_number)}_${safeDymoFilename(state.currentLot.lot_code)}.dymo`;
+    downloadTextFile(xml, downloadName);
     const signed = await supabase.storage.from("dymo-labels").createSignedUrl(labelPath, 3600);
     const openLink = signed.data?.signedUrl
       ? ` <a href="${escapeHtml(signed.data.signedUrl)}" target="_blank" rel="noreferrer">Open uploaded label</a>`
       : "";
-    setLabelStatus(`DYMO label generated and uploaded.${openLink}`, "success");
+    setLabelStatus(`DYMO label generated and downloaded as ${escapeHtml(downloadName)} for the local print helper.${openLink}`, "success");
     return true;
   } catch (error) {
     console.error("Generate live sale label failed:", error);
