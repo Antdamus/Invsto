@@ -342,10 +342,7 @@ struct ReadyView: View {
                 switch viewModel.captureState {
                 case .reviewingCapture:
                     if let image = resultPreviewImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        activeMediaImage(image)
                     } else {
                         activeMediaPlaceholder(title: "Review Capture", message: "Captured photo is loading.")
                     }
@@ -353,10 +350,7 @@ struct ReadyView: View {
                     activeMediaPlaceholder(title: "Finishing Job", message: uploadProgressText)
                 case .sessionReady:
                     if let image = viewModel.activeSession?.keptPhotos.last?.previewImage {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        activeMediaImage(image)
                     } else {
                         activeMediaPlaceholder(title: "Ready For Capture", message: "Capture and keep at least one photo.")
                     }
@@ -368,7 +362,8 @@ struct ReadyView: View {
                     }
                 }
             }
-            .frame(height: 330)
+            .aspectRatio(3.0 / 4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -381,6 +376,13 @@ struct ReadyView: View {
                     .foregroundStyle(OGVisualStyle.textSecondary)
             }
         }
+    }
+
+    private func activeMediaImage(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func livePreview(_ session: AVCaptureSession) -> some View {

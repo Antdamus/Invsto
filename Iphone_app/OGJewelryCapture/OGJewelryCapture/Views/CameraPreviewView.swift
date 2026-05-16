@@ -11,7 +11,7 @@ struct CameraPreviewView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.videoPreviewLayer.videoGravity = .resizeAspectFill
+        view.videoPreviewLayer.videoGravity = .resizeAspect
         view.videoPreviewLayer.session = session
         view.isTapToFocusEnabled = isTapToFocusEnabled
         view.isPinchToZoomEnabled = isPinchToZoomEnabled
@@ -23,6 +23,7 @@ struct CameraPreviewView: UIViewRepresentable {
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         uiView.videoPreviewLayer.session = session
+        uiView.videoPreviewLayer.videoGravity = .resizeAspect
         uiView.isTapToFocusEnabled = isTapToFocusEnabled
         uiView.isPinchToZoomEnabled = isPinchToZoomEnabled
         uiView.zoomFactor = zoomFactor
