@@ -83,6 +83,35 @@ function getSessionStoreName(session = state.currentSession) {
   return session?.store_id ? getStoreName(session.store_id) : "No store";
 }
 
+function formatSessionTitleDate(value = new Date()) {
+  return value.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getLiveSalesStoreStorageKey() {
+  return `og-live-sales-store:${state.user?.id || "anonymous"}`;
+}
+
+function readSavedStoreId() {
+  try {
+    return localStorage.getItem(getLiveSalesStoreStorageKey()) || "";
+  } catch (error) {
+    console.warn("Could not read live sale store preference:", error);
+    return "";
+  }
+}
+
+function saveStoreId(storeId) {
+  try {
+    if (storeId) localStorage.setItem(getLiveSalesStoreStorageKey(), storeId);
+  } catch (error) {
+    console.warn("Could not save live sale store preference:", error);
+  }
+}
+
 function canManageLiveSales() {
   return Boolean(state.employee);
 }
@@ -140,19 +169,38 @@ function setupShell() {
 }
 
 async function loadStores() {
-  const { data, error } = await supabase
+  const select = $("session-store-select");
+  if (select) select.disabled = true;
+
+  let { data, error } = await supabase
     .from("store_locations")
     .select("id, name, active")
     .eq("active", true)
     .order("name", { ascending: true });
 
+  if (!error && !data?.length) {
+    const retry = await supabase
+      .from("store_locations")
+      .select("id, name, active")
+      .order("name", { ascending: true });
+    data = retry.data;
+    error = retry.error;
+  }
+
   if (error) {
     console.error("Live sale store load failed:", error);
     state.stores = [];
+    setStatus("Could not load stores. Refresh or confirm this account can see store locations.", "error");
+    renderStoreSelect();
     return;
   }
 
   state.stores = data || [];
+  const saved = readSavedStoreId();
+  if (!state.currentSession?.store_id && saved && state.stores.some((store) => store.id === saved)) {
+    const storeSelect = $("session-store-select");
+    if (storeSelect) storeSelect.value = saved;
+  }
   renderStoreSelect();
 }
 
@@ -163,7 +211,7 @@ function renderStoreSelect() {
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "Select store";
+  placeholder.textContent = state.stores.length ? "Select store" : "No stores found";
   select.appendChild(placeholder);
 
   state.stores.forEach((store) => {
@@ -173,7 +221,11 @@ function renderStoreSelect() {
     select.appendChild(option);
   });
 
+  const saved = readSavedStoreId();
   if (state.currentSession?.store_id) select.value = state.currentSession.store_id;
+  else if (saved && state.stores.some((store) => store.id === saved)) select.value = saved;
+  else if (state.stores.length === 1) select.value = state.stores[0].id;
+  select.disabled = false;
 }
 
 async function loadSessions({ keepSelection = true } = {}) {
@@ -394,6 +446,7 @@ async function startSession() {
   }
 
   try {
+    saveStoreId(storeId);
     state.busy = true;
     setStatus("Starting live sale session...");
     const { data, error } = await supabase.rpc("start_live_sale_session", {
@@ -1033,6 +1086,9 @@ function scheduleItemSearch() {
 }
 
 function setupListeners() {
+  $("session-store-select")?.addEventListener("change", (event) => {
+    saveStoreId(event.target.value || "");
+  });
   $("refresh-live-sales")?.addEventListener("click", async () => {
     await loadStores();
     await loadSessions();
@@ -1082,6 +1138,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ok || !canManageLiveSales()) return;
   setupShell();
   setupListeners();
+  const titleInput = $("session-title");
+  if (titleInput && !titleInput.value.trim()) {
+    titleInput.value = `Live Sale - ${formatSessionTitleDate()}`;
+  }
   await loadStores();
   await loadSessions({ keepSelection: false });
   renderAll();

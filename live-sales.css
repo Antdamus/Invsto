@@ -111,16 +111,18 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
   margin-bottom: 18px;
+  align-items: start;
 }
 
 .scan-workspace {
   grid-template-columns: minmax(360px, 0.8fr) minmax(0, 1.2fr);
-  align-items: start;
 }
 
 .live-panel {
   border-radius: 8px;
   padding: 22px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .panel-head {
@@ -129,6 +131,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
 
 .panel-head h2 {
@@ -176,6 +179,7 @@ body {
 .live-panel input,
 .live-panel select,
 .live-panel textarea {
+  min-width: 0;
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -184,6 +188,11 @@ body {
   padding: 13px 14px;
   font: inherit;
   outline: none;
+}
+
+.live-panel select option {
+  color: #121212;
+  background: #ffffff;
 }
 
 .live-panel input:focus,
@@ -297,6 +306,10 @@ body {
   border-radius: 8px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.035);
+  height: auto;
+  min-height: 0;
+  max-height: 160px;
+  overflow: auto;
 }
 
 .current-lot-card:not(.empty),
