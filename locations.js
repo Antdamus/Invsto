@@ -65,7 +65,7 @@ async function checkAuth() {
 
   const subtitle = document.getElementById("header-subtitle");
   if (subtitle && role !== "admin") {
-    subtitle.textContent = "Tray creation and inventory placement tools";
+    subtitle.textContent = "Location, container, and tray creation tools";
   }
 
   document.querySelectorAll(".header-pills .pill").forEach((pill) => {
@@ -927,8 +927,7 @@ function closeCreateLocationModal() {
 function openCreateLocationModal({ tray = false, container = false } = {}) {
   const elements = getCreateModalElements();
   if (!elements.modal) return;
-  const forceTray = !locationsAccess.isAdmin;
-  const createTray = tray || forceTray;
+  const createTray = Boolean(tray);
   const createContainer = !createTray && Boolean(container);
 
   elements.form?.reset();
@@ -957,7 +956,7 @@ function openCreateLocationModal({ tray = false, container = false } = {}) {
   }
   if (elements.isTrayInput) {
     elements.isTrayInput.checked = createTray;
-    elements.isTrayInput.disabled = forceTray;
+    elements.isTrayInput.disabled = false;
   }
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
   if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
@@ -1053,7 +1052,7 @@ async function saveCreatedLocation() {
   const capacityValue = asTrimmedString(elements.capacityInput?.value);
   const capacityHasNoLimit = Boolean(elements.capacityNoLimitInput?.checked);
   const locationCode = asTrimmedString(elements.barcodeInput?.value);
-  const isTray = !locationsAccess.isAdmin ? true : Boolean(elements.isTrayInput?.checked);
+  const isTray = Boolean(elements.isTrayInput?.checked);
   const isContainer = !isTray && Boolean(parentLocationId);
   const parentLocation = parentLocationId
     ? state.locations.find((location) => String(location.id) === String(parentLocationId))

@@ -1172,8 +1172,6 @@
   color: #ffe8ad;
 }
 
-.locations-worker-view #locations-create-location,
-.locations-worker-view #locations-create-container,
 .locations-worker-view #location-edit-form,
 .locations-worker-view .nav-link[href="dashboard.html"],
 .locations-worker-view .nav-link[href="admin.html"] {
