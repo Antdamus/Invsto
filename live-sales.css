@@ -114,6 +114,22 @@ body {
   align-items: start;
 }
 
+body.live-session-active:not(.live-label-step) .live-grid,
+body:not(.live-session-active) #bag-label-panel,
+body:not(.live-session-active) #scan-stage,
+body.live-session-active #session-setup-panel,
+body.live-session-active:not(.live-label-step) #bag-label-panel {
+  display: none;
+}
+
+body.live-label-step .live-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.live-label-step #bag-label-panel {
+  max-width: 760px;
+}
+
 .scan-workspace {
   grid-template-columns: minmax(360px, 0.8fr) minmax(0, 1.2fr);
 }
@@ -214,6 +230,31 @@ body {
   margin: 14px 0;
 }
 
+.step-copy {
+  margin: -6px 0 16px;
+}
+
+.shortcut-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.shortcut-strip span {
+  border: 1px solid rgba(231, 192, 114, 0.2);
+  border-radius: 999px;
+  background: rgba(231, 192, 114, 0.08);
+  color: var(--live-muted);
+  padding: 8px 11px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.shortcut-strip b {
+  color: var(--live-gold);
+}
+
 .primary-btn,
 .secondary-btn {
   display: inline-flex;
@@ -308,13 +349,90 @@ body {
   background: rgba(255, 255, 255, 0.035);
   height: auto;
   min-height: 0;
-  max-height: 160px;
+  max-height: 320px;
   overflow: auto;
 }
 
 .current-lot-card:not(.empty),
 .match-card:not(.empty) {
   border-style: solid;
+}
+
+.selected-match-card {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.match-photo {
+  width: 92px;
+  height: 92px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--live-muted);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 900;
+  cursor: zoom-in;
+}
+
+.match-photo:disabled {
+  cursor: default;
+}
+
+.match-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.match-copy {
+  min-width: 0;
+}
+
+.choice-match-card {
+  display: grid;
+  gap: 10px;
+}
+
+.choice-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.choice-photo {
+  width: 72px;
+  height: 72px;
+}
+
+.choice-copy {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--live-text);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choice-copy small {
+  display: block;
+  color: var(--live-muted);
+  margin-top: 4px;
+}
+
+.choice-copy b {
+  display: block;
+  color: var(--live-gold);
+  margin-top: 8px;
 }
 
 .scan-row {
@@ -420,6 +538,67 @@ body {
   color: var(--live-ok);
 }
 
+.live-photo-modal[hidden] {
+  display: none;
+}
+
+.live-photo-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.live-photo-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.live-photo-dialog {
+  position: relative;
+  width: min(92vw, 760px);
+  max-height: 90vh;
+  border: 1px solid var(--live-border-strong);
+  border-radius: 10px;
+  background: #080707;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.live-photo-dialog img {
+  width: 100%;
+  max-height: 78vh;
+  object-fit: contain;
+  background: #000;
+}
+
+.live-photo-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.live-photo-title {
+  padding: 14px 16px;
+  color: var(--live-text);
+  font-weight: 900;
+}
+
 @media (max-width: 980px) {
   .live-sales-content {
     padding: 18px 14px 36px;
@@ -451,6 +630,17 @@ body {
 
   .manifest-item {
     grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .selected-match-card,
+  .choice-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .match-photo,
+  .choice-photo {
+    width: 64px;
+    height: 64px;
   }
 
   .manifest-thumb {

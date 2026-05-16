@@ -107,7 +107,7 @@
         </section>
 
         <section class="live-grid">
-          <article class="live-panel">
+          <article class="live-panel" id="session-setup-panel">
             <div class="panel-head">
               <div>
                 <span class="eyebrow">Session</span>
@@ -135,32 +135,33 @@
             <div id="active-session-list" class="session-list"></div>
           </article>
 
-          <article class="live-panel">
+          <article class="live-panel" id="bag-label-panel">
             <div class="panel-head">
               <div>
-                <span class="eyebrow">Auction Bag</span>
-                <h2>Bag Label</h2>
+                <span class="eyebrow">Final Step</span>
+                <h2>Confirm Auction Number</h2>
               </div>
               <span id="lot-status-pill" class="status-pill">No bag selected</span>
             </div>
+            <p class="step-copy">Type or confirm the auction number, then press Enter. The DYMO label is generated automatically and the next bag is prepared.</p>
             <label>
               Auction Number
               <input id="auction-number" type="text" placeholder="Scan or type auction number" autocomplete="off" />
             </label>
-            <label>
+            <label class="optional-label-text">
               Small Label Text
               <input id="label-free-text" type="text" placeholder="Optional free text" autocomplete="off" />
             </label>
             <div class="button-row">
-              <button id="create-lot" type="button" class="primary-btn">Create / Load Bag</button>
-              <button id="generate-live-label" type="button" class="secondary-btn">Generate DYMO Label</button>
+              <button id="generate-live-label" type="button" class="primary-btn">Print Label + Next Bag</button>
+              <button id="create-lot" type="button" class="secondary-btn">Load Bag Manually</button>
             </div>
             <div id="label-status" class="status-line"></div>
             <div id="current-lot-card" class="current-lot-card empty">Create a bag to begin scanning items.</div>
           </article>
         </section>
 
-        <section class="scan-workspace">
+        <section class="scan-workspace" id="scan-stage">
           <article class="live-panel scan-panel">
             <div class="panel-head">
               <div>
@@ -168,6 +169,12 @@
                 <h2>Add Item to Current Bag</h2>
               </div>
               <span class="status-pill">Reserved only</span>
+            </div>
+            <div class="shortcut-strip">
+              <span><b>Scan</b> adds the item automatically</span>
+              <span><b>Same scan</b> +1 quantity</span>
+              <span><b>Space</b> next scan</span>
+              <span><b>Enter</b> finish bag</span>
             </div>
             <div class="scan-row">
               <input id="item-scan" type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
@@ -203,7 +210,17 @@
     </div>
   </div>
 
-  <script src="supabase.js"></script>
+  <div id="live-photo-modal" class="live-photo-modal" hidden>
+    <div class="live-photo-backdrop" data-close-live-photo></div>
+    <div class="live-photo-dialog" role="dialog" aria-modal="true" aria-labelledby="live-photo-modal-title">
+      <button id="live-photo-close" type="button" class="live-photo-close" aria-label="Close image preview">×</button>
+      <img id="live-photo-modal-image" alt="Selected item preview" />
+      <div id="live-photo-modal-title" class="live-photo-title">Item preview</div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
   <script src="live-sales.js"></script>
 </body>
 </html>

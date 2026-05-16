@@ -13,6 +13,7 @@ const state = {
   selectedSourceRow: null,
   sourceReservations: new Map(),
   itemSearchTimer: null,
+  flowStep: "session",
   busy: false,
 };
 
@@ -84,15 +85,18 @@ function getSessionStoreName(session = state.currentSession) {
 }
 
 function formatSessionTitleDate(value = new Date()) {
-  return value.toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  const weekday = value.toLocaleDateString([], { weekday: "long" });
+  const date = value.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const time = value.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `${weekday} ${date} ${time} eBay`;
 }
 
 function getLiveSalesStoreStorageKey() {
   return `og-live-sales-store:${state.user?.id || "anonymous"}`;
+}
+
+function getAuctionNumberStorageKey() {
+  return `og-live-sales-last-auction:${state.user?.id || "anonymous"}:${state.currentSession?.store_id || "no-store"}`;
 }
 
 function readSavedStoreId() {
@@ -110,6 +114,46 @@ function saveStoreId(storeId) {
   } catch (error) {
     console.warn("Could not save live sale store preference:", error);
   }
+}
+
+function readLastAuctionNumber() {
+  try {
+    return localStorage.getItem(getAuctionNumberStorageKey()) || "";
+  } catch (error) {
+    console.warn("Could not read live sale auction preference:", error);
+    return "";
+  }
+}
+
+function saveLastAuctionNumber(value) {
+  try {
+    const clean = String(value || "").trim();
+    if (clean) localStorage.setItem(getAuctionNumberStorageKey(), clean);
+  } catch (error) {
+    console.warn("Could not save live sale auction preference:", error);
+  }
+}
+
+function incrementAuctionNumber(value) {
+  const clean = String(value || "").trim();
+  if (!clean) return "1";
+  const match = clean.match(/^(.*?)(\d+)$/);
+  if (!match) return clean;
+  const [, prefix, digits] = match;
+  const nextNumber = String(Number(digits) + 1).padStart(digits.length, "0");
+  return `${prefix}${nextNumber}`;
+}
+
+function setFlowStep(step) {
+  state.flowStep = step;
+  renderFlowState();
+}
+
+function renderFlowState() {
+  const hasSession = Boolean(state.currentSession);
+  document.body.classList.toggle("live-session-active", hasSession);
+  document.body.classList.toggle("live-label-step", hasSession && state.flowStep === "label");
+  document.body.classList.toggle("live-scan-step", hasSession && state.flowStep !== "label");
 }
 
 function canManageLiveSales() {
@@ -251,6 +295,7 @@ async function loadSessions({ keepSelection = true } = {}) {
   }
 
   if (!state.currentSession) state.currentLot = null;
+  setFlowStep(state.currentSession ? "scan" : "session");
   renderSessions();
   renderStoreSelect();
   await loadLotItems();
@@ -278,9 +323,10 @@ function renderSessions() {
           state.currentSession = session;
           state.currentLot = null;
           clearScan();
+          setFlowStep("scan");
           renderAll();
           await loadLotItems();
-          $("auction-number")?.focus();
+          await prepareNextBag();
         });
         list.appendChild(button);
       });
@@ -328,16 +374,22 @@ function renderCurrentLot() {
 }
 
 function updateScanGate() {
-  const enabled = Boolean(state.currentSession && state.currentLot && state.currentLot.status !== "packed");
+  const enabled = Boolean(
+    state.currentSession
+      && state.currentLot
+      && state.currentLot.status !== "packed"
+      && state.flowStep !== "label"
+  );
   $("item-scan")?.toggleAttribute("disabled", !enabled);
   $("scan-item")?.toggleAttribute("disabled", !enabled);
   $("reserve-quantity")?.toggleAttribute("disabled", !enabled);
   $("reserve-item")?.toggleAttribute("disabled", !enabled || !state.selectedItem || !state.selectedSourceRow);
-  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot);
+  $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !state.lotItems.length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
 }
 
 function renderAll() {
+  renderFlowState();
   renderSessions();
   renderSummary();
   renderCurrentLot();
@@ -360,6 +412,29 @@ async function resolvePhotoUrl(path) {
   const { data, error } = await supabase.storage.from("photos").createSignedUrl(cleanPath, 3600);
   if (error) return "";
   return data?.signedUrl || "";
+}
+
+function openLivePhotoModal(url, title = "Item preview") {
+  const modal = $("live-photo-modal");
+  const image = $("live-photo-modal-image");
+  const label = $("live-photo-modal-title");
+  if (!modal || !image) return;
+
+  image.src = url;
+  image.alt = title;
+  if (label) label.textContent = title;
+  modal.hidden = false;
+  document.body.classList.add("live-photo-open");
+  $("live-photo-close")?.focus();
+}
+
+function closeLivePhotoModal() {
+  const modal = $("live-photo-modal");
+  const image = $("live-photo-modal-image");
+  if (!modal) return;
+  modal.hidden = true;
+  if (image) image.removeAttribute("src");
+  document.body.classList.remove("live-photo-open");
 }
 
 async function loadLotItems() {
@@ -436,7 +511,12 @@ function renderManifest() {
 async function startSession() {
   if (state.busy) return;
   const storeId = $("session-store-select")?.value || "";
-  const title = $("session-title")?.value?.trim() || "Live Sale";
+  const titleInput = $("session-title");
+  let title = titleInput?.value?.trim() || "";
+  if (!title || titleInput?.dataset.autoTitle === "true") {
+    title = formatSessionTitleDate();
+    if (titleInput) titleInput.value = title;
+  }
   const notes = $("session-notes")?.value?.trim() || null;
 
   if (!storeId) {
@@ -459,8 +539,9 @@ async function startSession() {
     state.currentSession = Array.isArray(data) ? data[0] : data;
     state.currentLot = null;
     await loadSessions({ keepSelection: true });
-    setStatus("Live sale session started. Enter the auction number for the first bag.", "success");
-    setTimeout(() => $("auction-number")?.focus(), 80);
+    state.busy = false;
+    await prepareNextBag();
+    setStatus("Show session started. Scan the first item into the current bag.", "success");
   } catch (error) {
     console.error("Start live sale session failed:", error);
     setStatus(error.message || "Could not start the live sale session.", "error");
@@ -495,13 +576,14 @@ async function endSession() {
   }
 }
 
-async function createOrLoadLot() {
+async function createOrLoadLot(options = {}) {
+  if (state.busy && !options.force) return;
   if (!state.currentSession) {
     setStatus("Start or select a live sale session first.", "error");
     return;
   }
 
-  const auctionNumber = $("auction-number")?.value?.trim();
+  const auctionNumber = String(options.auctionNumber ?? $("auction-number")?.value ?? "").trim();
   if (!auctionNumber) {
     setStatus("Enter the auction number first.", "error");
     $("auction-number")?.focus();
@@ -510,7 +592,7 @@ async function createOrLoadLot() {
 
   try {
     state.busy = true;
-    setStatus("Creating or loading auction bag...");
+    if (!options.silent) setStatus("Creating or loading auction bag...");
     const { data, error } = await supabase.rpc("create_live_sale_lot", {
       _session_id: state.currentSession.id,
       _auction_number: auctionNumber,
@@ -521,8 +603,11 @@ async function createOrLoadLot() {
     state.currentLot = Array.isArray(data) ? data[0] : data;
     clearScan();
     await loadLotItems();
-    setStatus("Bag is ready. Scan the first item barcode.", "success");
-    setTimeout(() => $("item-scan")?.focus(), 80);
+    if ($("auction-number")) $("auction-number").value = state.currentLot.auction_number || auctionNumber;
+    if ($("label-free-text")) $("label-free-text").value = state.currentLot.auction_number || auctionNumber;
+    setFlowStep("scan");
+    if (!options.silent) setStatus("Bag is ready. Scan the first item barcode.", "success");
+    if (options.focusScan !== false) setTimeout(() => focusItemScanner(), 80);
   } catch (error) {
     console.error("Create live sale lot failed:", error);
     setStatus(error.message || "Could not create the auction bag.", "error");
@@ -531,11 +616,101 @@ async function createOrLoadLot() {
   }
 }
 
+async function getNextAuctionNumber() {
+  if (!state.currentSession?.id) return incrementAuctionNumber(readLastAuctionNumber());
+
+  const { data, error } = await supabase
+    .from("live_sale_lots")
+    .select("auction_number, created_at")
+    .eq("session_id", state.currentSession.id)
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  if (error) {
+    console.warn("Could not derive next live-sale auction number:", error);
+    return incrementAuctionNumber(readLastAuctionNumber());
+  }
+
+  const numbers = (data || []).map((lot) => String(lot.auction_number || "").trim()).filter(Boolean);
+  const numericLots = numbers
+    .map((value) => ({ value, match: value.match(/^(.*?)(\d+)$/) }))
+    .filter((entry) => entry.match)
+    .map((entry) => ({
+      value: entry.value,
+      prefix: entry.match[1],
+      number: Number(entry.match[2]),
+      width: entry.match[2].length,
+    }))
+    .sort((a, b) => b.number - a.number);
+
+  if (numericLots.length) {
+    const top = numericLots[0];
+    return `${top.prefix}${String(top.number + 1).padStart(top.width, "0")}`;
+  }
+
+  return incrementAuctionNumber(readLastAuctionNumber());
+}
+
+async function prepareNextBag() {
+  if (!state.currentSession || state.currentLot?.status === "open" || state.currentLot?.status === "reserved") {
+    if (state.currentLot && state.flowStep !== "label") {
+      setFlowStep("scan");
+      setTimeout(() => focusItemScanner(), 80);
+    }
+    return;
+  }
+
+  const recoverableLot = await findRecoverableCurrentLot();
+  if (recoverableLot) {
+    state.currentLot = recoverableLot;
+    if ($("auction-number")) $("auction-number").value = recoverableLot.auction_number || "";
+    if ($("label-free-text")) $("label-free-text").value = recoverableLot.auction_number || "";
+    setFlowStep("scan");
+    await loadLotItems();
+    setStatus(`Recovered bag ${recoverableLot.auction_number}. Continue scanning or press Enter on an empty scanner to print.`, "success");
+    setTimeout(() => focusItemScanner(), 80);
+    return;
+  }
+
+  const nextAuctionNumber = await getNextAuctionNumber();
+  if ($("auction-number")) $("auction-number").value = nextAuctionNumber;
+  if ($("label-free-text")) $("label-free-text").value = nextAuctionNumber;
+  await createOrLoadLot({ auctionNumber: nextAuctionNumber, silent: true, focusScan: true });
+  setStatus(`Bag ${nextAuctionNumber} is ready. Scan items, press Space for the next scan, or press Enter on an empty scanner to print.`, "success");
+}
+
+async function findRecoverableCurrentLot() {
+  if (!state.currentSession?.id) return null;
+  const { data, error } = await supabase
+    .from("live_sale_lots")
+    .select("*")
+    .eq("session_id", state.currentSession.id)
+    .in("status", ["open", "reserved"])
+    .is("label_path", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.warn("Could not load recoverable live-sale bag:", error);
+    return null;
+  }
+
+  return data?.[0] || null;
+}
+
+function focusItemScanner() {
+  const scanner = $("item-scan");
+  if (!scanner || scanner.disabled) return;
+  scanner.focus();
+  scanner.select();
+}
+
 function sanitizeSearchTerm(value) {
   return String(value || "").trim().replace(/[%,]/g, " ");
 }
 
 async function findItemForScan() {
+  if (state.busy) return;
   if (!state.currentLot) {
     setStatus("Create or load an auction bag first.", "error");
     return;
@@ -620,16 +795,24 @@ async function findItemForScan() {
 function renderItemChoices(items) {
   const card = $("item-match-card");
   if (!card) return;
-  card.className = "match-card";
+  card.className = "match-card choice-match-card";
   card.innerHTML = items.map((item) => `
-    <button type="button" class="source-btn" data-pick-item="${escapeHtml(item.id)}">
-      <span>
+    <article class="choice-card">
+      <button type="button" class="match-photo choice-photo" data-choice-photo="${escapeHtml(item.id)}" disabled>
+        <span>No photo</span>
+      </button>
+      <button type="button" class="choice-copy" data-pick-item="${escapeHtml(item.id)}">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <small>${escapeHtml(item.barcode || "-")} - ${Number(item.weight || 0).toFixed(2)} g</small>
-      </span>
-      <b>Use</b>
-    </button>
+        <b>Use this item</b>
+      </button>
+    </article>
   `).join("");
+
+  items.forEach((item) => hydrateItemPhoto({
+    item,
+    button: card.querySelector(`[data-choice-photo="${CSS.escape(item.id)}"]`),
+  }));
 
   card.querySelectorAll("[data-pick-item]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -639,6 +822,25 @@ function renderItemChoices(items) {
       renderSelectedItem();
       await loadSourceRowsForItem(item);
     });
+  });
+}
+
+function hydrateItemPhoto({ item, button }) {
+  if (!item || !button) return;
+  const itemId = item.id;
+  const photoPath = firstItemPhoto(item);
+  if (!photoPath) return;
+
+  resolvePhotoUrl(photoPath).then((url) => {
+    if (!url || !button.isConnected) return;
+    if (button.matches("[data-selected-item-photo]") && state.selectedItem?.id !== itemId) return;
+    button.disabled = false;
+    button.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Item preview")}" />`;
+    button.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openLivePhotoModal(url, item.title || "Item preview");
+    };
   });
 }
 
@@ -653,12 +855,21 @@ function renderSelectedItem() {
     return;
   }
 
-  card.className = "match-card";
+  card.className = "match-card selected-match-card";
   card.innerHTML = `
-    <strong>${escapeHtml(state.selectedItem.title || "Untitled item")}</strong>
-    <span>${escapeHtml(state.selectedItem.barcode || "-")} - ${Number(state.selectedItem.weight || 0).toFixed(2)} g</span>
-    <small>${escapeHtml(state.selectedSourceRow?.locationLabel || "Choose source tray")}</small>
+    <button type="button" class="match-photo" data-selected-item-photo disabled>
+      <span>No photo</span>
+    </button>
+    <div class="match-copy">
+      <strong>${escapeHtml(state.selectedItem.title || "Untitled item")}</strong>
+      <span>${escapeHtml(state.selectedItem.barcode || "-")} - ${Number(state.selectedItem.weight || 0).toFixed(2)} g</span>
+      <small>${escapeHtml(state.selectedSourceRow?.locationLabel || "Choose source tray")}</small>
+    </div>
   `;
+  hydrateItemPhoto({
+    item: state.selectedItem,
+    button: card.querySelector("[data-selected-item-photo]"),
+  });
   updateScanGate();
 }
 
@@ -706,9 +917,14 @@ async function loadSourceRowsForItem(item) {
   renderSelectedItem();
 
   if (state.selectedSourceRow) {
-    setStatus("Only one available tray source was found. Quantity is ready.", "success");
-    $("reserve-quantity")?.focus();
-    $("reserve-quantity")?.select();
+    if (state.flowStep === "scan") {
+      setStatus("Only one available tray source was found. Reserving it now...", "success");
+      await reserveSelectedItem({ auto: true });
+    } else {
+      setStatus("Only one available tray source was found. Quantity is ready.", "success");
+      $("reserve-quantity")?.focus();
+      $("reserve-quantity")?.select();
+    }
   } else if (state.sourceRows.length) {
     setStatus(`${state.sourceRows.length} source trays found. Choose the tray the item came from.`, "info");
   } else {
@@ -777,7 +993,7 @@ function renderSourceRows() {
   updateScanGate();
 }
 
-async function reserveSelectedItem() {
+async function reserveSelectedItem(options = {}) {
   if (!state.currentLot || !state.selectedItem || !state.selectedSourceRow || state.busy) {
     setStatus("Scan an item and choose its source tray first.", "error");
     return;
@@ -791,7 +1007,7 @@ async function reserveSelectedItem() {
 
   try {
     state.busy = true;
-    setStatus("Reserving item into live-sale bag...");
+    setStatus(options.auto ? "Adding scanned item to this bag..." : "Reserving item into live-sale bag...");
     const { error } = await supabase.rpc("reserve_live_sale_item", {
       _lot_id: state.currentLot.id,
       _item_barcode: state.selectedItem.barcode,
@@ -806,8 +1022,9 @@ async function reserveSelectedItem() {
     clearScan();
     await reloadCurrentLot();
     await loadLotItems();
-    setStatus("Item reserved in the bag. Scan the next item or generate the label.", "success");
-    setTimeout(() => $("item-scan")?.focus(), 80);
+    setFlowStep("scan");
+    setStatus("Item added. Scan the same barcode again for +1 quantity, scan another item, or press Enter on the empty scanner to print.", "success");
+    setTimeout(() => focusItemScanner(), 80);
   } catch (error) {
     console.error("Live sale item reservation failed:", error);
     setStatus(error.message || "Could not reserve the item.", "error");
@@ -1031,10 +1248,10 @@ function downloadTextFile(text, filename) {
   URL.revokeObjectURL(url);
 }
 
-async function generateLiveLabel() {
+async function generateLiveLabel(options = {}) {
   if (!state.currentLot) {
     setLabelStatus("Create or load an auction bag first.", "error");
-    return;
+    return false;
   }
 
   try {
@@ -1069,9 +1286,91 @@ async function generateLiveLabel() {
       ? ` <a href="${escapeHtml(signed.data.signedUrl)}" target="_blank" rel="noreferrer">Open uploaded label</a>`
       : "";
     setLabelStatus(`DYMO label generated and uploaded.${openLink}`, "success");
+    return true;
   } catch (error) {
     console.error("Generate live sale label failed:", error);
     setLabelStatus(error.message || "Could not generate the DYMO label.", "error");
+    if (!options.suppressStatus) setStatus(error.message || "Could not generate the DYMO label.", "error");
+    return false;
+  }
+}
+
+async function updateCurrentLotAuctionNumber(auctionNumber) {
+  if (!state.currentLot?.id) return;
+  const nextAuction = String(auctionNumber || "").trim();
+  if (!nextAuction) throw new Error("Auction number is required.");
+  if (nextAuction === String(state.currentLot.auction_number || "").trim()) return;
+
+  const { data, error } = await supabase.rpc("update_live_sale_lot_auction_number", {
+    _lot_id: state.currentLot.id,
+    _auction_number: nextAuction,
+    _notes: "Auction number confirmed before live-sale label print",
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  state.currentLot = Array.isArray(data) ? data[0] : data;
+}
+
+function finishBagScanning() {
+  if (!state.currentLot) {
+    setStatus("Start a bag before confirming an auction number.", "error");
+    return;
+  }
+  if (!state.lotItems.length) {
+    setStatus("Scan at least one item before printing the auction bag label.", "error");
+    focusItemScanner();
+    return;
+  }
+
+  setFlowStep("label");
+  const auctionInput = $("auction-number");
+  if (auctionInput) {
+    auctionInput.value = state.currentLot.auction_number || auctionInput.value || "";
+    setTimeout(() => {
+      auctionInput.focus();
+      auctionInput.select();
+    }, 80);
+  }
+  setStatus("Confirm the auction number. Press Enter to generate the DYMO label and start the next bag.", "success");
+}
+
+async function finalizeCurrentBag() {
+  if (!state.currentLot || state.busy) return;
+  if (!state.lotItems.length) {
+    setStatus("This bag has no items yet.", "error");
+    setFlowStep("scan");
+    setTimeout(() => focusItemScanner(), 80);
+    return;
+  }
+
+  const auctionNumber = $("auction-number")?.value?.trim();
+  if (!auctionNumber) {
+    setStatus("Auction number is required before printing.", "error");
+    $("auction-number")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setStatus("Printing label and preparing the next bag...");
+    await updateCurrentLotAuctionNumber(auctionNumber);
+    if ($("label-free-text")) $("label-free-text").value = auctionNumber;
+    const printed = await generateLiveLabel({ suppressStatus: true });
+    if (!printed) return;
+
+    saveLastAuctionNumber(state.currentLot.auction_number);
+    state.currentLot = null;
+    state.lotItems = [];
+    clearScan();
+    renderAll();
+    state.busy = false;
+    await prepareNextBag();
+    setStatus(`Label for auction ${auctionNumber} was generated. Next bag is ready.`, "success");
+  } catch (error) {
+    console.error("Finalize live-sale bag failed:", error);
+    setStatus(error.message || "Could not finish this auction bag.", "error");
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -1089,6 +1388,9 @@ function setupListeners() {
   $("session-store-select")?.addEventListener("change", (event) => {
     saveStoreId(event.target.value || "");
   });
+  $("session-title")?.addEventListener("input", (event) => {
+    event.target.dataset.autoTitle = "false";
+  });
   $("refresh-live-sales")?.addEventListener("click", async () => {
     await loadStores();
     await loadSessions();
@@ -1098,8 +1400,8 @@ function setupListeners() {
   });
   $("start-session")?.addEventListener("click", startSession);
   $("end-session")?.addEventListener("click", endSession);
-  $("create-lot")?.addEventListener("click", createOrLoadLot);
-  $("generate-live-label")?.addEventListener("click", generateLiveLabel);
+  $("create-lot")?.addEventListener("click", () => createOrLoadLot());
+  $("generate-live-label")?.addEventListener("click", finalizeCurrentBag);
   $("scan-item")?.addEventListener("click", findItemForScan);
   $("reserve-item")?.addEventListener("click", reserveSelectedItem);
   $("clear-scan")?.addEventListener("click", () => {
@@ -1107,11 +1409,23 @@ function setupListeners() {
     setStatus("");
   });
   $("cancel-lot")?.addEventListener("click", cancelCurrentLot);
+  $("live-photo-close")?.addEventListener("click", closeLivePhotoModal);
+  document.querySelectorAll("[data-close-live-photo]").forEach((node) => {
+    node.addEventListener("click", closeLivePhotoModal);
+  });
 
   $("auction-number")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      createOrLoadLot();
+      if (state.flowStep === "label") finalizeCurrentBag();
+      else createOrLoadLot();
+    }
+  });
+
+  $("label-free-text")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && state.flowStep === "label") {
+      event.preventDefault();
+      finalizeCurrentBag();
     }
   });
 
@@ -1119,7 +1433,17 @@ function setupListeners() {
     if (event.key === "Enter") {
       event.preventDefault();
       if (state.itemSearchTimer) clearTimeout(state.itemSearchTimer);
-      findItemForScan();
+      const term = sanitizeSearchTerm($("item-scan")?.value || "");
+      if (term) findItemForScan();
+      else finishBagScanning();
+      return;
+    }
+
+    if (event.key === " " && !sanitizeSearchTerm($("item-scan")?.value || "")) {
+      event.preventDefault();
+      clearScan();
+      setStatus("Scanner is ready for the next item. Press Enter on an empty scanner when this bag is complete.", "success");
+      focusItemScanner();
     }
   });
   $("item-scan")?.addEventListener("input", scheduleItemSearch);
@@ -1128,6 +1452,22 @@ function setupListeners() {
     if (event.key === "Enter") {
       event.preventDefault();
       reserveSelectedItem();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("live-photo-modal")?.hidden) {
+      closeLivePhotoModal();
+      return;
+    }
+
+    const active = document.activeElement;
+    const tag = active?.tagName?.toLowerCase();
+    const isTypingAwayFromScanner = tag === "input" || tag === "textarea" || tag === "select";
+    if (event.key === " " && state.flowStep === "scan" && !isTypingAwayFromScanner) {
+      event.preventDefault();
+      focusItemScanner();
+      setStatus("Scanner is ready for the next item. Press Enter on an empty scanner to print.", "success");
     }
   });
 }
@@ -1140,10 +1480,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupListeners();
   const titleInput = $("session-title");
   if (titleInput && !titleInput.value.trim()) {
-    titleInput.value = `Live Sale - ${formatSessionTitleDate()}`;
+    titleInput.value = formatSessionTitleDate();
+    titleInput.dataset.autoTitle = "true";
   }
   await loadStores();
   await loadSessions({ keepSelection: false });
+  if (state.currentSession) await prepareNextBag();
   renderAll();
   if (window.lucide) window.lucide.createIcons();
 });
