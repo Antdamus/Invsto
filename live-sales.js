@@ -13,6 +13,7 @@ const state = {
   selectedSourceRow: null,
   sourceReservations: new Map(),
   itemSearchTimer: null,
+  scannerRefocusTimer: null,
   flowStep: "session",
   photoZoom: 1,
   photoPanX: 0,
@@ -387,8 +388,6 @@ function updateScanGate() {
   );
   $("item-scan")?.toggleAttribute("disabled", !enabled);
   $("scan-item")?.toggleAttribute("disabled", !enabled);
-  $("reserve-quantity")?.toggleAttribute("disabled", !enabled);
-  $("reserve-item")?.toggleAttribute("disabled", !enabled || !state.selectedItem || !state.selectedSourceRow);
   $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !state.lotItems.length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
 }
@@ -549,20 +548,31 @@ function renderManifest() {
     return;
   }
 
-  state.lotItems.forEach((entry) => {
-    const item = entry.item || {};
-    const loc = entry.source_location || {};
+  const activeGroups = getManifestGroups();
+  if (!activeGroups.length) {
+    list.innerHTML = `<div class="empty-state">This bag has no reserved items yet.</div>`;
+    return;
+  }
+
+  activeGroups.forEach((group) => {
+    const item = group.item || {};
+    const loc = group.sourceLocation || {};
     const article = document.createElement("article");
     article.className = "manifest-item";
     article.innerHTML = `
       <div class="manifest-thumb"><span>No photo</span></div>
       <div class="manifest-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-        <span>${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(entry.status || "reserved")}</span>
-        <small>${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""} - Live minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
+        <span>${escapeHtml(item.barcode || "-")} - ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</span>
+        <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))}</small>
       </div>
       <div class="manifest-actions">
-        ${entry.status === "reserved" ? `<button type="button" class="tiny-btn" data-release-lot-item="${escapeHtml(entry.id)}">Release</button>` : ""}
+        <div class="manifest-qty-control" aria-label="Quantity for ${escapeHtml(item.title || "item")}">
+          <button type="button" class="tiny-btn" data-qty-action="decrease" data-group-key="${escapeHtml(group.key)}">-</button>
+          <input class="manifest-qty-input" data-manifest-qty-input data-group-key="${escapeHtml(group.key)}" type="number" min="0" step="1" value="${Number(group.quantity || 0)}" />
+          <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}">+</button>
+        </div>
+        <button type="button" class="tiny-btn" data-release-group="${escapeHtml(group.key)}">Release</button>
       </div>
     `;
     list.appendChild(article);
@@ -578,9 +588,71 @@ function renderManifest() {
     });
   });
 
-  list.querySelectorAll("[data-release-lot-item]").forEach((button) => {
-    button.addEventListener("click", () => releaseLotItem(button.getAttribute("data-release-lot-item")));
+  list.querySelectorAll("[data-qty-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = getManifestGroupByKey(button.getAttribute("data-group-key"));
+      if (!group) return;
+      const direction = button.getAttribute("data-qty-action") === "increase" ? 1 : -1;
+      setManifestGroupQuantity(group, Math.max(0, group.quantity + direction));
+    });
   });
+
+  list.querySelectorAll("[data-manifest-qty-input]").forEach((input) => {
+    const commit = () => {
+      const group = getManifestGroupByKey(input.getAttribute("data-group-key"));
+      if (!group) return;
+      const value = Math.max(0, parseInt(input.value || "0", 10) || 0);
+      if (value !== group.quantity) setManifestGroupQuantity(group, value);
+    };
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commit();
+        focusItemScanner();
+      }
+    });
+  });
+
+  list.querySelectorAll("[data-release-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = getManifestGroupByKey(button.getAttribute("data-release-group"));
+      if (group) releaseManifestGroup(group);
+    });
+  });
+}
+
+function getManifestGroups() {
+  const groups = new Map();
+  state.lotItems
+    .filter((entry) => entry.status === "reserved")
+    .forEach((entry) => {
+      const itemId = entry.item_id || entry.item?.id || "";
+      const sourceRowId = entry.source_stock_location_row_id || "";
+      const key = `${itemId}::${sourceRowId}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          itemId,
+          sourceStockLocationRowId: sourceRowId,
+          item: entry.item || {},
+          sourceLocation: entry.source_location || {},
+          quantity: 0,
+          showElapsedSeconds: entry.show_elapsed_seconds,
+        });
+      }
+      const group = groups.get(key);
+      group.quantity += Number(entry.quantity || 0);
+      group.showElapsedSeconds = Math.min(
+        Number(group.showElapsedSeconds ?? entry.show_elapsed_seconds ?? 0),
+        Number(entry.show_elapsed_seconds ?? group.showElapsedSeconds ?? 0),
+      );
+    });
+  return Array.from(groups.values());
+}
+
+function getManifestGroupByKey(key) {
+  return getManifestGroups().find((group) => group.key === key) || null;
 }
 
 async function startSession() {
@@ -778,6 +850,25 @@ function focusItemScanner() {
   if (!scanner || scanner.disabled) return;
   scanner.focus();
   scanner.select();
+}
+
+function shouldReturnFocusToScanner() {
+  const scanner = $("item-scan");
+  if (!scanner || scanner.disabled) return false;
+  if (!state.currentSession || !state.currentLot || state.flowStep !== "scan") return false;
+  if (!$("live-photo-modal")?.hidden) return false;
+  if (state.busy) return false;
+  if (document.activeElement?.matches?.("[data-manifest-qty-input]")) return false;
+  if (state.selectedItem && state.sourceRows.length !== 1) return false;
+  return true;
+}
+
+function scheduleScannerRefocus(delay = 2000) {
+  if (state.scannerRefocusTimer) clearTimeout(state.scannerRefocusTimer);
+  state.scannerRefocusTimer = setTimeout(() => {
+    state.scannerRefocusTimer = null;
+    if (shouldReturnFocusToScanner()) focusItemScanner();
+  }, delay);
 }
 
 function sanitizeSearchTerm(value) {
@@ -996,12 +1087,10 @@ async function loadSourceRowsForItem(item) {
       setStatus("Only one available tray source was found. Reserving it now...", "success");
       await reserveSelectedItem({ auto: true });
     } else {
-      setStatus("Only one available tray source was found. Quantity is ready.", "success");
-      $("reserve-quantity")?.focus();
-      $("reserve-quantity")?.select();
+      setStatus("Only one available tray source was found.", "success");
     }
   } else if (state.sourceRows.length) {
-    setStatus(`${state.sourceRows.length} source trays found. Choose the tray the item came from.`, "info");
+    setStatus(`${state.sourceRows.length} source trays found. Choose the tray the item came from; one unit will be added.`, "info");
   } else {
     setStatus("This item has no unreserved stock in a checked-in tray for this live sale store.", "error");
   }
@@ -1058,9 +1147,8 @@ function renderSourceRows() {
       state.selectedSourceRow = row;
       renderSourceRows();
       renderSelectedItem();
-      setStatus("Source tray selected. Confirm the quantity and reserve.", "success");
-      $("reserve-quantity")?.focus();
-      $("reserve-quantity")?.select();
+      setStatus("Source tray selected. Adding one unit to the bag...", "success");
+      reserveSelectedItem({ auto: true });
     });
     container.appendChild(button);
   });
@@ -1074,7 +1162,7 @@ async function reserveSelectedItem(options = {}) {
     return;
   }
 
-  const qty = Math.max(1, parseInt($("reserve-quantity")?.value || "1", 10) || 1);
+  const qty = Math.max(1, parseInt(String(options.quantity || "1"), 10) || 1);
   if (qty > Number(state.selectedSourceRow.available_quantity || 0)) {
     setStatus(`Only ${state.selectedSourceRow.available_quantity} unreserved unit(s) are available at that source.`, "error");
     return;
@@ -1127,32 +1215,44 @@ function clearScan() {
   state.sourceRows = [];
   state.selectedSourceRow = null;
   if ($("item-scan")) $("item-scan").value = "";
-  if ($("reserve-quantity")) $("reserve-quantity").value = "1";
   renderSelectedItem();
   renderSourceRows();
   updateScanGate();
 }
 
-async function releaseLotItem(lotItemId) {
-  if (!lotItemId) return;
+async function releaseManifestGroup(group) {
+  if (!group) return;
   const ok = window.confirm("Release this item from the auction bag reservation?");
   if (!ok) return;
+  await setManifestGroupQuantity(group, 0, "Released from current bag contents");
+}
+
+async function setManifestGroupQuantity(group, quantity, note = "Updated quantity from current bag contents") {
+  if (!group || state.busy) return;
+  const nextQuantity = Math.max(0, parseInt(String(quantity), 10) || 0);
 
   try {
-    const { data, error } = await supabase.rpc("release_live_sale_lot_item", {
-      _lot_item_id: lotItemId,
-      _notes: "Released from live-sale bag before packing",
+    state.busy = true;
+    setStatus(nextQuantity > 0 ? "Updating item quantity..." : "Releasing item from this bag...");
+    const { error } = await supabase.rpc("set_live_sale_lot_group_quantity", {
+      _lot_id: state.currentLot.id,
+      _item_id: group.itemId,
+      _stock_location_row_id: group.sourceStockLocationRowId,
+      _quantity: nextQuantity,
       _signed_by_email: state.user?.email || null,
+      _notes: note,
     });
     if (error) throw error;
-    const changedItemId = Array.isArray(data) ? data[0]?.item_id : data?.item_id;
-    await bumpInventoryVersion(changedItemId ? [changedItemId] : []);
+    await bumpInventoryVersion(group.itemId ? [group.itemId] : []);
     await reloadCurrentLot();
     await loadLotItems();
-    setStatus("Reservation released.", "success");
+    setStatus(nextQuantity > 0 ? "Quantity updated. Scanner is ready." : "Item released from this bag.", "success");
+    setTimeout(() => focusItemScanner(), 80);
   } catch (error) {
-    console.error("Release live sale item failed:", error);
-    setStatus(error.message || "Could not release that reservation.", "error");
+    console.error("Set live sale group quantity failed:", error);
+    setStatus(error.message || "Could not update that item quantity.", "error");
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -1478,7 +1578,6 @@ function setupListeners() {
   $("create-lot")?.addEventListener("click", () => createOrLoadLot());
   $("generate-live-label")?.addEventListener("click", finalizeCurrentBag);
   $("scan-item")?.addEventListener("click", findItemForScan);
-  $("reserve-item")?.addEventListener("click", reserveSelectedItem);
   $("clear-scan")?.addEventListener("click", () => {
     clearScan();
     setStatus("");
@@ -1504,6 +1603,13 @@ function setupListeners() {
   }, { passive: false });
   document.querySelectorAll("[data-close-live-photo]").forEach((node) => {
     node.addEventListener("click", closeLivePhotoModal);
+  });
+
+  $("item-scan")?.addEventListener("focus", () => {
+    if (state.scannerRefocusTimer) {
+      clearTimeout(state.scannerRefocusTimer);
+      state.scannerRefocusTimer = null;
+    }
   });
 
   $("auction-number")?.addEventListener("keydown", (event) => {
@@ -1540,13 +1646,6 @@ function setupListeners() {
   });
   $("item-scan")?.addEventListener("input", scheduleItemSearch);
 
-  $("reserve-quantity")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      reserveSelectedItem();
-    }
-  });
-
   document.addEventListener("keydown", (event) => {
     if (!$("live-photo-modal")?.hidden) {
       if (event.key === "Escape" || event.key === "Enter") {
@@ -1564,6 +1663,10 @@ function setupListeners() {
       focusItemScanner();
       setStatus("Scanner is ready for the next item. Press Enter on an empty scanner to print.", "success");
     }
+  });
+
+  ["click", "input", "pointerup", "touchend"].forEach((eventName) => {
+    document.addEventListener(eventName, () => scheduleScannerRefocus(), true);
   });
 }
 

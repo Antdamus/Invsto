@@ -441,10 +441,6 @@ body.live-label-step #bag-label-panel {
   align-items: center;
 }
 
-.quantity-field {
-  margin-top: 12px;
-}
-
 .source-results {
   display: grid;
   gap: 10px;
@@ -516,6 +512,33 @@ body.live-label-step #bag-label-panel {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.manifest-qty-control {
+  display: grid;
+  grid-template-columns: 34px 58px 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.manifest-qty-input {
+  width: 58px;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--live-text);
+  font: inherit;
+  font-weight: 900;
+  text-align: center;
+  outline: none;
+}
+
+.manifest-qty-input:focus {
+  border-color: var(--live-border-strong);
+  box-shadow: 0 0 0 3px rgba(231, 192, 114, 0.12);
 }
 
 .tiny-btn {
