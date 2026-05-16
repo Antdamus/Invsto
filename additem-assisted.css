@@ -750,6 +750,11 @@
   font-weight: 800;
 }
 
+.assisted-editor-field-label {
+  color: var(--text-soft);
+  font-weight: 800;
+}
+
 .assisted-editor-slider-label input {
   width: 100%;
   accent-color: #c99857;

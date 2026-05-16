@@ -105,6 +105,7 @@
       rotation: 0,
       flipX: false,
       flipY: false,
+      backgroundFill: "black",
       offsetX: 0,
       offsetY: 0,
       isDragging: false,
@@ -172,6 +173,8 @@
       imageEditorRotateRight: document.getElementById("assisted-editor-rotate-right"),
       imageEditorFlipHorizontal: document.getElementById("assisted-editor-flip-horizontal"),
       imageEditorFlipVertical: document.getElementById("assisted-editor-flip-vertical"),
+      imageEditorFillBlack: document.getElementById("assisted-editor-fill-black"),
+      imageEditorFillWhite: document.getElementById("assisted-editor-fill-white"),
       imageEditorReset: document.getElementById("assisted-editor-reset"),
       imageEditorSave: document.getElementById("assisted-editor-save"),
       imageEditorStatus: document.getElementById("assisted-editor-status"),
@@ -2397,6 +2400,7 @@
     state.imageEditor.rotation = 0;
     state.imageEditor.flipX = false;
     state.imageEditor.flipY = false;
+    state.imageEditor.backgroundFill = "black";
     state.imageEditor.offsetX = 0;
     state.imageEditor.offsetY = 0;
     state.imageEditor.isDragging = false;
@@ -2412,6 +2416,43 @@
       width: canvas?.width || 900,
       height: canvas?.height || 900,
     };
+  }
+
+  function inferEditorBackgroundFill(image) {
+    const sourceType = asTrimmedString(image?.sourceType).toLowerCase();
+    const name = asTrimmedString(image?.name).toLowerCase();
+    const path = asTrimmedString(image?.path).toLowerCase();
+    const joined = `${sourceType} ${name} ${path}`;
+
+    if (joined.includes("white")) return "white";
+    if (joined.includes("black")) return "black";
+    return "black";
+  }
+
+  function getEditorBackgroundColor() {
+    return state.imageEditor.backgroundFill === "white" ? "#ffffff" : "#000000";
+  }
+
+  function updateEditorFillButtons(elements) {
+    const isWhite = state.imageEditor.backgroundFill === "white";
+    elements.imageEditorFillBlack?.classList.toggle("is-active", !isWhite);
+    elements.imageEditorFillWhite?.classList.toggle("is-active", isWhite);
+    elements.imageEditorFillBlack?.setAttribute("aria-pressed", String(!isWhite));
+    elements.imageEditorFillWhite?.setAttribute("aria-pressed", String(isWhite));
+  }
+
+  function setEditorBackgroundFill(elements, fill) {
+    state.imageEditor.backgroundFill = fill === "white" ? "white" : "black";
+    updateEditorFillButtons(elements);
+    drawImageEditor(elements);
+  }
+
+  function fillEditorCanvasBackground(context, width, height) {
+    context.save();
+    context.globalCompositeOperation = "source-over";
+    context.fillStyle = getEditorBackgroundColor();
+    context.fillRect(0, 0, width, height);
+    context.restore();
   }
 
   function getEditorDrawRect(width, height) {
@@ -2462,7 +2503,7 @@
     const width = canvas.width;
     const height = canvas.height;
     const rect = getEditorDrawRect(width, height);
-    context.clearRect(0, 0, width, height);
+    fillEditorCanvasBackground(context, width, height);
 
     if (!rect) return;
     drawTransformedEditorImage(context, image, rect, width, height);
@@ -2497,6 +2538,7 @@
 
     elements.imageEditorFlipHorizontal?.classList.remove("is-active");
     elements.imageEditorFlipVertical?.classList.remove("is-active");
+    updateEditorFillButtons(elements);
     drawImageEditor(elements);
   }
 
@@ -2535,6 +2577,8 @@
 
     resetImageEditorState();
     state.imageEditor.image = selectedImage;
+    state.imageEditor.backgroundFill = inferEditorBackgroundFill(selectedImage);
+    updateEditorFillButtons(elements);
     setInlineStatus(elements.imageEditorStatus, "Loading selected image...", "is-waiting");
 
     elements.imageEditorModal?.classList.remove("hidden");
@@ -2642,7 +2686,7 @@
 
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
-      context.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+      fillEditorCanvasBackground(context, outputCanvas.width, outputCanvas.height);
       drawTransformedEditorImage(
         context,
         state.imageEditor.imageElement,
@@ -3264,6 +3308,12 @@
     });
     elements.imageEditorFlipVertical?.addEventListener("click", () => {
       toggleEditorFlip(elements, "y");
+    });
+    elements.imageEditorFillBlack?.addEventListener("click", () => {
+      setEditorBackgroundFill(elements, "black");
+    });
+    elements.imageEditorFillWhite?.addEventListener("click", () => {
+      setEditorBackgroundFill(elements, "white");
     });
     elements.imageEditorReset?.addEventListener("click", () => resetEditorFraming(elements));
     elements.imageEditorSave?.addEventListener("click", () => saveImageEditorCrop(elements));
