@@ -4,6 +4,8 @@ import SwiftUI
 struct ReadyView: View {
     @StateObject private var viewModel: ReadyViewModel
     @State private var isShowingCancelConfirmation = false
+    @State private var previewedPhotoID: LocalSessionPhoto.ID?
+    @State private var selectedThumbnailPhotoID: LocalSessionPhoto.ID?
 
     let onChangeStation: () -> Void
     let onRefreshStations: () async -> Void
@@ -260,6 +262,9 @@ struct ReadyView: View {
             }
         } message: {
             Text("Are you sure you want to cancel this job? The capture will be failed, local session photos will be cleared, and the station will return to listening.")
+        }
+        .fullScreenCover(isPresented: photoPreviewPresentationBinding) {
+            keptPhotoPreviewCover
         }
     }
 
@@ -521,41 +526,141 @@ struct ReadyView: View {
 
     private func compactKeptPhotoCard(_ photo: LocalSessionPhoto) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(OGVisualStyle.panelElevated)
+            Button {
+                previewedPhotoID = photo.id
+                selectedThumbnailPhotoID = photo.id
+            } label: {
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(OGVisualStyle.panelElevated)
 
-                if let image = photo.previewImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
+                    if let image = photo.previewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    }
+
+                    if photo.isPrimary {
+                        Text("Primary")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(OGVisualStyle.gold.opacity(0.9), in: Capsule())
+                            .foregroundStyle(Color.black.opacity(0.85))
+                            .padding(6)
+                    }
                 }
+                .frame(width: 112, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            selectedThumbnailPhotoID == photo.id ? OGVisualStyle.goldSoft : OGVisualStyle.strokeStrong,
+                            lineWidth: selectedThumbnailPhotoID == photo.id ? 2 : 1
+                        )
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview photo \(photo.sortOrder + 1)")
 
-                if photo.isPrimary {
-                    Text("Primary")
+            HStack(spacing: 5) {
+                Text("Photo \(photo.sortOrder + 1)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textPrimary)
+
+                if selectedThumbnailPhotoID == photo.id {
+                    Image(systemName: "checkmark.circle.fill")
                         .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(OGVisualStyle.gold.opacity(0.9), in: Capsule())
-                        .foregroundStyle(Color.black.opacity(0.85))
-                        .padding(6)
+                        .foregroundStyle(OGVisualStyle.goldSoft)
                 }
             }
-            .frame(width: 112, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Text("Photo \(photo.sortOrder + 1)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(OGVisualStyle.textPrimary)
 
             Button("Delete", role: .destructive) {
                 viewModel.deleteKeptPhoto(photo)
+                if previewedPhotoID == photo.id {
+                    previewedPhotoID = nil
+                }
+                if selectedThumbnailPhotoID == photo.id {
+                    selectedThumbnailPhotoID = nil
+                }
             }
             .font(.caption.weight(.semibold))
             .buttonStyle(.bordered)
             .tint(OGVisualStyle.destructive)
         }
         .frame(width: 112, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var keptPhotoPreviewCover: some View {
+        if let photos = viewModel.activeSession?.keptPhotos, !photos.isEmpty {
+            KeptPhotoPreviewView(
+                photos: photos,
+                selectedPhotoID: selectedPreviewPhotoBinding(photos: photos),
+                onClose: {
+                    previewedPhotoID = nil
+                },
+                onDelete: {
+                    deletePreviewedPhoto(from: photos)
+                }
+            )
+        } else {
+            Color.black
+                .ignoresSafeArea()
+                .onAppear {
+                    previewedPhotoID = nil
+                }
+        }
+    }
+
+    private var photoPreviewPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { previewedPhotoID != nil },
+            set: { isPresented in
+                if !isPresented {
+                    previewedPhotoID = nil
+                }
+            }
+        )
+    }
+
+    private func selectedPreviewPhotoBinding(photos: [LocalSessionPhoto]) -> Binding<LocalSessionPhoto.ID> {
+        Binding(
+            get: {
+                guard let previewedPhotoID, photos.contains(where: { $0.id == previewedPhotoID }) else {
+                    return photos[0].id
+                }
+
+                return previewedPhotoID
+            },
+            set: { newValue in
+                previewedPhotoID = newValue
+                selectedThumbnailPhotoID = newValue
+            }
+        )
+    }
+
+    private func deletePreviewedPhoto(from photos: [LocalSessionPhoto]) {
+        let selectedID = previewedPhotoID ?? photos[0].id
+        guard let selectedIndex = photos.firstIndex(where: { $0.id == selectedID }) else {
+            previewedPhotoID = nil
+            return
+        }
+
+        let photo = photos[selectedIndex]
+        let remainingPhotos = photos.filter { $0.id != photo.id }
+        viewModel.deleteKeptPhoto(photo)
+
+        guard !remainingPhotos.isEmpty else {
+            previewedPhotoID = nil
+            selectedThumbnailPhotoID = nil
+            return
+        }
+
+        let nextIndex = min(selectedIndex, remainingPhotos.count - 1)
+        previewedPhotoID = remainingPhotos[nextIndex].id
+        selectedThumbnailPhotoID = remainingPhotos[nextIndex].id
     }
 
     private var activeJobFooterActions: some View {
@@ -754,6 +859,203 @@ struct ReadyView: View {
         viewModel.latestUploadResult?.previewImage ?? viewModel.latestLocalResult?.previewImage
     }
 
+}
+
+private struct KeptPhotoPreviewView: View {
+    let photos: [LocalSessionPhoto]
+    @Binding var selectedPhotoID: LocalSessionPhoto.ID
+    let onClose: () -> Void
+    let onDelete: () -> Void
+
+    @State private var isShowingDeleteConfirmation = false
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                header
+
+                TabView(selection: $selectedPhotoID) {
+                    ForEach(photos) { photo in
+                        previewPage(photo)
+                            .tag(photo.id)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: photos.count > 1 ? .automatic : .never))
+
+                footer
+            }
+        }
+        .tint(OGVisualStyle.gold)
+        .confirmationDialog(
+            "Delete this kept photo?",
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Photo", role: .destructive) {
+                onDelete()
+            }
+
+            Button("Keep Photo", role: .cancel) {}
+        } message: {
+            Text("This removes the local kept photo from the active session. Remaining photos will keep their current order rules.")
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.headline.weight(.bold))
+                    .frame(width: 42, height: 42)
+                    .background(OGVisualStyle.panelElevated, in: Circle())
+                    .foregroundStyle(OGVisualStyle.textPrimary)
+            }
+            .accessibilityLabel("Close photo preview")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(currentPhoto.map { "Photo \($0.sortOrder + 1)" } ?? "Kept Photo")
+                    .font(.system(.title3, design: .serif).weight(.bold))
+                    .foregroundStyle(OGVisualStyle.textPrimary)
+
+                Text(photoPositionText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if currentPhoto?.isPrimary == true {
+                Text("Primary")
+                    .font(.caption.weight(.bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(OGVisualStyle.gold.opacity(0.92), in: Capsule())
+                    .foregroundStyle(Color.black.opacity(0.86))
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 18)
+        .padding(.bottom, 10)
+    }
+
+    private func previewPage(_ photo: LocalSessionPhoto) -> some View {
+        VStack(spacing: 12) {
+            if let image = photo.previewImage {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 10)
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "photo")
+                        .font(.largeTitle.weight(.semibold))
+                        .foregroundStyle(OGVisualStyle.goldSoft)
+
+                    Text("Photo preview is unavailable.")
+                        .font(.headline)
+                        .foregroundStyle(OGVisualStyle.textPrimary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 14) {
+            if let currentPhoto {
+                metadata(for: currentPhoto)
+            }
+
+            HStack(spacing: 10) {
+                Button("Close") {
+                    onClose()
+                }
+                .buttonStyle(OGActionButtonStyle(role: .secondary))
+
+                Button("Delete Photo", role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                }
+                .buttonStyle(OGActionButtonStyle(role: .destructive))
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 20)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.0),
+                    Color.black.opacity(0.88)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    private func metadata(for photo: LocalSessionPhoto) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                metadataItem("Captured", photo.capturedAt.formatted(date: .abbreviated, time: .shortened))
+                Spacer(minLength: 12)
+                metadataItem("Size", ByteCountFormatter.string(fromByteCount: photo.fileSizeBytes, countStyle: .file))
+            }
+
+            HStack {
+                metadataItem("Dimensions", "\(photo.imageWidth)x\(photo.imageHeight)")
+                Spacer(minLength: 12)
+                metadataItem("Type", photo.mimeType)
+            }
+
+            if photo.isSimulatorFallback {
+                Text("Simulator fallback capture")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(OGVisualStyle.panel.opacity(0.94))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(OGVisualStyle.strokeStrong, lineWidth: 1)
+                )
+        )
+    }
+
+    private func metadataItem(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(OGVisualStyle.textSecondary)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .foregroundStyle(OGVisualStyle.textPrimary)
+        }
+    }
+
+    private var currentPhoto: LocalSessionPhoto? {
+        photos.first { $0.id == selectedPhotoID } ?? photos.first
+    }
+
+    private var photoPositionText: String {
+        guard let currentIndex = photos.firstIndex(where: { $0.id == selectedPhotoID }) else {
+            return "\(photos.count) kept photo\(photos.count == 1 ? "" : "s")"
+        }
+
+        return "\(currentIndex + 1) of \(photos.count)"
+    }
 }
 
 #Preview {
