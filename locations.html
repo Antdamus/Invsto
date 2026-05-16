@@ -223,16 +223,12 @@
             <input type="text" id="location-create-type" class="location-edit-input" list="location-type-options" placeholder="Choose or type a new type" />
           </label>
 
-          <label class="location-edit-label full">
-            <span>Parent Table / Vault / Location</span>
-            <select id="location-create-parent" class="location-edit-select"></select>
-          </label>
-
           <div id="location-create-parent-scan-wrap" class="location-edit-label full location-parent-scan hidden">
-            <span>Confirm Parent Barcode</span>
-            <input type="text" id="location-create-parent-scan" class="location-edit-input" autocomplete="off" placeholder="Scan the selected parent location barcode" />
+            <span>Scan or Select Parent Location</span>
+            <input type="text" id="location-create-parent-scan" class="location-edit-input" autocomplete="off" placeholder="Scan parent barcode first" />
+            <select id="location-create-parent" class="location-edit-select"></select>
             <small id="location-create-parent-scan-status" class="location-parent-scan-status">
-              Select a parent location, then scan its label before saving this container.
+              Scan the table, vault, or location label to select it automatically. Manual selection still requires the matching scan.
             </small>
           </div>
 

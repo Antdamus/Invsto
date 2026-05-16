@@ -30,6 +30,7 @@ async function checkAuth() {
   }
 
   const userId = session.user.id;
+  currentLocationsUser = session.user;
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select("role, active, display_name")
@@ -128,6 +129,8 @@ const state = {
   dymoUrls: new Map(),
 };
 
+let currentLocationsUser = null;
+
 const DEFAULT_LOCATION_TYPES = [
   "Table",
   "Vault",
@@ -191,9 +194,92 @@ function formatDateTime(value) {
   });
 }
 
+function formatGpsCoordinate(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(6) : "";
+}
+
+function buildGoogleMapsUrl(lat, lng) {
+  const latitude = formatGpsCoordinate(lat);
+  const longitude = formatGpsCoordinate(lng);
+  if (!latitude || !longitude) return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latitude},${longitude}`)}`;
+}
+
 function isTrayToleranceNotNullError(error) {
   return error?.code === "23502"
     && /tray_weight_tolerance_grams/i.test(error?.message || error?.details || "");
+}
+
+function isMissingLocationCreationAuditColumnError(error) {
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+  return /created_by|created_by_email|creation_latitude|creation_longitude|creation_accuracy_m|creation_gps_captured_at|creation_gps_status/i.test(text)
+    && /column|schema cache|could not find/i.test(text);
+}
+
+function stripLocationCreationAuditPayload(payload) {
+  const {
+    created_by,
+    created_by_email,
+    creation_latitude,
+    creation_longitude,
+    creation_accuracy_m,
+    creation_gps_captured_at,
+    creation_gps_status,
+    ...legacyPayload
+  } = payload;
+  return legacyPayload;
+}
+
+function getBrowserGeolocation(options = {}) {
+  const timeoutMs = options.timeoutMs || 6500;
+  if (!navigator.geolocation) {
+    return Promise.resolve({
+      status: "unavailable",
+      error: "Browser geolocation is not available.",
+    });
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({
+        status: "timeout",
+        error: "GPS capture timed out.",
+      });
+    }, timeoutMs);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve({
+          status: "captured",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          capturedAt: new Date(position.timestamp || Date.now()).toISOString(),
+        });
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve({
+          status: error?.code === 1 ? "denied" : "failed",
+          error: error?.message || "GPS capture failed.",
+        });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: timeoutMs,
+        maximumAge: 0,
+      }
+    );
+  });
 }
 
 function getLocationDisplayDate(location) {
@@ -972,29 +1058,72 @@ function getCreateParentLocation() {
   return state.locations.find((location) => String(location.id) === String(parentId)) || null;
 }
 
+function findParentLocationByBarcode(scannedCode) {
+  const normalizedScan = normalizeScannedLocationCode(scannedCode);
+  if (!normalizedScan) return null;
+
+  return getParentLocationCandidates().find((location) => {
+    return normalizeScannedLocationCode(location.location_code) === normalizedScan;
+  }) || null;
+}
+
+function selectCreateParentFromScan(scannedCode) {
+  const elements = getCreateModalElements();
+  const parentLocation = findParentLocationByBarcode(scannedCode);
+  if (!parentLocation || !elements.parentSelect) return null;
+
+  elements.parentSelect.value = parentLocation.id;
+  syncCreateContainerStoreFromParent();
+  setCreateModalMode("container");
+  renderLocationNameSuggestions(
+    elements.nameInput,
+    document.getElementById("location-create-name-suggestions"),
+    "",
+    elements.storeSelect?.value || ""
+  );
+  return parentLocation;
+}
+
 function shouldRequireCreateParentBarcodeScan() {
   const elements = getCreateModalElements();
-  const parentId = asTrimmedString(elements.parentSelect?.value);
   const mode = elements.form?.dataset.createMode || inferCreateModalMode();
-  return !locationsAccess.isAdmin && mode === "container" && Boolean(parentId);
+  return !locationsAccess.isAdmin && mode === "container";
 }
 
 function updateCreateParentScanUi(options = {}) {
   const elements = getCreateModalElements();
   if (!elements.parentScanWrap || !elements.parentScanInput || !elements.parentScanStatus) return false;
 
+  const mode = elements.form?.dataset.createMode || inferCreateModalMode();
+  const showParentPicker = mode === "container";
   const required = shouldRequireCreateParentBarcodeScan();
   const parentLocation = getCreateParentLocation();
-  elements.parentScanWrap.classList.toggle("hidden", !required);
+  elements.parentScanWrap.classList.toggle("hidden", !showParentPicker);
   elements.parentScanInput.required = required;
   elements.parentScanInput.disabled = false;
   elements.parentScanInput.readOnly = false;
 
-  if (!required) {
+  if (!showParentPicker) {
     elements.parentScanInput.value = "";
     elements.parentScanWrap.classList.remove("is-verified", "is-error");
-    elements.parentScanStatus.textContent = "Select a parent location, then scan its label before saving this container.";
+    elements.parentScanStatus.textContent = "Scan the table, vault, or location label to select it automatically. Manual selection still requires the matching scan.";
     return true;
+  }
+
+  if (!required) {
+    elements.parentScanWrap.classList.remove("is-verified", "is-error");
+    elements.parentScanStatus.textContent = parentLocation
+      ? "Parent selected. Admin scan verification is optional."
+      : "Select a parent location, or scan its barcode to choose it automatically.";
+    if (options.focus) window.setTimeout(() => elements.parentScanInput?.focus(), 50);
+    return true;
+  }
+
+  if (!parentLocation) {
+    const scannedMatch = selectCreateParentFromScan(elements.parentScanInput.value);
+    if (scannedMatch) {
+      return updateCreateParentScanUi(options);
+    }
   }
 
   const expectedCode = normalizeScannedLocationCode(parentLocation?.location_code);
@@ -1005,7 +1134,9 @@ function updateCreateParentScanUi(options = {}) {
   elements.parentScanWrap.classList.toggle("is-error", Boolean(scannedCode && !verified));
 
   if (!parentLocation) {
-    elements.parentScanStatus.textContent = "Choose the parent location first.";
+    elements.parentScanStatus.textContent = scannedCode
+      ? "No active parent location matches that barcode."
+      : "Scan the parent location barcode, or select the parent below and scan to verify it.";
   } else if (!expectedCode) {
     elements.parentScanStatus.textContent = "This parent location does not have a barcode. Choose a barcode-ready parent location.";
   } else if (!scannedCode) {
@@ -1016,7 +1147,7 @@ function updateCreateParentScanUi(options = {}) {
     elements.parentScanStatus.textContent = "Scanned barcode does not match the selected parent location.";
   }
 
-  if (required && options.focus && parentLocation) {
+  if (required && options.focus) {
     window.setTimeout(() => elements.parentScanInput?.focus(), 50);
   }
 
@@ -1046,7 +1177,7 @@ function closeCreateLocationModal() {
   elements.parentScanWrap?.classList.add("hidden");
   elements.parentScanWrap?.classList.remove("is-verified", "is-error");
   if (elements.parentScanStatus) {
-    elements.parentScanStatus.textContent = "Select a parent location, then scan its label before saving this container.";
+    elements.parentScanStatus.textContent = "Scan the table, vault, or location label to select it automatically. Manual selection still requires the matching scan.";
   }
   hideLocationNameSuggestions(document.getElementById("location-create-name-suggestions"));
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
@@ -1078,7 +1209,7 @@ function openCreateLocationModal({ tray = false, container = false } = {}) {
     elements.isTrayInput.disabled = false;
   }
   setCreateModalMode(createTray ? "tray" : createContainer ? "container" : "location");
-  updateCreateParentScanUi();
+  updateCreateParentScanUi({ focus: createContainer });
   if (elements.capacityNoLimitInput) elements.capacityNoLimitInput.checked = true;
   if (elements.toleranceNoLimitInput) elements.toleranceNoLimitInput.checked = true;
   syncCreateLocationLimitControls();
@@ -1164,6 +1295,95 @@ async function uploadCreateLocationPhoto(file) {
   return data?.path || path;
 }
 
+async function fetchLocationCreationAudit(locationId) {
+  if (!locationsAccess.isAdmin || !locationId) return null;
+
+  const { data, error } = await supabase
+    .from("inventory_change_log")
+    .select("*")
+    .eq("table_name", "locations")
+    .eq("action", "insert")
+    .eq("record_id", locationId)
+    .order("changed_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Location creation audit unavailable:", error);
+    return null;
+  }
+
+  return data || null;
+}
+
+function renderLocationCreationAuditCard(location, creationAudit) {
+  if (!locationsAccess.isAdmin) return "";
+
+  const auditData = creationAudit?.new_data || {};
+  const creatorEmail = creationAudit?.worker_email
+    || location.created_by_email
+    || auditData.created_by_email
+    || "Not recorded";
+  const creatorId = creationAudit?.worker_id
+    || location.created_by
+    || auditData.created_by
+    || "";
+  const createdAt = creationAudit?.changed_at || location.created_at || "";
+  const gpsStatus = location.creation_gps_status || auditData.creation_gps_status || "not recorded";
+  const lat = location.creation_latitude ?? auditData.creation_latitude;
+  const lng = location.creation_longitude ?? auditData.creation_longitude;
+  const accuracy = location.creation_accuracy_m ?? auditData.creation_accuracy_m;
+  const gpsCapturedAt = location.creation_gps_captured_at || auditData.creation_gps_captured_at || "";
+  const mapUrl = buildGoogleMapsUrl(lat, lng);
+
+  return `
+    <section class="location-detail-card location-audit-card">
+      <div class="location-detail-card-head">
+        <div>
+          <h4 class="location-detail-card-title">Creation Trail</h4>
+          <div class="location-status-line">Admin audit of who created this ${escapeHtml(getLocationRoleLabel(location).toLowerCase())} and where it was created.</div>
+        </div>
+      </div>
+
+      <div class="location-detail-meta-grid">
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Created By</div>
+          <div class="location-detail-stat-value">${escapeHtml(creatorEmail)}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Created At</div>
+          <div class="location-detail-stat-value">${escapeHtml(formatDateTime(createdAt))}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">User ID</div>
+          <div class="location-detail-stat-value">${escapeHtml(creatorId || "Not recorded")}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">Audit Source</div>
+          <div class="location-detail-stat-value">${creationAudit ? "Inventory change log" : "Location record"}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">GPS Status</div>
+          <div class="location-detail-stat-value">${escapeHtml(gpsStatus)}</div>
+        </div>
+        <div class="location-detail-stat">
+          <div class="location-detail-stat-label">GPS Accuracy</div>
+          <div class="location-detail-stat-value">${Number.isFinite(Number(accuracy)) ? `${Number(accuracy).toFixed(0)} m` : "Not recorded"}</div>
+        </div>
+        <div class="location-detail-stat full">
+          <div class="location-detail-stat-label">Coordinates</div>
+          <div class="location-detail-stat-value">
+            ${mapUrl
+              ? `<a class="location-audit-map-link" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener">${escapeHtml(formatGpsCoordinate(lat))}, ${escapeHtml(formatGpsCoordinate(lng))}</a>`
+              : "No GPS coordinates recorded."}
+            ${gpsCapturedAt ? `<span class="location-audit-subline">Captured ${escapeHtml(formatDateTime(gpsCapturedAt))}</span>` : ""}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 async function saveCreatedLocation() {
   const elements = getCreateModalElements();
   const locationName = asTrimmedString(elements.nameInput?.value);
@@ -1209,13 +1429,24 @@ async function saveCreatedLocation() {
     return;
   }
 
-  if (elements.status) elements.status.textContent = "Creating location and label...";
+  if (elements.status) elements.status.textContent = "Capturing GPS and creating location...";
 
   try {
-    const [dymoPath, photoPath] = await Promise.all([
+    const [dymoPath, photoPath, gpsCapture] = await Promise.all([
       uploadCreateLocationDymo(locationCode, locationName),
       uploadCreateLocationPhoto(photoFile),
+      getBrowserGeolocation(),
     ]);
+
+    const creationAuditPayload = {
+      created_by: currentLocationsUser?.id || null,
+      created_by_email: currentLocationsUser?.email || null,
+      creation_latitude: Number.isFinite(Number(gpsCapture.latitude)) ? Number(gpsCapture.latitude) : null,
+      creation_longitude: Number.isFinite(Number(gpsCapture.longitude)) ? Number(gpsCapture.longitude) : null,
+      creation_accuracy_m: Number.isFinite(Number(gpsCapture.accuracy)) ? Number(gpsCapture.accuracy) : null,
+      creation_gps_captured_at: gpsCapture.capturedAt || null,
+      creation_gps_status: gpsCapture.status || "unknown",
+    };
 
     const payload = {
       location_name: locationName,
@@ -1233,18 +1464,29 @@ async function saveCreatedLocation() {
       is_tray: isTray,
       tray_weight_tolerance_grams: toleranceHasNoLimit || !toleranceValue ? null : Number(toleranceValue),
       tray_current_store_id: isTray ? (storeId || null) : null,
+      ...creationAuditPayload,
     };
 
+    let insertPayload = payload;
     let { data, error } = await supabase
       .from("locations")
-      .insert(payload)
+      .insert(insertPayload)
       .select("id")
       .single();
+
+    if (error && isMissingLocationCreationAuditColumnError(error)) {
+      insertPayload = stripLocationCreationAuditPayload(payload);
+      ({ data, error } = await supabase
+        .from("locations")
+        .insert(insertPayload)
+        .select("id")
+        .single());
+    }
 
     if (error && !isTray && isTrayToleranceNotNullError(error)) {
       ({ data, error } = await supabase
         .from("locations")
-        .insert({ ...payload, tray_weight_tolerance_grams: 10 })
+        .insert({ ...insertPayload, tray_weight_tolerance_grams: 10 })
         .select("id")
         .single());
     }
@@ -1875,9 +2117,10 @@ async function renderLocationDetail(locationId) {
     subtitle.textContent = `${subtitle.textContent} - ${getTrayStatusLabel(location)}`;
   }
 
-  const [photoUrl, itemPhotoUrls] = await Promise.all([
+  const [photoUrl, itemPhotoUrls, creationAudit] = await Promise.all([
     resolveLocationPhotoUrl(location),
     Promise.all(location.itemRows.map((item) => resolveItemPhotoUrl(item.photoPath))),
+    fetchLocationCreationAudit(location.id),
   ]);
 
   let trayMovements = [];
@@ -2060,6 +2303,8 @@ async function renderLocationDetail(locationId) {
       </div>
       <div class="location-status-line">Updated: ${escapeHtml(formatDateTime(getLocationDisplayDate(location)))}</div>
     </section>
+
+    ${renderLocationCreationAuditCard(location, creationAudit)}
 
     ${trayMarkup}
 
@@ -2540,6 +2785,7 @@ function bindEvents() {
   });
 
   document.getElementById("location-create-parent-scan")?.addEventListener("input", () => {
+    selectCreateParentFromScan(document.getElementById("location-create-parent-scan")?.value);
     updateCreateParentScanUi();
   });
 

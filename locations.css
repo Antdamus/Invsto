@@ -682,6 +682,29 @@
   line-height: 1.45;
 }
 
+.location-audit-card {
+  border-color: rgba(214,178,94,.16);
+  background: rgba(214,178,94,.045);
+}
+
+.location-audit-map-link {
+  color: #ffe8ad;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.location-audit-map-link:hover,
+.location-audit-map-link:focus-visible {
+  text-decoration: underline;
+}
+
+.location-audit-subline {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
 .location-asset-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1249,6 +1272,10 @@
   width: 100%;
   pointer-events: auto;
   user-select: text;
+}
+
+.location-parent-scan .location-edit-select {
+  margin-top: 10px;
 }
 
 .location-parent-scan-status {
