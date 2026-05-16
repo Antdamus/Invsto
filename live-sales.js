@@ -14,6 +14,11 @@ const state = {
   sourceReservations: new Map(),
   itemSearchTimer: null,
   flowStep: "session",
+  photoZoom: 1,
+  photoPanX: 0,
+  photoPanY: 0,
+  photoDrag: null,
+  photoSuppressClick: false,
   busy: false,
 };
 
@@ -423,9 +428,30 @@ function openLivePhotoModal(url, title = "Item preview") {
   image.src = url;
   image.alt = title;
   if (label) label.textContent = title;
+  setLivePhotoZoom(1);
   modal.hidden = false;
   document.body.classList.add("live-photo-open");
   $("live-photo-close")?.focus();
+}
+
+function setLivePhotoZoom(value) {
+  state.photoZoom = Math.min(3, Math.max(1, Number(value) || 1));
+  if (state.photoZoom <= 1) {
+    state.photoPanX = 0;
+    state.photoPanY = 0;
+  }
+  updateLivePhotoTransform();
+}
+
+function updateLivePhotoTransform() {
+  const image = $("live-photo-modal-image");
+  const zoomReadout = $("live-photo-zoom-readout");
+  if (image) {
+    image.style.transform = `translate(${state.photoPanX}px, ${state.photoPanY}px) scale(${state.photoZoom})`;
+    image.classList.toggle("is-zoomed", state.photoZoom > 1);
+    image.classList.toggle("is-dragging", Boolean(state.photoDrag));
+  }
+  if (zoomReadout) zoomReadout.textContent = `${Math.round(state.photoZoom * 100)}%`;
 }
 
 function closeLivePhotoModal() {
@@ -434,7 +460,51 @@ function closeLivePhotoModal() {
   if (!modal) return;
   modal.hidden = true;
   if (image) image.removeAttribute("src");
+  state.photoPanX = 0;
+  state.photoPanY = 0;
+  state.photoDrag = null;
+  setLivePhotoZoom(1);
   document.body.classList.remove("live-photo-open");
+}
+
+function startLivePhotoDrag(event) {
+  if (state.photoZoom <= 1) return;
+  event.preventDefault();
+  const image = $("live-photo-modal-image");
+  state.photoDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: state.photoPanX,
+    originY: state.photoPanY,
+    didMove: false,
+  };
+  image?.setPointerCapture?.(event.pointerId);
+  updateLivePhotoTransform();
+}
+
+function moveLivePhotoDrag(event) {
+  if (!state.photoDrag || state.photoDrag.pointerId !== event.pointerId) return;
+  event.preventDefault();
+  const deltaX = event.clientX - state.photoDrag.startX;
+  const deltaY = event.clientY - state.photoDrag.startY;
+  if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) state.photoDrag.didMove = true;
+  state.photoPanX = state.photoDrag.originX + deltaX;
+  state.photoPanY = state.photoDrag.originY + deltaY;
+  updateLivePhotoTransform();
+}
+
+function endLivePhotoDrag(event) {
+  if (!state.photoDrag || state.photoDrag.pointerId !== event.pointerId) return;
+  $("live-photo-modal-image")?.releasePointerCapture?.(event.pointerId);
+  state.photoSuppressClick = Boolean(state.photoDrag.didMove);
+  state.photoDrag = null;
+  updateLivePhotoTransform();
+  if (state.photoSuppressClick) {
+    setTimeout(() => {
+      state.photoSuppressClick = false;
+    }, 0);
+  }
 }
 
 async function loadLotItems() {
@@ -499,7 +569,12 @@ function renderManifest() {
     resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
       if (!url || !article.isConnected) return;
       const thumb = article.querySelector(".manifest-thumb");
-      if (thumb) thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Reserved item")}" />`;
+      if (thumb) {
+        thumb.innerHTML = `<button type="button" class="manifest-thumb-btn" aria-label="Open ${escapeHtml(item.title || "reserved item")} image"><img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Reserved item")}" /></button>`;
+        thumb.querySelector("button")?.addEventListener("click", () => {
+          openLivePhotoModal(url, item.title || "Reserved item");
+        });
+      }
     });
   });
 
@@ -1410,6 +1485,23 @@ function setupListeners() {
   });
   $("cancel-lot")?.addEventListener("click", cancelCurrentLot);
   $("live-photo-close")?.addEventListener("click", closeLivePhotoModal);
+  $("live-photo-zoom-in")?.addEventListener("click", () => setLivePhotoZoom(state.photoZoom + 0.25));
+  $("live-photo-zoom-out")?.addEventListener("click", () => setLivePhotoZoom(state.photoZoom - 0.25));
+  $("live-photo-modal-image")?.addEventListener("click", (event) => {
+    if (state.photoSuppressClick) {
+      event.preventDefault();
+      return;
+    }
+    setLivePhotoZoom(state.photoZoom > 1 ? 1 : 2);
+  });
+  $("live-photo-modal-image")?.addEventListener("pointerdown", startLivePhotoDrag);
+  $("live-photo-modal-image")?.addEventListener("pointermove", moveLivePhotoDrag);
+  $("live-photo-modal-image")?.addEventListener("pointerup", endLivePhotoDrag);
+  $("live-photo-modal-image")?.addEventListener("pointercancel", endLivePhotoDrag);
+  $("live-photo-modal-image")?.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    setLivePhotoZoom(state.photoZoom + (event.deltaY < 0 ? 0.2 : -0.2));
+  }, { passive: false });
   document.querySelectorAll("[data-close-live-photo]").forEach((node) => {
     node.addEventListener("click", closeLivePhotoModal);
   });
@@ -1456,8 +1548,11 @@ function setupListeners() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !$("live-photo-modal")?.hidden) {
-      closeLivePhotoModal();
+    if (!$("live-photo-modal")?.hidden) {
+      if (event.key === "Escape" || event.key === "Enter") {
+        event.preventDefault();
+        closeLivePhotoModal();
+      }
       return;
     }
 

@@ -213,9 +213,18 @@
   <div id="live-photo-modal" class="live-photo-modal" hidden>
     <div class="live-photo-backdrop" data-close-live-photo></div>
     <div class="live-photo-dialog" role="dialog" aria-modal="true" aria-labelledby="live-photo-modal-title">
-      <button id="live-photo-close" type="button" class="live-photo-close" aria-label="Close image preview">×</button>
-      <img id="live-photo-modal-image" alt="Selected item preview" />
-      <div id="live-photo-modal-title" class="live-photo-title">Item preview</div>
+      <button id="live-photo-close" type="button" class="live-photo-close" aria-label="Close image preview">x</button>
+      <div class="live-photo-stage">
+        <img id="live-photo-modal-image" alt="Selected item preview" />
+      </div>
+      <div class="live-photo-footer">
+        <div id="live-photo-modal-title" class="live-photo-title">Item preview</div>
+        <div class="live-photo-tools" aria-label="Image zoom controls">
+          <button id="live-photo-zoom-out" type="button" class="tiny-btn">Zoom Out</button>
+          <span id="live-photo-zoom-readout">100%</span>
+          <button id="live-photo-zoom-in" type="button" class="tiny-btn">Zoom In</button>
+        </div>
+      </div>
     </div>
   </div>
 
