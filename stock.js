@@ -504,6 +504,7 @@ function buildLocationChips(item) {
                 <span class="stock-card-action-cluster">
                   <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
                   <button type="button" class="return-storage-btn" data-id="${item.id}">Return to Storage</button>
+                  <button type="button" class="store-transfer-card-btn" data-id="${item.id}">Store Transfer</button>
                   <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
                 </span>
               `}
@@ -848,6 +849,15 @@ function buildLocationChips(item) {
           e.stopPropagation();
           const itemId = returnStorageTrigger.dataset.id;
           if (itemId) window.storageTransferModule?.openReturnForItem?.(itemId);
+          return;
+        }
+
+        const storeTransferTrigger = e.target.closest(".store-transfer-card-btn");
+        if (storeTransferTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = storeTransferTrigger.dataset.id;
+          if (itemId) window.location.href = `store-transfers.html?item=${encodeURIComponent(itemId)}`;
           return;
         }
 
@@ -7014,6 +7024,13 @@ populateDropdowns({
     //#region event listener for storage-to-tray replenishment
       window.storageTransferModule?.setup();
     //#endregion
+
+    document.getElementById("open-store-transfer")?.addEventListener("click", () => {
+      const ids = [...selectedItems].filter(Boolean);
+      window.location.href = ids.length
+        ? `store-transfers.html?items=${encodeURIComponent(ids.join(","))}`
+        : "store-transfers.html";
+    });
   //#endregion
 
   //step 6 ensure there is function to update the toolbar

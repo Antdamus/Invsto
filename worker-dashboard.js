@@ -265,6 +265,55 @@ async function loadWorkerUrgentOrders() {
   }).join("");
 }
 
+async function loadWorkerStoreTransferAlerts() {
+  const container = $("worker-store-transfer-alerts-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading store transfers...</div>`;
+
+  const { data: sessionData } = await window.supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (!userId) return;
+
+  const { data, error } = await window.supabase
+    .from("store_transfers")
+    .select("id, transfer_number, source_store_id, destination_store_id, status, sender_email, created_at")
+    .eq("receiver_user_id", userId)
+    .in("status", ["pending_receipt", "partially_received", "exception"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) {
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load store transfers.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No store transfers are currently assigned to you.</div>`;
+    return;
+  }
+
+  const storeIds = [...new Set(data.flatMap((row) => [row.source_store_id, row.destination_store_id]).filter(Boolean))];
+  const { data: stores } = await window.supabase
+    .from("store_locations")
+    .select("id, name")
+    .in("id", storeIds);
+  const storeMap = Object.fromEntries((stores || []).map((store) => [store.id, store.name]));
+
+  container.innerHTML = data.map((transfer) => `
+    <a class="urgent-order-card ${transfer.status === "exception" ? "is-overdue" : "is-soon"}" href="store-transfers.html">
+      <div class="urgent-order-top">
+        <strong>${escapeHtml(transfer.transfer_number || "Store transfer")}</strong>
+        <span class="urgent-order-badge">${escapeHtml(transfer.status.replace(/_/g, " "))}</span>
+      </div>
+      <div class="urgent-order-meta">
+        <span>${escapeHtml(storeMap[transfer.source_store_id] || "Source")} to ${escapeHtml(storeMap[transfer.destination_store_id] || "Destination")}</span>
+        <span>Sender: ${escapeHtml(transfer.sender_email || "-")}</span>
+        <span>Created ${escapeHtml(fmtDate(transfer.created_at))}</span>
+      </div>
+    </a>
+  `).join("");
+}
+
 /** ---------- UI helpers ---------- */
 function setSoftError(msg) {
   const el = $("soft-error");
@@ -837,6 +886,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     state.employee = employee;
     await enforceContractorAgreementGate(window.supabase);
     await loadWorkerUrgentOrders();
+    await loadWorkerStoreTransferAlerts();
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();

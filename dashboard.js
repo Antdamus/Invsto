@@ -268,6 +268,53 @@ async function loadUrgentOrders() {
   }).join("");
 }
 
+async function loadStoreTransferAlerts() {
+  const container = document.getElementById("store-transfer-alerts-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading store transfers...</div>`;
+
+  const { data, error } = await supabase
+    .from("store_transfers")
+    .select("id, transfer_number, source_store_id, destination_store_id, status, receiver_email, sender_email, created_at")
+    .in("status", ["pending_receipt", "partially_received", "exception"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) {
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load store transfers.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open store transfers need attention.</div>`;
+    return;
+  }
+
+  const storeIds = [...new Set(data.flatMap((row) => [row.source_store_id, row.destination_store_id]).filter(Boolean))];
+  const { data: stores } = await supabase
+    .from("store_locations")
+    .select("id, name")
+    .in("id", storeIds);
+  const storeMap = Object.fromEntries((stores || []).map((store) => [store.id, store.name]));
+
+  container.innerHTML = data.map((transfer) => {
+    const isException = transfer.status === "exception";
+    return `
+      <a class="urgent-order-card ${isException ? "is-overdue" : "is-soon"}" href="store-transfers.html">
+        <div class="urgent-order-top">
+          <strong>${escapeHtml(transfer.transfer_number || "Store transfer")}</strong>
+          <span class="urgent-order-badge">${escapeHtml(transfer.status.replace(/_/g, " "))}</span>
+        </div>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(storeMap[transfer.source_store_id] || "Source")} to ${escapeHtml(storeMap[transfer.destination_store_id] || "Destination")}</span>
+          <span>Receiver: ${escapeHtml(transfer.receiver_email || "-")}</span>
+          <span>Created ${escapeHtml(formatDateTime(transfer.created_at))}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** =================== Data Loading =================== */
 async function loadInventoryData() {
   const { data: itemTypes, error: itemTypeError } = await supabase
@@ -606,6 +653,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   setupNavigation();
   await loadUrgentOrders();
+  await loadStoreTransferAlerts();
 
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);

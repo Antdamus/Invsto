@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Store Transfers</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="store-transfers.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links"></nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="transfer-greeting">Store Transfers</strong>
+            <div class="sub">Move custody between stores with item, location, photo, GPS, and signature trail</div>
+          </div>
+          <div class="header-pills">
+            <div class="pill">Scope: <b>Inter-store</b></div>
+            <div class="pill">Mode: <b>Custody</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content transfer-page">
+        <section class="transfer-hero">
+          <div>
+            <span class="eyebrow">Transfer Workflow</span>
+            <h1>Move Merchandise Store to Store</h1>
+            <p>Scan the item, scan its current tray or storage bag, attach evidence photos, assign the receiving user, then place it in the destination store when it arrives.</p>
+          </div>
+          <button type="button" id="refresh-transfers" class="secondary-btn">Refresh</button>
+        </section>
+
+        <section class="transfer-layout">
+          <article class="transfer-card create-transfer-card">
+            <div class="card-head">
+              <div>
+                <span class="eyebrow">Checkout</span>
+                <h2>Create Store Transfer</h2>
+              </div>
+              <span id="bundle-count-pill" class="soft-pill">0 items</span>
+            </div>
+
+            <div class="store-grid">
+              <label>Source Store
+                <select id="source-store-select"></select>
+              </label>
+              <label>Destination Store
+                <select id="destination-store-select"></select>
+              </label>
+              <label>Receiving User
+                <select id="receiver-user-select"></select>
+              </label>
+            </div>
+
+            <div class="workflow-panel">
+              <div class="step-row">
+                <span>1</span>
+                <div>
+                  <strong>Scan or search item</strong>
+                  <small>Barcode is fastest. If this page opened from a card, the item starts selected.</small>
+                </div>
+              </div>
+              <div class="scan-row">
+                <input id="transfer-item-scan" type="text" placeholder="Scan item barcode or search by title" autocomplete="off" />
+                <button id="find-transfer-item" type="button" class="secondary-btn">Find</button>
+              </div>
+              <div id="selected-transfer-item" class="selection-card is-empty">No item selected yet.</div>
+            </div>
+
+            <div class="workflow-panel">
+              <div class="step-row">
+                <span>2</span>
+                <div>
+                  <strong>Scan source tray or storage</strong>
+                  <small>For storage, scan the parent table/vault first, then the bag/container.</small>
+                </div>
+              </div>
+              <div class="scan-row">
+                <input id="transfer-source-scan" type="text" placeholder="Scan tray, parent location, or bag barcode" autocomplete="off" />
+                <button id="find-transfer-source" type="button" class="secondary-btn">Confirm Source</button>
+              </div>
+              <div id="selected-transfer-source" class="selection-card is-empty">No source selected yet.</div>
+              <label class="quantity-field">Quantity
+                <input id="transfer-quantity" type="number" min="1" step="1" value="1" />
+              </label>
+              <button id="add-transfer-line" type="button" class="primary-btn">Add to Transfer</button>
+            </div>
+
+            <div class="workflow-panel">
+              <div class="step-row">
+                <span>3</span>
+                <div>
+                  <strong>Evidence photos</strong>
+                  <small>Attach a photo of all merchandise being transferred before signing.</small>
+                </div>
+              </div>
+              <label class="evidence-drop">
+                <input id="transfer-evidence-input" type="file" accept="image/*" multiple capture="environment" />
+                <span>Add Evidence Photos</span>
+              </label>
+              <div id="transfer-evidence-strip" class="evidence-strip"></div>
+            </div>
+
+            <section class="bundle-section">
+              <div class="section-title-row">
+                <h3>Transfer Bundle</h3>
+                <small>Space returns to item scan. Enter opens the signature step.</small>
+              </div>
+              <div id="transfer-bundle-list" class="bundle-list">
+                <div class="empty-state">No merchandise added yet.</div>
+              </div>
+            </section>
+
+            <div class="transfer-actions">
+              <button id="clear-transfer-bundle" type="button" class="secondary-btn">Clear</button>
+              <button id="open-transfer-signature" type="button" class="primary-btn">Proceed to Sign</button>
+            </div>
+            <p id="create-transfer-status" class="status-line"></p>
+          </article>
+
+          <article class="transfer-card pending-transfer-card">
+            <div class="card-head">
+              <div>
+                <span class="eyebrow">Receiving Queue</span>
+                <h2>Pending Transfers</h2>
+              </div>
+              <select id="transfer-status-filter">
+                <option value="open">Open</option>
+                <option value="mine">Assigned to me</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <div id="pending-transfers-list" class="pending-list">
+              <div class="empty-state">Loading transfers...</div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="transfer-sign-modal" class="transfer-modal hidden">
+    <div class="transfer-modal-card">
+      <button id="close-transfer-sign" type="button" class="modal-x">x</button>
+      <span class="eyebrow">Custody Signature</span>
+      <h2>Confirm Store Transfer</h2>
+      <div id="transfer-sign-summary" class="sign-summary"></div>
+      <label>Sender Password
+        <input id="sender-password" type="password" autocomplete="current-password" placeholder="Sign as current user" />
+      </label>
+      <label>Receiver Password
+        <input id="receiver-password" type="password" autocomplete="current-password" placeholder="Receiving user signs custody" />
+      </label>
+      <label>Notes
+        <textarea id="transfer-notes" rows="3" placeholder="Optional transfer notes"></textarea>
+      </label>
+      <p id="transfer-sign-error" class="status-line is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-transfer-sign" type="button" class="secondary-btn">Cancel</button>
+        <button id="submit-transfer" type="button" class="primary-btn">Create Transfer</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="receive-transfer-modal" class="transfer-modal hidden">
+    <div class="transfer-modal-card wide">
+      <button id="close-receive-transfer" type="button" class="modal-x">x</button>
+      <span class="eyebrow">Destination Placement</span>
+      <h2 id="receive-transfer-title">Receive Transfer</h2>
+      <div id="receive-transfer-items" class="receive-items"></div>
+      <div class="workflow-panel">
+        <div class="step-row">
+          <span>1</span>
+          <div>
+            <strong>Choose transfer item</strong>
+            <small>Select the item line you are placing in the destination store.</small>
+          </div>
+        </div>
+        <div id="receive-selected-item" class="selection-card is-empty">No transfer item selected.</div>
+      </div>
+      <div class="workflow-panel">
+        <div class="step-row">
+          <span>2</span>
+          <div>
+            <strong>Scan destination tray or storage</strong>
+            <small>For storage, scan parent first, then the bag/container.</small>
+          </div>
+        </div>
+        <div class="scan-row">
+          <input id="receive-location-scan" type="text" placeholder="Scan destination tray, parent, or bag" autocomplete="off" />
+          <button id="find-receive-location" type="button" class="secondary-btn">Confirm</button>
+        </div>
+        <div id="receive-location-card" class="selection-card is-empty">No destination selected.</div>
+        <label class="quantity-field">Quantity to place
+          <input id="receive-quantity" type="number" min="1" step="1" value="1" />
+        </label>
+      </div>
+      <label>Password
+        <input id="receive-password" type="password" autocomplete="current-password" placeholder="Sign this placement" />
+      </label>
+      <label>Notes
+        <textarea id="receive-notes" rows="3" placeholder="Optional receiving note"></textarea>
+      </label>
+      <p id="receive-transfer-status" class="status-line"></p>
+      <div class="modal-actions">
+        <button id="mark-transfer-exception" type="button" class="secondary-btn danger">Report Exception</button>
+        <button id="submit-receive-transfer" type="button" class="primary-btn">Sign and Place</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="admin-nav.js"></script>
+  <script src="store-transfers.js"></script>
+</body>
+</html>
