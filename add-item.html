@@ -559,39 +559,82 @@
       <div class="modal-kicker">Stock Placement</div>
       <div class="modal-header-assign-location">Assign Location and Quantity</div>
       <p class="modal-copy-assign-location">
-        Choose where the item should land and how much stock should be attached before the final save.
+        Choose tray or container placement, then scan each barcode in order. The next field opens automatically.
       </p>
 
       <div class="modal-body-assign-location">
-        <label for="admin-location-store-filter">Store Filter</label>
-        <select id="admin-location-store-filter" class="add-input">
-          <option value="">All Stores</option>
-        </select>
-
-        <label for="admin-location-name">Location</label>
-        <div class="custom-dropdown">
-          <button id="admin-location-dropdown-toggle" type="button" class="dropdown-toggle">Select Location</button>
-          <div id="admin-location-dropdown-menu" class="dropdown-menu"></div>
+        <div class="placement-mode-group" role="radiogroup" aria-label="Storage destination type">
+          <button type="button" id="placement-mode-tray" class="placement-mode-button is-active" data-placement-mode="tray" role="radio" aria-checked="true">
+            <span>Tray</span>
+            <small>Scan one tray barcode.</small>
+          </button>
+          <button type="button" id="placement-mode-container" class="placement-mode-button" data-placement-mode="container" role="radio" aria-checked="false">
+            <span>Container</span>
+            <small>Scan parent storage, then container.</small>
+          </button>
         </div>
+
+        <div id="placement-scan-flow" class="placement-scan-flow" data-mode="tray">
+          <label id="placement-tray-step" class="placement-scan-step is-active" for="placement-tray-barcode">
+            <span class="placement-step-kicker">Step 1</span>
+            <span class="placement-step-title">Scan tray barcode</span>
+            <input type="text" id="placement-tray-barcode" class="add-input placement-barcode-input" placeholder="Scan tray barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <small id="placement-tray-status">Waiting for tray scan.</small>
+          </label>
+
+          <label id="placement-parent-step" class="placement-scan-step hidden" for="placement-parent-barcode">
+            <span class="placement-step-kicker">Step 1</span>
+            <span class="placement-step-title">Scan parent table, vault, or storage barcode</span>
+            <input type="text" id="placement-parent-barcode" class="add-input placement-barcode-input" placeholder="Scan parent storage barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <small id="placement-parent-status">Scan the selected parent storage label first.</small>
+          </label>
+
+          <label id="placement-container-step" class="placement-scan-step hidden" for="placement-container-barcode">
+            <span class="placement-step-kicker">Step 2</span>
+            <span class="placement-step-title">Scan container or bag barcode</span>
+            <input type="text" id="placement-container-barcode" class="add-input placement-barcode-input" placeholder="Scan container barcode" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" />
+            <small id="placement-container-status">Container must belong to the scanned parent.</small>
+          </label>
+        </div>
+
         <input type="hidden" id="admin-location-name" />
         <input type="hidden" id="admin-location-id" />
         <p id="admin-location-selection-summary" class="modal-selection-summary">
-          Search by location name, barcode, type, or store.
+          Scan a destination barcode to see the storage snapshot.
         </p>
 
         <section id="admin-location-intelligence" class="location-intelligence-card" aria-live="polite">
           <div class="location-intelligence-empty">
-            Select a location to see current contents and similar-weight items.
+            Scan a location to see current contents and similar-weight items.
           </div>
         </section>
 
         <label for="admin-stock-quantity">Stock Quantity</label>
-        <input type="number" id="admin-stock-quantity" placeholder="Enter quantity" min="0" />
+        <input type="number" id="admin-stock-quantity" placeholder="Enter quantity" min="1" step="1" />
       </div>
 
       <div class="modal-footer-assign-location">
         <button id="btn-confirm-admin-stock" class="btn-location-confirm">Confirm</button>
         <button id="btn-cancel-admin-stock" class="btn-location-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stock-placement-signature-modal" class="modal hidden stock-placement-signature-modal" aria-hidden="true">
+    <div class="stock-placement-signature-dialog" role="dialog" aria-modal="true" aria-labelledby="stock-placement-signature-title">
+      <p class="modal-kicker">Signed Placement</p>
+      <h2 id="stock-placement-signature-title" class="item-save-success-title">Confirm stock placement</h2>
+      <p id="stock-placement-signature-summary" class="item-save-success-copy">
+        Confirm the selected destination and quantity before this placement is attached to the item.
+      </p>
+      <label for="stock-placement-password" class="item-label-print-input">
+        <span>Your password</span>
+        <input id="stock-placement-password" type="password" placeholder="Sign this placement" autocomplete="current-password" />
+      </label>
+      <p id="stock-placement-password-error" class="inline-status inline-status-error"></p>
+      <div class="item-label-print-actions stock-placement-signature-actions">
+        <button type="button" id="stock-placement-password-confirm" class="add-button">Sign Placement</button>
+        <button type="button" id="stock-placement-password-cancel" class="add-button-secondary">Cancel</button>
       </div>
     </div>
   </div>

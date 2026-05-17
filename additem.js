@@ -32,6 +32,9 @@ let latestLocationDymoUrl = null;
 let activeStoreOptions = [];
 let activeAdminLocationOptions = [];
 let selectedAdminLocation = null;
+let selectedAdminParentLocation = null;
+let stockPlacementMode = "tray";
+const stockPlacementScanTimers = {};
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
 const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
@@ -1027,18 +1030,17 @@ let uploadedImages = [];
     // Only set/clear when explicitly given a default; otherwise keep whatever is there
     if (defaultQty !== null && Number.isFinite(defaultQty)) {
       qtyEl.value = String(defaultQty);
-    } else if (!qtyEl.value) {
-      qtyEl.value = ""; // keep empty if nothing set yet
+    } else {
+      qtyEl.value = "1";
     }
 
-    setSelectedAdminLocation("");
     modal.dataset.itemId = itemId;
     modal.classList.remove("hidden");
-    openAdminLocationScannerSearch({ clearSearch: true });
-
-    const preferredStoreId = await fetchLastStockPlacementStoreIdForCurrentUser();
-    await populateAdminLocationDropdown("", preferredStoreId);
-    openAdminLocationScannerSearch();
+    document.body.classList.add("modal-open");
+    activeStoreOptions = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
+    activeAdminLocationOptions = await fetchAdminLocationOptions();
+    resetAdminStockPlacementFlow();
+    focusPlacementInput(stockPlacementMode === "container" ? "placement-parent-barcode" : "placement-tray-barcode");
   }
 
 
@@ -1061,7 +1063,7 @@ let uploadedImages = [];
   async function fetchAdminLocationOptions() {
     const { data, error } = await supabase
       .from("locations")
-      .select("id, location_name, location_code, type, store_id, max_capacity, active")
+      .select("id, location_name, location_code, type, store_id, parent_location_id, location_role, is_tray, tray_current_store_id, max_capacity, active")
       .eq("active", true)
       .order("location_name", { ascending: true });
 
@@ -1080,7 +1082,12 @@ let uploadedImages = [];
         code: String(location.location_code || "").trim(),
         type: String(location.type || "").trim(),
         storeId: String(location.store_id || "").trim(),
+        parentId: String(location.parent_location_id || "").trim(),
+        role: String(location.location_role || "").trim(),
+        isTray: Boolean(location.is_tray),
+        trayCurrentStoreId: String(location.tray_current_store_id || "").trim(),
         storeName: storeNameById.get(String(location.store_id || "")) || "No store assigned",
+        currentStoreName: storeNameById.get(String(location.tray_current_store_id || "")) || storeNameById.get(String(location.store_id || "")) || "No store assigned",
         maxCapacity: Number(location.max_capacity) || null,
       }))
       .filter((location) => location.id && location.name)
@@ -1228,6 +1235,137 @@ let uploadedImages = [];
     return location.code ? `${location.name} (${location.code})` : location.name;
   }
 
+  function isTrayAdminLocation(location) {
+    return Boolean(location?.isTray) || String(location?.role || "").toLowerCase() === "tray";
+  }
+
+  function isContainerAdminLocation(location) {
+    return !isTrayAdminLocation(location) && (
+      String(location?.role || "").toLowerCase() === "container" || Boolean(location?.parentId)
+    );
+  }
+
+  function isParentStorageAdminLocation(location) {
+    return Boolean(location) && !isTrayAdminLocation(location) && !isContainerAdminLocation(location);
+  }
+
+  function getAdminLocationStoreLabel(location) {
+    if (!location) return "";
+    return isTrayAdminLocation(location) ? location.currentStoreName : location.storeName;
+  }
+
+  function findAdminLocationByBarcode(barcode, predicate = null) {
+    const normalized = String(barcode || "").trim().toLowerCase();
+    if (!normalized) return null;
+
+    const matches = activeAdminLocationOptions.filter((location) => {
+      const isCodeMatch = String(location.code || "").trim().toLowerCase() === normalized;
+      return isCodeMatch && (!predicate || predicate(location));
+    });
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function setPlacementStepStatus(id, message, type = "info") {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    element.textContent = message || "";
+    element.classList.toggle("is-success", type === "success");
+    element.classList.toggle("is-error", type === "error");
+  }
+
+  function setPlacementStepState(stepId, state = "") {
+    const step = document.getElementById(stepId);
+    if (!step) return;
+    step.classList.toggle("is-active", state === "active");
+    step.classList.toggle("is-complete", state === "complete");
+  }
+
+  function focusPlacementInput(id, options = {}) {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    setTimeout(() => {
+      if (options.scroll !== false) {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      input.focus({ preventScroll: true });
+      input.select?.();
+    }, options.delayMs ?? 90);
+  }
+
+  function resetStockPlacementScanInputs() {
+    Object.keys(stockPlacementScanTimers).forEach((key) => {
+      clearTimeout(stockPlacementScanTimers[key]);
+      delete stockPlacementScanTimers[key];
+    });
+    ["placement-tray-barcode", "placement-parent-barcode", "placement-container-barcode"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
+    selectedAdminParentLocation = null;
+    setPlacementStepStatus("placement-tray-status", "Waiting for tray scan.");
+    setPlacementStepStatus("placement-parent-status", "Scan the selected parent storage label first.");
+    setPlacementStepStatus("placement-container-status", "Container must belong to the scanned parent.");
+  }
+
+  function syncStockPlacementModeUI() {
+    const flow = document.getElementById("placement-scan-flow");
+    const trayStep = document.getElementById("placement-tray-step");
+    const parentStep = document.getElementById("placement-parent-step");
+    const containerStep = document.getElementById("placement-container-step");
+    const isContainerMode = stockPlacementMode === "container";
+
+    flow?.setAttribute("data-mode", stockPlacementMode);
+    document.querySelectorAll("[data-placement-mode]").forEach((button) => {
+      const isActive = button.dataset.placementMode === stockPlacementMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-checked", isActive ? "true" : "false");
+    });
+
+    trayStep?.classList.toggle("hidden", isContainerMode);
+    parentStep?.classList.toggle("hidden", !isContainerMode);
+    containerStep?.classList.toggle("hidden", !isContainerMode);
+
+    if (isContainerMode) {
+      setPlacementStepState("placement-parent-step", "active");
+      setPlacementStepState("placement-container-step", "");
+      setPlacementStepState("placement-tray-step", "");
+    } else {
+      setPlacementStepState("placement-tray-step", "active");
+      setPlacementStepState("placement-parent-step", "");
+      setPlacementStepState("placement-container-step", "");
+    }
+  }
+
+  function setStockPlacementMode(mode = "tray", { clear = true, focus = true } = {}) {
+    stockPlacementMode = mode === "container" ? "container" : "tray";
+    try {
+      window.localStorage?.setItem("og.addItem.stockPlacementMode", stockPlacementMode);
+    } catch (_) {}
+
+    if (clear) {
+      setSelectedAdminLocation("");
+      resetStockPlacementScanInputs();
+      renderLocationIntelligenceEmpty("admin-location-intelligence");
+    }
+
+    syncStockPlacementModeUI();
+    if (focus) {
+      focusPlacementInput(stockPlacementMode === "container" ? "placement-parent-barcode" : "placement-tray-barcode");
+    }
+  }
+
+  function restoreStockPlacementModePreference() {
+    try {
+      const saved = window.localStorage?.getItem("og.addItem.stockPlacementMode");
+      stockPlacementMode = saved === "container" ? "container" : "tray";
+    } catch (_) {
+      stockPlacementMode = "tray";
+    }
+  }
+
   function setSelectedAdminLocation(location = null) {
     const locationObject = typeof location === "string"
       ? activeAdminLocationOptions.find((entry) => entry.name === location || entry.id === location || entry.code === location) || null
@@ -1235,16 +1373,20 @@ let uploadedImages = [];
     const locationName = locationObject?.name || "";
     const locationId = locationObject?.id || "";
     const locationCode = locationObject?.code || "";
-    const storeName = locationObject?.storeName || "";
+    const storeName = getAdminLocationStoreLabel(locationObject);
     const typeName = locationObject?.type || "";
     const summary = document.getElementById("admin-location-selection-summary");
 
     selectedAdminLocation = locationObject || null;
-    document.getElementById("admin-location-name").value = locationName;
-    document.getElementById("admin-location-id").value = locationId;
-    document.getElementById("admin-location-dropdown-toggle").innerText = locationObject
-      ? getAdminLocationLabel(locationObject)
-      : "Select Location";
+    const locationNameInput = document.getElementById("admin-location-name");
+    const locationIdInput = document.getElementById("admin-location-id");
+    const dropdownToggle = document.getElementById("admin-location-dropdown-toggle");
+
+    if (locationNameInput) locationNameInput.value = locationName;
+    if (locationIdInput) locationIdInput.value = locationId;
+    if (dropdownToggle) {
+      dropdownToggle.innerText = locationObject ? getAdminLocationLabel(locationObject) : "Select Location";
+    }
 
     if (summary) {
       summary.textContent = locationObject
@@ -1253,7 +1395,7 @@ let uploadedImages = [];
             storeName ? `Store: ${storeName}` : "",
             typeName ? `Type: ${typeName}` : "",
           ].filter(Boolean).join(" | ")
-        : "Search by location name, barcode, type, or store.";
+        : "Scan a destination barcode to see the storage snapshot.";
     }
 
     const referenceWeight = Number(document.getElementById("weight")?.value);
@@ -1289,6 +1431,117 @@ let uploadedImages = [];
     }
     renderAdminLocationDropdownOptions(searchInput?.value || "");
     focusAdminStockQuantityInput();
+  }
+
+  function completeTrayPlacementScan(location) {
+    setSelectedAdminLocation(location);
+    setPlacementStepState("placement-tray-step", "complete");
+    setPlacementStepStatus(
+      "placement-tray-status",
+      `Selected ${location.name}${location.code ? ` (${location.code})` : ""}.`,
+      "success"
+    );
+    focusAdminStockQuantityInput();
+  }
+
+  function completeParentPlacementScan(location) {
+    selectedAdminParentLocation = location;
+    setSelectedAdminLocation("");
+    setPlacementStepState("placement-parent-step", "complete");
+    setPlacementStepState("placement-container-step", "active");
+    setPlacementStepStatus(
+      "placement-parent-status",
+      `Parent confirmed: ${location.name}${location.code ? ` (${location.code})` : ""}.`,
+      "success"
+    );
+    setPlacementStepStatus("placement-container-status", "Now scan the container or bag inside that parent.");
+    document.getElementById("placement-container-barcode").value = "";
+    focusPlacementInput("placement-container-barcode");
+  }
+
+  function completeContainerPlacementScan(location) {
+    setSelectedAdminLocation(location);
+    setPlacementStepState("placement-container-step", "complete");
+    setPlacementStepStatus(
+      "placement-container-status",
+      `Container selected: ${location.name}${location.code ? ` (${location.code})` : ""}.`,
+      "success"
+    );
+    focusAdminStockQuantityInput();
+  }
+
+  function handleTrayBarcodeScan(value) {
+    const location = findAdminLocationByBarcode(value, isTrayAdminLocation);
+    if (!location) {
+      setPlacementStepStatus("placement-tray-status", "No active tray matched that barcode.", "error");
+      setSelectedAdminLocation("");
+      return false;
+    }
+
+    completeTrayPlacementScan(location);
+    return true;
+  }
+
+  function handleParentBarcodeScan(value) {
+    const location = findAdminLocationByBarcode(value, isParentStorageAdminLocation);
+    if (!location) {
+      setPlacementStepStatus("placement-parent-status", "No active parent storage location matched that barcode.", "error");
+      selectedAdminParentLocation = null;
+      setSelectedAdminLocation("");
+      setPlacementStepState("placement-parent-step", "active");
+      setPlacementStepState("placement-container-step", "");
+      return false;
+    }
+
+    completeParentPlacementScan(location);
+    return true;
+  }
+
+  function handleContainerBarcodeScan(value) {
+    if (!selectedAdminParentLocation?.id) {
+      setPlacementStepStatus("placement-container-status", "Scan the parent storage barcode first.", "error");
+      focusPlacementInput("placement-parent-barcode");
+      return false;
+    }
+
+    const location = findAdminLocationByBarcode(value, (entry) => {
+      return isContainerAdminLocation(entry) && String(entry.parentId || "") === String(selectedAdminParentLocation.id);
+    });
+
+    if (!location) {
+      setPlacementStepStatus("placement-container-status", "No container matched that barcode under the scanned parent.", "error");
+      setSelectedAdminLocation("");
+      return false;
+    }
+
+    completeContainerPlacementScan(location);
+    return true;
+  }
+
+  function schedulePlacementBarcodeScan(input, handler) {
+    if (!input || !handler) return;
+    const value = input.value.trim();
+    clearTimeout(stockPlacementScanTimers[input.id]);
+    if (!value) return;
+    stockPlacementScanTimers[input.id] = window.setTimeout(() => {
+      handler(input.value.trim());
+      delete stockPlacementScanTimers[input.id];
+    }, 650);
+  }
+
+  function flushPlacementBarcodeScan(input, handler) {
+    if (!input || !handler) return;
+    clearTimeout(stockPlacementScanTimers[input.id]);
+    delete stockPlacementScanTimers[input.id];
+    handler(input.value.trim());
+  }
+
+  function resetAdminStockPlacementFlow() {
+    restoreStockPlacementModePreference();
+    resetStockPlacementScanInputs();
+    setSelectedAdminLocation("");
+    renderLocationIntelligenceEmpty("admin-location-intelligence");
+    syncStockPlacementModeUI();
   }
 
   function getFilteredAdminLocationOptions(searchTerm = "") {
@@ -1933,56 +2186,6 @@ let uploadedImages = [];
     });
   }
 
-  //event listeners for the modal and other logic
-  function setupAdminLocationModalListeners() {
-    const confirmBtn = document.getElementById("btn-confirm-admin-stock");
-    const cancelBtn = document.getElementById("btn-cancel-admin-stock");
-
-    cancelBtn.onclick = () => {
-      document.getElementById("modal-admin-assign-location").classList.add("hidden");
-    };
-
-    confirmBtn.onclick = async () => {
-      const barcode = document.getElementById("scanned-barcode")?.value || "temp-barcode";
-      const locationName = document.getElementById("admin-location-name").value.trim();
-      const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
-
-      if (!locationName || isNaN(quantity)) {
-        showToast("❌ Please select a location and enter quantity.");
-        return;
-      }
-
-      const { data: loc, error } = await supabase
-        .from("locations")
-        .select("id")
-        .eq("location_name", locationName)
-        .single();
-
-      if (error || !loc) {
-        showToast("❌ Location not found.");
-        return;
-      }
-
-      // Save for later use
-      pendingStockAssignments[barcode] = {
-        location_name: locationName,
-        quantity,
-        location_id: loc.id
-      };
-
-      // ⬇️ Show assignment preview in the main form
-      const previewBox = document.getElementById("assignment-preview-box");
-      document.getElementById("assignment-location").textContent = `📍 Location: ${locationName}`;
-      document.getElementById("assignment-quantity").textContent = `📦 Quantity: ${quantity}`;
-      previewBox.classList.remove("hidden");
-
-
-      showToast(`📦 Will assign ${quantity} to ${locationName} after item is saved`);
-      document.getElementById("modal-admin-assign-location").classList.add("hidden");
-    };
-
-  }
-
   //location dropdown only opening for admins
   async function populateAdminLocationDropdown(selectedValue = "", selectedStoreId = "") {
     activeStoreOptions = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
@@ -2030,20 +2233,144 @@ let uploadedImages = [];
     });
   }
 
+  async function validateAddItemPassword(password) {
+    if (!currentUser?.email || !password) return false;
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password,
+    });
+
+    return !error;
+  }
+
+  function requestStockPlacementSignature({ location, quantity, mode, parentLocation } = {}) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById("stock-placement-signature-modal");
+      const summary = document.getElementById("stock-placement-signature-summary");
+      const passwordInput = document.getElementById("stock-placement-password");
+      const errorEl = document.getElementById("stock-placement-password-error");
+      const confirmBtn = document.getElementById("stock-placement-password-confirm");
+      const cancelBtn = document.getElementById("stock-placement-password-cancel");
+
+      if (!modal || !passwordInput || !confirmBtn || !cancelBtn || !errorEl) {
+        resolve(null);
+        return;
+      }
+
+      const destinationLabel = location ? getAdminLocationLabel(location) : "selected destination";
+      const parentLabel = parentLocation ? ` Parent: ${getAdminLocationLabel(parentLocation)}.` : "";
+      if (summary) {
+        summary.textContent = `Sign ${quantity} unit${quantity === 1 ? "" : "s"} into ${mode === "container" ? "container" : "tray"} ${destinationLabel}.${parentLabel}`;
+      }
+
+      passwordInput.value = "";
+      errorEl.textContent = "";
+      modal.classList.remove("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("modal-open");
+
+      const cleanup = (result) => {
+        confirmBtn.onclick = null;
+        cancelBtn.onclick = null;
+        passwordInput.onkeydown = null;
+        modal.classList.add("hidden");
+        modal.setAttribute("aria-hidden", "true");
+        if (!document.querySelector(".modal:not(.hidden)")) {
+          document.body.classList.remove("modal-open");
+        }
+        resolve(result);
+      };
+
+      cancelBtn.onclick = () => cleanup(null);
+      confirmBtn.onclick = async () => {
+        const password = passwordInput.value.trim();
+        if (!password) {
+          errorEl.textContent = "Password is required.";
+          return;
+        }
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Checking...";
+        try {
+          const valid = await validateAddItemPassword(password);
+          if (!valid) {
+            errorEl.textContent = "Incorrect password.";
+            return;
+          }
+
+          cleanup({
+            signedByEmail: currentUser?.email || "",
+            signedAt: new Date().toISOString(),
+            confirmationMethod: "password_stock_placement",
+          });
+        } finally {
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = "Sign Placement";
+        }
+      };
+
+      passwordInput.onkeydown = (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        confirmBtn.click();
+      };
+
+      setTimeout(() => passwordInput.focus({ preventScroll: true }), 80);
+    });
+  }
+
   function setupAdminLocationModalListeners() {
     const confirmBtn = document.getElementById("btn-confirm-admin-stock");
     const cancelBtn = document.getElementById("btn-cancel-admin-stock");
-    const storeFilter = document.getElementById("admin-location-store-filter");
+    const trayInput = document.getElementById("placement-tray-barcode");
+    const parentInput = document.getElementById("placement-parent-barcode");
+    const containerInput = document.getElementById("placement-container-barcode");
 
     cancelBtn.onclick = () => {
       document.getElementById("modal-admin-assign-location").classList.add("hidden");
+      if (!document.querySelector(".modal:not(.hidden)")) {
+        document.body.classList.remove("modal-open");
+      }
     };
 
-    storeFilter?.addEventListener("change", () => {
-      const searchInput = document.getElementById("admin-location-dropdown-search");
-      renderAdminLocationDropdownOptions(searchInput?.value || "");
-      openAdminLocationScannerSearch();
+    document.querySelectorAll("[data-placement-mode]").forEach((button) => {
+      if (button.dataset.bound === "true") return;
+      button.dataset.bound = "true";
+      button.addEventListener("click", () => {
+        setStockPlacementMode(button.dataset.placementMode || "tray", { clear: true, focus: true });
+      });
     });
+
+    if (trayInput && trayInput.dataset.bound !== "true") {
+      trayInput.dataset.bound = "true";
+      trayInput.addEventListener("input", () => schedulePlacementBarcodeScan(trayInput, handleTrayBarcodeScan));
+      trayInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        flushPlacementBarcodeScan(trayInput, handleTrayBarcodeScan);
+      });
+    }
+
+    if (parentInput && parentInput.dataset.bound !== "true") {
+      parentInput.dataset.bound = "true";
+      parentInput.addEventListener("input", () => schedulePlacementBarcodeScan(parentInput, handleParentBarcodeScan));
+      parentInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        flushPlacementBarcodeScan(parentInput, handleParentBarcodeScan);
+      });
+    }
+
+    if (containerInput && containerInput.dataset.bound !== "true") {
+      containerInput.dataset.bound = "true";
+      containerInput.addEventListener("input", () => schedulePlacementBarcodeScan(containerInput, handleContainerBarcodeScan));
+      containerInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        flushPlacementBarcodeScan(containerInput, handleContainerBarcodeScan);
+      });
+    }
 
     const quantityInput = document.getElementById("admin-stock-quantity");
     if (quantityInput && quantityInput.dataset.enterBound !== "true") {
@@ -2062,7 +2389,7 @@ let uploadedImages = [];
       const locationName = document.getElementById("admin-location-name").value.trim();
       const quantity = parseInt(document.getElementById("admin-stock-quantity").value.trim(), 10);
 
-      if (!locationId || !locationName || isNaN(quantity)) {
+      if (!locationId || !locationName || !Number.isFinite(quantity) || quantity <= 0) {
         showToast("Please select a location and enter quantity.");
         return;
       }
@@ -2073,19 +2400,60 @@ let uploadedImages = [];
         return;
       }
 
+      if (stockPlacementMode === "tray" && !isTrayAdminLocation(location)) {
+        showToast("Scan an active tray barcode for tray placement.");
+        focusPlacementInput("placement-tray-barcode");
+        return;
+      }
+
+      if (stockPlacementMode === "container") {
+        if (!isContainerAdminLocation(location)) {
+          showToast("Scan a container or bag barcode for container placement.");
+          focusPlacementInput("placement-container-barcode");
+          return;
+        }
+        if (!selectedAdminParentLocation?.id || String(location.parentId || "") !== String(selectedAdminParentLocation.id)) {
+          showToast("The container must belong to the scanned parent storage location.");
+          focusPlacementInput("placement-parent-barcode");
+          return;
+        }
+      }
+
+      const signed = await requestStockPlacementSignature({
+        location,
+        quantity,
+        mode: stockPlacementMode,
+        parentLocation: stockPlacementMode === "container" ? selectedAdminParentLocation : null,
+      });
+
+      if (!signed) return;
+
       pendingStockAssignments[barcode] = {
         location_name: location.name,
         quantity,
-        location_id: location.id
+        location_id: location.id,
+        location_code: location.code,
+        placement_type: stockPlacementMode,
+        parent_location_id: selectedAdminParentLocation?.id || null,
+        parent_location_name: selectedAdminParentLocation?.name || null,
+        signed_by_email: signed.signedByEmail,
+        signed_at: signed.signedAt,
+        confirmation_method: signed.confirmationMethod,
       };
 
       const previewBox = document.getElementById("assignment-preview-box");
-      document.getElementById("assignment-location").textContent = `Location: ${getAdminLocationLabel(location)}`;
-      document.getElementById("assignment-quantity").textContent = `Quantity: ${quantity}`;
+      const parentCopy = stockPlacementMode === "container" && selectedAdminParentLocation
+        ? ` via ${getAdminLocationLabel(selectedAdminParentLocation)}`
+        : "";
+      document.getElementById("assignment-location").textContent = `Location: ${getAdminLocationLabel(location)}${parentCopy}`;
+      document.getElementById("assignment-quantity").textContent = `Quantity: ${quantity} | Signed by ${signed.signedByEmail || "current user"}`;
       previewBox.classList.remove("hidden");
 
       showToast(`Will assign ${quantity} to ${location.name} after item is saved`);
       document.getElementById("modal-admin-assign-location").classList.add("hidden");
+      if (!document.querySelector(".modal:not(.hidden)")) {
+        document.body.classList.remove("modal-open");
+      }
     };
   }
 
@@ -2308,7 +2676,12 @@ try {
   const locationId = pendingStockAssignments[newItem.barcode]?.location_id || null;
 
   // ⬅️ assign into the hoisted variable
-  bulkRes = await window.addItemBulkModule.saveRegistryForItem(newItem.id, bagBarcode, locationId);
+  bulkRes = await window.addItemBulkModule.saveRegistryForItem(
+    newItem.id,
+    bagBarcode,
+    locationId,
+    pendingStockAssignments[newItem.barcode] || null
+  );
 
   if (bulkRes?.error) {
     showToast("⚠️ Item saved, but bulk registry failed.");
@@ -2329,8 +2702,9 @@ if (stockInfo && (bulkRes?.skipped === true))  {
     location_id: stockInfo.location_id,
     quantity: stockInfo.quantity,
     added_by: currentUser.id,
-    confirmation_email: currentUser.email,
-    confirmed_at: new Date().toISOString()
+    confirmation_email: stockInfo.signed_by_email || currentUser.email,
+    confirmation_method: stockInfo.confirmation_method || "password_stock_placement",
+    confirmed_at: stockInfo.signed_at || new Date().toISOString()
   });
 
   const stockLog = await supabase.from("stock_transactions").insert({
@@ -2338,10 +2712,11 @@ if (stockInfo && (bulkRes?.skipped === true))  {
     location_id: stockInfo.location_id,
     quantity: stockInfo.quantity,
     action_type: "checkin",
-    method: "unverified",  // ✅ new: set the method
-    email: window.currentUser?.email,  // ✅ new: log who did it
+    method: stockInfo.confirmation_method || "password_stock_placement",
+    email: stockInfo.signed_by_email || window.currentUser?.email,
     user_id: currentUser.id,
-    timestamp: new Date().toISOString()
+    notes: `Add item stock placement into ${stockInfo.placement_type || "location"} ${stockInfo.location_name || stockInfo.location_id}${stockInfo.parent_location_name ? ` under ${stockInfo.parent_location_name}` : ""}`,
+    timestamp: stockInfo.signed_at || new Date().toISOString()
   });
 
   if (stockInsert.error || stockLog.error) {

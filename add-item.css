@@ -847,6 +847,113 @@ input[type="file"].add-input::file-selector-button {
   padding-right: 6px;
 }
 
+.placement-mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.placement-mode-button {
+  display: grid;
+  gap: 4px;
+  min-height: 76px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(244, 224, 190, 0.14);
+  background: rgba(255, 248, 236, 0.055);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.placement-mode-button:hover,
+.placement-mode-button.is-active {
+  border-color: rgba(244, 203, 127, 0.7);
+  background: rgba(244, 203, 127, 0.13);
+}
+
+.placement-mode-button:focus-visible {
+  outline: 3px solid rgba(244, 203, 127, 0.32);
+  outline-offset: 3px;
+}
+
+.placement-mode-button span {
+  font-weight: 900;
+}
+
+.placement-mode-button small {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.placement-scan-flow {
+  display: grid;
+  gap: 12px;
+}
+
+.placement-scan-step {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(244, 224, 190, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.placement-scan-step.is-active {
+  border-color: rgba(244, 203, 127, 0.65);
+  box-shadow: 0 0 0 4px rgba(244, 203, 127, 0.08);
+}
+
+.placement-scan-step.is-complete {
+  border-color: rgba(67, 190, 128, 0.38);
+  background: rgba(67, 190, 128, 0.08);
+}
+
+.placement-step-kicker {
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.placement-step-title {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.placement-scan-step small {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.placement-scan-step small.is-success {
+  color: var(--success);
+}
+
+.placement-scan-step small.is-error {
+  color: var(--danger);
+}
+
+.stock-placement-signature-dialog {
+  width: min(520px, 100%);
+  margin: auto 0;
+  padding: 28px;
+  border-radius: 26px;
+  border: 1px solid rgba(244, 224, 190, 0.16);
+  background:
+    radial-gradient(circle at top left, rgba(244, 203, 127, 0.16), transparent 35%),
+    rgba(17, 14, 18, 0.98);
+  color: var(--text);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46);
+}
+
+.stock-placement-signature-actions {
+  margin-top: 18px;
+}
+
 .location-intelligence-card {
   display: grid;
   gap: 14px;
@@ -1418,7 +1525,8 @@ input[type="file"].add-input::file-selector-button {
   }
 
   .item-label-print-head,
-  .item-label-print-actions {
+  .item-label-print-actions,
+  .placement-mode-group {
     grid-template-columns: 1fr;
   }
 }

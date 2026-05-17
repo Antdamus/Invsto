@@ -170,7 +170,7 @@ window.addItemBulkModule = (function () {
   }
 
   // called from the add-item flow after item_types insert
-  async function saveRegistryForItem(itemTypeId, bagBarcode, locationId = null) {
+  async function saveRegistryForItem(itemTypeId, bagBarcode, locationId = null, placementMeta = null) {
     if (!state.payload) return { skipped: true, data: null };
 
     // 1) Upload the DYMO label (if one was generated during Save click)
@@ -228,11 +228,33 @@ window.addItemBulkModule = (function () {
           item_id: itemTypeId,          // ← matches your table FK
           location_id: locationId,
           batch_id: bag.id,             // tie this stock to THIS bag
-          quantity: state.estimated_qty
+          quantity: state.estimated_qty,
+          added_by: window.currentUser?.id || null,
+          confirmation_email: placementMeta?.signed_by_email || window.currentUser?.email || null,
+          confirmation_method: placementMeta?.confirmation_method || "password_stock_placement",
+          confirmed_at: placementMeta?.signed_at || new Date().toISOString()
         });
       if (stockErr) {
         console.warn("⚠️ bag stock insert failed:", stockErr);
         // we still return the bag so the caller can decide what to do
+      } else {
+        const { error: stockTxErr } = await supabase
+          .from("stock_transactions")
+          .insert({
+            item_id: itemTypeId,
+            location_id: locationId,
+            quantity: state.estimated_qty,
+            action_type: "checkin",
+            confirmed_at: placementMeta?.signed_at || new Date().toISOString(),
+            user_id: window.currentUser?.id || null,
+            email: placementMeta?.signed_by_email || window.currentUser?.email || null,
+            notes: `Add item bulk stock placement into ${placementMeta?.placement_type || "location"} ${placementMeta?.location_name || locationId}`,
+            method: placementMeta?.confirmation_method || "password_stock_placement",
+            timestamp: placementMeta?.signed_at || new Date().toISOString()
+          });
+        if (stockTxErr) {
+          console.warn("⚠️ bag stock transaction insert failed:", stockTxErr);
+        }
       }
     }
 
