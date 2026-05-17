@@ -500,7 +500,7 @@ function buildLocationChips(item) {
             ${showSensitive ? `<p><strong>Notes:</strong> ${escapeStockHtml(item.distributor_notes || "-")}</p>` : ""}
             <p><strong>QR Type:</strong> ${escapeStockHtml(item.qr_type || "-")}</p>
             <p><strong>Last Updated:</strong> ${escapeStockHtml(new Date(item.created_at).toLocaleString())}</p>
-            ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${escapeStockHtml(item.dymo_label_url)}">DYMO Label</a></p>` : ""}
+            ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </details>
           <div class="stock-sensitive-legacy">
           <p><strong>Weight:</strong> ${item.weight}</p>
@@ -511,7 +511,7 @@ function buildLocationChips(item) {
           <p><strong>QR Type:</strong> ${item.qr_type}</p>
           <p><strong>Barcode:</strong> ${item.barcode || "—"}</p>
           <p><strong>Last Updated:</strong> ${new Date(item.created_at).toLocaleString()}</p>
-          ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-path="${item.dymo_label_url}">📄 DYMO Label</a></p>` : ""}
+          ${item.dymo_label_url ? `<p><a href="#" class="dymo-link" data-id="${escapeStockHtml(item.id || "")}" data-path="${escapeStockHtml(item.dymo_label_url)}" data-barcode="${escapeStockHtml(item.barcode || "")}" data-title="${escapeStockHtml(item.title || "")}">Print DYMO Label</a></p>` : ""}
           </div>
           ${stockLabel}
           <p class="chip-section-label">Categories:</p>
@@ -3144,6 +3144,90 @@ let stockPhotoViewerItemId = null;
 function getStockItemById(itemId) {
   return allItems.find((item) => String(item.id) === String(itemId)) || null;
 }
+
+function normalizeDymoStoragePath(reference) {
+  const value = String(reference || "").trim();
+  if (!value) return "";
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      const match = url.pathname.match(/\/storage\/v1\/object\/(?:sign|public|authenticated)\/dymo-labels\/(.+)$/i);
+      if (match?.[1]) {
+        return decodeURIComponent(match[1]).replace(/^\/+/, "");
+      }
+    } catch (_) {
+      return "";
+    }
+    return "";
+  }
+
+  const cleaned = value.replace(/^dymo-labels\//i, "").replace(/^\/+/, "");
+  return cleaned.startsWith("labels/") ? cleaned : `labels/${cleaned}`;
+}
+
+async function loadDymoLabelXml(reference) {
+  const value = String(reference || "").trim();
+  const storagePath = normalizeDymoStoragePath(value);
+
+  if (storagePath) {
+    const { data, error } = await supabase.storage.from("dymo-labels").download(storagePath);
+    if (error) throw error;
+    return data.text();
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    const response = await fetch(value);
+    if (!response.ok) {
+      throw new Error(`Failed to download DYMO label (${response.status}).`);
+    }
+    return response.text();
+  }
+
+  throw new Error("No DYMO label path is attached to this item.");
+}
+
+async function queueStockDymoLabelForHelper(link) {
+  const item = getStockItemById(link?.dataset?.id) || {};
+  const labelReference = link?.dataset?.path || item.dymo_label_url || "";
+  const labelXml = await loadDymoLabelXml(labelReference);
+
+  if (!window.dymoModule?.printDymoLabelXml) {
+    throw new Error("The DYMO label helper is not loaded on this page.");
+  }
+
+  return window.dymoModule.printDymoLabelXml(labelXml, {
+    copies: 1,
+    barcode: link?.dataset?.barcode || item.barcode || "",
+    title: link?.dataset?.title || item.title || "",
+    labelKind: "StockLabel",
+    listenerOnly: true,
+  });
+}
+
+document.addEventListener("click", async (event) => {
+  const link = event.target.closest(".dymo-link");
+  if (!link) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (link.dataset.busy === "true") return;
+
+  const originalText = link.textContent;
+  link.dataset.busy = "true";
+  link.textContent = "Queueing DYMO label...";
+
+  try {
+    const result = await queueStockDymoLabelForHelper(link);
+    showToast(`DYMO label sent to local print helper${result?.filename ? `: ${result.filename}` : "."}`);
+  } catch (error) {
+    console.error("Stock DYMO helper print failed:", error);
+    showToast(error?.message || "Unable to queue DYMO label for printing.");
+  } finally {
+    link.textContent = originalText || "Print DYMO Label";
+    link.dataset.busy = "false";
+  }
+}, true);
 
 function getStockItemPhotoPaths(item) {
   return (Array.isArray(item?.photoPaths) ? item.photoPaths : Array.isArray(item?.photos) ? item.photos : [])

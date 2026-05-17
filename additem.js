@@ -404,7 +404,7 @@ let uploadedImages = [];
       labelKind: "ItemLabel",
       listenerOnly: true,
       onProgress: (current, total, printer) => {
-        setLabelPrintStatus(`Downloading helper label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
+        setLabelPrintStatus(`Queueing automatic print label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
       },
     });
   }
@@ -433,7 +433,7 @@ let uploadedImages = [];
         : `${printVerb} recommended label batch after add-item save.`;
       const recorded = await recordItemLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
       const delivery = printResult?.mode === "queued-download"
-        ? `Downloaded ${printResult.filename || "the DYMO label"} for the local print helper`
+        ? `Queued ${printResult.filename || "the DYMO label"} for automatic local printing`
         : `Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}`;
       setLabelPrintStatus(`${delivery}.${recorded ? " Reloading for the next item..." : " Label tag will record after the migration is pushed. Reloading..."}`, "success");
       scheduleReloadAfterLabelDecision(recorded ? 1300 : 2400);
@@ -502,7 +502,7 @@ let uploadedImages = [];
     if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
     bindItemLabelPrintModalControls();
     updateLabelPrintEstimate();
-    setLabelPrintStatus("Ready to send to the local print helper. Keep tools/start-dymo-print-helper.bat open.");
+    setLabelPrintStatus("Ready to queue automatic printing through the local helper. Keep tools/start-dymo-print-helper.bat open.");
     setLabelPrintBusy(false);
 
     continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });

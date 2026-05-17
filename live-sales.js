@@ -1564,13 +1564,13 @@ async function generateLiveLabel(options = {}) {
     state.currentLot = Array.isArray(data) ? data[0] : data;
     renderAll();
 
-    const downloadName = `${labelBaseName}.dymo`;
+    const downloadName = `${labelBaseName}_Copies_1.dymo`;
     downloadTextFile(xml, downloadName);
     const signed = await supabase.storage.from("dymo-labels").createSignedUrl(labelPath, 3600);
     const openLink = signed.data?.signedUrl
       ? ` <a href="${escapeHtml(signed.data.signedUrl)}" target="_blank" rel="noreferrer">Open uploaded label</a>`
       : "";
-    setLabelStatus(`DYMO label generated and downloaded as ${escapeHtml(downloadName)} for the local print helper.${openLink}`, "success");
+    setLabelStatus(`DYMO label generated and queued as ${escapeHtml(downloadName)} for automatic local printing.${openLink}`, "success");
     return true;
   } catch (error) {
     console.error("Generate live sale label failed:", error);
