@@ -65,6 +65,17 @@ window.storageTransferModule = (function () {
     }
   }
 
+  function withTimeout(promise, ms, message) {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = window.setTimeout(() => reject(new Error(message)), ms);
+    });
+
+    return Promise.race([promise, timeout]).finally(() => {
+      window.clearTimeout(timeoutId);
+    });
+  }
+
   function focusAndSelect(id, delay = 50) {
     window.setTimeout(() => {
       const input = $(id);
@@ -1239,28 +1250,25 @@ window.storageTransferModule = (function () {
     const validation = validateReadyForReview();
     if (validation) throw new Error(validation);
 
-    const { data, error } = await supabase.rpc("transfer_container_stock_to_tray", {
+    const parent = state.parent;
+    const changedItemId = state.selectedItem.id;
+    const { data, error } = await withTimeout(supabase.rpc("transfer_container_stock_to_tray", {
       _source_stock_row_id: state.selectedStockRow.id,
       _destination_tray_location_id: state.selectedTray.id,
       _quantity: qty,
       _signed_by_email: userEmail,
       _notes: notes,
-    });
+    }), 45000, "The transfer request is taking too long. Please check the connection and try again.");
 
     if (error) throw error;
 
-    const changedItemId = state.selectedItem.id;
-    await bumpInventoryVersion?.([changedItemId]);
-    if (typeof refreshItemById === "function") await refreshItemById(changedItemId);
-
-    const parent = state.parent;
     resetForwardSelection({ keepTray: true, keepItem: false });
     if ($("storage-transfer-item-scan")) $("storage-transfer-item-scan").value = "";
     if ($("storage-transfer-container-scan")) $("storage-transfer-container-scan").value = "";
-    if (parent) await loadParentContainers(parent);
     renderTraySummary();
     focusAndSelect("storage-transfer-item-scan");
     console.log("Storage to tray transfer result:", data);
+    refreshAfterTransfer(changedItemId, { parent, direction: "forward" });
     return changedItemId;
   }
 
@@ -1270,43 +1278,117 @@ window.storageTransferModule = (function () {
     const validation = validateReturnReadyForReview();
     if (validation) throw new Error(validation);
 
-    const { data, error } = await supabase.rpc("transfer_tray_stock_to_container", {
+    const changedItemId = state.returnSelectedItem.id;
+    const parent = state.returnParent;
+    const { data, error } = await withTimeout(supabase.rpc("transfer_tray_stock_to_container", {
       _source_stock_row_id: state.returnSelectedStockRow.id,
       _destination_container_location_id: state.returnContainer.id,
       _parent_location_id: state.returnParent.id,
       _quantity: qty,
       _signed_by_email: userEmail,
       _notes: notes,
-    });
+    }), 45000, "The transfer request is taking too long. Please check the connection and try again.");
 
     if (error) throw error;
-
-    const changedItemId = state.returnSelectedItem.id;
-    await bumpInventoryVersion?.([changedItemId]);
-    if (typeof refreshItemById === "function") await refreshItemById(changedItemId);
 
     resetReturnSelection({ keepDestination: true });
     focusAndSelect("return-transfer-item-scan");
     console.log("Tray to storage transfer result:", data);
+    refreshAfterTransfer(changedItemId, { parent, direction: "return" });
     return changedItemId;
   }
 
-  async function verifyTransferPassword(password) {
-    if (window.checkoutModule?.verifyPasswordForCurrentUser) {
-      return await window.checkoutModule.verifyPasswordForCurrentUser(password);
+  function refreshAfterTransfer(changedItemId, { parent = null, direction = "forward" } = {}) {
+    Promise.resolve()
+      .then(async () => {
+        if (typeof window.bumpInventoryVersion === "function") {
+          await window.bumpInventoryVersion([changedItemId]);
+        } else if (typeof bumpInventoryVersion === "function") {
+          await bumpInventoryVersion([changedItemId]);
+        }
+
+        if (typeof refreshItemById === "function") {
+          await refreshItemById(changedItemId);
+        }
+
+        if (direction === "forward" && parent) {
+          await loadParentContainers(parent);
+        }
+      })
+      .catch((error) => {
+        console.warn("Transfer saved, but the local refresh did not finish:", error);
+        setStatus("Transfer saved. Refresh the stock page if the newest counts do not appear immediately.", "info");
+      });
+  }
+
+  async function getSignedTransferUser() {
+    if (typeof currentUser !== "undefined" && currentUser?.email) {
+      return currentUser;
     }
 
-    const { data, error: userError } = await supabase.auth.getUser();
-    if (userError || !data?.user?.email) {
+    const { data, error } = await withTimeout(
+      supabase.auth.getUser(),
+      8000,
+      "Could not read the current login. Refresh and try again."
+    );
+
+    if (error || !data?.user?.email) {
       throw new Error("Could not fetch authenticated user.");
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: data.user.email,
-      password,
-    });
+    return data.user;
+  }
 
-    return !error;
+  async function verifyTransferPassword(email, password) {
+    const url = `${window.SUPABASE_URL || ""}/auth/v1/token?grant_type=password`;
+    const anonKey = window.SUPABASE_ANON_KEY || "";
+    if (!window.SUPABASE_URL || !anonKey) {
+      throw new Error("Supabase auth settings are not available. Refresh and try again.");
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 12000);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+        signal: controller.signal,
+      });
+
+      if (response.ok) return true;
+
+      if (response.status === 400 || response.status === 401 || response.status === 422) {
+        return false;
+      }
+
+      let message = `Password verification failed (${response.status}).`;
+      try {
+        const body = await response.json();
+        message = body?.error_description || body?.msg || body?.message || message;
+      } catch (_) {
+        // Keep the status-based message.
+      }
+      throw new Error(message);
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error("Password verification timed out. Check the connection and try again.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  async function submitTransferWithTimeout(mode, email) {
+    if (mode === MODE_TRAY_TO_STORAGE) {
+      return await confirmTrayToStorage(email);
+    }
+    return await confirmStorageToTray(email);
   }
 
   async function confirmTransfer() {
@@ -1332,23 +1414,25 @@ window.storageTransferModule = (function () {
       }
       if (errorEl) errorEl.textContent = "";
 
-      const valid = await verifyTransferPassword(password.trim());
+      console.log("Storage transfer: loading signed user");
+      const signedUser = await getSignedTransferUser();
+
+      console.log("Storage transfer: verifying password");
+      const valid = await verifyTransferPassword(signedUser.email, password);
       if (!valid) {
         if (errorEl) errorEl.textContent = "Incorrect password. Please try again.";
         return;
       }
       if (confirmButton) confirmButton.textContent = "Transferring...";
 
-      const { data: userResult, error: userError } = await supabase.auth.getUser();
-      if (userError || !userResult?.user) throw new Error("Could not authenticate this transfer.");
-
+      console.log("Storage transfer: submitting transfer", { mode: state.mode });
       if (state.mode === MODE_TRAY_TO_STORAGE) {
-        await confirmTrayToStorage(userResult.user.email || "");
+        await submitTransferWithTimeout(MODE_TRAY_TO_STORAGE, signedUser.email || "");
         closeConfirmModal();
         showModuleToast("Tray return recorded.", "success");
         setStatus("Transfer complete. The tray and destination bag quantities were updated.", "success");
       } else {
-        await confirmStorageToTray(userResult.user.email || "");
+        await submitTransferWithTimeout(MODE_STORAGE_TO_TRAY, signedUser.email || "");
         closeConfirmModal();
         showModuleToast("Tray replenishment recorded.", "success");
         setStatus("Transfer complete. The bag and tray quantities were updated.", "success");
