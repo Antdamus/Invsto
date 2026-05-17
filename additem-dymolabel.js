@@ -951,6 +951,22 @@ window.dymoModule = (function () {
         const preferredPrinterName = String(options.printerName || "").trim();
         const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
         const allowQueueFallback = options.queueFallback !== false;
+        const listenerOnly = options.listenerOnly === true || options.directPrint === false;
+
+        if (listenerOnly) {
+            const queued = queueDymoLabelForLocalHelper(labelXml, {
+                copies,
+                barcode: options.barcode || window.latestDymoBarcode,
+                title: options.title || "",
+                labelKind: options.labelKind || "ItemLabel",
+            });
+            onProgress?.(copies, copies, { name: "local print helper" });
+            return {
+                mode: "queued-download",
+                copies,
+                filename: queued.filename,
+            };
+        }
 
         try {
             const framework = await ensureDymoFrameworkReady();

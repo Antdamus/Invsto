@@ -23,6 +23,14 @@ If printing fails, the file is moved to:
 Documents\OGJewelers\DymoPrintQueue\failed
 ```
 
+If Windows does not have a silent `.dymo` print action registered, the helper opens the label in DYMO Connect and moves it to:
+
+```text
+Documents\OGJewelers\DymoPrintQueue\opened
+```
+
+In that case, click print inside DYMO Connect. This is not as fast as silent printing, but it keeps the label from being treated as a failed/unknown file.
+
 ## One-Time Setup
 
 1. Install DYMO Connect on the seller computer.
@@ -92,10 +100,10 @@ The helper reads `Copies_4` and sends the same DYMO label to print four times.
 
 ## Important
 
-The helper uses Windows' `Print` shell verb for `.dymo` files. If DYMO Connect does not register that print action on the computer, the helper will move the label to `failed` and write the error to:
+The helper first tries Windows' `Print` shell verb for `.dymo` files. If DYMO Connect does not register that print action on the computer, the helper opens the label in DYMO Connect and writes the reason to:
 
 ```text
 Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.log
 ```
 
-In that case, enable `-FallbackOpen` only as a temporary workaround. It opens the label instead of silently printing it.
+That means the local listener is working, but silent printing is not registered on that Windows machine.

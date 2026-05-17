@@ -1984,8 +1984,9 @@ async function bumpInventoryVersion(changedIds = null) {
         barcode: state.item?.barcode || "",
         title: state.item?.title || "",
         labelKind: "InventoryLabel",
+        listenerOnly: true,
         onProgress: (current, total, printer) => {
-          setInventoryLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
+          setInventoryLabelPrintStatus(`Downloading helper label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
         },
       });
     }
@@ -2075,7 +2076,7 @@ async function bumpInventoryVersion(changedIds = null) {
       if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
 
       updateInventoryLabelPrintEstimate();
-      setInventoryLabelPrintStatus("Ready to print. If the browser cannot reach DYMO Connect, it will download a helper label.");
+      setInventoryLabelPrintStatus("Ready to send to the local print helper. Keep tools/start-dymo-print-helper.bat open.");
       setInventoryLabelPrintBusy(false);
       modal.classList.remove("hidden");
       modal.setAttribute("aria-hidden", "false");

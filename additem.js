@@ -402,8 +402,9 @@ let uploadedImages = [];
       barcode: state.item?.barcode || "",
       title: state.item?.title || "",
       labelKind: "ItemLabel",
+      listenerOnly: true,
       onProgress: (current, total, printer) => {
-        setLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
+        setLabelPrintStatus(`Downloading helper label ${current} of ${total} for ${printer?.name || "local print helper"}...`);
       },
     });
   }
@@ -501,7 +502,7 @@ let uploadedImages = [];
     if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
     bindItemLabelPrintModalControls();
     updateLabelPrintEstimate();
-    setLabelPrintStatus("Ready to print. If the browser cannot reach DYMO Connect, it will download a helper label.");
+    setLabelPrintStatus("Ready to send to the local print helper. Keep tools/start-dymo-print-helper.bat open.");
     setLabelPrintBusy(false);
 
     continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });

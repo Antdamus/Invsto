@@ -2,6 +2,7 @@
   [string]$WatchPath = "$env:USERPROFILE\Downloads",
   [string]$Filter = "OGJewelers_*.dymo",
   [string]$ArchivePath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\printed",
+  [string]$OpenedPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\opened",
   [string]$FailedPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\failed",
   [string]$LogPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.log",
   [string]$ConfigPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.config.json",
@@ -135,6 +136,35 @@ function Move-PrintedFile {
   return $destination
 }
 
+function Test-DymoPrintVerb {
+  $paths = @(
+    "HKCU:\Software\Classes\dymo.ext\shell\print\command",
+    "HKLM:\Software\Classes\dymo.ext\shell\print\command"
+  )
+
+  foreach ($path in $paths) {
+    if (Test-Path -LiteralPath $path) {
+      $value = (Get-Item -LiteralPath $path).GetValue("")
+      if (-not [string]::IsNullOrWhiteSpace($value)) {
+        return $true
+      }
+    }
+  }
+
+  return $false
+}
+
+function Open-DymoLabel {
+  param([string]$Path, [int]$Copies = 1, [string]$Reason = "")
+
+  $copyNote = if ($Copies -gt 1) { " Print $Copies copies manually from DYMO Connect." } else { "" }
+  $reasonText = if ($Reason) { " $Reason" } else { "" }
+  Write-HelperLog "Opening label in DYMO Connect instead of silent printing.$reasonText$copyNote Path: $Path" "WARN"
+  Start-Process -FilePath $Path -WindowStyle Minimized -ErrorAction Stop | Out-Null
+  Start-Sleep -Seconds $PostPrintDelaySeconds
+  return "opened"
+}
+
 function Invoke-DymoPrint {
   param([string]$Path, [int]$Copies = 1)
 
@@ -151,7 +181,11 @@ function Invoke-DymoPrint {
 
   if ($DryRun) {
     Write-HelperLog "DRY RUN: would print $Path ($Copies copies)"
-    return
+    return "printed"
+  }
+
+  if (-not (Test-DymoPrintVerb)) {
+    return Open-DymoLabel -Path $Path -Copies $Copies -Reason "Windows has no Print action registered for .dymo files."
   }
 
   Write-HelperLog "Sending label to default DYMO print handler: $Path ($Copies copies)"
@@ -163,8 +197,7 @@ function Invoke-DymoPrint {
         throw
       }
 
-      Write-HelperLog "Print verb failed; opening label instead because -FallbackOpen was enabled. $($_.Exception.Message)" "WARN"
-      Start-Process -FilePath $Path -WindowStyle Minimized -ErrorAction Stop | Out-Null
+      return Open-DymoLabel -Path $Path -Copies $Copies -Reason "Print action failed: $($_.Exception.Message)"
     }
 
     if ($Copies -gt 1 -and $copy -lt $Copies) {
@@ -173,6 +206,7 @@ function Invoke-DymoPrint {
   }
 
   Start-Sleep -Seconds $PostPrintDelaySeconds
+  return "printed"
 }
 
 function Get-RequestedCopies {
@@ -195,9 +229,14 @@ function Handle-Label {
 
   try {
     $copies = Get-RequestedCopies -FileName ([System.IO.Path]::GetFileName($Path))
-    Invoke-DymoPrint -Path $Path -Copies $copies
-    $archive = Move-PrintedFile -Path $Path -DestinationDirectory $ArchivePath
-    Write-HelperLog "Printed and archived: $archive"
+    $result = Invoke-DymoPrint -Path $Path -Copies $copies
+    if ($result -eq "opened") {
+      $opened = Move-PrintedFile -Path $Path -DestinationDirectory $OpenedPath
+      Write-HelperLog "Opened in DYMO Connect and archived for manual print: $opened" "WARN"
+    } else {
+      $archive = Move-PrintedFile -Path $Path -DestinationDirectory $ArchivePath
+      Write-HelperLog "Printed and archived: $archive"
+    }
   } catch {
     Write-HelperLog "Print failed for $Path. $($_.Exception.Message)" "ERROR"
     try {
@@ -234,6 +273,7 @@ if (-not $NoSaveConfig) {
 
 Ensure-Directory -Path $WatchPath
 Ensure-Directory -Path $ArchivePath
+Ensure-Directory -Path $OpenedPath
 Ensure-Directory -Path $FailedPath
 Ensure-Directory -Path (Split-Path -Parent $LogPath)
 
@@ -241,6 +281,7 @@ Write-HelperLog "OG Jewelers DYMO print helper started."
 Write-HelperLog "Watching: $WatchPath"
 Write-HelperLog "Filter: $Filter plus OGJewelers_*.dymo and LiveSale_*.dymo compatibility patterns (other downloads in this folder are ignored)"
 Write-HelperLog "Archive: $ArchivePath"
+Write-HelperLog "Opened/manual print archive: $OpenedPath"
 Write-HelperLog "Failed: $FailedPath"
 Write-HelperLog "Config: $ConfigPath"
 if ($DryRun) {
