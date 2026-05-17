@@ -23,6 +23,7 @@ const state = {
   selectedLiveLotItems: [],
   liveLotMatchedLineIds: new Set(),
   liveLotOrderMatches: [],
+  workerNoInventoryGps: null,
   busy: false,
 };
 
@@ -180,6 +181,7 @@ function closeModal(id) {
   if (
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
+    || !$("worker-no-inventory-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -364,6 +366,7 @@ function updateCheckoutStoreGate() {
   $("find-location")?.toggleAttribute("disabled", !hasStore);
   $("stage-current-line")?.toggleAttribute("disabled", !hasStore);
   $("fulfill-order")?.toggleAttribute("disabled", !hasStore);
+  $("complete-no-inventory")?.toggleAttribute("disabled", !hasStore);
 }
 
 async function handleCheckoutStoreChange() {
@@ -2050,6 +2053,172 @@ function closeAdminOrderCloseoutModal() {
   closeModal("admin-order-closeout-modal");
 }
 
+function describeGeolocationError(error) {
+  if (!error) return "GPS failed";
+  if (error.code === 1) return "GPS permission denied";
+  if (error.code === 2) return "GPS unavailable";
+  if (error.code === 3) return "GPS timed out";
+  return error.message || "GPS failed";
+}
+
+function captureAuditLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve({ status: "unavailable", message: "GPS is not available in this browser." });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          status: "captured",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy_meters: position.coords.accuracy,
+          captured_at: new Date(position.timestamp || Date.now()).toISOString(),
+        });
+      },
+      (error) => {
+        resolve({
+          status: error?.code === 1 ? "denied" : error?.code === 3 ? "timeout" : "failed",
+          message: describeGeolocationError(error),
+        });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 8000,
+        maximumAge: 0,
+      }
+    );
+  });
+}
+
+function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
+  const el = $("worker-no-inventory-gps");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-good", tone === "good");
+  el.classList.toggle("is-warn", tone !== "good");
+}
+
+function closeWorkerNoInventoryModal() {
+  state.workerNoInventoryGps = null;
+  closeModal("worker-no-inventory-modal");
+  setTimeout(() => $("complete-no-inventory")?.focus(), 80);
+}
+
+function renderWorkerNoInventoryList(line) {
+  const list = $("worker-no-inventory-list");
+  if (!list) return;
+  const order = line?.order || {};
+  const storeName = getCheckoutStoreName() || "No checkout store selected";
+  list.innerHTML = `
+    <article class="bundle-review-item">
+      <div class="bundle-review-thumb"><span>eBay</span></div>
+      <div class="bundle-review-copy">
+        <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
+        <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
+        <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
+      </div>
+    </article>
+  `;
+}
+
+async function openWorkerNoInventoryModal() {
+  const line = state.selectedLine;
+  if (!line) {
+    setStatus("Select an eBay order first.", "error");
+    return;
+  }
+  if (!requireCheckoutStore()) return;
+  if (getRemainingLineQuantity(line) <= 0 || !isOpenOrderLine(line)) {
+    setStatus("This eBay line is already closed.", "error");
+    return;
+  }
+  if (String(line.line_status || "pending").toLowerCase() !== "pending" || Number(line.fulfilled_quantity || 0) > 0) {
+    setStatus("Use normal packing for partially fulfilled eBay lines. This shortcut is only for untouched pending lines.", "error");
+    return;
+  }
+
+  state.workerNoInventoryGps = null;
+  $("worker-no-inventory-note").value = "";
+  $("worker-no-inventory-error").textContent = "";
+  $("worker-no-inventory-subtitle").textContent =
+    `This closes the selected eBay line without removing stock from inventory. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}. Press Enter to confirm after reviewing.`;
+  renderWorkerNoInventoryList(line);
+  setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
+  openModal("worker-no-inventory-modal");
+  setTimeout(() => $("confirm-worker-no-inventory")?.focus(), 80);
+
+  const gps = await captureAuditLocation();
+  state.workerNoInventoryGps = gps;
+  if ($("worker-no-inventory-modal")?.classList.contains("hidden")) return;
+
+  if (gps.status === "captured") {
+    setWorkerNoInventoryGpsStatus(
+      `GPS captured for audit (${Number(gps.accuracy_meters || 0).toFixed(0)} m accuracy).`,
+      "good"
+    );
+  } else {
+    setWorkerNoInventoryGpsStatus(
+      `${gps.message || "GPS was not captured."} The completion will still be audited with this GPS status.`,
+      "warn"
+    );
+  }
+}
+
+async function confirmWorkerNoInventoryCompletion() {
+  if (state.busy) return;
+  const line = state.selectedLine;
+  const errorEl = $("worker-no-inventory-error");
+  const confirmButton = $("confirm-worker-no-inventory");
+  const note = String($("worker-no-inventory-note")?.value || "").trim();
+  const gps = state.workerNoInventoryGps || { status: "not_finished" };
+
+  if (!line) {
+    if (errorEl) errorEl.textContent = "Select an eBay order line first.";
+    return;
+  }
+  if (!requireCheckoutStore()) return;
+
+  try {
+    state.busy = true;
+    if (errorEl) errorEl.textContent = "";
+    if (confirmButton) confirmButton.disabled = true;
+
+    const { error } = await supabase.rpc("complete_ebay_order_line_without_inventory", {
+      _order_line_id: line.id,
+      _notes: note || null,
+      _signed_by_email: state.user.email,
+      _checkout_store_id: state.checkoutStoreId || null,
+      _gps_latitude: gps.latitude ?? null,
+      _gps_longitude: gps.longitude ?? null,
+      _gps_accuracy_meters: gps.accuracy_meters ?? null,
+      _gps_captured_at: gps.captured_at ?? null,
+      _gps_status: gps.status || "not_finished",
+    });
+    if (error) throw error;
+
+    state.stagedFulfillments.delete(line.id);
+    closeWorkerNoInventoryModal();
+    setStatus("Order completed without inventory removal. The audit trail was recorded.", "info");
+    await loadOrders();
+
+    const nextBuyerLine = getNextPackableLine(state.activeBuyerKey, line.id);
+    if (nextBuyerLine) {
+      selectOrderLine(nextBuyerLine.id);
+      return;
+    }
+    clearSelection();
+  } catch (error) {
+    console.error("Worker no-inventory completion failed:", error);
+    if (errorEl) errorEl.textContent = error.message || "Could not complete this order without inventory.";
+  } finally {
+    state.busy = false;
+    if (confirmButton) confirmButton.disabled = false;
+  }
+}
+
 function getAdminCloseoutActionCopy(action) {
   if (action === "cancelled") {
     return {
@@ -2348,6 +2517,7 @@ function clearSelection() {
   clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
+  closeModal("worker-no-inventory-modal");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   renderOrders();
@@ -2396,6 +2566,7 @@ function setupListeners() {
   });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
+  $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
@@ -2404,6 +2575,9 @@ function setupListeners() {
   $("confirm-bundle-review")?.addEventListener("click", () => fulfillSelectedOrder({ skipReview: true }));
   $("cancel-bundle-review")?.addEventListener("click", closeBundleReviewModal);
   $("close-bundle-review")?.addEventListener("click", closeBundleReviewModal);
+  $("confirm-worker-no-inventory")?.addEventListener("click", confirmWorkerNoInventoryCompletion);
+  $("cancel-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
+  $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
 
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -2467,6 +2641,10 @@ function setupListeners() {
     if (event.target.id === "bundle-review-modal") closeBundleReviewModal();
   });
 
+  $("worker-no-inventory-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "worker-no-inventory-modal") closeWorkerNoInventoryModal();
+  });
+
   $("admin-order-closeout-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();
   });
@@ -2486,6 +2664,17 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeAdminOrderCloseoutModal();
+      }
+      return;
+    }
+
+    if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && event.target?.tagName?.toLowerCase() !== "textarea") {
+        event.preventDefault();
+        confirmWorkerNoInventoryCompletion();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeWorkerNoInventoryModal();
       }
       return;
     }

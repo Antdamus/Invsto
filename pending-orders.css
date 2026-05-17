@@ -193,6 +193,12 @@ h1 {
   color: var(--text);
 }
 
+.caution-btn {
+  border-color: rgba(227, 189, 119, 0.45);
+  background: rgba(227, 189, 119, 0.1);
+  color: var(--gold-strong);
+}
+
 .secondary-btn svg {
   width: 17px;
   height: 17px;
@@ -1315,6 +1321,29 @@ body.modal-open {
 .modal-field textarea,
 .modal-field input {
   width: 100%;
+}
+
+.gps-status-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(227, 189, 119, 0.22);
+  border-radius: 16px;
+  background: rgba(227, 189, 119, 0.08);
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.gps-status-card.is-good {
+  border-color: rgba(125, 240, 178, 0.28);
+  background: rgba(125, 240, 178, 0.08);
+  color: var(--green);
+}
+
+.gps-status-card.is-warn {
+  border-color: rgba(255, 195, 92, 0.26);
+  background: rgba(255, 195, 92, 0.08);
+  color: #f6d89c;
 }
 
 .bundle-review-card {

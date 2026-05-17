@@ -101,7 +101,7 @@ function getLinePayout(line) {
 
 function getLineStatusLabel(line) {
   if (line.line_status === "cancelled") return "Canceled";
-  if (isAdminCloseoutLine(line)) return "Admin closeout";
+  if (isAdminCloseoutLine(line)) return "No-inventory completion";
   if (line.line_status === "fulfilled") return "Shipped";
   return line.line_status || "Closed";
 }
@@ -115,6 +115,18 @@ function getLineStatusClass(line) {
 function isAdminCloseoutLine(line) {
   return state.adminCloseoutLineIds.has(line.id)
     || (line.line_status === "fulfilled" && !line.stock_transaction_id);
+}
+
+function getEventGpsLabel(event) {
+  const status = String(event?.gps_status || event?.payload?.gps?.status || "").trim();
+  if (!status) return "";
+  if (status === "captured" && event?.gps_latitude != null && event?.gps_longitude != null) {
+    const lat = Number(event.gps_latitude).toFixed(5);
+    const lng = Number(event.gps_longitude).toFixed(5);
+    const accuracy = event.gps_accuracy_meters != null ? `, ${Number(event.gps_accuracy_meters).toFixed(0)} m` : "";
+    return `GPS ${lat}, ${lng}${accuracy}`;
+  }
+  return `GPS ${status.replace(/_/g, " ")}`;
 }
 
 async function checkAdminAuth() {
@@ -383,7 +395,7 @@ function renderHistoryList() {
     const workers = [...new Set(group.lines.map((line) => line.fulfilled_by_email).filter(Boolean))];
     const hasCancelled = group.lines.some((line) => line.line_status === "cancelled");
     const hasAdmin = group.lines.some(isAdminCloseoutLine);
-    const primaryStatus = hasCancelled ? "Canceled" : hasAdmin ? "Admin closeout" : "Shipped";
+    const primaryStatus = hasCancelled ? "Canceled" : hasAdmin ? "No-inventory completion" : "Shipped";
     const statusClass = hasCancelled ? "is-cancelled" : hasAdmin ? "is-admin" : "";
     const lineIds = group.lines.map((line) => line.id);
 
@@ -472,7 +484,7 @@ function renderEventList() {
 
   const events = getFilteredEvents().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (!events.length) {
-    list.innerHTML = `<div class="history-empty">No admin closeout or reversal events match this view.</div>`;
+    list.innerHTML = `<div class="history-empty">No no-inventory completions, cancellations, or reversal events match this view.</div>`;
     return;
   }
 
@@ -483,13 +495,17 @@ function renderEventList() {
         ? "Packed without inventory removal"
         : "Canceled by admin";
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
+    const gps = getEventGpsLabel(event);
+    const store = event.payload?.checkout_store_name || "";
     return `
       <article class="event-card">
         <span class="history-status ${event.category === "revert" ? "is-admin" : event.action === "cancelled" ? "is-cancelled" : ""}">${escapeHtml(label)}</span>
-        <h3>${escapeHtml(event.signed_by_email || "Unknown admin")}</h3>
+        <h3>${escapeHtml(event.signed_by_email || "Unknown user")}</h3>
         <div class="event-meta">
           <span>${escapeHtml(formatDateTime(event.created_at))}</span>
           <span>${Number(event.order_line_ids?.length || event.payload?.reverted_lines || 0).toLocaleString()} line(s)${escapeHtml(units)}</span>
+          ${gps ? `<span>${escapeHtml(gps)}</span>` : ""}
+          ${store ? `<span>${escapeHtml(store)}</span>` : ""}
         </div>
         <p>${escapeHtml(event.notes || "No note recorded.")}</p>
       </article>

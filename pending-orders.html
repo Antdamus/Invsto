@@ -357,6 +357,7 @@
               <div class="fulfill-actions">
                 <button id="clear-selection" type="button" class="secondary-btn">Clear</button>
                 <button id="stage-current-line" type="button" class="secondary-btn">Stage Item</button>
+                <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
                 <button id="fulfill-order" type="button" class="primary-btn">Confirm Packed Bundle</button>
               </div>
             </section>
@@ -399,6 +400,26 @@
       <div class="modal-actions">
         <button id="cancel-bundle-review" type="button" class="secondary-btn">Keep Editing</button>
         <button id="confirm-bundle-review" type="button" class="primary-btn">Confirm Packed Bundle</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="worker-no-inventory-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="worker-no-inventory-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card">
+      <button id="close-worker-no-inventory" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Physical Item Present</span>
+      <h2 id="worker-no-inventory-title">Complete without inventory removal?</h2>
+      <p id="worker-no-inventory-subtitle">Use this only when the order is being shipped now, but the item was never entered into inventory.</p>
+      <div id="worker-no-inventory-list" class="bundle-review-list"></div>
+      <label class="modal-field">
+        Optional Note
+        <textarea id="worker-no-inventory-note" rows="3" placeholder="Example: Item physically present from old stock, not entered in inventory yet."></textarea>
+      </label>
+      <div id="worker-no-inventory-gps" class="gps-status-card">Preparing GPS audit...</div>
+      <p id="worker-no-inventory-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-worker-no-inventory" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-worker-no-inventory" type="button" class="primary-btn">Confirm Completion</button>
       </div>
     </div>
   </div>
