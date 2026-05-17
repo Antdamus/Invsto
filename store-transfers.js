@@ -19,6 +19,11 @@
     receiveItem: null,
     receiveParent: null,
     receiveLocation: null,
+    itemScanTimer: null,
+    sourceScanTimer: null,
+    lastAutoItemScan: "",
+    itemSearchBusy: false,
+    sourceScanBusy: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -163,6 +168,13 @@
     state.stores = storesResult.data || [];
     state.employees = await resolveReceiverDirectory(client, receiversResult);
     state.locations = locationsResult.data || [];
+    if (receiversResult.error) {
+      setStatus(
+        "create-transfer-status",
+        "Receiver directory RPC is not available yet, so the dropdown may only show users visible to this account. Run supabase db push.",
+        "error"
+      );
+    }
     if (window.OGRoleNavigation?.render) {
       window.OGRoleNavigation.render(String(state.employee?.role || "").toLowerCase() === "admin" ? "admin" : "worker");
     }
@@ -251,6 +263,18 @@
     return data || [];
   }
 
+  function looksLikeBarcodeScan(value) {
+    const text = String(value || "").trim();
+    if (text.length < 6 || /\s/.test(text)) return false;
+    return /^og/i.test(text) || /^\d{8,}$/.test(text);
+  }
+
+  function looksLikeLocationScan(value) {
+    const text = String(value || "").trim();
+    if (text.length < 4 || /\s/.test(text)) return false;
+    return /^loc-/i.test(text) || /^[a-z0-9-]+$/i.test(text);
+  }
+
   async function selectItemById(itemId) {
     const { data, error } = await supabase
       .from("item_types")
@@ -279,18 +303,34 @@
     setTimeout(() => $("transfer-source-scan")?.focus(), 60);
   }
 
-  async function handleItemSearch() {
+  async function handleItemSearch(options = {}) {
+    const term = $("transfer-item-scan").value.trim();
+    if (!term || state.itemSearchBusy) return;
+    if (options.auto && state.lastAutoItemScan === term) return;
+    state.itemSearchBusy = true;
     try {
-      const matches = await findItems($("transfer-item-scan").value);
+      const matches = await findItems(term);
       if (!matches.length) {
-        setStatus("create-transfer-status", "No item matched that scan.", "error");
+        setStatus("create-transfer-status", options.auto ? "" : "No item matched that scan.", options.auto ? "info" : "error");
         return;
       }
       await setCurrentItem(matches[0]);
+      if (options.auto) state.lastAutoItemScan = term;
       setStatus("create-transfer-status", matches.length > 1 ? "Multiple matches found; first match selected. Refine if needed." : "Item selected.", "info");
     } catch (error) {
       setStatus("create-transfer-status", error.message || "Could not search items.", "error");
+    } finally {
+      state.itemSearchBusy = false;
     }
+  }
+
+  function scheduleItemAutoSearch() {
+    const term = $("transfer-item-scan").value.trim();
+    window.clearTimeout(state.itemScanTimer);
+    if (!looksLikeBarcodeScan(term)) return;
+    state.itemScanTimer = window.setTimeout(() => {
+      handleItemSearch({ auto: true });
+    }, 450);
   }
 
   async function fetchStockRowsForCurrentItem() {
@@ -305,6 +345,7 @@
   }
 
   async function handleSourceScan() {
+    if (state.sourceScanBusy) return;
     const sourceStoreId = $("source-store-select").value;
     if (!sourceStoreId) {
       setStatus("create-transfer-status", "Choose the source store first.", "error");
@@ -314,50 +355,74 @@
       setStatus("create-transfer-status", "Scan an item first.", "error");
       return;
     }
-    const location = findLocationByScan($("transfer-source-scan").value);
+    const rawScan = $("transfer-source-scan").value.trim();
+    if (!rawScan) return;
+    state.sourceScanBusy = true;
+    const location = findLocationByScan(rawScan);
     $("transfer-source-scan").value = "";
-    if (!location) {
-      setStatus("create-transfer-status", "No source location matched that scan.", "error");
-      return;
-    }
-    if (locationStoreId(location) !== sourceStoreId) {
-      setStatus("create-transfer-status", "That location is not in the selected source store.", "error");
-      return;
-    }
+    try {
+      if (!location) {
+        setStatus("create-transfer-status", "No source location matched that scan.", "error");
+        return;
+      }
+      if (locationStoreId(location) !== sourceStoreId) {
+        setStatus("create-transfer-status", "That location is not in the selected source store.", "error");
+        return;
+      }
 
-    if (isParentLocation(location)) {
-      state.sourceParent = location;
-      state.currentSource = null;
+      if (isParentLocation(location)) {
+        state.sourceParent = location;
+        state.currentSource = null;
+        $("selected-transfer-source").className = "selection-card";
+        $("selected-transfer-source").innerHTML = `<strong>Parent confirmed</strong><small>${escapeHtml(locationLabel(location))}. Now scan the bag/container.</small>`;
+        setStatus("create-transfer-status", "Parent confirmed. Scan the bag/container that holds this item.", "info");
+        setTimeout(() => $("transfer-source-scan")?.focus(), 60);
+        return;
+      }
+
+      if (isContainer(location) && !state.sourceParent) {
+        setStatus("create-transfer-status", "For storage, scan the parent table/vault first, then scan this bag/container.", "error");
+        setTimeout(() => $("transfer-source-scan")?.focus(), 60);
+        return;
+      }
+
+      if (isContainer(location) && String(location.parent_location_id) !== String(state.sourceParent.id)) {
+        setStatus("create-transfer-status", "That bag does not belong to the scanned parent location.", "error");
+        return;
+      }
+
+      if (!isTray(location) && !isContainer(location)) {
+        setStatus("create-transfer-status", "Scan a tray or a bag/container that directly holds stock.", "error");
+        return;
+      }
+
+      const stockRows = await fetchStockRowsForCurrentItem();
+      const stockRow = stockRows.find((row) => String(row.location_id) === String(location.id));
+      if (!stockRow) {
+        setStatus("create-transfer-status", "This item is not available in that source location.", "error");
+        return;
+      }
+
+      state.currentSource = { location, stockRow };
+      const max = Number(stockRow.quantity || 0);
+      $("transfer-quantity").max = String(max);
+      $("transfer-quantity").value = "1";
       $("selected-transfer-source").className = "selection-card";
-      $("selected-transfer-source").innerHTML = `<strong>Parent confirmed</strong><small>${escapeHtml(locationLabel(location))}. Now scan the bag/container.</small>`;
-      setTimeout(() => $("transfer-source-scan")?.focus(), 60);
-      return;
+      $("selected-transfer-source").innerHTML = `<strong>${escapeHtml(locationLabel(location))}</strong><small>${max.toLocaleString()} unit(s) available.</small>`;
+      setStatus("create-transfer-status", "Source selected. Enter the quantity to transfer.", "info");
+      setTimeout(() => $("transfer-quantity")?.focus(), 60);
+    } finally {
+      state.sourceScanBusy = false;
     }
+  }
 
-    if (isContainer(location) && state.sourceParent && String(location.parent_location_id) !== String(state.sourceParent.id)) {
-      setStatus("create-transfer-status", "That bag does not belong to the scanned parent location.", "error");
-      return;
-    }
-
-    if (!isTray(location) && !isContainer(location)) {
-      setStatus("create-transfer-status", "Scan a tray or a bag/container that directly holds stock.", "error");
-      return;
-    }
-
-    const stockRows = await fetchStockRowsForCurrentItem();
-    const stockRow = stockRows.find((row) => String(row.location_id) === String(location.id));
-    if (!stockRow) {
-      setStatus("create-transfer-status", "This item is not available in that source location.", "error");
-      return;
-    }
-
-    state.currentSource = { location, stockRow };
-    const max = Number(stockRow.quantity || 0);
-    $("transfer-quantity").max = String(max);
-    $("transfer-quantity").value = "1";
-    $("selected-transfer-source").className = "selection-card";
-    $("selected-transfer-source").innerHTML = `<strong>${escapeHtml(locationLabel(location))}</strong><small>${max.toLocaleString()} unit(s) available.</small>`;
-    setTimeout(() => $("transfer-quantity")?.focus(), 60);
+  function scheduleSourceAutoScan() {
+    const term = $("transfer-source-scan").value.trim();
+    window.clearTimeout(state.sourceScanTimer);
+    if (!looksLikeLocationScan(term)) return;
+    state.sourceScanTimer = window.setTimeout(() => {
+      handleSourceScan();
+    }, 350);
   }
 
   function renderBundle() {
@@ -407,6 +472,7 @@
     state.currentItem = null;
     state.currentSource = null;
     state.sourceParent = null;
+    state.lastAutoItemScan = "";
     $("selected-transfer-item").className = "selection-card is-empty";
     $("selected-transfer-item").textContent = "No item selected yet.";
     $("selected-transfer-source").className = "selection-card is-empty";
@@ -530,6 +596,16 @@
   function clearBundle() {
     state.bundle = [];
     state.evidence = [];
+    state.currentItem = null;
+    state.currentSource = null;
+    state.sourceParent = null;
+    state.lastAutoItemScan = "";
+    $("transfer-item-scan").value = "";
+    $("transfer-source-scan").value = "";
+    $("selected-transfer-item").className = "selection-card is-empty";
+    $("selected-transfer-item").textContent = "No item selected yet.";
+    $("selected-transfer-source").className = "selection-card is-empty";
+    $("selected-transfer-source").textContent = "No source selected yet.";
     renderBundle();
     renderEvidence();
   }
@@ -734,16 +810,23 @@
 
   function bindEvents() {
     $("find-transfer-item").addEventListener("click", handleItemSearch);
+    $("transfer-item-scan").addEventListener("input", () => {
+      state.lastAutoItemScan = "";
+      scheduleItemAutoSearch();
+    });
     $("transfer-item-scan").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
+        window.clearTimeout(state.itemScanTimer);
         handleItemSearch();
       }
     });
     $("find-transfer-source").addEventListener("click", handleSourceScan);
+    $("transfer-source-scan").addEventListener("input", scheduleSourceAutoScan);
     $("transfer-source-scan").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
+        window.clearTimeout(state.sourceScanTimer);
         handleSourceScan();
       }
     });
