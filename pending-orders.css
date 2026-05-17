@@ -1437,6 +1437,9 @@ body.modal-open {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.22);
+  color: inherit;
+  text-align: left;
+  cursor: zoom-in;
 }
 
 .no-inventory-photo-card img {
@@ -1454,6 +1457,37 @@ body.modal-open {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.evidence-photo-viewer-modal {
+  z-index: 5600;
+}
+
+.evidence-photo-viewer-card {
+  width: min(980px, 100%);
+}
+
+.evidence-photo-viewer-frame {
+  display: grid;
+  place-items: center;
+  min-height: min(62vh, 620px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.46);
+  overflow: hidden;
+}
+
+.evidence-photo-viewer-frame img {
+  width: 100%;
+  max-height: min(62vh, 620px);
+  object-fit: contain;
+}
+
+#no-inventory-photo-viewer-caption {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .bundle-review-card {

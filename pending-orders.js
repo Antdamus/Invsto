@@ -197,6 +197,7 @@ function closeModal(id) {
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
+    || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -2402,11 +2403,41 @@ function renderNoInventoryEvidencePhotos() {
   }
 
   grid.innerHTML = state.noInventoryEvidencePhotos.map((photo, index) => `
-    <article class="no-inventory-photo-card">
+    <button class="no-inventory-photo-card" type="button" data-no-inventory-photo-index="${index}" title="Open evidence photo">
       <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}" />
       <span>${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}</span>
-    </article>
+    </button>
   `).join("");
+
+  grid.querySelectorAll("[data-no-inventory-photo-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openNoInventoryEvidencePhotoViewer(Number(button.dataset.noInventoryPhotoIndex || 0));
+    });
+  });
+}
+
+function openNoInventoryEvidencePhotoViewer(index) {
+  const photo = state.noInventoryEvidencePhotos[index];
+  if (!photo?.previewUrl) return;
+
+  const image = $("no-inventory-photo-viewer-image");
+  const caption = $("no-inventory-photo-viewer-caption");
+  if (image) {
+    image.src = photo.previewUrl;
+    image.alt = photo.label || `Evidence photo ${index + 1}`;
+  }
+  if (caption) {
+    caption.textContent = `${photo.label || `Evidence photo ${index + 1}`} - ${photo.bucket}/${photo.path}`;
+  }
+  openModal("no-inventory-photo-viewer-modal");
+  setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
+}
+
+function closeNoInventoryEvidencePhotoViewer() {
+  const image = $("no-inventory-photo-viewer-image");
+  if (image) image.removeAttribute("src");
+  closeModal("no-inventory-photo-viewer-modal");
+  setTimeout(() => $("request-no-inventory-photo")?.focus(), 80);
 }
 
 async function requestNoInventoryEvidencePhoto() {
@@ -3104,6 +3135,12 @@ function setupListeners() {
     if (event.target.id === "worker-no-inventory-modal") closeWorkerNoInventoryModal();
   });
 
+  $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
+  });
+  $("close-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
+  $("dismiss-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
+
   $("admin-order-closeout-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();
   });
@@ -3116,6 +3153,14 @@ function setupListeners() {
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        closeNoInventoryEvidencePhotoViewer();
+      }
+      return;
+    }
+
     if (!$("admin-order-closeout-modal")?.classList.contains("hidden")) {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
