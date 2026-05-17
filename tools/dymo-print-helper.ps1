@@ -6,6 +6,9 @@
   [string]$FailedPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\failed",
   [string]$LogPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.log",
   [string]$ConfigPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.config.json",
+  [string]$NodePath = "node",
+  [string]$DymoWebServicePrintScriptPath = (Join-Path $PSScriptRoot "dymo-web-service-print.js"),
+  [string]$PreferredPrinterName = "",
   [int]$PollSeconds = 1,
   [int]$PostPrintDelaySeconds = 6,
   [switch]$Once,
@@ -165,6 +168,55 @@ function Open-DymoLabel {
   return "opened"
 }
 
+function Invoke-DymoWebServicePrint {
+  param([string]$Path, [int]$Copies = 1)
+
+  if ([string]::IsNullOrWhiteSpace($NodePath)) {
+    Write-HelperLog "DYMO web service print skipped because NodePath is empty." "WARN"
+    return $false
+  }
+
+  if (-not (Test-Path -LiteralPath $DymoWebServicePrintScriptPath)) {
+    Write-HelperLog "DYMO web service print script was not found: $DymoWebServicePrintScriptPath" "WARN"
+    return $false
+  }
+
+  $nodeArgs = @(
+    $DymoWebServicePrintScriptPath,
+    "--file",
+    $Path,
+    "--copies",
+    [string]$Copies
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($PreferredPrinterName)) {
+    $nodeArgs += @("--printer", $PreferredPrinterName)
+  }
+
+  Write-HelperLog "Sending label through DYMO web service: $Path ($Copies copies)"
+
+  try {
+    $output = & $NodePath @nodeArgs 2>&1
+    $exitCode = $LASTEXITCODE
+
+    foreach ($line in $output) {
+      if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+        Write-HelperLog "DYMO web service: $line"
+      }
+    }
+
+    if ($exitCode -eq 0) {
+      return $true
+    }
+
+    Write-HelperLog "DYMO web service print returned exit code $exitCode." "WARN"
+  } catch {
+    Write-HelperLog "DYMO web service print could not run. $($_.Exception.Message)" "WARN"
+  }
+
+  return $false
+}
+
 function Invoke-DymoPrint {
   param([string]$Path, [int]$Copies = 1)
 
@@ -183,6 +235,13 @@ function Invoke-DymoPrint {
     Write-HelperLog "DRY RUN: would print $Path ($Copies copies)"
     return "printed"
   }
+
+  if (Invoke-DymoWebServicePrint -Path $Path -Copies $Copies) {
+    Start-Sleep -Seconds $PostPrintDelaySeconds
+    return "printed"
+  }
+
+  Write-HelperLog "DYMO web service print did not complete. Falling back to Windows print/open behavior." "WARN"
 
   if (-not (Test-DymoPrintVerb)) {
     return Open-DymoLabel -Path $Path -Copies $Copies -Reason "Windows has no Print action registered for .dymo files."
@@ -284,6 +343,10 @@ Write-HelperLog "Archive: $ArchivePath"
 Write-HelperLog "Opened/manual print archive: $OpenedPath"
 Write-HelperLog "Failed: $FailedPath"
 Write-HelperLog "Config: $ConfigPath"
+Write-HelperLog "DYMO web service bridge: $DymoWebServicePrintScriptPath"
+if (-not [string]::IsNullOrWhiteSpace($PreferredPrinterName)) {
+  Write-HelperLog "Preferred printer: $PreferredPrinterName"
+}
 if ($DryRun) {
   Write-HelperLog "Dry run is enabled. No labels will be sent to the printer." "WARN"
 }

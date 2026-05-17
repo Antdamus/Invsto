@@ -11,7 +11,7 @@ OGJewelers_LiveSale_Friday_May_16_2026_8_30_PM_eBay_Auction_102_LIVE-20260516-00
 OGJewelers_ItemLabel_OG1750_Copies_2_20260516223015.dymo
 ```
 
-The helper watches the folder you select for `OGJewelers_*.dymo`, sends matching files to the default Windows print handler, then moves them to:
+The helper watches the folder you select for `OGJewelers_*.dymo`, sends matching files directly to DYMO Connect's local web service, then moves them to:
 
 ```text
 Documents\OGJewelers\DymoPrintQueue\printed
@@ -23,7 +23,7 @@ If printing fails, the file is moved to:
 Documents\OGJewelers\DymoPrintQueue\failed
 ```
 
-If Windows does not have a silent `.dymo` print action registered, the helper opens the label in DYMO Connect and moves it to:
+If the DYMO web service is not available and Windows does not have a silent `.dymo` print action registered, the helper opens the label in DYMO Connect and moves it to:
 
 ```text
 Documents\OGJewelers\DymoPrintQueue\opened
@@ -37,6 +37,8 @@ In that case, click print inside DYMO Connect. This is not as fast as silent pri
 2. Open one `.dymo` file manually and make sure it prints correctly.
 3. Make the DYMO printer the default printer in Windows.
 4. Know which folder the browser uses for downloads. It can be Downloads or a dedicated label folder.
+5. Keep DYMO Connect open so its local web service is running.
+6. Make sure Node.js is available on the computer, because the helper uses a tiny local Node bridge to call DYMO's web service.
 
 ## Start The Helper
 
@@ -74,6 +76,12 @@ Run this from PowerShell:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\dymo-print-helper.ps1 -DryRun -Once
 ```
 
+To confirm the DYMO local web service and printer can be reached without printing a label:
+
+```powershell
+node .\tools\dymo-web-service-print.js --probe
+```
+
 To test a specific folder without printing:
 
 ```powershell
@@ -100,10 +108,12 @@ The helper reads `Copies_4` and sends the same DYMO label to print four times.
 
 ## Important
 
-The helper first tries Windows' `Print` shell verb for `.dymo` files. If DYMO Connect does not register that print action on the computer, the helper opens the label in DYMO Connect and writes the reason to:
+The helper first tries DYMO Connect's local web service from the local computer. This avoids the browser security block that prevents the deployed GitHub Pages app from talking directly to `localhost`.
+
+If that local DYMO service fails, the helper tries Windows' `Print` shell verb for `.dymo` files. If DYMO Connect does not register that print action on the computer, the helper opens the label in DYMO Connect and writes the reason to:
 
 ```text
 Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.log
 ```
 
-That means the local listener is working, but silent printing is not registered on that Windows machine.
+That means the local listener is working, but direct printing is not available on that Windows machine.
