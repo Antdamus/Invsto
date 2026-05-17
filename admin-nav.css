@@ -138,6 +138,8 @@ body.admin-unified-nav .nav-links {
   flex-direction: column;
   gap: 10px;
   padding-top: 6px;
+  overflow-y: auto;
+  padding-bottom: 12px;
 }
 
 body.admin-unified-nav .nav-link {

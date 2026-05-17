@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - Past Live Sales</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="past-live-sales.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="past-live-body">
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Past Live Sales</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="admin.html">Admin</a>
+      <a href="dashboard.html">Dashboard</a>
+      <a href="locations.html">Locations</a>
+      <a href="add-item.html">Add Item</a>
+      <a href="add-inventory.html">Add Inventory</a>
+      <a href="inventory-activity.html">Daily Adds</a>
+      <a href="stock.html">Stock</a>
+      <a href="live-sales.html">Live Sales</a>
+      <a href="past-live-sales.html" class="active">Past Live Sales</a>
+      <a href="pending-orders.html">Pending Orders</a>
+      <a href="ebay-order-history.html">Order History</a>
+      <a href="timeclock.html">Timesheet</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="admin.html"><span class="link-text">Admin</span></a>
+          <a class="nav-link" href="dashboard.html"><span class="link-text">Dashboard</span></a>
+          <a class="nav-link" href="locations.html"><span class="link-text">Locations</span></a>
+          <a class="nav-link" href="add-item.html"><span class="link-text">Add Item</span></a>
+          <a class="nav-link" href="add-inventory.html"><span class="link-text">Add Inventory</span></a>
+          <a class="nav-link" href="inventory-activity.html"><span class="link-text">Daily Adds</span></a>
+          <a class="nav-link" href="stock.html"><span class="link-text">Stock</span></a>
+          <a class="nav-link" href="live-sales.html"><span class="link-text">Live Sales</span></a>
+          <a class="nav-link active" href="past-live-sales.html"><span class="link-text">Past Live Sales</span></a>
+          <a class="nav-link" href="pending-orders.html"><span class="link-text">Pending Orders</span></a>
+          <a class="nav-link" href="ebay-order-history.html"><span class="link-text">Order History</span></a>
+          <a class="nav-link" href="timeclock.html"><span class="link-text">Timesheet</span></a>
+          <a class="nav-link" href="#" id="logout"><span class="link-text">Logout</span></a>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="past-live-greeting">Past Live Sales</strong>
+            <div class="sub">Admin review of shows, auction bags, labels, timings, and correction trails.</div>
+          </div>
+          <div class="header-pills" aria-label="Page context">
+            <div class="pill">Scope: <b>Live Sales</b></div>
+            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill" id="past-live-date-pill">Date: <b>-</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content past-live-content">
+        <section class="past-hero">
+          <div>
+            <span class="eyebrow">Show Archive</span>
+            <h1>Past Live Sales</h1>
+            <p>Review completed, cancelled, active, and archived shows with every auction bag, label, item, show minute, and admin correction in one place.</p>
+          </div>
+          <div class="past-actions">
+            <button id="refresh-past-live" type="button" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+            <a href="live-sales.html" class="secondary-btn">
+              <i data-lucide="radio"></i>
+              Live Sales
+            </a>
+          </div>
+        </section>
+
+        <section class="past-stat-grid" aria-label="Live sale summary">
+          <article>
+            <span>Sessions</span>
+            <strong id="stat-sessions">0</strong>
+            <small>Shown by current filters</small>
+          </article>
+          <article>
+            <span>Auction Bags</span>
+            <strong id="stat-bags">0</strong>
+            <small>Across selected date range</small>
+          </article>
+          <article>
+            <span>Reserved Units</span>
+            <strong id="stat-units">0</strong>
+            <small>Reserved, packed, or corrected</small>
+          </article>
+          <article>
+            <span>Needs Attention</span>
+            <strong id="stat-attention">0</strong>
+            <small>Open or unlabelled bags</small>
+          </article>
+        </section>
+
+        <section class="past-filters" aria-label="Past live sale filters">
+          <label>
+            From
+            <input id="filter-from" type="date" />
+          </label>
+          <label>
+            To
+            <input id="filter-to" type="date" />
+          </label>
+          <label>
+            Store
+            <select id="filter-store">
+              <option value="">All stores</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="ended">Ended</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <label class="wide-filter">
+            Search
+            <input id="filter-search" type="search" placeholder="Show, auction, bag, item barcode, worker, notes..." autocomplete="off" />
+          </label>
+        </section>
+
+        <section class="past-layout">
+          <aside class="session-board">
+            <div class="board-head">
+              <div>
+                <span class="eyebrow">Sessions</span>
+                <h2>Shows</h2>
+              </div>
+              <span id="session-count-pill" class="soft-pill">0</span>
+            </div>
+            <div id="session-list" class="session-list">
+              <div class="past-empty">Loading live sale sessions...</div>
+            </div>
+          </aside>
+
+          <section class="session-detail" aria-live="polite">
+            <div id="session-detail-empty" class="detail-empty">Select a live sale session to inspect bags, labels, and audit events.</div>
+            <div id="session-detail-content" hidden>
+              <div class="detail-top">
+                <div>
+                  <span id="detail-status" class="status-badge">-</span>
+                  <h2 id="detail-title">-</h2>
+                  <p id="detail-meta">-</p>
+                </div>
+                <div class="detail-actions">
+                  <button id="edit-session" type="button" class="secondary-btn">
+                    <i data-lucide="pencil"></i>
+                    Edit Show
+                  </button>
+                  <button id="cancel-session-from-history" type="button" class="secondary-btn danger-btn">
+                    <i data-lucide="x-circle"></i>
+                    Cancel
+                  </button>
+                  <button id="archive-session" type="button" class="secondary-btn">
+                    <i data-lucide="archive"></i>
+                    Archive
+                  </button>
+                </div>
+              </div>
+
+              <div class="detail-metrics">
+                <div><span>Started</span><strong id="detail-started">-</strong></div>
+                <div><span>Ended</span><strong id="detail-ended">-</strong></div>
+                <div><span>Duration</span><strong id="detail-duration">-</strong></div>
+                <div><span>Store</span><strong id="detail-store">-</strong></div>
+              </div>
+
+              <section class="detail-section">
+                <div class="section-head">
+                  <div>
+                    <span class="eyebrow">Auction Bags</span>
+                    <h3>Bags and Contents</h3>
+                  </div>
+                </div>
+                <div id="bag-list" class="bag-list">
+                  <div class="past-empty">No bags loaded.</div>
+                </div>
+              </section>
+
+              <section class="detail-section">
+                <div class="section-head">
+                  <div>
+                    <span class="eyebrow">Audit Trail</span>
+                    <h3>Live Sale Events</h3>
+                  </div>
+                </div>
+                <div id="event-list" class="event-list">
+                  <div class="past-empty">No audit events loaded.</div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <p id="past-live-status" class="status-line" aria-live="polite"></p>
+      </main>
+    </div>
+  </div>
+
+  <div id="past-live-action-modal" class="past-modal" hidden>
+    <div class="past-modal-backdrop" data-close-past-action></div>
+    <div class="past-modal-card" role="dialog" aria-modal="true" aria-labelledby="past-action-title">
+      <button id="past-action-close" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span id="past-action-eyebrow" class="eyebrow">Admin Correction</span>
+      <h2 id="past-action-title">Signed Action</h2>
+      <p id="past-action-subtitle">Review the change and sign it with your password.</p>
+      <div id="past-action-fields" class="action-fields"></div>
+      <label>
+        Reason
+        <textarea id="past-action-reason" rows="3" placeholder="Briefly explain why this correction is being made"></textarea>
+      </label>
+      <label>
+        Admin Password
+        <input id="past-action-password" type="password" autocomplete="current-password" placeholder="Sign this action" />
+      </label>
+      <p id="past-action-error" class="status-line is-error"></p>
+      <div class="modal-actions">
+        <button id="past-action-cancel" type="button" class="secondary-btn">Cancel</button>
+        <button id="past-action-confirm" type="button" class="primary-btn">Sign and Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="past-photo-modal" class="past-photo-modal" hidden>
+    <div class="past-photo-backdrop" data-close-past-photo></div>
+    <div class="past-photo-dialog" role="dialog" aria-modal="true" aria-labelledby="past-photo-title">
+      <button id="past-photo-close" type="button" class="modal-close-btn" aria-label="Close image preview">x</button>
+      <div class="past-photo-stage">
+        <img id="past-photo-image" alt="Live sale item preview" />
+      </div>
+      <footer class="past-photo-footer">
+        <strong id="past-photo-title">Item preview</strong>
+        <div class="photo-tools">
+          <button id="past-photo-zoom-out" type="button" class="tiny-btn">Zoom Out</button>
+          <span id="past-photo-zoom-readout">100%</span>
+          <button id="past-photo-zoom-in" type="button" class="tiny-btn">Zoom In</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="admin-nav.js"></script>
+  <script src="past-live-sales.js"></script>
+</body>
+</html>

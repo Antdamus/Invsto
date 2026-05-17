@@ -10,6 +10,7 @@
     { href: "inventory-activity.html", label: "Daily Adds", mark: "DA" },
     { href: "stock.html", label: "Stock", mark: "S" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
+    { href: "past-live-sales.html", label: "Past Live Sales", mark: "PL" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
