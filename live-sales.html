@@ -97,6 +97,10 @@
               <i data-lucide="package-check"></i>
               Pending Orders
             </a>
+            <button id="cancel-session" type="button" class="secondary-btn danger-btn" disabled>
+              <i data-lucide="trash-2"></i>
+              Cancel Session
+            </button>
           </div>
         </section>
 
@@ -232,6 +236,31 @@
           <span id="live-photo-zoom-readout">100%</span>
           <button id="live-photo-zoom-in" type="button" class="tiny-btn">Zoom In</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cancel-session-modal" class="live-sign-modal" hidden>
+    <div class="live-sign-backdrop" data-close-cancel-session></div>
+    <div class="live-sign-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-session-title">
+      <button id="cancel-session-close" type="button" class="live-sign-close" aria-label="Close cancel session modal">x</button>
+      <div class="live-sign-head">
+        <span class="eyebrow">Signed Cancellation</span>
+        <h2 id="cancel-session-title">Cancel Active Live Session</h2>
+        <p id="cancel-session-summary">This will cancel the active show session and release open reserved bags.</p>
+      </div>
+      <label>
+        Brief Explanation
+        <textarea id="cancel-session-reason" rows="3" placeholder="Why is this session being cancelled?"></textarea>
+      </label>
+      <label>
+        Your Password
+        <input id="cancel-session-password" type="password" placeholder="Sign this cancellation" autocomplete="current-password" />
+      </label>
+      <p id="cancel-session-error" class="status-line is-error" aria-live="polite"></p>
+      <div class="button-row">
+        <button id="cancel-session-confirm" type="button" class="primary-btn danger-primary-btn">Cancel Session</button>
+        <button id="cancel-session-dismiss" type="button" class="secondary-btn">Keep Session</button>
       </div>
     </div>
   </div>

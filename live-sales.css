@@ -400,6 +400,12 @@ body.live-label-step #current-lot-card {
   border-color: rgba(255, 107, 107, 0.26);
 }
 
+.danger-primary-btn {
+  background: linear-gradient(135deg, #ffd4d4, #d84f4f);
+  color: #200707;
+  box-shadow: 0 18px 40px rgba(216, 79, 79, 0.2);
+}
+
 .primary-btn:disabled,
 .secondary-btn:disabled {
   opacity: 0.5;
@@ -728,6 +734,10 @@ body.live-label-step #current-lot-card {
   display: none;
 }
 
+.live-sign-modal[hidden] {
+  display: none;
+}
+
 .live-photo-modal {
   position: fixed;
   inset: 0;
@@ -737,11 +747,92 @@ body.live-label-step #current-lot-card {
   padding: 24px;
 }
 
-.live-photo-backdrop {
+.live-sign-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.live-photo-backdrop,
+.live-sign-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.76);
   backdrop-filter: blur(8px);
+}
+
+.live-sign-dialog {
+  position: relative;
+  width: min(94vw, 560px);
+  max-height: 90vh;
+  overflow: auto;
+  border: 1px solid rgba(255, 107, 107, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(140deg, rgba(28, 24, 23, 0.98), rgba(11, 12, 16, 0.98));
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+  padding: 24px;
+}
+
+.live-sign-head {
+  margin-bottom: 18px;
+}
+
+.live-sign-head h2 {
+  margin: 4px 0 6px;
+  font-family: "DM Serif Display", serif;
+  color: var(--live-text);
+  font-size: 2rem;
+  letter-spacing: 0;
+}
+
+.live-sign-head p {
+  margin: 0;
+  color: var(--live-muted);
+}
+
+.live-sign-dialog label {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--live-text);
+  font-weight: 900;
+}
+
+.live-sign-dialog input,
+.live-sign-dialog textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--live-text);
+  padding: 13px 14px;
+  font: inherit;
+  outline: none;
+}
+
+.live-sign-dialog input:focus,
+.live-sign-dialog textarea:focus {
+  border-color: rgba(255, 107, 107, 0.34);
+  box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.12);
+}
+
+.live-sign-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .live-photo-dialog {

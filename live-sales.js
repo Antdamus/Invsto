@@ -410,6 +410,7 @@ function updateScanGate() {
   $("scan-item")?.toggleAttribute("disabled", !enabled);
   $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !getManifestGroups().length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
+  $("cancel-session")?.toggleAttribute("disabled", !state.currentSession || state.busy);
 }
 
 function renderAll() {
@@ -796,6 +797,125 @@ async function endSession() {
     setStatus(error.message || "Could not end the live sale session.", "error");
   } finally {
     state.busy = false;
+  }
+}
+
+function setCancelSessionError(message = "") {
+  const errorEl = $("cancel-session-error");
+  if (errorEl) errorEl.textContent = message;
+}
+
+function setCancelSessionBusy(isBusy) {
+  $("cancel-session-confirm")?.toggleAttribute("disabled", isBusy);
+  $("cancel-session-dismiss")?.toggleAttribute("disabled", isBusy);
+  $("cancel-session-close")?.toggleAttribute("disabled", isBusy);
+}
+
+function openCancelSessionModal() {
+  if (!state.currentSession) {
+    setStatus("Select an active live sale session first.", "error");
+    return;
+  }
+
+  const modal = $("cancel-session-modal");
+  if (!modal) return;
+
+  const title = state.currentSession.title || state.currentSession.session_code || "Live Sale";
+  const store = getSessionStoreName();
+  const started = formatDate(state.currentSession.started_at);
+  const reservedUnits = state.lotItems.reduce((sum, item) => (
+    item.status === "reserved" ? sum + Number(item.quantity || 0) : sum
+  ), 0);
+
+  const summary = $("cancel-session-summary");
+  if (summary) {
+    summary.textContent = `This will cancel "${title}" at ${store}, started ${started}. Open reserved bags in this session will be released from reservation. Current visible bag has ${reservedUnits} reserved unit${reservedUnits === 1 ? "" : "s"}.`;
+  }
+
+  if ($("cancel-session-reason")) $("cancel-session-reason").value = "";
+  if ($("cancel-session-password")) $("cancel-session-password").value = "";
+  setCancelSessionError("");
+  setCancelSessionBusy(false);
+
+  modal.hidden = false;
+  document.body.classList.add("live-sign-open");
+  setTimeout(() => $("cancel-session-reason")?.focus(), 80);
+}
+
+function closeCancelSessionModal(options = {}) {
+  const modal = $("cancel-session-modal");
+  if (!modal || modal.hidden) return;
+  if (state.busy && options.force !== true) return;
+  modal.hidden = true;
+  document.body.classList.remove("live-sign-open");
+  setCancelSessionError("");
+  setCancelSessionBusy(false);
+}
+
+async function validateLiveSalePassword(password) {
+  if (!state.user?.email || !password) return false;
+  const { error } = await supabase.auth.signInWithPassword({
+    email: state.user.email,
+    password,
+  });
+  return !error;
+}
+
+async function submitCancelSession() {
+  if (!state.currentSession || state.busy) return;
+
+  const reason = $("cancel-session-reason")?.value?.trim() || "";
+  const password = $("cancel-session-password")?.value?.trim() || "";
+
+  if (reason.length < 3) {
+    setCancelSessionError("Enter a brief explanation for cancelling this live session.");
+    $("cancel-session-reason")?.focus();
+    return;
+  }
+
+  if (!password) {
+    setCancelSessionError("Enter your password to sign this cancellation.");
+    $("cancel-session-password")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setCancelSessionBusy(true);
+    setCancelSessionError("Verifying password...");
+
+    const valid = await validateLiveSalePassword(password);
+    if (!valid) {
+      throw new Error("Incorrect password. Please try again.");
+    }
+
+    setCancelSessionError("Cancelling session and writing audit trail...");
+    const { error } = await supabase.rpc("cancel_live_sale_session", {
+      _session_id: state.currentSession.id,
+      _reason: reason,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+
+    await bumpInventoryVersion();
+    state.currentSession = null;
+    state.currentLot = null;
+    state.lotItems = [];
+    state.selectedItem = null;
+    state.selectedSourceRow = null;
+    state.sourceRows = [];
+    closeCancelSessionModal({ force: true });
+    clearScan();
+    await loadSessions({ keepSelection: false });
+    renderAll();
+    setStatus("Live sale session cancelled. Reservations were released and the audit trail was recorded.", "success");
+  } catch (error) {
+    console.error("Cancel live sale session failed:", error);
+    setCancelSessionError(error?.message || "Could not cancel this live sale session.");
+  } finally {
+    state.busy = false;
+    setCancelSessionBusy(false);
+    updateScanGate();
   }
 }
 
@@ -1686,6 +1806,25 @@ function setupListeners() {
   });
   $("start-session")?.addEventListener("click", startSession);
   $("end-session")?.addEventListener("click", endSession);
+  $("cancel-session")?.addEventListener("click", openCancelSessionModal);
+  $("cancel-session-confirm")?.addEventListener("click", submitCancelSession);
+  $("cancel-session-dismiss")?.addEventListener("click", closeCancelSessionModal);
+  $("cancel-session-close")?.addEventListener("click", closeCancelSessionModal);
+  document.querySelectorAll("[data-close-cancel-session]").forEach((node) => {
+    node.addEventListener("click", closeCancelSessionModal);
+  });
+  $("cancel-session-password")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitCancelSession();
+    }
+  });
+  $("cancel-session-reason")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submitCancelSession();
+    }
+  });
   $("create-lot")?.addEventListener("click", () => createOrLoadLot());
   $("generate-live-label")?.addEventListener("click", finalizeCurrentBag);
   $("scan-item")?.addEventListener("click", findItemForScan);
