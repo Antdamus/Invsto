@@ -41,6 +41,7 @@ const NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS = 1_500;
 const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 45_000;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
+const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
 
 function $(id) {
   return document.getElementById(id);
@@ -2382,16 +2383,87 @@ function setNoInventoryPhotoStatus(message = "", type = "info") {
   el.classList.toggle("is-error", type === "error");
 }
 
-function serializeNoInventoryEvidencePhotos() {
-  return state.noInventoryEvidencePhotos.map((photo) => ({
-    bucket: photo.bucket,
-    path: photo.path,
-    capture_job_id: photo.capture_job_id || null,
-    sort_order: photo.sort_order ?? null,
-    label: photo.label || null,
-    mime_type: photo.mime_type || null,
-    created_at: photo.created_at || null,
-  }));
+function safeNoInventoryEvidenceSegment(value, fallback = "evidence") {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/\.[a-z0-9]{2,5}$/i, "")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 72);
+  return cleaned || fallback;
+}
+
+function getNoInventoryEvidenceFileExtension(photo, blob) {
+  const source = `${photo?.path || ""} ${photo?.mime_type || ""} ${blob?.type || ""}`.toLowerCase();
+  if (source.includes("png")) return "png";
+  if (source.includes("webp")) return "webp";
+  if (source.includes("heic")) return "heic";
+  if (source.includes("heif")) return "heif";
+  return "jpg";
+}
+
+function getNoInventoryEvidenceSourceLabel() {
+  const line = state.selectedLine || {};
+  const order = line.order || {};
+  return safeNoInventoryEvidenceSegment(
+    order.order_number || order.buyer_username || getBuyerLabel(line) || line.id,
+    "pending-order"
+  );
+}
+
+async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
+  if (!state.noInventoryEvidencePhotos.length) return [];
+
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderLabel = getNoInventoryEvidenceSourceLabel();
+  const selectedSuffix = selectedLineIds.length === 1
+    ? safeNoInventoryEvidenceSegment(selectedLineIds[0], "line")
+    : `${selectedLineIds.length}-lines`;
+  const savedPhotos = [];
+
+  for (let index = 0; index < state.noInventoryEvidencePhotos.length; index += 1) {
+    const photo = state.noInventoryEvidencePhotos[index];
+    const response = await fetch(photo.previewUrl);
+    if (!response.ok) {
+      throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
+    }
+
+    const blob = await response.blob();
+    const extension = getNoInventoryEvidenceFileExtension(photo, blob);
+    const originalName = safeNoInventoryEvidenceSegment(photo.path.split("/").pop(), `photo-${index + 1}`);
+    const destinationPath = [
+      "pending-orders",
+      dateFolder,
+      orderLabel,
+      `${Date.now()}-${crypto.randomUUID()}-${selectedSuffix}-${originalName}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(destinationPath, blob, {
+        contentType: blob.type || photo.mime_type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (error) {
+      throw new Error(error.message || `Could not save evidence photo ${index + 1}.`);
+    }
+
+    savedPhotos.push({
+      bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: photo.bucket,
+      source_path: photo.path,
+      capture_job_id: photo.capture_job_id || null,
+      sort_order: index,
+      label: photo.label || `Evidence photo ${index + 1}`,
+      mime_type: blob.type || photo.mime_type || null,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  return savedPhotos;
 }
 
 function renderNoInventoryEvidencePhotos() {
@@ -2663,8 +2735,15 @@ async function confirmWorkerNoInventoryCompletion() {
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
     const currentBuyerKey = state.activeBuyerKey;
+    setNoInventoryPhotoStatus(
+      state.noInventoryEvidencePhotos.length
+        ? "Saving selected evidence photos into the order evidence repository..."
+        : "",
+      "info"
+    );
+    const savedEvidencePhotos = await persistNoInventoryEvidencePhotos(selectedLineIds);
 
-    const { data, error } = await supabase.rpc("complete_ebay_order_lines_without_inventory", {
+    const { data, error } = await supabase.rpc("complete_ebay_order_lines_without_inventory_evidence", {
       _order_line_ids: selectedLineIds,
       _notes: note || null,
       _signed_by_email: state.user.email,
@@ -2674,7 +2753,7 @@ async function confirmWorkerNoInventoryCompletion() {
       _gps_accuracy_meters: gps.accuracy_meters ?? null,
       _gps_captured_at: gps.captured_at ?? null,
       _gps_status: gps.status || "not_finished",
-      _evidence_photos: serializeNoInventoryEvidencePhotos(),
+      _evidence_photos: savedEvidencePhotos,
     });
     if (error) throw error;
 
