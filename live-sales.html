@@ -97,6 +97,10 @@
               <i data-lucide="package-check"></i>
               Pending Orders
             </a>
+            <button id="open-bag-history" type="button" class="secondary-btn" disabled>
+              <i data-lucide="history"></i>
+              View Bags
+            </button>
             <button id="cancel-session" type="button" class="secondary-btn danger-btn" disabled>
               <i data-lucide="trash-2"></i>
               Cancel Session
@@ -236,6 +240,35 @@
           <span id="live-photo-zoom-readout">100%</span>
           <button id="live-photo-zoom-in" type="button" class="tiny-btn">Zoom In</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="bag-history-modal" class="live-bag-modal" hidden>
+    <div class="live-bag-backdrop" data-close-bag-history></div>
+    <div class="live-bag-dialog" role="dialog" aria-modal="true" aria-labelledby="bag-history-title">
+      <button id="bag-history-close" type="button" class="live-bag-close" aria-label="Close bag history">x</button>
+      <header class="live-bag-head">
+        <div>
+          <span class="eyebrow">Session Bags</span>
+          <h2 id="bag-history-title">Bag History</h2>
+          <p id="bag-history-summary">Review auction bags and their contents without leaving the live sale.</p>
+        </div>
+        <button id="bag-history-refresh" type="button" class="secondary-btn">
+          <i data-lucide="refresh-cw"></i>
+          Refresh
+        </button>
+      </header>
+      <div class="bag-history-toolbar">
+        <input id="bag-history-search" type="search" placeholder="Search auction, bag, barcode, item, or source" autocomplete="off" />
+      </div>
+      <div class="bag-history-layout">
+        <aside id="bag-history-list" class="bag-history-list">
+          <div class="empty-state">No bags loaded yet.</div>
+        </aside>
+        <section id="bag-history-detail" class="bag-history-detail">
+          <div class="empty-state">Select a bag to inspect its contents.</div>
+        </section>
       </div>
     </div>
   </div>

@@ -12,6 +12,11 @@ const state = {
   sourceRows: [],
   selectedSourceRow: null,
   sourceReservations: new Map(),
+  bagHistoryLots: [],
+  bagHistoryItems: [],
+  bagHistorySelectedLotId: "",
+  bagHistorySearch: "",
+  bagHistoryLoading: false,
   itemSearchTimer: null,
   scannerRefocusTimer: null,
   flowStep: "session",
@@ -393,8 +398,15 @@ function renderCurrentLot() {
   card.innerHTML = `
     <strong>Auction ${escapeHtml(state.currentLot.auction_number)}</strong>
     <span>Bag ID ${escapeHtml(state.currentLot.lot_code)} - ${escapeHtml(state.currentLot.status || "open")}</span>
-    <small>${state.currentLot.label_path ? `DYMO label: ${escapeHtml(state.currentLot.label_path)}` : "DYMO label has not been generated yet."}</small>
+    <small>
+      ${state.currentLot.label_path
+        ? `<button type="button" class="current-lot-label-btn" data-print-current-lot-label>Print DYMO label again</button>`
+        : "DYMO label has not been generated yet."}
+    </small>
   `;
+  card.querySelector("[data-print-current-lot-label]")?.addEventListener("click", () => {
+    printLiveSaleBagLabel(state.currentLot.id);
+  });
   pill.textContent = state.currentLot.status === "packed" ? "Packed" : "Ready to scan";
   pill.className = `status-pill ${state.currentLot.status === "packed" ? "" : "is-ready"}`;
 }
@@ -410,6 +422,7 @@ function updateScanGate() {
   $("scan-item")?.toggleAttribute("disabled", !enabled);
   $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !getManifestGroups().length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
+  $("open-bag-history")?.toggleAttribute("disabled", !state.currentSession || state.busy);
   $("cancel-session")?.toggleAttribute("disabled", !state.currentSession || state.busy);
 }
 
@@ -676,6 +689,313 @@ function getManifestGroups() {
 
 function getManifestGroupByKey(key) {
   return getManifestGroups().find((group) => group.key === key) || null;
+}
+
+function getBagStatusClass(status = "") {
+  const clean = String(status || "").toLowerCase();
+  if (clean === "packed") return "is-packed";
+  if (clean === "cancelled" || clean === "released") return "is-cancelled";
+  return "";
+}
+
+function getBagHistoryItemsForLot(lotId) {
+  return state.bagHistoryItems.filter((entry) => String(entry.lot_id) === String(lotId));
+}
+
+function getBagHistoryGroups(lotId) {
+  const groups = new Map();
+  getBagHistoryItemsForLot(lotId).forEach((entry) => {
+    const itemId = entry.item_id || entry.item?.id || "";
+    const sourceRowId = entry.source_stock_location_row_id || "";
+    const status = entry.status || "reserved";
+    const key = `${itemId}::${sourceRowId}::${status}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        item: entry.item || {},
+        sourceLocation: entry.source_location || {},
+        status,
+        quantity: 0,
+        showElapsedSeconds: entry.show_elapsed_seconds,
+        scannedAt: entry.scanned_at,
+      });
+    }
+    const group = groups.get(key);
+    group.quantity += Number(entry.quantity || 0);
+    group.showElapsedSeconds = Math.min(
+      Number(group.showElapsedSeconds ?? entry.show_elapsed_seconds ?? 0),
+      Number(entry.show_elapsed_seconds ?? group.showElapsedSeconds ?? 0),
+    );
+  });
+  return Array.from(groups.values());
+}
+
+function getBagHistoryTotals(lotId) {
+  const groups = getBagHistoryGroups(lotId);
+  return {
+    types: groups.length,
+    units: groups.reduce((sum, group) => sum + Number(group.quantity || 0), 0),
+  };
+}
+
+function lotMatchesBagHistorySearch(lot, term) {
+  if (!term) return true;
+  const haystack = [
+    lot.auction_number,
+    lot.lot_code,
+    lot.status,
+    lot.notes,
+    lot.label_path,
+    ...getBagHistoryItemsForLot(lot.id).flatMap((entry) => [
+      entry.item?.title,
+      entry.item?.barcode,
+      entry.source_location?.location_name,
+      entry.source_location?.location_code,
+      entry.status,
+    ]),
+  ].join(" ").toLowerCase();
+  return haystack.includes(term);
+}
+
+function renderBagHistory() {
+  const list = $("bag-history-list");
+  const detail = $("bag-history-detail");
+  const summary = $("bag-history-summary");
+  if (!list || !detail) return;
+
+  const sessionTitle = state.currentSession?.title || state.currentSession?.session_code || "selected show";
+  const term = String(state.bagHistorySearch || "").trim().toLowerCase();
+  const lots = state.bagHistoryLots.filter((lot) => lotMatchesBagHistorySearch(lot, term));
+
+  if (summary) {
+    const lotCount = state.bagHistoryLots.length;
+    summary.textContent = state.currentSession
+      ? `${sessionTitle} at ${getSessionStoreName()} has ${lotCount.toLocaleString()} bag${lotCount === 1 ? "" : "s"}. Select one to inspect its contents.`
+      : "Select a live session to review its bags.";
+  }
+
+  list.replaceChildren();
+  if (state.bagHistoryLoading) {
+    list.innerHTML = `<div class="empty-state">Loading session bags...</div>`;
+    detail.innerHTML = `<div class="empty-state">Loading bag details...</div>`;
+    return;
+  }
+
+  if (!state.bagHistoryLots.length) {
+    list.innerHTML = `<div class="empty-state">No bags have been created for this session yet.</div>`;
+    detail.innerHTML = `<div class="empty-state">Scan the first item to create the first bag.</div>`;
+    return;
+  }
+
+  if (!lots.length) {
+    list.innerHTML = `<div class="empty-state">No bags match that search.</div>`;
+    detail.innerHTML = `<div class="empty-state">Try auction number, item title, barcode, or source location.</div>`;
+    return;
+  }
+
+  if (!lots.some((lot) => String(lot.id) === String(state.bagHistorySelectedLotId))) {
+    state.bagHistorySelectedLotId = lots[0]?.id || "";
+  }
+
+  lots.forEach((lot) => {
+    const totals = getBagHistoryTotals(lot.id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `bag-history-card ${String(lot.id) === String(state.bagHistorySelectedLotId) ? "is-selected" : ""}`;
+    button.innerHTML = `
+      <div class="bag-status-row">
+        <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
+        <b class="bag-status-badge ${getBagStatusClass(lot.status)}">${escapeHtml(lot.status || "open")}</b>
+      </div>
+      <span>${escapeHtml(lot.lot_code || "Bag")} - ${totals.types.toLocaleString()} type${totals.types === 1 ? "" : "s"} / ${totals.units.toLocaleString()} unit${totals.units === 1 ? "" : "s"}</span>
+      <small>${escapeHtml(formatDate(lot.created_at))}${lot.label_path ? " - label ready" : ""}</small>
+    `;
+    button.addEventListener("click", () => {
+      state.bagHistorySelectedLotId = lot.id;
+      renderBagHistory();
+    });
+    list.appendChild(button);
+  });
+
+  renderBagHistoryDetail();
+}
+
+function renderBagHistoryDetail() {
+  const detail = $("bag-history-detail");
+  if (!detail) return;
+
+  const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(state.bagHistorySelectedLotId));
+  if (!lot) {
+    detail.innerHTML = `<div class="empty-state">Select a bag to inspect its contents.</div>`;
+    return;
+  }
+
+  const groups = getBagHistoryGroups(lot.id);
+  const totals = getBagHistoryTotals(lot.id);
+  detail.replaceChildren();
+
+  const header = document.createElement("div");
+  header.className = "bag-detail-head";
+  header.innerHTML = `
+    <div class="bag-status-row">
+      <h3>Auction ${escapeHtml(lot.auction_number || "-")}</h3>
+      <b class="bag-status-badge ${getBagStatusClass(lot.status)}">${escapeHtml(lot.status || "open")}</b>
+    </div>
+    <div class="bag-detail-meta">
+      <span>Bag ${escapeHtml(lot.lot_code || "-")}</span>
+      <span>${totals.types.toLocaleString()} item type${totals.types === 1 ? "" : "s"}</span>
+      <span>${totals.units.toLocaleString()} total unit${totals.units === 1 ? "" : "s"}</span>
+      <span>Created ${escapeHtml(formatDate(lot.created_at))}</span>
+      ${lot.closed_at ? `<span>Closed ${escapeHtml(formatDate(lot.closed_at))}</span>` : ""}
+      ${lot.label_path ? `<button type="button" class="bag-detail-label-btn" data-print-live-label="${escapeHtml(lot.id)}">Print DYMO Label</button>` : "<span>No DYMO label yet</span>"}
+    </div>
+    ${lot.notes ? `<p class="subtle-text">${escapeHtml(lot.notes)}</p>` : ""}
+  `;
+  detail.appendChild(header);
+  header.querySelector("[data-print-live-label]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = "Queueing label...";
+    try {
+      await printLiveSaleBagLabel(lot.id);
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+  });
+
+  const itemsWrap = document.createElement("div");
+  itemsWrap.className = "bag-detail-items";
+  detail.appendChild(itemsWrap);
+
+  if (!groups.length) {
+    itemsWrap.innerHTML = `<div class="empty-state">This bag has no item records yet.</div>`;
+    return;
+  }
+
+  groups.forEach((group) => {
+    const item = group.item || {};
+    const loc = group.sourceLocation || {};
+    const sourceKind = getSourceKindLabel(loc);
+    const row = document.createElement("article");
+    row.className = "bag-detail-item";
+    row.innerHTML = `
+      <div class="bag-detail-thumb"><span>No photo</span></div>
+      <div class="bag-detail-copy">
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <span>${escapeHtml(item.barcode || "-")}</span>
+        <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
+        <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))} - ${escapeHtml(group.status || "reserved")}</small>
+      </div>
+      <div class="bag-detail-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
+    `;
+    itemsWrap.appendChild(row);
+
+    resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+      if (!url || !row.isConnected) return;
+      const thumb = row.querySelector(".bag-detail-thumb");
+      if (!thumb) return;
+      thumb.innerHTML = `<button type="button" aria-label="Open ${escapeHtml(item.title || "item")} image"><img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Item preview")}" /></button>`;
+      thumb.querySelector("button")?.addEventListener("click", () => openLivePhotoModal(url, item.title || "Item preview"));
+    });
+  });
+}
+
+async function loadBagHistory() {
+  if (!state.currentSession) return;
+  state.bagHistoryLoading = true;
+  renderBagHistory();
+
+  try {
+    const [lotsResult, itemsResult] = await Promise.all([
+      supabase
+        .from("live_sale_lots")
+        .select("*")
+        .eq("session_id", state.currentSession.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("live_sale_lot_items")
+        .select(`
+          *,
+          item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
+          source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
+        `)
+        .eq("session_id", state.currentSession.id)
+        .order("scanned_at", { ascending: true }),
+    ]);
+
+    if (lotsResult.error) throw lotsResult.error;
+    if (itemsResult.error) throw itemsResult.error;
+
+    state.bagHistoryLots = lotsResult.data || [];
+    state.bagHistoryItems = itemsResult.data || [];
+    if (
+      state.currentLot?.id
+      && state.bagHistoryLots.some((lot) => String(lot.id) === String(state.currentLot.id))
+    ) {
+      state.bagHistorySelectedLotId = state.currentLot.id;
+    } else if (!state.bagHistoryLots.some((lot) => String(lot.id) === String(state.bagHistorySelectedLotId))) {
+      state.bagHistorySelectedLotId = state.bagHistoryLots[0]?.id || "";
+    }
+  } catch (error) {
+    console.error("Load live sale bag history failed:", error);
+    state.bagHistoryLots = [];
+    state.bagHistoryItems = [];
+    setStatus(error?.message || "Could not load bag history.", "error");
+  } finally {
+    state.bagHistoryLoading = false;
+    renderBagHistory();
+  }
+}
+
+async function openBagHistoryModal() {
+  if (!state.currentSession) {
+    setStatus("Start or select a live sale session first.", "error");
+    return;
+  }
+
+  const modal = $("bag-history-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.classList.add("live-bag-open");
+  if (state.bagHistoryLots.some((lot) => String(lot.session_id) !== String(state.currentSession.id))) {
+    state.bagHistoryLots = [];
+    state.bagHistoryItems = [];
+    state.bagHistorySelectedLotId = state.currentLot?.id || "";
+  }
+  state.bagHistorySearch = $("bag-history-search")?.value?.trim() || "";
+  renderBagHistory();
+  await loadBagHistory();
+  setTimeout(() => $("bag-history-search")?.focus(), 80);
+}
+
+function closeBagHistoryModal() {
+  const modal = $("bag-history-modal");
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  document.body.classList.remove("live-bag-open");
+  setTimeout(() => focusItemScanner(), 80);
+}
+
+async function printLiveSaleBagLabel(lotId) {
+  const lot = state.bagHistoryLots.find((entry) => String(entry.id) === String(lotId))
+    || (String(state.currentLot?.id || "") === String(lotId) ? state.currentLot : null);
+  if (!lot) {
+    setStatus("Could not find that auction bag.", "error");
+    return;
+  }
+
+  const xml = buildLiveAuctionDymoXml({
+    auctionNumber: lot.auction_number,
+    lotCode: lot.lot_code,
+    freeText: lot.auction_number,
+  });
+  const filename = `${getLiveSaleLabelBaseName(lot)}_Reprint_Copies_1.dymo`;
+  downloadTextFile(xml, filename);
+  setStatus(`DYMO label for auction ${lot.auction_number || lot.lot_code || "bag"} queued for automatic printing.`, "success");
 }
 
 function renderLabelReview() {
@@ -1607,10 +1927,12 @@ function buildLiveAuctionDymoXml({ auctionNumber, lotCode, freeText }) {
       <LabelObjects>
         ${qrObject("QRCodeObject0", auctionValue, "1.5044161", "0.06538457", "0.28525865", "0.32408708")}
         ${qrObject("QRCodeObject1", auctionValue, "1.5044161", "0.47906214", "0.3110023", "0.29687557")}
-        ${textObject("TextObject0", rightText, "1.4095135", "0.43833333", "4.8")}
+        ${textObject("TextObject0", rightText, "1.4095135", "0.059999704", "4.8")}
+        ${textObject("TextObject1", rightText, "1.4095135", "0.43833333", "4.8")}
         ${qrObject("QRCodeObject2", lotValue, "0.26554355", "0.47743064", "0.30536497", "0.30013865")}
         ${qrObject("QRCodeObject3", lotValue, "0.2628106", "0.09862068", "0.308098", "0.290851")}
-        ${textObject("TextObject4", leftText, "0.13781057", "0.43833315", "4")}
+        ${textObject("TextObject4", leftText, "0.13781057", "0.059999704", "4")}
+        ${textObject("TextObject5", leftText, "0.13781057", "0.43833315", "4")}
       </LabelObjects>
     </DynamicLayoutManager>
   </DYMOLabel>
@@ -1639,10 +1961,10 @@ function safeDymoFilename(value) {
     .slice(0, 80) || "label";
 }
 
-function getLiveSaleLabelBaseName() {
-  const showTitle = state.currentSession?.title || state.currentSession?.session_code || "Live_Show";
-  const auctionNumber = state.currentLot?.auction_number || "Auction";
-  const lotCode = state.currentLot?.lot_code || "Bag";
+function getLiveSaleLabelBaseName(lot = state.currentLot, session = state.currentSession) {
+  const showTitle = session?.title || session?.session_code || "Live_Show";
+  const auctionNumber = lot?.auction_number || "Auction";
+  const lotCode = lot?.lot_code || "Bag";
   return [
     "OGJewelers",
     "LiveSale",
@@ -1806,6 +2128,16 @@ function setupListeners() {
   });
   $("start-session")?.addEventListener("click", startSession);
   $("end-session")?.addEventListener("click", endSession);
+  $("open-bag-history")?.addEventListener("click", openBagHistoryModal);
+  $("bag-history-refresh")?.addEventListener("click", loadBagHistory);
+  $("bag-history-close")?.addEventListener("click", closeBagHistoryModal);
+  $("bag-history-search")?.addEventListener("input", (event) => {
+    state.bagHistorySearch = event.target.value || "";
+    renderBagHistory();
+  });
+  document.querySelectorAll("[data-close-bag-history]").forEach((node) => {
+    node.addEventListener("click", closeBagHistoryModal);
+  });
   $("cancel-session")?.addEventListener("click", openCancelSessionModal);
   $("cancel-session-confirm")?.addEventListener("click", submitCancelSession);
   $("cancel-session-dismiss")?.addEventListener("click", closeCancelSessionModal);
@@ -1908,6 +2240,12 @@ function setupListeners() {
         event.preventDefault();
         closeLivePhotoModal();
       }
+      return;
+    }
+
+    if (!$("bag-history-modal")?.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeBagHistoryModal();
       return;
     }
 
