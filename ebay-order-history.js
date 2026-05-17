@@ -4,11 +4,15 @@ const state = {
   lines: [],
   adminEvents: [],
   revertEvents: [],
+  relatedAdminEvents: [],
+  relatedRevertEvents: [],
   filteredLines: [],
   adminCloseoutLineIds: new Set(),
   selectedRevertLineIds: [],
   busy: false,
 };
+
+let evidencePhotoViewerReturnFocus = null;
 
 function $(id) {
   return document.getElementById(id);
@@ -136,13 +140,15 @@ function getEventEvidencePhotos(event) {
     : [];
 }
 
-async function signEventEvidencePhoto(photo) {
+async function signEventEvidencePhoto(photo, options = {}) {
+  const thumbnail = options.thumbnail !== false;
   try {
-    const { data, error } = await supabase.storage
-      .from(photo.bucket)
-      .createSignedUrl(photo.path, 600, {
+    const storage = supabase.storage.from(photo.bucket);
+    const { data, error } = thumbnail
+      ? await storage.createSignedUrl(photo.path, 600, {
         transform: { width: 260, height: 260, resize: "contain", quality: 60 },
-      });
+      })
+      : await storage.createSignedUrl(photo.path, 600);
     if (!error && data?.signedUrl) return data.signedUrl;
   } catch (_) {}
 
@@ -154,6 +160,30 @@ async function signEventEvidencePhoto(photo) {
   return "";
 }
 
+function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "") {
+  if (!url) return;
+  evidencePhotoViewerReturnFocus = document.activeElement;
+  const image = $("evidence-photo-viewer-image");
+  const title = $("evidence-photo-viewer-title");
+  const caption = $("evidence-photo-viewer-caption");
+  if (image) {
+    image.src = url;
+    image.alt = label;
+  }
+  if (title) title.textContent = label;
+  if (caption) caption.textContent = meta;
+  openModal("evidence-photo-viewer-modal");
+  setTimeout(() => $("close-evidence-photo-viewer")?.focus(), 80);
+}
+
+function closeEvidencePhotoViewer() {
+  const image = $("evidence-photo-viewer-image");
+  if (image) image.src = "";
+  closeModal("evidence-photo-viewer-modal");
+  evidencePhotoViewerReturnFocus?.focus?.();
+  evidencePhotoViewerReturnFocus = null;
+}
+
 async function hydrateEventEvidencePhotos(events) {
   for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
     const event = events[eventIndex];
@@ -163,18 +193,29 @@ async function hydrateEventEvidencePhotos(events) {
 
     const signed = await Promise.all(photos.map(async (photo, index) => ({
       ...photo,
-      url: await signEventEvidencePhoto(photo),
+      thumbUrl: await signEventEvidencePhoto(photo),
+      fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
       label: photo.label || `Evidence photo ${index + 1}`,
     })));
-    const visible = signed.filter((photo) => photo.url);
+    const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
     if (!visible.length) continue;
 
     container.innerHTML = visible.map((photo) => `
-      <a class="event-photo-thumb" href="${escapeHtml(photo.url)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.label)}" />
+      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}">
+        <img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />
         <span>${escapeHtml(photo.label)}</span>
-      </a>
+      </button>
     `).join("");
+
+    container.querySelectorAll("[data-evidence-photo-url]").forEach((button) => {
+      button.addEventListener("click", () => {
+        openEvidencePhotoViewer(
+          button.dataset.evidencePhotoUrl,
+          button.dataset.evidencePhotoLabel,
+          button.dataset.evidencePhotoMeta
+        );
+      });
+    });
   }
 }
 
@@ -230,6 +271,14 @@ function setupDefaultDates() {
   const today = toDateInputValue();
   if ($("history-from") && !$("history-from").value) $("history-from").value = today;
   if ($("history-to") && !$("history-to").value) $("history-to").value = today;
+  const search = $("history-search");
+  if (search) {
+    search.value = "";
+    search.setAttribute("autocomplete", "off");
+    search.setAttribute("autocorrect", "off");
+    search.setAttribute("autocapitalize", "off");
+    search.setAttribute("spellcheck", "false");
+  }
 }
 
 async function loadOrderHistory() {
@@ -321,12 +370,48 @@ async function loadOrderHistory() {
     console.warn("Failed to load eBay revert events. Push the latest migration if this is new:", revertEventsResult.error);
   }
 
+  const closedLines = (linesResult.data || []).map(normalizeLine);
+  const closedLineIds = closedLines.map((line) => line.id).filter(Boolean);
+  let relatedAdminEvents = [];
+  let relatedRevertEvents = [];
+
+  if (closedLineIds.length) {
+    const [relatedAdminResult, relatedRevertResult] = await Promise.all([
+      supabase
+        .from("ebay_order_admin_events")
+        .select("*")
+        .overlaps("order_line_ids", closedLineIds)
+        .limit(500),
+      supabase
+        .from("ebay_order_revert_events")
+        .select("*")
+        .overlaps("order_line_ids", closedLineIds)
+        .limit(500),
+    ]);
+
+    if (relatedAdminResult.error) {
+      console.warn("Failed to load related admin events for visible order lines:", relatedAdminResult.error);
+    } else {
+      relatedAdminEvents = relatedAdminResult.data || [];
+    }
+
+    if (relatedRevertResult.error) {
+      console.warn("Failed to load related revert events for visible order lines:", relatedRevertResult.error);
+    } else {
+      relatedRevertEvents = relatedRevertResult.data || [];
+    }
+  }
+
   state.adminEvents = adminEventsResult.data || [];
   state.revertEvents = revertEventsResult.data || [];
+  state.relatedAdminEvents = relatedAdminEvents;
+  state.relatedRevertEvents = relatedRevertEvents;
   state.adminCloseoutLineIds = new Set(
-    state.adminEvents.flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
+    [...state.adminEvents, ...state.relatedAdminEvents]
+      .filter((event) => event.action === "fulfilled_no_inventory")
+      .flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
   );
-  state.lines = (linesResult.data || []).map(normalizeLine);
+  state.lines = closedLines;
   renderWorkerOptions();
   applyFilters();
 }
@@ -391,6 +476,89 @@ function renderSummary() {
   $("summary-reversals").textContent = String(reverted);
 }
 
+function getEventLineIds(event) {
+  return Array.isArray(event?.order_line_ids) ? event.order_line_ids.filter(Boolean) : [];
+}
+
+function getLineByIdMap(lines = state.lines) {
+  return new Map(lines.map((line) => [line.id, line]));
+}
+
+function getBuyerKeyFromLine(line) {
+  return String(line?.order?.buyer_username || line?.order?.order_number || line?.order_id || line?.id || "unknown")
+    .trim()
+    .toLowerCase();
+}
+
+function getBuyerLabelFromLine(line) {
+  return String(line?.order?.buyer_username || "").trim() || "No buyer username";
+}
+
+function getEventBuyerLabel(event, lines = []) {
+  const snapshots = Array.isArray(event?.payload?.line_snapshots) ? event.payload.line_snapshots : [];
+  return snapshots.find((snapshot) => snapshot?.buyer_username)?.buyer_username
+    || lines.find((line) => line?.order?.buyer_username)?.order?.buyer_username
+    || "No buyer username";
+}
+
+function getEventOrderNumbers(event, lines = []) {
+  const values = new Set();
+  const snapshots = Array.isArray(event?.payload?.line_snapshots) ? event.payload.line_snapshots : [];
+  snapshots.forEach((snapshot) => {
+    if (snapshot?.order_number) values.add(snapshot.order_number);
+  });
+  lines.forEach((line) => {
+    if (line?.order?.order_number) values.add(line.order.order_number);
+  });
+  return [...values];
+}
+
+function getRelatedEventsForLineIds(lineIds = []) {
+  const wanted = new Set(lineIds);
+  return [
+    ...state.relatedAdminEvents.map((event) => ({ ...event, category: "admin" })),
+    ...state.relatedRevertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
+    ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
+    ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
+  ]
+    .filter((event) => getEventLineIds(event).some((lineId) => wanted.has(lineId)))
+    .filter((event, index, array) => array.findIndex((entry) => entry.id === event.id && entry.category === event.category) === index)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function getEventLabel(event) {
+  if (event.category === "revert") return "Reverted";
+  if (event.action === "fulfilled_no_inventory") return "No-inventory completion";
+  if (event.action === "cancelled") return "Canceled";
+  return event.action || "Event";
+}
+
+function getHistoryGroupStatus(group) {
+  if (group.events.some((event) => event.category === "revert")) return "Has reversal";
+  if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
+  if (group.events.some((event) => event.action === "fulfilled_no_inventory") || group.lines.some(isAdminCloseoutLine)) {
+    return "No-inventory completion";
+  }
+  return "Shipped";
+}
+
+function getHistoryGroupStatusClass(group) {
+  const label = getHistoryGroupStatus(group);
+  if (label === "Canceled") return "is-cancelled";
+  if (label === "No-inventory completion" || label === "Has reversal") return "is-admin";
+  return "";
+}
+
+function getHistoryGroupEvidencePhotos(group) {
+  const seen = new Set();
+  return group.events.flatMap(getEventEvidencePhotos).filter((photo) => {
+    const key = `${photo.bucket}:${photo.path}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function groupLinesByOrder(lines) {
   const groups = new Map();
   lines.forEach((line) => {
@@ -425,12 +593,83 @@ function groupLinesByOrder(lines) {
   });
 }
 
+function buildHistoryGroups(lines) {
+  const lineById = getLineByIdMap(lines);
+  const coveredLineIds = new Set();
+  const groups = [];
+  const completionEvents = getFilteredEvents()
+    .filter((event) => event.category !== "revert" && getEventLineIds(event).some((lineId) => lineById.has(lineId)));
+
+  completionEvents.forEach((event) => {
+    const eventLineIds = getEventLineIds(event).filter((lineId) => lineById.has(lineId));
+    const eventLines = eventLineIds.map((lineId) => lineById.get(lineId)).filter(Boolean);
+    if (!eventLines.length) return;
+
+    eventLineIds.forEach((lineId) => coveredLineIds.add(lineId));
+    const relatedEvents = getRelatedEventsForLineIds(eventLineIds);
+    const orderNumbers = getEventOrderNumbers(event, eventLines);
+    const latestAt = event.created_at || eventLines[0]?.fulfilled_at || null;
+    groups.push({
+      id: `event-${event.id}`,
+      kind: "event",
+      buyer: getEventBuyerLabel(event, eventLines),
+      subtitle: orderNumbers.length ? `${orderNumbers.length} order(s): ${orderNumbers.join(", ")}` : "Grouped completion",
+      lines: eventLines,
+      events: relatedEvents,
+      gross: eventLines.reduce((sum, line) => sum + getLineGross(line), 0),
+      payout: eventLines.reduce((sum, line) => sum + getLinePayout(line), 0),
+      latestAt,
+    });
+  });
+
+  const remainingGroups = new Map();
+  lines.filter((line) => !coveredLineIds.has(line.id)).forEach((line) => {
+    const key = getBuyerKeyFromLine(line);
+    if (!remainingGroups.has(key)) {
+      remainingGroups.set(key, {
+        id: `buyer-${key}`,
+        kind: "buyer",
+        buyer: getBuyerLabelFromLine(line),
+        subtitle: "Closed order lines",
+        lines: [],
+        events: [],
+        gross: 0,
+        payout: 0,
+        latestAt: null,
+      });
+    }
+    const group = remainingGroups.get(key);
+    group.lines.push(line);
+    group.gross += getLineGross(line);
+    group.payout += getLinePayout(line);
+    const fulfilledAt = line.fulfilled_at ? new Date(line.fulfilled_at) : null;
+    if (fulfilledAt && !Number.isNaN(fulfilledAt.getTime())) {
+      const current = group.latestAt ? new Date(group.latestAt) : null;
+      if (!current || fulfilledAt > current) group.latestAt = line.fulfilled_at;
+    }
+  });
+
+  remainingGroups.forEach((group) => {
+    const lineIds = group.lines.map((line) => line.id);
+    group.events = getRelatedEventsForLineIds(lineIds);
+    const orderNumbers = [...new Set(group.lines.map((line) => line.order?.order_number).filter(Boolean))];
+    group.subtitle = orderNumbers.length ? `${orderNumbers.length} order(s): ${orderNumbers.join(", ")}` : group.subtitle;
+    groups.push(group);
+  });
+
+  return groups.sort((a, b) => {
+    const aTime = a.latestAt ? new Date(a.latestAt).getTime() : 0;
+    const bTime = b.latestAt ? new Date(b.latestAt).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
 function renderHistoryList() {
   const list = $("history-list");
   if (!list) return;
 
-  const groups = groupLinesByOrder(state.filteredLines);
-  $("history-count").textContent = `${groups.length} order${groups.length === 1 ? "" : "s"}`;
+  const groups = buildHistoryGroups(state.filteredLines);
+  $("history-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
 
   if (!groups.length) {
     list.innerHTML = `<div class="history-empty">No closed orders match this view.</div>`;
@@ -438,27 +677,28 @@ function renderHistoryList() {
   }
 
   list.innerHTML = "";
-  groups.forEach((group) => {
-    const buyer = group.order.buyer_username || "No buyer username";
-    const orderNumber = group.order.order_number || "eBay order";
+  groups.forEach((group, groupIndex) => {
     const workers = [...new Set(group.lines.map((line) => line.fulfilled_by_email).filter(Boolean))];
-    const hasCancelled = group.lines.some((line) => line.line_status === "cancelled");
-    const hasAdmin = group.lines.some(isAdminCloseoutLine);
-    const primaryStatus = hasCancelled ? "Canceled" : hasAdmin ? "No-inventory completion" : "Shipped";
-    const statusClass = hasCancelled ? "is-cancelled" : hasAdmin ? "is-admin" : "";
+    const primaryStatus = getHistoryGroupStatus(group);
+    const statusClass = getHistoryGroupStatusClass(group);
     const lineIds = group.lines.map((line) => line.id);
+    const groupPhotos = getHistoryGroupEvidencePhotos(group);
+    const auditEvents = group.events.slice(0, 6);
 
     const card = document.createElement("article");
     card.className = "history-order-card";
     card.innerHTML = `
       <div class="history-order-top">
         <div>
-          <span class="eyebrow">Order ${escapeHtml(orderNumber)}</span>
-          <h3>${escapeHtml(buyer)}</h3>
+          <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
+          <h3>${escapeHtml(group.buyer)}</h3>
           <div class="history-card-meta">
             <span>${group.lines.length} line(s)</span>
             <span>Closed ${escapeHtml(formatDateTime(group.latestAt))}</span>
             <span class="history-status ${statusClass}">${escapeHtml(primaryStatus)}</span>
+          </div>
+          <div class="history-worker-row">
+            <span>${escapeHtml(group.subtitle || "No order details")}</span>
           </div>
           <div class="history-worker-row">
             <span>Completed by: ${escapeHtml(workers.join(", ") || "Unknown")}</span>
@@ -472,6 +712,15 @@ function renderHistoryList() {
           <button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>
         </div>
       </div>
+      ${groupPhotos.length ? `
+        <div class="history-evidence-strip">
+          <div>
+            <span class="eyebrow">Evidence</span>
+            <strong>${groupPhotos.length} photo${groupPhotos.length === 1 ? "" : "s"} attached</strong>
+          </div>
+          <div class="event-photo-grid compact" data-group-evidence-index="${groupIndex}"></div>
+        </div>
+      ` : ""}
       <div class="history-lines">
         ${group.lines.map((line) => `
           <div class="history-line-row">
@@ -484,18 +733,75 @@ function renderHistoryList() {
                 <span>${escapeHtml(formatDateTime(line.fulfilled_at))}</span>
               </div>
             </div>
-            <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
+            <div class="history-line-actions">
+              <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
+              <button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>
+            </div>
           </div>
         `).join("")}
       </div>
+      ${auditEvents.length ? `
+        <details class="history-audit-details">
+          <summary>Audit trail for this group</summary>
+          <div class="history-audit-timeline">
+            ${auditEvents.map((event) => `
+              <article>
+                <strong>${escapeHtml(getEventLabel(event))}</strong>
+                <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
+                <p>${escapeHtml(event.notes || "No note recorded.")}</p>
+              </article>
+            `).join("")}
+          </div>
+        </details>
+      ` : ""}
     `;
 
     card.querySelector("[data-revert-lines]")?.addEventListener("click", (event) => {
       const ids = event.currentTarget.dataset.revertLines.split(",").filter(Boolean);
       openRevertModal(ids);
     });
+    card.querySelectorAll("[data-revert-line]").forEach((button) => {
+      button.addEventListener("click", () => openRevertModal([button.dataset.revertLine].filter(Boolean)));
+    });
     list.appendChild(card);
   });
+  hydrateHistoryGroupEvidencePhotos(groups).catch((error) => {
+    console.warn("Could not load grouped evidence photos:", error);
+  });
+}
+
+async function hydrateHistoryGroupEvidencePhotos(groups) {
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const photos = getHistoryGroupEvidencePhotos(groups[groupIndex]);
+    const container = document.querySelector(`[data-group-evidence-index="${groupIndex}"]`);
+    if (!container || !photos.length) continue;
+
+    const signed = await Promise.all(photos.map(async (photo, index) => ({
+      ...photo,
+      thumbUrl: await signEventEvidencePhoto(photo),
+      fullUrl: await signEventEvidencePhoto(photo, { thumbnail: false }),
+      label: photo.label || `Evidence photo ${index + 1}`,
+    })));
+    const visible = signed.filter((photo) => photo.thumbUrl || photo.fullUrl);
+    if (!visible.length) continue;
+
+    container.innerHTML = visible.map((photo) => `
+      <button class="event-photo-thumb" type="button" data-evidence-photo-url="${escapeHtml(photo.fullUrl || photo.thumbUrl)}" data-evidence-photo-label="${escapeHtml(photo.label)}" data-evidence-photo-meta="${escapeHtml(photo.bucket + "/" + photo.path)}">
+        <img src="${escapeHtml(photo.thumbUrl || photo.fullUrl)}" alt="${escapeHtml(photo.label)}" />
+        <span>${escapeHtml(photo.label)}</span>
+      </button>
+    `).join("");
+
+    container.querySelectorAll("[data-evidence-photo-url]").forEach((button) => {
+      button.addEventListener("click", () => {
+        openEvidencePhotoViewer(
+          button.dataset.evidencePhotoUrl,
+          button.dataset.evidencePhotoLabel,
+          button.dataset.evidencePhotoMeta
+        );
+      });
+    });
+  }
 }
 
 function getFilteredEvents() {
@@ -674,6 +980,11 @@ function setupListeners() {
   $("revert-order-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "revert-order-modal") closeRevertModal();
   });
+  $("evidence-photo-viewer-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "evidence-photo-viewer-modal") closeEvidencePhotoViewer();
+  });
+  $("close-evidence-photo-viewer")?.addEventListener("click", closeEvidencePhotoViewer);
+  $("dismiss-evidence-photo-viewer")?.addEventListener("click", closeEvidencePhotoViewer);
   $("revert-password")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -681,6 +992,13 @@ function setupListeners() {
     }
   });
   document.addEventListener("keydown", (event) => {
+    if (!$("evidence-photo-viewer-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape" || event.key === "Enter") {
+        event.preventDefault();
+        closeEvidencePhotoViewer();
+      }
+      return;
+    }
     if (!$("revert-order-modal")?.classList.contains("hidden")) {
       if (event.key === "Escape") {
         event.preventDefault();

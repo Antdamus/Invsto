@@ -149,7 +149,17 @@
           </label>
           <label class="wide">
             Search
-            <input id="history-search" type="search" placeholder="Buyer, order #, title, item #, worker..." autocomplete="off" />
+            <input
+              id="history-search"
+              type="search"
+              placeholder="Buyer, order #, title, item #, worker..."
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              name="og-order-history-search"
+              inputmode="search"
+            />
           </label>
         </section>
 
@@ -231,6 +241,21 @@
       <div class="history-modal-actions">
         <button id="cancel-revert" type="button" class="secondary-btn">Cancel</button>
         <button id="confirm-revert" type="button" class="primary-btn">Sign and Revert</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="evidence-photo-viewer-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="evidence-photo-viewer-title">
+    <div class="history-modal-card evidence-viewer-card">
+      <button id="close-evidence-photo-viewer" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Evidence Photo</span>
+      <h2 id="evidence-photo-viewer-title">Evidence photo</h2>
+      <div class="evidence-viewer-frame">
+        <img id="evidence-photo-viewer-image" alt="Evidence photo preview" />
+      </div>
+      <p id="evidence-photo-viewer-caption" class="evidence-viewer-caption"></p>
+      <div class="history-modal-actions">
+        <button id="dismiss-evidence-photo-viewer" type="button" class="primary-btn">Done</button>
       </div>
     </div>
   </div>
