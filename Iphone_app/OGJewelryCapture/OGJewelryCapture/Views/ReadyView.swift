@@ -1,9 +1,12 @@
 import AVFoundation
+import PhotosUI
 import SwiftUI
 
 struct ReadyView: View {
     @StateObject private var viewModel: ReadyViewModel
     @State private var isShowingCancelConfirmation = false
+    @State private var isShowingPhotoLibraryPicker = false
+    @State private var selectedPhotoLibraryItems = [PhotosPickerItem]()
     @State private var previewedPhotoID: LocalSessionPhoto.ID?
     @State private var selectedThumbnailPhotoID: LocalSessionPhoto.ID?
 
@@ -265,6 +268,31 @@ struct ReadyView: View {
         }
         .fullScreenCover(isPresented: photoPreviewPresentationBinding) {
             keptPhotoPreviewCover
+        }
+        .photosPicker(
+            isPresented: $isShowingPhotoLibraryPicker,
+            selection: $selectedPhotoLibraryItems,
+            maxSelectionCount: max(viewModel.remainingPhotoImportSlots, 1),
+            matching: .images,
+            preferredItemEncoding: .current
+        )
+        .onChange(of: selectedPhotoLibraryItems) { _, newItems in
+            guard !newItems.isEmpty else { return }
+
+            Task {
+                let selectedCount = newItems.count
+                var imageDataItems = [Data?]()
+                for item in newItems {
+                    imageDataItems.append(try? await item.loadTransferable(type: Data.self))
+                }
+
+                await viewModel.importPhotoLibraryImageData(imageDataItems, selectedCount: selectedCount)
+                selectedPhotoLibraryItems = []
+            }
+        }
+        .onChange(of: isShowingPhotoLibraryPicker) { _, isPresented in
+            guard !isPresented, selectedPhotoLibraryItems.isEmpty else { return }
+            viewModel.resumeCaptureAfterEmptyPhotoLibraryImportIfNeeded()
         }
     }
 
@@ -556,6 +584,20 @@ struct ReadyView: View {
                     .foregroundStyle(OGVisualStyle.goldSoft)
             case .idle, .listening, .completed, .failed:
                 EmptyView()
+            }
+
+            if viewModel.canImportPhotos {
+                Button("Import From Photos") {
+                    viewModel.prepareForPhotoLibraryImport()
+                    isShowingPhotoLibraryPicker = true
+                }
+                .buttonStyle(OGActionButtonStyle(role: .secondary))
+            }
+
+            if let photoLibraryImportMessage = viewModel.photoLibraryImportMessage {
+                Text(photoLibraryImportMessage)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
             }
 
             if let actionHelpText {
@@ -872,6 +914,10 @@ struct ReadyView: View {
 
         if viewModel.isUploadingFinalSet {
             return "Finish Job is already uploading."
+        }
+
+        if viewModel.isImportingPhotos {
+            return "Photo import is still processing."
         }
 
         return "Finish Job is temporarily unavailable."

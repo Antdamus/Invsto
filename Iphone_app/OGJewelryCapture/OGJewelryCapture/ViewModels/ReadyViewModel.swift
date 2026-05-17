@@ -132,6 +132,8 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var torchState: CameraTorchState = .unknown
     @Published private(set) var isSparkleTorchEnabled = false
     @Published private(set) var sparkleTorchStrength: SparkleTorchStrength
+    @Published private(set) var photoLibraryImportMessage: String?
+    @Published private(set) var isImportingPhotos = false
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -248,7 +250,7 @@ final class ReadyViewModel: ObservableObject {
 
     var canFinishJob: Bool {
         guard let activeSession else { return false }
-        return activeSession.keptPhotoCount > 0 && !activeSession.isUploadingFinalSet
+        return activeSession.keptPhotoCount > 0 && !activeSession.isUploadingFinalSet && !isImportingPhotos
     }
 
     func start() async {
@@ -547,6 +549,105 @@ final class ReadyViewModel: ObservableObject {
         transitionToCapture(for: job)
     }
 
+    func prepareForPhotoLibraryImport() {
+        guard canImportPhotos else { return }
+
+        pendingAutoCaptureTask?.cancel()
+        photoLibraryImportMessage = nil
+
+        Task { [weak self] in
+            await self?.turnTorchOffForInactiveCapture()
+        }
+    }
+
+    func resumeCaptureAfterEmptyPhotoLibraryImportIfNeeded() {
+        guard case let .captureRequested(job) = captureState else { return }
+        guard !isImportingPhotos else { return }
+
+        transitionToCapture(for: job)
+    }
+
+    func importPhotoLibraryImageData(_ imageDataItems: [Data?], selectedCount: Int) async {
+        guard !imageDataItems.isEmpty else { return }
+        guard let job = pendingJob else { return }
+        guard canImportPhotos else { return }
+
+        let currentSession = activeSession ?? LocalCaptureSession(
+            jobID: job.id,
+            finalUploadTargetJobID: nil,
+            resolutionMode: captureResolutionMode,
+            keptPhotos: [],
+            isUploadingFinalSet: false
+        )
+        guard currentSession.jobID == job.id else { return }
+
+        let remainingSlots = LocalCaptureSession.softMaxPhotoCount - currentSession.keptPhotoCount
+        guard remainingSlots > 0 else {
+            photoLibraryImportMessage = "Photo limit reached. Delete a kept photo before importing another one."
+            return
+        }
+
+        pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
+        isImportingPhotos = true
+        photoLibraryImportMessage = "Importing selected photo\(selectedCount == 1 ? "" : "s")..."
+
+        let limitedItems = Array(imageDataItems.prefix(remainingSlots))
+        var importedPhotos = [LocalSessionPhoto]()
+        var failedImportCount = 0
+
+        for imageData in limitedItems {
+            do {
+                guard let imageData else {
+                    failedImportCount += 1
+                    continue
+                }
+
+                let importedPhoto = try LocalCapturePhotoStore.ImportedPhotoData(imageData: imageData)
+                let storedPhoto = try photoStore.persistImportedPhoto(
+                    importedPhoto,
+                    jobID: currentSession.jobID,
+                    sortOrder: currentSession.keptPhotos.count + importedPhotos.count,
+                    isPrimary: currentSession.keptPhotos.isEmpty && importedPhotos.isEmpty
+                )
+                importedPhotos.append(storedPhoto)
+            } catch {
+                failedImportCount += 1
+            }
+        }
+
+        let updatedSession = sessionWithReindexedPhotos(
+            jobID: currentSession.jobID,
+            finalUploadTargetJobID: currentSession.finalUploadTargetJobID,
+            resolutionMode: currentSession.resolutionMode,
+            keptPhotos: currentSession.keptPhotos + importedPhotos,
+            isUploadingFinalSet: false
+        )
+
+        activeSession = updatedSession
+        latestLocalResult = nil
+        latestUploadResult = nil
+        isImportingPhotos = false
+
+        var messages = [String]()
+        if !importedPhotos.isEmpty {
+            messages.append("Imported \(importedPhotos.count) photo\(importedPhotos.count == 1 ? "" : "s") from Photos.")
+        }
+        if selectedCount > remainingSlots {
+            messages.append("Only \(remainingSlots) slot\(remainingSlots == 1 ? "" : "s") remained, so extra selections were skipped.")
+        }
+        if failedImportCount > 0 {
+            messages.append("\(failedImportCount) selected photo\(failedImportCount == 1 ? "" : "s") could not be imported.")
+        }
+        photoLibraryImportMessage = messages.isEmpty ? nil : messages.joined(separator: " ")
+
+        if !updatedSession.keptPhotos.isEmpty {
+            captureState = .sessionReady(job, updatedSession)
+        } else if case .captureRequested = captureState {
+            transitionToCapture(for: job)
+        }
+    }
+
     func deleteKeptPhoto(_ photo: LocalSessionPhoto) {
         guard let job = pendingJob else { return }
         guard let session = activeSession else { return }
@@ -819,6 +920,7 @@ final class ReadyViewModel: ObservableObject {
         latestUploadResult = nil
         stopSparkleTorch(resetToggle: true)
         isTorchEnabled = false
+        photoLibraryImportMessage = nil
 
         switch captureMode {
         case .auto:
@@ -1398,6 +1500,22 @@ final class ReadyViewModel: ObservableObject {
 
     var canTriggerHardwareShutterCapture: Bool {
         captureReadyJob != nil
+    }
+
+    var canImportPhotos: Bool {
+        guard hasActiveJob, !isImportingPhotos else { return false }
+        guard (activeSession?.keptPhotoCount ?? 0) < LocalCaptureSession.softMaxPhotoCount else { return false }
+
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture, .sessionReady:
+            return true
+        case .idle, .listening, .capturing, .reviewingCapture, .uploadingFinalSet, .completed, .failed:
+            return false
+        }
+    }
+
+    var remainingPhotoImportSlots: Int {
+        max(LocalCaptureSession.softMaxPhotoCount - (activeSession?.keptPhotoCount ?? 0), 0)
     }
 
     var isTorchControlVisible: Bool {
