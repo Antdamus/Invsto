@@ -772,7 +772,25 @@ window.dymoModule = (function () {
 
     function normalizeDymoPrinters(printers) {
         if (!printers) return [];
+        if (typeof printers.then === "function") return [];
         if (Array.isArray(printers)) return printers.filter(Boolean);
+
+        if (typeof printers === "string") {
+            try {
+                const doc = new DOMParser().parseFromString(printers, "text/xml");
+                const nodes = Array.from(doc.querySelectorAll("LabelWriterPrinter, TapePrinter, Printer"));
+                return nodes
+                    .map((node) => ({
+                        name: node.querySelector("Name")?.textContent?.trim() || "",
+                        modelName: node.querySelector("ModelName")?.textContent?.trim() || "",
+                        printerType: node.nodeName || "",
+                        isConnected: node.querySelector("IsConnected")?.textContent?.trim() || "",
+                    }))
+                    .filter((printer) => printer.name);
+            } catch (_) {
+                return [];
+            }
+        }
 
         if (typeof printers.length === "number") {
             const list = [];
@@ -786,6 +804,63 @@ window.dymoModule = (function () {
         return Object.keys(printers)
             .map((key) => printers[key])
             .filter((printer) => printer && typeof printer === "object" && printer.name);
+    }
+
+    async function resolveDymoPrinters(framework) {
+        const sources = [];
+
+        if (typeof framework.getPrintersAsync === "function") {
+            sources.push(() => framework.getPrintersAsync());
+        }
+        if (typeof framework.getPrinters === "function") {
+            sources.push(() => framework.getPrinters());
+        }
+
+        for (const source of sources) {
+            try {
+                const result = source();
+                const printers = normalizeDymoPrinters(
+                    result && typeof result.then === "function" ? await result : result
+                );
+                if (printers.length) return printers;
+            } catch (error) {
+                console.warn("DYMO printer lookup attempt failed:", error);
+            }
+        }
+
+        return [];
+    }
+
+    async function waitForDymoPrinters(framework) {
+        const delays = [0, 250, 750, 1500, 2500];
+        let printers = [];
+
+        for (const delay of delays) {
+            if (delay) {
+                await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+            printers = await resolveDymoPrinters(framework);
+            if (printers.length) return printers;
+        }
+
+        return printers;
+    }
+
+    function getDymoEnvironmentSummary(framework) {
+        if (typeof framework.checkEnvironment !== "function") return "";
+
+        try {
+            const env = framework.checkEnvironment();
+            if (!env || typeof env !== "object") return "";
+            return [
+                env.isBrowserSupported === false ? "browser unsupported" : "",
+                env.isFrameworkInstalled === false ? "DYMO framework not installed" : "",
+                env.isWebServicePresent === false ? "DYMO web service not reachable" : "",
+            ].filter(Boolean).join(", ");
+        } catch (error) {
+            console.warn("DYMO environment check failed:", error);
+            return "";
+        }
     }
 
     async function ensureDymoFrameworkReady() {
@@ -842,13 +917,15 @@ window.dymoModule = (function () {
             throw new Error("DYMO Connect print functions are not available.");
         }
 
-        const printers = normalizeDymoPrinters(framework.getPrinters());
+        const printers = await waitForDymoPrinters(framework);
         const printer = printers.find((entry) => preferredPrinterName && entry.name === preferredPrinterName)
             || printers.find((entry) => /labelwriter/i.test(`${entry.printerType || ""} ${entry.modelName || ""} ${entry.name || ""}`))
             || printers[0];
 
         if (!printer?.name) {
-            throw new Error("No DYMO printer was found. Open DYMO Connect and confirm the printer is available.");
+            const environmentSummary = getDymoEnvironmentSummary(framework);
+            const suffix = environmentSummary ? ` DYMO status: ${environmentSummary}.` : "";
+            throw new Error(`No DYMO printer was found by the browser.${suffix} Open DYMO Connect, confirm DYMO Web Service is enabled, then refresh this page.`);
         }
 
         const label = framework.openLabelXml(labelXml);
