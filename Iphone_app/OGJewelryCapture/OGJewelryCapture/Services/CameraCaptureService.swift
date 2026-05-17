@@ -652,7 +652,7 @@ final class CameraCaptureService: NSObject {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
 
-            let clampedLevel = Self.clampedTorchLevel(requestedLevel)
+            let clampedLevel = Self.clampedTorchLevel(requestedLevel, maxAvailableLevel: AVCaptureDevice.maxAvailableTorchLevel)
             try device.setTorchModeOn(level: clampedLevel)
 
             return CameraTorchState(
@@ -702,8 +702,8 @@ final class CameraCaptureService: NSObject {
         return "Torch is not available on this camera."
     }
 
-    private static func clampedTorchLevel(_ level: Float) -> Float {
-        min(max(level, 0.1), 1.0)
+    private static func clampedTorchLevel(_ level: Float, maxAvailableLevel: Float) -> Float {
+        min(max(level, 0.1), min(1.0, maxAvailableLevel))
     }
 
     private func applyCaptureResolutionModeToPhotoOutput() {

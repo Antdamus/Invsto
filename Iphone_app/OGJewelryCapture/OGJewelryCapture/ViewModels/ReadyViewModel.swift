@@ -81,6 +81,36 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
+    enum SparkleTorchStrength: String, CaseIterable, Identifiable {
+        case low
+        case medium
+        case high
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .low:
+                "Low"
+            case .medium:
+                "Medium"
+            case .high:
+                "High"
+            }
+        }
+
+        var offsets: [Double] {
+            switch self {
+            case .low:
+                [0.0, 0.08, -0.04, 0.05, -0.06, 0.02, 0.0]
+            case .medium:
+                [0.0, 0.13, -0.06, 0.08, -0.10, 0.03, 0.0]
+            case .high:
+                [0.0, 0.18, -0.09, 0.12, -0.14, 0.05, 0.0]
+            }
+        }
+    }
+
     @Published private(set) var listenerState: CaptureListenerState = .idle
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var cameraAvailability: CameraAvailability = .unknown
@@ -100,6 +130,8 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var isTorchEnabled = false
     @Published private(set) var torchIntensity: Double
     @Published private(set) var torchState: CameraTorchState = .unknown
+    @Published private(set) var isSparkleTorchEnabled = false
+    @Published private(set) var sparkleTorchStrength: SparkleTorchStrength
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -114,6 +146,8 @@ final class ReadyViewModel: ObservableObject {
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
     private var pendingTorchApplyTask: Task<Void, Never>?
+    private var sparkleTorchTask: Task<Void, Never>?
+    private var lastAppliedSparkleTorchLevel: Float?
     private var autoListenTask: Task<Void, Never>?
     private var lastHardwareShutterCaptureAt: Date?
 
@@ -127,8 +161,10 @@ final class ReadyViewModel: ObservableObject {
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
     private static let autoListenEnabledKey = "ready.autoListenEnabled"
     private static let torchIntensityKey = "ready.torchIntensity"
+    private static let sparkleTorchStrengthKey = "ready.sparkleTorchStrength"
     private static let autoListenInterval: Duration = .seconds(5)
     private static let torchHardwareUpdateDelay: Duration = .milliseconds(80)
+    private static let sparkleTorchUpdateInterval: Duration = .milliseconds(600)
     private static let hardwareShutterDebounceInterval: TimeInterval = 0.75
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
     private static let defaultTorchIntensity: Double = 0.4
@@ -167,6 +203,10 @@ final class ReadyViewModel: ObservableObject {
 
         let storedTorchIntensity = userDefaults.object(forKey: Self.torchIntensityKey) as? Double
         self.torchIntensity = Self.clampedTorchIntensity(storedTorchIntensity ?? Self.defaultTorchIntensity)
+
+        self.sparkleTorchStrength = SparkleTorchStrength(
+            rawValue: userDefaults.string(forKey: Self.sparkleTorchStrengthKey) ?? ""
+        ) ?? .medium
     }
 
     deinit {
@@ -174,6 +214,7 @@ final class ReadyViewModel: ObservableObject {
         let cameraService = cameraService
         pendingAutoCaptureTask?.cancel()
         pendingTorchApplyTask?.cancel()
+        sparkleTorchTask?.cancel()
         autoListenTask?.cancel()
 
         Task {
@@ -242,6 +283,7 @@ final class ReadyViewModel: ObservableObject {
     func stop() async {
         pendingAutoCaptureTask?.cancel()
         pendingTorchApplyTask?.cancel()
+        stopSparkleTorch(resetToggle: true)
         stopAutoListenPolling()
         await turnTorchOffForInactiveCapture()
         await listener.stopListening()
@@ -297,6 +339,9 @@ final class ReadyViewModel: ObservableObject {
         guard isTorchEnabled != isEnabled else { return }
 
         isTorchEnabled = isEnabled
+        if !isEnabled {
+            stopSparkleTorch(resetToggle: true)
+        }
 
         Task { [weak self] in
             guard let self else { return }
@@ -312,8 +357,32 @@ final class ReadyViewModel: ObservableObject {
         userDefaults.set(clampedIntensity, forKey: Self.torchIntensityKey)
 
         guard isTorchEnabled else { return }
+        guard !isSparkleTorchEnabled else {
+            pendingTorchApplyTask?.cancel()
+            pendingTorchApplyTask = nil
+            return
+        }
 
         scheduleTorchIntensityApply()
+    }
+
+    func updateSparkleTorchEnabled(_ isEnabled: Bool) {
+        guard isSparkleTorchEnabled != isEnabled else { return }
+
+        if isEnabled {
+            guard canAdjustSparkleTorch else { return }
+            isSparkleTorchEnabled = true
+            startSparkleTorchIfNeeded()
+        } else {
+            stopSparkleTorch(resetToggle: true)
+        }
+    }
+
+    func updateSparkleTorchStrength(_ strength: SparkleTorchStrength) {
+        guard sparkleTorchStrength != strength else { return }
+
+        sparkleTorchStrength = strength
+        userDefaults.set(strength.rawValue, forKey: Self.sparkleTorchStrengthKey)
     }
 
     func triggerManualCapture() {
@@ -638,7 +707,7 @@ final class ReadyViewModel: ObservableObject {
     private func performCapture(for job: CaptureJob) async {
         pendingAutoCaptureTask = nil
         finishJobMessage = nil
-        await flushPendingTorchIntensityBeforeCapture()
+        await freezeSparkleTorchForCapture()
         captureState = .capturing(job)
 
         switch cameraAvailability {
@@ -673,7 +742,6 @@ final class ReadyViewModel: ObservableObject {
         guard let job = captureReadyJob else { return }
 
         pendingAutoCaptureTask?.cancel()
-        captureState = .capturing(job)
         pendingAutoCaptureTask = Task { [weak self] in
             await self?.performCapture(for: job)
         }
@@ -749,6 +817,7 @@ final class ReadyViewModel: ObservableObject {
     private func transitionToCapture(for job: CaptureJob) {
         latestLocalResult = nil
         latestUploadResult = nil
+        stopSparkleTorch(resetToggle: true)
         isTorchEnabled = false
 
         switch captureMode {
@@ -1093,10 +1162,12 @@ final class ReadyViewModel: ObservableObject {
 
         if !state.isAvailable || !state.isEnabled {
             isTorchEnabled = false
+            stopSparkleTorch(resetToggle: true)
         }
     }
 
     private func prepareTorchForLivePreview() async {
+        stopSparkleTorch(resetToggle: true)
         isTorchEnabled = false
         let state = await cameraService.setTorch(enabled: false, level: Float(torchIntensity))
         torchState = state
@@ -1108,12 +1179,26 @@ final class ReadyViewModel: ObservableObject {
             return
         }
 
+        if !enabled {
+            stopSparkleTorch(resetToggle: true)
+        }
+
         let state = await cameraService.setTorch(enabled: enabled, level: Float(torchIntensity))
         torchState = state
         isTorchEnabled = enabled && state.isAvailable && state.isEnabled
+
+        if !isTorchEnabled {
+            stopSparkleTorch(resetToggle: true)
+        }
     }
 
     private func scheduleTorchIntensityApply() {
+        guard !isSparkleTorchEnabled else {
+            pendingTorchApplyTask?.cancel()
+            pendingTorchApplyTask = nil
+            return
+        }
+
         pendingTorchApplyTask?.cancel()
         pendingTorchApplyTask = Task { [weak self] in
             do {
@@ -1127,11 +1212,20 @@ final class ReadyViewModel: ObservableObject {
         }
     }
 
-    private func flushPendingTorchIntensityBeforeCapture() async {
+    private func freezeSparkleTorchForCapture() async {
         pendingTorchApplyTask?.cancel()
         pendingTorchApplyTask = nil
 
         guard isTorchEnabled, torchState.isAvailable else { return }
+
+        if isSparkleTorchEnabled {
+            let frozenLevel = lastAppliedSparkleTorchLevel ?? max(torchState.level, Float(torchIntensity))
+            stopSparkleTorch(resetToggle: true)
+            let state = await cameraService.setTorch(enabled: true, level: frozenLevel)
+            torchState = state
+            isTorchEnabled = state.isAvailable && state.isEnabled
+            return
+        }
 
         let state = await cameraService.setTorch(enabled: true, level: Float(torchIntensity))
         torchState = state
@@ -1141,9 +1235,71 @@ final class ReadyViewModel: ObservableObject {
     private func turnTorchOffForInactiveCapture() async {
         pendingTorchApplyTask?.cancel()
         pendingTorchApplyTask = nil
+        stopSparkleTorch(resetToggle: true)
         isTorchEnabled = false
         let state = await cameraService.setTorch(enabled: false, level: Float(torchIntensity))
         torchState = state
+    }
+
+    private func startSparkleTorchIfNeeded() {
+        guard isSparkleTorchEnabled, isTorchEnabled, torchState.isAvailable else {
+            stopSparkleTorch(resetToggle: true)
+            return
+        }
+        guard sparkleTorchTask == nil else { return }
+
+        pendingTorchApplyTask?.cancel()
+        pendingTorchApplyTask = nil
+        lastAppliedSparkleTorchLevel = torchState.level > 0 ? torchState.level : Float(torchIntensity)
+
+        sparkleTorchTask = Task { [weak self] in
+            await self?.runSparkleTorchLoop()
+        }
+    }
+
+    private func runSparkleTorchLoop() async {
+        var offsetIndex = 0
+
+        while !Task.isCancelled {
+            guard isSparkleTorchEnabled, isTorchEnabled, torchState.isAvailable, isTorchControlVisible else {
+                stopSparkleTorch(resetToggle: true)
+                return
+            }
+
+            pendingTorchApplyTask?.cancel()
+            pendingTorchApplyTask = nil
+
+            let offsets = sparkleTorchStrength.offsets
+            let offset = offsets[offsetIndex % offsets.count]
+            let requestedLevel = Float(Self.clampedTorchIntensity(torchIntensity + offset))
+            let state = await cameraService.setTorch(enabled: true, level: requestedLevel)
+            torchState = state
+            isTorchEnabled = state.isAvailable && state.isEnabled
+
+            guard isTorchEnabled else {
+                stopSparkleTorch(resetToggle: true)
+                return
+            }
+
+            lastAppliedSparkleTorchLevel = state.level
+            offsetIndex += 1
+
+            do {
+                try await Task.sleep(for: Self.sparkleTorchUpdateInterval)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func stopSparkleTorch(resetToggle: Bool) {
+        sparkleTorchTask?.cancel()
+        sparkleTorchTask = nil
+        lastAppliedSparkleTorchLevel = nil
+
+        if resetToggle {
+            isSparkleTorchEnabled = false
+        }
     }
 
     private func updateAutoListenPolling() {
@@ -1268,6 +1424,14 @@ final class ReadyViewModel: ObservableObject {
         guard isTorchControlVisible else { return nil }
         guard !torchState.isAvailable else { return torchState.message }
         return torchState.message
+    }
+
+    var isSparkleTorchControlVisible: Bool {
+        isTorchControlVisible && torchState.isAvailable && isTorchEnabled
+    }
+
+    var canAdjustSparkleTorch: Bool {
+        canAdjustTorch && isTorchEnabled && torchState.isAvailable
     }
 
     private var canAcceptIncomingJobs: Bool {

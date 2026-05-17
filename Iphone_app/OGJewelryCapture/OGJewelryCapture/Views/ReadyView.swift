@@ -468,6 +468,36 @@ struct ReadyView: View {
                     .frame(width: 44, alignment: .trailing)
             }
 
+            if viewModel.isSparkleTorchControlVisible {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Toggle("Sparkle Light", isOn: sparkleTorchEnabledBinding)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(OGVisualStyle.textPrimary)
+                            .disabled(!viewModel.canAdjustSparkleTorch)
+
+                        Spacer(minLength: 10)
+
+                        Text(viewModel.isSparkleTorchEnabled ? "On" : "Off")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(viewModel.isSparkleTorchEnabled ? OGVisualStyle.goldSoft : OGVisualStyle.textSecondary)
+                    }
+
+                    Text("Gently varies torch brightness for reflective jewelry.")
+                        .font(.footnote)
+                        .foregroundStyle(OGVisualStyle.textSecondary)
+
+                    if viewModel.isSparkleTorchEnabled {
+                        Picker("Sparkle Strength", selection: sparkleTorchStrengthBinding) {
+                            ForEach(ReadyViewModel.SparkleTorchStrength.allCases) { strength in
+                                Text(strength.label).tag(strength)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+            }
+
             if let message = viewModel.torchAvailabilityMessage {
                 Text(message)
                     .font(.footnote)
@@ -921,6 +951,20 @@ struct ReadyView: View {
         Binding(
             get: { viewModel.torchIntensity },
             set: { viewModel.updateTorchIntensity($0) }
+        )
+    }
+
+    private var sparkleTorchEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isSparkleTorchEnabled },
+            set: { viewModel.updateSparkleTorchEnabled($0) }
+        )
+    }
+
+    private var sparkleTorchStrengthBinding: Binding<ReadyViewModel.SparkleTorchStrength> {
+        Binding(
+            get: { viewModel.sparkleTorchStrength },
+            set: { viewModel.updateSparkleTorchStrength($0) }
         )
     }
 
