@@ -1428,12 +1428,12 @@ window.storageTransferModule = (function () {
       console.log("Storage transfer: submitting transfer", { mode: state.mode });
       if (state.mode === MODE_TRAY_TO_STORAGE) {
         await submitTransferWithTimeout(MODE_TRAY_TO_STORAGE, signedUser.email || "");
-        closeConfirmModal();
+        closeModal();
         showModuleToast("Tray return recorded.", "success");
         setStatus("Transfer complete. The tray and destination bag quantities were updated.", "success");
       } else {
         await submitTransferWithTimeout(MODE_STORAGE_TO_TRAY, signedUser.email || "");
-        closeConfirmModal();
+        closeModal();
         showModuleToast("Tray replenishment recorded.", "success");
         setStatus("Transfer complete. The bag and tray quantities were updated.", "success");
       }
