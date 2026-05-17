@@ -129,6 +129,55 @@ function getEventGpsLabel(event) {
   return `GPS ${status.replace(/_/g, " ")}`;
 }
 
+function getEventEvidencePhotos(event) {
+  const photos = event?.payload?.evidence_photos;
+  return Array.isArray(photos)
+    ? photos.filter((photo) => photo?.bucket && photo?.path)
+    : [];
+}
+
+async function signEventEvidencePhoto(photo) {
+  try {
+    const { data, error } = await supabase.storage
+      .from(photo.bucket)
+      .createSignedUrl(photo.path, 600, {
+        transform: { width: 260, height: 260, resize: "contain", quality: 60 },
+      });
+    if (!error && data?.signedUrl) return data.signedUrl;
+  } catch (_) {}
+
+  try {
+    const { data, error } = await supabase.storage.from(photo.bucket).createSignedUrl(photo.path, 600);
+    if (!error && data?.signedUrl) return data.signedUrl;
+  } catch (_) {}
+
+  return "";
+}
+
+async function hydrateEventEvidencePhotos(events) {
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+    const event = events[eventIndex];
+    const photos = getEventEvidencePhotos(event);
+    const container = document.querySelector(`[data-event-evidence-index="${eventIndex}"]`);
+    if (!container || !photos.length) continue;
+
+    const signed = await Promise.all(photos.map(async (photo, index) => ({
+      ...photo,
+      url: await signEventEvidencePhoto(photo),
+      label: photo.label || `Evidence photo ${index + 1}`,
+    })));
+    const visible = signed.filter((photo) => photo.url);
+    if (!visible.length) continue;
+
+    container.innerHTML = visible.map((photo) => `
+      <a class="event-photo-thumb" href="${escapeHtml(photo.url)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.label)}" />
+        <span>${escapeHtml(photo.label)}</span>
+      </a>
+    `).join("");
+  }
+}
+
 async function checkAdminAuth() {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) {
@@ -488,7 +537,7 @@ function renderEventList() {
     return;
   }
 
-  list.innerHTML = events.map((event) => {
+  list.innerHTML = events.map((event, eventIndex) => {
     const label = event.category === "revert"
       ? "Order reverted"
       : event.action === "fulfilled_no_inventory"
@@ -497,6 +546,7 @@ function renderEventList() {
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
     const gps = getEventGpsLabel(event);
     const store = event.payload?.checkout_store_name || "";
+    const evidenceCount = getEventEvidencePhotos(event).length;
     return `
       <article class="event-card">
         <span class="history-status ${event.category === "revert" ? "is-admin" : event.action === "cancelled" ? "is-cancelled" : ""}">${escapeHtml(label)}</span>
@@ -506,11 +556,16 @@ function renderEventList() {
           <span>${Number(event.order_line_ids?.length || event.payload?.reverted_lines || 0).toLocaleString()} line(s)${escapeHtml(units)}</span>
           ${gps ? `<span>${escapeHtml(gps)}</span>` : ""}
           ${store ? `<span>${escapeHtml(store)}</span>` : ""}
+          ${evidenceCount ? `<span>${evidenceCount} evidence photo${evidenceCount === 1 ? "" : "s"}</span>` : ""}
         </div>
         <p>${escapeHtml(event.notes || "No note recorded.")}</p>
+        ${evidenceCount ? `<div class="event-photo-grid" data-event-evidence-index="${eventIndex}"></div>` : ""}
       </article>
     `;
   }).join("");
+  hydrateEventEvidencePhotos(events).catch((error) => {
+    console.warn("Could not load event evidence photos:", error);
+  });
 }
 
 function openModal(id) {

@@ -26,8 +26,21 @@ const state = {
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
   workerNoInventoryLineIds: new Set(),
+  noInventoryCaptureStations: [],
+  selectedNoInventoryCaptureStationId: "",
+  noInventoryEvidencePhotos: [],
+  noInventoryCaptureBusy: false,
   busy: false,
 };
+
+const NO_INVENTORY_CAPTURE_STATION_TABLE = "capture_stations";
+const NO_INVENTORY_CAPTURE_JOB_TABLE = "capture_jobs";
+const NO_INVENTORY_CAPTURE_PHOTO_TABLE = "capture_job_photos";
+const NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS = 90_000;
+const NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS = 1_500;
+const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
+const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 45_000;
+const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 
 function $(id) {
   return document.getElementById(id);
@@ -2106,6 +2119,358 @@ function captureAuditLocation() {
   });
 }
 
+function delayNoInventoryCapture(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPreferredNoInventoryCaptureStationHints() {
+  try {
+    return {
+      stationId: String(window.OG_CAPTURE_STATION_ID || localStorage.getItem("og.captureStationId") || "").trim(),
+      stationName: String(window.OG_CAPTURE_STATION_NAME || localStorage.getItem("og.captureStationName") || "").trim(),
+    };
+  } catch (_) {
+    return { stationId: "", stationName: "" };
+  }
+}
+
+function renderNoInventoryCaptureStations() {
+  const select = $("no-inventory-capture-station");
+  if (!select) return;
+  const stations = state.noInventoryCaptureStations;
+
+  if (!stations.length) {
+    select.innerHTML = '<option value="">No active stations</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.replaceChildren(new Option("Choose station", ""));
+  stations.forEach((station) => {
+    select.appendChild(new Option(station.name || station.id, station.id));
+  });
+  select.value = stations.some((station) => station.id === state.selectedNoInventoryCaptureStationId)
+    ? state.selectedNoInventoryCaptureStationId
+    : "";
+  select.disabled = false;
+}
+
+function setSelectedNoInventoryCaptureStation(stationId = "") {
+  const station = state.noInventoryCaptureStations.find((entry) => entry.id === stationId) || null;
+  state.selectedNoInventoryCaptureStationId = station?.id || "";
+
+  const select = $("no-inventory-capture-station");
+  if (select && select.value !== state.selectedNoInventoryCaptureStationId) {
+    select.value = state.selectedNoInventoryCaptureStationId;
+  }
+
+  try {
+    if (station) {
+      localStorage.setItem("og.captureStationId", station.id);
+      localStorage.setItem("og.captureStationName", station.name || "");
+    }
+  } catch (_) {}
+
+  return station;
+}
+
+async function loadNoInventoryCaptureStations({ silent = false } = {}) {
+  const select = $("no-inventory-capture-station");
+  if (select) {
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading stations...</option>';
+  }
+
+  const { data, error } = await supabase
+    .from(NO_INVENTORY_CAPTURE_STATION_TABLE)
+    .select("id, name, active")
+    .eq("active", true)
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(error.message || "Could not load capture stations.");
+
+  state.noInventoryCaptureStations = Array.isArray(data) ? data : [];
+  const { stationId, stationName } = getPreferredNoInventoryCaptureStationHints();
+  const nextStation = state.noInventoryCaptureStations.find((station) => station.id === state.selectedNoInventoryCaptureStationId)
+    || state.noInventoryCaptureStations.find((station) => station.id === stationId)
+    || state.noInventoryCaptureStations.find((station) => String(station.name || "").trim().toLowerCase() === stationName.toLowerCase())
+    || state.noInventoryCaptureStations[0]
+    || null;
+
+  setSelectedNoInventoryCaptureStation(nextStation?.id || "");
+  renderNoInventoryCaptureStations();
+
+  if (!silent) {
+    setNoInventoryPhotoStatus(nextStation ? `Ready to take evidence photos on ${nextStation.name || "selected station"}.` : "No active capture stations are available.", nextStation ? "info" : "error");
+  }
+
+  return state.noInventoryCaptureStations;
+}
+
+function getSelectedNoInventoryCaptureStation() {
+  return state.noInventoryCaptureStations.find((station) => station.id === state.selectedNoInventoryCaptureStationId) || null;
+}
+
+async function createNoInventoryCaptureJob(stationId) {
+  const { data, error } = await supabase
+    .from(NO_INVENTORY_CAPTURE_JOB_TABLE)
+    .insert({
+      station_id: stationId,
+      status: "queued",
+      requested_at: new Date().toISOString(),
+      requested_by_email: state.user?.email || null,
+    })
+    .select("id, station_id, status, requested_at")
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "Failed to create capture job.");
+  return data;
+}
+
+function noInventoryCaptureJobHasUpload(job) {
+  return Boolean(job?.storage_bucket && job?.storage_path)
+    || Boolean(job?.upload_completed_at)
+    || Boolean(job?.capture_completed_at && job?.storage_path);
+}
+
+async function getNoInventoryCaptureJobPhotoCount(jobId) {
+  const { count, error } = await supabase
+    .from(NO_INVENTORY_CAPTURE_PHOTO_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("capture_job_id", jobId);
+
+  if (error) {
+    console.warn("Could not check capture photo count:", error);
+    return 0;
+  }
+  return count || 0;
+}
+
+async function findRecentNoInventoryCaptureCompletion(stationId, requestedAt) {
+  if (!stationId || !requestedAt) return null;
+  const requestedMs = new Date(requestedAt).getTime();
+  const lookbackIso = Number.isFinite(requestedMs)
+    ? new Date(requestedMs - NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS).toISOString()
+    : requestedAt;
+
+  const { data, error } = await supabase
+    .from(NO_INVENTORY_CAPTURE_JOB_TABLE)
+    .select("id, station_id, status, storage_bucket, storage_path, capture_completed_at, upload_completed_at, mime_type, file_size_bytes, failure_code, failure_message, requested_at")
+    .eq("station_id", stationId)
+    .gte("requested_at", lookbackIso)
+    .order("requested_at", { ascending: false })
+    .limit(5);
+
+  if (error) {
+    console.warn("Could not check recent no-inventory captures:", error);
+    return null;
+  }
+
+  for (const job of Array.isArray(data) ? data : []) {
+    if (job.status === "failed") continue;
+    if (job.status === "completed" || noInventoryCaptureJobHasUpload(job) || await getNoInventoryCaptureJobPhotoCount(job.id)) {
+      return { ...job, status: "completed" };
+    }
+  }
+  return null;
+}
+
+async function pollNoInventoryCaptureJob(job, station = {}) {
+  const jobId = job?.id || job;
+  const stationId = station.id || job?.station_id || "";
+  const requestedAt = job?.requested_at || "";
+  const stationName = station.name || "";
+  const startedAt = Date.now();
+  let lastPhotoCount = 0;
+  let lastPhotoChangeAt = startedAt;
+
+  while ((Date.now() - startedAt) < NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS) {
+    const { data, error } = await supabase
+      .from(NO_INVENTORY_CAPTURE_JOB_TABLE)
+      .select("id, station_id, status, storage_bucket, storage_path, capture_completed_at, upload_completed_at, mime_type, file_size_bytes, failure_code, failure_message, requested_at")
+      .eq("id", jobId)
+      .single();
+
+    if (error || !data) throw new Error(error?.message || "Failed to poll capture job.");
+    if (data.status === "completed" || data.status === "failed") return data;
+
+    const photoCount = await getNoInventoryCaptureJobPhotoCount(jobId);
+    if (photoCount !== lastPhotoCount) {
+      lastPhotoCount = photoCount;
+      lastPhotoChangeAt = Date.now();
+    }
+    if (noInventoryCaptureJobHasUpload(data)) return { ...data, status: "completed" };
+    if (photoCount > 0 && (Date.now() - lastPhotoChangeAt) >= NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS) {
+      return { ...data, status: "completed" };
+    }
+
+    const fallbackJob = await findRecentNoInventoryCaptureCompletion(stationId, requestedAt);
+    if (fallbackJob && fallbackJob.id !== jobId) return fallbackJob;
+
+    const label = data.status === "queued"
+      ? `Capture queued${stationName ? ` on ${stationName}` : ""}. Waiting for camera...`
+      : data.status === "capturing"
+        ? `Camera is capturing${stationName ? ` on ${stationName}` : ""}...`
+        : data.status === "uploading"
+          ? `Camera is uploading${stationName ? ` on ${stationName}` : ""}...`
+          : `Capture status: ${data.status || "waiting"}`;
+    setNoInventoryPhotoStatus(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
+    await delayNoInventoryCapture(NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Timed out waiting for camera capture.");
+}
+
+async function loadNoInventoryCaptureJobPhotos(jobId) {
+  const { data, error } = await supabase
+    .from(NO_INVENTORY_CAPTURE_PHOTO_TABLE)
+    .select("id, capture_job_id, sort_order, is_primary, storage_bucket, storage_path, mime_type, label, created_at")
+    .eq("capture_job_id", jobId)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw new Error(error.message || "Failed to load capture photos.");
+  return Array.isArray(data) ? data : [];
+}
+
+async function createNoInventorySignedImageUrl(bucket, path, options = {}) {
+  if (!bucket || !path) return "";
+  try {
+    const { data, error } = options.transform
+      ? await supabase.storage.from(bucket).createSignedUrl(path, 600, { transform: options.transform })
+      : await supabase.storage.from(bucket).createSignedUrl(path, 600);
+    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!options.transform) return "";
+  } catch (_) {
+    if (!options.transform) return "";
+  }
+  return createNoInventorySignedImageUrl(bucket, path);
+}
+
+async function noInventoryCaptureRowsToEvidencePhotos(rows) {
+  const photos = [];
+  for (let index = 0; index < (rows || []).length; index += 1) {
+    const row = rows[index];
+    const bucket = String(row?.storage_bucket || "").trim();
+    const path = String(row?.storage_path || "").trim();
+    if (!bucket || !path) continue;
+    const [previewUrl, thumbnailUrl] = await Promise.all([
+      createNoInventorySignedImageUrl(bucket, path),
+      createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
+    ]);
+    if (!previewUrl) continue;
+    photos.push({
+      id: row.id || `${bucket}:${path}`,
+      bucket,
+      path,
+      previewUrl,
+      thumbnailUrl: thumbnailUrl || previewUrl,
+      capture_job_id: row.capture_job_id || "",
+      sort_order: row.sort_order ?? index,
+      label: row.label || `Evidence photo ${index + 1}`,
+      mime_type: row.mime_type || "image/jpeg",
+      created_at: row.created_at || new Date().toISOString(),
+    });
+  }
+  return photos;
+}
+
+function setNoInventoryPhotoStatus(message = "", type = "info") {
+  const el = $("no-inventory-photo-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+}
+
+function serializeNoInventoryEvidencePhotos() {
+  return state.noInventoryEvidencePhotos.map((photo) => ({
+    bucket: photo.bucket,
+    path: photo.path,
+    capture_job_id: photo.capture_job_id || null,
+    sort_order: photo.sort_order ?? null,
+    label: photo.label || null,
+    mime_type: photo.mime_type || null,
+    created_at: photo.created_at || null,
+  }));
+}
+
+function renderNoInventoryEvidencePhotos() {
+  const grid = $("no-inventory-photo-grid");
+  if (!grid) return;
+  if (!state.noInventoryEvidencePhotos.length) {
+    grid.innerHTML = `<div class="empty-state">No evidence photos added.</div>`;
+    return;
+  }
+
+  grid.innerHTML = state.noInventoryEvidencePhotos.map((photo, index) => `
+    <article class="no-inventory-photo-card">
+      <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}" />
+      <span>${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}</span>
+    </article>
+  `).join("");
+}
+
+async function requestNoInventoryEvidencePhoto() {
+  if (state.noInventoryCaptureBusy) return;
+  try {
+    state.noInventoryCaptureBusy = true;
+    $("request-no-inventory-photo")?.toggleAttribute("disabled", true);
+
+    if (!state.noInventoryCaptureStations.length) {
+      await loadNoInventoryCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedNoInventoryCaptureStation();
+    if (!station) {
+      setNoInventoryPhotoStatus("Choose a camera station before taking evidence photos.", "error");
+      $("no-inventory-capture-station")?.focus();
+      return;
+    }
+
+    setNoInventoryPhotoStatus(`Sending camera request to ${station.name || "selected station"}...`, "info");
+    const job = await createNoInventoryCaptureJob(station.id);
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "pending-order-no-inventory",
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+        orderLineIds: [...state.workerNoInventoryLineIds],
+      },
+    }));
+
+    const completedJob = await pollNoInventoryCaptureJob(job, station);
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || completedJob.failure_code || "Capture failed.");
+    }
+
+    let photoRows = await loadNoInventoryCaptureJobPhotos(completedJob.id);
+    if (!photoRows.length && completedJob.storage_bucket && completedJob.storage_path) {
+      photoRows = [{
+        capture_job_id: completedJob.id,
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        label: "Evidence photo",
+      }];
+    }
+    if (!photoRows.length) throw new Error("Camera completed, but no uploaded photos were returned.");
+
+    const photos = await noInventoryCaptureRowsToEvidencePhotos(photoRows);
+    const existing = new Set(state.noInventoryEvidencePhotos.map((photo) => `${photo.bucket}:${photo.path}`));
+    photos.forEach((photo) => {
+      if (!existing.has(`${photo.bucket}:${photo.path}`)) state.noInventoryEvidencePhotos.push(photo);
+    });
+    renderNoInventoryEvidencePhotos();
+    setNoInventoryPhotoStatus(`${photos.length} evidence photo${photos.length === 1 ? "" : "s"} added to this audit.`, "info");
+  } catch (error) {
+    console.error("No-inventory evidence capture failed:", error);
+    setNoInventoryPhotoStatus(error?.message || "Could not take evidence photo.", "error");
+  } finally {
+    state.noInventoryCaptureBusy = false;
+    $("request-no-inventory-photo")?.toggleAttribute("disabled", false);
+  }
+}
+
 function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
   const el = $("worker-no-inventory-gps");
   if (!el) return;
@@ -2118,6 +2483,7 @@ function closeWorkerNoInventoryModal() {
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
+  state.noInventoryEvidencePhotos = [];
   closeModal("worker-no-inventory-modal");
   setTimeout(() => $("complete-no-inventory")?.focus(), 80);
 }
@@ -2207,14 +2573,22 @@ async function openWorkerNoInventoryModal() {
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = candidates;
   state.workerNoInventoryLineIds = new Set(candidates.map((entry) => entry.id));
+  state.noInventoryEvidencePhotos = [];
   $("worker-no-inventory-note").value = "";
   $("worker-no-inventory-error").textContent = "";
+  setNoInventoryPhotoStatus("");
   $("worker-no-inventory-subtitle").textContent =
     `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Uncheck anything that should stay in the packing queue. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
+  renderNoInventoryEvidencePhotos();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
   setTimeout(() => $("confirm-worker-no-inventory")?.focus(), 80);
+
+  loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not load no-inventory capture stations:", error);
+    setNoInventoryPhotoStatus(error?.message || "Could not load capture stations.", "error");
+  });
 
   const gps = await captureAuditLocation();
   state.workerNoInventoryGps = gps;
@@ -2269,6 +2643,7 @@ async function confirmWorkerNoInventoryCompletion() {
       _gps_accuracy_meters: gps.accuracy_meters ?? null,
       _gps_captured_at: gps.captured_at ?? null,
       _gps_status: gps.status || "not_finished",
+      _evidence_photos: serializeNoInventoryEvidencePhotos(),
     });
     if (error) throw error;
 
@@ -2590,6 +2965,7 @@ function clearSelection() {
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
+  state.noInventoryEvidencePhotos = [];
   clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
@@ -2656,6 +3032,11 @@ function setupListeners() {
   $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("select-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(true));
   $("deselect-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(false));
+  $("no-inventory-capture-station")?.addEventListener("change", (event) => {
+    setSelectedNoInventoryCaptureStation(event.target.value);
+  });
+  $("refresh-no-inventory-stations")?.addEventListener("click", () => loadNoInventoryCaptureStations());
+  $("request-no-inventory-photo")?.addEventListener("click", requestNoInventoryEvidencePhoto);
 
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

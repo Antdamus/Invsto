@@ -2,6 +2,10 @@
 -- The UI uses this when a buyer has multiple pending lines that are physically
 -- present but not represented in inventory yet.
 
+drop function if exists public.complete_ebay_order_lines_without_inventory(
+  uuid[], text, text, uuid, numeric, numeric, numeric, timestamptz, text
+);
+
 create or replace function public.complete_ebay_order_lines_without_inventory(
   _order_line_ids uuid[],
   _notes text default null,
@@ -11,7 +15,8 @@ create or replace function public.complete_ebay_order_lines_without_inventory(
   _gps_longitude numeric default null,
   _gps_accuracy_meters numeric default null,
   _gps_captured_at timestamptz default null,
-  _gps_status text default null
+  _gps_status text default null,
+  _evidence_photos jsonb default '[]'::jsonb
 )
 returns table (
   updated_lines integer,
@@ -30,6 +35,11 @@ declare
   v_gps_status text := nullif(btrim(coalesce(_gps_status, '')), '');
   v_now timestamptz := now();
   v_store_name text;
+  v_evidence_photos jsonb := case
+    when jsonb_typeof(coalesce(_evidence_photos, '[]'::jsonb)) = 'array'
+      then coalesce(_evidence_photos, '[]'::jsonb)
+    else '[]'::jsonb
+  end;
   v_order_ids uuid[] := '{}'::uuid[];
   v_updated_line_ids uuid[] := '{}'::uuid[];
   v_order_id uuid;
@@ -190,6 +200,7 @@ begin
       'updated_orders', v_updated_orders,
       'checkout_store_id', _checkout_store_id,
       'checkout_store_name', v_store_name,
+      'evidence_photos', v_evidence_photos,
       'line_snapshots', v_snapshots,
       'gps', jsonb_build_object(
         'status', v_gps_status,
@@ -208,9 +219,9 @@ end;
 $$;
 
 revoke all on function public.complete_ebay_order_lines_without_inventory(
-  uuid[], text, text, uuid, numeric, numeric, numeric, timestamptz, text
+  uuid[], text, text, uuid, numeric, numeric, numeric, timestamptz, text, jsonb
 ) from public;
 
 grant execute on function public.complete_ebay_order_lines_without_inventory(
-  uuid[], text, text, uuid, numeric, numeric, numeric, timestamptz, text
+  uuid[], text, text, uuid, numeric, numeric, numeric, timestamptz, text, jsonb
 ) to authenticated;

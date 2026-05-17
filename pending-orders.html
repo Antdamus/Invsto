@@ -267,7 +267,10 @@
                   <h2 id="selected-order-title">Order</h2>
                   <p id="selected-order-subtitle"></p>
                 </div>
-                <span id="selected-order-status" class="status-badge">Pending</span>
+                <div class="detail-actions">
+                  <span id="selected-order-status" class="status-badge">Pending</span>
+                  <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
+                </div>
               </div>
 
               <div id="money-grid" class="money-grid">
@@ -357,7 +360,6 @@
               <div class="fulfill-actions">
                 <button id="clear-selection" type="button" class="secondary-btn">Clear</button>
                 <button id="stage-current-line" type="button" class="secondary-btn">Stage Item</button>
-                <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
                 <button id="fulfill-order" type="button" class="primary-btn">Confirm Packed Bundle</button>
               </div>
             </section>
@@ -418,6 +420,29 @@
         </div>
       </div>
       <div id="worker-no-inventory-list" class="bundle-review-list"></div>
+      <section class="no-inventory-evidence" aria-label="Optional evidence photos">
+        <div>
+          <span class="eyebrow">Optional Photos</span>
+          <h3>Evidence Photos</h3>
+          <p>Take photos only when the item is special, ambiguous, or needs extra documentation. These photos are saved with the audit trail.</p>
+        </div>
+        <div class="no-inventory-camera-row">
+          <label>
+            Camera Station
+            <select id="no-inventory-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="no-inventory-camera-actions">
+            <button id="refresh-no-inventory-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-no-inventory-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+          </div>
+        </div>
+        <p id="no-inventory-photo-status" class="fulfill-status"></p>
+        <div id="no-inventory-photo-grid" class="no-inventory-photo-grid">
+          <div class="empty-state">No evidence photos added.</div>
+        </div>
+      </section>
       <label class="modal-field">
         Optional Note
         <textarea id="worker-no-inventory-note" rows="3" placeholder="Example: Item physically present from old stock, not entered in inventory yet."></textarea>
