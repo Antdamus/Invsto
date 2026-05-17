@@ -89,21 +89,6 @@ window.storageTransferModule = (function () {
     state.autoTimers.set(key, timer);
   }
 
-  function scheduleReviewIfReady(key = "auto-review") {
-    clearAutoTimer(key);
-    const validation = state.mode === MODE_TRAY_TO_STORAGE
-      ? validateReturnReadyForReview()
-      : validateReadyForReview();
-    if (validation) return;
-    const timer = window.setTimeout(() => {
-      const nextValidation = state.mode === MODE_TRAY_TO_STORAGE
-        ? validateReturnReadyForReview()
-        : validateReadyForReview();
-      if (!nextValidation) openConfirmModal();
-    }, 1000);
-    state.autoTimers.set(key, timer);
-  }
-
   function getLocationRole(location) {
     if (!location) return "";
     if (location.is_tray) return "tray";
@@ -715,7 +700,7 @@ window.storageTransferModule = (function () {
       if (!state.selectedTray) focusAndSelect("storage-transfer-tray-scan");
       else {
         focusAndSelect("storage-transfer-quantity");
-        scheduleReviewIfReady("storage-to-tray-quantity-ready");
+        setStatus("Enter the quantity to move, then press Enter to review and sign.", "info");
       }
     } catch (error) {
       console.error("Container scan failed:", error);
@@ -783,7 +768,7 @@ window.storageTransferModule = (function () {
       state.selectedTray = tray;
       await checkTrayConflict();
       focusAndSelect("storage-transfer-quantity");
-      scheduleReviewIfReady("storage-to-tray-quantity-ready");
+      setStatus("Enter the quantity to move, then press Enter to review and sign.", "info");
     } catch (error) {
       console.error("Tray scan failed:", error);
       state.selectedTray = null;
@@ -821,7 +806,7 @@ window.storageTransferModule = (function () {
       focusAndSelect("storage-transfer-tray-scan");
     } else {
       focusAndSelect("storage-transfer-quantity");
-      scheduleReviewIfReady("storage-to-tray-quantity-ready");
+      setStatus("Enter the quantity to move, then press Enter to review and sign.", "info");
     }
   }
 
@@ -1029,7 +1014,7 @@ window.storageTransferModule = (function () {
       focusAndSelect("return-transfer-parent-scan");
     } else {
       focusAndSelect("return-transfer-quantity");
-      scheduleReviewIfReady("return-quantity-ready");
+      setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
     }
   }
 
@@ -1099,7 +1084,7 @@ window.storageTransferModule = (function () {
         focusAndSelect("return-transfer-parent-scan");
       } else {
         focusAndSelect("return-transfer-quantity");
-        scheduleReviewIfReady("return-quantity-ready");
+        setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
       }
     } catch (error) {
       console.error("Return bag scan failed:", error);
@@ -1127,7 +1112,7 @@ window.storageTransferModule = (function () {
       validateReturnDestinationPair();
       renderReturnDestinationSummaries();
       focusAndSelect("return-transfer-quantity");
-      scheduleReviewIfReady("return-quantity-ready");
+      setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
     } catch (error) {
       console.error("Return parent scan failed:", error);
       state.returnParent = null;
@@ -1209,13 +1194,6 @@ window.storageTransferModule = (function () {
 
   function openConfirmModal() {
     clearAutoTimer("auto-review");
-    clearAutoTimer("storage-to-tray-quantity-ready");
-    clearAutoTimer("return-quantity-ready");
-    clearAutoTimer("forward-quantity-review");
-    clearAutoTimer("return-quantity-review");
-    clearAutoTimer("forward-quantity-focus");
-    clearAutoTimer("return-quantity-focus");
-
     const validation = state.mode === MODE_TRAY_TO_STORAGE
       ? validateReturnReadyForReview()
       : validateReadyForReview();
@@ -1313,8 +1291,31 @@ window.storageTransferModule = (function () {
     return changedItemId;
   }
 
+  async function verifyTransferPassword(password) {
+    if (window.checkoutModule?.verifyPasswordForCurrentUser) {
+      return await window.checkoutModule.verifyPasswordForCurrentUser(password);
+    }
+
+    const { data, error: userError } = await supabase.auth.getUser();
+    if (userError || !data?.user?.email) {
+      throw new Error("Could not fetch authenticated user.");
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: data.user.email,
+      password,
+    });
+
+    return !error;
+  }
+
   async function confirmTransfer() {
-    if (state.busy) return;
+    const confirmButton = $("confirm-storage-transfer");
+    if (state.busy) {
+      const errorEl = $("storage-transfer-confirm-error");
+      if (errorEl) errorEl.textContent = "Transfer is already processing. Please wait.";
+      return;
+    }
     const errorEl = $("storage-transfer-confirm-error");
     const password = $("storage-transfer-password")?.value || "";
 
@@ -1325,17 +1326,18 @@ window.storageTransferModule = (function () {
 
     try {
       state.busy = true;
+      if (confirmButton) {
+        confirmButton.disabled = true;
+        confirmButton.textContent = "Signing...";
+      }
       if (errorEl) errorEl.textContent = "";
 
-      if (!window.checkoutModule?.verifyPasswordForCurrentUser) {
-        throw new Error("Password verification is not available on this page.");
-      }
-
-      const valid = await window.checkoutModule.verifyPasswordForCurrentUser(password.trim());
+      const valid = await verifyTransferPassword(password.trim());
       if (!valid) {
         if (errorEl) errorEl.textContent = "Incorrect password. Please try again.";
         return;
       }
+      if (confirmButton) confirmButton.textContent = "Transferring...";
 
       const { data: userResult, error: userError } = await supabase.auth.getUser();
       if (userError || !userResult?.user) throw new Error("Could not authenticate this transfer.");
@@ -1357,6 +1359,10 @@ window.storageTransferModule = (function () {
       setStatus(error?.message || "Transfer failed.", "error");
     } finally {
       state.busy = false;
+      if (confirmButton) {
+        confirmButton.disabled = false;
+        confirmButton.textContent = "Sign and Transfer";
+      }
     }
   }
 
@@ -1496,11 +1502,6 @@ window.storageTransferModule = (function () {
     bindDebouncedInput("return-transfer-item-scan", "return-item-scan", handleReturnItemScan);
     bindDebouncedInput("return-transfer-bag-scan", "return-bag-scan", handleReturnBagScan);
     bindDebouncedInput("return-transfer-parent-scan", "return-parent-scan", handleReturnParentScan);
-
-    $("storage-transfer-quantity")?.addEventListener("input", () => scheduleReviewIfReady("forward-quantity-review"));
-    $("return-transfer-quantity")?.addEventListener("input", () => scheduleReviewIfReady("return-quantity-review"));
-    $("return-transfer-quantity")?.addEventListener("focus", () => scheduleReviewIfReady("return-quantity-focus"));
-    $("storage-transfer-quantity")?.addEventListener("focus", () => scheduleReviewIfReady("forward-quantity-focus"));
 
     $("storage-transfer-bags")?.addEventListener("click", (event) => {
       const trigger = event.target.closest("[data-source-stock-id]");

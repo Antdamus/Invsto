@@ -2993,7 +2993,8 @@ async function refreshItemById(itemId) {
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
     .select("id, item_id, quantity, location_id")
-    .eq("item_id", itemId);
+    .eq("item_id", itemId)
+    .gt("quantity", 0);
 
   if (!stockError && stockData) {
     const [{ data: locations, error: locError }, { data: stores, error: storeError }] = await Promise.all([
@@ -5663,7 +5664,8 @@ async function fetchStockItems() {
   // Step 2: Fetch stock quantities
   const { data: stockData, error: stockError } = await supabase
     .from("item_stock_locations")
-    .select("id, item_id, quantity, location_id");
+    .select("id, item_id, quantity, location_id")
+    .gt("quantity", 0);
 
   if (stockError || !stockData) {
     console.error("❌ Failed to fetch stock quantities:", stockError);

@@ -147,6 +147,22 @@ function isMissingDailyAdjustmentStorage(error) {
   return /daily_stock_checkin_adjustments|admin_adjust_daily_stock_checkin|schema cache|could not find|does not exist/i.test(text);
 }
 
+async function bumpInventoryVersion(changedIds = null) {
+  const payload = {
+    inventory_version: crypto.randomUUID(),
+    changed_item_ids: Array.isArray(changedIds) && changedIds.length > 0 ? changedIds : null,
+  };
+
+  const { error } = await supabase
+    .from("metadata")
+    .update(payload)
+    .eq("id", "inventory");
+
+  if (error) {
+    console.warn("Daily Adds correction saved, but the stock refresh signal failed:", error);
+  }
+}
+
 function setActiveNavLink() {
   const path = (location.pathname || "").split("/").pop() || "inventory-activity.html";
   document.querySelectorAll(".nav-link").forEach((link) => {
@@ -633,6 +649,7 @@ async function confirmStockAdjustment() {
 
     if (error) throw error;
 
+    await bumpInventoryVersion([row.itemId]);
     closeStockAdjustmentModal();
     await refreshActivity();
   } catch (error) {
