@@ -742,12 +742,55 @@ window.dymoModule = (function () {
         };
     }
 
-    function makeSafeDymoDownloadName(barcode) {
-        const safeBarcode = String(barcode || "OGJewelryLabel")
+    function safeDymoFilenamePart(value, fallback = "label") {
+        return String(value || fallback)
             .trim()
             .replace(/[^\w.-]+/g, "_")
-            .replace(/^_+|_+$/g, "");
+            .replace(/^_+|_+$/g, "")
+            .slice(0, 72) || fallback;
+    }
+
+    function makeSafeDymoDownloadName(barcode) {
+        const safeBarcode = safeDymoFilenamePart(barcode, "OGJewelryLabel");
         return `${safeBarcode || "OGJewelryLabel"}.dymo`;
+    }
+
+    function downloadDymoXml(labelXml, filename) {
+        const blob = new Blob([labelXml], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function makeDymoQueueDownloadName(options = {}) {
+        const labelKind = safeDymoFilenamePart(options.labelKind || "ItemLabel", "ItemLabel");
+        const barcode = safeDymoFilenamePart(options.barcode || window.latestDymoBarcode || "NoBarcode", "NoBarcode");
+        const title = String(options.title || "").trim() ? safeDymoFilenamePart(options.title, "") : "";
+        const copies = Math.max(1, Math.floor(Number(options.copies) || 1));
+        const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+        return [
+            "OGJewelers",
+            labelKind,
+            barcode,
+            title,
+            `Copies_${copies}`,
+            timestamp,
+        ].filter(Boolean).join("_").slice(0, 180) + ".dymo";
+    }
+
+    function queueDymoLabelForLocalHelper(labelXml, options = {}) {
+        if (!labelXml) {
+            throw new Error("No DYMO label is ready to queue for printing.");
+        }
+        const copies = Math.max(1, Math.floor(Number(options.copies) || 1));
+        const filename = makeDymoQueueDownloadName({ ...options, copies });
+        downloadDymoXml(labelXml, filename);
+        return { filename, copies };
     }
 
     function downloadPreparedDymoLabel(filename = "") {
@@ -755,15 +798,7 @@ window.dymoModule = (function () {
             throw new Error("No DYMO label is ready to download.");
         }
 
-        const blob = new Blob([window.latestDymoXml], { type: "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename || makeSafeDymoDownloadName(window.latestDymoBarcode);
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadDymoXml(window.latestDymoXml, filename || makeSafeDymoDownloadName(window.latestDymoBarcode));
     }
 
     function getDymoFramework() {
@@ -908,39 +943,65 @@ window.dymoModule = (function () {
     }
 
     async function printDymoLabelXml(labelXml, options = {}) {
+        if (!labelXml) {
+            throw new Error("No DYMO label XML was provided.");
+        }
+
         const copies = Math.max(1, Math.floor(Number(options.copies) || 1));
         const preferredPrinterName = String(options.printerName || "").trim();
         const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
-        const framework = await ensureDymoFrameworkReady();
+        const allowQueueFallback = options.queueFallback !== false;
 
-        if (typeof framework.getPrinters !== "function" || typeof framework.openLabelXml !== "function") {
-            throw new Error("DYMO Connect print functions are not available.");
+        try {
+            const framework = await ensureDymoFrameworkReady();
+
+            if (typeof framework.getPrinters !== "function" || typeof framework.openLabelXml !== "function") {
+                throw new Error("DYMO Connect print functions are not available.");
+            }
+
+            const printers = await waitForDymoPrinters(framework);
+            const printer = printers.find((entry) => preferredPrinterName && entry.name === preferredPrinterName)
+                || printers.find((entry) => /labelwriter/i.test(`${entry.printerType || ""} ${entry.modelName || ""} ${entry.name || ""}`))
+                || printers[0];
+
+            if (!printer?.name) {
+                const environmentSummary = getDymoEnvironmentSummary(framework);
+                const suffix = environmentSummary ? ` DYMO status: ${environmentSummary}.` : "";
+                throw new Error(`No DYMO printer was found by the browser.${suffix} Open DYMO Connect, confirm DYMO Web Service is enabled, then refresh this page.`);
+            }
+
+            const label = framework.openLabelXml(labelXml);
+            if (!label || typeof label.print !== "function") {
+                throw new Error("The DYMO label could not be opened for printing.");
+            }
+
+            for (let index = 0; index < copies; index += 1) {
+                onProgress?.(index + 1, copies, printer);
+                label.print(printer.name);
+                // Give DYMO Connect a small breath between jobs so larger batches do not get dropped.
+                await new Promise((resolve) => setTimeout(resolve, 120));
+            }
+
+            return { mode: "direct", printerName: printer.name, copies };
+        } catch (error) {
+            if (!allowQueueFallback) throw error;
+
+            console.warn("DYMO direct print unavailable; downloading label for local print helper.", error);
+            onProgress?.(copies, copies, { name: "local print helper" });
+            const queued = queueDymoLabelForLocalHelper(labelXml, {
+                copies,
+                barcode: options.barcode || window.latestDymoBarcode,
+                title: options.title || "",
+                labelKind: options.labelKind || "ItemLabel",
+            });
+
+            return {
+                mode: "queued-download",
+                copies,
+                filename: queued.filename,
+                originalError: error,
+            };
         }
-
-        const printers = await waitForDymoPrinters(framework);
-        const printer = printers.find((entry) => preferredPrinterName && entry.name === preferredPrinterName)
-            || printers.find((entry) => /labelwriter/i.test(`${entry.printerType || ""} ${entry.modelName || ""} ${entry.name || ""}`))
-            || printers[0];
-
-        if (!printer?.name) {
-            const environmentSummary = getDymoEnvironmentSummary(framework);
-            const suffix = environmentSummary ? ` DYMO status: ${environmentSummary}.` : "";
-            throw new Error(`No DYMO printer was found by the browser.${suffix} Open DYMO Connect, confirm DYMO Web Service is enabled, then refresh this page.`);
-        }
-
-        const label = framework.openLabelXml(labelXml);
-        if (!label || typeof label.print !== "function") {
-            throw new Error("The DYMO label could not be opened for printing.");
-        }
-
-        for (let index = 0; index < copies; index += 1) {
-            onProgress?.(index + 1, copies, printer);
-            label.print(printer.name);
-            // Give DYMO Connect a small breath between jobs so larger batches do not get dropped.
-            await new Promise((resolve) => setTimeout(resolve, 120));
-        }
-
-        return { printerName: printer.name, copies };
     }
 
     async function printPreparedDymoLabel(options = {}) {
@@ -1071,6 +1132,8 @@ window.dymoModule = (function () {
     getPreparedDymoLabel,
     downloadPreparedDymoLabel,
     makeSafeDymoDownloadName,
+    makeDymoQueueDownloadName,
+    queueDymoLabelForLocalHelper,
     printDymoLabelXml,
     printPreparedDymoLabel,
 };

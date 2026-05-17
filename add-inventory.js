@@ -1907,14 +1907,15 @@ async function bumpInventoryVersion(changedIds = null) {
       return true;
     }
 
-    async function recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder) {
+    async function recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder, deliveryMode = "direct") {
       const state = pendingInventoryLabelPrintState;
       if (!state?.stockTransactionId) return false;
 
+      const deliveryVerb = deliveryMode === "queued-download" ? "queued" : "printed";
       const decisionLabel = strategy === "individual_batch"
-        ? `printed ${printQuantity} recommended label${printQuantity === 1 ? "" : "s"}`
+        ? `${deliveryVerb} ${printQuantity} recommended label${printQuantity === 1 ? "" : "s"}`
         : strategy === "collective_only"
-          ? "printed one collective label"
+          ? `${deliveryVerb} one collective label`
           : "deferred label printing and copied barcode";
       const auditNote = `label print decision: ${decisionLabel}; labels per order ${labelsPerOrder}; decided by ${currentUser?.email || "current user"}`;
       const nextNotes = [state.stockTransactionNotes || "", auditNote].filter(Boolean).join(" | ");
@@ -1980,6 +1981,9 @@ async function bumpInventoryVersion(changedIds = null) {
 
       return window.dymoModule.printDymoLabelXml(state.dymoXml, {
         copies,
+        barcode: state.item?.barcode || "",
+        title: state.item?.title || "",
+        labelKind: "InventoryLabel",
         onProgress: (current, total, printer) => {
           setInventoryLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
         },
@@ -2017,13 +2021,17 @@ async function bumpInventoryVersion(changedIds = null) {
           return;
         }
 
-        await printInventoryItemLabels(printQuantity);
+        const printResult = await printInventoryItemLabels(printQuantity);
+        const printVerb = printResult?.mode === "queued-download" ? "Queued" : "Printed";
         const notes = strategy === "collective_only"
-          ? `Printed one collective label after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`
-          : `Printed recommended label batch after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`;
+          ? `${printVerb} one collective label after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`
+          : `${printVerb} recommended label batch after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`;
         const recorded = await recordInventoryLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
-        await recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder);
-        setInventoryLabelPrintStatus(`Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}.${recorded ? "" : " Label tag will record after the migration is pushed."}`, "success");
+        await recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder, printResult?.mode || "direct");
+        const delivery = printResult?.mode === "queued-download"
+          ? `Downloaded ${printResult.filename || "the DYMO label"} for the local print helper`
+          : `Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}`;
+        setInventoryLabelPrintStatus(`${delivery}.${recorded ? "" : " Label tag will record after the migration is pushed."}`, "success");
         setTimeout(closeInventoryLabelPrintModal, recorded ? 1000 : 1800);
       } catch (error) {
         console.error("Add inventory label print failed:", error);
@@ -2067,7 +2075,7 @@ async function bumpInventoryVersion(changedIds = null) {
       if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
 
       updateInventoryLabelPrintEstimate();
-      setInventoryLabelPrintStatus("Ready to print through DYMO Connect.");
+      setInventoryLabelPrintStatus("Ready to print. If the browser cannot reach DYMO Connect, it will download a helper label.");
       setInventoryLabelPrintBusy(false);
       modal.classList.remove("hidden");
       modal.setAttribute("aria-hidden", "false");

@@ -1,6 +1,6 @@
 ﻿param(
   [string]$WatchPath = "$env:USERPROFILE\Downloads",
-  [string]$Filter = "LiveSale_*.dymo",
+  [string]$Filter = "OGJewelers_*.dymo",
   [string]$ArchivePath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\printed",
   [string]$FailedPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\failed",
   [string]$LogPath = "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\dymo-print-helper.log",
@@ -63,7 +63,7 @@ function Select-WatchFolder {
     $shell = New-Object -ComObject Shell.Application
     $folder = $shell.BrowseForFolder(
       0,
-      "Select the folder where live-sale DYMO labels download. The helper only prints files named $Filter.",
+      "Select the folder where OG Jewelers DYMO labels download. The helper only prints OGJewelers_*.dymo labels.",
       0,
       $InitialPath
     )
@@ -136,37 +136,66 @@ function Move-PrintedFile {
 }
 
 function Invoke-DymoPrint {
-  param([string]$Path)
+  param([string]$Path, [int]$Copies = 1)
 
   if (-not (Wait-ForStableFile -Path $Path)) {
     throw "File was not ready for printing: $Path"
   }
 
+  if ($Copies -lt 1) {
+    $Copies = 1
+  }
+  if ($Copies -gt 100) {
+    throw "Refusing to print more than 100 copies from one label file: $Copies"
+  }
+
   if ($DryRun) {
-    Write-HelperLog "DRY RUN: would print $Path"
+    Write-HelperLog "DRY RUN: would print $Path ($Copies copies)"
     return
   }
 
-  Write-HelperLog "Sending label to default DYMO print handler: $Path"
-  try {
-    Start-Process -FilePath $Path -Verb Print -WindowStyle Minimized -ErrorAction Stop | Out-Null
-  } catch {
-    if (-not $FallbackOpen) {
-      throw
+  Write-HelperLog "Sending label to default DYMO print handler: $Path ($Copies copies)"
+  for ($copy = 1; $copy -le $Copies; $copy++) {
+    try {
+      Start-Process -FilePath $Path -Verb Print -WindowStyle Minimized -ErrorAction Stop | Out-Null
+    } catch {
+      if (-not $FallbackOpen) {
+        throw
+      }
+
+      Write-HelperLog "Print verb failed; opening label instead because -FallbackOpen was enabled. $($_.Exception.Message)" "WARN"
+      Start-Process -FilePath $Path -WindowStyle Minimized -ErrorAction Stop | Out-Null
     }
 
-    Write-HelperLog "Print verb failed; opening label instead because -FallbackOpen was enabled. $($_.Exception.Message)" "WARN"
-    Start-Process -FilePath $Path -WindowStyle Minimized -ErrorAction Stop | Out-Null
+    if ($Copies -gt 1 -and $copy -lt $Copies) {
+      Start-Sleep -Milliseconds 700
+    }
   }
 
   Start-Sleep -Seconds $PostPrintDelaySeconds
+}
+
+function Get-RequestedCopies {
+  param([string]$FileName)
+
+  $match = [regex]::Match($FileName, '(?i)(?:^|_)Copies_(\d+)(?:_|\.dymo$)')
+  if (-not $match.Success) {
+    return 1
+  }
+
+  $copies = [int]$match.Groups[1].Value
+  if ($copies -lt 1) {
+    return 1
+  }
+  return $copies
 }
 
 function Handle-Label {
   param([string]$Path)
 
   try {
-    Invoke-DymoPrint -Path $Path
+    $copies = Get-RequestedCopies -FileName ([System.IO.Path]::GetFileName($Path))
+    Invoke-DymoPrint -Path $Path -Copies $copies
     $archive = Move-PrintedFile -Path $Path -DestinationDirectory $ArchivePath
     Write-HelperLog "Printed and archived: $archive"
   } catch {
@@ -210,7 +239,7 @@ Ensure-Directory -Path (Split-Path -Parent $LogPath)
 
 Write-HelperLog "OG Jewelers DYMO print helper started."
 Write-HelperLog "Watching: $WatchPath"
-Write-HelperLog "Filter: $Filter (other downloads in this folder are ignored)"
+Write-HelperLog "Filter: $Filter plus OGJewelers_*.dymo and LiveSale_*.dymo compatibility patterns (other downloads in this folder are ignored)"
 Write-HelperLog "Archive: $ArchivePath"
 Write-HelperLog "Failed: $FailedPath"
 Write-HelperLog "Config: $ConfigPath"
@@ -221,16 +250,19 @@ if ($DryRun) {
 $seen = @{}
 
 do {
-  Get-ChildItem -LiteralPath $WatchPath -Filter $Filter -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime |
-    ForEach-Object {
-      $key = "{0}|{1}|{2}" -f $_.FullName, $_.Length, $_.LastWriteTimeUtc.Ticks
-      if ($seen.ContainsKey($key)) {
-        return
+  $filters = @($Filter, "OGJewelers_*.dymo", "LiveSale_*.dymo") | Select-Object -Unique
+  foreach ($activeFilter in $filters) {
+    Get-ChildItem -LiteralPath $WatchPath -Filter $activeFilter -File -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime |
+      ForEach-Object {
+        $key = "{0}|{1}|{2}" -f $_.FullName, $_.Length, $_.LastWriteTimeUtc.Ticks
+        if ($seen.ContainsKey($key)) {
+          return
+        }
+        $seen[$key] = $true
+        Handle-Label -Path $_.FullName
       }
-      $seen[$key] = $true
-      Handle-Label -Path $_.FullName
-    }
+  }
 
   if ($Once) {
     break

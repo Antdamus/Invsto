@@ -399,6 +399,9 @@ let uploadedImages = [];
 
     return window.dymoModule.printDymoLabelXml(state.dymoXml, {
       copies,
+      barcode: state.item?.barcode || "",
+      title: state.item?.title || "",
+      labelKind: "ItemLabel",
       onProgress: (current, total, printer) => {
         setLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
       },
@@ -422,12 +425,16 @@ let uploadedImages = [];
         return;
       }
 
-      await printSavedItemLabels(printQuantity, strategy);
+      const printResult = await printSavedItemLabels(printQuantity, strategy);
+      const printVerb = printResult?.mode === "queued-download" ? "Queued" : "Printed";
       const notes = strategy === "collective_only"
-        ? "Printed one collective label; item should not receive individual labels."
-        : `Printed recommended label batch after add-item save.`;
+        ? `${printVerb} one collective label; item should not receive individual labels.`
+        : `${printVerb} recommended label batch after add-item save.`;
       const recorded = await recordItemLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
-      setLabelPrintStatus(`Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}.${recorded ? " Reloading for the next item..." : " Label tag will record after the migration is pushed. Reloading..."}`, "success");
+      const delivery = printResult?.mode === "queued-download"
+        ? `Downloaded ${printResult.filename || "the DYMO label"} for the local print helper`
+        : `Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}`;
+      setLabelPrintStatus(`${delivery}.${recorded ? " Reloading for the next item..." : " Label tag will record after the migration is pushed. Reloading..."}`, "success");
       scheduleReloadAfterLabelDecision(recorded ? 1300 : 2400);
     } catch (error) {
       console.error("Label print decision failed:", error);
@@ -494,7 +501,7 @@ let uploadedImages = [];
     if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
     bindItemLabelPrintModalControls();
     updateLabelPrintEstimate();
-    setLabelPrintStatus("Ready to print through DYMO Connect.");
+    setLabelPrintStatus("Ready to print. If the browser cannot reach DYMO Connect, it will download a helper label.");
     setLabelPrintBusy(false);
 
     continueButton?.addEventListener("click", reloadAddItemPageForNextItem, { once: true });

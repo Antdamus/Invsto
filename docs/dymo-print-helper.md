@@ -4,13 +4,14 @@ This helper makes the live-sale flow print labels with almost no seller friction
 
 ## What It Does
 
-The live-sale page downloads labels named like:
+The app downloads labels named like:
 
 ```text
-LiveSale_Friday_May_16_2026_8_30_PM_eBay_Auction_102_LIVE-20260516-0001.dymo
+OGJewelers_LiveSale_Friday_May_16_2026_8_30_PM_eBay_Auction_102_LIVE-20260516-0001.dymo
+OGJewelers_ItemLabel_OG1750_Copies_2_20260516223015.dymo
 ```
 
-The helper watches the folder you select for `LiveSale_*.dymo`, sends matching files to the default Windows print handler, then moves them to:
+The helper watches the folder you select for `OGJewelers_*.dymo`, sends matching files to the default Windows print handler, then moves them to:
 
 ```text
 Documents\OGJewelers\DymoPrintQueue\printed
@@ -44,10 +45,12 @@ Leave that window open during the live show.
 The helper only prints files matching:
 
 ```text
-LiveSale_*.dymo
+OGJewelers_*.dymo
 ```
 
 Other downloads in the same folder are ignored.
+
+It also still accepts the older `LiveSale_*.dymo` names so prior live-sale labels keep working.
 
 The selected folder is remembered here:
 
@@ -76,6 +79,16 @@ If the browser is configured to download labels to a dedicated queue folder:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\dymo-print-helper.ps1 -WatchPath "$env:USERPROFILE\Documents\OGJewelers\DymoPrintQueue\incoming"
 ```
+
+## Multiple Copies
+
+When the app needs more than one copy, it writes the quantity into the filename:
+
+```text
+OGJewelers_InventoryLabel_OG1750_Copies_4_20260516223015.dymo
+```
+
+The helper reads `Copies_4` and sends the same DYMO label to print four times.
 
 ## Important
 

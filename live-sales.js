@@ -1524,6 +1524,7 @@ function getLiveSaleLabelBaseName() {
   const auctionNumber = state.currentLot?.auction_number || "Auction";
   const lotCode = state.currentLot?.lot_code || "Bag";
   return [
+    "OGJewelers",
     "LiveSale",
     safeDymoFilename(showTitle),
     `Auction_${safeDymoFilename(auctionNumber)}`,
