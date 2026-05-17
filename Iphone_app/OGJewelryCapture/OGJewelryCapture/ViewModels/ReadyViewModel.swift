@@ -97,6 +97,9 @@ final class ReadyViewModel: ObservableObject {
     @Published private(set) var isAutoListenEnabled: Bool
     @Published private(set) var autoListenStatus: AutoListenStatus = .off
     @Published private(set) var lastAutoListenCheckAt: Date?
+    @Published private(set) var isTorchEnabled = false
+    @Published private(set) var torchIntensity: Double
+    @Published private(set) var torchState: CameraTorchState = .unknown
 
     let employee: AuthenticatedEmployee
     let station: CaptureStation
@@ -122,9 +125,11 @@ final class ReadyViewModel: ObservableObject {
     private static let captureResolutionModeKey = "ready.captureResolutionMode"
     private static let autoCaptureDelayKey = "ready.autoCaptureDelay"
     private static let autoListenEnabledKey = "ready.autoListenEnabled"
+    private static let torchIntensityKey = "ready.torchIntensity"
     private static let autoListenInterval: Duration = .seconds(5)
     private static let hardwareShutterDebounceInterval: TimeInterval = 0.75
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
+    private static let defaultTorchIntensity: Double = 0.4
     private static let operatorCancelledFailureCode = "cancelled_by_operator"
     private static let operatorCancelledFailureMessage = "Operator cancelled capture"
     private static let cancelRejectedMessage = "Cancel Job was not accepted. This job is still active on this station."
@@ -157,6 +162,9 @@ final class ReadyViewModel: ObservableObject {
         let storedDelay = userDefaults.object(forKey: Self.autoCaptureDelayKey) as? Double
         let resolvedDelay = storedDelay ?? Self.defaultAutoCaptureDelay
         self.autoCaptureDelay = Self.clampedDelay(resolvedDelay)
+
+        let storedTorchIntensity = userDefaults.object(forKey: Self.torchIntensityKey) as? Double
+        self.torchIntensity = Self.clampedTorchIntensity(storedTorchIntensity ?? Self.defaultTorchIntensity)
     }
 
     deinit {
@@ -207,6 +215,7 @@ final class ReadyViewModel: ObservableObject {
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
         cameraModeStatus = await cameraService.currentCameraModeStatus()
         await refreshZoomState(resetToDefault: true)
+        await refreshTorchState()
         captureState = .listening
 
         await listener.startListening(
@@ -230,6 +239,7 @@ final class ReadyViewModel: ObservableObject {
     func stop() async {
         pendingAutoCaptureTask?.cancel()
         stopAutoListenPolling()
+        await turnTorchOffForInactiveCapture()
         await listener.stopListening()
         cameraService.stopSession()
         pendingJob = nil
@@ -271,9 +281,37 @@ final class ReadyViewModel: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
+            await self.turnTorchOffForInactiveCapture()
             await self.cameraService.updateCaptureResolutionMode(mode)
             await self.refreshCameraModeStatus()
             await self.refreshZoomState(resetToDefault: true)
+            await self.refreshTorchState()
+        }
+    }
+
+    func updateTorchEnabled(_ isEnabled: Bool) {
+        guard isTorchEnabled != isEnabled else { return }
+
+        isTorchEnabled = isEnabled
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.applyTorch(enabled: isEnabled)
+        }
+    }
+
+    func updateTorchIntensity(_ intensity: Double) {
+        let clampedIntensity = Self.clampedTorchIntensity(intensity)
+        guard torchIntensity != clampedIntensity else { return }
+
+        torchIntensity = clampedIntensity
+        userDefaults.set(clampedIntensity, forKey: Self.torchIntensityKey)
+
+        guard isTorchEnabled else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.applyTorch(enabled: true)
         }
     }
 
@@ -364,6 +402,9 @@ final class ReadyViewModel: ObservableObject {
         guard isShowingPersistentResult else { return }
 
         pendingAutoCaptureTask?.cancel()
+        Task { [weak self] in
+            await self?.turnTorchOffForInactiveCapture()
+        }
         pendingJob = nil
         activeJobID = nil
         activeSession = nil
@@ -374,9 +415,11 @@ final class ReadyViewModel: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
+            await self.turnTorchOffForInactiveCapture()
             self.cameraAvailability = await self.cameraService.prepareIfNeeded()
             self.cameraModeStatus = await self.cameraService.currentCameraModeStatus()
             await self.refreshZoomState(resetToDefault: true)
+            await self.refreshTorchState()
             await self.refreshPendingJob()
         }
     }
@@ -395,6 +438,9 @@ final class ReadyViewModel: ObservableObject {
 
         do {
             let updatedSession = try appendKeptPhoto(result)
+            Task { [weak self] in
+                await self?.turnTorchOffForInactiveCapture()
+            }
             latestLocalResult = nil
             latestUploadResult = nil
             finishJobMessage = nil
@@ -414,6 +460,9 @@ final class ReadyViewModel: ObservableObject {
     func discardCapturedPhoto() {
         guard case let .reviewingCapture(job, _) = captureState else { return }
 
+        Task { [weak self] in
+            await self?.turnTorchOffForInactiveCapture()
+        }
         latestLocalResult = nil
         latestUploadResult = nil
         finishJobMessage = nil
@@ -450,6 +499,9 @@ final class ReadyViewModel: ObservableObject {
         if updatedSession.keptPhotos.isEmpty {
             transitionToCapture(for: job)
         } else {
+            Task { [weak self] in
+                await self?.turnTorchOffForInactiveCapture()
+            }
             captureState = .sessionReady(job, updatedSession)
         }
     }
@@ -517,6 +569,7 @@ final class ReadyViewModel: ObservableObject {
         guard canAcceptIncomingJobs else { return }
 
         pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
         activeJobID = job.id
         handledJobIDs.insert(job.id)
         pendingJob = job
@@ -533,6 +586,7 @@ final class ReadyViewModel: ObservableObject {
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
         cameraModeStatus = await cameraService.currentCameraModeStatus()
         await refreshZoomState(resetToDefault: true)
+        await refreshTorchState()
 
         switch cameraAvailability {
         case .ready, .simulatorFallback:
@@ -594,10 +648,12 @@ final class ReadyViewModel: ObservableObject {
 
         do {
             let result = try await cameraService.capturePhoto(for: job.id)
+            await turnTorchOffForInactiveCapture()
             latestLocalResult = result
             latestUploadResult = nil
             captureState = .reviewingCapture(job, result)
         } catch {
+            await turnTorchOffForInactiveCapture()
             let failureAccepted = await failJob(
                 jobID: job.id,
                 code: "capture_failed",
@@ -691,10 +747,12 @@ final class ReadyViewModel: ObservableObject {
     private func transitionToCapture(for job: CaptureJob) {
         latestLocalResult = nil
         latestUploadResult = nil
+        isTorchEnabled = false
 
         switch captureMode {
         case .auto:
             Task {
+                await prepareTorchForLivePreview()
                 await cameraService.enableContinuousPreviewAutoFocus()
             }
             captureState = .captureRequested(job)
@@ -702,6 +760,7 @@ final class ReadyViewModel: ObservableObject {
         case .manual:
             pendingAutoCaptureTask?.cancel()
             Task {
+                await prepareTorchForLivePreview()
                 await cameraService.enableContinuousPreviewAutoFocus()
             }
             captureState = .waitingForManualCapture(job)
@@ -710,6 +769,7 @@ final class ReadyViewModel: ObservableObject {
 
     private func performFinishJob(for job: CaptureJob, session: LocalCaptureSession) async {
         pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
 
         let uploadingSession = LocalCaptureSession(
             jobID: session.jobID,
@@ -834,6 +894,7 @@ final class ReadyViewModel: ObservableObject {
 
             await refreshPendingJob()
         } catch {
+            await turnTorchOffForInactiveCapture()
             let recoveredSession = LocalCaptureSession(
                 jobID: session.jobID,
                 finalUploadTargetJobID: activeSession?.finalUploadTargetJobID ?? session.finalUploadTargetJobID,
@@ -851,6 +912,7 @@ final class ReadyViewModel: ObservableObject {
 
     private func performCancelActiveJob(_ job: CaptureJob) async {
         pendingAutoCaptureTask?.cancel()
+        await turnTorchOffForInactiveCapture()
         finishJobMessage = nil
 
         do {
@@ -865,6 +927,7 @@ final class ReadyViewModel: ObservableObject {
             return
         }
 
+        await turnTorchOffForInactiveCapture()
         cameraService.stopSession()
         latestLocalResult = nil
         latestUploadResult = nil
@@ -878,6 +941,7 @@ final class ReadyViewModel: ObservableObject {
         await cameraService.updateCaptureResolutionMode(captureResolutionMode)
         cameraModeStatus = await cameraService.currentCameraModeStatus()
         await refreshZoomState(resetToDefault: true)
+        await refreshTorchState()
         await refreshPendingJob()
     }
 
@@ -898,6 +962,8 @@ final class ReadyViewModel: ObservableObject {
         message: String,
         clearLocalSession: Bool
     ) async -> Bool {
+        await turnTorchOffForInactiveCapture()
+
         do {
             _ = try await repository.markFailed(id: jobID, code: code, message: message)
         } catch {
@@ -958,6 +1024,11 @@ final class ReadyViewModel: ObservableObject {
         min(max(delay, 0.5), 15.0)
     }
 
+    private static func clampedTorchIntensity(_ intensity: Double) -> Double {
+        let stepped = (intensity * 10).rounded() / 10
+        return min(max(stepped, 0.1), 1.0)
+    }
+
     private func reconfigurePendingCaptureIfNeeded() {
         guard let job = pendingJob else { return }
 
@@ -1013,6 +1084,38 @@ final class ReadyViewModel: ObservableObject {
 
     private func refreshCameraModeStatus() async {
         cameraModeStatus = await cameraService.currentCameraModeStatus()
+    }
+
+    private func refreshTorchState() async {
+        let state = await cameraService.currentTorchState()
+        torchState = state
+
+        if !state.isAvailable || !state.isEnabled {
+            isTorchEnabled = false
+        }
+    }
+
+    private func prepareTorchForLivePreview() async {
+        isTorchEnabled = false
+        let state = await cameraService.setTorch(enabled: false, level: Float(torchIntensity))
+        torchState = state
+    }
+
+    private func applyTorch(enabled: Bool) async {
+        guard isTorchControlVisible, torchState.isAvailable else {
+            await turnTorchOffForInactiveCapture()
+            return
+        }
+
+        let state = await cameraService.setTorch(enabled: enabled, level: Float(torchIntensity))
+        torchState = state
+        isTorchEnabled = enabled && state.isAvailable && state.isEnabled
+    }
+
+    private func turnTorchOffForInactiveCapture() async {
+        isTorchEnabled = false
+        let state = await cameraService.setTorch(enabled: false, level: Float(torchIntensity))
+        torchState = state
     }
 
     private func updateAutoListenPolling() {
@@ -1111,6 +1214,32 @@ final class ReadyViewModel: ObservableObject {
 
     var canTriggerHardwareShutterCapture: Bool {
         captureReadyJob != nil
+    }
+
+    var isTorchControlVisible: Bool {
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture, .capturing:
+            return true
+        case .idle, .listening, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
+            return false
+        }
+    }
+
+    var canAdjustTorch: Bool {
+        guard torchState.isAvailable else { return false }
+
+        switch captureState {
+        case .captureRequested, .waitingForManualCapture:
+            return true
+        case .idle, .listening, .capturing, .reviewingCapture, .sessionReady, .uploadingFinalSet, .completed, .failed:
+            return false
+        }
+    }
+
+    var torchAvailabilityMessage: String? {
+        guard isTorchControlVisible else { return nil }
+        guard !torchState.isAvailable else { return torchState.message }
+        return torchState.message
     }
 
     private var canAcceptIncomingJobs: Bool {

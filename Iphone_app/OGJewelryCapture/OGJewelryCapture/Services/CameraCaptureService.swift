@@ -14,6 +14,31 @@ struct CameraZoomState: Equatable {
     }
 }
 
+struct CameraTorchState: Equatable {
+    let isAvailable: Bool
+    let isEnabled: Bool
+    let level: Float
+    let message: String?
+
+    static let unknown = CameraTorchState(
+        isAvailable: false,
+        isEnabled: false,
+        level: 0,
+        message: "Torch availability is not ready yet."
+    )
+
+    static let simulatorUnavailable = CameraTorchState(
+        isAvailable: false,
+        isEnabled: false,
+        level: 0,
+        message: "Torch is unavailable in simulator preview."
+    )
+
+    static func unavailable(_ message: String) -> CameraTorchState {
+        CameraTorchState(isAvailable: false, isEnabled: false, level: 0, message: message)
+    }
+}
+
 enum CameraAvailability: Equatable {
     case unknown
     case ready
@@ -105,6 +130,7 @@ final class CameraCaptureService: NSObject {
     private var activeProcessor: PhotoCaptureProcessor?
     private var captureResolutionMode: CaptureResolutionMode = .standard
     private var cameraModeStatus: CameraModeStatus = .unknown
+    private var torchState: CameraTorchState = .unknown
 
     private let preferredMaximumZoomFactor: CGFloat = 3.0
 
@@ -169,6 +195,7 @@ final class CameraCaptureService: NSObject {
                 isUsingStandardFallback: false,
                 message: nil
             )
+            torchState = .simulatorUnavailable
             return
         }
         guard isConfigured else { return }
@@ -179,6 +206,7 @@ final class CameraCaptureService: NSObject {
                     try self.configureSession(for: mode, forceReconfigure: false)
                 } catch {
                     self.applyCaptureResolutionModeToPhotoOutput()
+                    self.torchState = self.currentTorchStateLocked()
                 }
                 continuation.resume()
             }
@@ -203,11 +231,42 @@ final class CameraCaptureService: NSObject {
         }
     }
 
+    func currentTorchState() async -> CameraTorchState {
+        guard availability != .simulatorFallback else {
+            return .simulatorUnavailable
+        }
+
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                self.torchState = self.currentTorchStateLocked()
+                continuation.resume(returning: self.torchState)
+            }
+        }
+    }
+
+    func setTorch(enabled: Bool, level requestedLevel: Float) async -> CameraTorchState {
+        guard availability != .simulatorFallback else {
+            torchState = .simulatorUnavailable
+            return torchState
+        }
+
+        return await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                let state = self.setTorchLocked(enabled: enabled, level: requestedLevel)
+                self.torchState = state
+                continuation.resume(returning: state)
+            }
+        }
+    }
+
     func stopSession() {
         sessionQueue.async {
-            guard self.isRunning else { return }
-            self.previewSession.stopRunning()
-            self.isRunning = false
+            self.turnTorchOffLocked()
+
+            if self.isRunning {
+                self.previewSession.stopRunning()
+                self.isRunning = false
+            }
         }
     }
 
@@ -249,9 +308,11 @@ final class CameraCaptureService: NSObject {
             captureResolutionMode = mode
             cameraModeStatus = selection.status(for: mode)
             applyCaptureResolutionModeToPhotoOutput()
+            torchState = currentTorchStateLocked()
             return
         }
 
+        turnTorchOffLocked()
         previewSession.beginConfiguration()
         previewSession.sessionPreset = .photo
 
@@ -277,10 +338,12 @@ final class CameraCaptureService: NSObject {
             captureResolutionMode = mode
             cameraModeStatus = selection.status(for: mode)
             applyCaptureResolutionModeToPhotoOutput()
+            torchState = currentTorchStateLocked()
 
             previewSession.commitConfiguration()
             isConfigured = true
         } catch {
+            torchState = currentTorchStateLocked()
             previewSession.commitConfiguration()
             throw error
         }
@@ -531,6 +594,114 @@ final class CameraCaptureService: NSObject {
         let supportedMaximum = min(device.activeFormat.videoMaxZoomFactor, preferredMaximumZoomFactor)
         let resolvedMaximum = max(1.0, supportedMaximum)
         return 1.0 ... resolvedMaximum
+    }
+
+    private func currentTorchStateLocked() -> CameraTorchState {
+        guard availability != .simulatorFallback else {
+            return .simulatorUnavailable
+        }
+
+        guard let device = activeDevice else {
+            return .unavailable("Torch is not available until the camera is ready.")
+        }
+
+        guard device.hasTorch, device.isTorchModeSupported(.on) else {
+            return .unavailable(torchUnavailableMessage())
+        }
+
+        guard device.isTorchAvailable else {
+            return .unavailable("Torch is temporarily unavailable. Let the device cool, then try again.")
+        }
+
+        return CameraTorchState(
+            isAvailable: true,
+            isEnabled: device.torchMode == .on || device.isTorchActive,
+            level: device.torchLevel,
+            message: nil
+        )
+    }
+
+    private func setTorchLocked(enabled: Bool, level requestedLevel: Float) -> CameraTorchState {
+        guard let device = activeDevice else {
+            return .unavailable("Torch is not available until the camera is ready.")
+        }
+
+        guard device.hasTorch, device.isTorchModeSupported(.on) else {
+            return .unavailable(torchUnavailableMessage())
+        }
+
+        if !enabled {
+            do {
+                try device.lockForConfiguration()
+                device.torchMode = .off
+                device.unlockForConfiguration()
+            } catch {
+                // Best-effort cleanup only. Return the refreshed state below.
+            }
+
+            return currentTorchStateLocked()
+        }
+
+        guard device.isTorchAvailable else {
+            return .unavailable("Torch is temporarily unavailable. Let the device cool, then try again.")
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            let clampedLevel = Self.clampedTorchLevel(requestedLevel)
+            try device.setTorchModeOn(level: clampedLevel)
+
+            return CameraTorchState(
+                isAvailable: true,
+                isEnabled: device.torchMode == .on,
+                level: device.torchLevel,
+                message: nil
+            )
+        } catch {
+            turnTorchOffLocked()
+            return CameraTorchState(
+                isAvailable: false,
+                isEnabled: false,
+                level: 0,
+                message: "Torch is temporarily unavailable. Let the device cool, then try again."
+            )
+        }
+    }
+
+    private func turnTorchOffLocked() {
+        guard let device = activeDevice else {
+            torchState = .unavailable("Torch is not available until the camera is ready.")
+            return
+        }
+
+        guard device.hasTorch, device.isTorchModeSupported(.off) else {
+            torchState = currentTorchStateLocked()
+            return
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            device.torchMode = .off
+        } catch {
+            // Best-effort cleanup only. The next availability refresh will surface state.
+        }
+
+        torchState = currentTorchStateLocked()
+    }
+
+    private func torchUnavailableMessage() -> String {
+        if captureResolutionMode == .closeUpMacro, cameraModeStatus.isUsingCloseUpCamera {
+            return "Torch is unavailable with the current Close-Up / Macro camera path."
+        }
+
+        return "Torch is not available on this camera."
+    }
+
+    private static func clampedTorchLevel(_ level: Float) -> Float {
+        min(max(level, 0.1), 1.0)
     }
 
     private func applyCaptureResolutionModeToPhotoOutput() {

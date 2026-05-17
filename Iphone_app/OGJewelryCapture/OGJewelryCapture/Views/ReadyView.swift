@@ -272,6 +272,11 @@ struct ReadyView: View {
         VStack(alignment: .leading, spacing: 12) {
             activeCaptureHeader
             activeMediaArea
+
+            if viewModel.isTorchControlVisible {
+                torchControls
+            }
+
             activeCaptureActions
 
             if let activeSession = viewModel.activeSession {
@@ -432,6 +437,52 @@ struct ReadyView: View {
                 .foregroundStyle(OGVisualStyle.textSecondary)
                 .padding(.horizontal, 20)
         }
+    }
+
+    private var torchControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Toggle("Torch", isOn: torchEnabledBinding)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textPrimary)
+                    .disabled(!viewModel.canAdjustTorch)
+
+                Spacer(minLength: 10)
+
+                Text(viewModel.isTorchEnabled ? "On" : "Off")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(viewModel.isTorchEnabled ? OGVisualStyle.goldSoft : OGVisualStyle.textSecondary)
+            }
+
+            HStack(spacing: 12) {
+                Text("Intensity")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+
+                Slider(value: torchIntensityBinding, in: 0.1 ... 1.0, step: 0.1)
+                    .disabled(!viewModel.canAdjustTorch || !viewModel.isTorchEnabled)
+
+                Text(viewModel.torchIntensity.formatted(.number.precision(.fractionLength(1))))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(OGVisualStyle.goldSoft)
+                    .frame(width: 34, alignment: .trailing)
+            }
+
+            if let message = viewModel.torchAvailabilityMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(OGVisualStyle.textSecondary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(OGVisualStyle.panel)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(OGVisualStyle.stroke, lineWidth: 1)
+                )
+        )
     }
 
     @ViewBuilder
@@ -856,6 +907,20 @@ struct ReadyView: View {
         Binding(
             get: { viewModel.captureResolutionMode },
             set: { viewModel.updateCaptureResolutionMode($0) }
+        )
+    }
+
+    private var torchEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isTorchEnabled },
+            set: { viewModel.updateTorchEnabled($0) }
+        )
+    }
+
+    private var torchIntensityBinding: Binding<Double> {
+        Binding(
+            get: { viewModel.torchIntensity },
+            set: { viewModel.updateTorchIntensity($0) }
         )
     }
 
