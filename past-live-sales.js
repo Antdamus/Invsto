@@ -482,6 +482,8 @@ function renderSelectedSession() {
   $("detail-ended").textContent = session.ended_at ? formatDateTime(session.ended_at) : "Still active";
   $("detail-duration").textContent = formatDuration(session.started_at, session.ended_at);
   $("detail-store").textContent = getStoreName(session.store_id);
+  const eventCount = getEventsForSession(session.id).length;
+  $("audit-button-label").textContent = `Audit Trail (${eventCount.toLocaleString()})`;
 
   const cancelBtn = $("cancel-session-from-history");
   const archiveBtn = $("archive-session");
@@ -489,7 +491,6 @@ function renderSelectedSession() {
   if (archiveBtn) archiveBtn.hidden = session.status === "active" || session.status === "archived";
 
   renderBagList(session);
-  renderEventList(session);
 }
 
 function renderBagList(session) {
@@ -577,7 +578,7 @@ function renderBagItem(container, group) {
 }
 
 function renderEventList(session) {
-  const list = $("event-list");
+  const list = $("event-modal-list");
   if (!list) return;
   const events = getEventsForSession(session.id);
   list.replaceChildren();
@@ -605,6 +606,26 @@ function renderEventList(session) {
     `;
     list.appendChild(card);
   });
+}
+
+function openEventModal() {
+  const session = getSelectedSession();
+  const modal = $("past-event-modal");
+  if (!session || !modal) return;
+  $("past-event-title").textContent = `${session.title || "Live Sale"} Audit Trail`;
+  const events = getEventsForSession(session.id);
+  $("past-event-summary").textContent = `${events.length.toLocaleString()} recorded event${events.length === 1 ? "" : "s"} for ${session.session_code || "this session"}.`;
+  renderEventList(session);
+  modal.hidden = false;
+  document.body.classList.add("past-event-open");
+  $("past-event-close")?.focus();
+}
+
+function closeEventModal() {
+  const modal = $("past-event-modal");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("past-event-open");
 }
 
 function formatEventType(value = "") {
@@ -1081,6 +1102,7 @@ function endPhotoDrag(event) {
 function setupListeners() {
   $("refresh-past-live")?.addEventListener("click", () => loadPastLiveSales());
   $("edit-session")?.addEventListener("click", openEditSessionModal);
+  $("open-audit-trail")?.addEventListener("click", openEventModal);
   $("archive-session")?.addEventListener("click", openArchiveSessionModal);
   $("cancel-session-from-history")?.addEventListener("click", openCancelSessionModal);
 
@@ -1102,6 +1124,9 @@ function setupListeners() {
       confirmPastAction();
     }
   });
+
+  $("past-event-close")?.addEventListener("click", closeEventModal);
+  document.querySelectorAll("[data-close-past-events]").forEach((node) => node.addEventListener("click", closeEventModal));
 
   $("past-photo-close")?.addEventListener("click", closePhotoModal);
   document.querySelectorAll("[data-close-past-photo]").forEach((node) => node.addEventListener("click", closePhotoModal));
@@ -1130,6 +1155,12 @@ function setupListeners() {
     if (!$("past-live-action-modal")?.hidden && event.key === "Escape") {
       event.preventDefault();
       closeActionModal();
+      return;
+    }
+
+    if (!$("past-event-modal")?.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeEventModal();
     }
   });
 }

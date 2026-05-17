@@ -175,6 +175,10 @@
                     <i data-lucide="pencil"></i>
                     Edit Show
                   </button>
+                  <button id="open-audit-trail" type="button" class="secondary-btn">
+                    <i data-lucide="list-checks"></i>
+                    <span id="audit-button-label">Audit Trail</span>
+                  </button>
                   <button id="cancel-session-from-history" type="button" class="secondary-btn danger-btn">
                     <i data-lucide="x-circle"></i>
                     Cancel
@@ -202,18 +206,6 @@
                 </div>
                 <div id="bag-list" class="bag-list">
                   <div class="past-empty">No bags loaded.</div>
-                </div>
-              </section>
-
-              <section class="detail-section">
-                <div class="section-head">
-                  <div>
-                    <span class="eyebrow">Audit Trail</span>
-                    <h3>Live Sale Events</h3>
-                  </div>
-                </div>
-                <div id="event-list" class="event-list">
-                  <div class="past-empty">No audit events loaded.</div>
                 </div>
               </section>
             </div>
@@ -245,6 +237,23 @@
       <div class="modal-actions">
         <button id="past-action-cancel" type="button" class="secondary-btn">Cancel</button>
         <button id="past-action-confirm" type="button" class="primary-btn">Sign and Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="past-event-modal" class="past-event-modal" hidden>
+    <div class="past-event-backdrop" data-close-past-events></div>
+    <div class="past-event-dialog" role="dialog" aria-modal="true" aria-labelledby="past-event-title">
+      <button id="past-event-close" type="button" class="modal-close-btn" aria-label="Close audit trail">x</button>
+      <header class="past-event-head">
+        <div>
+          <span class="eyebrow">Audit Trail</span>
+          <h2 id="past-event-title">Live Sale Events</h2>
+          <p id="past-event-summary">Review signed actions, reservations, labels, cancellations, and corrections.</p>
+        </div>
+      </header>
+      <div id="event-modal-list" class="event-list">
+        <div class="past-empty">No audit events loaded.</div>
       </div>
     </div>
   </div>

@@ -586,11 +586,13 @@ body.past-live-body {
 }
 
 .past-modal[hidden],
+.past-event-modal[hidden],
 .past-photo-modal[hidden] {
   display: none;
 }
 
 .past-modal,
+.past-event-modal,
 .past-photo-modal {
   position: fixed;
   inset: 0;
@@ -605,6 +607,7 @@ body.past-live-body {
 }
 
 .past-modal-backdrop,
+.past-event-backdrop,
 .past-photo-backdrop {
   position: absolute;
   inset: 0;
@@ -613,6 +616,7 @@ body.past-live-body {
 }
 
 .past-modal-card,
+.past-event-dialog,
 .past-photo-dialog {
   position: relative;
   width: min(94vw, 620px);
@@ -623,6 +627,37 @@ body.past-live-body {
   background: linear-gradient(145deg, rgba(26, 23, 24, 0.98), rgba(8, 8, 10, 0.98));
   box-shadow: var(--past-shadow);
   padding: 24px;
+}
+
+.past-event-dialog {
+  width: min(94vw, 900px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;
+}
+
+.past-event-head {
+  padding: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.past-event-head h2 {
+  margin: 4px 0 6px;
+  font-family: "DM Serif Display", Georgia, serif;
+  color: var(--past-ink);
+  font-size: 2.2rem;
+  letter-spacing: 0;
+}
+
+.past-event-head p {
+  margin: 0;
+  color: var(--past-muted);
+}
+
+.past-event-dialog .event-list {
+  max-height: min(70vh, 680px);
+  overflow: auto;
 }
 
 .past-modal-card {
