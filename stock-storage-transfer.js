@@ -209,8 +209,9 @@ window.storageTransferModule = (function () {
     if (state.mode === MODE_TRAY_TO_STORAGE) {
       if (eyebrow) eyebrow.textContent = "Tray to storage";
       if (title) title.textContent = "Return Tray Stock";
-      if (subtitle) subtitle.textContent = "Scan the item, confirm the tray source, scan the destination bag and parent location, then sign the return.";
-      focusAndSelect("return-transfer-item-scan", 75);
+      if (subtitle) subtitle.textContent = "Confirm the item, scan the source tray, scan the parent storage location, scan the destination bag, then sign the return.";
+      if (state.returnSelectedItem) focusAndSelect("return-transfer-tray-scan", 75);
+      else focusAndSelect("return-transfer-item-scan", 75);
     } else {
       if (eyebrow) eyebrow.textContent = "Storage to tray";
       if (title) title.textContent = "Replenish Tray";
@@ -994,9 +995,6 @@ window.storageTransferModule = (function () {
       .sort((a, b) => String(a.location?.location_name || "").localeCompare(String(b.location?.location_name || "")));
 
     renderReturnTrayOptions();
-    if (state.returnTrayRows.length === 1) {
-      selectReturnTrayStockRow(state.returnTrayRows[0].id);
-    }
   }
 
   async function selectReturnItem(item) {
@@ -1004,10 +1002,7 @@ window.storageTransferModule = (function () {
     state.returnItemCandidates = [];
     renderReturnItemSummary();
     await loadReturnTrayRowsForItem(item);
-    if (!state.returnSelectedTray) {
-      const firstTrayButton = $("return-transfer-tray-options")?.querySelector("[data-return-tray-stock-id]");
-      firstTrayButton?.focus?.();
-    }
+    focusAndSelect("return-transfer-tray-scan");
   }
 
   function selectReturnTrayStockRow(stockRowId) {
@@ -1019,10 +1014,10 @@ window.storageTransferModule = (function () {
     renderReturnTrayOptions();
     renderReturnSelectedCard();
 
-    if (!state.returnContainer) {
-      focusAndSelect("return-transfer-bag-scan");
-    } else if (!state.returnParent) {
+    if (!state.returnParent) {
       focusAndSelect("return-transfer-parent-scan");
+    } else if (!state.returnContainer) {
+      focusAndSelect("return-transfer-bag-scan");
     } else {
       focusAndSelect("return-transfer-quantity");
       setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
@@ -1045,6 +1040,8 @@ window.storageTransferModule = (function () {
       state.returnTrayRows = [];
       state.returnSelectedStockRow = null;
       state.returnSelectedTray = null;
+      const trayInput = $("return-transfer-tray-scan");
+      if (trayInput) trayInput.value = "";
       renderReturnItemSummary();
       renderReturnTrayOptions();
       renderReturnSelectedCard();
@@ -1059,6 +1056,39 @@ window.storageTransferModule = (function () {
       resetReturnSelection({ keepDestination: true });
       setStatus(error?.message || "Could not find that item.", "error");
       showModuleToast(error?.message || "Could not find that item.", "error");
+    }
+  }
+
+  async function handleReturnTrayScan() {
+    clearAutoTimer("return-tray-scan");
+    const input = $("return-transfer-tray-scan");
+    const query = input?.value || "";
+    setStatus("");
+
+    try {
+      if (!state.returnSelectedItem) {
+        focusAndSelect("return-transfer-item-scan");
+        throw new Error("Confirm the item first, then scan the tray.");
+      }
+      if (!state.locations.length) await loadLocations();
+      if (!state.returnTrayRows.length) await loadReturnTrayRowsForItem(state.returnSelectedItem);
+
+      const tray = findLocationByScan(query, (location) => isTray(location) && location.active !== false);
+      if (!tray) throw new Error("No active source tray matched that scan.");
+
+      const row = state.returnTrayRows.find((entry) => entry.location_id === tray.id);
+      if (!row) throw new Error("That tray does not currently hold the selected item.");
+
+      selectReturnTrayStockRow(row.id);
+      if (input) input.value = tray.location_code || tray.location_name || input.value;
+    } catch (error) {
+      console.error("Return tray scan failed:", error);
+      state.returnSelectedStockRow = null;
+      state.returnSelectedTray = null;
+      renderReturnTrayOptions();
+      renderReturnSelectedCard();
+      setStatus(error?.message || "Could not select that source tray.", "error");
+      showModuleToast(error?.message || "Could not select that source tray.", "error");
     }
   }
 
@@ -1091,7 +1121,9 @@ window.storageTransferModule = (function () {
       validateReturnDestinationPair();
       renderReturnDestinationSummaries();
 
-      if (!state.returnParent) {
+      if (!state.returnSelectedTray) {
+        focusAndSelect("return-transfer-tray-scan");
+      } else if (!state.returnParent) {
         focusAndSelect("return-transfer-parent-scan");
       } else {
         focusAndSelect("return-transfer-quantity");
@@ -1122,8 +1154,14 @@ window.storageTransferModule = (function () {
       state.returnParent = parent;
       validateReturnDestinationPair();
       renderReturnDestinationSummaries();
-      focusAndSelect("return-transfer-quantity");
-      setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
+      if (!state.returnSelectedTray) {
+        focusAndSelect("return-transfer-tray-scan");
+      } else if (!state.returnContainer) {
+        focusAndSelect("return-transfer-bag-scan");
+      } else {
+        focusAndSelect("return-transfer-quantity");
+        setStatus("Enter the quantity to return, then press Enter to review and sign.", "info");
+      }
     } catch (error) {
       console.error("Return parent scan failed:", error);
       state.returnParent = null;
@@ -1468,6 +1506,12 @@ window.storageTransferModule = (function () {
       });
       renderParentSummary();
       renderBags();
+    } else {
+      resetReturnSelection({ keepDestination: false });
+      ["return-transfer-item-scan", "return-transfer-tray-scan", "return-transfer-bag-scan", "return-transfer-parent-scan"].forEach((id) => {
+        const input = $(id);
+        if (input) input.value = "";
+      });
     }
     loadLocations()
       .catch((error) => {
@@ -1529,6 +1573,55 @@ window.storageTransferModule = (function () {
     }
   }
 
+  async function openReturnForItem(itemId) {
+    const modal = $("storage-transfer-modal");
+    if (!modal) return;
+    modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    state.returnItemCandidates = [];
+    state.returnTrayRows = [];
+    state.returnSelectedStockRow = null;
+    state.returnSelectedItem = null;
+    state.returnSelectedTray = null;
+    state.returnContainer = null;
+    state.returnParent = null;
+    ["return-transfer-tray-scan", "return-transfer-bag-scan", "return-transfer-parent-scan"].forEach((id) => {
+      const input = $(id);
+      if (input) input.value = "";
+    });
+    renderReturnItemSummary();
+    renderReturnDestinationSummaries();
+    renderReturnTrayOptions();
+    renderReturnSelectedCard();
+    setMode(MODE_TRAY_TO_STORAGE);
+    setStatus("");
+
+    try {
+      await loadLocations();
+      let item = typeof window.getStockItemById === "function" ? window.getStockItemById(itemId) : null;
+      if (!item) {
+        const { data, error } = await supabase
+          .from("item_types")
+          .select("id, title, barcode, weight, sale_price, photos, photo_url")
+          .eq("id", itemId)
+          .maybeSingle();
+        if (error) throw error;
+        item = data;
+      }
+      if (!item) throw new Error("Could not load that item for tray return.");
+
+      const input = $("return-transfer-item-scan");
+      if (input) input.value = item.barcode || item.title || "";
+      await selectReturnItem(item);
+      setStatus("Item confirmed. Scan the tray where you are taking it from.", "success");
+    } catch (error) {
+      console.error("Could not open tray return flow for item:", error);
+      setStatus(error?.message || "Could not start tray return for that item.", "error");
+      showModuleToast(error?.message || "Could not start tray return for that item.", "error");
+      focusAndSelect("return-transfer-item-scan");
+    }
+  }
+
   function closeModal() {
     $("storage-transfer-modal")?.classList.add("hidden");
     $("storage-transfer-confirm-modal")?.classList.add("hidden");
@@ -1557,6 +1650,7 @@ window.storageTransferModule = (function () {
     $("storage-transfer-find-tray")?.addEventListener("click", handleTrayScan);
     $("storage-transfer-review-btn")?.addEventListener("click", openConfirmModal);
     $("return-transfer-find-item")?.addEventListener("click", handleReturnItemScan);
+    $("return-transfer-find-tray")?.addEventListener("click", handleReturnTrayScan);
     $("return-transfer-find-bag")?.addEventListener("click", handleReturnBagScan);
     $("return-transfer-find-parent")?.addEventListener("click", handleReturnParentScan);
     $("return-transfer-review-btn")?.addEventListener("click", openConfirmModal);
@@ -1574,6 +1668,7 @@ window.storageTransferModule = (function () {
     bindEnter("storage-transfer-tray-scan", handleTrayScan);
     bindEnter("storage-transfer-quantity", openConfirmModal);
     bindEnter("return-transfer-item-scan", handleReturnItemScan);
+    bindEnter("return-transfer-tray-scan", handleReturnTrayScan);
     bindEnter("return-transfer-bag-scan", handleReturnBagScan);
     bindEnter("return-transfer-parent-scan", handleReturnParentScan);
     bindEnter("return-transfer-quantity", openConfirmModal);
@@ -1584,6 +1679,7 @@ window.storageTransferModule = (function () {
     bindDebouncedInput("storage-transfer-container-scan", "forward-container-scan", handleContainerScan);
     bindDebouncedInput("storage-transfer-tray-scan", "forward-tray-scan", handleTrayScan);
     bindDebouncedInput("return-transfer-item-scan", "return-item-scan", handleReturnItemScan);
+    bindDebouncedInput("return-transfer-tray-scan", "return-tray-scan", handleReturnTrayScan);
     bindDebouncedInput("return-transfer-bag-scan", "return-bag-scan", handleReturnBagScan);
     bindDebouncedInput("return-transfer-parent-scan", "return-parent-scan", handleReturnParentScan);
 
@@ -1659,5 +1755,6 @@ window.storageTransferModule = (function () {
     setup,
     openModal,
     openForItem,
+    openReturnForItem,
   };
 })();

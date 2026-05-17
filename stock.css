@@ -2198,7 +2198,8 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 }
 
 .transfer-stock-btn,
-.replenish-tray-btn {
+.replenish-tray-btn,
+.return-storage-btn {
   border: 1px solid rgba(0,113,227,.20);
   border-radius: 999px;
   background: rgba(0,113,227,.08);
@@ -2214,6 +2215,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   border-color: rgba(154,109,31,.28);
   background: rgba(214,178,94,.16);
   color: #6f4b12;
+}
+
+.return-storage-btn {
+  border-color: rgba(23, 124, 91, .25);
+  background: rgba(34, 163, 117, .12);
+  color: #116149;
 }
 
 .stock-location-chips {
@@ -2486,6 +2493,13 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   gap: 14px;
 }
 
+.stock-photo-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .stock-photo-viewer-header h2,
 .stock-photo-manager-header h2 {
   margin: 0;
@@ -2634,6 +2648,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   max-width: 420px;
   aspect-ratio: 1;
   display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+#stock-photo-editor-canvas.is-dragging {
+  cursor: grabbing;
 }
 
 .stock-photo-editor-controls {
@@ -2690,6 +2710,13 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   grid-column: 1 / -1;
   background: #16171b;
   color: #fff;
+}
+
+#stock-photo-manager-modal.is-editing-existing .stock-upload-dropzone,
+#stock-photo-manager-modal.is-editing-existing .stock-photo-manager-toolbar,
+#stock-photo-manager-modal.is-editing-existing #stock-photo-manager-grid,
+#stock-photo-manager-modal.is-editing-existing .stock-photo-manager-actions {
+  display: none;
 }
 
 #stock-photo-inspector-modal {

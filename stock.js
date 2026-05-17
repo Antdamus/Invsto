@@ -73,6 +73,7 @@ const STOCK_WORKER_ITEM_SELECT = [
 
 const stockMediaState = {
   itemId: null,
+  managerMode: "add",
   stagedImages: [],
   selectedPaths: new Set(),
   busy: false,
@@ -88,10 +89,19 @@ const stockMediaState = {
     offsetY: 0,
     rotation: 0,
     backgroundFill: "black",
+    mode: "add",
+    replaceExistingPath: "",
+    drag: null,
   },
   inspector: {
     index: -1,
     zoom: 1,
+  },
+  viewer: {
+    itemId: null,
+    signed: [],
+    currentPath: "",
+    currentUrl: "",
   },
 };
 
@@ -493,6 +503,7 @@ function buildLocationChips(item) {
               ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `
                 <span class="stock-card-action-cluster">
                   <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
+                  <button type="button" class="return-storage-btn" data-id="${item.id}">Return to Storage</button>
                   <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
                 </span>
               `}
@@ -828,6 +839,15 @@ function buildLocationChips(item) {
           e.stopPropagation();
           const itemId = replenishTrigger.dataset.id;
           if (itemId) window.storageTransferModule?.openForItem?.(itemId);
+          return;
+        }
+
+        const returnStorageTrigger = e.target.closest(".return-storage-btn");
+        if (returnStorageTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = returnStorageTrigger.dataset.id;
+          if (itemId) window.storageTransferModule?.openReturnForItem?.(itemId);
           return;
         }
 
@@ -4397,6 +4417,7 @@ function openStockPhotoInspector(index) {
 function closeStockPhotoEditor() {
   const editor = document.getElementById("stock-photo-editor");
   editor?.classList.add("hidden");
+  document.getElementById("stock-photo-editor-canvas")?.classList.remove("is-dragging");
   stockMediaState.editor = {
     index: -1,
     image: null,
@@ -4406,6 +4427,9 @@ function closeStockPhotoEditor() {
     offsetY: 0,
     rotation: 0,
     backgroundFill: "black",
+    mode: "add",
+    replaceExistingPath: "",
+    drag: null,
   };
 }
 
@@ -4444,6 +4468,59 @@ function setStockEditorBackgroundFill(fill) {
   stockMediaState.editor.backgroundFill = fill === "white" ? "white" : "black";
   syncStockEditorFillControls();
   drawStockPhotoEditor();
+}
+
+function clampStockEditorOffset(value) {
+  return Math.max(-1, Math.min(1, Number(value) || 0));
+}
+
+function updateStockEditorOffsetFromDrag(event) {
+  const drag = stockMediaState.editor.drag;
+  const canvas = document.getElementById("stock-photo-editor-canvas");
+  if (!drag || !canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const maxOffsetPixels = Math.max(1, rect.width * 0.42);
+  stockMediaState.editor.offsetX = clampStockEditorOffset(drag.startOffsetX + ((event.clientX - drag.startX) / maxOffsetPixels));
+  stockMediaState.editor.offsetY = clampStockEditorOffset(drag.startOffsetY + ((event.clientY - drag.startY) / maxOffsetPixels));
+  syncStockEditorControls();
+  drawStockPhotoEditor();
+}
+
+function setupStockPhotoEditorDrag() {
+  const canvas = document.getElementById("stock-photo-editor-canvas");
+  if (!canvas) return;
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!stockMediaState.editor.imageElement) return;
+    event.preventDefault();
+    canvas.setPointerCapture?.(event.pointerId);
+    canvas.classList.add("is-dragging");
+    stockMediaState.editor.drag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startOffsetX: stockMediaState.editor.offsetX,
+      startOffsetY: stockMediaState.editor.offsetY,
+    };
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!stockMediaState.editor.drag) return;
+    event.preventDefault();
+    updateStockEditorOffsetFromDrag(event);
+  });
+
+  const finishDrag = (event) => {
+    if (!stockMediaState.editor.drag) return;
+    canvas.releasePointerCapture?.(stockMediaState.editor.drag.pointerId || event.pointerId);
+    canvas.classList.remove("is-dragging");
+    stockMediaState.editor.drag = null;
+  };
+
+  canvas.addEventListener("pointerup", finishDrag);
+  canvas.addEventListener("pointercancel", finishDrag);
+  canvas.addEventListener("pointerleave", finishDrag);
 }
 
 function drawStockPhotoEditor() {
@@ -4489,7 +4566,14 @@ async function openStockPhotoEditor(index) {
       offsetY: 0,
       rotation: 0,
       backgroundFill: inferStockEditorBackgroundFill(image),
+      mode: image.replaceExistingPath ? "replace-existing" : "add",
+      replaceExistingPath: image.replaceExistingPath || "",
+      drag: null,
     };
+    const saveButton = document.getElementById("stock-photo-editor-save");
+    if (saveButton) {
+      saveButton.textContent = image.replaceExistingPath ? "Sign and Replace Photo" : "Use Edited Photo";
+    }
     document.getElementById("stock-photo-editor")?.classList.remove("hidden");
     syncStockEditorControls();
     drawStockPhotoEditor();
@@ -4505,7 +4589,24 @@ async function saveStockPhotoEditorImage() {
     return;
   }
 
-  setStockPhotoStatus("Saving edited photo...", "waiting");
+  const isReplacingExisting = stockMediaState.editor.mode === "replace-existing"
+    && stockMediaState.editor.replaceExistingPath;
+  let signed = null;
+  if (isReplacingExisting) {
+    signed = await requestStockPhotoSaveSignature([stockMediaState.editor.image?.path], {
+      mode: "replace",
+      title: "Replace This Photo?",
+      summary: "This will make the edited crop the active item photo. The previous file is kept in the audit trail for recovery.",
+      reason: "Edited existing item photo crop, rotation, or centering.",
+      confirmText: "Sign and Replace Photo",
+    });
+    if (!signed) {
+      setStockPhotoStatus("Photo edit cancelled. The current item photo was not changed.", "waiting");
+      return;
+    }
+  }
+
+  setStockPhotoStatus(isReplacingExisting ? "Replacing item photo..." : "Saving edited photo...", "waiting");
   setStockPhotoProgress(12, "Rendering edited crop...", true);
 
   try {
@@ -4523,6 +4624,37 @@ async function saveStockPhotoEditorImage() {
     setStockPhotoProgress(45, "Uploading edited photo...", true);
     const uploaded = await uploadStockPhotoBlob(blob, `edited-${stockMediaState.editor.image?.name || "stock-photo"}.png`, "image/png");
     uploaded.sourceType = "edited crop";
+
+    if (isReplacingExisting) {
+      setStockPhotoProgress(68, "Attaching replacement to item...", true);
+      const { data, error } = await supabase.rpc("replace_item_photo", {
+        _item_id: stockMediaState.itemId,
+        _old_photo_path: stockMediaState.editor.replaceExistingPath,
+        _new_photo_path: uploaded.path,
+        _reason: signed.reason,
+        _signed_by_email: signed.signedByEmail,
+      });
+      if (error) throw new Error(error.message || "Could not replace the item photo.");
+
+      setStockPhotoProgress(84, "Refreshing item photo...", true);
+      await bumpInventoryVersion([stockMediaState.itemId]);
+      await refreshItemById(stockMediaState.itemId);
+      window.dispatchEvent(new CustomEvent("stock:photos-replaced", {
+        detail: {
+          itemId: stockMediaState.itemId,
+          oldPhotoPath: stockMediaState.editor.replaceExistingPath,
+          newPhotoPath: uploaded.path,
+          photos: data || [],
+        },
+      }));
+      const editedItemId = stockMediaState.itemId;
+      closeStockPhotoManager();
+      setStockPhotoProgress(100, "Photo replaced.", true);
+      showToast("Item photo replaced.");
+      await openStockPhotoViewer(editedItemId, uploaded.path);
+      return;
+    }
+
     stockMediaState.stagedImages.unshift(uploaded);
     stockMediaState.selectedPaths.add(uploaded.path);
     renderStockPhotoManagerGrid();
@@ -4631,9 +4763,11 @@ async function handleStockPhotoFiles(files) {
 async function openStockPhotoManager(itemId) {
   const item = getStockItemById(itemId);
   stockMediaState.itemId = itemId;
+  stockMediaState.managerMode = "add";
   stockMediaState.stagedImages = [];
   stockMediaState.selectedPaths = new Set();
   stockMediaState.selectedCaptureStationId = "";
+  document.getElementById("stock-photo-manager-modal")?.classList.remove("is-editing-existing");
   document.getElementById("stock-photo-manager-title").textContent = `Add Photos${item?.title ? `: ${item.title}` : ""}`;
   document.getElementById("stock-photo-upload-input").value = "";
   setStockPhotoStatus("Upload photos, review the processed versions, then save only the ones you want.");
@@ -4652,6 +4786,8 @@ async function openStockPhotoManager(itemId) {
 function closeStockPhotoManager() {
   document.getElementById("stock-photo-manager-modal")?.classList.add("hidden");
   document.getElementById("stock-photo-manager-modal")?.classList.remove("show");
+  document.getElementById("stock-photo-manager-modal")?.classList.remove("is-editing-existing");
+  stockMediaState.managerMode = "add";
   document.body.classList.remove("modal-open");
   closeStockPhotoInspector();
   closeStockPhotoSaveConfirmModal();
@@ -4757,9 +4893,10 @@ function closeStockPhotoSaveConfirmModal() {
   }
 }
 
-function requestStockPhotoSaveSignature(selectedPaths = []) {
+function requestStockPhotoSaveSignature(selectedPaths = [], options = {}) {
   return new Promise((resolve) => {
     const modal = document.getElementById("stock-photo-save-confirm-modal");
+    const title = document.getElementById("stock-photo-save-confirm-title");
     const summary = document.getElementById("stock-photo-save-confirm-summary");
     const strip = document.getElementById("stock-photo-save-confirm-strip");
     const passwordInput = document.getElementById("stock-photo-save-password");
@@ -4779,8 +4916,12 @@ function requestStockPhotoSaveSignature(selectedPaths = []) {
       .filter(Boolean);
     const count = selectedImages.length || selectedPaths.length;
 
+    if (title) {
+      title.textContent = options.title || "Add Selected Photos?";
+    }
     if (summary) {
-      summary.textContent = `You are adding ${count} selected photo${count === 1 ? "" : "s"} to this item. Sign this change so it appears clearly in the audit trail.`;
+      summary.textContent = options.summary
+        || `You are adding ${count} selected photo${count === 1 ? "" : "s"} to this item. Sign this change so it appears clearly in the audit trail.`;
     }
     if (strip) {
       strip.innerHTML = selectedImages.slice(0, 8).map((image) => `
@@ -4789,11 +4930,11 @@ function requestStockPhotoSaveSignature(selectedPaths = []) {
     }
 
     passwordInput.value = "";
-    reasonInput.value = `Added ${count} selected item photo${count === 1 ? "" : "s"} from the stock photo manager.`;
+    reasonInput.value = options.reason || `Added ${count} selected item photo${count === 1 ? "" : "s"} from the stock photo manager.`;
     errorMsg.textContent = "";
     errorMsg.classList.remove("show");
     confirmBtn.disabled = false;
-    confirmBtn.textContent = "Sign and Add Photos";
+    confirmBtn.textContent = options.confirmText || "Sign and Add Photos";
 
     const cleanup = (value) => {
       confirmBtn.onclick = null;
@@ -4825,7 +4966,7 @@ function requestStockPhotoSaveSignature(selectedPaths = []) {
       const isValid = await validatePassword(password);
       if (!isValid) {
         confirmBtn.disabled = false;
-        confirmBtn.textContent = "Sign and Add Photos";
+        confirmBtn.textContent = options.confirmText || "Sign and Add Photos";
         errorMsg.textContent = "Incorrect password.";
         errorMsg.classList.add("show");
         return;
@@ -5399,6 +5540,12 @@ async function openStockPhotoViewer(itemId, startPath = "") {
   }
 
   stockPhotoViewerItemId = itemId;
+  stockMediaState.viewer = {
+    itemId,
+    signed: [],
+    currentPath: "",
+    currentUrl: "",
+  };
   document.getElementById("stock-photo-viewer-title").textContent = item.title || "Item Photos";
   const modal = document.getElementById("stock-photo-viewer-modal");
   const image = document.getElementById("stock-photo-viewer-image");
@@ -5409,10 +5556,13 @@ async function openStockPhotoViewer(itemId, startPath = "") {
     path,
     url: await getSignedUrl(path),
   })));
+  stockMediaState.viewer.signed = signed.filter((entry) => entry.path && entry.url);
 
   function showPath(path) {
     const entry = signed.find((photo) => photo.path === path) || signed[0];
     if (!entry?.url) return;
+    stockMediaState.viewer.currentPath = entry.path;
+    stockMediaState.viewer.currentUrl = entry.url;
     image.src = entry.url;
     thumbs.querySelectorAll("button").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.path === entry.path);
@@ -5435,10 +5585,54 @@ async function openStockPhotoViewer(itemId, startPath = "") {
   showPath(startPath || paths[0]);
 }
 
+async function openStockPhotoEditorFromViewer() {
+  const itemId = stockPhotoViewerItemId || stockMediaState.viewer.itemId;
+  const item = getStockItemById(itemId);
+  const currentPath = stockMediaState.viewer.currentPath;
+  const currentUrl = stockMediaState.viewer.currentUrl || await getSignedUrl(currentPath);
+  if (!itemId || !item || !currentPath || !currentUrl) {
+    showToast("Choose a photo before editing.");
+    return;
+  }
+
+  closeStockPhotoViewer();
+  closeStockPhotoEditor();
+  stockMediaState.itemId = itemId;
+  stockMediaState.managerMode = "replace-existing";
+  stockMediaState.selectedPaths = new Set();
+  const fileName = currentPath.split("/").pop() || "item-photo.png";
+  const thumbnailUrl = await createStockSignedImageUrl(STOCK_PHOTO_BUCKET, currentPath, {
+    transform: STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM,
+  }) || currentUrl;
+  stockMediaState.stagedImages = [{
+    path: currentPath,
+    name: fileName,
+    previewUrl: currentUrl,
+    thumbnailUrl,
+    storageBucket: STOCK_PHOTO_BUCKET,
+    sourceType: "current item photo",
+    replaceExistingPath: currentPath,
+  }];
+
+  const managerModal = document.getElementById("stock-photo-manager-modal");
+  managerModal?.classList.add("is-editing-existing");
+  document.getElementById("stock-photo-manager-title").textContent = `Edit Photo${item?.title ? `: ${item.title}` : ""}`;
+  document.getElementById("stock-photo-upload-input").value = "";
+  setStockPhotoStatus("Drag the image to recenter it, crop with zoom, rotate if needed, and choose black or white for any exposed background.");
+  resetStockPhotoProgress();
+  renderStockPhotoManagerGrid();
+  managerModal?.classList.remove("hidden");
+  managerModal?.classList.add("show");
+  document.body.classList.add("modal-open");
+  await openStockPhotoEditor(0);
+}
+
 function closeStockPhotoViewer() {
   document.getElementById("stock-photo-viewer-modal")?.classList.add("hidden");
   document.getElementById("stock-photo-viewer-modal")?.classList.remove("show");
   document.body.classList.remove("modal-open");
+  stockMediaState.viewer.currentPath = "";
+  stockMediaState.viewer.currentUrl = "";
 }
 
 function setupStockMediaListeners() {
@@ -5477,6 +5671,12 @@ function setupStockMediaListeners() {
       closeStockPhotoViewer();
       openStockPhotoManager(itemId);
     }
+  });
+  document.getElementById("stock-photo-viewer-edit")?.addEventListener("click", () => {
+    openStockPhotoEditorFromViewer().catch((error) => {
+      console.error("Failed to open current stock photo editor:", error);
+      showToast(error?.message || "Could not open the photo editor.");
+    });
   });
   document.getElementById("stock-photo-upload-input")?.addEventListener("change", (event) => {
     handleStockPhotoFiles(event.target.files);
@@ -5541,6 +5741,7 @@ function setupStockMediaListeners() {
     setStockEditorBackgroundFill("white");
   });
   document.getElementById("stock-photo-editor-save")?.addEventListener("click", saveStockPhotoEditorImage);
+  setupStockPhotoEditorDrag();
   document.getElementById("stock-photo-manager-grid")?.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button || stockMediaState.busy) return;

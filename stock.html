@@ -672,7 +672,10 @@
       <button type="button" id="close-stock-photo-viewer" class="stock-modal-close" title="Close">&times;</button>
       <div class="stock-photo-viewer-header">
         <h2 id="stock-photo-viewer-title">Item Photos</h2>
-        <button type="button" id="stock-photo-viewer-add" class="stock-secondary-btn">Add Photos</button>
+        <div class="stock-photo-viewer-actions">
+          <button type="button" id="stock-photo-viewer-edit" class="stock-secondary-btn">Edit Photo</button>
+          <button type="button" id="stock-photo-viewer-add" class="stock-secondary-btn">Add Photos</button>
+        </div>
       </div>
       <div class="stock-photo-viewer-stage">
         <img id="stock-photo-viewer-image" src="" alt="Selected item photo">
@@ -912,12 +915,12 @@
           </section>
 
           <section class="storage-transfer-panel">
-            <label for="return-transfer-bag-scan">Destination bag / container</label>
+            <label for="return-transfer-tray-scan">Source tray label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="return-transfer-bag-scan" placeholder="Scan bag barcode or name" autocomplete="off" />
-              <button type="button" id="return-transfer-find-bag" class="stock-secondary-btn">Find</button>
+              <input type="text" id="return-transfer-tray-scan" placeholder="Scan the tray holding this item" autocomplete="off" />
+              <button type="button" id="return-transfer-find-tray" class="stock-secondary-btn">Confirm Tray</button>
             </div>
-            <div id="return-transfer-bag-summary" class="storage-transfer-summary-card is-empty">No destination bag selected.</div>
+            <div id="return-transfer-selected-card" class="storage-transfer-selected-card is-empty">No return source selected.</div>
           </section>
 
           <section class="storage-transfer-panel">
@@ -927,6 +930,15 @@
               <button type="button" id="return-transfer-find-parent" class="stock-secondary-btn">Find</button>
             </div>
             <div id="return-transfer-parent-summary" class="storage-transfer-summary-card is-empty">No parent location selected.</div>
+          </section>
+
+          <section class="storage-transfer-panel">
+            <label for="return-transfer-bag-scan">Destination bag / container</label>
+            <div class="storage-transfer-scan-row">
+              <input type="text" id="return-transfer-bag-scan" placeholder="Scan bag barcode or name" autocomplete="off" />
+              <button type="button" id="return-transfer-find-bag" class="stock-secondary-btn">Find</button>
+            </div>
+            <div id="return-transfer-bag-summary" class="storage-transfer-summary-card is-empty">No destination bag selected.</div>
           </section>
         </div>
 
@@ -944,8 +956,6 @@
               <span>Return details</span>
               <small id="return-transfer-selection-status">Scan the item first.</small>
             </div>
-
-            <div id="return-transfer-selected-card" class="storage-transfer-selected-card is-empty">No return source selected.</div>
 
             <label for="return-transfer-quantity">Quantity to return</label>
             <input type="number" id="return-transfer-quantity" min="1" step="1" value="1" />
