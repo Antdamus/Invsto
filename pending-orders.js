@@ -1598,7 +1598,7 @@ function normalizeMatchText(value) {
 
 function getLiveLotItemGroups(items = state.selectedLiveLotItems) {
   const groups = new Map();
-  items.forEach((entry) => {
+  getPackableLiveLotItems(items).forEach((entry) => {
     const item = entry.item || {};
     const barcode = String(item.barcode || "").trim();
     const key = item.id || barcode || item.title || entry.id;
@@ -1614,6 +1614,10 @@ function getLiveLotItemGroups(items = state.selectedLiveLotItems) {
     if (entry.status) group.statuses.add(entry.status);
   });
   return Array.from(groups.values());
+}
+
+function getPackableLiveLotItems(items = state.selectedLiveLotItems) {
+  return (items || []).filter((entry) => entry.status === "reserved");
 }
 
 function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = state.selectedLiveLotItems) {
@@ -1679,9 +1683,11 @@ function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = sta
 
 function calculateLiveLotOrderMatches(lot = state.selectedLiveLot, items = state.selectedLiveLotItems) {
   if (!lot) return [];
+  const packableItems = getPackableLiveLotItems(items);
+  if (!packableItems.length) return [];
   return state.orders
     .filter(isOpenOrderLine)
-    .map((line) => scoreOrderLineForLiveLot(line, lot, items))
+    .map((line) => scoreOrderLineForLiveLot(line, lot, packableItems))
     .filter((match) => match.score > 0)
     .sort((a, b) => b.score - a.score || getShipTimestamp(a.line.order?.ship_by_date) - getShipTimestamp(b.line.order?.ship_by_date))
     .slice(0, 12);
@@ -1849,10 +1855,10 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
   }
 
   const lot = state.selectedLiveLot;
-  const reserved = state.selectedLiveLotItems.filter((entry) => entry.status === "reserved");
-  const totalQty = reserved.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+  const packableItems = getPackableLiveLotItems();
+  const totalQty = packableItems.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
   const sessionStatus = lot.session?.status ? ` - ${lot.session.status}` : "";
-  const sourceCount = new Set(reserved.map((entry) => entry.source_location_id).filter(Boolean)).size;
+  const sourceCount = new Set(packableItems.map((entry) => entry.source_location_id).filter(Boolean)).size;
   panel.className = `live-lot-panel is-loaded${global ? " is-global" : ""}`;
   if (global && $("bag-lookup-status")) {
     $("bag-lookup-status").textContent = `Auction ${lot.auction_number || "-"}`;
@@ -1863,10 +1869,10 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
         <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
         <small>Bag ${escapeHtml(lot.lot_code || "-")} - ${escapeHtml(lot.session?.session_code || "No session")}${escapeHtml(sessionStatus)} - Started ${escapeHtml(formatDate(lot.session?.started_at))}</small>
       </div>
-      <span class="live-lot-badge">${reserved.length} type(s) / ${totalQty} unit(s)${sourceCount ? ` / ${sourceCount} source(s)` : ""}</span>
+      <span class="live-lot-badge">${packableItems.length} type(s) / ${totalQty} unit(s)${sourceCount ? ` / ${sourceCount} source(s)` : ""}</span>
     </div>
     <div class="live-lot-items">
-      ${state.selectedLiveLotItems.map((entry) => {
+      ${packableItems.length ? packableItems.map((entry) => {
         const item = entry.item || {};
         const loc = entry.source_location || {};
         const sourceKind = getSourceKindLabel(loc);
@@ -1877,14 +1883,14 @@ function renderLiveLotPanelInto(panel, { global = false } = {}) {
               <strong>${escapeHtml(item.title || "Untitled item")}</strong>
               <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(item.barcode || "-")} - Qty ${Number(entry.quantity || 1).toLocaleString()} - ${escapeHtml(loc.location_name || "Unknown source")} - minute ${escapeHtml(formatElapsed(entry.show_elapsed_seconds))}</small>
             </div>
-            <b>${escapeHtml(entry.status || "reserved")}</b>
+            <b>Ready</b>
           </article>
         `;
-      }).join("")}
+      }).join("") : `<div class="empty-state">This bag has no currently reserved items to pack. Released corrections are kept only in the audit trail.</div>`}
     </div>
   `;
 
-  state.selectedLiveLotItems.forEach((entry) => {
+  packableItems.forEach((entry) => {
     const card = panel.querySelector(`[data-live-lot-item="${CSS.escape(entry.id)}"]`);
     const item = entry.item || {};
     resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
@@ -2123,7 +2129,7 @@ async function renderBundleReviewList(staged) {
 
 function getActiveLiveLotReservedItems() {
   if (!state.selectedLiveLot) return [];
-  return state.selectedLiveLotItems.filter((entry) => entry.status === "reserved");
+  return getPackableLiveLotItems();
 }
 
 async function renderLiveLotBundleReviewList(items) {
