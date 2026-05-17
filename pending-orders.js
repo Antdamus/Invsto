@@ -1582,18 +1582,85 @@ async function loadLiveLotItems(lotId) {
   return data || [];
 }
 
-function getLiveLotSearchTerms(lot) {
-  return [
-    lot?.auction_number,
-    lot?.lot_code,
-  ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
-}
-
 function normalizeMatchText(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
     .replace(/[\s_-]+/g, "");
+}
+
+function normalizeAuctionToken(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^#+/, "")
+    .replace(/[^a-z0-9]+/gi, "")
+    .toLowerCase();
+}
+
+function extractAuctionTokens(value) {
+  const text = String(value || "");
+  const tokens = new Set();
+  if (!text.trim()) return tokens;
+
+  const exact = normalizeAuctionToken(text);
+  if (exact && /^#?[a-z0-9-]+$/i.test(text.trim())) tokens.add(exact);
+
+  const hashPattern = /#\s*([a-z0-9][a-z0-9-]*)/gi;
+  let match = hashPattern.exec(text);
+  while (match) {
+    const token = normalizeAuctionToken(match[1]);
+    if (token) tokens.add(token);
+    match = hashPattern.exec(text);
+  }
+
+  const contextPattern = /\b(?:auction|auc|lot|bag)\s*(?:number|num|no\.?|#)?\s*[:.-]?\s*#?\s*([a-z0-9][a-z0-9-]*)/gi;
+  match = contextPattern.exec(text);
+  while (match) {
+    const token = normalizeAuctionToken(match[1]);
+    if (token) tokens.add(token);
+    match = contextPattern.exec(text);
+  }
+
+  return tokens;
+}
+
+function lineHasAuctionNumber(line, lot) {
+  const expected = normalizeAuctionToken(lot?.auction_number);
+  if (!expected) return false;
+  const fields = [
+    line.item_title,
+    line.custom_label,
+  ];
+  return fields.some((field) => extractAuctionTokens(field).has(expected));
+}
+
+function getLiveLotReferenceDate(lot) {
+  return lot?.created_at || lot?.session?.started_at || lot?.live_sale_sessions?.started_at || null;
+}
+
+function getOrderReferenceDate(order) {
+  return order?.sale_date || order?.paid_on_date || null;
+}
+
+function getLocalDayDistance(a, b) {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  const first = startOfLocalDay(a);
+  const second = startOfLocalDay(b);
+  const firstTime = first.getTime();
+  const secondTime = second.getTime();
+  if (Number.isNaN(firstTime) || Number.isNaN(secondTime)) return Number.POSITIVE_INFINITY;
+  return Math.round(Math.abs(firstTime - secondTime) / 86400000);
+}
+
+function lineDateFitsLiveLot(line, lot) {
+  return getLocalDayDistance(getLiveLotReferenceDate(lot), getOrderReferenceDate(line.order)) <= 1;
+}
+
+function getLiveLotOrderHardMatch(line, lot) {
+  return {
+    auctionMatches: lineHasAuctionNumber(line, lot),
+    dateMatches: lineDateFitsLiveLot(line, lot),
+  };
 }
 
 function getLiveLotItemGroups(items = state.selectedLiveLotItems) {
@@ -1623,6 +1690,15 @@ function getPackableLiveLotItems(items = state.selectedLiveLotItems) {
 function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = state.selectedLiveLotItems) {
   const reasons = [];
   let score = 0;
+  const hardMatch = getLiveLotOrderHardMatch(line, lot);
+  if (!hardMatch.auctionMatches || !hardMatch.dateMatches) {
+    return {
+      line,
+      score: 0,
+      reasons,
+    };
+  }
+
   const searchText = line.searchText || "";
   const lineNeedle = normalizeMatchText([
     line.item_title,
@@ -1632,14 +1708,10 @@ function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = sta
     line.order?.sales_record_number,
     line.order?.buyer_username,
   ].filter(Boolean).join(" "));
-  const lotTerms = getLiveLotSearchTerms(lot);
-
-  lotTerms.forEach((term) => {
-    if (term && searchText.includes(term)) {
-      score += 90;
-      reasons.push(term === String(lot?.auction_number || "").toLowerCase() ? "auction number" : "bag ID");
-    }
-  });
+  score += 120;
+  reasons.push("auction number");
+  score += 18;
+  reasons.push("sale date");
 
   const groups = getLiveLotItemGroups(items);
   const totalQty = groups.reduce((sum, group) => sum + Number(group.quantity || 0), 0);
@@ -1715,7 +1787,7 @@ function renderLiveLotOrderMatches() {
   if (!matches.length) {
     list.innerHTML = `
       <div class="empty-state">
-        This bag loaded, but no pending order looks like a strong match yet. Clear the bag lookup or search the queue manually.
+        No pending order has the same auction number and a sale date within one day of this bag. Clear the bag lookup or search the queue manually if this needs review.
       </div>
     `;
     return;
@@ -1837,7 +1909,7 @@ async function loadLiveLotByScan(rawTerm = "") {
     selectLikelyLineForLiveLot(state.selectedLiveLot);
     setStatus(state.liveLotOrderMatches.length
       ? "Live-sale bag loaded. Suggested eBay order matches are shown first."
-      : "Live-sale bag loaded. No likely pending order match was found.", "info");
+      : "Live-sale bag loaded. No pending order matched both auction number and sale date.", "info");
   } catch (error) {
     console.error("Live-sale bag load failed:", error);
     setStatus(error.message || "Could not load that live-sale bag.", "error");
