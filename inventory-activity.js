@@ -23,6 +23,8 @@ const state = {
   filteredRows: [],
   selectedDateFrom: "",
   selectedDateTo: "",
+  adminEmail: "",
+  pendingStockAdjustment: null,
 };
 
 const fmtMoney = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -113,6 +115,8 @@ async function checkAdminAuth() {
     return false;
   }
 
+  state.adminEmail = session.user?.email || "";
+
   const { data: employee, error } = await supabase
     .from("employees")
     .select("role, active, display_name")
@@ -136,6 +140,11 @@ async function checkAdminAuth() {
   }
 
   return true;
+}
+
+function isMissingDailyAdjustmentStorage(error) {
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""} ${error?.code || ""}`;
+  return /daily_stock_checkin_adjustments|admin_adjust_daily_stock_checkin|schema cache|could not find|does not exist/i.test(text);
 }
 
 function setActiveNavLink() {
@@ -233,38 +242,106 @@ async function loadStockAdds(startIso, endIso) {
 
   if (error) throw error;
 
+  const transactionIds = (data || []).map((tx) => tx.id).filter(Boolean);
+  const adjustmentsBySource = await loadStockAdjustments(transactionIds);
+
   return (data || []).map((tx) => {
     const item = tx.item_types || {};
     const loc = tx.locations || {};
-    const qty = Number(tx.quantity || 0);
+    const originalQty = Number(tx.quantity || 0);
     const unitCost = Number(item.cost || 0);
     const unitValue = Number(item.sale_price || 0);
     const deletedSameDay = isVoidedSameDayAdd(item, tx.confirmed_at || tx.timestamp);
+    const adjustments = adjustmentsBySource.get(tx.id) || [];
+    const latestAdjustment = adjustments[0] || null;
+    const effectiveQty = latestAdjustment ? Number(latestAdjustment.new_quantity || 0) : originalQty;
+    const adjusted = Boolean(latestAdjustment);
+    const reverted = adjusted && effectiveQty === 0;
+    const adjustmentNotes = adjustments.map((entry) => {
+      const nextQty = Number(entry.new_quantity || 0).toLocaleString();
+      const previousQty = Number(entry.previous_quantity || 0).toLocaleString();
+      const actor = entry.performed_by_email ? ` by ${entry.performed_by_email}` : "";
+      return `${formatDateTime(entry.created_at)}${actor}: ${previousQty} to ${nextQty}${entry.reason ? ` - ${entry.reason}` : ""}`;
+    }).join(" | ");
+    const baseNotes = deletedSameDay
+      ? `Voided from totals. Deleted ${formatDateTime(item.deleted_at)}${item.deleted_by_email ? ` by ${item.deleted_by_email}` : ""}${item.deletion_reason ? ` - ${item.deletion_reason}` : ""}`
+      : tx.notes || tx.method || "";
+    const notes = [
+      adjusted ? `Original add: ${originalQty.toLocaleString()} unit${originalQty === 1 ? "" : "s"}` : "",
+      adjustmentNotes,
+      baseNotes,
+    ].filter(Boolean).join(" | ");
 
     return {
       id: `stock-${tx.id}`,
-      kind: deletedSameDay ? "deleted" : "stock",
-      kindLabel: deletedSameDay ? "Deleted Same Day" : "Inventory Added",
+      kind: deletedSameDay ? "deleted" : reverted ? "stock-reverted" : adjusted ? "stock-adjusted" : "stock",
+      kindLabel: deletedSameDay ? "Deleted Same Day" : reverted ? "Inventory Reverted" : adjusted ? "Inventory Adjusted" : "Inventory Added",
       time: tx.confirmed_at || tx.timestamp,
+      transactionId: tx.id,
       itemId: tx.item_id,
       title: item.title || "Unknown item",
       barcode: item.barcode || "",
-      quantity: qty,
+      quantity: effectiveQty,
+      originalQuantity: originalQty,
+      adjusted,
+      reverted,
+      adjustments,
+      latestAdjustment,
       location: [loc.location_name, loc.location_code].filter(Boolean).join(" / "),
       worker: tx.email || tx.user_id || "Unknown",
-      cost: unitCost * qty,
-      value: unitValue * qty,
-      metricCost: deletedSameDay ? 0 : unitCost * qty,
-      metricValue: deletedSameDay ? 0 : unitValue * qty,
-      metricQuantity: deletedSameDay ? 0 : qty,
+      cost: unitCost * effectiveQty,
+      value: unitValue * effectiveQty,
+      metricCost: deletedSameDay ? 0 : unitCost * effectiveQty,
+      metricValue: deletedSameDay ? 0 : unitValue * effectiveQty,
+      metricQuantity: deletedSameDay ? 0 : effectiveQty,
       isVoided: deletedSameDay,
+      canAdjustStock: !deletedSameDay,
       deletedAt: item.deleted_at || "",
       deletedBy: item.deleted_by_email || "",
-      notes: deletedSameDay
-        ? `Voided from totals. Deleted ${formatDateTime(item.deleted_at)}${item.deleted_by_email ? ` by ${item.deleted_by_email}` : ""}${item.deletion_reason ? ` - ${item.deletion_reason}` : ""}`
-        : tx.notes || tx.method || "",
+      notes,
     };
   });
+}
+
+async function loadStockAdjustments(transactionIds = []) {
+  const ids = [...new Set(transactionIds.filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+
+  const { data, error } = await supabase
+    .from("daily_stock_checkin_adjustments")
+    .select(`
+      id,
+      source_transaction_id,
+      correction_transaction_id,
+      item_id,
+      location_id,
+      previous_quantity,
+      new_quantity,
+      quantity_delta,
+      reason,
+      performed_by,
+      performed_by_email,
+      created_at
+    `)
+    .in("source_transaction_id", ids)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (isMissingDailyAdjustmentStorage(error)) {
+      console.warn("Daily Adds adjustment migration has not been pushed yet:", error);
+      return map;
+    }
+    throw error;
+  }
+
+  (data || []).forEach((row) => {
+    const key = row.source_transaction_id;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  });
+
+  return map;
 }
 
 function renderMetrics(rows) {
@@ -274,7 +351,8 @@ function renderMetrics(rows) {
   const activeRows = rows.filter((row) => !row.isVoided);
   const voidedRows = rows.filter((row) => row.isVoided);
   const newItems = activeRows.filter((row) => row.kind === "new").length;
-  const stockEvents = activeRows.filter((row) => row.kind === "stock").length;
+  const stockEvents = activeRows.filter((row) => row.kind === "stock" || row.kind === "stock-adjusted").length;
+  const revertedStockEvents = rows.filter((row) => row.kind === "stock-reverted").length;
   const quantityAdded = rows.reduce((sum, row) => sum + Number(row.metricQuantity || 0), 0);
   const addedValue = rows.reduce((sum, row) => sum + Number(row.metricValue || 0), 0);
 
@@ -302,7 +380,26 @@ function renderMetrics(rows) {
     <div class="metric-card">
       <div class="metric-top"><div class="metric-label">Same-day Deleted</div><div class="metric-icon">VOID</div></div>
       <div class="metric-value">${voidedRows.length.toLocaleString()}</div>
-      <div class="metric-foot">Shown below, excluded from totals</div>
+      <div class="metric-foot">${revertedStockEvents.toLocaleString()} reverted inventory add${revertedStockEvents === 1 ? "" : "s"} also excluded</div>
+    </div>
+  `;
+}
+
+function renderStockActionCell(row) {
+  if (!row.canAdjustStock || !row.transactionId) return `<span class="activity-muted">--</span>`;
+
+  if (row.reverted) {
+    return `
+      <div class="activity-actions">
+        <button class="activity-action-btn" type="button" data-adjust-stock-id="${escapeHtml(row.id)}">Restore / Change</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="activity-actions">
+      <button class="activity-action-btn" type="button" data-adjust-stock-id="${escapeHtml(row.id)}">Change Qty</button>
+      <button class="activity-action-btn danger" type="button" data-revert-stock-id="${escapeHtml(row.id)}">Revert Add</button>
     </div>
   `;
 }
@@ -336,6 +433,7 @@ function renderTable(rows) {
           : fmtMoney(row.value)}
       </td>
       <td>${escapeHtml(row.notes || "--")}</td>
+      <td>${renderStockActionCell(row)}</td>
     </tr>
   `).join("");
 
@@ -353,6 +451,7 @@ function renderTable(rows) {
             <th>Cost</th>
             <th>Value</th>
             <th>Notes</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>${tableRows}</tbody>
@@ -373,6 +472,8 @@ function applySearch() {
         row.location,
         row.worker,
         row.notes,
+        row.adjusted ? "adjusted corrected correction changed quantity" : "",
+        row.reverted ? "reverted fake test removed take out" : "",
         row.isVoided ? "deleted voided excluded" : "",
       ].join(" ").toLowerCase();
       return haystack.includes(query);
@@ -381,6 +482,199 @@ function applySearch() {
   state.filteredRows = rows;
   renderMetrics(rows);
   renderTable(rows);
+}
+
+function getStockAdjustmentElements() {
+  return {
+    modal: document.getElementById("stock-adjustment-modal"),
+    title: document.getElementById("stock-adjustment-title"),
+    summary: document.getElementById("stock-adjustment-summary"),
+    stats: document.getElementById("stock-adjustment-stats"),
+    quantity: document.getElementById("stock-adjustment-quantity"),
+    reason: document.getElementById("stock-adjustment-reason"),
+    password: document.getElementById("stock-adjustment-password"),
+    error: document.getElementById("stock-adjustment-error"),
+    confirm: document.getElementById("stock-adjustment-confirm"),
+    cancel: document.getElementById("stock-adjustment-cancel"),
+    close: document.getElementById("stock-adjustment-close"),
+  };
+}
+
+function findActivityRow(rowId) {
+  return state.rows.find((row) => row.id === rowId) || null;
+}
+
+function setStockAdjustmentError(message = "") {
+  const { error } = getStockAdjustmentElements();
+  if (!error) return;
+  error.hidden = !message;
+  error.textContent = message || "";
+}
+
+function closeStockAdjustmentModal() {
+  const elements = getStockAdjustmentElements();
+  elements.modal?.classList.add("hidden");
+  elements.modal?.setAttribute("aria-hidden", "true");
+  state.pendingStockAdjustment = null;
+  if (elements.quantity) elements.quantity.value = "";
+  if (elements.reason) elements.reason.value = "";
+  if (elements.password) elements.password.value = "";
+  setStockAdjustmentError("");
+}
+
+function openStockAdjustmentModal(row, mode = "adjust") {
+  const elements = getStockAdjustmentElements();
+  if (!elements.modal || !row) return;
+
+  const currentQty = Math.max(0, Number(row.quantity || 0));
+  const nextQty = mode === "revert" ? 0 : currentQty;
+  state.pendingStockAdjustment = { rowId: row.id, mode };
+
+  if (elements.title) {
+    elements.title.textContent = mode === "revert" ? "Revert Inventory Add" : "Change Added Quantity";
+  }
+  if (elements.summary) {
+    elements.summary.innerHTML = `
+      <strong>${escapeHtml(row.title)}</strong>
+      <span>${escapeHtml(row.barcode || "No barcode")} - ${escapeHtml(row.location || "No location")}</span>
+    `;
+  }
+  if (elements.stats) {
+    elements.stats.innerHTML = `
+      <div><span>Original add</span><strong>${Number(row.originalQuantity ?? row.quantity ?? 0).toLocaleString()}</strong></div>
+      <div><span>Current counted add</span><strong>${currentQty.toLocaleString()}</strong></div>
+      <div><span>New counted add</span><strong id="stock-adjustment-preview">${nextQty.toLocaleString()}</strong></div>
+    `;
+  }
+  if (elements.quantity) {
+    elements.quantity.value = String(nextQty);
+    elements.quantity.readOnly = mode === "revert";
+  }
+  if (elements.reason) {
+    elements.reason.value = mode === "revert" ? "Reverting mistaken or test inventory add." : "";
+  }
+  if (elements.password) elements.password.value = "";
+  if (elements.confirm) {
+    elements.confirm.textContent = mode === "revert" ? "Sign and Revert Add" : "Sign and Save Quantity";
+  }
+  setStockAdjustmentError("");
+  elements.modal.classList.remove("hidden");
+  elements.modal.setAttribute("aria-hidden", "false");
+  setTimeout(() => (mode === "revert" ? elements.reason : elements.quantity)?.focus(), 60);
+}
+
+function updateStockAdjustmentPreview() {
+  const input = document.getElementById("stock-adjustment-quantity");
+  const preview = document.getElementById("stock-adjustment-preview");
+  if (!input || !preview) return;
+  const value = Math.max(0, Math.floor(Number(input.value || 0)));
+  preview.textContent = Number.isFinite(value) ? value.toLocaleString() : "0";
+}
+
+async function confirmStockAdjustment() {
+  const pending = state.pendingStockAdjustment;
+  if (!pending) return;
+
+  const row = findActivityRow(pending.rowId);
+  const elements = getStockAdjustmentElements();
+  if (!row) {
+    setStockAdjustmentError("This activity row is no longer available. Refresh and try again.");
+    return;
+  }
+
+  const newQuantity = Math.floor(Number(elements.quantity?.value || 0));
+  const reason = (elements.reason?.value || "").trim();
+  const password = elements.password?.value || "";
+
+  if (!Number.isFinite(newQuantity) || newQuantity < 0) {
+    setStockAdjustmentError("Enter a quantity of zero or higher.");
+    elements.quantity?.focus();
+    return;
+  }
+  if (newQuantity === Number(row.quantity || 0)) {
+    setStockAdjustmentError("That add is already at this quantity.");
+    elements.quantity?.focus();
+    return;
+  }
+  if (reason.length < 3) {
+    setStockAdjustmentError("Add a brief reason so the audit trail is useful.");
+    elements.reason?.focus();
+    return;
+  }
+  if (!password) {
+    setStockAdjustmentError("Enter your password to sign this correction.");
+    elements.password?.focus();
+    return;
+  }
+
+  if (!state.adminEmail) {
+    setStockAdjustmentError("Could not identify your admin email. Refresh and log in again.");
+    return;
+  }
+
+  if (elements.confirm) elements.confirm.disabled = true;
+  if (elements.cancel) elements.cancel.disabled = true;
+  if (elements.close) elements.close.disabled = true;
+  setStockAdjustmentError("");
+
+  try {
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: state.adminEmail,
+      password,
+    });
+    if (authError) throw authError;
+
+    const { error } = await supabase.rpc("admin_adjust_daily_stock_checkin", {
+      _source_transaction_id: row.transactionId,
+      _new_quantity: newQuantity,
+      _reason: reason,
+      _admin_email: state.adminEmail,
+    });
+
+    if (error) throw error;
+
+    closeStockAdjustmentModal();
+    await refreshActivity();
+  } catch (error) {
+    console.error("Daily Adds stock adjustment failed:", error);
+    const message = isMissingDailyAdjustmentStorage(error)
+      ? "The Daily Adds adjustment migration needs to be pushed before this can be used."
+      : error.message || "Could not save this correction.";
+    setStockAdjustmentError(message);
+  } finally {
+    if (elements.confirm) elements.confirm.disabled = false;
+    if (elements.cancel) elements.cancel.disabled = false;
+    if (elements.close) elements.close.disabled = false;
+  }
+}
+
+function setupStockAdjustmentModal() {
+  const elements = getStockAdjustmentElements();
+
+  document.getElementById("activity-table-container")?.addEventListener("click", (event) => {
+    const adjustBtn = event.target.closest("[data-adjust-stock-id]");
+    const revertBtn = event.target.closest("[data-revert-stock-id]");
+    const rowId = adjustBtn?.dataset.adjustStockId || revertBtn?.dataset.revertStockId || "";
+    if (!rowId) return;
+
+    const row = findActivityRow(rowId);
+    if (!row) return;
+    openStockAdjustmentModal(row, revertBtn ? "revert" : "adjust");
+  });
+
+  elements.close?.addEventListener("click", closeStockAdjustmentModal);
+  elements.cancel?.addEventListener("click", closeStockAdjustmentModal);
+  elements.modal?.addEventListener("click", (event) => {
+    if (event.target === elements.modal) closeStockAdjustmentModal();
+  });
+  elements.quantity?.addEventListener("input", updateStockAdjustmentPreview);
+  elements.confirm?.addEventListener("click", confirmStockAdjustment);
+  elements.password?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmStockAdjustment();
+    }
+  });
 }
 
 async function refreshActivity() {
@@ -437,6 +731,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   setActiveNavLink();
   setupNavigation();
+  setupStockAdjustmentModal();
 
   const today = localDateValue();
   const fromInput = document.getElementById("activity-date-from");

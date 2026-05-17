@@ -143,6 +143,41 @@
     </div>
   </div>
 
+  <div class="activity-modal hidden" id="stock-adjustment-modal" aria-hidden="true">
+    <div class="activity-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="stock-adjustment-title">
+      <button class="activity-modal-close" id="stock-adjustment-close" type="button" aria-label="Close">Close</button>
+      <div class="activity-modal-kicker">Signed Correction</div>
+      <h2 id="stock-adjustment-title">Change Added Quantity</h2>
+      <p class="activity-modal-copy">
+        This updates the counted Daily Adds quantity, moves the stock difference at the same location, and writes a correction trail.
+      </p>
+      <div class="stock-adjustment-summary" id="stock-adjustment-summary"></div>
+      <div class="stock-adjustment-stats" id="stock-adjustment-stats"></div>
+
+      <label class="stock-adjustment-field">
+        <span>New quantity counted from this add</span>
+        <input id="stock-adjustment-quantity" type="number" min="0" step="1" inputmode="numeric" />
+      </label>
+
+      <label class="stock-adjustment-field">
+        <span>Reason</span>
+        <textarea id="stock-adjustment-reason" rows="3" placeholder="Example: test inventory, duplicate check-in, wrong count after double-checking"></textarea>
+      </label>
+
+      <label class="stock-adjustment-field">
+        <span>Admin password</span>
+        <input id="stock-adjustment-password" type="password" autocomplete="current-password" placeholder="Sign this correction" />
+      </label>
+
+      <div class="stock-adjustment-error" id="stock-adjustment-error" hidden></div>
+
+      <div class="stock-adjustment-footer">
+        <button class="stock-adjustment-secondary" id="stock-adjustment-cancel" type="button">Cancel</button>
+        <button class="stock-adjustment-primary" id="stock-adjustment-confirm" type="button">Sign and Save Quantity</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
