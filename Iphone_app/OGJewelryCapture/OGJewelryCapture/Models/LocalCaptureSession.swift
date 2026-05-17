@@ -23,6 +23,7 @@ struct LocalCaptureSession: Equatable {
     static let softMaxPhotoCount = 10
 
     let jobID: UUID
+    let finalUploadTargetJobID: UUID?
     let resolutionMode: CaptureResolutionMode
     let keptPhotos: [LocalSessionPhoto]
     let isUploadingFinalSet: Bool

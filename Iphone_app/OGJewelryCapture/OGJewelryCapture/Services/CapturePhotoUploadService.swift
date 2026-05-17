@@ -63,8 +63,12 @@ struct CapturePhotoUploadService {
         )
     }
 
-    func uploadSessionPhoto(_ photo: LocalSessionPhoto, stationID: UUID) async throws -> UploadResult {
-        let objectPath = makeObjectPath(for: photo, stationID: stationID)
+    func uploadSessionPhoto(
+        _ photo: LocalSessionPhoto,
+        stationID: UUID,
+        targetJobID: UUID? = nil
+    ) async throws -> UploadResult {
+        let objectPath = makeObjectPath(for: photo, stationID: stationID, targetJobID: targetJobID)
         let uploadTimestamp = Date()
 
         let imageData: Data
@@ -100,8 +104,9 @@ struct CapturePhotoUploadService {
         return "\(stationID.uuidString.lowercased())/\(capture.jobID.uuidString.lowercased())/\(timestamp)-capture.jpg"
     }
 
-    private func makeObjectPath(for photo: LocalSessionPhoto, stationID: UUID) -> String {
+    private func makeObjectPath(for photo: LocalSessionPhoto, stationID: UUID, targetJobID: UUID?) -> String {
         let timestamp = formatter.string(from: photo.capturedAt)
-        return "\(stationID.uuidString.lowercased())/\(photo.jobID.uuidString.lowercased())/\(photo.sortOrder)-\(timestamp)-capture.jpg"
+        let jobID = targetJobID ?? photo.jobID
+        return "\(stationID.uuidString.lowercased())/\(jobID.uuidString.lowercased())/\(photo.sortOrder)-\(timestamp)-capture.jpg"
     }
 }

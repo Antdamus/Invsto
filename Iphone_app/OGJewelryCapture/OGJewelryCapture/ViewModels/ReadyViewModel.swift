@@ -438,6 +438,7 @@ final class ReadyViewModel: ObservableObject {
         let remainingPhotos = session.keptPhotos.filter { $0.id != photo.id }
         let updatedSession = sessionWithReindexedPhotos(
             jobID: session.jobID,
+            finalUploadTargetJobID: session.finalUploadTargetJobID,
             resolutionMode: session.resolutionMode,
             keptPhotos: remainingPhotos,
             isUploadingFinalSet: false
@@ -521,6 +522,7 @@ final class ReadyViewModel: ObservableObject {
         pendingJob = job
         activeSession = LocalCaptureSession(
             jobID: job.id,
+            finalUploadTargetJobID: nil,
             resolutionMode: captureResolutionMode,
             keptPhotos: [],
             isUploadingFinalSet: false
@@ -622,6 +624,7 @@ final class ReadyViewModel: ObservableObject {
     private func appendKeptPhoto(_ result: LocalCaptureResult) throws -> LocalCaptureSession {
         let currentSession = activeSession ?? LocalCaptureSession(
             jobID: result.jobID,
+            finalUploadTargetJobID: nil,
             resolutionMode: captureResolutionMode,
             keptPhotos: [],
             isUploadingFinalSet: false
@@ -635,6 +638,7 @@ final class ReadyViewModel: ObservableObject {
 
         let updatedSession = sessionWithReindexedPhotos(
             jobID: currentSession.jobID,
+            finalUploadTargetJobID: currentSession.finalUploadTargetJobID,
             resolutionMode: currentSession.resolutionMode,
             keptPhotos: currentSession.keptPhotos + [storedPhoto],
             isUploadingFinalSet: false
@@ -645,6 +649,7 @@ final class ReadyViewModel: ObservableObject {
 
     private func sessionWithReindexedPhotos(
         jobID: UUID,
+        finalUploadTargetJobID: UUID?,
         resolutionMode: CaptureResolutionMode,
         keptPhotos: [LocalSessionPhoto],
         isUploadingFinalSet: Bool
@@ -676,6 +681,7 @@ final class ReadyViewModel: ObservableObject {
 
         return LocalCaptureSession(
             jobID: jobID,
+            finalUploadTargetJobID: finalUploadTargetJobID,
             resolutionMode: resolutionMode,
             keptPhotos: sortedPhotos,
             isUploadingFinalSet: isUploadingFinalSet
@@ -707,6 +713,7 @@ final class ReadyViewModel: ObservableObject {
 
         let uploadingSession = LocalCaptureSession(
             jobID: session.jobID,
+            finalUploadTargetJobID: session.finalUploadTargetJobID,
             resolutionMode: session.resolutionMode,
             keptPhotos: session.keptPhotos,
             isUploadingFinalSet: true
@@ -715,23 +722,60 @@ final class ReadyViewModel: ObservableObject {
         activeSession = uploadingSession
         latestLocalResult = nil
         latestUploadResult = nil
-        finishJobMessage = "Uploading \(uploadingSession.keptPhotoCount) kept photo\(uploadingSession.keptPhotoCount == 1 ? "" : "s") and finalizing the job."
+        finishJobMessage = "Resolving the final upload target for \(uploadingSession.keptPhotoCount) kept photo\(uploadingSession.keptPhotoCount == 1 ? "" : "s")."
         captureState = .uploadingFinalSet(job, uploadingSession)
 
         do {
-            _ = try await repository.ensureUploadingForMultiPhotoRetry(
-                id: job.id,
-                captureCompletedAt: Date()
-            )
+            let finalTargetJob: CaptureJob
+            let resolvedSession: LocalCaptureSession
 
-            let sortedPhotos = uploadingSession.keptPhotos.sorted { $0.sortOrder < $1.sortOrder }
+            if let finalUploadTargetJobID = uploadingSession.finalUploadTargetJobID {
+                guard let lockedFinalTargetJob = try await repository.fetchJob(id: finalUploadTargetJobID) else {
+                    throw CaptureJobRepository.RepositoryError.transitionRejected
+                }
+
+                _ = try await repository.ensureUploadingForMultiPhotoRetry(
+                    id: lockedFinalTargetJob.id,
+                    captureCompletedAt: Date()
+                )
+                finalTargetJob = lockedFinalTargetJob
+                resolvedSession = uploadingSession
+                finishJobMessage = "Retrying upload to the previously resolved final target \(lockedFinalTargetJob.shortReference)."
+            } else {
+                let resolution = try await repository.resolveFinalCaptureUploadTarget(
+                    stationID: station.id,
+                    currentActiveJobID: job.id
+                )
+
+                finalTargetJob = resolution.job
+                resolvedSession = LocalCaptureSession(
+                    jobID: uploadingSession.jobID,
+                    finalUploadTargetJobID: resolution.job.id,
+                    resolutionMode: uploadingSession.resolutionMode,
+                    keptPhotos: uploadingSession.keptPhotos,
+                    isUploadingFinalSet: true
+                )
+                activeSession = resolvedSession
+
+                if resolution.targetSwitched {
+                    finishJobMessage = "Newest signal found. Uploading kept photos to final target \(resolution.job.shortReference)."
+                } else {
+                    finishJobMessage = "Final target confirmed. Uploading kept photos to job \(resolution.job.shortReference)."
+                }
+            }
+
+            let sortedPhotos = resolvedSession.keptPhotos.sorted { $0.sortOrder < $1.sortOrder }
             var mostRecentUploadResult: CapturePhotoUploadService.UploadResult?
             var uploadResultsByPhotoID = [UUID: CapturePhotoUploadService.UploadResult]()
 
             for photo in sortedPhotos {
-                let uploadResult = try await uploadService.uploadSessionPhoto(photo, stationID: station.id)
+                let uploadResult = try await uploadService.uploadSessionPhoto(
+                    photo,
+                    stationID: station.id,
+                    targetJobID: finalTargetJob.id
+                )
                 let recorded = try await repository.recordCaptureJobPhoto(
-                    jobID: job.id,
+                    jobID: finalTargetJob.id,
                     sortOrder: photo.sortOrder,
                     isPrimary: photo.isPrimary,
                     storageBucket: uploadResult.bucket,
@@ -751,7 +795,7 @@ final class ReadyViewModel: ObservableObject {
             }
 
             let finalized = try await repository.completeCaptureJobMultiPhoto(
-                jobID: job.id,
+                jobID: finalTargetJob.id,
                 expectedPhotoCount: sortedPhotos.count,
                 uploadCompletedAt: mostRecentUploadResult?.uploadedAt ?? Date()
             )
@@ -767,7 +811,7 @@ final class ReadyViewModel: ObservableObject {
 
                 if let primaryUploadResult {
                     latestUploadResult = CaptureUploadResult(
-                        jobID: job.id,
+                        jobID: finalTargetJob.id,
                         capturedAt: primaryPhoto.capturedAt,
                         uploadedAt: primaryUploadResult.uploadedAt,
                         imageData: imageData,
@@ -780,18 +824,19 @@ final class ReadyViewModel: ObservableObject {
                 }
             }
 
-            photoStore.clearSession(jobID: job.id)
+            photoStore.clearSession(jobID: session.jobID)
             activeSession = nil
             activeJobID = nil
             pendingJob = nil
             latestLocalResult = nil
-            finishJobMessage = "Job \(job.shortReference) uploaded and completed successfully."
+            finishJobMessage = "Job \(finalTargetJob.shortReference) uploaded and completed successfully."
             captureState = .listening
 
             await refreshPendingJob()
         } catch {
             let recoveredSession = LocalCaptureSession(
                 jobID: session.jobID,
+                finalUploadTargetJobID: activeSession?.finalUploadTargetJobID ?? session.finalUploadTargetJobID,
                 resolutionMode: session.resolutionMode,
                 keptPhotos: session.keptPhotos,
                 isUploadingFinalSet: false
@@ -880,6 +925,7 @@ final class ReadyViewModel: ObservableObject {
         if let activeSession {
             let restoredSession = LocalCaptureSession(
                 jobID: activeSession.jobID,
+                finalUploadTargetJobID: activeSession.finalUploadTargetJobID,
                 resolutionMode: activeSession.resolutionMode,
                 keptPhotos: activeSession.keptPhotos,
                 isUploadingFinalSet: false

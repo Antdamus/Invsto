@@ -1,6 +1,14 @@
 import Foundation
 import Supabase
 
+struct CaptureFinalUploadTarget: Equatable {
+    let job: CaptureJob
+    let targetSwitched: Bool
+    let originalActiveJobID: UUID
+    let supersededCount: Int
+    let message: String?
+}
+
 struct CaptureJobRepository {
     enum RepositoryError: LocalizedError {
         case transitionRejected
@@ -114,6 +122,35 @@ struct CaptureJobRepository {
         return jobs.first
     }
 
+    func resolveFinalCaptureUploadTarget(
+        stationID: UUID,
+        currentActiveJobID: UUID
+    ) async throws -> CaptureFinalUploadTarget {
+        let params = ResolveFinalCaptureUploadTargetParams(
+            stationID: stationID,
+            currentActiveJobID: currentActiveJobID
+        )
+
+        let resolutionResults: [ResolveFinalCaptureUploadTargetResponse] = try await client
+            .rpc("resolve_final_capture_upload_target", params: params)
+            .execute()
+            .value
+
+        guard let resolutionResult = resolutionResults.first,
+              let job = try await fetchJob(id: resolutionResult.jobID)
+        else {
+            throw RepositoryError.transitionRejected
+        }
+
+        return CaptureFinalUploadTarget(
+            job: job,
+            targetSwitched: resolutionResult.targetSwitched,
+            originalActiveJobID: resolutionResult.originalActiveJobID,
+            supersededCount: resolutionResult.supersededCount,
+            message: resolutionResult.message
+        )
+    }
+
     func claimJobForCapture(id: UUID) async throws -> Bool {
         return try await updateLifecycle(
             jobID: id,
@@ -157,6 +194,10 @@ struct CaptureJobRepository {
     }
 
     func ensureUploadingForMultiPhotoRetry(id: UUID, captureCompletedAt: Date) async throws -> Bool {
+        if let job = try await fetchJob(id: id), job.status == .uploading {
+            return true
+        }
+
         if try await markUploading(id: id, captureCompletedAt: captureCompletedAt) {
             return true
         }
@@ -321,6 +362,44 @@ private struct ClaimNewestCaptureJobForStationResponse: Decodable, Sendable {
     let requestedAt: Date
     let targetSwitched: Bool
     let originalActiveJobID: UUID?
+    let supersededCount: Int
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case stationID = "station_id"
+        case status
+        case requestedAt = "requested_at"
+        case targetSwitched = "target_switched"
+        case originalActiveJobID = "original_active_job_id"
+        case supersededCount = "superseded_count"
+        case message
+    }
+}
+
+private struct ResolveFinalCaptureUploadTargetParams: Encodable, Sendable {
+    let stationID: UUID
+    let currentActiveJobID: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case stationID = "_station_id"
+        case currentActiveJobID = "_current_active_job_id"
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(stationID, forKey: .stationID)
+        try container.encode(currentActiveJobID, forKey: .currentActiveJobID)
+    }
+}
+
+private struct ResolveFinalCaptureUploadTargetResponse: Decodable, Sendable {
+    let jobID: UUID
+    let stationID: UUID
+    let status: CaptureJobStatus
+    let requestedAt: Date
+    let targetSwitched: Bool
+    let originalActiveJobID: UUID
     let supersededCount: Int
     let message: String?
 
