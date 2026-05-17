@@ -5,7 +5,13 @@ let latestLocationDymoXml = null;
 let latestLocationDymoUrl = null;
 let pendingBulkItem = null; // item selected for a bulk bag
 let activeStoreOptions = [];
+let activeAssignLocationOptions = [];
+let selectedAssignLocation = null;
+let selectedAssignParentLocation = null;
+let assignPlacementMode = "tray";
+const assignPlacementScanTimers = {};
 let pendingAssignLocationDraft = null;
+let pendingInventoryLabelPrintState = null;
 
 function escapeLocationDymoXml(value) {
   return String(value ?? "")
@@ -285,28 +291,87 @@ async function bumpInventoryVersion(changedIds = null) {
   }
 
   function resetAssignLocationSelection() {
+    selectedAssignLocation = null;
+    selectedAssignParentLocation = null;
+    const idInput = document.getElementById("assign-location-id");
     const nameInput = document.getElementById("assign-location-name");
     const barcodeInput = document.getElementById("assign-location-barcode");
     const nameToggle = document.getElementById("assign-location-name-dropdown-toggle");
     const barcodeToggle = document.getElementById("assign-location-barcode-dropdown-toggle");
+    const summary = document.getElementById("assign-location-selection-summary");
 
+    if (idInput) idInput.value = "";
     if (nameInput) nameInput.value = "";
     if (barcodeInput) barcodeInput.value = "";
     if (nameToggle) nameToggle.innerText = "Select Location Name";
     if (barcodeToggle) barcodeToggle.innerText = "Select Barcode";
+    if (summary) summary.textContent = "Scan a destination barcode to see the storage snapshot.";
     renderLocationIntelligenceEmpty("assign-location-intelligence");
   }
 
-  function setAssignLocationSelection({ locationName = "", locationCode = "" } = {}) {
+  function getAssignLocationLabel(location) {
+    if (!location) return "selected location";
+    const name = location.name || location.location_name || "";
+    const code = location.code || location.location_code || "";
+    return code ? `${name} (${code})` : name || code || "selected location";
+  }
+
+  function getAssignLocationStoreLabel(location) {
+    if (!location) return "";
+    return isTrayAssignLocation(location) ? location.currentStoreName : location.storeName;
+  }
+
+  function setAssignLocationSelection(location = null) {
+    const legacyLocation = location && !location.id && (location.locationName || location.locationCode)
+      ? {
+          id: "",
+          name: location.locationName || "",
+          code: location.locationCode || "",
+          type: "",
+          storeName: "",
+          currentStoreName: "",
+        }
+      : null;
+    const locationObject = legacyLocation || (typeof location === "string"
+      ? activeAssignLocationOptions.find((entry) => entry.id === location || entry.name === location || entry.code === location) || null
+      : location);
+    selectedAssignLocation = locationObject || null;
+    const idInput = document.getElementById("assign-location-id");
     const nameInput = document.getElementById("assign-location-name");
     const barcodeInput = document.getElementById("assign-location-barcode");
     const nameToggle = document.getElementById("assign-location-name-dropdown-toggle");
     const barcodeToggle = document.getElementById("assign-location-barcode-dropdown-toggle");
+    const summary = document.getElementById("assign-location-selection-summary");
+    const locationName = locationObject?.name || locationObject?.location_name || "";
+    const locationCode = locationObject?.code || locationObject?.location_code || "";
+    const storeName = getAssignLocationStoreLabel(locationObject);
+    const typeName = locationObject?.type || "";
 
+    if (idInput) idInput.value = locationObject?.id || "";
     if (nameInput) nameInput.value = locationName || "";
     if (barcodeInput) barcodeInput.value = locationCode || "";
     if (nameToggle) nameToggle.innerText = locationName || "Select Location Name";
     if (barcodeToggle) barcodeToggle.innerText = locationCode || "Select Barcode";
+    if (summary) {
+      summary.textContent = locationObject
+        ? [
+            locationCode ? `Barcode: ${locationCode}` : "",
+            storeName ? `Store: ${storeName}` : "",
+            typeName ? `Type: ${typeName}` : "",
+          ].filter(Boolean).join(" | ")
+        : "Scan a destination barcode to see the storage snapshot.";
+    }
+
+    if (locationObject?.id) {
+      const barcode = document.getElementById("modal-assign-location")?.dataset?.barcode || "";
+      const batchItem = currentBatch[barcode];
+      renderLocationIntelligence("assign-location-intelligence", locationObject.id, {
+        referenceWeight: Number(batchItem?.item?.weight),
+        referenceLabel: batchItem?.item?.title || "this item",
+      });
+    } else {
+      renderLocationIntelligenceEmpty("assign-location-intelligence");
+    }
   }
 
   async function populateAssignLocationStoreFilter(selectedStoreId = "") {
@@ -422,7 +487,7 @@ async function bumpInventoryVersion(changedIds = null) {
   async function fetchAssignableLocations(storeId = "") {
     let query = supabase
       .from("locations")
-      .select("id, location_name, location_code, store_id, type, max_capacity")
+      .select("id, location_name, location_code, store_id, type, max_capacity, parent_location_id, location_role, is_tray, tray_current_store_id")
       .eq("active", true)
       .order("location_name", { ascending: true });
 
@@ -436,7 +501,268 @@ async function bumpInventoryVersion(changedIds = null) {
       return [];
     }
 
-    return Array.isArray(data) ? data : [];
+    const stores = activeStoreOptions.length ? activeStoreOptions : await fetchActiveStores();
+    const storeNameById = new Map(stores.map((store) => [String(store.id), store.name]));
+
+    return (Array.isArray(data) ? data : [])
+      .map((location) => ({
+        id: String(location.id || ""),
+        name: String(location.location_name || "").trim(),
+        code: String(location.location_code || "").trim(),
+        type: String(location.type || "").trim(),
+        storeId: String(location.store_id || "").trim(),
+        parentId: String(location.parent_location_id || "").trim(),
+        role: String(location.location_role || "").trim(),
+        isTray: Boolean(location.is_tray),
+        trayCurrentStoreId: String(location.tray_current_store_id || "").trim(),
+        storeName: storeNameById.get(String(location.store_id || "")) || "No store assigned",
+        currentStoreName: storeNameById.get(String(location.tray_current_store_id || "")) || storeNameById.get(String(location.store_id || "")) || "No store assigned",
+        maxCapacity: Number(location.max_capacity) || null,
+      }))
+      .filter((location) => location.id && location.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function isTrayAssignLocation(location) {
+    return Boolean(location?.isTray) || String(location?.role || "").toLowerCase() === "tray";
+  }
+
+  function isContainerAssignLocation(location) {
+    return !isTrayAssignLocation(location) && (
+      String(location?.role || "").toLowerCase() === "container" || Boolean(location?.parentId)
+    );
+  }
+
+  function isParentStorageAssignLocation(location) {
+    return Boolean(location) && !isTrayAssignLocation(location) && !isContainerAssignLocation(location);
+  }
+
+  function findAssignLocationByBarcode(barcode, predicate = null) {
+    const normalized = String(barcode || "").trim().toLowerCase();
+    if (!normalized) return null;
+
+    const matches = activeAssignLocationOptions.filter((location) => {
+      const isCodeMatch = String(location.code || "").trim().toLowerCase() === normalized;
+      return isCodeMatch && (!predicate || predicate(location));
+    });
+
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function setAssignPlacementStepStatus(id, message, type = "info") {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    element.textContent = message || "";
+    element.classList.toggle("is-success", type === "success");
+    element.classList.toggle("is-error", type === "error");
+  }
+
+  function setAssignPlacementStepState(stepId, state = "") {
+    const step = document.getElementById(stepId);
+    if (!step) return;
+    step.classList.toggle("is-active", state === "active");
+    step.classList.toggle("is-complete", state === "complete");
+  }
+
+  function focusAssignPlacementInput(id, options = {}) {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    setTimeout(() => {
+      if (options.scroll !== false) {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      input.focus({ preventScroll: true });
+      input.select?.();
+    }, options.delayMs ?? 80);
+  }
+
+  function focusAssignQuantityInput() {
+    focusAssignPlacementInput("assign-location-quantity", { delayMs: 70 });
+  }
+
+  function resetAssignPlacementScanInputs() {
+    Object.keys(assignPlacementScanTimers).forEach((key) => {
+      clearTimeout(assignPlacementScanTimers[key]);
+      delete assignPlacementScanTimers[key];
+    });
+
+    ["assign-placement-tray-barcode", "assign-placement-parent-barcode", "assign-placement-container-barcode"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
+
+    selectedAssignParentLocation = null;
+    setAssignPlacementStepStatus("assign-placement-tray-status", "Waiting for tray scan.");
+    setAssignPlacementStepStatus("assign-placement-parent-status", "Scan the parent storage label first.");
+    setAssignPlacementStepStatus("assign-placement-container-status", "Container must belong to the scanned parent.");
+  }
+
+  function syncAssignPlacementModeUI() {
+    const flow = document.getElementById("assign-placement-scan-flow");
+    const trayStep = document.getElementById("assign-placement-tray-step");
+    const parentStep = document.getElementById("assign-placement-parent-step");
+    const containerStep = document.getElementById("assign-placement-container-step");
+    const isContainerMode = assignPlacementMode === "container";
+
+    flow?.setAttribute("data-mode", assignPlacementMode);
+    document.querySelectorAll("[data-assign-placement-mode]").forEach((button) => {
+      const isActive = button.dataset.assignPlacementMode === assignPlacementMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-checked", isActive ? "true" : "false");
+    });
+
+    trayStep?.classList.toggle("hidden", isContainerMode);
+    parentStep?.classList.toggle("hidden", !isContainerMode);
+    containerStep?.classList.toggle("hidden", !isContainerMode);
+
+    if (isContainerMode) {
+      setAssignPlacementStepState("assign-placement-parent-step", "active");
+      setAssignPlacementStepState("assign-placement-container-step", "");
+      setAssignPlacementStepState("assign-placement-tray-step", "");
+    } else {
+      setAssignPlacementStepState("assign-placement-tray-step", "active");
+      setAssignPlacementStepState("assign-placement-parent-step", "");
+      setAssignPlacementStepState("assign-placement-container-step", "");
+    }
+  }
+
+  function setAssignPlacementMode(mode = "tray", { clear = true, focus = true } = {}) {
+    assignPlacementMode = mode === "container" ? "container" : "tray";
+    try {
+      window.localStorage?.setItem("og.addInventory.stockPlacementMode", assignPlacementMode);
+    } catch (_) {}
+
+    if (clear) {
+      resetAssignLocationSelection();
+      resetAssignPlacementScanInputs();
+    }
+
+    syncAssignPlacementModeUI();
+    if (focus) {
+      focusAssignPlacementInput(assignPlacementMode === "container" ? "assign-placement-parent-barcode" : "assign-placement-tray-barcode");
+    }
+  }
+
+  function restoreAssignPlacementModePreference() {
+    try {
+      const saved = window.localStorage?.getItem("og.addInventory.stockPlacementMode");
+      assignPlacementMode = saved === "container" ? "container" : "tray";
+    } catch (_) {
+      assignPlacementMode = "tray";
+    }
+  }
+
+  function completeAssignTrayScan(location) {
+    setAssignLocationSelection(location);
+    setAssignPlacementStepState("assign-placement-tray-step", "complete");
+    setAssignPlacementStepStatus(
+      "assign-placement-tray-status",
+      `Selected ${getAssignLocationLabel(location)}.`,
+      "success"
+    );
+    focusAssignQuantityInput();
+  }
+
+  function completeAssignParentScan(location) {
+    selectedAssignParentLocation = location;
+    setAssignLocationSelection(null);
+    setAssignPlacementStepState("assign-placement-parent-step", "complete");
+    setAssignPlacementStepState("assign-placement-container-step", "active");
+    setAssignPlacementStepStatus(
+      "assign-placement-parent-status",
+      `Parent confirmed: ${getAssignLocationLabel(location)}.`,
+      "success"
+    );
+    setAssignPlacementStepStatus("assign-placement-container-status", "Now scan the container or bag inside that parent.");
+    const containerInput = document.getElementById("assign-placement-container-barcode");
+    if (containerInput) containerInput.value = "";
+    focusAssignPlacementInput("assign-placement-container-barcode");
+  }
+
+  function completeAssignContainerScan(location) {
+    setAssignLocationSelection(location);
+    setAssignPlacementStepState("assign-placement-container-step", "complete");
+    setAssignPlacementStepStatus(
+      "assign-placement-container-status",
+      `Container selected: ${getAssignLocationLabel(location)}.`,
+      "success"
+    );
+    focusAssignQuantityInput();
+  }
+
+  function handleAssignTrayBarcodeScan(value) {
+    const location = findAssignLocationByBarcode(value, isTrayAssignLocation);
+    if (!location) {
+      setAssignPlacementStepStatus("assign-placement-tray-status", "No active tray matched that barcode.", "error");
+      setAssignLocationSelection(null);
+      return false;
+    }
+
+    completeAssignTrayScan(location);
+    return true;
+  }
+
+  function handleAssignParentBarcodeScan(value) {
+    const location = findAssignLocationByBarcode(value, isParentStorageAssignLocation);
+    if (!location) {
+      setAssignPlacementStepStatus("assign-placement-parent-status", "No active parent storage matched that barcode.", "error");
+      selectedAssignParentLocation = null;
+      setAssignLocationSelection(null);
+      setAssignPlacementStepState("assign-placement-parent-step", "active");
+      setAssignPlacementStepState("assign-placement-container-step", "");
+      return false;
+    }
+
+    completeAssignParentScan(location);
+    return true;
+  }
+
+  function handleAssignContainerBarcodeScan(value) {
+    if (!selectedAssignParentLocation?.id) {
+      setAssignPlacementStepStatus("assign-placement-container-status", "Scan the parent storage barcode first.", "error");
+      focusAssignPlacementInput("assign-placement-parent-barcode");
+      return false;
+    }
+
+    const location = findAssignLocationByBarcode(value, (entry) => {
+      return isContainerAssignLocation(entry) && String(entry.parentId || "") === String(selectedAssignParentLocation.id);
+    });
+
+    if (!location) {
+      setAssignPlacementStepStatus("assign-placement-container-status", "No container matched that barcode under the scanned parent.", "error");
+      setAssignLocationSelection(null);
+      return false;
+    }
+
+    completeAssignContainerScan(location);
+    return true;
+  }
+
+  function scheduleAssignBarcodeScan(input, handler) {
+    if (!input || !handler) return;
+    const value = input.value.trim();
+    clearTimeout(assignPlacementScanTimers[input.id]);
+    if (!value) return;
+    assignPlacementScanTimers[input.id] = window.setTimeout(() => {
+      handler(input.value.trim());
+      delete assignPlacementScanTimers[input.id];
+    }, 650);
+  }
+
+  function flushAssignBarcodeScan(input, handler) {
+    if (!input || !handler) return;
+    clearTimeout(assignPlacementScanTimers[input.id]);
+    delete assignPlacementScanTimers[input.id];
+    handler(input.value.trim());
+  }
+
+  function resetAssignPlacementFlow() {
+    restoreAssignPlacementModePreference();
+    resetAssignLocationSelection();
+    resetAssignPlacementScanInputs();
+    syncAssignPlacementModeUI();
   }
 
   function escapeHtml(value) {
@@ -802,7 +1128,6 @@ async function bumpInventoryVersion(changedIds = null) {
     const itemTitle = document.getElementById("assign-location-item-title");
     const scannedCount = document.getElementById("assign-location-scanned-count");
     const quantityInput = document.getElementById("assign-location-quantity");
-    const storeSelect = document.getElementById("assign-location-store");
   
     const { data: lastUsed, error } = await supabase
       .from("item_stock_locations")
@@ -814,6 +1139,9 @@ async function bumpInventoryVersion(changedIds = null) {
 
     resetAssignLocationSelection();
     resetAssignLocationDropdownState();
+    resetAssignPlacementFlow();
+    activeStoreOptions = await fetchActiveStores();
+    activeAssignLocationOptions = await fetchAssignableLocations();
 
     if (itemTitle) itemTitle.textContent = batchItem.item.title || "Current Batch Item";
     if (scannedCount) scannedCount.textContent = String(batchItem.count || 0);
@@ -829,23 +1157,13 @@ async function bumpInventoryVersion(changedIds = null) {
       lastUsedLabel.textContent = "—";
     }
 
-  
-    const preferredStoreId = await fetchLastStockPlacementStoreIdForCurrentUser()
-      || lastUsed?.locations?.store_id
-      || "";
-    await populateAssignLocationStoreFilter(preferredStoreId);
-    if (storeSelect && preferredStoreId) {
-      storeSelect.value = preferredStoreId;
-    }
-
     modal.dataset.barcode = batchItem.item.barcode;
     modal.classList.remove("hidden");
   
     updateBarcodeInputStateBasedOnModals();
   
     setTimeout(() => {
-      quantityInput?.focus();
-      quantityInput?.select?.();
+      focusAssignPlacementInput(assignPlacementMode === "container" ? "assign-placement-parent-barcode" : "assign-placement-tray-barcode", { scroll: false });
     }, 80);
   }
   
@@ -962,14 +1280,58 @@ async function bumpInventoryVersion(changedIds = null) {
       const modal = document.getElementById("modal-assign-location");
       const confirmBtn = document.getElementById("btn-confirm-location-assign");
       const cancelBtn = document.getElementById("btn-cancel-location-assign");
-      const storeFilter = document.getElementById("assign-location-store");
       const quantityInput = document.getElementById("assign-location-quantity");
       const barcodeInput = document.getElementById("input-to-search-inventory-item");
+      const trayInput = document.getElementById("assign-placement-tray-barcode");
+      const parentInput = document.getElementById("assign-placement-parent-barcode");
+      const containerInput = document.getElementById("assign-placement-container-barcode");
 
-      storeFilter?.addEventListener("change", () => {
-        resetAssignLocationSelection();
-        resetAssignLocationDropdownState();
+      document.querySelectorAll("[data-assign-placement-mode]").forEach((button) => {
+        if (button.dataset.bound === "true") return;
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+          setAssignPlacementMode(button.dataset.assignPlacementMode || "tray", { clear: true, focus: true });
+        });
       });
+
+      if (trayInput && trayInput.dataset.bound !== "true") {
+        trayInput.dataset.bound = "true";
+        trayInput.addEventListener("input", () => scheduleAssignBarcodeScan(trayInput, handleAssignTrayBarcodeScan));
+        trayInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          flushAssignBarcodeScan(trayInput, handleAssignTrayBarcodeScan);
+        });
+      }
+
+      if (parentInput && parentInput.dataset.bound !== "true") {
+        parentInput.dataset.bound = "true";
+        parentInput.addEventListener("input", () => scheduleAssignBarcodeScan(parentInput, handleAssignParentBarcodeScan));
+        parentInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          flushAssignBarcodeScan(parentInput, handleAssignParentBarcodeScan);
+        });
+      }
+
+      if (containerInput && containerInput.dataset.bound !== "true") {
+        containerInput.dataset.bound = "true";
+        containerInput.addEventListener("input", () => scheduleAssignBarcodeScan(containerInput, handleAssignContainerBarcodeScan));
+        containerInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          flushAssignBarcodeScan(containerInput, handleAssignContainerBarcodeScan);
+        });
+      }
+
+      if (quantityInput && quantityInput.dataset.enterBound !== "true") {
+        quantityInput.dataset.enterBound = "true";
+        quantityInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          confirmBtn?.click();
+        });
+      }
     
       cancelBtn.addEventListener("click", () => {
         modal.classList.add("hidden");
@@ -981,13 +1343,12 @@ async function bumpInventoryVersion(changedIds = null) {
       confirmBtn.addEventListener("click", async () => {
         const barcode = modal.dataset.barcode;
         const batchItem = currentBatch[barcode];
-        const location_name = document.getElementById("assign-location-name").value.trim();
-        const location_code = document.getElementById("assign-location-barcode").value.trim();
-        const selectedStoreId = storeFilter?.value?.trim() || "";
+        const locationData = selectedAssignLocation;
         const quantityToAdd = parseInt(quantityInput?.value?.trim() || "", 10);
       
-        if (!location_name && !location_code) {
-          showToast("⚠️ Please select a location name or barcode.");
+        if (!locationData?.id) {
+          showToast(assignPlacementMode === "container" ? "Scan the parent and container barcodes first." : "Scan a tray barcode first.");
+          focusAssignPlacementInput(assignPlacementMode === "container" ? "assign-placement-parent-barcode" : "assign-placement-tray-barcode");
           return;
         }
       
@@ -997,37 +1358,29 @@ async function bumpInventoryVersion(changedIds = null) {
           return;
         }
 
-        let locationQuery = supabase
-          .from("locations")
-          .select("id, location_name, location_code, store_id, max_capacity")
-          .eq("active", true);
-
-        if (selectedStoreId) {
-          locationQuery = locationQuery.eq("store_id", selectedStoreId);
-        }
-
-        if (location_name) {
-          locationQuery = locationQuery.eq("location_name", location_name);
-        }
-
-        if (location_code) {
-          locationQuery = locationQuery.eq("location_code", location_code);
-        }
-
-        const { data: matchingLocations, error } = await locationQuery.limit(2);
-      
-        if (error || !Array.isArray(matchingLocations) || matchingLocations.length === 0) {
-          showToast("❌ Could not find matching location.");
-          return;
-        }
-      
-        // ✅ Trigger password modal
-        if (matchingLocations.length > 1) {
-          showToast("Multiple matches found. Filter by store or use the barcode.");
+        if (assignPlacementMode === "tray" && !isTrayAssignLocation(locationData)) {
+          showToast("Scan an active tray barcode for tray placement.");
+          focusAssignPlacementInput("assign-placement-tray-barcode");
           return;
         }
 
-        const locationData = matchingLocations[0];
+        if (assignPlacementMode === "container") {
+          if (!isContainerAssignLocation(locationData)) {
+            showToast("Scan a container or bag barcode for container placement.");
+            focusAssignPlacementInput("assign-placement-container-barcode");
+            return;
+          }
+          if (!selectedAssignParentLocation?.id || String(locationData.parentId || "") !== String(selectedAssignParentLocation.id)) {
+            showToast("The container must belong to the scanned parent storage location.");
+            focusAssignPlacementInput("assign-placement-parent-barcode");
+            return;
+          }
+        }
+
+        const parentCopy = assignPlacementMode === "container" && selectedAssignParentLocation
+          ? ` via ${getAssignLocationLabel(selectedAssignParentLocation)}`
+          : "";
+        // selected location already resolved by barcode scan.
         await renderLocationIntelligence("assign-location-intelligence", locationData.id, {
           referenceWeight: Number(batchItem?.item?.weight),
           referenceLabel: batchItem?.item?.title || "this item",
@@ -1036,8 +1389,16 @@ async function bumpInventoryVersion(changedIds = null) {
         window.showPasswordConfirmModal(
           batchItem,
           locationData.id,
-          locationData.location_name || locationData.location_code || location_name || location_code,
-          quantityToAdd
+          `${getAssignLocationLabel(locationData)}${parentCopy}`,
+          quantityToAdd,
+          {
+            placement_type: assignPlacementMode,
+            location_code: locationData.code || "",
+            location_store_name: getAssignLocationStoreLabel(locationData) || "",
+            parent_location_id: selectedAssignParentLocation?.id || null,
+            parent_location_name: selectedAssignParentLocation?.name || null,
+            parent_location_code: selectedAssignParentLocation?.code || null,
+          }
         );
       });      
     }
@@ -1416,6 +1777,305 @@ async function bumpInventoryVersion(changedIds = null) {
 
     }
 
+    function getInventoryLabelPrintElements() {
+      return {
+        labelsPerOrderInput: document.getElementById("inventory-labels-per-order"),
+        countEl: document.getElementById("inventory-label-print-count"),
+        formulaEl: document.getElementById("inventory-label-print-formula"),
+        statusEl: document.getElementById("inventory-label-print-status"),
+        batchButton: document.getElementById("inventory-label-print-batch"),
+        oneButton: document.getElementById("inventory-label-print-one"),
+        laterButton: document.getElementById("inventory-label-print-later"),
+      };
+    }
+
+    function getInventoryLabelsPerOrderValue() {
+      const input = document.getElementById("inventory-labels-per-order");
+      const value = Math.floor(Number(input?.value || 2));
+      return Number.isFinite(value) && value > 0 ? value : 2;
+    }
+
+    function getInventoryRecommendedLabelCount() {
+      const quantity = Math.max(1, Number(pendingInventoryLabelPrintState?.quantityAdded || 1));
+      const labelsPerOrder = getInventoryLabelsPerOrderValue();
+      return Math.max(1, Math.ceil(quantity / labelsPerOrder));
+    }
+
+    function updateInventoryLabelPrintEstimate() {
+      const state = pendingInventoryLabelPrintState;
+      const elements = getInventoryLabelPrintElements();
+      if (!state) return;
+
+      const quantity = Math.max(1, Number(state.quantityAdded || 1));
+      const labelsPerOrder = getInventoryLabelsPerOrderValue();
+      const recommendedCount = getInventoryRecommendedLabelCount();
+      const labelWord = recommendedCount === 1 ? "label" : "labels";
+
+      if (elements.countEl) {
+        elements.countEl.textContent = `${recommendedCount.toLocaleString()} ${labelWord} recommended`;
+      }
+      if (elements.formulaEl) {
+        elements.formulaEl.textContent = `${quantity.toLocaleString()} inventory unit${quantity === 1 ? "" : "s"} / ${labelsPerOrder.toLocaleString()} label${labelsPerOrder === 1 ? "" : "s"} per order = ${recommendedCount.toLocaleString()} ${labelWord}.`;
+      }
+      if (elements.batchButton) {
+        elements.batchButton.textContent = `Print ${recommendedCount.toLocaleString()} ${labelWord}`;
+      }
+    }
+
+    function setInventoryLabelPrintBusy(isBusy) {
+      const elements = getInventoryLabelPrintElements();
+      [elements.batchButton, elements.oneButton, elements.laterButton, elements.labelsPerOrderInput]
+        .filter(Boolean)
+        .forEach((element) => {
+          element.disabled = Boolean(isBusy);
+        });
+    }
+
+    function setInventoryLabelPrintStatus(message = "", type = "info") {
+      const statusEl = document.getElementById("inventory-label-print-status");
+      if (!statusEl) return;
+      statusEl.textContent = message;
+      statusEl.classList.toggle("is-muted", type !== "error" && type !== "success");
+      statusEl.classList.toggle("is-error", type === "error");
+      statusEl.classList.toggle("is-success", type === "success");
+    }
+
+    async function copyTextToClipboard(text) {
+      const value = String(text || "").trim();
+      if (!value) return false;
+
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_) {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        return copied;
+      }
+    }
+
+    function isMissingLabelPreferenceStorage(error) {
+      const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+      return /set_item_label_print_preference|label_print_strategy|labels_per_order|label_print_quantity|collective_label_only|schema cache|could not find|function/i.test(text);
+    }
+
+    async function recordInventoryLabelPreference(strategy, printQuantity, labelsPerOrder, notes = "") {
+      const state = pendingInventoryLabelPrintState;
+      if (!state?.item?.id) return false;
+
+      const payload = {
+        _item_id: state.item.id,
+        _strategy: strategy,
+        _labels_per_order: labelsPerOrder,
+        _label_print_quantity: printQuantity,
+        _notes: notes,
+      };
+
+      const { error } = await supabase.rpc("set_item_label_print_preference", payload);
+      if (!error) return true;
+
+      if (!isMissingLabelPreferenceStorage(error)) throw error;
+
+      const fallbackUpdate = {
+        label_print_strategy: strategy,
+        labels_per_order: labelsPerOrder,
+        label_print_quantity: strategy === "deferred" ? null : printQuantity,
+        label_printed_at: strategy === "deferred" ? null : new Date().toISOString(),
+        label_printed_by: currentUser?.id || null,
+        label_printed_by_email: currentUser?.email || null,
+        collective_label_only: strategy === "collective_only",
+        label_print_notes: notes || null,
+      };
+
+      const { error: updateError } = await supabase
+        .from("item_types")
+        .update(fallbackUpdate)
+        .eq("id", state.item.id);
+
+      if (updateError) {
+        console.warn("Label print preference could not be recorded until migration is pushed:", updateError);
+        return false;
+      }
+
+      return true;
+    }
+
+    async function recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder) {
+      const state = pendingInventoryLabelPrintState;
+      if (!state?.stockTransactionId) return false;
+
+      const decisionLabel = strategy === "individual_batch"
+        ? `printed ${printQuantity} recommended label${printQuantity === 1 ? "" : "s"}`
+        : strategy === "collective_only"
+          ? "printed one collective label"
+          : "deferred label printing and copied barcode";
+      const auditNote = `label print decision: ${decisionLabel}; labels per order ${labelsPerOrder}; decided by ${currentUser?.email || "current user"}`;
+      const nextNotes = [state.stockTransactionNotes || "", auditNote].filter(Boolean).join(" | ");
+
+      const { error } = await supabase
+        .from("stock_transactions")
+        .update({ notes: nextNotes })
+        .eq("id", state.stockTransactionId);
+
+      if (error) {
+        console.warn("Could not append label print decision to stock transaction:", error);
+        return false;
+      }
+
+      state.stockTransactionNotes = nextNotes;
+      return true;
+    }
+
+    function extractDymoStoragePath(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (!/^https?:\/\//i.test(text)) {
+        return text.replace(/^dymo-labels\//i, "");
+      }
+
+      try {
+        const url = new URL(text);
+        const match = url.pathname.match(/\/storage\/v1\/object\/(?:sign|public)\/dymo-labels\/(.+)$/);
+        return match?.[1] ? decodeURIComponent(match[1]) : "";
+      } catch (_) {
+        return "";
+      }
+    }
+
+    async function loadDymoLabelXmlForInventoryItem(item) {
+      const labelReference = String(item?.dymo_label_url || "").trim();
+      const storagePath = extractDymoStoragePath(labelReference);
+
+      if (storagePath) {
+        const { data, error } = await supabase.storage.from("dymo-labels").download(storagePath);
+        if (!error && data) {
+          return data.text();
+        }
+      }
+
+      if (/^https?:\/\//i.test(labelReference)) {
+        const response = await fetch(labelReference);
+        if (!response.ok) {
+          throw new Error(`Failed to load DYMO label (${response.status}).`);
+        }
+        return response.text();
+      }
+
+      throw new Error("No DYMO label is attached to this item.");
+    }
+
+    async function printInventoryItemLabels(copies) {
+      const state = pendingInventoryLabelPrintState;
+      if (!state?.item) throw new Error("No saved inventory item is ready for label printing.");
+      if (!state.dymoXml) {
+        state.dymoXml = await loadDymoLabelXmlForInventoryItem(state.item);
+      }
+
+      return window.dymoModule.printDymoLabelXml(state.dymoXml, {
+        copies,
+        onProgress: (current, total, printer) => {
+          setInventoryLabelPrintStatus(`Printing ${current} of ${total} on ${printer?.name || "DYMO printer"}...`);
+        },
+      });
+    }
+
+    function closeInventoryLabelPrintModal() {
+      const modal = document.getElementById("inventory-label-print-modal");
+      modal?.classList.add("hidden");
+      modal?.setAttribute("aria-hidden", "true");
+      pendingInventoryLabelPrintState = null;
+      updateBarcodeInputStateBasedOnModals();
+      document.getElementById("input-to-search-inventory-item")?.focus();
+    }
+
+    async function handleInventoryLabelPrintDecision(strategy) {
+      const state = pendingInventoryLabelPrintState;
+      if (!state) return;
+
+      const labelsPerOrder = getInventoryLabelsPerOrderValue();
+      const printQuantity = strategy === "individual_batch"
+        ? getInventoryRecommendedLabelCount()
+        : strategy === "collective_only"
+          ? 1
+          : null;
+
+      setInventoryLabelPrintBusy(true);
+      try {
+        if (strategy === "deferred") {
+          const copied = await copyTextToClipboard(state.item?.barcode);
+          const recorded = await recordInventoryLabelPreference("deferred", null, labelsPerOrder, "Add inventory label printing deferred; barcode copied.");
+          await recordInventoryLabelPrintAudit("deferred", null, labelsPerOrder);
+          setInventoryLabelPrintStatus(`${copied ? "Barcode copied to clipboard." : "Could not copy barcode automatically."}${recorded ? "" : " Label preference will record after the migration is pushed."}`, copied ? "success" : "error");
+          setTimeout(closeInventoryLabelPrintModal, copied ? 900 : 1800);
+          return;
+        }
+
+        await printInventoryItemLabels(printQuantity);
+        const notes = strategy === "collective_only"
+          ? `Printed one collective label after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`
+          : `Printed recommended label batch after adding ${state.quantityAdded} inventory unit${Number(state.quantityAdded) === 1 ? "" : "s"} to ${state.locationName || "selected storage"}.`;
+        const recorded = await recordInventoryLabelPreference(strategy, printQuantity, labelsPerOrder, notes);
+        await recordInventoryLabelPrintAudit(strategy, printQuantity, labelsPerOrder);
+        setInventoryLabelPrintStatus(`Printed ${printQuantity} label${printQuantity === 1 ? "" : "s"}.${recorded ? "" : " Label tag will record after the migration is pushed."}`, "success");
+        setTimeout(closeInventoryLabelPrintModal, recorded ? 1000 : 1800);
+      } catch (error) {
+        console.error("Add inventory label print failed:", error);
+        setInventoryLabelPrintStatus(`Could not complete label printing: ${error?.message || error}`, "error");
+        setInventoryLabelPrintBusy(false);
+      }
+    }
+
+    function bindInventoryLabelPrintControls() {
+      const elements = getInventoryLabelPrintElements();
+      elements.labelsPerOrderInput?.addEventListener("input", updateInventoryLabelPrintEstimate);
+      if (elements.batchButton) {
+        elements.batchButton.onclick = () => handleInventoryLabelPrintDecision("individual_batch");
+      }
+      if (elements.oneButton) {
+        elements.oneButton.onclick = () => handleInventoryLabelPrintDecision("collective_only");
+      }
+      if (elements.laterButton) {
+        elements.laterButton.onclick = () => handleInventoryLabelPrintDecision("deferred");
+      }
+    }
+
+    function showInventoryLabelPrintModal({ item, quantityAdded, locationName, stockTransactionId = "", stockTransactionNotes = "" } = {}) {
+      const modal = document.getElementById("inventory-label-print-modal");
+      const summary = document.getElementById("inventory-label-print-summary");
+      const labelsPerOrderInput = document.getElementById("inventory-labels-per-order");
+      if (!modal) return false;
+
+      pendingInventoryLabelPrintState = {
+        item,
+        quantityAdded: Math.max(1, Number(quantityAdded) || 1),
+        locationName: locationName || "selected storage",
+        stockTransactionId: stockTransactionId || "",
+        stockTransactionNotes: stockTransactionNotes || "",
+        dymoXml: "",
+      };
+
+      if (summary) {
+        summary.textContent = `${pendingInventoryLabelPrintState.quantityAdded.toLocaleString()} unit${pendingInventoryLabelPrintState.quantityAdded === 1 ? "" : "s"} of ${item?.title || "this item"} were added to ${pendingInventoryLabelPrintState.locationName}. Choose how many physical labels should print now.`;
+      }
+      if (labelsPerOrderInput) labelsPerOrderInput.value = "2";
+
+      updateInventoryLabelPrintEstimate();
+      setInventoryLabelPrintStatus("Ready to print through DYMO Connect.");
+      setInventoryLabelPrintBusy(false);
+      modal.classList.remove("hidden");
+      modal.setAttribute("aria-hidden", "false");
+      updateBarcodeInputStateBasedOnModals();
+      setTimeout(() => document.getElementById("inventory-label-print-batch")?.focus(), 80);
+      return true;
+    }
+
     //event listener to have a confirmation of who added the batch 
     function setupPasswordConfirmationModal() {
       const modal = document.getElementById("modal-password-confirm");
@@ -1425,14 +2085,15 @@ async function bumpInventoryVersion(changedIds = null) {
       const confirmBtn = document.getElementById("btn-confirm-password");
       const cancelBtn = document.getElementById("btn-cancel-password");
 
-      let pendingAssignment = null; // { batchItem, location_id, location_name, quantityToAdd }
+      let pendingAssignment = null; // { batchItem, location_id, location_name, quantityToAdd, placementMeta }
 
       // 👇 Called from assign-location modal
-      window.showPasswordConfirmModal = (batchItem, location_id, location_name, quantityToAdd = null) => {
+      window.showPasswordConfirmModal = (batchItem, location_id, location_name, quantityToAdd = null, placementMeta = {}) => {
         pendingAssignment = {
           batchItem,
           location_id,
           location_name,
+          placementMeta: placementMeta || {},
           quantityToAdd: Number.isInteger(quantityToAdd) && quantityToAdd > 0
             ? quantityToAdd
             : Math.max(1, Number(batchItem?.count) || 1),
@@ -1463,9 +2124,14 @@ async function bumpInventoryVersion(changedIds = null) {
         const isBulkFlow = !!batchItem?.bag_info?.bulkPayload; 
 
         try {
-          const { batchItem, location_id, location_name, quantityToAdd } = pendingAssignment;
+          const { batchItem, location_id, location_name, quantityToAdd, placementMeta = {} } = pendingAssignment;
           const bagInfo = batchItem?.bag_info;
           const isBulkFlow = !!(bagInfo && bagInfo.bulkPayload);
+          const signedAt = new Date().toISOString();
+          const signedEmail = currentUser.email || "";
+          const confirmationMethod = "password_stock_placement";
+          let stockTransactionId = "";
+          let stockTransactionNotes = "";
 
           if (!isBulkFlow) {
             // ── NON-BULK: generic stock write ───────────────────────────────
@@ -1489,11 +2155,11 @@ async function bumpInventoryVersion(changedIds = null) {
                 .from("item_stock_locations")
                 .update({
                   quantity: existingStock.quantity + quantityToAdd,
-                  last_updated: new Date().toISOString(),
+                  last_updated: signedAt,
                   added_by: currentUser.id,
-                  confirmation_email: currentUser.email,
-                  confirmation_method: "manual_password",
-                  confirmed_at: new Date().toISOString(),
+                  confirmation_email: signedEmail,
+                  confirmation_method: confirmationMethod,
+                  confirmed_at: signedAt,
                 })
                 .eq("id", existingStock.id);
 
@@ -1511,9 +2177,9 @@ async function bumpInventoryVersion(changedIds = null) {
                   location_id,
                   quantity: quantityToAdd,
                   added_by: currentUser.id,
-                  confirmation_email: currentUser.email,
-                  confirmation_method: "manual_password",
-                  confirmed_at: new Date().toISOString(),
+                  confirmation_email: signedEmail,
+                  confirmation_method: confirmationMethod,
+                  confirmed_at: signedAt,
                 });
 
               if (insertError) {
@@ -1524,18 +2190,28 @@ async function bumpInventoryVersion(changedIds = null) {
             }
 
             // Audit (non-bulk only)
-            const { error: txError } = await supabase.from("stock_transactions").insert({
+            const { data: txData, error: txError } = await supabase.from("stock_transactions").insert({
               item_id: batchItem.item.id,
               location_id,
               quantity: quantityToAdd,
               action_type: "checkin",
-              method: "manual_password",
+              method: confirmationMethod,
               user_id: currentUser.id,
-              email: currentUser.email,
-              timestamp: new Date().toISOString(),
-              confirmed_at: new Date().toISOString(),
-              notes: `Added via Add Inventory Module`,
-            });
+              email: signedEmail,
+              timestamp: signedAt,
+              confirmed_at: signedAt,
+              notes: [
+                "Added via Add Inventory Module",
+                placementMeta.placement_type ? `destination type: ${placementMeta.placement_type}` : "",
+                placementMeta.location_code ? `location barcode: ${placementMeta.location_code}` : "",
+                placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
+                `signed by ${signedEmail}`,
+              ].filter(Boolean).join(" | "),
+            }).select("id, notes").maybeSingle();
+            if (!txError) {
+              stockTransactionId = txData?.id || "";
+              stockTransactionNotes = txData?.notes || "";
+            }
 
             if (txError) {
               console.error("❌ Failed to log transaction:", txError);
@@ -1555,7 +2231,14 @@ async function bumpInventoryVersion(changedIds = null) {
             const res = await window.addItemBulkModule.saveRegistryForItem(
               batchItem.item.id,
               bagBarcode,
-              location_id
+              location_id,
+              {
+                ...placementMeta,
+                signed_by_email: signedEmail,
+                signed_at: signedAt,
+                confirmation_method: confirmationMethod,
+                location_name,
+              }
             );
 
             if (res?.error) {
@@ -1565,18 +2248,28 @@ async function bumpInventoryVersion(changedIds = null) {
             }
 
             // Audit (bulk)
-            const { error: bulkTxErr } = await supabase.from("stock_transactions").insert({
+            const { data: bulkTxData, error: bulkTxErr } = await supabase.from("stock_transactions").insert({
               item_id: batchItem.item.id,
               location_id,
               quantity: quantityToAdd,
               action_type: "checkin",
               method: "bulk_bag",
               user_id: currentUser.id,
-              email: currentUser.email,
-              timestamp: new Date().toISOString(),
-              confirmed_at: new Date().toISOString(),
-              notes: `Added via Bulk Bag ${bagBarcode}`,
-            });
+              email: signedEmail,
+              timestamp: signedAt,
+              confirmed_at: signedAt,
+              notes: [
+                `Added via Bulk Bag ${bagBarcode}`,
+                placementMeta.placement_type ? `destination type: ${placementMeta.placement_type}` : "",
+                placementMeta.location_code ? `location barcode: ${placementMeta.location_code}` : "",
+                placementMeta.parent_location_name ? `parent: ${placementMeta.parent_location_name}` : "",
+                `signed by ${signedEmail}`,
+              ].filter(Boolean).join(" | "),
+            }).select("id, notes").maybeSingle();
+            if (!bulkTxErr) {
+              stockTransactionId = bulkTxData?.id || "";
+              stockTransactionNotes = bulkTxData?.notes || "";
+            }
 
             if (bulkTxErr) {
               console.warn("⚠️ Bulk saved, but audit log failed:", bulkTxErr);
@@ -1597,6 +2290,13 @@ async function bumpInventoryVersion(changedIds = null) {
           delete currentBatch[batchItem.item.barcode];
 
           await bumpInventoryVersion([batchItem.item.id]);
+          showInventoryLabelPrintModal({
+            item: batchItem.item,
+            quantityAdded: quantityToAdd,
+            locationName: location_name,
+            stockTransactionId,
+            stockTransactionNotes,
+          });
         } catch (err) {
           console.error("❌ Unexpected error during stock confirmation:", err);
           showToast(`❌ Failed to confirm stock: ${err.message || err}`);
@@ -2371,6 +3071,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     //listerner for the password modal 
     setupPasswordConfirmationModal();
+    bindInventoryLabelPrintControls();
 
 
     // 🔁 Always refocus on barcode input when clicking outside modal or toast

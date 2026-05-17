@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://qajavascriptsdktests.azurewebsites.net/JavaScript/dymo.connect.framework.js"></script>
 
 </head>
 <body>
@@ -167,30 +168,71 @@
             </div>
           </div>
 
-          <label for="assign-location-store">Filter by Store</label>
-          <select id="assign-location-store" name="assign_location_store">
-            <option value="">All Stores</option>
-          </select>
-          
-          <!-- 🏷️ Location Name Dropdown -->
-          <label for="assign-location-name">Search or Select by Name</label>
-          <div id="assign-location-name-dropdown-container" class="custom-dropdown">
-            <button id="assign-location-name-dropdown-toggle" type="button" class="dropdown-toggle">
-              Select Location Name
+          <div class="assign-placement-mode-group" role="radiogroup" aria-label="Storage destination type">
+            <button type="button" class="assign-placement-mode-btn is-active" data-assign-placement-mode="tray" role="radio" aria-checked="true">
+              Tray
             </button>
-            <div id="assign-location-name-dropdown-menu" class="dropdown-menu"></div>
+            <button type="button" class="assign-placement-mode-btn" data-assign-placement-mode="container" role="radio" aria-checked="false">
+              Container / Bag
+            </button>
           </div>
-          <input type="hidden" id="assign-location-name" name="location_name" />
 
-          <!-- 📎 Location Barcode Dropdown -->
-          <label for="assign-location-barcode">Search by Barcode</label>
-          <div id="assign-location-barcode-dropdown-container" class="custom-dropdown">
-            <button id="assign-location-barcode-dropdown-toggle" type="button" class="dropdown-toggle">
-              Select Barcode
-            </button>
-            <div id="assign-location-barcode-dropdown-menu" class="dropdown-menu"></div>
+          <div id="assign-placement-scan-flow" class="assign-placement-scan-flow" data-mode="tray">
+            <div id="assign-placement-tray-step" class="assign-placement-step is-active">
+              <div>
+                <span class="assign-placement-step-kicker">Step 1</span>
+                <strong>Scan tray barcode</strong>
+                <p>Scan the destination tray. Once it matches, quantity is selected automatically.</p>
+              </div>
+              <input
+                type="text"
+                id="assign-placement-tray-barcode"
+                class="location-search-input"
+                placeholder="Scan tray barcode"
+                autocomplete="off"
+              />
+              <small id="assign-placement-tray-status">Waiting for tray scan.</small>
+            </div>
+
+            <div id="assign-placement-parent-step" class="assign-placement-step hidden">
+              <div>
+                <span class="assign-placement-step-kicker">Step 1</span>
+                <strong>Scan parent table / vault / storage</strong>
+                <p>The parent storage must be scanned before the container is accepted.</p>
+              </div>
+              <input
+                type="text"
+                id="assign-placement-parent-barcode"
+                class="location-search-input"
+                placeholder="Scan parent storage barcode"
+                autocomplete="off"
+              />
+              <small id="assign-placement-parent-status">Scan the parent storage label first.</small>
+            </div>
+
+            <div id="assign-placement-container-step" class="assign-placement-step hidden">
+              <div>
+                <span class="assign-placement-step-kicker">Step 2</span>
+                <strong>Scan container / bag barcode</strong>
+                <p>The container has to belong to the scanned parent location.</p>
+              </div>
+              <input
+                type="text"
+                id="assign-placement-container-barcode"
+                class="location-search-input"
+                placeholder="Scan container barcode"
+                autocomplete="off"
+              />
+              <small id="assign-placement-container-status">Container must belong to the scanned parent.</small>
+            </div>
           </div>
+
+          <input type="hidden" id="assign-location-id" name="location_id" />
+          <input type="hidden" id="assign-location-name" name="location_name" />
           <input type="hidden" id="assign-location-barcode" name="location_barcode" />
+          <div id="assign-location-selection-summary" class="assign-location-selection-summary">
+            Scan a destination barcode to see the storage snapshot.
+          </div>
 
           <!-- 🕘 Last Used Location Info -->
           <div id="last-used-location-info" class="location-last-used">
@@ -331,6 +373,39 @@
         <div id="modal-buttons-password-confirm" class="modal-footer-assign-location">
           <button id="btn-confirm-password" class="btn-location-confirm">Confirm</button>
           <button id="btn-cancel-password" class="btn-location-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Item Label Print Choice After Inventory Add -->
+    <div id="inventory-label-print-modal" class="modal hidden inventory-label-print-modal" aria-hidden="true">
+      <div class="inventory-label-print-dialog" role="dialog" aria-modal="true" aria-labelledby="inventory-label-print-title">
+        <div class="inventory-label-print-mark" aria-hidden="true">OK</div>
+        <p class="assign-location-summary-label">Inventory Added</p>
+        <h2 id="inventory-label-print-title">Stock placement saved</h2>
+        <p id="inventory-label-print-summary">
+          Choose how many physical item labels should print for the quantity you just added.
+        </p>
+        <div class="item-label-print-panel" aria-live="polite">
+          <div class="item-label-print-head">
+            <div>
+              <span class="item-label-print-kicker">Label Printing</span>
+              <strong id="inventory-label-print-count">0 labels recommended</strong>
+            </div>
+            <label for="inventory-labels-per-order" class="item-label-print-input">
+              <span>Labels per order</span>
+              <input id="inventory-labels-per-order" type="number" min="1" step="1" value="2" />
+            </label>
+          </div>
+          <p id="inventory-label-print-formula" class="item-label-print-formula">
+            Inventory quantity divided by labels per order.
+          </p>
+          <div class="item-label-print-actions">
+            <button type="button" id="inventory-label-print-batch" class="btn-location-confirm">Print Recommended Labels</button>
+            <button type="button" id="inventory-label-print-one" class="btn-location-cancel">Just Print One</button>
+            <button type="button" id="inventory-label-print-later" class="btn-location-cancel">Not at This Time</button>
+          </div>
+          <p id="inventory-label-print-status" class="inventory-label-print-status"></p>
         </div>
       </div>
     </div>

@@ -2924,6 +2924,223 @@ body {
   border-radius: 12px;
 }
 
+.assign-placement-mode-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.assign-placement-mode-btn {
+  min-height: 48px;
+  border: 1px solid var(--inv-border);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--inv-muted);
+  font: inherit;
+  font-weight: 780;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.assign-placement-mode-btn.is-active {
+  border-color: rgba(182, 138, 74, 0.42);
+  background: linear-gradient(135deg, rgba(255, 245, 225, 0.96), rgba(255, 255, 255, 0.98));
+  color: var(--inv-text);
+  box-shadow: 0 12px 26px rgba(182, 138, 74, 0.14);
+}
+
+.assign-placement-scan-flow {
+  display: grid;
+  gap: 12px;
+}
+
+.assign-placement-step {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--inv-border);
+  border-radius: 18px;
+  background: var(--inv-surface-soft);
+}
+
+.assign-placement-step.hidden {
+  display: none;
+}
+
+.assign-placement-step.is-active {
+  border-color: rgba(182, 138, 74, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(182, 138, 74, 0.12);
+}
+
+.assign-placement-step.is-complete {
+  border-color: rgba(20, 150, 96, 0.3);
+  background: #f0fbf6;
+}
+
+.assign-placement-step-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: #8a6330;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.assign-placement-step strong {
+  display: block;
+  color: var(--inv-text);
+  font-size: 1rem;
+}
+
+.assign-placement-step p,
+.assign-placement-step small {
+  margin: 0;
+  color: var(--inv-muted);
+  line-height: 1.45;
+}
+
+.assign-placement-step small.is-success {
+  color: #087443;
+  font-weight: 780;
+}
+
+.assign-placement-step small.is-error {
+  color: var(--inv-danger);
+  font-weight: 780;
+}
+
+.assign-location-selection-summary {
+  padding: 12px 14px;
+  border: 1px solid var(--inv-border);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--inv-muted);
+  line-height: 1.45;
+}
+
+.inventory-label-print-modal {
+  z-index: 10020;
+}
+
+.inventory-label-print-dialog {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.98));
+  color: var(--inv-text);
+  box-shadow: 0 34px 80px rgba(15, 23, 42, 0.26);
+}
+
+.inventory-label-print-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #111827, #3a2b1a);
+  color: #fff7eb;
+  font-weight: 900;
+}
+
+.inventory-label-print-dialog h2 {
+  margin: 0 0 8px;
+  color: var(--inv-text);
+  font-size: clamp(1.4rem, 2.3vw, 1.9rem);
+  line-height: 1.1;
+}
+
+#inventory-label-print-summary {
+  margin: 0 0 18px;
+  color: var(--inv-muted);
+  line-height: 1.55;
+}
+
+.item-label-print-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--inv-border);
+  border-radius: 18px;
+  background: #ffffff;
+}
+
+.item-label-print-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
+  gap: 14px;
+  align-items: end;
+}
+
+.item-label-print-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: #8a6330;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.item-label-print-head strong {
+  display: block;
+  color: var(--inv-text);
+  font-size: 1.08rem;
+}
+
+.item-label-print-input {
+  display: grid;
+  gap: 6px;
+  color: var(--inv-muted);
+  font-weight: 780;
+}
+
+.item-label-print-input input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--inv-border);
+  border-radius: 14px;
+  background: var(--inv-surface-soft);
+  color: var(--inv-text);
+  font: inherit;
+}
+
+.item-label-print-formula,
+.inventory-label-print-status {
+  margin: 0;
+  color: var(--inv-muted);
+  line-height: 1.45;
+}
+
+.inventory-label-print-status.is-error {
+  color: var(--inv-danger);
+  font-weight: 780;
+}
+
+.inventory-label-print-status.is-success {
+  color: #087443;
+  font-weight: 780;
+}
+
+.item-label-print-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.item-label-print-actions .btn-location-confirm,
+.item-label-print-actions .btn-location-cancel {
+  width: 100%;
+  max-width: none;
+  white-space: normal;
+}
+
 @media (max-width: 720px) {
   .add-inventory-wrapper {
     width: min(100vw - 20px, 100%);
@@ -2932,6 +3149,9 @@ body {
 
   .top-controls,
   .assign-location-summary-card,
+  .assign-placement-mode-group,
+  .item-label-print-head,
+  .item-label-print-actions,
   .modal-footer-assign-location,
   .modal-footer-batch-threshold,
   #modal-buttons-confirmitem,
