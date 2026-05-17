@@ -150,18 +150,18 @@
     const [
       employeeResult,
       storesResult,
-      employeesResult,
+      receiversResult,
       locationsResult,
     ] = await Promise.all([
       client.from("employees").select("id, user_id, display_name, email, role, active").eq("user_id", state.user.id).maybeSingle(),
       client.from("store_locations").select("id, name, active").eq("active", true).order("name"),
-      client.from("employees").select("id, user_id, display_name, email, role, active").not("user_id", "is", null).order("display_name"),
+      client.rpc("list_store_transfer_receivers"),
       client.from("locations").select("id, location_name, location_code, type, active, store_id, parent_location_id, location_role, is_tray, tray_current_store_id").eq("active", true).order("location_name"),
     ]);
 
     state.employee = employeeResult.data || null;
     state.stores = storesResult.data || [];
-    state.employees = (employeesResult.data || []).filter((employee) => employee.active !== false && employee.user_id);
+    state.employees = await resolveReceiverDirectory(client, receiversResult);
     state.locations = locationsResult.data || [];
     if (window.OGRoleNavigation?.render) {
       window.OGRoleNavigation.render(String(state.employee?.role || "").toLowerCase() === "admin" ? "admin" : "worker");
@@ -169,6 +169,33 @@
     renderSelectors();
     await loadTransfers();
     preselectFromUrl();
+  }
+
+  async function resolveReceiverDirectory(client, receiversResult) {
+    if (!receiversResult.error && Array.isArray(receiversResult.data)) {
+      return receiversResult.data
+        .filter((employee) => employee.user_id && employee.email)
+        .map((employee) => ({
+          id: employee.employee_id || employee.id,
+          user_id: employee.user_id,
+          display_name: employee.display_name || employee.email,
+          email: employee.email,
+          role: employee.role || "",
+          active: true,
+        }));
+    }
+
+    console.warn("Receiver directory RPC failed, falling back to visible employees:", receiversResult.error);
+    const fallback = await client
+      .from("employees")
+      .select("id, user_id, display_name, email, role, active")
+      .not("user_id", "is", null)
+      .order("display_name");
+    if (fallback.error) {
+      console.warn("Receiver fallback lookup failed:", fallback.error);
+      return [];
+    }
+    return (fallback.data || []).filter((employee) => employee.active !== false && employee.user_id && employee.email);
   }
 
   function renderSelectors() {
