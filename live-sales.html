@@ -298,6 +298,44 @@
     </div>
   </div>
 
+  <div id="edit-bag-item-modal" class="live-edit-modal" hidden>
+    <div class="live-edit-backdrop" data-close-edit-bag-item></div>
+    <div class="live-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-bag-item-title">
+      <button id="edit-bag-item-close" type="button" class="live-edit-close" aria-label="Close correction modal">x</button>
+      <div class="live-edit-head">
+        <span class="eyebrow">Bag Correction</span>
+        <h2 id="edit-bag-item-title">Correct Bag Item</h2>
+        <p>Adjust the quantity or scan the correct replacement item. Every correction is tied to your signed-in account and written to the live-sale audit trail.</p>
+      </div>
+      <div id="edit-bag-current" class="edit-current-card"></div>
+      <label>
+        Brief Explanation
+        <textarea id="edit-bag-reason" rows="3" placeholder="Example: wrong item scanned during the live, correcting before printing label"></textarea>
+      </label>
+      <div class="edit-grid">
+        <label>
+          Correct Quantity
+          <input id="edit-bag-quantity" type="number" min="0" step="1" />
+        </label>
+        <label>
+          Replacement Item Barcode
+          <input id="edit-bag-replacement-scan" type="search" placeholder="Optional: scan correct item barcode" autocomplete="off" />
+        </label>
+      </div>
+      <div class="button-row">
+        <button id="edit-bag-find-replacement" type="button" class="secondary-btn">Find Replacement</button>
+        <button id="edit-bag-clear-replacement" type="button" class="secondary-btn">Keep Same Item</button>
+      </div>
+      <div id="edit-bag-replacement-results" class="edit-result-list"></div>
+      <div id="edit-bag-source-results" class="edit-result-list"></div>
+      <p id="edit-bag-error" class="status-line is-error" aria-live="polite"></p>
+      <div class="button-row">
+        <button id="edit-bag-confirm" type="button" class="primary-btn">Apply Correction</button>
+        <button id="edit-bag-cancel" type="button" class="secondary-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>

@@ -12,6 +12,7 @@ const state = {
   sourceRows: [],
   selectedSourceRow: null,
   sourceReservations: new Map(),
+  lotSourceAvailability: new Map(),
   bagHistoryLots: [],
   bagHistoryItems: [],
   bagHistorySelectedLotId: "",
@@ -25,6 +26,11 @@ const state = {
   photoPanY: 0,
   photoDrag: null,
   photoSuppressClick: false,
+  editGroup: null,
+  editLot: null,
+  editReplacementItem: null,
+  editSourceRows: [],
+  editSelectedSourceRow: null,
   busy: false,
 };
 
@@ -544,6 +550,7 @@ function endLivePhotoDrag(event) {
 async function loadLotItems() {
   if (!state.currentLot) {
     state.lotItems = [];
+    state.lotSourceAvailability = new Map();
     renderAll();
     return;
   }
@@ -561,11 +568,94 @@ async function loadLotItems() {
   if (error) {
     console.warn("Live sale lot items failed to load:", error);
     state.lotItems = [];
+    state.lotSourceAvailability = new Map();
   } else {
     state.lotItems = data || [];
+    await loadLotSourceAvailability();
   }
 
   renderAll();
+}
+
+async function loadLotSourceAvailability() {
+  const reservedItems = state.lotItems.filter((entry) =>
+    entry.status === "reserved" && entry.source_stock_location_row_id
+  );
+  const currentBySource = new Map();
+  reservedItems.forEach((entry) => {
+    const sourceId = entry.source_stock_location_row_id;
+    const current = currentBySource.get(sourceId) || {
+      itemId: entry.item_id,
+      quantity: 0,
+    };
+    current.quantity += Number(entry.quantity || 0);
+    currentBySource.set(sourceId, current);
+  });
+
+  state.lotSourceAvailability = new Map();
+  const sourceIds = [...currentBySource.keys()];
+  if (!sourceIds.length) return;
+
+  try {
+    const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
+      supabase
+        .from("item_stock_locations")
+        .select("id,item_id,quantity")
+        .in("id", sourceIds),
+      supabase
+        .from("active_stock_reservations")
+        .select("stock_location_row_id,reserved_quantity")
+        .in("stock_location_row_id", sourceIds),
+    ]);
+
+    if (rowError) throw rowError;
+    const hasReservationOverlay = !reservationError;
+    if (reservationError) console.warn("Live-sale availability overlay failed:", reservationError);
+
+    const reservationMap = new Map((reservations || []).map((entry) => [
+      entry.stock_location_row_id,
+      Number(entry.reserved_quantity || 0),
+    ]));
+
+    (rows || []).forEach((row) => {
+      const current = currentBySource.get(row.id)?.quantity || 0;
+      const reserved = reservationMap.get(row.id) || 0;
+      const physical = Number(row.quantity || 0);
+      const maxQuantity = hasReservationOverlay
+        ? Math.max(current, physical - reserved + current)
+        : current;
+      state.lotSourceAvailability.set(row.id, {
+        currentQuantity: current,
+        physicalQuantity: physical,
+        reservedQuantity: reserved,
+        maxQuantity,
+        availableExtra: Math.max(0, maxQuantity - current),
+      });
+    });
+
+    currentBySource.forEach((current, sourceId) => {
+      if (!state.lotSourceAvailability.has(sourceId)) {
+        state.lotSourceAvailability.set(sourceId, {
+          currentQuantity: current.quantity,
+          physicalQuantity: current.quantity,
+          reservedQuantity: current.quantity,
+          maxQuantity: current.quantity,
+          availableExtra: 0,
+        });
+      }
+    });
+  } catch (error) {
+    console.warn("Live-sale source capacity could not be checked:", error);
+    currentBySource.forEach((current, sourceId) => {
+      state.lotSourceAvailability.set(sourceId, {
+        currentQuantity: current.quantity,
+        physicalQuantity: current.quantity,
+        reservedQuantity: current.quantity,
+        maxQuantity: current.quantity,
+        availableExtra: 0,
+      });
+    });
+  }
 }
 
 function renderManifest() {
@@ -591,23 +681,26 @@ function renderManifest() {
 
   activeGroups.forEach((group) => {
     const item = group.item || {};
-    const loc = group.sourceLocation || {};
-    const sourceKind = getSourceKindLabel(loc);
+    const maxQuantity = Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0));
+    const canIncrease = Number(group.quantity || 0) < maxQuantity;
     const article = document.createElement("article");
     article.className = "manifest-item";
     article.innerHTML = `
       <div class="manifest-thumb"><span>No photo</span></div>
       <div class="manifest-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-        <span><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(item.barcode || "-")} - ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</span>
-        <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))}</small>
+        <span>${renderManifestSourceSummary(group)}</span>
+        ${renderManifestTimeNote(group)}
+        ${renderManifestSourceBreakdown(group)}
       </div>
       <div class="manifest-actions">
         <div class="manifest-qty-control" aria-label="Quantity for ${escapeHtml(item.title || "item")}">
           <button type="button" class="tiny-btn" data-qty-action="decrease" data-group-key="${escapeHtml(group.key)}">-</button>
-          <input class="manifest-qty-input" data-manifest-qty-input data-group-key="${escapeHtml(group.key)}" type="number" min="0" step="1" value="${Number(group.quantity || 0)}" />
-          <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}">+</button>
+          <input class="manifest-qty-input" data-manifest-qty-input data-group-key="${escapeHtml(group.key)}" type="number" min="0" max="${maxQuantity}" step="1" value="${Number(group.quantity || 0)}" title="Maximum available for the selected source(s): ${maxQuantity}" />
+          <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}" ${canIncrease ? "" : "disabled"}>+</button>
         </div>
+        <small class="manifest-max-note">Max ${maxQuantity.toLocaleString()}</small>
+        <button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>
         <button type="button" class="tiny-btn" data-release-group="${escapeHtml(group.key)}">Release</button>
       </div>
     `;
@@ -629,7 +722,12 @@ function renderManifest() {
       const group = getManifestGroupByKey(button.getAttribute("data-group-key"));
       if (!group) return;
       const direction = button.getAttribute("data-qty-action") === "increase" ? 1 : -1;
-      setManifestGroupQuantity(group, Math.max(0, group.quantity + direction));
+      const nextQuantity = Math.max(0, group.quantity + direction);
+      if (direction > 0 && nextQuantity > Number(group.maxQuantity || group.quantity || 0)) {
+        setStatus(`Only ${Number(group.maxQuantity || group.quantity || 0).toLocaleString()} unit(s) are available for this item in the selected source(s).`, "error");
+        return;
+      }
+      setManifestGroupQuantity(group, nextQuantity);
     });
   });
 
@@ -638,6 +736,12 @@ function renderManifest() {
       const group = getManifestGroupByKey(input.getAttribute("data-group-key"));
       if (!group) return;
       const value = Math.max(0, parseInt(input.value || "0", 10) || 0);
+      const maxQuantity = Number(group.maxQuantity || group.quantity || 0);
+      if (value > maxQuantity) {
+        input.value = String(group.quantity || 0);
+        setStatus(`Only ${maxQuantity.toLocaleString()} unit(s) are available for this item in the selected source(s).`, "error");
+        return;
+      }
       if (value !== group.quantity) setManifestGroupQuantity(group, value);
     };
     input.addEventListener("change", commit);
@@ -656,6 +760,13 @@ function renderManifest() {
       if (group) releaseManifestGroup(group);
     });
   });
+
+  list.querySelectorAll("[data-edit-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = getManifestGroupByKey(button.getAttribute("data-edit-group"));
+      if (group) openEditBagItemModal(group);
+    });
+  });
 }
 
 function getManifestGroups() {
@@ -665,30 +776,573 @@ function getManifestGroups() {
     .forEach((entry) => {
       const itemId = entry.item_id || entry.item?.id || "";
       const sourceRowId = entry.source_stock_location_row_id || "";
-      const key = `${itemId}::${sourceRowId}`;
+      const sourceKey = sourceRowId || entry.source_location_id || "unknown";
+      const key = itemId || entry.item?.barcode || entry.item?.title || sourceKey;
+      const quantity = Number(entry.quantity || 0);
+      const elapsed = Number(entry.show_elapsed_seconds ?? 0);
       if (!groups.has(key)) {
         groups.set(key, {
           key,
           itemId,
-          sourceStockLocationRowId: sourceRowId,
           item: entry.item || {},
-          sourceLocation: entry.source_location || {},
           quantity: 0,
-          showElapsedSeconds: entry.show_elapsed_seconds,
+          showElapsedSeconds: elapsed,
+          lastShowElapsedSeconds: elapsed,
+          sourcesByKey: new Map(),
         });
       }
       const group = groups.get(key);
-      group.quantity += Number(entry.quantity || 0);
+      group.quantity += quantity;
       group.showElapsedSeconds = Math.min(
-        Number(group.showElapsedSeconds ?? entry.show_elapsed_seconds ?? 0),
-        Number(entry.show_elapsed_seconds ?? group.showElapsedSeconds ?? 0),
+        Number(group.showElapsedSeconds ?? elapsed),
+        elapsed,
       );
+      group.lastShowElapsedSeconds = Math.max(
+        Number(group.lastShowElapsedSeconds ?? elapsed),
+        elapsed,
+      );
+
+      if (!group.sourcesByKey.has(sourceKey)) {
+        const capacity = sourceRowId ? state.lotSourceAvailability.get(sourceRowId) : null;
+        group.sourcesByKey.set(sourceKey, {
+          key: sourceKey,
+          sourceStockLocationRowId: sourceRowId,
+          sourceLocation: entry.source_location || {},
+          quantity: 0,
+          showElapsedSeconds: elapsed,
+          lastShowElapsedSeconds: elapsed,
+          maxQuantity: capacity?.maxQuantity ?? 0,
+          availableExtra: capacity?.availableExtra ?? 0,
+        });
+      }
+      const source = group.sourcesByKey.get(sourceKey);
+      source.quantity += quantity;
+      source.showElapsedSeconds = Math.min(Number(source.showElapsedSeconds ?? elapsed), elapsed);
+      source.lastShowElapsedSeconds = Math.max(Number(source.lastShowElapsedSeconds ?? elapsed), elapsed);
+      if (!source.maxQuantity || source.maxQuantity < source.quantity) {
+        source.maxQuantity = source.quantity;
+      }
     });
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map((group) => {
+    const sources = [...group.sourcesByKey.values()].map((source) => ({
+      ...source,
+      maxQuantity: Math.max(Number(source.maxQuantity || 0), Number(source.quantity || 0)),
+    }));
+    const maxQuantity = sources.reduce((sum, source) => sum + Number(source.maxQuantity || source.quantity || 0), 0);
+    return {
+      ...group,
+      sources,
+      sourceLocation: sources[0]?.sourceLocation || {},
+      sourceStockLocationRowId: sources[0]?.sourceStockLocationRowId || "",
+      maxQuantity: Math.max(maxQuantity, Number(group.quantity || 0)),
+      scanSpanSeconds: Math.max(0, Number(group.lastShowElapsedSeconds || 0) - Number(group.showElapsedSeconds || 0)),
+      sourcesByKey: undefined,
+    };
+  });
 }
 
 function getManifestGroupByKey(key) {
   return getManifestGroups().find((group) => group.key === key) || null;
+}
+
+function getSourceLocationLabel(source = {}) {
+  const loc = source.sourceLocation || source;
+  const sourceKind = getSourceKindLabel(loc);
+  const name = loc.location_name || "Unknown source";
+  const code = loc.location_code ? ` (${loc.location_code})` : "";
+  return `${sourceKind}: ${name}${code}`;
+}
+
+function renderManifestSourceSummary(group) {
+  const sources = group.sources || [];
+  const item = group.item || {};
+  if (sources.length <= 1) {
+    const source = sources[0] || {};
+    const loc = source.sourceLocation || {};
+    const sourceKind = getSourceKindLabel(loc);
+    return `<b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(item.barcode || "-")} - ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}`;
+  }
+
+  return `${escapeHtml(item.barcode || "-")} - ${sources.length} sources combined`;
+}
+
+function renderManifestSourceBreakdown(group, { showMax = true } = {}) {
+  const sources = group.sources || [];
+  if (sources.length <= 1) return "";
+  return `
+    <div class="manifest-source-breakdown">
+      ${sources.map((source) => {
+        const loc = source.sourceLocation || {};
+        const sourceKind = getSourceKindLabel(loc);
+        return `
+          <span>
+            <b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b>
+            ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}
+            <strong>Qty ${Number(source.quantity || 0).toLocaleString()}${showMax ? ` / max ${Number(source.maxQuantity || source.quantity || 0).toLocaleString()}` : ""}</strong>
+          </span>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function renderManifestTimeNote(group) {
+  const first = Number(group.showElapsedSeconds || 0);
+  const last = Number(group.lastShowElapsedSeconds || first);
+  const span = Math.max(0, last - first);
+  if (span > 600) {
+    const minutes = Math.round(span / 60);
+    return `<small class="manifest-time-note is-alert">Live minutes ${escapeHtml(formatElapsed(first))}-${escapeHtml(formatElapsed(last))} - scans ${minutes} min apart; verify this belongs in the same auction bag.</small>`;
+  }
+  return `<small class="manifest-time-note">Live minute ${escapeHtml(formatElapsed(first))}</small>`;
+}
+
+function planManifestGroupQuantities(group, targetQuantity) {
+  const sources = (group.sources || [])
+    .filter((source) => source.sourceStockLocationRowId)
+    .map((source) => ({
+      ...source,
+      quantity: Number(source.quantity || 0),
+      maxQuantity: Math.max(Number(source.maxQuantity || 0), Number(source.quantity || 0)),
+      nextQuantity: 0,
+    }))
+    .sort((a, b) => Number(a.showElapsedSeconds || 0) - Number(b.showElapsedSeconds || 0));
+
+  if (!sources.length) return null;
+
+  let remaining = Math.max(0, Number(targetQuantity || 0));
+  sources.forEach((source) => {
+    const keep = Math.min(source.quantity, remaining);
+    source.nextQuantity = keep;
+    remaining -= keep;
+  });
+
+  if (remaining > 0) {
+    sources.forEach((source) => {
+      if (remaining <= 0) return;
+      const extraCapacity = Math.max(0, source.maxQuantity - source.nextQuantity);
+      const added = Math.min(extraCapacity, remaining);
+      source.nextQuantity += added;
+      remaining -= added;
+    });
+  }
+
+  if (remaining > 0) return null;
+  return sources.filter((source) => source.nextQuantity !== source.quantity);
+}
+
+function setEditBagError(message = "") {
+  const el = $("edit-bag-error");
+  if (el) el.textContent = message;
+}
+
+function closeEditBagItemModal() {
+  const modal = $("edit-bag-item-modal");
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  state.editGroup = null;
+  state.editLot = null;
+  state.editReplacementItem = null;
+  state.editSourceRows = [];
+  state.editSelectedSourceRow = null;
+  setEditBagError("");
+  setTimeout(() => focusItemScanner(), 80);
+}
+
+function openEditBagItemModal(group, lot = state.currentLot) {
+  if (!group || !lot) return;
+  state.editGroup = group;
+  state.editLot = lot;
+  state.editReplacementItem = null;
+  state.editSourceRows = [];
+  state.editSelectedSourceRow = null;
+  setEditBagError("");
+
+  const modal = $("edit-bag-item-modal");
+  if (!modal) return;
+  $("edit-bag-reason").value = "";
+  $("edit-bag-quantity").value = String(Number(group.quantity || 0));
+  $("edit-bag-quantity").max = String(Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0)));
+  $("edit-bag-replacement-scan").value = "";
+  renderEditBagCurrent();
+  renderEditReplacementResults([]);
+  renderEditSourceRows();
+  modal.hidden = false;
+  setTimeout(() => $("edit-bag-reason")?.focus(), 80);
+}
+
+function renderEditBagCurrent() {
+  const card = $("edit-bag-current");
+  const group = state.editGroup;
+  if (!card || !group) return;
+  const item = group.item || {};
+  card.innerHTML = `
+    <span class="eyebrow">Current Bag Item</span>
+    <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+    <span>${renderManifestSourceSummary(group)}</span>
+    ${renderManifestTimeNote(group)}
+    ${renderManifestSourceBreakdown(group)}
+    <small>Current quantity ${Number(group.quantity || 0).toLocaleString()} / max ${Number(group.maxQuantity || group.quantity || 0).toLocaleString()}</small>
+  `;
+}
+
+async function searchLiveSaleItems(term) {
+  const clean = sanitizeSearchTerm(term);
+  if (!clean) return [];
+
+  let exact = await supabase
+    .from("item_types")
+    .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+    .eq("barcode", clean)
+    .is("deleted_at", null)
+    .limit(1);
+
+  if (exact.error && /deleted_at/i.test(exact.error.message || "")) {
+    exact = await supabase
+      .from("item_types")
+      .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+      .eq("barcode", clean)
+      .limit(1);
+  }
+
+  if (!exact.error && exact.data?.length === 1) return exact.data;
+
+  const pattern = `%${clean}%`;
+  let { data, error } = await supabase
+    .from("item_types")
+    .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+    .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
+    .is("deleted_at", null)
+    .limit(10);
+
+  if (error && /deleted_at/i.test(error.message || "")) {
+    const retry = await supabase
+      .from("item_types")
+      .select("id,title,description,barcode,sale_price,weight,photos,photo_url")
+      .or(`barcode.ilike.${pattern},title.ilike.${pattern},description.ilike.${pattern}`)
+      .limit(10);
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) throw error;
+  return data || [];
+}
+
+function renderEditReplacementResults(items = []) {
+  const container = $("edit-bag-replacement-results");
+  if (!container) return;
+  container.replaceChildren();
+
+  if (state.editReplacementItem) {
+    const item = state.editReplacementItem;
+    const selected = document.createElement("article");
+    selected.className = "edit-result-btn is-selected";
+    selected.innerHTML = `
+      <div class="edit-result-thumb"><span>No photo</span></div>
+      <div class="edit-result-copy">
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <small>${escapeHtml(item.barcode || "-")} - ${Number(item.weight || 0).toFixed(2)} g</small>
+      </div>
+      <span class="edit-result-meta">Replacement selected</span>
+    `;
+    container.appendChild(selected);
+    hydrateEditResultPhoto(selected, item);
+    return;
+  }
+
+  if (!items.length) return;
+  items.forEach((item) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "edit-result-btn";
+    button.innerHTML = `
+      <div class="edit-result-thumb"><span>No photo</span></div>
+      <div class="edit-result-copy">
+        <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+        <small>${escapeHtml(item.barcode || "-")} - ${Number(item.weight || 0).toFixed(2)} g</small>
+      </div>
+      <span class="edit-result-meta">Use</span>
+    `;
+    button.addEventListener("click", () => selectEditReplacementItem(item));
+    container.appendChild(button);
+    hydrateEditResultPhoto(button, item);
+  });
+}
+
+function hydrateEditResultPhoto(container, item) {
+  const thumb = container.querySelector(".edit-result-thumb");
+  if (!thumb) return;
+  resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
+    if (!url || !thumb.isConnected) return;
+    thumb.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Item preview")}" />`;
+  });
+}
+
+async function findEditReplacementItem() {
+  const term = $("edit-bag-replacement-scan")?.value || "";
+  const clean = sanitizeSearchTerm(term);
+  if (!clean) {
+    setEditBagError("Scan or type the replacement item barcode first.");
+    return;
+  }
+
+  try {
+    setEditBagError("");
+    const results = await searchLiveSaleItems(clean);
+    if (!results.length) {
+      renderEditReplacementResults([]);
+      setEditBagError("No inventory item matched that replacement scan.");
+      return;
+    }
+    if (results.length === 1) {
+      await selectEditReplacementItem(results[0]);
+      return;
+    }
+    renderEditReplacementResults(results);
+    setEditBagError(`${results.length} items matched. Choose the correct replacement.`);
+  } catch (error) {
+    console.error("Replacement item search failed:", error);
+    setEditBagError(error.message || "Could not search replacement item.");
+  }
+}
+
+async function selectEditReplacementItem(item) {
+  state.editReplacementItem = item;
+  state.editSourceRows = [];
+  state.editSelectedSourceRow = null;
+  renderEditReplacementResults([]);
+  await loadEditSourceRowsForItem(item);
+}
+
+function normalizeSourceRowWithReservations(row, reservationMap) {
+  const previous = state.sourceReservations;
+  state.sourceReservations = reservationMap;
+  const normalized = normalizeSourceRow(row);
+  state.sourceReservations = previous;
+  return normalized;
+}
+
+async function loadEditSourceRowsForItem(item) {
+  if (!item?.id) return;
+  const sourceContainer = $("edit-bag-source-results");
+  if (sourceContainer) sourceContainer.innerHTML = `<div class="empty-state">Loading replacement sources...</div>`;
+
+  try {
+    const [{ data: rows, error: rowError }, { data: reservations, error: reservationError }] = await Promise.all([
+      supabase
+        .from("item_stock_locations")
+        .select("id,item_id,location_id,quantity,location:location_id(*)")
+        .eq("item_id", item.id)
+        .gt("quantity", 0),
+      supabase
+        .from("active_stock_reservations")
+        .select("stock_location_row_id,reserved_quantity")
+        .eq("item_id", item.id),
+    ]);
+
+    if (rowError) throw rowError;
+    if (reservationError) console.warn("Replacement reservation overlay not available:", reservationError);
+
+    const reservationMap = new Map((reservations || []).map((entry) => [
+      entry.stock_location_row_id,
+      Number(entry.reserved_quantity || 0),
+    ]));
+    const sessionStoreId = state.currentSession?.store_id || "";
+    const eligibleRows = (rows || [])
+      .map((row) => normalizeSourceRowWithReservations(row, reservationMap))
+      .filter((row) => {
+        const inStore = !sessionStoreId || row.store_id === sessionStoreId;
+        const validTray = row.isTray && row.tray_status !== "checked_out";
+        const validStorage = !row.isTray && ["storage_location", "container"].includes(row.source_role);
+        return inStore && (validTray || validStorage) && row.available_quantity > 0;
+      });
+
+    const trayRows = eligibleRows.filter((row) => row.isTray);
+    const storageRows = eligibleRows.filter((row) => !row.isTray);
+    state.editSourceRows = trayRows.length ? trayRows : storageRows;
+    state.editSelectedSourceRow = state.editSourceRows.length === 1 ? state.editSourceRows[0] : null;
+    if (state.editSelectedSourceRow) {
+      const quantity = $("edit-bag-quantity");
+      if (quantity) {
+        const available = Number(state.editSelectedSourceRow.available_quantity || 0);
+        quantity.max = String(available);
+        if (Number(quantity.value || 0) > available) quantity.value = String(available);
+      }
+    }
+    renderEditSourceRows();
+  } catch (error) {
+    console.error("Replacement source load failed:", error);
+    state.editSourceRows = [];
+    state.editSelectedSourceRow = null;
+    renderEditSourceRows();
+    setEditBagError(error.message || "Could not load replacement sources.");
+  }
+}
+
+function renderEditSourceRows() {
+  const container = $("edit-bag-source-results");
+  if (!container) return;
+  container.replaceChildren();
+
+  if (!state.editReplacementItem) return;
+
+  if (!state.editSourceRows.length) {
+    container.innerHTML = `<div class="empty-state">No available source found for the replacement item in this live-sale store.</div>`;
+    return;
+  }
+
+  state.editSourceRows.forEach((row) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `edit-result-btn ${state.editSelectedSourceRow?.id === row.id ? "is-selected" : ""}`;
+    button.innerHTML = `
+      <div class="edit-result-thumb"><span>${escapeHtml(row.source_kind_label || "Source")}</span></div>
+      <div class="edit-result-copy">
+        <strong>${escapeHtml(row.locationLabel || "Unknown source")}</strong>
+        <small>${Number(row.available_quantity || 0).toLocaleString()} available after ${Number(row.reserved_quantity || 0).toLocaleString()} reserved</small>
+      </div>
+      <span class="edit-result-meta">${state.editSelectedSourceRow?.id === row.id ? "Selected" : "Select"}</span>
+    `;
+    button.addEventListener("click", () => {
+      state.editSelectedSourceRow = row;
+      const quantity = $("edit-bag-quantity");
+      if (quantity) {
+        const available = Number(row.available_quantity || 0);
+        quantity.max = String(available);
+        if (Number(quantity.value || 0) > available) quantity.value = String(available);
+      }
+      renderEditSourceRows();
+    });
+    container.appendChild(button);
+  });
+}
+
+function clearEditReplacement() {
+  state.editReplacementItem = null;
+  state.editSourceRows = [];
+  state.editSelectedSourceRow = null;
+  if ($("edit-bag-replacement-scan")) $("edit-bag-replacement-scan").value = "";
+  if (state.editGroup && $("edit-bag-quantity")) {
+    $("edit-bag-quantity").max = String(Math.max(Number(state.editGroup.maxQuantity || 0), Number(state.editGroup.quantity || 0)));
+  }
+  renderEditReplacementResults([]);
+  renderEditSourceRows();
+  setEditBagError("");
+}
+
+async function recordLiveBagCorrectionEvent(payload) {
+  const lot = state.editLot || state.currentLot;
+  try {
+    const { error } = await supabase
+      .from("live_sale_events")
+      .insert({
+        session_id: state.currentSession?.id || lot?.session_id || null,
+        lot_id: lot?.id || null,
+        item_id: payload?.old_item_id || payload?.new_item_id || null,
+        event_type: "bag_item_corrected",
+        actor_email: state.user?.email || null,
+        notes: payload?.reason || null,
+        payload,
+      });
+    if (error) throw error;
+  } catch (error) {
+    console.warn("Could not write live bag correction event:", error);
+  }
+}
+
+async function applyEditBagCorrection() {
+  const group = state.editGroup;
+  const lot = state.editLot || state.currentLot;
+  if (!group || !lot || state.busy) return;
+
+  const reason = String($("edit-bag-reason")?.value || "").trim();
+  const quantity = Math.max(0, parseInt(String($("edit-bag-quantity")?.value || "0"), 10) || 0);
+  if (reason.length < 3) {
+    setEditBagError("A brief correction explanation is required.");
+    $("edit-bag-reason")?.focus();
+    return;
+  }
+
+  if (state.editReplacementItem) {
+    if (!state.editSelectedSourceRow) {
+      setEditBagError("Choose the source tray or storage for the replacement item.");
+      return;
+    }
+    if (quantity <= 0) {
+      setEditBagError("Replacement quantity must be at least 1.");
+      return;
+    }
+    if (quantity > Number(state.editSelectedSourceRow.available_quantity || 0)) {
+      setEditBagError(`Only ${state.editSelectedSourceRow.available_quantity} replacement unit(s) are available at that source.`);
+      return;
+    }
+  } else {
+    const maxQuantity = Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0));
+    if (quantity > maxQuantity) {
+      setEditBagError(`Only ${maxQuantity.toLocaleString()} unit(s) are available for this item in the selected source(s).`);
+      return;
+    }
+  }
+
+  try {
+    state.busy = true;
+    const confirmButton = $("edit-bag-confirm");
+    if (confirmButton) confirmButton.disabled = true;
+    setEditBagError("");
+
+    const oldItem = group.item || {};
+    if (state.editReplacementItem) {
+      const { error } = await supabase.rpc("correct_live_sale_lot_item_group", {
+        _lot_id: lot.id,
+        _old_item_id: group.itemId,
+        _new_item_barcode: state.editReplacementItem.barcode,
+        _new_stock_location_row_id: state.editSelectedSourceRow.id,
+        _quantity: quantity,
+        _notes: reason,
+        _signed_by_email: state.user?.email || null,
+      });
+      if (error) throw error;
+      await bumpInventoryVersion([group.itemId, state.editReplacementItem.id].filter(Boolean));
+    } else {
+      const changed = await saveManifestGroupQuantity(group, quantity, `Live bag correction: ${reason}`, lot);
+      if (changed) {
+        await bumpInventoryVersion(group.itemId ? [group.itemId] : []);
+        await recordLiveBagCorrectionEvent({
+          action: "quantity_correction",
+          reason,
+          old_item_id: group.itemId,
+          old_item_title: oldItem.title || null,
+          old_barcode: oldItem.barcode || null,
+          previous_quantity: Number(group.quantity || 0),
+          new_quantity: quantity,
+          sources: (group.sources || []).map((source) => ({
+            source_stock_location_row_id: source.sourceStockLocationRowId,
+            source_location_id: source.sourceLocation?.id || null,
+            source_label: getSourceLocationLabel(source),
+            quantity: source.quantity,
+          })),
+        });
+      }
+    }
+
+    closeEditBagItemModal();
+    if (String(state.currentLot?.id || "") === String(lot.id)) {
+      await reloadCurrentLot();
+      await loadLotItems();
+    }
+    if (!$("bag-history-modal")?.hidden || String(state.bagHistorySelectedLotId || "") === String(lot.id)) {
+      await loadBagHistory();
+    }
+    setStatus("Bag correction saved and documented.", "success");
+  } catch (error) {
+    console.error("Live bag correction failed:", error);
+    setEditBagError(error.message || "Could not apply that bag correction.");
+  } finally {
+    state.busy = false;
+    const confirmButton = $("edit-bag-confirm");
+    if (confirmButton) confirmButton.disabled = false;
+  }
 }
 
 function getBagStatusClass(status = "") {
@@ -707,27 +1361,63 @@ function getBagHistoryGroups(lotId) {
   getBagHistoryItemsForLot(lotId).forEach((entry) => {
     const itemId = entry.item_id || entry.item?.id || "";
     const sourceRowId = entry.source_stock_location_row_id || "";
+    const sourceKey = sourceRowId || entry.source_location_id || "unknown";
     const status = entry.status || "reserved";
-    const key = `${itemId}::${sourceRowId}::${status}`;
+    const key = `${itemId || entry.item?.barcode || entry.item?.title || sourceKey}::${status}`;
+    const quantity = Number(entry.quantity || 0);
+    const elapsed = Number(entry.show_elapsed_seconds ?? 0);
     if (!groups.has(key)) {
       groups.set(key, {
         key,
+        itemId,
         item: entry.item || {},
-        sourceLocation: entry.source_location || {},
         status,
         quantity: 0,
-        showElapsedSeconds: entry.show_elapsed_seconds,
+        showElapsedSeconds: elapsed,
+        lastShowElapsedSeconds: elapsed,
         scannedAt: entry.scanned_at,
+        sourcesByKey: new Map(),
       });
     }
     const group = groups.get(key);
-    group.quantity += Number(entry.quantity || 0);
+    group.quantity += quantity;
     group.showElapsedSeconds = Math.min(
-      Number(group.showElapsedSeconds ?? entry.show_elapsed_seconds ?? 0),
-      Number(entry.show_elapsed_seconds ?? group.showElapsedSeconds ?? 0),
+      Number(group.showElapsedSeconds ?? elapsed),
+      elapsed,
     );
+    group.lastShowElapsedSeconds = Math.max(
+      Number(group.lastShowElapsedSeconds ?? elapsed),
+      elapsed,
+    );
+
+    if (!group.sourcesByKey.has(sourceKey)) {
+      group.sourcesByKey.set(sourceKey, {
+        key: sourceKey,
+        sourceStockLocationRowId: sourceRowId,
+        sourceLocation: entry.source_location || {},
+        quantity: 0,
+        showElapsedSeconds: elapsed,
+        lastShowElapsedSeconds: elapsed,
+        maxQuantity: 0,
+      });
+    }
+    const source = group.sourcesByKey.get(sourceKey);
+    source.quantity += quantity;
+    source.maxQuantity = source.quantity;
+    source.showElapsedSeconds = Math.min(Number(source.showElapsedSeconds ?? elapsed), elapsed);
+    source.lastShowElapsedSeconds = Math.max(Number(source.lastShowElapsedSeconds ?? elapsed), elapsed);
   });
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map((group) => {
+    const sources = [...group.sourcesByKey.values()];
+    return {
+      ...group,
+      sources,
+      sourceLocation: sources[0]?.sourceLocation || {},
+      maxQuantity: Number(group.quantity || 0),
+      scanSpanSeconds: Math.max(0, Number(group.lastShowElapsedSeconds || 0) - Number(group.showElapsedSeconds || 0)),
+      sourcesByKey: undefined,
+    };
+  });
 }
 
 function getBagHistoryTotals(lotId) {
@@ -878,19 +1568,22 @@ function renderBagHistoryDetail() {
 
   groups.forEach((group) => {
     const item = group.item || {};
-    const loc = group.sourceLocation || {};
-    const sourceKind = getSourceKindLabel(loc);
+    const canEditGroup = group.status === "reserved" && ["open", "reserved", "released"].includes(String(lot.status || ""));
     const row = document.createElement("article");
     row.className = "bag-detail-item";
     row.innerHTML = `
       <div class="bag-detail-thumb"><span>No photo</span></div>
       <div class="bag-detail-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-        <span>${escapeHtml(item.barcode || "-")}</span>
-        <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
-        <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))} - ${escapeHtml(group.status || "reserved")}</small>
+        <span>${renderManifestSourceSummary(group)}</span>
+        ${renderManifestTimeNote(group)}
+        ${renderManifestSourceBreakdown(group, { showMax: false })}
+        <small>${escapeHtml(group.status || "reserved")}</small>
       </div>
-      <div class="bag-detail-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
+      <div class="bag-detail-actions">
+        <div class="bag-detail-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
+        ${canEditGroup ? `<button type="button" class="tiny-btn" data-edit-history-group="${escapeHtml(group.key)}">Edit</button>` : ""}
+      </div>
     `;
     itemsWrap.appendChild(row);
 
@@ -900,6 +1593,13 @@ function renderBagHistoryDetail() {
       if (!thumb) return;
       thumb.innerHTML = `<button type="button" aria-label="Open ${escapeHtml(item.title || "item")} image"><img src="${escapeHtml(url)}" alt="${escapeHtml(item.title || "Item preview")}" /></button>`;
       thumb.querySelector("button")?.addEventListener("click", () => openLivePhotoModal(url, item.title || "Item preview"));
+    });
+  });
+
+  itemsWrap.querySelectorAll("[data-edit-history-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = getBagHistoryGroups(lot.id).find((entry) => entry.key === button.getAttribute("data-edit-history-group"));
+      if (group) openEditBagItemModal(group, lot);
     });
   });
 }
@@ -1027,16 +1727,15 @@ function renderLabelReview() {
 
   groups.forEach((group) => {
     const item = group.item || {};
-    const loc = group.sourceLocation || {};
-    const sourceKind = getSourceKindLabel(loc);
     const row = document.createElement("article");
     row.className = "label-review-item";
     row.innerHTML = `
       <div class="label-review-thumb"><span>No photo</span></div>
       <div class="label-review-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
-        <span>${escapeHtml(item.barcode || "-")}</span>
-        <small><b class="source-kind-badge ${getSourceKindClass(loc)}">${escapeHtml(sourceKind)}</b> ${escapeHtml(loc.location_name || "Unknown source")} ${loc.location_code ? `(${escapeHtml(loc.location_code)})` : ""}</small>
+        <span>${renderManifestSourceSummary(group)}</span>
+        ${renderManifestTimeNote(group)}
+        ${renderManifestSourceBreakdown(group)}
       </div>
       <div class="label-review-qty">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
     `;
@@ -1373,6 +2072,8 @@ function shouldReturnFocusToScanner() {
   if (!scanner || scanner.disabled) return false;
   if (!state.currentSession || !state.currentLot || state.flowStep !== "scan") return false;
   if (!$("live-photo-modal")?.hidden) return false;
+  if (!$("bag-history-modal")?.hidden) return false;
+  if (!$("edit-bag-item-modal")?.hidden) return false;
   if (state.busy) return false;
   if (document.activeElement?.matches?.("[data-manifest-qty-input]")) return false;
   if (state.selectedItem && state.sourceRows.length !== 1) return false;
@@ -1755,6 +2456,38 @@ async function releaseManifestGroup(group) {
   await setManifestGroupQuantity(group, 0, "Released from current bag contents");
 }
 
+async function saveManifestGroupQuantity(group, quantity, note = "Updated quantity from current bag contents", lot = state.currentLot) {
+  if (!group) return false;
+  if (!lot?.id) throw new Error("Auction bag was not found.");
+  const nextQuantity = Math.max(0, parseInt(String(quantity), 10) || 0);
+  const maxQuantity = Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0));
+  if (nextQuantity > maxQuantity) {
+    throw new Error(`Only ${maxQuantity.toLocaleString()} unit(s) are available for this item in the selected source(s).`);
+  }
+
+  const quantityPlan = planManifestGroupQuantities(group, nextQuantity);
+  if (!quantityPlan) {
+    throw new Error("This item cannot be adjusted because the source stock is no longer available.");
+  }
+
+  if (!quantityPlan.length) {
+    return false;
+  }
+
+  for (const source of quantityPlan) {
+    const { error } = await supabase.rpc("set_live_sale_lot_group_quantity", {
+      _lot_id: lot.id,
+      _item_id: group.itemId,
+      _stock_location_row_id: source.sourceStockLocationRowId,
+      _quantity: source.nextQuantity,
+      _signed_by_email: state.user?.email || null,
+      _notes: `${note} (${getSourceLocationLabel(source)} -> ${source.nextQuantity})`,
+    });
+    if (error) throw error;
+  }
+  return true;
+}
+
 async function setManifestGroupQuantity(group, quantity, note = "Updated quantity from current bag contents") {
   if (!group || state.busy) return;
   const nextQuantity = Math.max(0, parseInt(String(quantity), 10) || 0);
@@ -1762,15 +2495,12 @@ async function setManifestGroupQuantity(group, quantity, note = "Updated quantit
   try {
     state.busy = true;
     setStatus(nextQuantity > 0 ? "Updating item quantity..." : "Releasing item from this bag...");
-    const { error } = await supabase.rpc("set_live_sale_lot_group_quantity", {
-      _lot_id: state.currentLot.id,
-      _item_id: group.itemId,
-      _stock_location_row_id: group.sourceStockLocationRowId,
-      _quantity: nextQuantity,
-      _signed_by_email: state.user?.email || null,
-      _notes: note,
-    });
-    if (error) throw error;
+    const changed = await saveManifestGroupQuantity(group, nextQuantity, note);
+    if (!changed) {
+      setStatus("Quantity already matches the current bag contents.", "success");
+      setTimeout(() => focusItemScanner(), 80);
+      return;
+    }
     await bumpInventoryVersion(group.itemId ? [group.itemId] : []);
     await reloadCurrentLot();
     await loadLotItems();
@@ -2186,6 +2916,26 @@ function setupListeners() {
   document.querySelectorAll("[data-close-live-photo]").forEach((node) => {
     node.addEventListener("click", closeLivePhotoModal);
   });
+  $("edit-bag-find-replacement")?.addEventListener("click", findEditReplacementItem);
+  $("edit-bag-clear-replacement")?.addEventListener("click", clearEditReplacement);
+  $("edit-bag-confirm")?.addEventListener("click", applyEditBagCorrection);
+  $("edit-bag-cancel")?.addEventListener("click", closeEditBagItemModal);
+  $("edit-bag-item-close")?.addEventListener("click", closeEditBagItemModal);
+  document.querySelectorAll("[data-close-edit-bag-item]").forEach((node) => {
+    node.addEventListener("click", closeEditBagItemModal);
+  });
+  $("edit-bag-replacement-scan")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      findEditReplacementItem();
+    }
+  });
+  $("edit-bag-quantity")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyEditBagCorrection();
+    }
+  });
 
   $("item-scan")?.addEventListener("focus", () => {
     if (state.scannerRefocusTimer) {
@@ -2240,6 +2990,12 @@ function setupListeners() {
         event.preventDefault();
         closeLivePhotoModal();
       }
+      return;
+    }
+
+    if (!$("edit-bag-item-modal")?.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeEditBagItemModal();
       return;
     }
 
