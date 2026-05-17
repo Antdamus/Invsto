@@ -827,21 +827,44 @@
       </div>
 
       <section id="storage-transfer-forward-flow" class="storage-transfer-flow">
+        <section class="storage-transfer-panel storage-transfer-item-gate">
+          <div class="storage-transfer-section-head">
+            <span>Step 1 - Item</span>
+            <small>Scan the item barcode or search by name before choosing storage.</small>
+          </div>
+          <label for="storage-transfer-item-scan">Item barcode or name</label>
+          <div class="storage-transfer-scan-row">
+            <input type="text" id="storage-transfer-item-scan" placeholder="Scan item barcode or type item name" autocomplete="off" />
+            <button type="button" id="storage-transfer-find-item" class="stock-secondary-btn">Confirm Item</button>
+          </div>
+          <div id="storage-transfer-item-summary" class="storage-transfer-summary-card is-empty">No item selected.</div>
+          <div id="storage-transfer-item-results" class="storage-transfer-bags"></div>
+        </section>
+
         <div class="storage-transfer-scans">
           <section class="storage-transfer-panel">
             <label for="storage-transfer-parent-scan">Table / vault / storage label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="storage-transfer-parent-scan" placeholder="Scan parent location barcode or name" autocomplete="off" />
-              <button type="button" id="storage-transfer-find-parent" class="stock-secondary-btn">Find</button>
+              <input type="text" id="storage-transfer-parent-scan" placeholder="Scan parent location barcode" autocomplete="off" />
+              <button type="button" id="storage-transfer-find-parent" class="stock-secondary-btn">Confirm Parent</button>
             </div>
             <div id="storage-transfer-parent-summary" class="storage-transfer-summary-card is-empty">No parent location selected.</div>
           </section>
 
           <section class="storage-transfer-panel">
+            <label for="storage-transfer-container-scan">Bag / container label</label>
+            <div class="storage-transfer-scan-row">
+              <input type="text" id="storage-transfer-container-scan" placeholder="Scan bag or container barcode" autocomplete="off" />
+              <button type="button" id="storage-transfer-find-container" class="stock-secondary-btn">Confirm Bag</button>
+            </div>
+            <div id="storage-transfer-container-summary" class="storage-transfer-summary-card is-empty">No bag selected.</div>
+          </section>
+
+          <section class="storage-transfer-panel">
             <label for="storage-transfer-tray-scan">Destination tray label</label>
             <div class="storage-transfer-scan-row">
-              <input type="text" id="storage-transfer-tray-scan" placeholder="Scan destination tray barcode or name" autocomplete="off" />
-              <button type="button" id="storage-transfer-find-tray" class="stock-secondary-btn">Find</button>
+              <input type="text" id="storage-transfer-tray-scan" placeholder="Scan destination tray barcode" autocomplete="off" />
+              <button type="button" id="storage-transfer-find-tray" class="stock-secondary-btn">Confirm Tray</button>
             </div>
             <div id="storage-transfer-tray-summary" class="storage-transfer-summary-card is-empty">No tray selected.</div>
           </section>
@@ -851,7 +874,7 @@
           <section class="storage-transfer-panel storage-transfer-bags-panel">
             <div class="storage-transfer-section-head">
               <span>Bags and items</span>
-              <small id="storage-transfer-bags-status">Scan a parent location to load its bags.</small>
+              <small id="storage-transfer-bags-status">Confirm an item, then scan a parent location.</small>
             </div>
             <div id="storage-transfer-bags" class="storage-transfer-bags"></div>
           </section>
@@ -952,6 +975,18 @@
         <button type="button" id="cancel-storage-transfer-confirm" class="stock-secondary-btn">Cancel</button>
         <button type="button" id="confirm-storage-transfer" class="stock-primary-btn">Sign and Transfer</button>
       </div>
+    </div>
+  </div>
+
+  <div id="storage-transfer-photo-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="storage-transfer-photo-title">
+    <div class="storage-transfer-photo-content">
+      <button type="button" id="close-storage-transfer-photo" class="stock-modal-close" title="Close">&times;</button>
+      <span class="storage-transfer-eyebrow">Item preview</span>
+      <h3 id="storage-transfer-photo-title">Confirm Item Photo</h3>
+      <div class="storage-transfer-photo-frame">
+        <img id="storage-transfer-photo-preview" alt="Item preview" />
+      </div>
+      <p id="storage-transfer-photo-caption" class="storage-transfer-photo-caption"></p>
     </div>
   </div>
 

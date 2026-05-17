@@ -2190,7 +2190,15 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   color: #1d1d1f;
 }
 
-.transfer-stock-btn {
+.stock-card-action-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.transfer-stock-btn,
+.replenish-tray-btn {
   border: 1px solid rgba(0,113,227,.20);
   border-radius: 999px;
   background: rgba(0,113,227,.08);
@@ -2200,6 +2208,12 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   font-size: .82rem;
   font-weight: 800;
   cursor: pointer;
+}
+
+.replenish-tray-btn {
+  border-color: rgba(154,109,31,.28);
+  background: rgba(214,178,94,.16);
+  color: #6f4b12;
 }
 
 .stock-location-chips {

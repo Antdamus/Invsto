@@ -8,10 +8,12 @@ window.storageTransferModule = (function () {
     mode: MODE_STORAGE_TO_TRAY,
     locations: [],
     stores: [],
+    forwardItemCandidates: [],
     parent: null,
     containers: [],
     stockRows: [],
     itemsById: new Map(),
+    selectedContainer: null,
     selectedStockRow: null,
     selectedItem: null,
     selectedTray: null,
@@ -150,10 +152,50 @@ window.storageTransferModule = (function () {
 
   function getItemPhoto(item) {
     const photos = Array.isArray(item?.photos) ? item.photos : [];
-    const first = photos.find(Boolean);
+    const photoPaths = Array.isArray(item?.photoPaths) ? item.photoPaths : [];
+    const first = photos.find(Boolean) || photoPaths.find(Boolean) || item?.photo_url || "";
     if (!first) return "";
     if (/^https?:\/\//i.test(first)) return first;
     return first;
+  }
+
+  async function getItemPhotoUrl(item) {
+    const path = getItemPhoto(item);
+    if (!path) return "";
+    if (/^https?:\/\//i.test(path)) return path;
+    if (typeof getSignedUrl === "function") {
+      return await getSignedUrl(path);
+    }
+    try {
+      const { data, error } = await supabase.storage.from("photos").createSignedUrl(path, 3600);
+      if (!error && data?.signedUrl) return data.signedUrl;
+    } catch (_) {}
+    return "";
+  }
+
+  function openItemPhotoPreview(url, title = "Item photo") {
+    const modal = $("storage-transfer-photo-modal");
+    const image = $("storage-transfer-photo-preview");
+    const caption = $("storage-transfer-photo-caption");
+    if (!modal || !image || !url) return;
+    image.src = url;
+    image.alt = title;
+    if (caption) caption.textContent = title;
+    modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    focusAndSelect("close-storage-transfer-photo", 40);
+  }
+
+  function closeItemPhotoPreview() {
+    const modal = $("storage-transfer-photo-modal");
+    const image = $("storage-transfer-photo-preview");
+    if (image) image.src = "";
+    modal?.classList.add("hidden");
+    if (!$("storage-transfer-modal")?.classList.contains("hidden")) {
+      document.body.classList.add("modal-open");
+    } else {
+      document.body.classList.remove("modal-open");
+    }
   }
 
   function setMode(mode) {
@@ -176,15 +218,20 @@ window.storageTransferModule = (function () {
     } else {
       if (eyebrow) eyebrow.textContent = "Storage to tray";
       if (title) title.textContent = "Replenish Tray";
-      if (subtitle) subtitle.textContent = "Scan a table, choose the bag and item, scan the tray, then sign the transfer.";
-      focusAndSelect("storage-transfer-parent-scan", 75);
+      if (subtitle) subtitle.textContent = "Confirm the item, scan the parent location, scan the bag that contains it, scan the tray, then sign the transfer.";
+      if (state.selectedItem) focusAndSelect("storage-transfer-parent-scan", 75);
+      else focusAndSelect("storage-transfer-item-scan", 75);
     }
     setStatus("");
   }
 
-  function resetForwardSelection({ keepTray = true } = {}) {
+  function resetForwardSelection({ keepTray = true, keepItem = false } = {}) {
     state.selectedStockRow = null;
-    state.selectedItem = null;
+    state.selectedContainer = null;
+    if (!keepItem) {
+      state.forwardItemCandidates = [];
+      state.selectedItem = null;
+    }
     state.trayConflict = null;
     if (!keepTray) state.selectedTray = null;
     const qty = $("storage-transfer-quantity");
@@ -192,6 +239,8 @@ window.storageTransferModule = (function () {
       qty.value = "1";
       qty.removeAttribute("max");
     }
+    renderForwardItemSummary();
+    renderContainerSummary();
     renderSelectedItem();
     renderTraySummary();
   }
@@ -253,7 +302,7 @@ window.storageTransferModule = (function () {
 
     const { data: exactRows, error: exactError } = await supabase
       .from("item_types")
-      .select("id, title, barcode, weight, sale_price, photos")
+      .select("id, title, barcode, weight, sale_price, photos, photo_url")
       .eq("barcode", value)
       .limit(8);
 
@@ -265,12 +314,121 @@ window.storageTransferModule = (function () {
 
     const { data: titleRows, error: titleError } = await supabase
       .from("item_types")
-      .select("id, title, barcode, weight, sale_price, photos")
+      .select("id, title, barcode, weight, sale_price, photos, photo_url")
       .or(`title.ilike.%${search}%,barcode.ilike.%${search}%`)
       .limit(8);
 
     if (titleError) throw titleError;
     return titleRows || [];
+  }
+
+  function renderForwardItemSummary() {
+    const target = $("storage-transfer-item-summary");
+    const results = $("storage-transfer-item-results");
+    if (!target) return;
+
+    if (!state.selectedItem) {
+      target.className = "storage-transfer-summary-card is-empty";
+      target.textContent = state.forwardItemCandidates.length
+        ? "Choose the matching item below."
+        : "No item selected.";
+      if (results) {
+        results.innerHTML = state.forwardItemCandidates.length
+          ? state.forwardItemCandidates.map((item) => `
+            <button type="button" class="storage-transfer-item-row" data-forward-item-id="${escapeHtml(item.id)}">
+              <span>
+                <strong>${escapeHtml(item.title || "Untitled item")}</strong>
+                <small>${escapeHtml(item.barcode || "No barcode")}</small>
+              </span>
+              <b>Select</b>
+            </button>
+          `).join("")
+          : "";
+      }
+      return;
+    }
+
+    target.className = "storage-transfer-summary-card storage-transfer-item-summary-card";
+    target.innerHTML = `
+      <button type="button" class="storage-transfer-item-photo-btn" data-transfer-item-photo>
+        <span>No photo</span>
+      </button>
+      <div>
+        <span>Item to replenish</span>
+        <strong>${escapeHtml(state.selectedItem.title || "Untitled item")}</strong>
+        <small>${escapeHtml(state.selectedItem.barcode || "No barcode")}</small>
+      </div>
+    `;
+    if (results) results.innerHTML = "";
+
+    const photoButton = target.querySelector("[data-transfer-item-photo]");
+    const itemForPhoto = state.selectedItem;
+    target.dataset.itemId = itemForPhoto.id || "";
+    getItemPhotoUrl(itemForPhoto).then((url) => {
+      if (!url || !photoButton || itemForPhoto.id !== photoButton.closest("#storage-transfer-item-summary")?.dataset.itemId) return;
+      photoButton.innerHTML = `<img src="${escapeHtml(url)}" alt="${escapeHtml(itemForPhoto.title || "Item photo")}">`;
+      photoButton.dataset.photoUrl = url;
+      photoButton.title = "Open item photo";
+    }).catch((error) => {
+      console.warn("Could not load replenish item photo:", error);
+    });
+  }
+
+  async function selectForwardItem(item, options = {}) {
+    state.selectedItem = item;
+    state.forwardItemCandidates = [];
+    state.selectedStockRow = null;
+    state.selectedContainer = null;
+    state.trayConflict = null;
+    renderForwardItemSummary();
+    renderContainerSummary();
+    renderSelectedItem();
+    renderBags();
+
+    if (state.selectedTray) {
+      try {
+        await checkTrayConflict();
+      } catch (error) {
+        console.error("Tray conflict check failed:", error);
+        setStatus(error?.message || "Could not check tray conflicts.", "error");
+      }
+    }
+
+    if (!options.silentFocus) focusAndSelect("storage-transfer-parent-scan");
+  }
+
+  async function handleForwardItemScan() {
+    clearAutoTimer("forward-item-scan");
+    const input = $("storage-transfer-item-scan");
+    const query = input?.value || "";
+    setStatus("");
+
+    try {
+      const candidates = await findItemCandidates(query);
+      if (!candidates.length) throw new Error("No item matched that barcode or title.");
+
+      state.forwardItemCandidates = candidates;
+      state.selectedItem = null;
+      state.selectedStockRow = null;
+      state.selectedContainer = null;
+      renderForwardItemSummary();
+      renderContainerSummary();
+      renderSelectedItem();
+      renderBags();
+
+      if (candidates.length === 1) {
+        await selectForwardItem(candidates[0]);
+      } else {
+        setStatus("Choose the matching item, then continue scanning the storage location.", "info");
+        $("storage-transfer-item-results")?.querySelector("[data-forward-item-id]")?.focus?.();
+      }
+    } catch (error) {
+      console.error("Forward item scan failed:", error);
+      resetForwardSelection({ keepTray: true, keepItem: false });
+      setStatus(error?.message || "Could not find that item.", "error");
+      showModuleToast(error?.message || "Could not find that item.", "error");
+      focusAndSelect("storage-transfer-item-scan");
+    }
   }
 
   function renderParentSummary() {
@@ -288,6 +446,29 @@ window.storageTransferModule = (function () {
       <span>Source parent</span>
       <strong>${escapeHtml(state.parent.location_name || "Unnamed location")}</strong>
       <small>${escapeHtml(state.parent.location_code || "No barcode")} - ${escapeHtml(getLocationPath(state.parent))}</small>
+    `;
+  }
+
+  function renderContainerSummary() {
+    const target = $("storage-transfer-container-summary");
+    if (!target) return;
+
+    if (!state.selectedContainer) {
+      target.className = "storage-transfer-summary-card is-empty";
+      target.textContent = "No bag selected.";
+      return;
+    }
+
+    const quantity = Number(state.selectedStockRow?.quantity || 0);
+    target.className = "storage-transfer-summary-card";
+    target.innerHTML = `
+      <span>Source bag</span>
+      <strong>${escapeHtml(state.selectedContainer.location_name || "Unnamed bag")}</strong>
+      <small>${escapeHtml(state.selectedContainer.location_code || "No barcode")} - ${escapeHtml(getLocationPath(state.selectedContainer))}</small>
+      <div class="storage-transfer-selected-meta">
+        <b>${quantity.toLocaleString()} available</b>
+        <span>${escapeHtml(state.selectedItem?.title || "Selected item")}</span>
+      </div>
     `;
   }
 
@@ -325,14 +506,18 @@ window.storageTransferModule = (function () {
 
     if (!state.selectedStockRow || !state.selectedItem) {
       target.className = "storage-transfer-selected-card is-empty";
-      target.textContent = "No item selected.";
+      target.textContent = state.selectedItem
+        ? "Scan the bag/container that contains this item."
+        : "No item selected.";
       if (hint) hint.textContent = "Available quantity will appear after selecting an item.";
-      if (status) status.textContent = "Select an item from a bag.";
+      if (status) status.textContent = state.selectedItem
+        ? "Scan the source bag that contains the selected item."
+        : "Scan or search for the item first.";
       return;
     }
 
     const quantity = Number(state.selectedStockRow.quantity || 0);
-    const container = state.containers.find((location) => location.id === state.selectedStockRow.location_id);
+    const container = state.selectedContainer || state.containers.find((location) => location.id === state.selectedStockRow.location_id);
     const qtyInput = $("storage-transfer-quantity");
     if (qtyInput) {
       qtyInput.max = String(quantity);
@@ -359,8 +544,10 @@ window.storageTransferModule = (function () {
     if (!target) return;
 
     if (!state.parent) {
-      target.innerHTML = `<div class="storage-transfer-empty">Scan a table, vault, or parent storage location first.</div>`;
-      if (status) status.textContent = "Scan a parent location to load its bags.";
+      target.innerHTML = `<div class="storage-transfer-empty">Confirm the item, then scan a table, vault, or parent storage location.</div>`;
+      if (status) status.textContent = state.selectedItem
+        ? "Scan a parent location to load bags that may contain this item."
+        : "Confirm an item first.";
       return;
     }
 
@@ -378,7 +565,9 @@ window.storageTransferModule = (function () {
 
     if (status) {
       const itemCount = state.stockRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-      status.textContent = `${state.containers.length} bag(s), ${itemCount.toLocaleString()} total unit(s).`;
+      status.textContent = state.selectedItem
+        ? `${state.containers.length} bag(s), ${itemCount.toLocaleString()} total matching unit(s) for this item.`
+        : `${state.containers.length} bag(s), ${itemCount.toLocaleString()} total unit(s).`;
     }
 
     target.innerHTML = state.containers.map((container) => {
@@ -406,7 +595,7 @@ window.storageTransferModule = (function () {
                   <b>Qty ${Number(row.quantity || 0).toLocaleString()}</b>
                 </button>
               `;
-            }).join("") : `<div class="storage-transfer-empty is-small">No active stock in this bag.</div>`}
+            }).join("") : `<div class="storage-transfer-empty is-small">${state.selectedItem ? "This item is not in this bag." : "No active stock in this bag."}</div>`}
           </div>
         </article>
       `;
@@ -420,7 +609,7 @@ window.storageTransferModule = (function () {
       .sort((a, b) => String(a.location_name || "").localeCompare(String(b.location_name || "")));
     state.stockRows = [];
     state.itemsById = new Map();
-    resetForwardSelection({ keepTray: true });
+    resetForwardSelection({ keepTray: true, keepItem: true });
     renderParentSummary();
 
     if (!state.containers.length) {
@@ -438,12 +627,15 @@ window.storageTransferModule = (function () {
     if (stockError) throw stockError;
 
     state.stockRows = Array.isArray(stockRows) ? stockRows : [];
+    if (state.selectedItem?.id) {
+      state.stockRows = state.stockRows.filter((row) => row.item_id === state.selectedItem.id);
+    }
     const itemIds = [...new Set(state.stockRows.map((row) => row.item_id).filter(Boolean))];
 
     if (itemIds.length) {
       const { data: items, error: itemsError } = await supabase
         .from("item_types")
-        .select("id, title, barcode, weight, sale_price, photos")
+        .select("id, title, barcode, weight, sale_price, photos, photo_url")
         .in("id", itemIds);
       if (itemsError) throw itemsError;
       state.itemsById = new Map((items || []).map((item) => [item.id, item]));
@@ -459,6 +651,10 @@ window.storageTransferModule = (function () {
     setStatus("");
 
     try {
+      if (!state.selectedItem) {
+        focusAndSelect("storage-transfer-item-scan");
+        throw new Error("Confirm the item before scanning the storage location.");
+      }
       await loadLocations();
       const parent = findLocationByScan(query, (location) => {
         return !isTray(location) && !isContainer(location) && location.active !== false;
@@ -467,11 +663,64 @@ window.storageTransferModule = (function () {
       if (!parent) throw new Error("No active parent location matched that scan.");
 
       await loadParentContainers(parent);
-      focusAndSelect("storage-transfer-tray-scan");
+      focusAndSelect("storage-transfer-container-scan");
     } catch (error) {
       console.error("Parent scan failed:", error);
       setStatus(error?.message || "Could not load that parent location.", "error");
       showModuleToast(error?.message || "Could not load that parent location.", "error");
+    }
+  }
+
+  async function handleContainerScan() {
+    clearAutoTimer("forward-container-scan");
+    const input = $("storage-transfer-container-scan");
+    const query = input?.value || "";
+    setStatus("");
+
+    try {
+      if (!state.selectedItem) {
+        focusAndSelect("storage-transfer-item-scan");
+        throw new Error("Confirm the item before scanning a bag.");
+      }
+      if (!state.parent) {
+        focusAndSelect("storage-transfer-parent-scan");
+        throw new Error("Scan the parent table, vault, or storage location before scanning the bag.");
+      }
+      if (!state.locations.length) await loadLocations();
+
+      const container = findLocationByScan(query, (location) => {
+        return isContainer(location)
+          && location.active !== false
+          && location.parent_location_id === state.parent.id;
+      });
+      if (!container) throw new Error("No active bag under the selected parent matched that scan.");
+
+      const row = state.stockRows.find((entry) => (
+        entry.location_id === container.id
+        && entry.item_id === state.selectedItem.id
+        && Number(entry.quantity || 0) > 0
+      ));
+      if (!row) {
+        state.selectedContainer = null;
+        state.selectedStockRow = null;
+        renderContainerSummary();
+        renderSelectedItem();
+        throw new Error("That bag does not contain the selected item, so it cannot be used for this transfer.");
+      }
+
+      state.selectedContainer = container;
+      await selectSourceStockRow(row.id, { keepFocus: true });
+      renderContainerSummary();
+
+      if (!state.selectedTray) focusAndSelect("storage-transfer-tray-scan");
+      else {
+        focusAndSelect("storage-transfer-quantity");
+        scheduleReviewIfReady("storage-to-tray-quantity-ready");
+      }
+    } catch (error) {
+      console.error("Container scan failed:", error);
+      setStatus(error?.message || "Could not select that bag.", "error");
+      showModuleToast(error?.message || "Could not select that bag.", "error");
     }
   }
 
@@ -511,6 +760,14 @@ window.storageTransferModule = (function () {
     setStatus("");
 
     try {
+      if (!state.selectedItem) {
+        focusAndSelect("storage-transfer-item-scan");
+        throw new Error("Confirm the item before scanning the tray.");
+      }
+      if (!state.selectedStockRow || !state.selectedContainer) {
+        focusAndSelect("storage-transfer-container-scan");
+        throw new Error("Scan the source bag that contains the selected item before scanning the tray.");
+      }
       if (!state.locations.length) await loadLocations();
       const tray = findLocationByScan(query, (location) => isTray(location) && location.active !== false);
       if (!tray) throw new Error("No active tray matched that scan.");
@@ -537,12 +794,15 @@ window.storageTransferModule = (function () {
     }
   }
 
-  async function selectSourceStockRow(stockRowId) {
+  async function selectSourceStockRow(stockRowId, options = {}) {
     const row = state.stockRows.find((entry) => entry.id === stockRowId);
     if (!row) return;
 
     state.selectedStockRow = row;
     state.selectedItem = state.itemsById.get(row.item_id) || null;
+    state.selectedContainer = state.containers.find((location) => location.id === row.location_id) || null;
+    renderForwardItemSummary();
+    renderContainerSummary();
     renderSelectedItem();
     renderBags();
 
@@ -551,6 +811,10 @@ window.storageTransferModule = (function () {
     } catch (error) {
       console.error("Tray conflict check failed:", error);
       setStatus(error?.message || "Could not check tray conflicts.", "error");
+    }
+
+    if (options.keepFocus) {
+      return;
     }
 
     if (!state.selectedTray) {
@@ -562,8 +826,10 @@ window.storageTransferModule = (function () {
   }
 
   function validateReadyForReview() {
+    if (!state.selectedItem) return "Confirm the item barcode or title first.";
     if (!state.parent) return "Scan the parent table, vault, or storage location first.";
-    if (!state.selectedStockRow || !state.selectedItem) return "Select the item from one of the bags.";
+    if (!state.selectedContainer) return "Scan the source bag or container.";
+    if (!state.selectedStockRow) return "The selected bag does not contain this item.";
     if (!state.selectedTray) return "Scan the destination tray.";
     if (state.trayConflict) return "This item is already in another tray in this store.";
 
@@ -891,7 +1157,7 @@ window.storageTransferModule = (function () {
   }
 
   function getForwardConfirmMarkup(qty) {
-    const sourceContainer = state.containers.find((location) => location.id === state.selectedStockRow.location_id);
+    const sourceContainer = state.selectedContainer || state.containers.find((location) => location.id === state.selectedStockRow.location_id);
     return `
       <div>
         <span>From bag</span>
@@ -1010,9 +1276,12 @@ window.storageTransferModule = (function () {
     if (typeof refreshItemById === "function") await refreshItemById(changedItemId);
 
     const parent = state.parent;
-    resetForwardSelection({ keepTray: true });
+    resetForwardSelection({ keepTray: true, keepItem: false });
+    if ($("storage-transfer-item-scan")) $("storage-transfer-item-scan").value = "";
+    if ($("storage-transfer-container-scan")) $("storage-transfer-container-scan").value = "";
     if (parent) await loadParentContainers(parent);
     renderTraySummary();
+    focusAndSelect("storage-transfer-item-scan");
     console.log("Storage to tray transfer result:", data);
     return changedItemId;
   }
@@ -1097,6 +1366,19 @@ window.storageTransferModule = (function () {
     modal.classList.remove("hidden");
     document.body.classList.add("modal-open");
     setStatus("");
+    if (state.mode === MODE_STORAGE_TO_TRAY) {
+      state.parent = null;
+      state.containers = [];
+      state.stockRows = [];
+      state.itemsById = new Map();
+      resetForwardSelection({ keepTray: false, keepItem: false });
+      ["storage-transfer-item-scan", "storage-transfer-parent-scan", "storage-transfer-container-scan", "storage-transfer-tray-scan"].forEach((id) => {
+        const input = $(id);
+        if (input) input.value = "";
+      });
+      renderParentSummary();
+      renderBags();
+    }
     loadLocations()
       .catch((error) => {
         console.error("Failed to preload transfer locations:", error);
@@ -1105,6 +1387,56 @@ window.storageTransferModule = (function () {
       .finally(() => {
         setMode(state.mode);
       });
+  }
+
+  async function openForItem(itemId) {
+    const modal = $("storage-transfer-modal");
+    if (!modal) return;
+    modal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    state.parent = null;
+    state.containers = [];
+    state.stockRows = [];
+    state.itemsById = new Map();
+    state.selectedTray = null;
+    state.selectedContainer = null;
+    state.selectedStockRow = null;
+    state.trayConflict = null;
+    ["storage-transfer-parent-scan", "storage-transfer-container-scan", "storage-transfer-tray-scan"].forEach((id) => {
+      const input = $(id);
+      if (input) input.value = "";
+    });
+    renderParentSummary();
+    renderContainerSummary();
+    renderTraySummary();
+    renderBags();
+    setMode(MODE_STORAGE_TO_TRAY);
+    setStatus("");
+
+    try {
+      await loadLocations();
+      let item = typeof window.getStockItemById === "function" ? window.getStockItemById(itemId) : null;
+      if (!item) {
+        const { data, error } = await supabase
+          .from("item_types")
+          .select("id, title, barcode, weight, sale_price, photos, photo_url")
+          .eq("id", itemId)
+          .maybeSingle();
+        if (error) throw error;
+        item = data;
+      }
+      if (!item) throw new Error("Could not load that item for replenishment.");
+
+      const input = $("storage-transfer-item-scan");
+      if (input) input.value = item.barcode || item.title || "";
+      await selectForwardItem(item);
+      setStatus("Item confirmed. Scan the parent table/vault/location barcode.", "success");
+    } catch (error) {
+      console.error("Could not open replenish flow for item:", error);
+      setStatus(error?.message || "Could not start replenishment for that item.", "error");
+      showModuleToast(error?.message || "Could not start replenishment for that item.", "error");
+      focusAndSelect("storage-transfer-item-scan");
+    }
   }
 
   function closeModal() {
@@ -1129,7 +1461,9 @@ window.storageTransferModule = (function () {
   function bindEvents() {
     $("open-storage-transfer")?.addEventListener("click", openModal);
     $("close-storage-transfer")?.addEventListener("click", closeModal);
+    $("storage-transfer-find-item")?.addEventListener("click", handleForwardItemScan);
     $("storage-transfer-find-parent")?.addEventListener("click", handleParentScan);
+    $("storage-transfer-find-container")?.addEventListener("click", handleContainerScan);
     $("storage-transfer-find-tray")?.addEventListener("click", handleTrayScan);
     $("storage-transfer-review-btn")?.addEventListener("click", openConfirmModal);
     $("return-transfer-find-item")?.addEventListener("click", handleReturnItemScan);
@@ -1144,7 +1478,9 @@ window.storageTransferModule = (function () {
       button.addEventListener("click", () => setMode(button.dataset.storageTransferMode));
     });
 
+    bindEnter("storage-transfer-item-scan", handleForwardItemScan);
     bindEnter("storage-transfer-parent-scan", handleParentScan);
+    bindEnter("storage-transfer-container-scan", handleContainerScan);
     bindEnter("storage-transfer-tray-scan", handleTrayScan);
     bindEnter("storage-transfer-quantity", openConfirmModal);
     bindEnter("return-transfer-item-scan", handleReturnItemScan);
@@ -1153,7 +1489,9 @@ window.storageTransferModule = (function () {
     bindEnter("return-transfer-quantity", openConfirmModal);
     bindEnter("storage-transfer-password", confirmTransfer);
 
+    bindDebouncedInput("storage-transfer-item-scan", "forward-item-scan", handleForwardItemScan);
     bindDebouncedInput("storage-transfer-parent-scan", "forward-parent-scan", handleParentScan);
+    bindDebouncedInput("storage-transfer-container-scan", "forward-container-scan", handleContainerScan);
     bindDebouncedInput("storage-transfer-tray-scan", "forward-tray-scan", handleTrayScan);
     bindDebouncedInput("return-transfer-item-scan", "return-item-scan", handleReturnItemScan);
     bindDebouncedInput("return-transfer-bag-scan", "return-bag-scan", handleReturnBagScan);
@@ -1168,6 +1506,21 @@ window.storageTransferModule = (function () {
       const trigger = event.target.closest("[data-source-stock-id]");
       if (!trigger) return;
       selectSourceStockRow(trigger.getAttribute("data-source-stock-id"));
+    });
+
+    $("storage-transfer-item-summary")?.addEventListener("click", (event) => {
+      const trigger = event.target.closest("[data-transfer-item-photo]");
+      if (!trigger) return;
+      const url = trigger.dataset.photoUrl;
+      if (!url) return;
+      openItemPhotoPreview(url, state.selectedItem?.title || "Item photo");
+    });
+
+    $("storage-transfer-item-results")?.addEventListener("click", async (event) => {
+      const trigger = event.target.closest("[data-forward-item-id]");
+      if (!trigger) return;
+      const item = state.forwardItemCandidates.find((entry) => entry.id === trigger.getAttribute("data-forward-item-id"));
+      if (item) await selectForwardItem(item);
     });
 
     $("return-transfer-tray-options")?.addEventListener("click", async (event) => {
@@ -1189,6 +1542,11 @@ window.storageTransferModule = (function () {
     $("storage-transfer-confirm-modal")?.addEventListener("click", (event) => {
       if (event.target.id === "storage-transfer-confirm-modal") closeConfirmModal();
     });
+
+    $("close-storage-transfer-photo")?.addEventListener("click", closeItemPhotoPreview);
+    $("storage-transfer-photo-modal")?.addEventListener("click", (event) => {
+      if (event.target.id === "storage-transfer-photo-modal") closeItemPhotoPreview();
+    });
   }
 
   function setup() {
@@ -1196,6 +1554,8 @@ window.storageTransferModule = (function () {
     state.initialized = true;
     bindEvents();
     renderParentSummary();
+    renderForwardItemSummary();
+    renderContainerSummary();
     renderTraySummary();
     renderSelectedItem();
     renderBags();
@@ -1213,5 +1573,6 @@ window.storageTransferModule = (function () {
   return {
     setup,
     openModal,
+    openForItem,
   };
 })();

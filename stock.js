@@ -490,7 +490,12 @@ function buildLocationChips(item) {
           <div class="stock-location-section">
             <div class="stock-section-row">
               <span>Locations</span>
-              ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `<button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>`}
+              ${isDeleted ? `<span class="stock-deleted-lock">Deleted item</span>` : `
+                <span class="stock-card-action-cluster">
+                  <button type="button" class="replenish-tray-btn" data-id="${item.id}">Replenish Tray</button>
+                  <button type="button" class="transfer-stock-btn" data-id="${item.id}">Move Stock</button>
+                </span>
+              `}
             </div>
             <div class="stock-location-chips">${buildLocationChips(item)}</div>
           </div>
@@ -814,6 +819,15 @@ function buildLocationChips(item) {
           e.preventDefault();
           e.stopPropagation();
           openStockDescriptionModal(descriptionTrigger.dataset.id);
+          return;
+        }
+
+        const replenishTrigger = e.target.closest(".replenish-tray-btn");
+        if (replenishTrigger) {
+          e.preventDefault();
+          e.stopPropagation();
+          const itemId = replenishTrigger.dataset.id;
+          if (itemId) window.storageTransferModule?.openForItem?.(itemId);
           return;
         }
 
