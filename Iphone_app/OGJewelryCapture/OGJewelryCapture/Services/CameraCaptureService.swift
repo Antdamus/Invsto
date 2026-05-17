@@ -244,6 +244,8 @@ final class CameraCaptureService: NSObject {
         }
     }
 
+    // Public AVFoundation torch controls expose brightness level, not beam spread,
+    // cone angle, or physical beam focus.
     func setTorch(enabled: Bool, level requestedLevel: Float) async -> CameraTorchState {
         guard availability != .simulatorFallback else {
             torchState = .simulatorUnavailable

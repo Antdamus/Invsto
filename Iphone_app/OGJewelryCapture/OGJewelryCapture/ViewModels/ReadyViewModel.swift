@@ -113,6 +113,7 @@ final class ReadyViewModel: ObservableObject {
 
     private var pendingJob: CaptureJob?
     private var pendingAutoCaptureTask: Task<Void, Never>?
+    private var pendingTorchApplyTask: Task<Void, Never>?
     private var autoListenTask: Task<Void, Never>?
     private var lastHardwareShutterCaptureAt: Date?
 
@@ -127,6 +128,7 @@ final class ReadyViewModel: ObservableObject {
     private static let autoListenEnabledKey = "ready.autoListenEnabled"
     private static let torchIntensityKey = "ready.torchIntensity"
     private static let autoListenInterval: Duration = .seconds(5)
+    private static let torchHardwareUpdateDelay: Duration = .milliseconds(80)
     private static let hardwareShutterDebounceInterval: TimeInterval = 0.75
     private static let defaultAutoCaptureDelay: TimeInterval = 1.2
     private static let defaultTorchIntensity: Double = 0.4
@@ -171,6 +173,7 @@ final class ReadyViewModel: ObservableObject {
         let listener = listener
         let cameraService = cameraService
         pendingAutoCaptureTask?.cancel()
+        pendingTorchApplyTask?.cancel()
         autoListenTask?.cancel()
 
         Task {
@@ -238,6 +241,7 @@ final class ReadyViewModel: ObservableObject {
 
     func stop() async {
         pendingAutoCaptureTask?.cancel()
+        pendingTorchApplyTask?.cancel()
         stopAutoListenPolling()
         await turnTorchOffForInactiveCapture()
         await listener.stopListening()
@@ -309,10 +313,7 @@ final class ReadyViewModel: ObservableObject {
 
         guard isTorchEnabled else { return }
 
-        Task { [weak self] in
-            guard let self else { return }
-            await self.applyTorch(enabled: true)
-        }
+        scheduleTorchIntensityApply()
     }
 
     func triggerManualCapture() {
@@ -637,6 +638,7 @@ final class ReadyViewModel: ObservableObject {
     private func performCapture(for job: CaptureJob) async {
         pendingAutoCaptureTask = nil
         finishJobMessage = nil
+        await flushPendingTorchIntensityBeforeCapture()
         captureState = .capturing(job)
 
         switch cameraAvailability {
@@ -1025,8 +1027,7 @@ final class ReadyViewModel: ObservableObject {
     }
 
     private static func clampedTorchIntensity(_ intensity: Double) -> Double {
-        let stepped = (intensity * 10).rounded() / 10
-        return min(max(stepped, 0.1), 1.0)
+        min(max(intensity, 0.1), 1.0)
     }
 
     private func reconfigurePendingCaptureIfNeeded() {
@@ -1112,7 +1113,34 @@ final class ReadyViewModel: ObservableObject {
         isTorchEnabled = enabled && state.isAvailable && state.isEnabled
     }
 
+    private func scheduleTorchIntensityApply() {
+        pendingTorchApplyTask?.cancel()
+        pendingTorchApplyTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.torchHardwareUpdateDelay)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await self?.applyTorch(enabled: true)
+        }
+    }
+
+    private func flushPendingTorchIntensityBeforeCapture() async {
+        pendingTorchApplyTask?.cancel()
+        pendingTorchApplyTask = nil
+
+        guard isTorchEnabled, torchState.isAvailable else { return }
+
+        let state = await cameraService.setTorch(enabled: true, level: Float(torchIntensity))
+        torchState = state
+        isTorchEnabled = state.isAvailable && state.isEnabled
+    }
+
     private func turnTorchOffForInactiveCapture() async {
+        pendingTorchApplyTask?.cancel()
+        pendingTorchApplyTask = nil
         isTorchEnabled = false
         let state = await cameraService.setTorch(enabled: false, level: Float(torchIntensity))
         torchState = state

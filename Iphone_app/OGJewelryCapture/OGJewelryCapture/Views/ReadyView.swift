@@ -459,13 +459,13 @@ struct ReadyView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(OGVisualStyle.textSecondary)
 
-                Slider(value: torchIntensityBinding, in: 0.1 ... 1.0, step: 0.1)
+                Slider(value: torchIntensityBinding, in: 0.1 ... 1.0)
                     .disabled(!viewModel.canAdjustTorch || !viewModel.isTorchEnabled)
 
-                Text(viewModel.torchIntensity.formatted(.number.precision(.fractionLength(1))))
+                Text(torchIntensityPercent)
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(OGVisualStyle.goldSoft)
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: 44, alignment: .trailing)
             }
 
             if let message = viewModel.torchAvailabilityMessage {
@@ -922,6 +922,10 @@ struct ReadyView: View {
             get: { viewModel.torchIntensity },
             set: { viewModel.updateTorchIntensity($0) }
         )
+    }
+
+    private var torchIntensityPercent: String {
+        viewModel.torchIntensity.formatted(.percent.precision(.fractionLength(0)))
     }
 
     private var autoCaptureDelayBinding: Binding<Double> {
