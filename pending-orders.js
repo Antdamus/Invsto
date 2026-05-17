@@ -24,6 +24,8 @@ const state = {
   liveLotMatchedLineIds: new Set(),
   liveLotOrderMatches: [],
   workerNoInventoryGps: null,
+  workerNoInventoryCandidates: [],
+  workerNoInventoryLineIds: new Set(),
   busy: false,
 };
 
@@ -890,6 +892,17 @@ function getNextPackableLine(key = state.activeBuyerKey, excludeId = "") {
 
 function isOpenOrderLine(line) {
   return line && !["fulfilled", "cancelled", "skipped"].includes(String(line.line_status || "").toLowerCase());
+}
+
+function isNoInventoryCompletionLine(line) {
+  return isOpenOrderLine(line)
+    && String(line.line_status || "pending").toLowerCase() === "pending"
+    && Number(line.fulfilled_quantity || 0) === 0;
+}
+
+function getNoInventoryCandidateLines(line = state.selectedLine) {
+  if (!line) return [];
+  return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
 }
 
 function isAdminCloseoutSelectable(line) {
@@ -2103,25 +2116,75 @@ function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
 
 function closeWorkerNoInventoryModal() {
   state.workerNoInventoryGps = null;
+  state.workerNoInventoryCandidates = [];
+  state.workerNoInventoryLineIds.clear();
   closeModal("worker-no-inventory-modal");
   setTimeout(() => $("complete-no-inventory")?.focus(), 80);
 }
 
-function renderWorkerNoInventoryList(line) {
+function updateWorkerNoInventorySelectionSummary() {
+  const selected = state.workerNoInventoryLineIds.size;
+  const total = state.workerNoInventoryCandidates.length;
+  const count = $("worker-no-inventory-count");
+  if (count) count.textContent = `${selected} of ${total} selected`;
+  $("confirm-worker-no-inventory")?.toggleAttribute("disabled", selected === 0);
+}
+
+function setWorkerNoInventoryLineSelection(lineId, checked) {
+  if (checked) state.workerNoInventoryLineIds.add(lineId);
+  else state.workerNoInventoryLineIds.delete(lineId);
+  renderWorkerNoInventoryList();
+}
+
+function setAllWorkerNoInventoryLines(checked) {
+  state.workerNoInventoryLineIds.clear();
+  if (checked) {
+    state.workerNoInventoryCandidates.forEach((line) => state.workerNoInventoryLineIds.add(line.id));
+  }
+  renderWorkerNoInventoryList();
+}
+
+function renderWorkerNoInventoryList() {
   const list = $("worker-no-inventory-list");
   if (!list) return;
-  const order = line?.order || {};
   const storeName = getCheckoutStoreName() || "No checkout store selected";
-  list.innerHTML = `
-    <article class="bundle-review-item">
-      <div class="bundle-review-thumb"><span>eBay</span></div>
-      <div class="bundle-review-copy">
-        <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
-        <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
-        <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
-      </div>
-    </article>
-  `;
+  if (!state.workerNoInventoryCandidates.length) {
+    list.innerHTML = `<div class="empty-state">No untouched pending lines are available for this buyer.</div>`;
+    updateWorkerNoInventorySelectionSummary();
+    return;
+  }
+
+  list.innerHTML = state.workerNoInventoryCandidates.map((line) => {
+    const order = line?.order || {};
+    const selected = state.workerNoInventoryLineIds.has(line.id);
+    return `
+      <article class="bundle-review-item no-inventory-line ${selected ? "is-selected" : ""}" data-no-inventory-card="${escapeHtml(line.id)}">
+        <label class="no-inventory-check" aria-label="Select this order line">
+          <input type="checkbox" data-no-inventory-line="${escapeHtml(line.id)}" ${selected ? "checked" : ""} />
+        </label>
+        <div class="bundle-review-thumb"><span>eBay</span></div>
+        <div class="bundle-review-copy">
+          <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
+          <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
+          <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-no-inventory-line]").forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", (event) => {
+      setWorkerNoInventoryLineSelection(event.currentTarget.dataset.noInventoryLine, event.currentTarget.checked);
+    });
+  });
+  list.querySelectorAll("[data-no-inventory-card]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const lineId = card.dataset.noInventoryCard;
+      setWorkerNoInventoryLineSelection(lineId, !state.workerNoInventoryLineIds.has(lineId));
+    });
+  });
+  updateWorkerNoInventorySelectionSummary();
 }
 
 async function openWorkerNoInventoryModal() {
@@ -2135,17 +2198,20 @@ async function openWorkerNoInventoryModal() {
     setStatus("This eBay line is already closed.", "error");
     return;
   }
-  if (String(line.line_status || "pending").toLowerCase() !== "pending" || Number(line.fulfilled_quantity || 0) > 0) {
-    setStatus("Use normal packing for partially fulfilled eBay lines. This shortcut is only for untouched pending lines.", "error");
+  const candidates = getNoInventoryCandidateLines(line);
+  if (!candidates.length) {
+    setStatus("No untouched pending lines for this buyer can be completed without inventory removal.", "error");
     return;
   }
 
   state.workerNoInventoryGps = null;
+  state.workerNoInventoryCandidates = candidates;
+  state.workerNoInventoryLineIds = new Set(candidates.map((entry) => entry.id));
   $("worker-no-inventory-note").value = "";
   $("worker-no-inventory-error").textContent = "";
   $("worker-no-inventory-subtitle").textContent =
-    `This closes the selected eBay line without removing stock from inventory. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}. Press Enter to confirm after reviewing.`;
-  renderWorkerNoInventoryList(line);
+    `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Uncheck anything that should stay in the packing queue. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
+  renderWorkerNoInventoryList();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
   setTimeout(() => $("confirm-worker-no-inventory")?.focus(), 80);
@@ -2174,20 +2240,27 @@ async function confirmWorkerNoInventoryCompletion() {
   const confirmButton = $("confirm-worker-no-inventory");
   const note = String($("worker-no-inventory-note")?.value || "").trim();
   const gps = state.workerNoInventoryGps || { status: "not_finished" };
+  const validCandidateIds = new Set(state.workerNoInventoryCandidates.map((entry) => entry.id));
+  const selectedLineIds = [...state.workerNoInventoryLineIds].filter((lineId) => validCandidateIds.has(lineId));
 
   if (!line) {
     if (errorEl) errorEl.textContent = "Select an eBay order line first.";
     return;
   }
   if (!requireCheckoutStore()) return;
+  if (!selectedLineIds.length) {
+    if (errorEl) errorEl.textContent = "Select at least one pending line to complete.";
+    return;
+  }
 
   try {
     state.busy = true;
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
+    const currentBuyerKey = state.activeBuyerKey;
 
-    const { error } = await supabase.rpc("complete_ebay_order_line_without_inventory", {
-      _order_line_id: line.id,
+    const { data, error } = await supabase.rpc("complete_ebay_order_lines_without_inventory", {
+      _order_line_ids: selectedLineIds,
       _notes: note || null,
       _signed_by_email: state.user.email,
       _checkout_store_id: state.checkoutStoreId || null,
@@ -2199,12 +2272,12 @@ async function confirmWorkerNoInventoryCompletion() {
     });
     if (error) throw error;
 
-    state.stagedFulfillments.delete(line.id);
+    selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
     closeWorkerNoInventoryModal();
-    setStatus("Order completed without inventory removal. The audit trail was recorded.", "info");
+    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
 
-    const nextBuyerLine = getNextPackableLine(state.activeBuyerKey, line.id);
+    const nextBuyerLine = getNextPackableLine(currentBuyerKey);
     if (nextBuyerLine) {
       selectOrderLine(nextBuyerLine.id);
       return;
@@ -2514,6 +2587,9 @@ function clearSelection() {
   state.stockRows = [];
   state.activeBuyerKey = "";
   state.stagedFulfillments.clear();
+  state.workerNoInventoryGps = null;
+  state.workerNoInventoryCandidates = [];
+  state.workerNoInventoryLineIds.clear();
   clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
@@ -2578,6 +2654,8 @@ function setupListeners() {
   $("confirm-worker-no-inventory")?.addEventListener("click", confirmWorkerNoInventoryCompletion);
   $("cancel-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
+  $("select-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(true));
+  $("deselect-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(false));
 
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -2669,7 +2747,12 @@ function setupListeners() {
     }
 
     if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
-      if (event.key === "Enter" && event.target?.tagName?.toLowerCase() !== "textarea") {
+      const target = event.target;
+      const targetTag = target?.tagName?.toLowerCase();
+      const skipEnter = targetTag === "textarea"
+        || targetTag === "input"
+        || (targetTag === "button" && target?.id !== "confirm-worker-no-inventory");
+      if (event.key === "Enter" && !skipEnter) {
         event.preventDefault();
         confirmWorkerNoInventoryCompletion();
       } else if (event.key === "Escape") {

@@ -1346,6 +1346,43 @@ body.modal-open {
   color: #f6d89c;
 }
 
+.no-inventory-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.no-inventory-toolbar > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bundle-review-item.no-inventory-line {
+  grid-template-columns: auto 72px minmax(0, 1fr);
+  cursor: pointer;
+}
+
+.bundle-review-item.no-inventory-line.is-selected {
+  border-color: rgba(227, 189, 119, 0.34);
+  background: rgba(227, 189, 119, 0.08);
+}
+
+.no-inventory-check {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+}
+
+.no-inventory-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold-strong);
+}
+
 .bundle-review-card {
   width: min(860px, 100%);
 }
