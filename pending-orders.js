@@ -31,6 +31,7 @@ const state = {
   noInventoryCaptureStations: [],
   selectedNoInventoryCaptureStationId: "",
   noInventoryEvidencePhotos: [],
+  noInventoryEvidencePhotoUploadKeys: new Set(),
   noInventoryCaptureBusy: false,
   busy: false,
 };
@@ -41,7 +42,6 @@ const NO_INVENTORY_CAPTURE_PHOTO_TABLE = "capture_job_photos";
 const NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS = 1_500;
 const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
-const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 60 * 60 * 1000;
 const NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
@@ -2357,39 +2357,8 @@ async function getNoInventoryCaptureJobPhotoCount(jobId) {
   return count || 0;
 }
 
-async function findRecentNoInventoryCaptureCompletion(stationId, requestedAt) {
-  if (!stationId || !requestedAt) return null;
-  const requestedMs = new Date(requestedAt).getTime();
-  const lookbackIso = Number.isFinite(requestedMs)
-    ? new Date(requestedMs - NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS).toISOString()
-    : requestedAt;
-
-  const { data, error } = await supabase
-    .from(NO_INVENTORY_CAPTURE_JOB_TABLE)
-    .select("id, station_id, status, storage_bucket, storage_path, capture_completed_at, upload_completed_at, mime_type, file_size_bytes, failure_code, failure_message, requested_at")
-    .eq("station_id", stationId)
-    .gte("requested_at", lookbackIso)
-    .order("requested_at", { ascending: false })
-    .limit(5);
-
-  if (error) {
-    console.warn("Could not check recent no-inventory captures:", error);
-    return null;
-  }
-
-  for (const job of Array.isArray(data) ? data : []) {
-    if (job.status === "failed") continue;
-    if (job.status === "completed" || noInventoryCaptureJobHasUpload(job) || await getNoInventoryCaptureJobPhotoCount(job.id)) {
-      return { ...job, status: "completed" };
-    }
-  }
-  return null;
-}
-
 async function pollNoInventoryCaptureJob(job, station = {}) {
   const jobId = job?.id || job;
-  const stationId = station.id || job?.station_id || "";
-  const requestedAt = job?.requested_at || "";
   const stationName = station.name || "";
   const startedAt = Date.now();
   let lastPhotoCount = 0;
@@ -2414,9 +2383,6 @@ async function pollNoInventoryCaptureJob(job, station = {}) {
     if (photoCount > 0 && (Date.now() - lastPhotoChangeAt) >= NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS) {
       return { ...data, status: "completed" };
     }
-
-    const fallbackJob = await findRecentNoInventoryCaptureCompletion(stationId, requestedAt);
-    if (fallbackJob && fallbackJob.id !== jobId) return fallbackJob;
 
     const label = data.status === "queued"
       ? `Capture queued${stationName ? ` on ${stationName}` : ""}. Waiting for camera...`
@@ -2485,6 +2451,33 @@ async function noInventoryCaptureRowsToEvidencePhotos(rows) {
   return photos;
 }
 
+function getNoInventoryEvidencePhotoKey(photo) {
+  return `${photo?.bucket || ""}:${photo?.path || ""}`;
+}
+
+function getSelectedNoInventoryEvidencePhotos() {
+  return state.noInventoryEvidencePhotos.filter((photo) => (
+    state.noInventoryEvidencePhotoUploadKeys.has(getNoInventoryEvidencePhotoKey(photo))
+  ));
+}
+
+function setNoInventoryEvidencePhotoSelected(photoKey, selected) {
+  if (!photoKey) return;
+  if (selected) state.noInventoryEvidencePhotoUploadKeys.add(photoKey);
+  else state.noInventoryEvidencePhotoUploadKeys.delete(photoKey);
+  renderNoInventoryEvidencePhotos();
+}
+
+function setAllNoInventoryEvidencePhotosSelected(selected) {
+  state.noInventoryEvidencePhotoUploadKeys.clear();
+  if (selected) {
+    state.noInventoryEvidencePhotos.forEach((photo) => {
+      state.noInventoryEvidencePhotoUploadKeys.add(getNoInventoryEvidencePhotoKey(photo));
+    });
+  }
+  renderNoInventoryEvidencePhotos();
+}
+
 function setNoInventoryPhotoStatus(message = "", type = "info") {
   const el = $("no-inventory-photo-status");
   if (!el) return;
@@ -2522,7 +2515,8 @@ function getNoInventoryEvidenceSourceLabel() {
 }
 
 async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
-  if (!state.noInventoryEvidencePhotos.length) return [];
+  const selectedPhotos = getSelectedNoInventoryEvidencePhotos();
+  if (!selectedPhotos.length) return [];
 
   const dateFolder = new Date().toISOString().slice(0, 10);
   const orderLabel = getNoInventoryEvidenceSourceLabel();
@@ -2531,8 +2525,8 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
     : `${selectedLineIds.length}-lines`;
   const savedPhotos = [];
 
-  for (let index = 0; index < state.noInventoryEvidencePhotos.length; index += 1) {
-    const photo = state.noInventoryEvidencePhotos[index];
+  for (let index = 0; index < selectedPhotos.length; index += 1) {
+    const photo = selectedPhotos[index];
     const response = await fetch(photo.previewUrl);
     if (!response.ok) {
       throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
@@ -2578,16 +2572,29 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
 function renderNoInventoryEvidencePhotos() {
   const grid = $("no-inventory-photo-grid");
   if (!grid) return;
+  const toolbar = document.querySelector(".no-inventory-photo-toolbar");
+  toolbar?.classList.toggle("hidden", !state.noInventoryEvidencePhotos.length);
   if (!state.noInventoryEvidencePhotos.length) {
     grid.innerHTML = `<div class="empty-state">No evidence photos added.</div>`;
+    updateNoInventoryEvidencePhotoSelectionSummary();
     return;
   }
 
   grid.innerHTML = state.noInventoryEvidencePhotos.map((photo, index) => `
-    <button class="no-inventory-photo-card" type="button" data-no-inventory-photo-index="${index}" title="Open evidence photo">
-      <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}" />
-      <span>${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}</span>
-    </button>
+    <article class="no-inventory-photo-card ${state.noInventoryEvidencePhotoUploadKeys.has(getNoInventoryEvidencePhotoKey(photo)) ? "is-selected" : ""}">
+      <label class="no-inventory-photo-select">
+        <input
+          type="checkbox"
+          data-no-inventory-photo-select="${escapeHtml(getNoInventoryEvidencePhotoKey(photo))}"
+          ${state.noInventoryEvidencePhotoUploadKeys.has(getNoInventoryEvidencePhotoKey(photo)) ? "checked" : ""}
+        />
+        <span>Upload</span>
+      </label>
+      <button type="button" data-no-inventory-photo-index="${index}" title="Open evidence photo">
+        <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}" />
+        <span>${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}</span>
+      </button>
+    </article>
   `).join("");
 
   grid.querySelectorAll("[data-no-inventory-photo-index]").forEach((button) => {
@@ -2595,6 +2602,22 @@ function renderNoInventoryEvidencePhotos() {
       openNoInventoryEvidencePhotoViewer(Number(button.dataset.noInventoryPhotoIndex || 0));
     });
   });
+  grid.querySelectorAll("[data-no-inventory-photo-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      setNoInventoryEvidencePhotoSelected(checkbox.dataset.noInventoryPhotoSelect, checkbox.checked);
+    });
+  });
+  updateNoInventoryEvidencePhotoSelectionSummary();
+}
+
+function updateNoInventoryEvidencePhotoSelectionSummary() {
+  const summary = $("no-inventory-photo-selection-summary");
+  if (!summary) return;
+  const total = state.noInventoryEvidencePhotos.length;
+  const selected = getSelectedNoInventoryEvidencePhotos().length;
+  summary.textContent = total
+    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for upload.`
+    : "";
 }
 
 function scrollNoInventoryConfirmIntoView() {
@@ -2678,10 +2701,14 @@ async function requestNoInventoryEvidencePhoto() {
     const photos = await noInventoryCaptureRowsToEvidencePhotos(photoRows);
     const existing = new Set(state.noInventoryEvidencePhotos.map((photo) => `${photo.bucket}:${photo.path}`));
     photos.forEach((photo) => {
-      if (!existing.has(`${photo.bucket}:${photo.path}`)) state.noInventoryEvidencePhotos.push(photo);
+      const key = getNoInventoryEvidencePhotoKey(photo);
+      if (!existing.has(key)) {
+        state.noInventoryEvidencePhotos.push(photo);
+        state.noInventoryEvidencePhotoUploadKeys.add(key);
+      }
     });
     renderNoInventoryEvidencePhotos();
-    setNoInventoryPhotoStatus(`${photos.length} evidence photo${photos.length === 1 ? "" : "s"} added to this audit.`, "info");
+    setNoInventoryPhotoStatus(`${photos.length} evidence photo${photos.length === 1 ? "" : "s"} added and selected for upload.`, "info");
     scrollNoInventoryConfirmIntoView();
   } catch (error) {
     console.error("No-inventory evidence capture failed:", error);
@@ -2705,6 +2732,7 @@ function closeWorkerNoInventoryModal() {
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
   state.noInventoryEvidencePhotos = [];
+  state.noInventoryEvidencePhotoUploadKeys.clear();
   closeModal("worker-no-inventory-modal");
   setTimeout(() => $("complete-no-inventory")?.focus(), 80);
 }
@@ -2797,6 +2825,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   state.workerNoInventoryCandidates = candidates;
   state.workerNoInventoryLineIds = new Set(candidates.map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
+  state.noInventoryEvidencePhotoUploadKeys.clear();
   $("worker-no-inventory-note").value = "";
   $("worker-no-inventory-error").textContent = "";
   setNoInventoryPhotoStatus("");
@@ -2863,9 +2892,12 @@ async function confirmWorkerNoInventoryCompletion() {
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
     const currentBuyerKey = state.activeBuyerKey;
+    const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
-      state.noInventoryEvidencePhotos.length
+      selectedPhotoCount
         ? "Saving selected evidence photos into the order evidence repository..."
+        : state.noInventoryEvidencePhotos.length
+          ? "No evidence photos selected for upload; completing without photo proof."
         : "",
       "info"
     );
@@ -3204,6 +3236,7 @@ function clearSelection() {
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
   state.noInventoryEvidencePhotos = [];
+  state.noInventoryEvidencePhotoUploadKeys.clear();
   clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
@@ -3279,6 +3312,8 @@ function setupListeners() {
   });
   $("refresh-no-inventory-stations")?.addEventListener("click", () => loadNoInventoryCaptureStations());
   $("request-no-inventory-photo")?.addEventListener("click", requestNoInventoryEvidencePhoto);
+  $("select-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(true));
+  $("deselect-all-no-inventory-photos")?.addEventListener("click", () => setAllNoInventoryEvidencePhotosSelected(false));
 
   $("item-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {

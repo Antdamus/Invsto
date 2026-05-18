@@ -1465,6 +1465,29 @@ body.modal-open {
   flex-wrap: wrap;
 }
 
+.no-inventory-photo-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.no-inventory-photo-toolbar > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.no-inventory-photo-toolbar .secondary-btn {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
 .no-inventory-photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
@@ -1478,6 +1501,30 @@ body.modal-open {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.22);
+  color: inherit;
+  text-align: left;
+}
+
+.no-inventory-photo-card.is-selected {
+  border-color: rgba(125, 240, 178, 0.48);
+  background: rgba(125, 240, 178, 0.08);
+}
+
+.no-inventory-photo-select {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--gold-strong);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.no-inventory-photo-card button {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: zoom-in;
