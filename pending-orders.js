@@ -38,10 +38,11 @@ const state = {
 const NO_INVENTORY_CAPTURE_STATION_TABLE = "capture_stations";
 const NO_INVENTORY_CAPTURE_JOB_TABLE = "capture_jobs";
 const NO_INVENTORY_CAPTURE_PHOTO_TABLE = "capture_job_photos";
-const NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS = 90_000;
+const NO_INVENTORY_CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS = 1_500;
 const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
-const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 45_000;
+const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 60 * 60 * 1000;
+const NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
@@ -2446,8 +2447,8 @@ async function createNoInventorySignedImageUrl(bucket, path, options = {}) {
   if (!bucket || !path) return "";
   try {
     const { data, error } = options.transform
-      ? await supabase.storage.from(bucket).createSignedUrl(path, 600, { transform: options.transform })
-      : await supabase.storage.from(bucket).createSignedUrl(path, 600);
+      ? await supabase.storage.from(bucket).createSignedUrl(path, NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS, { transform: options.transform })
+      : await supabase.storage.from(bucket).createSignedUrl(path, NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS);
     if (!error && data?.signedUrl) return data.signedUrl;
     if (!options.transform) return "";
   } catch (_) {
