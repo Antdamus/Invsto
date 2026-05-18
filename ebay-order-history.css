@@ -183,6 +183,14 @@ textarea {
   line-height: 1;
 }
 
+.history-worker-proof-mode [data-admin-only="true"] {
+  display: none;
+}
+
+.history-worker-proof-mode .history-money-row {
+  display: none;
+}
+
 .history-board {
   overflow: hidden;
 }
@@ -477,6 +485,14 @@ textarea {
 
 .evidence-viewer-card {
   width: min(1040px, 100%);
+}
+
+.proof-trail-modal-card {
+  width: min(980px, 100%);
+}
+
+.compact-modal-list {
+  padding: 8px 0 0;
 }
 
 .evidence-viewer-frame {

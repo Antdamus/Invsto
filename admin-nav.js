@@ -26,6 +26,7 @@
     { href: "store-transfers.html", label: "Store Transfers", mark: "ST" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
+    { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
     { href: "locations.html", label: "Locations", mark: "L" },
     { href: "dashboard.html", label: "Admin Dashboard", mark: "AD" },
   ];

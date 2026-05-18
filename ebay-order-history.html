@@ -93,11 +93,11 @@
         <div class="header-inner">
           <div class="greeting">
             <strong id="history-greeting">eBay Order History</strong>
-            <div class="sub">Admin shipping monitor - completed, canceled, and reverted orders</div>
+            <div id="history-subtitle" class="sub">Search completed orders and proof photos.</div>
           </div>
           <div class="header-pills" aria-label="Page context">
             <div class="pill">Scope: <b>eBay</b></div>
-            <div class="pill">Mode: <b>Admin</b></div>
+            <div class="pill">Mode: <b id="history-mode-label">Proof</b></div>
             <div class="pill" id="history-date-pill">Date: <b>-</b></div>
           </div>
         </div>
@@ -106,9 +106,9 @@
       <main class="content order-history-content">
         <section class="order-history-hero">
           <div>
-            <span class="eyebrow">Order Oversight</span>
+            <span class="eyebrow">Packing Proof</span>
             <h1>Shipped and Closed Orders</h1>
-            <p>Review who packed each order, money totals, admin closeouts, cancellations, and reversals.</p>
+            <p>Search by date, buyer, order number, auction number, title, item number, or worker, then open the photo proof for completed orders.</p>
           </div>
           <div class="history-actions">
             <button id="refresh-history" type="button" class="secondary-btn">
@@ -119,6 +119,10 @@
               <i data-lucide="truck"></i>
               Pending Orders
             </a>
+            <button id="open-proof-trail" type="button" class="secondary-btn">
+              <i data-lucide="shield-check"></i>
+              Proof Trail
+            </button>
           </div>
         </section>
 
@@ -132,7 +136,7 @@
             <input id="history-to" type="date" />
           </label>
           <label>
-            Worker/Admin
+            Worker
             <select id="history-worker">
               <option value="">All workers</option>
             </select>
@@ -172,23 +176,23 @@
             <span>Lines Shipped</span>
             <strong id="summary-shipped-lines">0</strong>
           </div>
-          <div class="history-summary-card">
+          <div class="history-summary-card" data-admin-only="true">
             <span>Gross Total</span>
             <strong id="summary-gross">$0.00</strong>
           </div>
-          <div class="history-summary-card">
+          <div class="history-summary-card" data-admin-only="true">
             <span>Estimated Payout</span>
             <strong id="summary-payout">$0.00</strong>
           </div>
           <div class="history-summary-card">
-            <span>Admin Closeouts</span>
+            <span>No-Inventory Proofs</span>
             <strong id="summary-admin-closeouts">0</strong>
           </div>
           <div class="history-summary-card">
             <span>Canceled Lines</span>
             <strong id="summary-cancelled">0</strong>
           </div>
-          <div class="history-summary-card">
+          <div class="history-summary-card" data-admin-only="true">
             <span>Reversals</span>
             <strong id="summary-reversals">0</strong>
           </div>
@@ -207,18 +211,19 @@
           </div>
         </section>
 
-        <section class="history-board">
-          <div class="history-board-head">
-            <div>
-              <span class="eyebrow">Admin Trail</span>
-              <h2>Closeout and Reversal Events</h2>
-            </div>
-          </div>
-          <div id="event-list" class="event-list">
-            <div class="history-empty">Loading admin events...</div>
-          </div>
-        </section>
       </main>
+    </div>
+  </div>
+
+  <div id="proof-trail-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="proof-trail-title">
+    <div class="history-modal-card proof-trail-modal-card">
+      <button id="close-proof-trail-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Proof Trail</span>
+      <h2 id="proof-trail-title">Closeout and Photo Events</h2>
+      <p>Detailed packing proof, evidence photos, and closeout events for the current filters.</p>
+      <div id="event-list" class="event-list compact-modal-list">
+        <div class="history-empty">Loading proof events...</div>
+      </div>
     </div>
   </div>
 

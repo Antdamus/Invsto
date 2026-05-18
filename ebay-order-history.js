@@ -81,13 +81,24 @@ function normalizeLine(row) {
     searchText: [
       row.item_title,
       row.item_number,
+      row.transaction_id,
       row.custom_label,
+      row.quantity,
+      row.fulfilled_quantity,
+      row.sold_for,
+      row.total_price,
       row.line_status,
+      getLineStatusLabel(row),
       row.fulfilled_by_email,
+      row.fulfilled_at,
       row.notes,
       getOrderFromLine(row).order_number,
       getOrderFromLine(row).buyer_username,
       getOrderFromLine(row).sales_record_number,
+      getOrderFromLine(row).sale_date,
+      getOrderFromLine(row).paid_on_date,
+      getOrderFromLine(row).ship_by_date,
+      getOrderFromLine(row).status,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
 }
@@ -119,6 +130,10 @@ function getLineStatusClass(line) {
 function isAdminCloseoutLine(line) {
   return state.adminCloseoutLineIds.has(line.id)
     || (line.line_status === "fulfilled" && !line.stock_transaction_id);
+}
+
+function isAdminUser() {
+  return String(state.employee?.role || "").toLowerCase() === "admin";
 }
 
 function getEventGpsLabel(event) {
@@ -184,6 +199,15 @@ function closeEvidencePhotoViewer() {
   evidencePhotoViewerReturnFocus = null;
 }
 
+function openProofTrailModal() {
+  openModal("proof-trail-modal");
+  setTimeout(() => $("close-proof-trail-modal")?.focus(), 80);
+}
+
+function closeProofTrailModal() {
+  closeModal("proof-trail-modal");
+}
+
 async function hydrateEventEvidencePhotos(events) {
   for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
     const event = events[eventIndex];
@@ -219,7 +243,7 @@ async function hydrateEventEvidencePhotos(events) {
   }
 }
 
-async function checkAdminAuth() {
+async function checkHistoryAuth() {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) {
     window.location.href = "index.html";
@@ -232,7 +256,7 @@ async function checkAdminAuth() {
     .eq("user_id", session.user.id)
     .maybeSingle();
 
-  if (employeeError || !employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
+  if (employeeError || !employee || employee.active === false) {
     window.location.href = "worker-dashboard.html";
     return false;
   }
@@ -241,6 +265,21 @@ async function checkAdminAuth() {
   state.employee = employee;
   const greeting = $("history-greeting");
   if (greeting) greeting.textContent = `eBay Order History${employee.display_name ? ` - ${employee.display_name}` : ""}`;
+  const subtitle = $("history-subtitle");
+  if (subtitle) {
+    subtitle.textContent = isAdminUser()
+      ? "Admin shipping monitor - completed, canceled, and reverted orders"
+      : "Search completed orders and open packing proof photos.";
+  }
+  const mode = $("history-mode-label");
+  if (mode) mode.textContent = isAdminUser() ? "Admin" : "Proof";
+  if (!isAdminUser()) {
+    document.body.classList.add("history-worker-proof-mode");
+    $("history-status")?.querySelector('option[value="reverted"]')?.remove();
+  }
+  if (window.OGRoleNavigation?.render) {
+    window.OGRoleNavigation.render(isAdminUser() ? "admin" : "worker");
+  }
   return true;
 }
 
@@ -268,8 +307,11 @@ async function logout(event) {
 }
 
 function setupDefaultDates() {
-  const today = toDateInputValue();
-  if ($("history-from") && !$("history-from").value) $("history-from").value = today;
+  const todayDate = new Date();
+  const fromDate = new Date(todayDate);
+  fromDate.setDate(fromDate.getDate() - 14);
+  const today = toDateInputValue(todayDate);
+  if ($("history-from") && !$("history-from").value) $("history-from").value = toDateInputValue(fromDate);
   if ($("history-to") && !$("history-to").value) $("history-to").value = today;
   const search = $("history-search");
   if (search) {
@@ -285,7 +327,7 @@ async function loadOrderHistory() {
   const list = $("history-list");
   const eventList = $("event-list");
   if (list) list.innerHTML = `<div class="history-empty">Loading order history...</div>`;
-  if (eventList) eventList.innerHTML = `<div class="history-empty">Loading admin events...</div>`;
+  if (eventList) eventList.innerHTML = `<div class="history-empty">Loading proof events...</div>`;
 
   const { fromIso, toIso } = getDateRange();
 
@@ -342,13 +384,15 @@ async function loadOrderHistory() {
     .order("created_at", { ascending: false })
     .limit(300);
 
-  const revertEventsQuery = supabase
-    .from("ebay_order_revert_events")
-    .select("*")
-    .gte("created_at", fromIso)
-    .lte("created_at", toIso)
-    .order("created_at", { ascending: false })
-    .limit(300);
+  const revertEventsQuery = isAdminUser()
+    ? supabase
+      .from("ebay_order_revert_events")
+      .select("*")
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso)
+      .order("created_at", { ascending: false })
+      .limit(300)
+    : Promise.resolve({ data: [], error: null });
 
   const [linesResult, adminEventsResult, revertEventsResult] = await Promise.all([
     linesQuery,
@@ -382,11 +426,13 @@ async function loadOrderHistory() {
         .select("*")
         .overlaps("order_line_ids", closedLineIds)
         .limit(500),
-      supabase
-        .from("ebay_order_revert_events")
-        .select("*")
-        .overlaps("order_line_ids", closedLineIds)
-        .limit(500),
+      isAdminUser()
+        ? supabase
+          .from("ebay_order_revert_events")
+          .select("*")
+          .overlaps("order_line_ids", closedLineIds)
+          .limit(500)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (relatedAdminResult.error) {
@@ -709,7 +755,7 @@ function renderHistoryList() {
             <span>Gross ${escapeHtml(formatMoney(group.gross))}</span>
             <span>Payout ${escapeHtml(formatMoney(group.payout))}</span>
           </div>
-          <button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>
+          ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
         </div>
       </div>
       ${groupPhotos.length ? `
@@ -735,14 +781,14 @@ function renderHistoryList() {
             </div>
             <div class="history-line-actions">
               <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
-              <button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>
+              ${isAdminUser() ? `<button type="button" class="secondary-btn revert-line-btn" data-revert-line="${escapeHtml(line.id)}">Revert Line</button>` : ""}
             </div>
           </div>
         `).join("")}
       </div>
       ${auditEvents.length ? `
         <details class="history-audit-details">
-          <summary>Audit trail for this group</summary>
+          <summary>${isAdminUser() ? "Audit trail" : "Packing proof"} for this group</summary>
           <div class="history-audit-timeline">
             ${auditEvents.map((event) => `
               <article>
@@ -848,7 +894,7 @@ function renderEventList() {
       ? "Order reverted"
       : event.action === "fulfilled_no_inventory"
         ? "Packed without inventory removal"
-        : "Canceled by admin";
+        : isAdminUser() ? "Canceled by admin" : "Canceled";
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
     const gps = getEventGpsLabel(event);
     const store = event.payload?.checkout_store_name || "";
@@ -885,6 +931,7 @@ function closeModal(id) {
 }
 
 function openRevertModal(lineIds) {
+  if (!isAdminUser()) return;
   state.selectedRevertLineIds = lineIds;
   const lines = state.lines.filter((line) => lineIds.includes(line.id));
   const list = $("revert-order-list");
@@ -918,7 +965,7 @@ async function verifyAdminPassword(password) {
 }
 
 async function confirmRevert() {
-  if (state.busy) return;
+  if (state.busy || !isAdminUser()) return;
   const note = String($("revert-note")?.value || "").trim();
   const password = String($("revert-password")?.value || "").trim();
   const errorEl = $("revert-error");
@@ -966,6 +1013,11 @@ async function confirmRevert() {
 
 function setupListeners() {
   $("refresh-history")?.addEventListener("click", loadOrderHistory);
+  $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
+  $("close-proof-trail-modal")?.addEventListener("click", closeProofTrailModal);
+  $("proof-trail-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "proof-trail-modal") closeProofTrailModal();
+  });
   ["history-from", "history-to"].forEach((id) => {
     $(id)?.addEventListener("change", loadOrderHistory);
   });
@@ -999,6 +1051,13 @@ function setupListeners() {
       }
       return;
     }
+    if (!$("proof-trail-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeProofTrailModal();
+      }
+      return;
+    }
     if (!$("revert-order-modal")?.classList.contains("hidden")) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1013,7 +1072,7 @@ function setupListeners() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
-  const ok = await checkAdminAuth();
+  const ok = await checkHistoryAuth();
   if (!ok) return;
   setupDashboardShell();
   setupDefaultDates();
