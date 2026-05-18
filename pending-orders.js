@@ -287,11 +287,11 @@ async function loadCurrentWorker() {
 }
 
 function canImportOrders() {
-  return String(state.employee?.role || "").toLowerCase() === "admin";
+  return Boolean(state.employee && state.employee.active !== false);
 }
 
 function isAdminUser() {
-  return canImportOrders();
+  return String(state.employee?.role || "").toLowerCase() === "admin";
 }
 
 function setupImportVisibility() {
@@ -3222,7 +3222,7 @@ function setupListeners() {
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
-    setImportStatus(file ? `Ready to import ${file.name}. Duplicate eBay order numbers will be skipped.` : "");
+    setImportStatus(file ? `Ready to import ${file.name}. Existing orders will be checked for missing lines.` : "");
   });
   $("order-search")?.addEventListener("input", () => {
     clearEbayLaunchFilter({ apply: false });
