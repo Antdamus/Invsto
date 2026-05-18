@@ -25,6 +25,7 @@ const state = {
   liveLotOrderMatches: [],
   ebayLaunchOrderNumbers: new Set(),
   ebayLaunchBuyerKeys: new Set(),
+  ebayLaunchSnapshot: null,
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
   workerNoInventoryLineIds: new Set(),
@@ -691,6 +692,44 @@ function getRequestedEbayOrderNumbers() {
     .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
 }
 
+function decodeBase64UrlJson(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  try {
+    const normalized = text.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    console.warn("Could not decode eBay order snapshot:", error);
+    return null;
+  }
+}
+
+function getRequestedEbayOrderSnapshot() {
+  const params = new URLSearchParams(window.location.search);
+  const snapshot = decodeBase64UrlJson(params.get("ebayOrderSnapshot"));
+  if (!snapshot || typeof snapshot !== "object") return null;
+
+  const orderNumber = normalizeEbayOrderNumber(snapshot.orderNumber || params.get("orderId"));
+  return {
+    ...snapshot,
+    orderNumber,
+  };
+}
+
+function formatEbaySnapshotSummary(snapshot) {
+  if (!snapshot) return "";
+  const parts = [
+    snapshot.buyerUsername ? `buyer ${snapshot.buyerUsername}` : "",
+    snapshot.shipToName ? `ship to ${snapshot.shipToName}` : "",
+    snapshot.orderValue ? `order value ${snapshot.orderValue}` : "",
+    snapshot.selectedService?.name ? `label service ${snapshot.selectedService.name}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "";
+}
+
 async function importEbayOrdersFromCsv() {
   if (!canImportOrders()) {
     setImportStatus("Only admins can import eBay order reports.", "error");
@@ -896,9 +935,10 @@ function applyOrderFilters() {
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {
-  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size) return;
+  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size && !state.ebayLaunchSnapshot) return;
   state.ebayLaunchOrderNumbers.clear();
   state.ebayLaunchBuyerKeys.clear();
+  state.ebayLaunchSnapshot = null;
   if (apply) applyOrderFilters();
 }
 
@@ -906,6 +946,7 @@ function applyEbayLaunchOrderSelection() {
   const orderNumbers = getRequestedEbayOrderNumbers();
   if (!orderNumbers.length) return;
 
+  state.ebayLaunchSnapshot = getRequestedEbayOrderSnapshot();
   state.ebayLaunchOrderNumbers = new Set(orderNumbers);
   state.ebayLaunchBuyerKeys.clear();
   clearLiveLotSelection({ render: false });
@@ -914,7 +955,9 @@ function applyEbayLaunchOrderSelection() {
   if (!matches.length) {
     applyOrderFilters();
     const joined = orderNumbers.join(", ");
-    setStatus(`No pending order line matched eBay order ${joined}. Make sure the latest eBay report was imported.`, "error");
+    const snapshotSummary = formatEbaySnapshotSummary(state.ebayLaunchSnapshot);
+    const pageDetails = snapshotSummary ? ` Page data: ${snapshotSummary}.` : "";
+    setStatus(`No pending order line matched eBay order ${joined}.${pageDetails} Make sure the latest eBay report was imported.`, "error");
     return;
   }
 
@@ -930,6 +973,8 @@ function applyEbayLaunchOrderSelection() {
   let message = missing.length
     ? `Opened ${matches.length.toLocaleString()} matching line(s). Missing from pending orders: ${missing.join(", ")}.`
     : `Opened ${matches.length.toLocaleString()} matching eBay label line(s). Showing ${visibleBuyerLines.toLocaleString()} pending line(s) for that buyer.`;
+  const snapshotSummary = formatEbaySnapshotSummary(state.ebayLaunchSnapshot);
+  if (snapshotSummary) message += ` eBay page data: ${snapshotSummary}.`;
   message += state.checkoutStoreId ? " Refresh returns to the full queue." : " Select the checkout store before packing.";
   setStatus(message, missing.length ? "error" : "info");
   if (state.checkoutStoreId && openMatch && isOpenOrderLine(openMatch)) {

@@ -6,6 +6,7 @@
   const STORAGE_KEY = "ogPendingOrdersUrl";
   const BUTTON_CLASS = "og-ebay-open-order";
   const FLOATING_ID = "og-ebay-open-all-orders";
+  const SINGLE_ORDER_ID = "og-ebay-open-single-order";
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -23,6 +24,126 @@
 
   function uniqueOrderNumbers() {
     return [...new Set(getOrderLinks().map((entry) => entry.orderNumber))];
+  }
+
+  function cleanText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function getText(selector, root = document) {
+    return cleanText(root.querySelector(selector)?.textContent || root.querySelector(selector)?.innerText || "");
+  }
+
+  function getTextLines(selector, root = document) {
+    const element = root.querySelector(selector);
+    return String(element?.innerText || element?.textContent || "")
+      .split(/\n+/)
+      .map(cleanText)
+      .filter(Boolean);
+  }
+
+  function getValueByHeading(label) {
+    const expected = String(label || "").trim().toLowerCase();
+    const headings = [...document.querySelectorAll('[data-testid="order-page"] h3')];
+    const heading = headings.find((entry) => cleanText(entry.textContent).toLowerCase() === expected);
+    const container = heading?.parentElement;
+    if (!container) return "";
+
+    const clone = container.cloneNode(true);
+    clone.querySelector("h3")?.remove();
+    clone.querySelectorAll("button, svg, .infotip, .infotip__overlay").forEach((element) => element.remove());
+    return cleanText(clone.textContent || clone.innerText || "");
+  }
+
+  function encodeBase64UrlJson(value) {
+    try {
+      const json = JSON.stringify(value);
+      const bytes = new TextEncoder().encode(json);
+      let binary = "";
+      bytes.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    } catch (error) {
+      console.warn("Could not encode eBay order snapshot:", error);
+      return "";
+    }
+  }
+
+  function getSingleLabelOrderNumber() {
+    const fromPath = normalizeOrderNumber(window.location.pathname);
+    if (fromPath) return fromPath;
+
+    const packingSlip = document.querySelector('[data-testid="packingslip-new-tab-link"]');
+    const fromPackingSlip = normalizeOrderNumber(packingSlip?.getAttribute("href"));
+    if (fromPackingSlip) return fromPackingSlip;
+
+    const surveyLink = document.querySelector('a[href*="ctx_order_id="]');
+    const fromSurvey = normalizeOrderNumber(surveyLink?.getAttribute("href"));
+    if (fromSurvey) return fromSurvey;
+
+    return "";
+  }
+
+  function isSingleLabelPage() {
+    return Boolean(
+      getSingleLabelOrderNumber()
+      && document.querySelector('[data-testid="order-page"]')
+      && document.querySelector('[data-testid="ship-to-address"]')
+    );
+  }
+
+  function getSelectedServiceSnapshot() {
+    const row = document.querySelector('input[name="service"]:checked')?.closest('[data-testid="service"]');
+    if (!row) return {};
+    return {
+      name: getText('[data-testid="service-title"]', row),
+      price: getText('[data-testid="service-price"]', row),
+      estimatedDelivery: getText('[data-testid="service-estimated-delivery-date"]', row),
+      includedCoverage: getText('[data-testid="included-compensation-amount"]', row),
+      qrCode: getText('[data-testid="service-qr-code-availability"]', row),
+    };
+  }
+
+  function getPackageSnapshot() {
+    return {
+      weightPounds: document.querySelector('input[aria-label="Package weight in pounds"]')?.value || "",
+      weightOunces: document.querySelector('input[aria-label="Package weight in ounces"]')?.value || "",
+      lengthInches: document.querySelector('input[aria-label="Package length in inches"]')?.value || "",
+      widthInches: document.querySelector('input[aria-label="Package width in inches"]')?.value || "",
+      heightInches: document.querySelector('input[aria-label="Package height in inches"]')?.value || "",
+    };
+  }
+
+  function getSingleLabelOrderSnapshot(orderNumber) {
+    const orderSection = document.querySelector('section[aria-label="Order information"]');
+    const moneyMatches = String(orderSection?.innerText || "").match(/\$\d[\d,]*(?:\.\d{2})?/g) || [];
+    const shipToAddressLines = getTextLines("#shipToAddress");
+    const shipFromAddressLines = getTextLines('[data-testid="ship-from-address"] [data-testid="address-info"]');
+    const totalCost = document.querySelector('[data-testid="total-cost"] span:last-child')?.textContent;
+
+    return {
+      source: "ebay-single-label-page",
+      capturedAt: new Date().toISOString(),
+      orderNumber,
+      buyerUsername: cleanText(document.querySelector('a[href*="/usr/"]')?.textContent),
+      itemCount: cleanText(orderSection?.querySelector("button.fake-link")?.textContent),
+      itemSubtotal: moneyMatches[0] || "",
+      orderValue: getValueByHeading("Order value"),
+      shippingPaid: getValueByHeading("Shipping paid"),
+      selectedShipping: getValueByHeading("Selected"),
+      expectedDelivery: getValueByHeading("Expected"),
+      shipToAddressLines,
+      shipToName: shipToAddressLines[0] || "",
+      shipToCityStateZip: shipToAddressLines[shipToAddressLines.length - 1] || "",
+      shipFromAddressLines,
+      packingSlipUrl: document.querySelector('[data-testid="packingslip-new-tab-link"]')?.href || "",
+      productImageUrl: document.querySelector('[data-testid="product-image-wrapper"] img')?.src || "",
+      authenticGuarantee: Boolean(document.querySelector('[data-testid="auth-guaranteed-badge"]')),
+      selectedService: getSelectedServiceSnapshot(),
+      package: getPackageSnapshot(),
+      labelTotalCost: cleanText(totalCost),
+    };
   }
 
   function normalizeAppUrl(value) {
@@ -51,7 +172,7 @@
     return normalized;
   }
 
-  function buildOgUrl(appUrl, orderNumbers) {
+  function buildOgUrl(appUrl, orderNumbers, orderSnapshot = null) {
     const url = new URL(appUrl);
     const unique = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     url.searchParams.set("source", "ebay");
@@ -62,10 +183,20 @@
       url.searchParams.set("orderIds", unique.join(","));
       url.searchParams.delete("orderId");
     }
+    if (orderSnapshot) {
+      const encoded = encodeBase64UrlJson(orderSnapshot);
+      if (encoded) {
+        url.searchParams.set("ebayOrderPage", "single");
+        url.searchParams.set("ebayOrderSnapshot", encoded);
+      }
+    } else {
+      url.searchParams.delete("ebayOrderPage");
+      url.searchParams.delete("ebayOrderSnapshot");
+    }
     return url.toString();
   }
 
-  async function openInOg(orderNumbers) {
+  async function openInOg(orderNumbers, orderSnapshot = null) {
     const clean = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     if (!clean.length) return;
 
@@ -74,7 +205,7 @@
       window.alert("OG Pending Orders URL was not set. Click the extension icon to set it.");
       return;
     }
-    window.open(buildOgUrl(appUrl, clean), "_blank", "noopener,noreferrer");
+    window.open(buildOgUrl(appUrl, clean, orderSnapshot), "_blank", "noopener,noreferrer");
   }
 
   function ensureStyles() {
@@ -98,7 +229,8 @@
         background: #dcebff;
       }
 
-      #${FLOATING_ID} {
+      #${FLOATING_ID},
+      #${SINGLE_ORDER_ID} {
         position: fixed;
         right: 18px;
         bottom: 18px;
@@ -111,6 +243,16 @@
         cursor: pointer;
         font: 800 14px Arial, sans-serif;
         padding: 12px 16px;
+      }
+
+      #${SINGLE_ORDER_ID} {
+        border-color: #0b72e7;
+        background: #edf5ff;
+        color: #0759b8;
+      }
+
+      #${SINGLE_ORDER_ID}:hover {
+        background: #dcebff;
       }
     `;
     document.head.appendChild(style);
@@ -158,10 +300,36 @@
     button.title = "Open all visible eBay label orders in OG Pending Orders";
   }
 
+  function injectSingleOrderButton() {
+    const orderNumber = getSingleLabelOrderNumber();
+    let button = document.getElementById(SINGLE_ORDER_ID);
+
+    if (!isSingleLabelPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = SINGLE_ORDER_ID;
+      button.addEventListener("click", () => {
+        const currentOrderNumber = getSingleLabelOrderNumber();
+        const snapshot = getSingleLabelOrderSnapshot(currentOrderNumber);
+        openInOg([currentOrderNumber], snapshot);
+      });
+      document.body.appendChild(button);
+    }
+
+    button.textContent = "Open order in OG";
+    button.title = `Extract ${orderNumber} from this eBay label page and open it in OG Pending Orders`;
+  }
+
   function injectOgControls() {
     ensureStyles();
     injectRowButtons();
     injectFloatingButton();
+    injectSingleOrderButton();
   }
 
   let scheduled = false;
