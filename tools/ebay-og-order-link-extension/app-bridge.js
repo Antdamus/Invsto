@@ -29,6 +29,13 @@
     }, 1000);
   }
 
+  function relayOgStatusToExtension(payload) {
+    chrome.runtime.sendMessage({
+      type: "OG_EBAY_LABEL_TRANSFER_STATUS",
+      payload,
+    }).catch(() => null);
+  }
+
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
     if (!transferId) return;
@@ -44,6 +51,12 @@
     postToOgApp(message.payload);
     sendResponse({ ok: true });
     return true;
+  });
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.origin !== window.location.origin) return;
+    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER_STATUS") return;
+    relayOgStatusToExtension(event.data.payload || {});
   });
 
   getConfiguredAppUrl().then((appUrl) => {

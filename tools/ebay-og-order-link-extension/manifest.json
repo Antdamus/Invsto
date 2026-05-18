@@ -5,7 +5,8 @@
   "version": "1.0.0",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.ebay.com/*",
@@ -16,6 +17,16 @@
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "label-capture-probe.js"
+      ],
+      "matches": [
+        "https://www.ebay.com/*"
+      ]
+    }
+  ],
   "content_scripts": [
     {
       "matches": [

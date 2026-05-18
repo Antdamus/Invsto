@@ -9,10 +9,15 @@ const state = {
   filteredLines: [],
   adminCloseoutLineIds: new Set(),
   selectedRevertLineIds: [],
+  awaitingLabelGroup: null,
+  labelPreviewUrls: new Map(),
+  handledLabelTransferIds: new Set(),
+  labelBusy: false,
   busy: false,
 };
 
 let evidencePhotoViewerReturnFocus = null;
+const EBAY_LABEL_BUCKET = "ebay-labels";
 
 function $(id) {
   return document.getElementById(id);
@@ -101,6 +106,14 @@ function normalizeLine(row) {
       getOrderFromLine(row).status,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function getLineGross(line) {
@@ -367,7 +380,13 @@ async function loadOrderHistory() {
         ship_by_date,
         status,
         total_price,
-        net_payout
+        net_payout,
+        ebay_shipment_id,
+        label_status,
+        label_storage_bucket,
+        label_file_path,
+        label_uploaded_at,
+        label_metadata
       )
     `)
     .in("line_status", ["fulfilled", "cancelled", "skipped"])
@@ -710,6 +729,57 @@ function buildHistoryGroups(lines) {
   });
 }
 
+function getUniqueOrdersFromLines(lines = []) {
+  const orders = new Map();
+  lines.forEach((line) => {
+    const order = line.order || {};
+    const key = order.id || order.order_number || line.order_id;
+    if (!key || orders.has(key)) return;
+    orders.set(key, order);
+  });
+  return [...orders.values()];
+}
+
+function getOrderNumbersFromOrders(orders = []) {
+  return [...new Set(orders
+    .map((order) => normalizeEbayOrderNumber(order?.order_number))
+    .filter(Boolean))];
+}
+
+function getAttachedHistoryOrder(orders = []) {
+  return orders.find((order) => order?.label_file_path) || null;
+}
+
+function renderGroupLabelControl(group, orders = []) {
+  if (!orders.length) return "";
+  const orderNumbers = getOrderNumbersFromOrders(orders);
+  const attachedOrder = getAttachedHistoryOrder(orders);
+  const labelPath = attachedOrder?.label_file_path || "";
+  const orderCount = orderNumbers.length || orders.length;
+  const orderWord = orderCount === 1 ? "order" : "orders";
+  const attachedCount = orders.filter((order) => order?.label_file_path).length;
+  const labelSummary = labelPath
+    ? `Attached ${formatDateTime(attachedOrder.label_uploaded_at)} - ${attachedCount >= orderCount ? `covers ${orderCount} ${orderWord}` : `${attachedCount} of ${orderCount} ${orderWord}`}`
+    : `One label for this grouped completion - ${orderCount} ${orderWord}`;
+  const encodedOrderNumbers = escapeHtml(orderNumbers.join(","));
+
+  return `
+    <div class="history-order-label-strip">
+      <div class="history-order-label-control">
+        <div>
+          <span class="eyebrow">Shipping Label</span>
+          <strong>${escapeHtml(group.buyer || "Grouped completion")}</strong>
+          <small>${escapeHtml(labelSummary)}</small>
+        </div>
+        <div>
+          ${labelPath ? `<button type="button" class="secondary-btn history-label-open-btn" data-history-label-open-group="${encodedOrderNumbers}">Open Label</button>` : ""}
+          <button type="button" class="secondary-btn history-label-btn" data-history-label-group="${encodedOrderNumbers}">${labelPath ? "Replace Label" : "Add Label"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderHistoryList() {
   const list = $("history-list");
   if (!list) return;
@@ -730,6 +800,8 @@ function renderHistoryList() {
     const lineIds = group.lines.map((line) => line.id);
     const groupPhotos = getHistoryGroupEvidencePhotos(group);
     const auditEvents = group.events.slice(0, 6);
+    const groupOrders = getUniqueOrdersFromLines(group.lines);
+    const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
 
     const card = document.createElement("article");
     card.className = "history-order-card";
@@ -749,6 +821,7 @@ function renderHistoryList() {
           <div class="history-worker-row">
             <span>Completed by: ${escapeHtml(workers.join(", ") || "Unknown")}</span>
           </div>
+          ${hasAttachedLabel ? `<span class="history-label-pill">Label attached</span>` : ""}
         </div>
         <div>
           <div class="history-money-row">
@@ -758,6 +831,7 @@ function renderHistoryList() {
           ${isAdminUser() ? `<button type="button" class="secondary-btn revert-order-btn" data-revert-lines="${escapeHtml(lineIds.join(","))}">Revert Order</button>` : ""}
         </div>
       </div>
+      ${renderGroupLabelControl(group, groupOrders)}
       ${groupPhotos.length ? `
         <div class="history-evidence-strip">
           <div>
@@ -805,6 +879,12 @@ function renderHistoryList() {
     card.querySelector("[data-revert-lines]")?.addEventListener("click", (event) => {
       const ids = event.currentTarget.dataset.revertLines.split(",").filter(Boolean);
       openRevertModal(ids);
+    });
+    card.querySelectorAll("[data-history-label-group]").forEach((button) => {
+      button.addEventListener("click", () => handleHistoryLabelButtonClick(button.dataset.historyLabelGroup));
+    });
+    card.querySelectorAll("[data-history-label-open-group]").forEach((button) => {
+      button.addEventListener("click", () => handleOpenHistoryLabelButtonClick(button.dataset.historyLabelOpenGroup));
     });
     card.querySelectorAll("[data-revert-line]").forEach((button) => {
       button.addEventListener("click", () => openRevertModal([button.dataset.revertLine].filter(Boolean)));
@@ -1011,6 +1091,341 @@ async function confirmRevert() {
   }
 }
 
+function normalizeEbayOrderNumber(value) {
+  const match = String(value || "").match(/\b\d{2}-\d{5}-\d{5}\b/);
+  return match ? match[0] : "";
+}
+
+function base64ToBlob(base64, mimeType = "application/pdf") {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType || "application/pdf" });
+}
+
+function safeStorageSegment(value, fallback = "value") {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+  return cleaned || fallback;
+}
+
+function parseHistoryOrderNumbers(value) {
+  const values = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(values
+    .map((entry) => normalizeEbayOrderNumber(entry))
+    .filter(Boolean))];
+}
+
+function getHistoryOrdersByNumbers(orderNumbers) {
+  const wanted = new Set(parseHistoryOrderNumbers(orderNumbers));
+  const orders = new Map();
+  state.lines.forEach((line) => {
+    const order = line.order || {};
+    const orderNumber = normalizeEbayOrderNumber(order.order_number);
+    if (!wanted.has(orderNumber)) return;
+    const key = order.id || orderNumber;
+    if (!orders.has(key)) orders.set(key, order);
+  });
+  return [...orders.values()];
+}
+
+function getHistoryLinesByOrderNumbers(orderNumbers) {
+  const wanted = new Set(parseHistoryOrderNumbers(orderNumbers));
+  return state.lines.filter((line) => wanted.has(normalizeEbayOrderNumber(line.order?.order_number)));
+}
+
+function getHistoryLabelTarget(orderNumbers) {
+  const normalized = parseHistoryOrderNumbers(orderNumbers);
+  const orders = getHistoryOrdersByNumbers(normalized);
+  if (!orders.length) return null;
+  const targetOrderNumbers = normalized.length ? normalized : getOrderNumbersFromOrders(orders);
+  return {
+    orderNumbers: targetOrderNumbers,
+    orders,
+    primaryOrder: getAttachedHistoryOrder(orders) || orders[0],
+  };
+}
+
+function getAwaitingHistoryLabelOrder(target = state.awaitingLabelGroup) {
+  if (!target) return null;
+  return getAttachedHistoryOrder(target.orders || []) || target.primaryOrder || target.orders?.[0] || null;
+}
+
+function setHistoryLabelStatus(message = "", type = "info") {
+  const status = $("history-label-status");
+  if (!status) return;
+  status.textContent = message || "Waiting for an eBay label transfer...";
+  status.classList.toggle("is-error", type === "error");
+  status.classList.toggle("is-success", type === "success");
+}
+
+function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
+  const details = $("history-label-details");
+  const preview = $("preview-history-label");
+  if (!details) return;
+  const order = getAwaitingHistoryLabelOrder(target);
+  const metadata = order?.label_metadata || {};
+  const size = formatFileSize(metadata.size);
+  const labelPath = order?.label_file_path || "";
+  const orderNumbers = target?.orderNumbers?.length ? target.orderNumbers : parseHistoryOrderNumbers(order?.order_number);
+  const orderCount = orderNumbers.length || 1;
+  const orderWord = orderCount === 1 ? "order" : "orders";
+  preview?.classList.toggle("hidden", !labelPath);
+  preview?.toggleAttribute("disabled", !labelPath);
+  details.innerHTML = labelPath
+    ? `
+      <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
+      <span><strong>Label:</strong> Attached ${escapeHtml(formatDateTime(order.label_uploaded_at))} - covers ${orderCount} ${orderWord}${size ? ` - ${escapeHtml(size)}` : ""}</span>
+      <span><strong>Shipment:</strong> ${escapeHtml(metadata.shipmentId || order.ebay_shipment_id || "-")}</span>
+      <span><strong>Carrier:</strong> ${escapeHtml(metadata.carrier || "-")}</span>
+      <span><strong>Service:</strong> ${escapeHtml(metadata.service || "-")}</span>
+    `
+    : `
+      <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || "-")}</span>
+      <span>Waiting for one eBay label PDF for this grouped completion.</span>
+    `;
+}
+
+function openHistoryLabelModal(orderNumbers) {
+  const target = getHistoryLabelTarget(orderNumbers);
+  if (!target?.orders?.length) {
+    window.alert("Could not find those orders in the current history view.");
+    return;
+  }
+
+  state.awaitingLabelGroup = target;
+  const attachedOrder = getAttachedHistoryOrder(target.orders);
+  const orderCount = target.orderNumbers.length || target.orders.length;
+  const orderWord = orderCount === 1 ? "order" : "orders";
+  $("history-label-title").textContent = attachedOrder?.label_file_path ? "Shipping label" : "Add shipping label";
+  $("history-label-subtitle").textContent = `Receiver armed for this grouped completion (${orderCount} ${orderWord}). Open the matching eBay label-ready page and click Send Label to OG.`;
+  setHistoryLabelStatus(attachedOrder?.label_file_path ? "A shipping label is already attached to this group. You can replace it by sending a new label from eBay." : "Waiting for an eBay label transfer...");
+  renderHistoryLabelDetails(target);
+  openModal("history-label-modal");
+  setTimeout(() => $("close-history-label-modal")?.focus(), 80);
+}
+
+async function getHistoryLabelSignedUrl(order) {
+  const bucket = order?.label_storage_bucket || EBAY_LABEL_BUCKET;
+  const path = order?.label_file_path || "";
+  if (!path) throw new Error("No shipping label is attached yet.");
+  const key = `${bucket}/${path}`;
+  if (state.labelPreviewUrls.has(key)) return state.labelPreviewUrls.get(key);
+
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+  if (error) throw new Error(error.message || "Could not create a label preview link.");
+  const url = data?.signedUrl || "";
+  if (!url) throw new Error("Could not create a label preview link.");
+  state.labelPreviewUrls.set(key, url);
+  return url;
+}
+
+async function openHistoryLabelWindow(order, targetWindow = null) {
+  let previewWindow = targetWindow;
+  try {
+    if (!previewWindow || previewWindow.closed) {
+      previewWindow = window.open("about:blank", "_blank");
+    }
+    if (previewWindow) previewWindow.opener = null;
+    const url = await getHistoryLabelSignedUrl(order);
+    if (previewWindow && !previewWindow.closed) {
+      previewWindow.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  } catch (error) {
+    if (previewWindow && !previewWindow.closed) previewWindow.close();
+    throw error;
+  }
+}
+
+function handleHistoryLabelButtonClick(orderNumber) {
+  openHistoryLabelModal(orderNumber);
+}
+
+function handleOpenHistoryLabelButtonClick(orderNumber) {
+  const target = getHistoryLabelTarget(orderNumber);
+  const order = getAttachedHistoryOrder(target?.orders || []);
+  if (!order?.id) {
+    window.alert("No shipping label is attached to this grouped completion yet.");
+    return;
+  }
+  const previewWindow = window.open("about:blank", "_blank");
+  if (previewWindow) previewWindow.opener = null;
+  openHistoryLabelWindow(order, previewWindow).catch((error) => {
+    window.alert(error.message || "Could not open the shipping label.");
+  });
+}
+
+function closeHistoryLabelModal() {
+  state.awaitingLabelGroup = null;
+  closeModal("history-label-modal");
+}
+
+function postHistoryLabelTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_LABEL_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
+async function attachHistoryLabelToOrder(transferPayload) {
+  const awaiting = state.awaitingLabelGroup;
+  if (!awaiting?.orders?.length) {
+    throw new Error("Open a history group's Add Label modal before sending the eBay label.");
+  }
+
+  const metadata = transferPayload?.metadata || {};
+  const label = transferPayload?.label || {};
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderId);
+  if (!orderNumber) throw new Error("The label transfer did not include a usable eBay order number.");
+  if (!awaiting.orderNumbers.includes(orderNumber)) {
+    throw new Error(`This eBay label is for ${orderNumber}, but this grouped history receiver is waiting for: ${awaiting.orderNumbers.join(", ")}.`);
+  }
+  if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
+
+  const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
+  const destinationPath = [
+    safeStorageSegment(orderNumber, "order"),
+    `${shipmentSegment}.pdf`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(EBAY_LABEL_BUCKET)
+    .upload(destinationPath, blob, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+  if (uploadError) throw new Error(uploadError.message || "Could not upload the eBay label PDF.");
+
+  const now = new Date().toISOString();
+  const labelMetadata = {
+    ...metadata,
+    coveredOrderNumbers: awaiting.orderNumbers,
+    transferId: transferPayload.transferId || null,
+    captureSource: label.source || null,
+    labelUrl: label.url || null,
+    mimeType: label.mimeType || "application/pdf",
+    size: label.size || blob.size,
+    capturedAt: label.capturedAt || metadata.capturedAt || new Date().toISOString(),
+  };
+  const orderIds = [...new Set(awaiting.orders.map((order) => order.id).filter(Boolean))];
+
+  const { error: orderError } = await supabase
+    .from("ebay_orders")
+    .update({
+      ebay_shipment_id: metadata.shipmentId || null,
+      label_status: "label_uploaded",
+      label_storage_bucket: EBAY_LABEL_BUCKET,
+      label_file_path: destinationPath,
+      label_uploaded_at: now,
+      label_uploaded_by: state.user?.id || null,
+      label_metadata: labelMetadata,
+    })
+    .in("id", orderIds);
+  if (orderError) throw new Error(orderError.message || "Could not update the eBay order label status.");
+
+  const updatedOrderFields = {
+    ebay_shipment_id: metadata.shipmentId || null,
+    label_status: "label_uploaded",
+    label_storage_bucket: EBAY_LABEL_BUCKET,
+    label_file_path: destinationPath,
+    label_uploaded_at: now,
+    label_uploaded_by: state.user?.id || null,
+    label_metadata: labelMetadata,
+  };
+
+  state.awaitingLabelGroup.orders = awaiting.orders.map((order) => ({
+    ...order,
+    ...updatedOrderFields,
+  }));
+  state.awaitingLabelGroup.primaryOrder = getAttachedHistoryOrder(state.awaitingLabelGroup.orders) || state.awaitingLabelGroup.orders[0];
+
+  getHistoryLinesByOrderNumbers(awaiting.orderNumbers).forEach((line) => {
+    line.order = { ...line.order, ...updatedOrderFields };
+    if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = line.order;
+  });
+
+  if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
+    chrome.runtime.sendMessage({
+      type: "OG_EBAY_CLEAR_PENDING_LABEL",
+      transferId: transferPayload.transferId,
+    }).catch(() => null);
+  }
+
+  const orderCount = awaiting.orderNumbers.length;
+  setHistoryLabelStatus(`Shipping label attached to this grouped completion (${orderCount} order${orderCount === 1 ? "" : "s"}).`, "success");
+  renderHistoryLabelDetails(state.awaitingLabelGroup);
+  renderHistoryList();
+  return {
+    orderNumber,
+    orderNumbers: awaiting.orderNumbers,
+    storagePath: destinationPath,
+    uploadedAt: now,
+  };
+}
+
+async function handleHistoryLabelTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledLabelTransferIds.has(transferId)) return;
+  if (state.labelBusy) return;
+  if (!state.awaitingLabelGroup) return;
+  if (transferId) state.handledLabelTransferIds.add(transferId);
+
+  state.labelBusy = true;
+  setHistoryLabelStatus("Uploading eBay shipping label to OG...");
+  postHistoryLabelTransferStatus({
+    transferId,
+    phase: "started",
+    message: "History label modal accepted the eBay label transfer.",
+  });
+  try {
+    const attached = await attachHistoryLabelToOrder(payload);
+    postHistoryLabelTransferStatus({
+      transferId,
+      ok: true,
+      message: `Shipping label attached to history group for ${attached.orderNumbers.join(", ")}.`,
+      ...attached,
+    });
+  } catch (error) {
+    console.error("Past order label transfer failed:", error);
+    const message = error.message || "Could not attach the eBay label.";
+    setHistoryLabelStatus(message, "error");
+    postHistoryLabelTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  } finally {
+    state.labelBusy = false;
+  }
+}
+
+function setupHistoryLabelReceiver() {
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
+    handleHistoryLabelTransfer(event.data.payload);
+  });
+}
+
+async function previewHistoryLabel() {
+  const order = getAwaitingHistoryLabelOrder();
+  const previewWindow = window.open("about:blank", "_blank");
+  if (previewWindow) previewWindow.opener = null;
+  try {
+    await openHistoryLabelWindow(order, previewWindow);
+  } catch (error) {
+    setHistoryLabelStatus(error.message || "Could not create a label preview link.", "error");
+  }
+}
+
 function setupListeners() {
   $("refresh-history")?.addEventListener("click", loadOrderHistory);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
@@ -1031,6 +1446,12 @@ function setupListeners() {
   $("confirm-revert")?.addEventListener("click", confirmRevert);
   $("revert-order-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "revert-order-modal") closeRevertModal();
+  });
+  $("close-history-label-modal")?.addEventListener("click", closeHistoryLabelModal);
+  $("done-history-label")?.addEventListener("click", closeHistoryLabelModal);
+  $("preview-history-label")?.addEventListener("click", previewHistoryLabel);
+  $("history-label-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "history-label-modal") closeHistoryLabelModal();
   });
   $("evidence-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "evidence-photo-viewer-modal") closeEvidencePhotoViewer();
@@ -1058,6 +1479,13 @@ function setupListeners() {
       }
       return;
     }
+    if (!$("history-label-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHistoryLabelModal();
+      }
+      return;
+    }
     if (!$("revert-order-modal")?.classList.contains("hidden")) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1076,6 +1504,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ok) return;
   setupDashboardShell();
   setupDefaultDates();
+  setupHistoryLabelReceiver();
   setupListeners();
   await loadOrderHistory();
   if (window.lucide) window.lucide.createIcons();

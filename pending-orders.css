@@ -1445,13 +1445,32 @@ body.modal-open {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.no-inventory-label {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(125, 240, 178, 0.22);
+  border-radius: 18px;
+  background: rgba(125, 240, 178, 0.055);
+}
+
+.no-inventory-label h3,
 .no-inventory-evidence h3 {
   margin-bottom: 4px;
 }
 
+.no-inventory-label p,
 .no-inventory-evidence p {
   margin: 0;
   color: var(--muted);
+}
+
+.no-inventory-label-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .no-inventory-camera-row {

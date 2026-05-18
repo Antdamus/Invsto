@@ -58,10 +58,11 @@ On eBay label-ready pages, the extension looks for:
 It adds `Send Label to OG` next to eBay's download label action. When clicked, it:
 
 1. Extracts the eBay order/shipment metadata from stable button attributes and surrounding tracking data.
-2. Instruments the page before clicking `Download label`, watching `fetch`, `XMLHttpRequest`, `URL.createObjectURL`, and PDF-ish anchor downloads.
-3. Captures the PDF blob before it becomes a browser PDF viewer or a local download.
-4. Relays the PDF to an open OG Pending Orders tab, or opens the configured OG URL with a transfer id.
-5. Lets the OG page upload the PDF with the signed-in user's Supabase session.
+2. Loads an extension-hosted page probe before clicking `Download label`, watching `fetch`, `XMLHttpRequest`, `URL.createObjectURL`, and PDF-ish anchor downloads.
+3. Starts a browser-download fallback so Chrome/Edge download events can expose a direct label URL if eBay bypasses page fetch/blob APIs.
+4. Captures the PDF blob before it becomes a browser PDF viewer or local file whenever possible.
+5. Relays the PDF to an open OG Pending Orders tab, or opens the configured OG URL with a transfer id.
+6. Lets the OG page upload the PDF with the signed-in user's Supabase session.
 
 This avoids automating the browser print dialog and avoids assuming the extension can read a downloaded local file.
 
@@ -69,5 +70,6 @@ Required extension permissions now include:
 
 - `storage` for the configured OG URL and pending label handoff.
 - `tabs` so the background worker can find an already-open OG Pending Orders tab.
+- `downloads` so the background worker can observe an eBay label download URL when the page does not expose the PDF through `fetch`, XHR, or blob hooks.
 - `https://www.ebay.com/*` for eBay page injection.
 - `https://*/*`, `http://localhost/*`, and `http://127.0.0.1/*` for the lightweight OG app bridge. The bridge only activates on the configured Pending Orders URL.

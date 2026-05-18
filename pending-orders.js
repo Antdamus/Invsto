@@ -1384,32 +1384,43 @@ async function getEbayLabelPreviewUrl(bucket, path) {
 
 function renderEbayLabelPanel() {
   const panel = $("ebay-label-panel");
-  if (!panel || !state.selectedLine) return;
-  const summary = $("ebay-label-summary");
-  const details = $("ebay-label-details");
-  const previewButton = $("preview-ebay-label");
+  if (!state.selectedLine) return;
   const label = getSelectedOrderLabelData();
   const metadata = label.metadata || {};
+  const sizeText = formatFileSize(metadata.size);
+  const summaryText = label.path
+    ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}. Preview before final confirmation.`
+    : "Waiting for a label from the eBay extension.";
+  const detailsHtml = label.path
+    ? `
+      <div class="selection-grid">
+        <span><small>Shipment</small><b>${escapeHtml(metadata.shipmentId || "-")}</b></span>
+        <span><small>Carrier</small><b>${escapeHtml(metadata.carrier || "-")}</b></span>
+        <span><small>Service</small><b>${escapeHtml(metadata.service || "-")}</b></span>
+        <span><small>Cost</small><b>${escapeHtml(metadata.labelCost ? formatMoney(metadata.labelCost) : "-")}</b></span>
+      </div>
+    `
+    : `<div class="empty-state">Click Send Label to OG on the eBay label-ready page after this order is packed.</div>`;
 
-  previewButton?.classList.toggle("hidden", !label.path);
-  previewButton?.toggleAttribute("disabled", !label.path);
-
-  if (!label.path) {
-    summary.textContent = "Waiting for a label from the eBay extension.";
-    details.innerHTML = `<div class="empty-state">Click Send Label to OG on the eBay label-ready page after this order is packed.</div>`;
-    return;
+  if (panel) {
+    const summary = $("ebay-label-summary");
+    const details = $("ebay-label-details");
+    const previewButton = $("preview-ebay-label");
+    summary.textContent = summaryText;
+    details.innerHTML = detailsHtml;
+    previewButton?.classList.toggle("hidden", !label.path);
+    previewButton?.toggleAttribute("disabled", !label.path);
   }
 
-  const sizeText = formatFileSize(metadata.size);
-  summary.textContent = `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}. Preview before final confirmation.`;
-  details.innerHTML = `
-    <div class="selection-grid">
-      <span><small>Shipment</small><b>${escapeHtml(metadata.shipmentId || "-")}</b></span>
-      <span><small>Carrier</small><b>${escapeHtml(metadata.carrier || "-")}</b></span>
-      <span><small>Service</small><b>${escapeHtml(metadata.service || "-")}</b></span>
-      <span><small>Cost</small><b>${escapeHtml(metadata.labelCost ? formatMoney(metadata.labelCost) : "-")}</b></span>
-    </div>
-  `;
+  const modalSummary = $("worker-no-inventory-label-summary");
+  const modalDetails = $("worker-no-inventory-label-details");
+  const modalPreviewButton = $("preview-worker-ebay-label");
+  if (modalSummary && modalDetails) {
+    modalSummary.textContent = summaryText;
+    modalDetails.innerHTML = detailsHtml;
+    modalPreviewButton?.classList.toggle("hidden", !label.path);
+    modalPreviewButton?.toggleAttribute("disabled", !label.path);
+  }
 }
 
 function renderSelectionSummary() {
@@ -2951,6 +2962,7 @@ async function openWorkerNoInventoryModal(options = {}) {
   $("worker-no-inventory-subtitle").textContent =
     `This closes the selected pending line(s) for ${getBuyerLabel(line)} without removing stock from inventory. Uncheck anything that should stay in the packing queue. It will be signed by your logged-in account at ${getCheckoutStoreName() || "the selected store"}.`;
   renderWorkerNoInventoryList();
+  renderEbayLabelPanel();
   renderNoInventoryEvidencePhotos();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
@@ -3385,6 +3397,48 @@ function safeStorageSegment(value, fallback = "value") {
   return cleaned || fallback;
 }
 
+function setEbayLabelTransferStatus(message = "", type = "info") {
+  const text = message || "Waiting for a label from the eBay extension.";
+  const modalSummary = $("worker-no-inventory-label-summary");
+  const pageSummary = $("ebay-label-summary");
+  const modalError = $("worker-no-inventory-error");
+  if (modalSummary) modalSummary.textContent = text;
+  if (pageSummary) pageSummary.textContent = text;
+  modalError?.classList.toggle("is-error", type === "error");
+  if (modalError) {
+    modalError.textContent = type === "error" ? text : "";
+  }
+  setStatus(text, type);
+}
+
+function postEbayLabelTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_LABEL_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
+async function loadEbayOrderForLabel(orderNumber) {
+  const { data, error } = await supabase
+    .from("ebay_orders")
+    .select(`
+      id,
+      order_number,
+      buyer_username,
+      status,
+      label_status,
+      label_storage_bucket,
+      label_file_path,
+      label_uploaded_at,
+      label_metadata
+    `)
+    .eq("order_number", orderNumber)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message || `Could not look up eBay order ${orderNumber}.`);
+  return data || null;
+}
+
 async function attachEbayLabelToOrder(transferPayload) {
   const metadata = transferPayload?.metadata || {};
   const label = transferPayload?.label || {};
@@ -3392,8 +3446,16 @@ async function attachEbayLabelToOrder(transferPayload) {
   if (!orderNumber) throw new Error("The label transfer did not include a usable eBay order number.");
   if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
 
+  const selectedOrderNumber = String(state.selectedLine?.order?.order_number || "");
+  if (selectedOrderNumber && selectedOrderNumber !== orderNumber) {
+    throw new Error(`This eBay label is for ${orderNumber}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
+  }
+
   const matchingLines = state.orders.filter((line) => String(line.order?.order_number || "") === orderNumber);
-  if (!matchingLines.length) throw new Error(`Order ${orderNumber} is not loaded in the pending queue. Import the latest eBay report first.`);
+  const directOrder = matchingLines[0]?.order || await loadEbayOrderForLabel(orderNumber);
+  if (!directOrder?.id) {
+    throw new Error(`Order ${orderNumber} is not in OG yet. Import the latest eBay order report first, then open that order/session and send the label again.`);
+  }
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
   const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
@@ -3410,7 +3472,10 @@ async function attachEbayLabelToOrder(transferPayload) {
     });
   if (uploadError) throw new Error(uploadError.message || "Could not upload the eBay label PDF.");
 
-  const orderIds = [...new Set(matchingLines.map((line) => line.order_id).filter(Boolean))];
+  const orderIds = [...new Set([
+    ...matchingLines.map((line) => line.order_id).filter(Boolean),
+    directOrder.id,
+  ].filter(Boolean))];
   const labelMetadata = {
     ...metadata,
     transferId: transferPayload.transferId || null,
@@ -3462,10 +3527,20 @@ async function attachEbayLabelToOrder(transferPayload) {
   if (!state.selectedLine || String(state.selectedLine.order?.order_number || "") !== orderNumber) {
     const openMatch = matchingLines.find(isOpenOrderLine) || matchingLines[0];
     if (openMatch) selectOrderLine(openMatch.id);
+    else if (!matchingLines.length) await loadOrders();
   } else {
     renderSelectedOrder();
   }
-  setStatus(`Shipping label attached to eBay order ${orderNumber}. Preview it before final confirmation.`, "info");
+  const attachedMessage = matchingLines.length
+    ? `Shipping label attached to eBay order ${orderNumber}. Preview it before final confirmation.`
+    : `Shipping label attached to eBay order ${orderNumber}. Refresh or open that order to preview it.`;
+  setStatus(attachedMessage, "info");
+  return {
+    orderNumber,
+    storagePath: destinationPath,
+    uploadedAt: now,
+    visibleInCurrentQueue: Boolean(matchingLines.length),
+  };
 }
 
 async function handleEbayLabelTransfer(payload) {
@@ -3474,13 +3549,29 @@ async function handleEbayLabelTransfer(payload) {
   if (state.ebayLabelBusy) return;
   if (transferId) state.handledEbayLabelTransferIds.add(transferId);
   state.ebayLabelBusy = true;
-  setStatus("Uploading eBay shipping label to OG...");
+  setEbayLabelTransferStatus("Uploading eBay shipping label to OG...");
+  postEbayLabelTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Pending order label receiver accepted the eBay label transfer.",
+  });
   try {
-    await attachEbayLabelToOrder(payload);
+    const attached = await attachEbayLabelToOrder(payload);
+    postEbayLabelTransferStatus({
+      transferId,
+      ok: true,
+      message: `Shipping label attached to eBay order ${attached.orderNumber}.`,
+      ...attached,
+    });
   } catch (error) {
-    if (transferId) state.handledEbayLabelTransferIds.delete(transferId);
     console.error("eBay label transfer failed:", error);
-    setStatus(error.message || "Could not attach the eBay label.", "error");
+    const message = error.message || "Could not attach the eBay label.";
+    setEbayLabelTransferStatus(message, "error");
+    postEbayLabelTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
   } finally {
     state.ebayLabelBusy = false;
   }
@@ -3552,6 +3643,7 @@ function setupListeners() {
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
+  $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
   $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
   $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);

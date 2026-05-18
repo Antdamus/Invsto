@@ -9,7 +9,9 @@
   const SINGLE_ORDER_ID = "og-ebay-open-single-order";
   const SEND_LABEL_ID = "og-ebay-send-label";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
+  const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
   const LABEL_STATUS_TIMEOUT_MS = 30000;
+  const LABEL_PROBE_READY_TIMEOUT_MS = 5000;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -219,11 +221,29 @@
     console.log("[OG eBay Label]", ...args);
   }
 
+  function getErrorMessage(error) {
+    if (error instanceof AggregateError) {
+      const messages = error.errors
+        .map((entry) => entry?.message || String(entry || ""))
+        .filter(Boolean);
+      return messages.join(" / ") || "No PDF was captured from the eBay download action.";
+    }
+    return error?.message || String(error || "Could not capture the eBay label.");
+  }
+
   function setLabelButtonStatus(message, tone = "info") {
     const button = document.getElementById(SEND_LABEL_ID);
     if (!button) return;
     button.dataset.statusTone = tone;
     button.textContent = message || "Send Label to OG";
+  }
+
+  function assertExtensionContextActive() {
+    try {
+      if (!chrome?.runtime?.id) throw new Error("Extension context invalidated.");
+    } catch (_) {
+      throw new Error("The OG eBay extension was reloaded while this eBay tab was already open. Refresh this eBay label page, then click Send Label to OG again.");
+    }
   }
 
   function arrayBufferToBase64(buffer) {
@@ -237,101 +257,50 @@
   }
 
   function injectLabelCaptureProbe() {
-    if (document.getElementById("og-ebay-label-capture-probe")) return;
-    const script = document.createElement("script");
-    script.id = "og-ebay-label-capture-probe";
-    script.textContent = `
-      (() => {
-        if (window.__ogEbayLabelCaptureProbeInstalled) return;
-        window.__ogEbayLabelCaptureProbeInstalled = true;
+    return new Promise((resolve, reject) => {
+      const existing = document.getElementById("og-ebay-label-capture-probe");
+      if (existing) existing.remove();
 
-        const isPdfResponse = (response, url = "") => {
-          const type = response?.headers?.get?.("content-type") || "";
-          return /pdf/i.test(type) || /label|download|shipping/i.test(String(url || response?.url || ""));
-        };
+      const timer = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("The eBay label capture probe did not finish loading."));
+      }, LABEL_PROBE_READY_TIMEOUT_MS);
 
-        const postPdf = async (source, url, blob) => {
-          if (!blob || !/pdf/i.test(blob.type || "") && !/\\.pdf(?:$|[?#])/i.test(String(url || ""))) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            window.postMessage({
-              type: "${LABEL_EVENT_TYPE}",
-              payload: {
-                source,
-                url: url || "",
-                mimeType: blob.type || "application/pdf",
-                size: blob.size || 0,
-                base64: String(reader.result || "").split(",")[1] || "",
-                capturedAt: new Date().toISOString(),
-              },
-            }, "*");
-          };
-          reader.readAsDataURL(blob);
-        };
+      function finish() {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve();
+      }
 
-        const originalFetch = window.fetch;
-        window.fetch = async (...args) => {
-          const response = await originalFetch(...args);
-          try {
-            const requestUrl = typeof args[0] === "string" ? args[0] : args[0]?.url;
-            if (isPdfResponse(response, requestUrl)) {
-              response.clone().blob().then((blob) => postPdf("fetch", response.url || requestUrl, blob)).catch(() => {});
-            }
-          } catch (_) {}
-          return response;
-        };
+      function onMessage(event) {
+        if (event.source !== window || event.data?.type !== LABEL_PROBE_READY_EVENT_TYPE) return;
+        finish();
+      }
 
-        const originalOpen = XMLHttpRequest.prototype.open;
-        const originalSend = XMLHttpRequest.prototype.send;
-        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-          this.__ogEbayLabelUrl = url;
-          return originalOpen.call(this, method, url, ...rest);
-        };
-        XMLHttpRequest.prototype.send = function(...args) {
-          this.addEventListener("load", () => {
-            try {
-              const contentType = this.getResponseHeader("content-type") || "";
-              if (!/pdf/i.test(contentType) && !/label|download|shipping/i.test(String(this.__ogEbayLabelUrl || ""))) return;
-              if (this.response instanceof Blob) {
-                postPdf("xhr", this.responseURL || this.__ogEbayLabelUrl, this.response);
-              } else if (this.response instanceof ArrayBuffer) {
-                postPdf("xhr", this.responseURL || this.__ogEbayLabelUrl, new Blob([this.response], { type: contentType || "application/pdf" }));
-              }
-            } catch (_) {}
-          });
-          return originalSend.apply(this, args);
-        };
+      window.addEventListener("message", onMessage);
 
-        const originalCreateObjectURL = URL.createObjectURL;
-        URL.createObjectURL = function(value) {
-          const objectUrl = originalCreateObjectURL.call(URL, value);
-          try {
-            if (value instanceof Blob) postPdf("object-url", objectUrl, value);
-          } catch (_) {}
-          return objectUrl;
-        };
-
-        document.addEventListener("click", (event) => {
-          const anchor = event.target?.closest?.("a[href]");
-          if (!anchor) return;
-          const href = anchor.href || "";
-          if (/\\.pdf(?:$|[?#])|label|download|shipping/i.test(href)) {
-            window.postMessage({
-              type: "${LABEL_EVENT_TYPE}",
-              payload: {
-                source: "anchor",
-                url: href,
-                mimeType: "",
-                size: 0,
-                base64: "",
-                capturedAt: new Date().toISOString(),
-              },
-            }, "*");
-          }
-        }, true);
-      })();
-    `;
-    (document.documentElement || document.head).appendChild(script);
+      const script = document.createElement("script");
+      script.id = "og-ebay-label-capture-probe";
+      try {
+        assertExtensionContextActive();
+        script.src = chrome.runtime.getURL("label-capture-probe.js");
+      } catch (error) {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        reject(error);
+        return;
+      }
+      script.async = false;
+      script.onload = () => {
+        window.setTimeout(() => script.remove(), 0);
+      };
+      script.onerror = () => {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        reject(new Error("The extension-hosted eBay label capture probe was blocked or could not load."));
+      };
+      (document.documentElement || document.head).appendChild(script);
+    });
   }
 
   function waitForCapturedLabel() {
@@ -369,6 +338,62 @@
     };
   }
 
+  async function beginDownloadCapture(metadata) {
+    assertExtensionContextActive();
+    const response = await chrome.runtime.sendMessage({
+      type: "OG_EBAY_BEGIN_DOWNLOAD_CAPTURE",
+      payload: {
+        metadata,
+        pageUrl: window.location.href,
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not prepare the browser download fallback.");
+    return response.captureId;
+  }
+
+  function waitForBackgroundDownloadCapture(captureId) {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        chrome.runtime.onMessage.removeListener(onMessage);
+        reject(new Error("No browser download was captured from the eBay action."));
+      }, LABEL_STATUS_TIMEOUT_MS + 10000);
+
+      function onMessage(message) {
+        if (message?.type !== "OG_EBAY_DOWNLOAD_CAPTURE_RESULT" || message.captureId !== captureId) return false;
+        if (!message.result?.ok) {
+          labelLog("download fallback did not attach label", message.result);
+          return false;
+        }
+        window.clearTimeout(timer);
+        chrome.runtime.onMessage.removeListener(onMessage);
+        resolve(message.result);
+        return false;
+      }
+
+      try {
+        assertExtensionContextActive();
+      } catch (error) {
+        window.clearTimeout(timer);
+        reject(error);
+        return;
+      }
+      chrome.runtime.onMessage.addListener(onMessage);
+    });
+  }
+
+  function cancelDownloadCapture(captureId) {
+    if (!captureId) return;
+    try {
+      assertExtensionContextActive();
+    } catch (_) {
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: "OG_EBAY_CANCEL_DOWNLOAD_CAPTURE",
+      captureId,
+    }).catch(() => null);
+  }
+
   async function sendLabelToOg() {
     const downloadButton = getDownloadLabelButton();
     const metadata = getLabelMetadata();
@@ -385,21 +410,52 @@
       return;
     }
 
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setLabelButtonStatus("Refresh eBay page", "error");
+      window.alert(error.message);
+      return;
+    }
+
     setLabelButtonStatus("Finding label...");
-    injectLabelCaptureProbe();
-    const capturePromise = waitForCapturedLabel();
+    let downloadCaptureId = "";
+    try {
+      await injectLabelCaptureProbe();
+      downloadCaptureId = await beginDownloadCapture(metadata);
+    } catch (error) {
+      if (/extension context|reloaded/i.test(error?.message || "")) {
+        setLabelButtonStatus("Refresh eBay page", "error");
+        window.alert(error.message);
+        return;
+      }
+      console.warn("[OG eBay Label] Capture setup warning:", error);
+    }
+    const pageCapturePromise = waitForCapturedLabel().then((label) => ({ kind: "page", label }));
+    const downloadCapturePromise = downloadCaptureId
+      ? waitForBackgroundDownloadCapture(downloadCaptureId).then((result) => ({ kind: "download", result }))
+      : Promise.reject(new Error("Browser download fallback was not available."));
 
     setLabelButtonStatus("Downloading label...");
     downloadButton.click();
 
     try {
-      let label = await capturePromise;
+      const captured = await Promise.any([pageCapturePromise, downloadCapturePromise]);
+      if (captured.kind === "download") {
+        setLabelButtonStatus(captured.result.opened ? "Opened OG to attach" : "Attached to OG", "success");
+        window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
+        return;
+      }
+
+      cancelDownloadCapture(downloadCaptureId);
+      let label = captured.label;
       if (!label.base64 && label.url && !label.url.startsWith("blob:")) {
         label = await fetchLabelUrlFromContentScript(label.url);
       }
       if (!label.base64) throw new Error("Captured a label URL, but not a readable PDF blob.");
 
       setLabelButtonStatus("Uploading to OG...");
+      assertExtensionContextActive();
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_SEND_LABEL",
         payload: {
@@ -412,8 +468,9 @@
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
     } catch (error) {
       console.error("[OG eBay Label] Capture failed:", error);
+      cancelDownloadCapture(downloadCaptureId);
       setLabelButtonStatus("Capture failed", "error");
-      window.alert(`${error.message || "Could not capture the eBay label."}\n\nTry again after the page finishes loading. If eBay only starts a browser download, the console metadata log can still help inspect the request.`);
+      window.alert(`${getErrorMessage(error)}\n\nThe extension now also watches Chrome/Edge downloads. If a PDF still downloads normally but does not attach, send me the console lines that start with [OG eBay Label].`);
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 5000);
     }
   }

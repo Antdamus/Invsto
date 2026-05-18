@@ -250,6 +250,23 @@
     </div>
   </div>
 
+  <div id="history-label-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="history-label-title">
+    <div class="history-modal-card history-label-modal-card">
+      <button id="close-history-label-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Shipping Label</span>
+      <h2 id="history-label-title">Add shipping label</h2>
+      <p id="history-label-subtitle">Open the matching eBay label-ready page, then click Send Label to OG.</p>
+      <div id="history-label-status" class="history-label-status">
+        Waiting for an eBay label transfer...
+      </div>
+      <div id="history-label-details" class="history-label-details"></div>
+      <div class="history-modal-actions">
+        <button id="preview-history-label" type="button" class="secondary-btn hidden">Preview Label</button>
+        <button id="done-history-label" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div id="evidence-photo-viewer-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="evidence-photo-viewer-title">
     <div class="history-modal-card evidence-viewer-card">
       <button id="close-evidence-photo-viewer" type="button" class="modal-close-btn" aria-label="Close">x</button>
