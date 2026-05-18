@@ -34,6 +34,9 @@ const state = {
   noInventoryEvidencePhotos: [],
   noInventoryEvidencePhotoUploadKeys: new Set(),
   noInventoryCaptureBusy: false,
+  ebayLabelPreviewUrls: new Map(),
+  handledEbayLabelTransferIds: new Set(),
+  ebayLabelBusy: false,
   busy: false,
 };
 
@@ -46,6 +49,7 @@ const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
+const EBAY_LABEL_BUCKET = "ebay-labels";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 
@@ -85,6 +89,14 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function firstItemPhoto(item) {
@@ -853,7 +865,12 @@ function buildOrderLineQueueQuery(status, admin) {
         paid_on_date,
         ship_by_date,
         ${moneyOrderFields}
-        status
+        status,
+        label_status,
+        label_storage_bucket,
+        label_file_path,
+        label_uploaded_at,
+        label_metadata
       )
     `)
     .order("created_at", { ascending: false })
@@ -1336,6 +1353,63 @@ function renderSelectedOrder() {
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
   $("detail-total").textContent = formatMoney(line.total_price || order.total_price || line.sold_for);
   $("detail-payout").textContent = line.net_payout || order.net_payout ? formatMoney(line.net_payout || order.net_payout) : "Not imported";
+  renderEbayLabelPanel();
+}
+
+function getSelectedOrderLabelData() {
+  const line = state.selectedLine || {};
+  const order = line.order || {};
+  return {
+    status: line.label_status || order.label_status || "",
+    bucket: line.label_storage_bucket || order.label_storage_bucket || EBAY_LABEL_BUCKET,
+    path: line.label_file_path || order.label_file_path || "",
+    uploadedAt: line.label_uploaded_at || order.label_uploaded_at || "",
+    metadata: line.label_metadata || order.label_metadata || {},
+  };
+}
+
+async function getEbayLabelPreviewUrl(bucket, path) {
+  if (!bucket || !path) return "";
+  const key = `${bucket}/${path}`;
+  if (state.ebayLabelPreviewUrls.has(key)) return state.ebayLabelPreviewUrls.get(key);
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+  if (error) {
+    console.warn("Could not sign eBay label PDF:", error);
+    return "";
+  }
+  const url = data?.signedUrl || "";
+  if (url) state.ebayLabelPreviewUrls.set(key, url);
+  return url;
+}
+
+function renderEbayLabelPanel() {
+  const panel = $("ebay-label-panel");
+  if (!panel || !state.selectedLine) return;
+  const summary = $("ebay-label-summary");
+  const details = $("ebay-label-details");
+  const previewButton = $("preview-ebay-label");
+  const label = getSelectedOrderLabelData();
+  const metadata = label.metadata || {};
+
+  previewButton?.classList.toggle("hidden", !label.path);
+  previewButton?.toggleAttribute("disabled", !label.path);
+
+  if (!label.path) {
+    summary.textContent = "Waiting for a label from the eBay extension.";
+    details.innerHTML = `<div class="empty-state">Click Send Label to OG on the eBay label-ready page after this order is packed.</div>`;
+    return;
+  }
+
+  const sizeText = formatFileSize(metadata.size);
+  summary.textContent = `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}. Preview before final confirmation.`;
+  details.innerHTML = `
+    <div class="selection-grid">
+      <span><small>Shipment</small><b>${escapeHtml(metadata.shipmentId || "-")}</b></span>
+      <span><small>Carrier</small><b>${escapeHtml(metadata.carrier || "-")}</b></span>
+      <span><small>Service</small><b>${escapeHtml(metadata.service || "-")}</b></span>
+      <span><small>Cost</small><b>${escapeHtml(metadata.labelCost ? formatMoney(metadata.labelCost) : "-")}</b></span>
+    </div>
+  `;
 }
 
 function renderSelectionSummary() {
@@ -3282,6 +3356,7 @@ function clearSelection() {
   state.workerNoInventoryLineIds.clear();
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
+  renderEbayLabelPanel();
   clearLiveLotSelection({ render: true });
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
@@ -3290,6 +3365,141 @@ function clearSelection() {
   $("fulfillment-workflow")?.classList.add("hidden");
   renderOrders();
   renderSummaryStrip();
+}
+
+function base64ToBlob(base64, mimeType = "application/pdf") {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType || "application/pdf" });
+}
+
+function safeStorageSegment(value, fallback = "value") {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+  return cleaned || fallback;
+}
+
+async function attachEbayLabelToOrder(transferPayload) {
+  const metadata = transferPayload?.metadata || {};
+  const label = transferPayload?.label || {};
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderId);
+  if (!orderNumber) throw new Error("The label transfer did not include a usable eBay order number.");
+  if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
+
+  const matchingLines = state.orders.filter((line) => String(line.order?.order_number || "") === orderNumber);
+  if (!matchingLines.length) throw new Error(`Order ${orderNumber} is not loaded in the pending queue. Import the latest eBay report first.`);
+
+  const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
+  const destinationPath = [
+    safeStorageSegment(orderNumber, "order"),
+    `${shipmentSegment}.pdf`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(EBAY_LABEL_BUCKET)
+    .upload(destinationPath, blob, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+  if (uploadError) throw new Error(uploadError.message || "Could not upload the eBay label PDF.");
+
+  const orderIds = [...new Set(matchingLines.map((line) => line.order_id).filter(Boolean))];
+  const labelMetadata = {
+    ...metadata,
+    transferId: transferPayload.transferId || null,
+    captureSource: label.source || null,
+    labelUrl: label.url || null,
+    mimeType: label.mimeType || "application/pdf",
+    size: label.size || blob.size,
+    capturedAt: label.capturedAt || metadata.capturedAt || new Date().toISOString(),
+  };
+  const now = new Date().toISOString();
+
+  const { error: orderError } = await supabase
+    .from("ebay_orders")
+    .update({
+      ebay_shipment_id: metadata.shipmentId || null,
+      label_status: "label_uploaded",
+      label_storage_bucket: EBAY_LABEL_BUCKET,
+      label_file_path: destinationPath,
+      label_uploaded_at: now,
+      label_uploaded_by: state.user?.id || null,
+      label_metadata: labelMetadata,
+    })
+    .in("id", orderIds);
+  if (orderError) throw new Error(orderError.message || "Could not update the eBay order label status.");
+
+  matchingLines.forEach((line) => {
+    line.label_status = "label_uploaded";
+    line.label_storage_bucket = EBAY_LABEL_BUCKET;
+    line.label_file_path = destinationPath;
+    line.label_uploaded_at = now;
+    line.label_metadata = labelMetadata;
+    if (line.order) {
+      line.order.ebay_shipment_id = metadata.shipmentId || null;
+      line.order.label_status = "label_uploaded";
+      line.order.label_storage_bucket = EBAY_LABEL_BUCKET;
+      line.order.label_file_path = destinationPath;
+      line.order.label_uploaded_at = now;
+      line.order.label_metadata = labelMetadata;
+    }
+  });
+
+  if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
+    chrome.runtime.sendMessage({
+      type: "OG_EBAY_CLEAR_PENDING_LABEL",
+      transferId: transferPayload.transferId,
+    }).catch(() => null);
+  }
+
+  if (!state.selectedLine || String(state.selectedLine.order?.order_number || "") !== orderNumber) {
+    const openMatch = matchingLines.find(isOpenOrderLine) || matchingLines[0];
+    if (openMatch) selectOrderLine(openMatch.id);
+  } else {
+    renderSelectedOrder();
+  }
+  setStatus(`Shipping label attached to eBay order ${orderNumber}. Preview it before final confirmation.`, "info");
+}
+
+async function handleEbayLabelTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledEbayLabelTransferIds.has(transferId)) return;
+  if (state.ebayLabelBusy) return;
+  if (transferId) state.handledEbayLabelTransferIds.add(transferId);
+  state.ebayLabelBusy = true;
+  setStatus("Uploading eBay shipping label to OG...");
+  try {
+    await attachEbayLabelToOrder(payload);
+  } catch (error) {
+    if (transferId) state.handledEbayLabelTransferIds.delete(transferId);
+    console.error("eBay label transfer failed:", error);
+    setStatus(error.message || "Could not attach the eBay label.", "error");
+  } finally {
+    state.ebayLabelBusy = false;
+  }
+}
+
+function setupEbayLabelReceiver() {
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
+    handleEbayLabelTransfer(event.data.payload);
+  });
+}
+
+async function previewSelectedEbayLabel() {
+  const label = getSelectedOrderLabelData();
+  if (!label.path) return setStatus("No eBay label is attached yet.", "error");
+  const url = await getEbayLabelPreviewUrl(label.bucket, label.path);
+  if (!url) return setStatus("Could not create a preview link for that label.", "error");
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function setupListeners() {
@@ -3341,6 +3551,7 @@ function setupListeners() {
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
+  $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
   $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
   $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);
@@ -3506,6 +3717,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await waitForSupabaseReady();
   const ok = await loadCurrentWorker();
   if (!ok) return;
+  setupEbayLabelReceiver();
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();

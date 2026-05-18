@@ -7,6 +7,9 @@
   const BUTTON_CLASS = "og-ebay-open-order";
   const FLOATING_ID = "og-ebay-open-all-orders";
   const SINGLE_ORDER_ID = "og-ebay-open-single-order";
+  const SEND_LABEL_ID = "og-ebay-send-label";
+  const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
+  const LABEL_STATUS_TIMEOUT_MS = 30000;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -113,6 +116,306 @@
       widthInches: document.querySelector('input[aria-label="Package width in inches"]')?.value || "",
       heightInches: document.querySelector('input[aria-label="Package height in inches"]')?.value || "",
     };
+  }
+
+  function tryParseJsonish(value) {
+    const text = String(value || "").trim();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function findValueInObject(value, keys) {
+    if (!value || typeof value !== "object") return "";
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findValueInObject(item, keys);
+        if (found) return found;
+      }
+      return "";
+    }
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (keys.includes(String(key).toLowerCase())) return String(entry ?? "");
+      const found = findValueInObject(entry, keys);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  function parseMetadataValue(source, keys) {
+    const text = String(source || "");
+    const lowerKeys = keys.map((key) => key.toLowerCase());
+    const parsed = tryParseJsonish(text);
+    const fromJson = findValueInObject(parsed, lowerKeys);
+    if (fromJson) return fromJson;
+
+    for (const key of lowerKeys) {
+      const patterns = [
+        new RegExp(`["']?${key}["']?\\s*[:=]\\s*["']([^"']+)["']`, "i"),
+        new RegExp(`${key}=([^&\\s,}]+)`, "i"),
+      ];
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match?.[1]) return cleanText(match[1]);
+      }
+    }
+    return "";
+  }
+
+  function getElementMetadataText(element) {
+    if (!element) return "";
+    const chunks = [];
+    for (const attribute of element.attributes || []) {
+      chunks.push(attribute.name, attribute.value);
+    }
+    let parent = element.parentElement;
+    for (let depth = 0; parent && depth < 4; depth += 1, parent = parent.parentElement) {
+      for (const attribute of parent.attributes || []) {
+        if (/data|click|tracking|spm/i.test(attribute.name)) chunks.push(attribute.name, attribute.value);
+      }
+    }
+    chunks.push(document.body?.innerText || "");
+    return chunks.join("\n");
+  }
+
+  function getShippingActions() {
+    return document.querySelector('[data-testid="shipping-actions"]');
+  }
+
+  function getDownloadLabelButton() {
+    const actions = getShippingActions();
+    return actions?.querySelector('button[aria-label="Download label"]')
+      || document.querySelector('[data-testid="shipping-actions"] button[aria-label*="Download" i]');
+  }
+
+  function getPrintLabelButton() {
+    const actions = getShippingActions();
+    return actions?.querySelector('button[aria-label="Print label"]')
+      || document.querySelector('[data-testid="shipping-actions"] button[aria-label*="Print" i]');
+  }
+
+  function getLabelMetadata() {
+    const downloadButton = getDownloadLabelButton();
+    const printButton = getPrintLabelButton();
+    const metadataText = getElementMetadataText(downloadButton || printButton || getShippingActions());
+    const fromPage = getSingleLabelOrderNumber() || normalizeOrderNumber(window.location.href) || normalizeOrderNumber(metadataText);
+    return {
+      orderId: normalizeOrderNumber(parseMetadataValue(metadataText, ["order_id", "orderId", "order_number", "orderNumber"]) || fromPage),
+      shipmentId: parseMetadataValue(metadataText, ["shipment_id", "shipmentId", "shipmentid"]),
+      carrier: parseMetadataValue(metadataText, ["carrier_code", "carrierCode", "carrier"]),
+      service: parseMetadataValue(metadataText, ["service_code", "serviceCode", "service"]),
+      packageType: parseMetadataValue(metadataText, ["package_code", "packageCode", "package"]),
+      labelCost: parseMetadataValue(metadataText, ["label_cost", "labelCost"]),
+      pageUrl: window.location.href,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
+  function labelLog(...args) {
+    console.log("[OG eBay Label]", ...args);
+  }
+
+  function setLabelButtonStatus(message, tone = "info") {
+    const button = document.getElementById(SEND_LABEL_ID);
+    if (!button) return;
+    button.dataset.statusTone = tone;
+    button.textContent = message || "Send Label to OG";
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function injectLabelCaptureProbe() {
+    if (document.getElementById("og-ebay-label-capture-probe")) return;
+    const script = document.createElement("script");
+    script.id = "og-ebay-label-capture-probe";
+    script.textContent = `
+      (() => {
+        if (window.__ogEbayLabelCaptureProbeInstalled) return;
+        window.__ogEbayLabelCaptureProbeInstalled = true;
+
+        const isPdfResponse = (response, url = "") => {
+          const type = response?.headers?.get?.("content-type") || "";
+          return /pdf/i.test(type) || /label|download|shipping/i.test(String(url || response?.url || ""));
+        };
+
+        const postPdf = async (source, url, blob) => {
+          if (!blob || !/pdf/i.test(blob.type || "") && !/\\.pdf(?:$|[?#])/i.test(String(url || ""))) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            window.postMessage({
+              type: "${LABEL_EVENT_TYPE}",
+              payload: {
+                source,
+                url: url || "",
+                mimeType: blob.type || "application/pdf",
+                size: blob.size || 0,
+                base64: String(reader.result || "").split(",")[1] || "",
+                capturedAt: new Date().toISOString(),
+              },
+            }, "*");
+          };
+          reader.readAsDataURL(blob);
+        };
+
+        const originalFetch = window.fetch;
+        window.fetch = async (...args) => {
+          const response = await originalFetch(...args);
+          try {
+            const requestUrl = typeof args[0] === "string" ? args[0] : args[0]?.url;
+            if (isPdfResponse(response, requestUrl)) {
+              response.clone().blob().then((blob) => postPdf("fetch", response.url || requestUrl, blob)).catch(() => {});
+            }
+          } catch (_) {}
+          return response;
+        };
+
+        const originalOpen = XMLHttpRequest.prototype.open;
+        const originalSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+          this.__ogEbayLabelUrl = url;
+          return originalOpen.call(this, method, url, ...rest);
+        };
+        XMLHttpRequest.prototype.send = function(...args) {
+          this.addEventListener("load", () => {
+            try {
+              const contentType = this.getResponseHeader("content-type") || "";
+              if (!/pdf/i.test(contentType) && !/label|download|shipping/i.test(String(this.__ogEbayLabelUrl || ""))) return;
+              if (this.response instanceof Blob) {
+                postPdf("xhr", this.responseURL || this.__ogEbayLabelUrl, this.response);
+              } else if (this.response instanceof ArrayBuffer) {
+                postPdf("xhr", this.responseURL || this.__ogEbayLabelUrl, new Blob([this.response], { type: contentType || "application/pdf" }));
+              }
+            } catch (_) {}
+          });
+          return originalSend.apply(this, args);
+        };
+
+        const originalCreateObjectURL = URL.createObjectURL;
+        URL.createObjectURL = function(value) {
+          const objectUrl = originalCreateObjectURL.call(URL, value);
+          try {
+            if (value instanceof Blob) postPdf("object-url", objectUrl, value);
+          } catch (_) {}
+          return objectUrl;
+        };
+
+        document.addEventListener("click", (event) => {
+          const anchor = event.target?.closest?.("a[href]");
+          if (!anchor) return;
+          const href = anchor.href || "";
+          if (/\\.pdf(?:$|[?#])|label|download|shipping/i.test(href)) {
+            window.postMessage({
+              type: "${LABEL_EVENT_TYPE}",
+              payload: {
+                source: "anchor",
+                url: href,
+                mimeType: "",
+                size: 0,
+                base64: "",
+                capturedAt: new Date().toISOString(),
+              },
+            }, "*");
+          }
+        }, true);
+      })();
+    `;
+    (document.documentElement || document.head).appendChild(script);
+  }
+
+  function waitForCapturedLabel() {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("No PDF was captured from the eBay download action."));
+      }, LABEL_STATUS_TIMEOUT_MS);
+
+      function onMessage(event) {
+        if (event.source !== window || event.data?.type !== LABEL_EVENT_TYPE) return;
+        const payload = event.data.payload || {};
+        if (!payload.base64 && !payload.url) return;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(payload);
+      }
+
+      window.addEventListener("message", onMessage);
+    });
+  }
+
+  async function fetchLabelUrlFromContentScript(url) {
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) throw new Error(`Label URL returned HTTP ${response.status}.`);
+    const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    return {
+      source: "content-fetch",
+      url: response.url || url,
+      mimeType: blob.type || "application/pdf",
+      size: blob.size || buffer.byteLength,
+      base64: arrayBufferToBase64(buffer),
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
+  async function sendLabelToOg() {
+    const downloadButton = getDownloadLabelButton();
+    const metadata = getLabelMetadata();
+    labelLog("metadata", metadata);
+
+    if (!metadata.orderId) {
+      setLabelButtonStatus("Order not found", "error");
+      window.alert("Could not find an eBay order number on this label page.");
+      return;
+    }
+    if (!downloadButton) {
+      setLabelButtonStatus("Download missing", "error");
+      window.alert("Could not find eBay's Download label button.");
+      return;
+    }
+
+    setLabelButtonStatus("Finding label...");
+    injectLabelCaptureProbe();
+    const capturePromise = waitForCapturedLabel();
+
+    setLabelButtonStatus("Downloading label...");
+    downloadButton.click();
+
+    try {
+      let label = await capturePromise;
+      if (!label.base64 && label.url && !label.url.startsWith("blob:")) {
+        label = await fetchLabelUrlFromContentScript(label.url);
+      }
+      if (!label.base64) throw new Error("Captured a label URL, but not a readable PDF blob.");
+
+      setLabelButtonStatus("Uploading to OG...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_LABEL",
+        payload: {
+          metadata,
+          label,
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not hand the label to OG.");
+      setLabelButtonStatus(response.opened ? "Opened OG to attach" : "Attached to OG", "success");
+      window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
+    } catch (error) {
+      console.error("[OG eBay Label] Capture failed:", error);
+      setLabelButtonStatus("Capture failed", "error");
+      window.alert(`${error.message || "Could not capture the eBay label."}\n\nTry again after the page finishes loading. If eBay only starts a browser download, the console metadata log can still help inspect the request.`);
+      window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 5000);
+    }
   }
 
   function getSingleLabelOrderSnapshot(orderNumber) {
@@ -256,6 +559,33 @@
       #${SINGLE_ORDER_ID}:hover {
         background: #dcebff;
       }
+
+      #${SEND_LABEL_ID} {
+        margin-left: 8px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 13px Arial, sans-serif;
+        padding: 9px 12px;
+      }
+
+      #${SEND_LABEL_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${SEND_LABEL_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      #${SEND_LABEL_ID}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -327,11 +657,40 @@
     button.title = `Extract ${orderNumber} from this eBay label page and open it in OG Pending Orders`;
   }
 
+  function injectSendLabelButton() {
+    const actions = getShippingActions();
+    const downloadButton = getDownloadLabelButton();
+    let button = document.getElementById(SEND_LABEL_ID);
+
+    if (!actions || !downloadButton) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = SEND_LABEL_ID;
+      button.textContent = "Send Label to OG";
+      button.title = "Capture the eBay download-label PDF and attach it to the open OG Pending Orders page";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendLabelToOg();
+      });
+    }
+
+    if (!actions.contains(button)) {
+      downloadButton.insertAdjacentElement("afterend", button);
+    }
+  }
+
   function injectOgControls() {
     ensureStyles();
     injectRowButtons();
     injectFloatingButton();
     injectSingleOrderButton();
+    injectSendLabelButton();
   }
 
   let scheduled = false;

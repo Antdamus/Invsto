@@ -4,11 +4,18 @@
   "description": "Adds OG app shortcuts to eBay bulk shipping label pages.",
   "version": "1.0.0",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
-    "https://www.ebay.com/*"
+    "https://www.ebay.com/*",
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -16,6 +23,17 @@
       ],
       "js": [
         "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "app-bridge.js"
       ],
       "run_at": "document_idle"
     }

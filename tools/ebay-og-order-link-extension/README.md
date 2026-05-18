@@ -46,3 +46,28 @@ https://www.ebay.com/ship/single/24-14644-64854
 ```
 
 it adds a floating `Open order in OG` button. That button sends the same `orderId` parameter plus a compact page snapshot with buyer, ship-to address, order value, shipping paid, selected shipping, expected delivery, selected label service, package dimensions, label total, product image, and packing slip URL.
+
+## Send labels to OG
+
+On eBay label-ready pages, the extension looks for:
+
+```text
+[data-testid="shipping-actions"] button[aria-label="Download label"]
+```
+
+It adds `Send Label to OG` next to eBay's download label action. When clicked, it:
+
+1. Extracts the eBay order/shipment metadata from stable button attributes and surrounding tracking data.
+2. Instruments the page before clicking `Download label`, watching `fetch`, `XMLHttpRequest`, `URL.createObjectURL`, and PDF-ish anchor downloads.
+3. Captures the PDF blob before it becomes a browser PDF viewer or a local download.
+4. Relays the PDF to an open OG Pending Orders tab, or opens the configured OG URL with a transfer id.
+5. Lets the OG page upload the PDF with the signed-in user's Supabase session.
+
+This avoids automating the browser print dialog and avoids assuming the extension can read a downloaded local file.
+
+Required extension permissions now include:
+
+- `storage` for the configured OG URL and pending label handoff.
+- `tabs` so the background worker can find an already-open OG Pending Orders tab.
+- `https://www.ebay.com/*` for eBay page injection.
+- `https://*/*`, `http://localhost/*`, and `http://127.0.0.1/*` for the lightweight OG app bridge. The bridge only activates on the configured Pending Orders URL.

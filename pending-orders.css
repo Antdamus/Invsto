@@ -856,6 +856,15 @@ textarea:focus {
   padding: 18px;
 }
 
+.ebay-label-panel {
+  border-color: rgba(125, 240, 178, 0.2);
+}
+
+.ebay-label-details {
+  display: grid;
+  gap: 10px;
+}
+
 .money-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
