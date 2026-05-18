@@ -187,7 +187,7 @@
         <div>
           <span class="eyebrow">Admin Import</span>
           <h2>Upload eBay Orders Report</h2>
-          <p>Import pending order lines from the eBay CSV. Existing order numbers are skipped automatically.</p>
+          <p>Import pending order lines from the eBay CSV. Existing orders are checked for missing line items.</p>
         </div>
         <div class="import-actions">
           <label class="file-picker">
@@ -449,7 +449,7 @@
       </label>
       <div id="worker-no-inventory-gps" class="gps-status-card">Preparing GPS audit...</div>
       <p id="worker-no-inventory-error" class="fulfill-status is-error"></p>
-      <div class="modal-actions">
+      <div id="worker-no-inventory-actions" class="modal-actions">
         <button id="cancel-worker-no-inventory" type="button" class="secondary-btn">Cancel</button>
         <button id="confirm-worker-no-inventory" type="button" class="primary-btn">Confirm Completion</button>
       </div>

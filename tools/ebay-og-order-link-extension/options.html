@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>OG eBay Order Link</title>
+  <style>
+    body {
+      width: 360px;
+      margin: 0;
+      padding: 18px;
+      color: #111827;
+      font-family: Arial, sans-serif;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: #5f6b7a;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #cfd6e0;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 13px;
+    }
+
+    button {
+      margin-top: 12px;
+      width: 100%;
+      border: 0;
+      border-radius: 999px;
+      background: #e7bd73;
+      color: #17120b;
+      cursor: pointer;
+      font-weight: 800;
+      padding: 11px;
+    }
+
+    #status {
+      min-height: 18px;
+      margin-top: 10px;
+      color: #12734a;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <h1>OG eBay Order Link</h1>
+  <p>Paste the full URL for your OG Pending Orders page. The extension will append the eBay order number when opening it.</p>
+  <label>
+    OG Pending Orders URL
+    <input id="app-url" type="url" placeholder="https://your-site.com/pending-orders.html" />
+  </label>
+  <button id="save" type="button">Save URL</button>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

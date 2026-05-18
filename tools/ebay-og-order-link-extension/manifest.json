@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "OG eBay Order Link",
+  "description": "Adds OG app shortcuts to eBay bulk shipping label pages.",
+  "version": "1.0.0",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.ebay.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.ebay.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "OG eBay Order Link",
+    "default_popup": "options.html"
+  }
+}

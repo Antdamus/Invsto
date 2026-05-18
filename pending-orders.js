@@ -23,6 +23,8 @@ const state = {
   selectedLiveLotItems: [],
   liveLotMatchedLineIds: new Set(),
   liveLotOrderMatches: [],
+  ebayLaunchOrderNumbers: new Set(),
+  ebayLaunchBuyerKeys: new Set(),
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
   workerNoInventoryLineIds: new Set(),
@@ -42,6 +44,8 @@ const NO_INVENTORY_CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const NO_INVENTORY_CAPTURE_FALLBACK_LOOKBACK_MS = 45_000;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
+const ORDER_QUEUE_PAGE_SIZE = 1000;
+const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 
 function $(id) {
   return document.getElementById(id);
@@ -652,19 +656,38 @@ function buildOrderImportPayload(rows) {
   return orders;
 }
 
-async function loadExistingOrderNumbers(orderNumbers) {
-  const existing = new Set();
+async function loadExistingOrdersByNumber(orderNumbers) {
+  const existing = new Map();
   for (let index = 0; index < orderNumbers.length; index += 100) {
     const chunk = orderNumbers.slice(index, index + 100);
     const { data, error } = await supabase
       .from("ebay_orders")
-      .select("order_number")
+      .select("id, order_number")
       .in("order_number", chunk);
 
     if (error) throw error;
-    (data || []).forEach((row) => existing.add(row.order_number));
+    (data || []).forEach((row) => existing.set(row.order_number, row.id));
   }
   return existing;
+}
+
+function normalizeEbayOrderNumber(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/\b\d{2}-\d{5}-\d{5}\b/);
+  return match ? match[0] : "";
+}
+
+function getRequestedEbayOrderNumbers() {
+  const params = new URLSearchParams(window.location.search);
+  const values = [
+    params.get("orderId"),
+    params.get("order"),
+    params.get("ebayOrder"),
+    ...(params.get("orderIds") || "").split(","),
+  ];
+  return [...new Set(values
+    .map(normalizeEbayOrderNumber)
+    .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
 }
 
 async function importEbayOrdersFromCsv() {
@@ -691,33 +714,38 @@ async function importEbayOrdersFromCsv() {
     if (!payload.length) throw new Error("No usable eBay order rows were found in that CSV.");
 
     const incomingNumbers = [...new Set(payload.map((entry) => entry.order.order_number))];
-    const existing = await loadExistingOrderNumbers(incomingNumbers);
-    const fresh = payload.filter((entry) => !existing.has(entry.order.order_number));
+    const existingOrders = await loadExistingOrdersByNumber(incomingNumbers);
+    const fresh = payload.filter((entry) => !existingOrders.has(entry.order.order_number));
     const skipped = payload.length - fresh.length;
 
-    if (!fresh.length) {
-      setImportStatus(`No new orders imported. ${skipped} duplicate order(s) were already in the system.`, "success");
-      await loadOrders();
-      return;
+    let insertedOrders = [];
+    if (fresh.length) {
+      const { data, error: orderError } = await supabase
+        .from("ebay_orders")
+        .insert(fresh.map((entry) => entry.order))
+        .select("id, order_number");
+
+      if (orderError) throw orderError;
+      insertedOrders = data || [];
     }
-
-    const { data: insertedOrders, error: orderError } = await supabase
-      .from("ebay_orders")
-      .insert(fresh.map((entry) => entry.order))
-      .select("id, order_number");
-
-    if (orderError) throw orderError;
     insertedOrderIds = (insertedOrders || []).map((order) => order.id).filter(Boolean);
 
-    const orderIdByNumber = new Map((insertedOrders || []).map((order) => [order.order_number, order.id]));
-    const lineRows = fresh.flatMap((entry) => {
+    const orderIdByNumber = new Map([
+      ...existingOrders.entries(),
+      ...(insertedOrders || []).map((order) => [order.order_number, order.id]),
+    ]);
+    const lineRows = payload.flatMap((entry) => {
       const orderId = orderIdByNumber.get(entry.order.order_number);
       return entry.lines.map((line) => ({ ...line, order_id: orderId }));
     }).filter((line) => line.order_id);
 
-    const { error: lineError } = await supabase
+    const { data: insertedLines, error: lineError } = await supabase
       .from("ebay_order_lines")
-      .insert(lineRows);
+      .upsert(lineRows, {
+        onConflict: "order_id,item_number,transaction_id",
+        ignoreDuplicates: true,
+      })
+      .select("id, order_id");
 
     if (lineError) {
       if (insertedOrderIds.length) {
@@ -726,7 +754,17 @@ async function importEbayOrdersFromCsv() {
       throw lineError;
     }
 
-    setImportStatus(`Imported ${insertedOrders.length} new order(s) and ${lineRows.length} line item(s). Skipped ${skipped} duplicate order(s).`, "success");
+    const insertedLineCount = (insertedLines || []).length;
+    if (insertedLineCount) {
+      const orderIdsWithNewLines = [...new Set((insertedLines || []).map((line) => line.order_id).filter(Boolean))];
+      await supabase
+        .from("ebay_orders")
+        .update({ status: "pending" })
+        .in("id", orderIdsWithNewLines)
+        .in("status", ["fulfilled", "cancelled", "archived"]);
+    }
+
+    setImportStatus(`Imported ${insertedOrders.length} new order(s) and ${insertedLineCount} new line item(s). Checked ${skipped} existing order(s) for missing lines.`, "success");
     $("ebay-orders-file").value = "";
     await loadOrders();
   } catch (error) {
@@ -737,11 +775,7 @@ async function importEbayOrdersFromCsv() {
   }
 }
 
-async function loadOrders() {
-  const status = $("order-status-filter")?.value || "pending";
-  const list = $("orders-list");
-  if (list) list.innerHTML = `<div class="empty-state">Loading pending orders...</div>`;
-  const admin = isAdminUser();
+function buildOrderLineQueueQuery(status, admin) {
   const moneyLineFields = admin ? `
       sold_for,
       shipping_and_handling,
@@ -782,7 +816,8 @@ async function loadOrders() {
         status
       )
     `)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (status === "pending") {
     query = query.in("line_status", ["pending", "partially_fulfilled"]);
@@ -792,15 +827,37 @@ async function loadOrders() {
     query = query.in("line_status", ["pending", "partially_fulfilled", "fulfilled"]);
   }
 
-  const { data, error } = await query.limit(300);
+  return query;
+}
 
-  if (error) {
+async function fetchOrderLineQueue(status, admin) {
+  const rows = [];
+  for (let from = 0; ; from += ORDER_QUEUE_PAGE_SIZE) {
+    const to = from + ORDER_QUEUE_PAGE_SIZE - 1;
+    const { data, error } = await buildOrderLineQueueQuery(status, admin).range(from, to);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < ORDER_QUEUE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function loadOrders() {
+  const status = $("order-status-filter")?.value || "pending";
+  const list = $("orders-list");
+  if (list) list.innerHTML = `<div class="empty-state">Loading pending orders...</div>`;
+  const admin = isAdminUser();
+
+  let data;
+  try {
+    data = await fetchOrderLineQueue(status, admin);
+  } catch (error) {
     console.error("Failed to load pending eBay orders:", error);
     if (list) list.innerHTML = `<div class="empty-state">Could not load eBay orders. Make sure the pending-order migration has been pushed.</div>`;
     return;
   }
 
-  state.orders = (data || []).map(normalizeLine);
+  state.orders = data.map(normalizeLine);
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
   }
@@ -824,11 +881,59 @@ function applyOrderFilters() {
     filtered = filtered.filter((line) => state.liveLotMatchedLineIds.has(line.id));
   }
 
+  if (state.ebayLaunchBuyerKeys.size) {
+    filtered = filtered.filter((line) => state.ebayLaunchBuyerKeys.has(getBuyerKey(line)));
+  } else if (state.ebayLaunchOrderNumbers.size) {
+    filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
+  }
+
   state.filteredOrders = filtered;
   renderOrders();
   renderSummaryStrip();
   renderAdminOrderActions();
   renderLiveLotOrderMatches();
+}
+
+function clearEbayLaunchFilter({ apply = true } = {}) {
+  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size) return;
+  state.ebayLaunchOrderNumbers.clear();
+  state.ebayLaunchBuyerKeys.clear();
+  if (apply) applyOrderFilters();
+}
+
+function applyEbayLaunchOrderSelection() {
+  const orderNumbers = getRequestedEbayOrderNumbers();
+  if (!orderNumbers.length) return;
+
+  state.ebayLaunchOrderNumbers = new Set(orderNumbers);
+  state.ebayLaunchBuyerKeys.clear();
+  clearLiveLotSelection({ render: false });
+  const matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
+
+  if (!matches.length) {
+    applyOrderFilters();
+    const joined = orderNumbers.join(", ");
+    setStatus(`No pending order line matched eBay order ${joined}. Make sure the latest eBay report was imported.`, "error");
+    return;
+  }
+
+  state.ebayLaunchBuyerKeys = new Set(matches.map(getBuyerKey).filter(Boolean));
+  applyOrderFilters();
+  const openMatch = matches.find(isOpenOrderLine) || matches[0];
+  if (openMatch) {
+    selectOrderLine(openMatch.id);
+  }
+  const foundNumbers = new Set(matches.map((line) => line.order?.order_number).filter(Boolean));
+  const missing = orderNumbers.filter((orderNumber) => !foundNumbers.has(orderNumber));
+  const visibleBuyerLines = state.filteredOrders.length;
+  let message = missing.length
+    ? `Opened ${matches.length.toLocaleString()} matching line(s). Missing from pending orders: ${missing.join(", ")}.`
+    : `Opened ${matches.length.toLocaleString()} matching eBay label line(s). Showing ${visibleBuyerLines.toLocaleString()} pending line(s) for that buyer.`;
+  message += state.checkoutStoreId ? " Refresh returns to the full queue." : " Select the checkout store before packing.";
+  setStatus(message, missing.length ? "error" : "info");
+  if (state.checkoutStoreId && openMatch && isOpenOrderLine(openMatch)) {
+    setTimeout(() => openWorkerNoInventoryModal({ autoRequestPhoto: true }), 250);
+  }
 }
 
 function renderSummaryStrip() {
@@ -838,7 +943,9 @@ function renderSummaryStrip() {
   $("summary-pending").textContent = String(pending);
   $("summary-ship-today").textContent = String(shipToday);
   $("summary-selected").textContent = state.selectedLine ? getBuyerLabel(state.selectedLine) : "None";
-  $("order-count-pill").textContent = String(groupLinesByBuyer(state.filteredOrders).length);
+  const buyerGroupCount = groupLinesByBuyer(state.filteredOrders).length;
+  const visibleLineCount = state.filteredOrders.length;
+  $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
 }
 
 function groupLinesByBuyer(lines) {
@@ -1891,6 +1998,7 @@ async function loadLiveLotByScan(rawTerm = "") {
   }
 
   try {
+    clearEbayLaunchFilter({ apply: false });
     setStatus("Loading live-sale bag...");
     let result = await supabase
       .from("live_sale_lots")
@@ -2488,6 +2596,14 @@ function renderNoInventoryEvidencePhotos() {
   });
 }
 
+function scrollNoInventoryConfirmIntoView() {
+  const modal = $("worker-no-inventory-modal");
+  const actions = $("worker-no-inventory-actions");
+  if (!modal || !actions || modal.classList.contains("hidden")) return;
+  actions.scrollIntoView({ behavior: "smooth", block: "end" });
+  setTimeout(() => $("confirm-worker-no-inventory")?.focus(), 350);
+}
+
 function openNoInventoryEvidencePhotoViewer(index) {
   const photo = state.noInventoryEvidencePhotos[index];
   if (!photo?.previewUrl) return;
@@ -2565,6 +2681,7 @@ async function requestNoInventoryEvidencePhoto() {
     });
     renderNoInventoryEvidencePhotos();
     setNoInventoryPhotoStatus(`${photos.length} evidence photo${photos.length === 1 ? "" : "s"} added to this audit.`, "info");
+    scrollNoInventoryConfirmIntoView();
   } catch (error) {
     console.error("No-inventory evidence capture failed:", error);
     setNoInventoryPhotoStatus(error?.message || "Could not take evidence photo.", "error");
@@ -2631,10 +2748,11 @@ function renderWorkerNoInventoryList() {
         <label class="no-inventory-check" aria-label="Select this order line">
           <input type="checkbox" data-no-inventory-line="${escapeHtml(line.id)}" ${selected ? "checked" : ""} />
         </label>
-        <div class="bundle-review-thumb"><span>eBay</span></div>
         <div class="bundle-review-copy">
-          <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
-          <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
+          <div class="no-inventory-line-head">
+            <strong>${escapeHtml(line?.item_title || "Untitled eBay item")}</strong>
+            <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
+          </div>
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
         </div>
       </article>
@@ -2656,7 +2774,8 @@ function renderWorkerNoInventoryList() {
   updateWorkerNoInventorySelectionSummary();
 }
 
-async function openWorkerNoInventoryModal() {
+async function openWorkerNoInventoryModal(options = {}) {
+  const autoRequestPhoto = Boolean(options.autoRequestPhoto);
   const line = state.selectedLine;
   if (!line) {
     setStatus("Select an eBay order first.", "error");
@@ -2686,12 +2805,20 @@ async function openWorkerNoInventoryModal() {
   renderNoInventoryEvidencePhotos();
   setWorkerNoInventoryGpsStatus("Requesting GPS for the audit trail...", "warn");
   openModal("worker-no-inventory-modal");
-  setTimeout(() => $("confirm-worker-no-inventory")?.focus(), 80);
+  setTimeout(() => (autoRequestPhoto ? $("request-no-inventory-photo") : $("confirm-worker-no-inventory"))?.focus(), 80);
 
-  loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
+  const stationPromise = loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
     console.warn("Could not load no-inventory capture stations:", error);
     setNoInventoryPhotoStatus(error?.message || "Could not load capture stations.", "error");
   });
+
+  if (autoRequestPhoto) {
+    stationPromise.then(() => {
+      if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
+        requestNoInventoryEvidencePhoto();
+      }
+    });
+  }
 
   const gps = await captureAuditLocation();
   state.workerNoInventoryGps = gps;
@@ -3088,6 +3215,7 @@ function clearSelection() {
 
 function setupListeners() {
   $("refresh-orders")?.addEventListener("click", async () => {
+    clearEbayLaunchFilter({ apply: false });
     clearOrderSearch({ apply: false });
     await loadOrders();
   });
@@ -3096,7 +3224,10 @@ function setupListeners() {
     const file = event.target.files?.[0];
     setImportStatus(file ? `Ready to import ${file.name}. Duplicate eBay order numbers will be skipped.` : "");
   });
-  $("order-search")?.addEventListener("input", applyOrderFilters);
+  $("order-search")?.addEventListener("input", () => {
+    clearEbayLaunchFilter({ apply: false });
+    applyOrderFilters();
+  });
   $("order-status-filter")?.addEventListener("change", loadOrders);
   $("order-sort")?.addEventListener("change", (event) => {
     state.orderSort = event.target.value;
@@ -3300,5 +3431,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadCheckoutStores();
   clearOrderSearch({ apply: false });
   await loadOrders();
+  applyEbayLaunchOrderSelection();
   if (window.lucide) window.lucide.createIcons();
 });
