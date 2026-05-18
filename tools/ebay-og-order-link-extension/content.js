@@ -246,6 +246,8 @@
       }
 
       #${SINGLE_ORDER_ID} {
+        top: 112px;
+        bottom: auto;
         border-color: #0b72e7;
         background: #edf5ff;
         color: #0759b8;
