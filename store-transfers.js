@@ -84,12 +84,15 @@
     return response.ok;
   }
 
-  async function getSignedPhoto(path) {
+  function primaryItemPhotoPath(item) {
+    return (Array.isArray(item?.photos) ? item.photos : []).find(Boolean) || "";
+  }
+
+  async function getSignedPhoto(path, transform = { width: 220, height: 220, resize: "cover", quality: 60 }) {
     if (!path) return "";
     if (/^https?:\/\//i.test(path)) return path;
-    const { data } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 60 * 20, {
-      transform: { width: 220, height: 220, resize: "cover", quality: 60 },
-    });
+    const options = transform ? { transform } : {};
+    const { data } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 60 * 20, options);
     return data?.signedUrl || "";
   }
 
@@ -286,13 +289,18 @@
   }
 
   async function setCurrentItem(item) {
-    state.currentItem = item;
     state.currentSource = null;
     state.sourceParent = null;
-    const photo = await getSignedPhoto((Array.isArray(item.photos) ? item.photos : [])[0]);
+    const photoPath = primaryItemPhotoPath(item);
+    const photo = await getSignedPhoto(photoPath);
+    state.currentItem = {
+      ...item,
+      transferPhotoPath: photoPath,
+      transferPhotoUrl: photo,
+    };
     $("selected-transfer-item").className = `selection-card ${photo ? "has-photo" : ""}`;
     $("selected-transfer-item").innerHTML = `
-      ${photo ? `<img class="item-photo" src="${photo}" alt="">` : ""}
+      ${photo ? `<button type="button" class="item-photo-button" data-preview-current-item aria-label="View photo for ${escapeHtml(item.title || "selected item")}"><img class="item-photo" src="${photo}" alt="${escapeHtml(item.title || "Selected item")}"></button>` : ""}
       <div>
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <small>${escapeHtml(item.barcode || "")}${item.weight ? ` - ${Number(item.weight).toLocaleString()} g` : ""}</small>
@@ -432,17 +440,57 @@
       return;
     }
     $("transfer-bundle-list").innerHTML = state.bundle.map((line, index) => `
-      <article class="bundle-item">
+      <article class="bundle-item ${line.photoUrl ? "has-photo" : ""}">
         <div class="bundle-item-top">
-          <div>
+          ${line.photoUrl ? `
+            <button type="button" class="bundle-item-photo" data-preview-line="${index}" aria-label="View photo for ${escapeHtml(line.item.title || "transfer item")}">
+              <img src="${line.photoUrl}" alt="${escapeHtml(line.item.title || "Transfer item")}">
+            </button>
+          ` : ""}
+          <div class="bundle-item-copy">
             <strong>${escapeHtml(line.item.title || "Untitled item")}</strong>
             <small>${escapeHtml(line.item.barcode || "")} - ${escapeHtml(locationLabel(line.location))}</small>
           </div>
-          <strong>Qty ${line.quantity}</strong>
+          <div class="bundle-item-qty">
+            <span>Qty</span>
+            <div class="quantity-stepper" aria-label="Transfer quantity">
+              <button type="button" data-adjust-line="${index}" data-delta="-1" aria-label="Decrease quantity for ${escapeHtml(line.item.title || "transfer item")}">-</button>
+              <input
+                type="number"
+                min="1"
+                max="${bundleLineMax(line)}"
+                step="1"
+                value="${line.quantity}"
+                data-qty-line="${index}"
+                aria-label="Quantity for ${escapeHtml(line.item.title || "transfer item")}"
+              />
+              <button type="button" data-adjust-line="${index}" data-delta="1" aria-label="Increase quantity for ${escapeHtml(line.item.title || "transfer item")}">+</button>
+            </div>
+            <small>${bundleLineMax(line).toLocaleString()} available</small>
+          </div>
         </div>
         <button type="button" class="secondary-btn danger" data-remove-line="${index}">Remove</button>
       </article>
     `).join("");
+  }
+
+  function bundleLineMax(line) {
+    return Math.max(1, Number(line?.stockRow?.quantity || line?.quantity || 1));
+  }
+
+  function setBundleLineQuantity(index, value) {
+    const line = state.bundle[Number(index)];
+    if (!line) return;
+    const max = bundleLineMax(line);
+    const requested = Math.trunc(Number(value || 0));
+    const next = Math.min(Math.max(requested || 1, 1), max);
+    line.quantity = next;
+    renderBundle();
+    setStatus(
+      "create-transfer-status",
+      requested > max ? `Only ${max.toLocaleString()} unit(s) are available from that source.` : "Transfer quantity updated.",
+      requested > max ? "error" : "info"
+    );
   }
 
   function addCurrentLine() {
@@ -460,13 +508,24 @@
       String(line.item.id) === String(state.currentItem.id)
       && String(line.stockRow.id) === String(state.currentSource.stockRow.id)
     ));
-    if (existing) existing.quantity += qty;
+    if (existing) {
+      const requestedTotal = existing.quantity + qty;
+      if (requestedTotal > available) {
+        setStatus("create-transfer-status", `That line already has ${existing.quantity.toLocaleString()} unit(s). Only ${available.toLocaleString()} are available from that source.`, "error");
+        return;
+      }
+      existing.quantity += qty;
+      existing.photoPath = existing.photoPath || state.currentItem.transferPhotoPath || primaryItemPhotoPath(state.currentItem);
+      existing.photoUrl = existing.photoUrl || state.currentItem.transferPhotoUrl || "";
+    }
     else {
       state.bundle.push({
         item: state.currentItem,
         location: state.currentSource.location,
         stockRow: state.currentSource.stockRow,
         quantity: qty,
+        photoPath: state.currentItem.transferPhotoPath || primaryItemPhotoPath(state.currentItem),
+        photoUrl: state.currentItem.transferPhotoUrl || "",
       });
     }
     state.currentItem = null;
@@ -505,6 +564,50 @@
     $("transfer-evidence-strip").innerHTML = state.evidence
       .map((photo) => `<img src="${photo.url}" alt="Transfer evidence">`)
       .join("");
+  }
+
+  function closeTransferPhotoPreview() {
+    const modal = $("transfer-photo-modal");
+    const image = $("transfer-photo-preview");
+    if (image) {
+      image.removeAttribute("src");
+      image.alt = "";
+    }
+    modal?.classList.add("hidden");
+  }
+
+  async function openTransferPhotoPreview({ title, photoPath, photoUrl }) {
+    const modal = $("transfer-photo-modal");
+    const image = $("transfer-photo-preview");
+    if (!modal || !image) return;
+    const fallbackUrl = photoUrl || "";
+    const largeUrl = photoPath
+      ? await getSignedPhoto(photoPath, { width: 1200, height: 1200, resize: "contain", quality: 86 })
+      : fallbackUrl;
+    if (!largeUrl && !fallbackUrl) return;
+    $("transfer-photo-title").textContent = title || "Item Photo";
+    image.alt = title ? `Photo of ${title}` : "Transfer item photo";
+    image.src = largeUrl || fallbackUrl;
+    modal.classList.remove("hidden");
+  }
+
+  async function openBundleLinePhoto(index) {
+    const line = state.bundle[Number(index)];
+    if (!line) return;
+    await openTransferPhotoPreview({
+      title: line.item?.title || "Transfer item",
+      photoPath: line.photoPath || primaryItemPhotoPath(line.item),
+      photoUrl: line.photoUrl || line.item?.transferPhotoUrl || "",
+    });
+  }
+
+  async function openCurrentItemPhoto() {
+    if (!state.currentItem) return;
+    await openTransferPhotoPreview({
+      title: state.currentItem.title || "Selected item",
+      photoPath: state.currentItem.transferPhotoPath || primaryItemPhotoPath(state.currentItem),
+      photoUrl: state.currentItem.transferPhotoUrl || "",
+    });
   }
 
   function selectedReceiver() {
@@ -838,16 +941,48 @@
     });
     $("add-transfer-line").addEventListener("click", addCurrentLine);
     $("transfer-evidence-input").addEventListener("change", (event) => handleEvidenceFiles(event.target.files));
+    $("selected-transfer-item").addEventListener("click", (event) => {
+      const previewButton = event.target.closest("[data-preview-current-item]");
+      if (previewButton) openCurrentItemPhoto();
+    });
     $("transfer-bundle-list").addEventListener("click", (event) => {
+      const previewButton = event.target.closest("[data-preview-line]");
+      if (previewButton) {
+        openBundleLinePhoto(previewButton.dataset.previewLine);
+        return;
+      }
+      const adjustButton = event.target.closest("[data-adjust-line]");
+      if (adjustButton) {
+        const index = Number(adjustButton.dataset.adjustLine);
+        const line = state.bundle[index];
+        if (line) setBundleLineQuantity(index, line.quantity + Number(adjustButton.dataset.delta || 0));
+        return;
+      }
       const button = event.target.closest("[data-remove-line]");
       if (!button) return;
       state.bundle.splice(Number(button.dataset.removeLine), 1);
       renderBundle();
     });
+    $("transfer-bundle-list").addEventListener("change", (event) => {
+      const input = event.target.closest("[data-qty-line]");
+      if (!input) return;
+      setBundleLineQuantity(input.dataset.qtyLine, input.value);
+    });
+    $("transfer-bundle-list").addEventListener("keydown", (event) => {
+      const input = event.target.closest("[data-qty-line]");
+      if (input && event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      }
+    });
     $("clear-transfer-bundle").addEventListener("click", clearBundle);
     $("open-transfer-signature").addEventListener("click", openSignatureModal);
     $("close-transfer-sign").addEventListener("click", closeSignatureModal);
     $("cancel-transfer-sign").addEventListener("click", closeSignatureModal);
+    $("close-transfer-photo").addEventListener("click", closeTransferPhotoPreview);
+    $("transfer-photo-modal").addEventListener("click", (event) => {
+      if (event.target?.id === "transfer-photo-modal") closeTransferPhotoPreview();
+    });
     $("submit-transfer").addEventListener("click", submitTransfer);
     $("refresh-transfers").addEventListener("click", loadTransfers);
     $("transfer-status-filter").addEventListener("change", renderPendingTransfers);
