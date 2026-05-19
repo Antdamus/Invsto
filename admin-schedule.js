@@ -1,6 +1,14 @@
 let gcMonthStart = null; // first day of the month being shown (Date)
 let schedEmpId = null;
 let schedWeekStart = startOfWeekSun(new Date());
+let schedEmployeesCache = [];
+let scheduleWeekState = { resolvedByDate: new Map(), overridesByDate: new Map() };
+let scheduleFlowState = {
+  selectedStoreId: '',
+  selectedDayIndex: new Date().getDay(),
+  assignmentType: 'store_work',
+  workerSearch: ''
+};
 
 function startOfWeekSun(d){
   const x = new Date(d);
@@ -159,6 +167,236 @@ async function fetchWeekOverrides(employeeId, weekStart){
     map.set(r.work_date, r);
   }
   return map;
+}
+
+function escSched(value){
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function scheduleTypeLabel(type = scheduleFlowState.assignmentType){
+  return type === 'live_show' ? 'Live show session' : 'Store work hours';
+}
+
+function scheduleTypeNote(){
+  return `[OG schedule type: ${scheduleFlowState.assignmentType}] ${scheduleTypeLabel()}`;
+}
+
+function selectedScheduleStoreId(){
+  return scheduleFlowState.selectedStoreId || qs(`recStore-${scheduleFlowState.selectedDayIndex}`)?.value || '';
+}
+
+function selectedScheduleEmployee(){
+  return schedEmployeesCache.find((employee) => String(employee.id) === String(schedEmpId)) || null;
+}
+
+function renderScheduleWorkerPicker(){
+  const grid = qs('schedWorkerGrid');
+  if (!grid) return;
+  const q = String(scheduleFlowState.workerSearch || '').trim().toLowerCase();
+  const rows = q
+    ? schedEmployeesCache.filter((employee) => String(employee.display_name || '').toLowerCase().includes(q))
+    : schedEmployeesCache;
+
+  if (!rows.length){
+    grid.innerHTML = `<div class="muted" style="padding:12px;">No workers match that search.</div>`;
+    return;
+  }
+
+  grid.innerHTML = rows.map((employee) => {
+    const active = String(employee.id) === String(schedEmpId) ? ' active' : '';
+    return `
+      <button type="button" class="schedule-pick-card${active}" data-sched-worker="${escSched(employee.id)}">
+        <strong>${escSched(employee.display_name || 'Unnamed worker')}</strong>
+        <span>${active ? 'Currently editing' : 'Tap to edit schedule'}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderScheduleStorePicker(){
+  const grid = qs('schedStoreGrid');
+  if (!grid) return;
+  const temp = document.createElement('select');
+  temp.innerHTML = storeOptionsHTML(scheduleFlowState.selectedStoreId);
+  const source = [...temp.options]
+    .filter((option) => option.value)
+    .map((option) => ({ id: option.value, name: option.textContent || 'Store' }));
+  if (!source.length){
+    grid.innerHTML = `<div class="muted" style="padding:12px;">No active stores are available.</div>`;
+    return;
+  }
+
+  if (!scheduleFlowState.selectedStoreId) {
+    scheduleFlowState.selectedStoreId = source[0]?.id || '';
+  }
+
+  grid.innerHTML = source.map((store) => {
+    const active = String(store.id) === String(scheduleFlowState.selectedStoreId) ? ' active' : '';
+    return `
+      <button type="button" class="schedule-store-card${active}" data-sched-store="${escSched(store.id)}">
+        <strong>${escSched(store.name || 'Store')}</strong>
+        <span>Schedule location</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function syncScheduleFlowDates(){
+  const weekDate = qs('schedFlowWeekDate');
+  const effFrom = qs('schedFlowEffFrom');
+  const label = qs('schedFlowWeekLabel');
+  if (weekDate) weekDate.value = toISODate(schedWeekStart);
+  if (effFrom && !effFrom.value) effFrom.value = qs('schedEffFrom')?.value || toISODate(new Date());
+  if (label) label.textContent = weekLabel(schedWeekStart);
+}
+
+function setScheduleType(type){
+  scheduleFlowState.assignmentType = type === 'live_show' ? 'live_show' : 'store_work';
+  document.querySelectorAll('#panelSchedule [data-sched-type]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.schedType === scheduleFlowState.assignmentType);
+  });
+  renderScheduleDayDetail();
+}
+
+function renderScheduleDayPicker(){
+  const picker = qs('schedDayPicker');
+  if (!picker) return;
+  picker.innerHTML = '';
+  for (let i = 0; i < 7; i++){
+    const day = addDays(schedWeekStart, i);
+    const iso = toISODate(day);
+    const resolved = scheduleWeekState.resolvedByDate.get(iso) || null;
+    const ov = scheduleWeekState.overridesByDate.get(iso) || null;
+    const active = i === scheduleFlowState.selectedDayIndex ? ' active' : '';
+    const time = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'No assignment';
+    const source = ov?.off ? 'Off this week' : (resolved?.source || 'Open');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `schedule-day-card${active}`;
+    button.dataset.schedDay = String(i);
+    button.innerHTML = `
+      <strong>${DOW[i]} ${day.getMonth()+1}/${day.getDate()}</strong>
+      <span>${escSched(time)}</span>
+      <small>${escSched(source)}</small>
+    `;
+    picker.appendChild(button);
+  }
+}
+
+function renderScheduleDayDetail(){
+  const detail = qs('schedDayDetail');
+  if (!detail) return;
+
+  if (!schedEmpId){
+    detail.innerHTML = `
+      <div class="schedule-current-card">
+        <h4>Choose a worker first</h4>
+        <p>Select a worker above, then this panel will show the week, day, store, and schedule assignment options.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const i = scheduleFlowState.selectedDayIndex;
+  const day = addDays(schedWeekStart, i);
+  const iso = toISODate(day);
+  const resolved = scheduleWeekState.resolvedByDate.get(iso) || null;
+  const ov = scheduleWeekState.overridesByDate.get(iso) || null;
+  const employee = selectedScheduleEmployee();
+  const storeId = selectedScheduleStoreId();
+  const storeLabel = storeId ? storeNameById(storeId) : 'Choose a store';
+  const resolvedStore = resolved?.store_id ? storeNameById(resolved.store_id) : '-';
+  const resolvedTime = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'Nothing assigned';
+  const startValue = ov?.start_local ? String(ov.start_local).slice(0,5) : (resolved ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+  const endValue = ov?.end_local ? String(ov.end_local).slice(0,5) : (resolved ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+
+  detail.innerHTML = `
+    <div class="schedule-current-card">
+      <h4>${escSched(DOW[i])} ${day.getMonth()+1}/${day.getDate()} for ${escSched(employee?.display_name || 'worker')}</h4>
+      <p><strong>Currently assigned:</strong> ${escSched(resolvedTime)} ${resolved?.source ? `(${escSched(resolved.source)})` : ''}</p>
+      <p><strong>Store:</strong> ${escSched(resolvedStore)} ${ov?.off ? '<span class="sched-pill ov">Off override</span>' : ''}</p>
+      <p><strong>New assignment:</strong> ${escSched(scheduleTypeLabel())} at ${escSched(storeLabel)}</p>
+    </div>
+
+    <div class="schedule-day-form">
+      <label>
+        Start
+        <input id="schedFlowStart" type="time" value="${escSched(startValue)}" />
+      </label>
+      <label>
+        End
+        <input id="schedFlowEnd" type="time" value="${escSched(endValue)}" />
+      </label>
+      <label>
+        Store
+        <select id="schedFlowStore">${storeOptionsHTML(storeId)}</select>
+      </label>
+      <label>
+        Type
+        <input value="${escSched(scheduleTypeLabel())}" readonly />
+      </label>
+    </div>
+
+    <div class="schedule-day-actions">
+      <button type="button" class="btn primary" id="schedFlowSaveOverride">Save this week only</button>
+      <button type="button" class="btn" id="schedFlowSaveRecurring">Save weekly recurring</button>
+      <button type="button" class="btn ghost" id="schedFlowMarkOff">Mark off this week</button>
+      <button type="button" class="btn ghost" id="schedFlowClearOverride">Clear this week</button>
+      <button type="button" class="btn ghost" id="schedFlowClearRecurring">Remove recurring</button>
+    </div>
+  `;
+}
+
+function renderScheduleFlow(){
+  renderScheduleWorkerPicker();
+  renderScheduleStorePicker();
+  syncScheduleFlowDates();
+  renderScheduleDayPicker();
+  renderScheduleDayDetail();
+}
+
+function syncGuidedFieldsToHidden(){
+  const i = scheduleFlowState.selectedDayIndex;
+  const iso = toISODate(addDays(schedWeekStart, i));
+  const start = qs('schedFlowStart')?.value || '';
+  const end = qs('schedFlowEnd')?.value || '';
+  const storeId = qs('schedFlowStore')?.value || selectedScheduleStoreId();
+  const flowEffFrom = qs('schedFlowEffFrom')?.value || '';
+  if (flowEffFrom && qs('schedEffFrom')) qs('schedEffFrom').value = flowEffFrom;
+  scheduleFlowState.selectedStoreId = storeId || scheduleFlowState.selectedStoreId;
+
+  const recStart = qs(`recStart-${i}`);
+  const recEnd = qs(`recEnd-${i}`);
+  const recStore = qs(`recStore-${i}`);
+  if (recStart) recStart.value = start;
+  if (recEnd) recEnd.value = end;
+  if (recStore) recStore.value = storeId || '';
+
+  const ovOff = qs(`ovOff-${iso}`);
+  const ovStart = qs(`ovStart-${iso}`);
+  const ovEnd = qs(`ovEnd-${iso}`);
+  const ovStore = qs(`ovStore-${iso}`);
+  if (ovOff) ovOff.checked = false;
+  if (ovStart) {
+    ovStart.disabled = false;
+    ovStart.value = start;
+  }
+  if (ovEnd) {
+    ovEnd.disabled = false;
+    ovEnd.value = end;
+  }
+  if (ovStore) {
+    ovStore.disabled = false;
+    ovStore.value = storeId || '';
+  }
+
+  const flowStore = qs('schedFlowStore');
+  if (flowStore) flowStore.value = storeId || '';
 }
 
 function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
@@ -453,6 +691,7 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
 
 async function saveRecurring(weekday){
   const empId = schedEmpId;
+  if (!empId) return alert('Choose a worker first.');
   const start = qs(`recStart-${weekday}`).value || '';
   const end   = qs(`recEnd-${weekday}`).value || '';
   const storeId = qs(`recStore-${weekday}`)?.value || null;
@@ -470,7 +709,7 @@ async function saveRecurring(weekday){
     _effective_from: effFrom,
     _effective_to: null,
     _store_id: storeId,
-    _note: null
+    _note: scheduleTypeNote()
   });
 
   if (error) return alert('Save failed: ' + error.message);
@@ -570,6 +809,7 @@ async function clearRecurring(weekday){
 
 async function saveOverride(workISO){
   const empId = schedEmpId;
+  if (!empId) return alert('Choose a worker first.');
 
   const off = qs(`ovOff-${workISO}`).checked;
   const s = qs(`ovStart-${workISO}`);
@@ -600,7 +840,7 @@ async function saveOverride(workISO){
     _start_local: start,
     _end_local: end,
     _store_id: off ? null : storeId,
-    _note: null
+    _note: off ? null : scheduleTypeNote()
   };
 
   // Try a v2 RPC first (if you created it in Supabase)
@@ -643,6 +883,7 @@ if (TRY_V2){
 }
 
 async function clearOverride(workISO){
+  if (!schedEmpId) return alert('Choose a worker first.');
   // Just delete the row; RLS allows admin writes
   const { error } = await supabaseClient
     .from('work_schedule_overrides')
@@ -658,6 +899,15 @@ async function loadScheduleWeek(){
     // UI labels
     qs('schedWeekLabel').textContent = weekLabel(schedWeekStart);
     qs('schedWeekDate').value = toISODate(schedWeekStart);
+    syncScheduleFlowDates();
+
+    if (!schedEmpId){
+      scheduleWeekState = { resolvedByDate: new Map(), overridesByDate: new Map() };
+      if (qs('schedBody')) qs('schedBody').innerHTML = `<tr><td colspan="4" class="muted">Choose a worker first.</td></tr>`;
+      if (qs('schedCards')) qs('schedCards').innerHTML = '';
+      renderScheduleFlow();
+      return;
+    }
 
     // data
     const [resolvedByDate, overridesByDate] = await Promise.all([
@@ -665,7 +915,9 @@ async function loadScheduleWeek(){
       fetchWeekOverrides(schedEmpId, schedWeekStart)
     ]);
 
+    scheduleWeekState = { resolvedByDate, overridesByDate };
     renderScheduleGrid(schedWeekStart, resolvedByDate, overridesByDate);
+    renderScheduleFlow();
   } catch (err){
     console.error(err);
 if (qs('schedBody')){
@@ -684,19 +936,51 @@ async function initSchedulePanel(){
 
   // employees
   const emps = await getActiveEmployees();
+  schedEmployeesCache = emps || [];
   const sel = qs('schedEmpSelect');
-  sel.innerHTML = emps.map(e => `<option value="${e.id}">${e.display_name}</option>`).join('');
-  schedEmpId = emps[0]?.id || null;
+  sel.innerHTML = `<option value="">Choose worker...</option>` + emps.map(e => `<option value="${e.id}">${e.display_name}</option>`).join('');
+  schedEmpId = null;
 
   // defaults
   qs('schedEffFrom').value = toISODate(new Date());
   qs('schedWeekDate').value = toISODate(schedWeekStart);
+  qs('schedFlowEffFrom').value = qs('schedEffFrom').value;
+  qs('schedFlowWeekDate').value = qs('schedWeekDate').value;
 
 qs('schedEmpSection').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
 
-  if (btn.hasAttribute('data-save-recurring')){
+  if (btn.hasAttribute('data-sched-worker')){
+    schedEmpId = btn.dataset.schedWorker || schedEmpId;
+    if (sel) sel.value = schedEmpId;
+    loadScheduleWeek();
+  } else if (btn.hasAttribute('data-sched-store')){
+    scheduleFlowState.selectedStoreId = btn.dataset.schedStore || '';
+    renderScheduleFlow();
+  } else if (btn.hasAttribute('data-sched-day')){
+    scheduleFlowState.selectedDayIndex = Number(btn.dataset.schedDay || 0);
+    renderScheduleFlow();
+  } else if (btn.hasAttribute('data-sched-type')){
+    setScheduleType(btn.dataset.schedType);
+  } else if (btn.id === 'schedFlowSaveOverride'){
+    syncGuidedFieldsToHidden();
+    const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
+    saveOverride(iso);
+  } else if (btn.id === 'schedFlowSaveRecurring'){
+    syncGuidedFieldsToHidden();
+    saveRecurring(scheduleFlowState.selectedDayIndex);
+  } else if (btn.id === 'schedFlowMarkOff'){
+    const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
+    const off = qs(`ovOff-${iso}`);
+    if (off) off.checked = true;
+    saveOverride(iso);
+  } else if (btn.id === 'schedFlowClearOverride'){
+    const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
+    clearOverride(iso);
+  } else if (btn.id === 'schedFlowClearRecurring'){
+    clearRecurring(scheduleFlowState.selectedDayIndex);
+  } else if (btn.hasAttribute('data-save-recurring')){
     const weekday = Number(btn.getAttribute('data-save-recurring'));
     saveRecurring(weekday);
   } else if (btn.hasAttribute('data-clear-recurring')){
@@ -713,6 +997,33 @@ qs('schedEmpSection').addEventListener('click', (e) => {
 
 qs('schedEmpSection').addEventListener('change', (e) => {
   const id = e.target?.id || '';
+
+  if (id === 'schedWorkerSearch'){
+    scheduleFlowState.workerSearch = e.target.value || '';
+    renderScheduleWorkerPicker();
+    return;
+  }
+
+  if (id === 'schedFlowEffFrom'){
+    const hidden = qs('schedEffFrom');
+    if (hidden) hidden.value = e.target.value || toISODate(new Date());
+    return;
+  }
+
+  if (id === 'schedFlowWeekDate'){
+    const d = fromISO(e.target.value);
+    schedWeekStart = startOfWeekSun(d);
+    qs('schedWeekDate').value = toISODate(schedWeekStart);
+    loadScheduleWeek();
+    return;
+  }
+
+  if (id === 'schedFlowStore'){
+    scheduleFlowState.selectedStoreId = e.target.value || '';
+    renderScheduleStorePicker();
+    renderScheduleDayDetail();
+    return;
+  }
 
   if (id.startsWith('ovOff-')){
     const iso = id.slice('ovOff-'.length);
@@ -790,6 +1101,13 @@ qs('schedEmpSection').addEventListener('change', (e) => {
   }
 });
 
+qs('schedEmpSection').addEventListener('input', (e) => {
+  if (e.target?.id === 'schedWorkerSearch'){
+    scheduleFlowState.workerSearch = e.target.value || '';
+    renderScheduleWorkerPicker();
+  }
+});
+
   // selectors
   sel.addEventListener('change', async () => {
     schedEmpId = sel.value;
@@ -809,6 +1127,18 @@ qs('schedEmpSection').addEventListener('change', (e) => {
   qs('schedWeekDate').addEventListener('change', async () => {
     const d = fromISO(qs('schedWeekDate').value);
     schedWeekStart = startOfWeekSun(d);
+    await loadScheduleWeek();
+  });
+
+  qs('schedFlowPrev')?.addEventListener('click', async () => {
+    schedWeekStart = addDays(schedWeekStart, -7);
+    qs('schedWeekDate').value = toISODate(schedWeekStart);
+    await loadScheduleWeek();
+  });
+
+  qs('schedFlowNext')?.addEventListener('click', async () => {
+    schedWeekStart = addDays(schedWeekStart, 7);
+    qs('schedWeekDate').value = toISODate(schedWeekStart);
     await loadScheduleWeek();
   });
 

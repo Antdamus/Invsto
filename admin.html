@@ -391,7 +391,77 @@
 
         <!-- Per-employee editor -->
         <div id="schedEmpSection">
-          <div class="sched-controls">
+          <div class="schedule-flow" id="scheduleFlow">
+            <section class="schedule-step schedule-worker-step" data-step="worker">
+              <div class="schedule-step-head">
+                <div>
+                  <span class="schedule-eyebrow">Step 1</span>
+                  <h3>Choose a worker</h3>
+                  <p>Select the person whose schedule you want to edit.</p>
+                </div>
+                <label class="schedule-search">
+                  <span class="sr-only">Search workers</span>
+                  <input id="schedWorkerSearch" type="search" placeholder="Search worker..." />
+                </label>
+              </div>
+              <div id="schedWorkerGrid" class="schedule-worker-grid" aria-live="polite"></div>
+            </section>
+
+            <section class="schedule-step schedule-context-step" data-step="context">
+              <div class="schedule-step-head">
+                <div>
+                  <span class="schedule-eyebrow">Step 2</span>
+                  <h3>Choose week and recurring start</h3>
+                  <p>Pick the week to view. If you save a weekly schedule, choose the date it starts applying.</p>
+                </div>
+              </div>
+              <div class="schedule-context-grid">
+                <div class="schedule-date-card">
+                  <span>Week of interest</span>
+                  <div class="schedule-week-controls">
+                    <button id="schedFlowPrev" class="btn small ghost" type="button">Prev</button>
+                    <input id="schedFlowWeekDate" type="date" />
+                    <button id="schedFlowNext" class="btn small ghost" type="button">Next</button>
+                  </div>
+                  <strong id="schedFlowWeekLabel">-</strong>
+                </div>
+                <div class="schedule-date-card">
+                  <span>Recurring starts from</span>
+                  <input id="schedFlowEffFrom" type="date" />
+                  <small>Used only when saving weekly recurring hours.</small>
+                </div>
+              </div>
+            </section>
+
+            <section class="schedule-step schedule-store-step" data-step="store">
+              <div class="schedule-step-head">
+                <div>
+                  <span class="schedule-eyebrow">Step 3</span>
+                  <h3>Choose a store</h3>
+                  <p>This store will be prefilled for the day you assign.</p>
+                </div>
+              </div>
+              <div id="schedStoreGrid" class="schedule-store-grid" aria-live="polite"></div>
+            </section>
+
+            <section class="schedule-step schedule-assign-step" data-step="assign">
+              <div class="schedule-step-head">
+                <div>
+                  <span class="schedule-eyebrow">Step 4</span>
+                  <h3>Assign the day</h3>
+                  <p>Choose the day, review anything already assigned, then save store hours or a live show session.</p>
+                </div>
+                <div class="schedule-type-toggle" role="group" aria-label="Assignment type">
+                  <button type="button" class="active" data-sched-type="store_work">Store work hours</button>
+                  <button type="button" data-sched-type="live_show">Live show session</button>
+                </div>
+              </div>
+              <div id="schedDayPicker" class="schedule-day-picker" aria-live="polite"></div>
+              <div id="schedDayDetail" class="schedule-day-detail" aria-live="polite"></div>
+            </section>
+          </div>
+
+          <div class="sched-controls legacy-schedule-controls">
             <div class="row">
               <label>Employee</label>
               <select id="schedEmpSelect"></select>
