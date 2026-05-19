@@ -201,6 +201,16 @@ function normalizeLabelMetadata(metadata = {}, additions = {}) {
   };
 }
 
+function getLabelTrackingDisplay(metadata = {}) {
+  return unique([
+    metadata.trackingNumber,
+    metadata.shippingBarcodeNumber,
+    ...(Array.isArray(metadata.trackingNumbers) ? metadata.trackingNumbers : []),
+    ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
+    ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
+  ]).join(", ");
+}
+
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (!Number.isFinite(size) || size <= 0) return "";
@@ -994,6 +1004,7 @@ function renderGroupLabelControl(group, orders = []) {
   const orderNumbers = getOrderNumbersFromOrders(orders);
   const attachedOrder = getAttachedHistoryOrder(orders);
   const labelPath = attachedOrder?.label_file_path || "";
+  const trackingText = getLabelTrackingDisplay(attachedOrder?.label_metadata || {});
   const orderCount = orderNumbers.length || orders.length;
   const orderWord = orderCount === 1 ? "order" : "orders";
   const attachedCount = orders.filter((order) => order?.label_file_path).length;
@@ -1009,6 +1020,7 @@ function renderGroupLabelControl(group, orders = []) {
           <span class="eyebrow">Shipping Label</span>
           <strong>${escapeHtml(group.buyer || "Grouped completion")}</strong>
           <small>${escapeHtml(labelSummary)}</small>
+          ${labelPath ? `<small class="history-label-tracker-inline">Tracker: <b>${escapeHtml(trackingText || "Not captured yet")}</b></small>` : ""}
         </div>
         <div>
           ${labelPath ? `<button type="button" class="secondary-btn history-label-open-btn" data-history-label-open-group="${encodedOrderNumbers}">Open Label</button>` : ""}
@@ -1506,6 +1518,7 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
   const order = getAwaitingHistoryLabelOrder(target);
   const metadata = order?.label_metadata || {};
   const size = formatFileSize(metadata.size);
+  const trackingText = getLabelTrackingDisplay(metadata);
   const labelPath = order?.label_file_path || "";
   const orderNumbers = target?.orderNumbers?.length ? target.orderNumbers : parseHistoryOrderNumbers(order?.order_number);
   const orderCount = orderNumbers.length || 1;
@@ -1517,7 +1530,10 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
       ${renderHistoryLabelOrderList(orderNumbers)}
       <span><strong>Label:</strong> Attached ${escapeHtml(formatDateTime(order.label_uploaded_at))} - covers ${orderCount} ${orderWord}${size ? ` - ${escapeHtml(size)}` : ""}</span>
-      <span><strong>Tracking:</strong> ${escapeHtml(metadata.trackingNumber || metadata.shippingBarcodeNumber || "-")}</span>
+      <div class="label-tracking-confirmation">
+        <small>Extracted barcode / tracking number</small>
+        <strong>${escapeHtml(trackingText || "Not captured yet")}</strong>
+      </div>
       <span><strong>Shipment:</strong> ${escapeHtml(metadata.shipmentId || order.ebay_shipment_id || "-")}</span>
       <span><strong>Carrier:</strong> ${escapeHtml(metadata.carrier || "-")}</span>
       <span><strong>Service:</strong> ${escapeHtml(metadata.service || "-")}</span>
@@ -1829,10 +1845,12 @@ async function attachHistoryLabelToOrder(transferPayload) {
   }
 
   const orderCount = awaiting.orderNumbers.length;
+  const trackingText = getLabelTrackingDisplay(labelMetadata);
+  const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
   state.pendingHistoryLabelReplacement = null;
   setHistoryReplaceButtonVisible(false);
   if ($("done-history-label")) $("done-history-label").textContent = "Done";
-  setHistoryLabelStatus(`Shipping label attached to this grouped completion (${orderCount} order${orderCount === 1 ? "" : "s"}).`, "success");
+  setHistoryLabelStatus(`Shipping label attached to this grouped completion (${orderCount} order${orderCount === 1 ? "" : "s"}).${trackingClause}`, "success");
   renderHistoryLabelDetails(state.awaitingLabelGroup);
   const visibleGroups = getVisibleHistoryGroups();
   renderSummary(visibleGroups);

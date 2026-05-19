@@ -2,7 +2,7 @@ let gcMonthStart = null; // first day of the month being shown (Date)
 let schedEmpId = null;
 let schedWeekStart = startOfWeekSun(new Date());
 let schedEmployeesCache = [];
-let scheduleWeekState = { resolvedByDate: new Map(), overridesByDate: new Map() };
+let scheduleWeekState = { resolvedByDate: new Map(), overridesByDate: new Map(), dayExceptionsByDate: new Map() };
 let scheduleFlowState = {
   selectedStoreId: '',
   selectedDayIndex: new Date().getDay(),
@@ -170,6 +170,29 @@ async function fetchWeekOverrides(employeeId, weekStart){
   return map;
 }
 
+async function fetchWeekDayExceptions(employeeId, weekStart){
+  const startISO = toISODate(weekStart);
+  const endISO = toISODate(addDays(weekStart, 6));
+
+  const { data, error } = await supabaseClient
+    .from('timeclock_day_exceptions')
+    .select('work_date, allow_clock_in_any_store, clock_in_store_id, allow_clock_out_any_store, clock_out_store_id, allowed_clock_in_store_ids, allowed_clock_out_store_ids, note')
+    .eq('employee_id', employeeId)
+    .gte('work_date', startISO)
+    .lte('work_date', endISO);
+
+  if (error) {
+    console.warn('Could not load timeclock day exceptions:', error);
+    return new Map();
+  }
+
+  const map = new Map();
+  for (const r of (data || [])){
+    map.set(String(r.work_date).slice(0, 10), r);
+  }
+  return map;
+}
+
 function escSched(value){
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -185,6 +208,13 @@ function scheduleTypeLabel(type = scheduleFlowState.assignmentType){
 
 function scheduleTypeNote(){
   return `[OG schedule type: ${scheduleFlowState.assignmentType}] ${scheduleTypeLabel()}`;
+}
+
+function scheduleAssignmentTypeFromNote(note = ''){
+  const text = String(note || '');
+  if (/\[OG schedule type:\s*live_show\]/i.test(text)) return 'live_show';
+  if (/\[OG schedule type:\s*store_work\]/i.test(text)) return 'store_work';
+  return '';
 }
 
 function selectedScheduleStoreId(){
@@ -317,6 +347,7 @@ function renderScheduleDayDetail(){
   const iso = toISODate(day);
   const resolved = scheduleWeekState.resolvedByDate.get(iso) || null;
   const ov = scheduleWeekState.overridesByDate.get(iso) || null;
+  const dayException = scheduleWeekState.dayExceptionsByDate.get(iso) || null;
   const employee = selectedScheduleEmployee();
   const storeId = selectedScheduleStoreId();
   const storeLabel = storeId ? storeNameById(storeId) : 'Choose a store';
@@ -324,6 +355,22 @@ function renderScheduleDayDetail(){
   const resolvedTime = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'Nothing assigned';
   const startValue = ov?.start_local ? String(ov.start_local).slice(0,5) : (resolved ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
   const endValue = ov?.end_local ? String(ov.end_local).slice(0,5) : (resolved ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
+  const defaultRouteStoreId = storeId || resolved?.store_id || '';
+  const clockInStores = Array.isArray(dayException?.allowed_clock_in_store_ids) && dayException.allowed_clock_in_store_ids.length
+    ? dayException.allowed_clock_in_store_ids
+    : [dayException?.clock_in_store_id || defaultRouteStoreId].filter(Boolean);
+  const clockOutStores = Array.isArray(dayException?.allowed_clock_out_store_ids) && dayException.allowed_clock_out_store_ids.length
+    ? dayException.allowed_clock_out_store_ids
+    : [dayException?.clock_out_store_id || defaultRouteStoreId].filter(Boolean);
+  const routeSummary = `${scheduleStoreNameList(clockInStores)} -> ${scheduleStoreNameList(clockOutStores)}`;
+  const copyOptions = Array.from({ length: 7 }, (_, index) => {
+    const sourceDay = addDays(schedWeekStart, index);
+    const sourceIso = toISODate(sourceDay);
+    const sourceResolved = scheduleWeekState.resolvedByDate.get(sourceIso) || null;
+    const sourceOff = !!scheduleWeekState.overridesByDate.get(sourceIso)?.off;
+    const label = `${DOW[index]} ${sourceDay.getMonth()+1}/${sourceDay.getDate()}${sourceOff ? ' - Off' : sourceResolved ? ` - ${fmtTimeHM(sourceResolved.start_ts)}-${fmtTimeHM(sourceResolved.end_ts)}` : ' - No assignment'}`;
+    return `<option value="${index}" ${index === i ? 'disabled' : ''}>${escSched(label)}</option>`;
+  }).join('');
 
   detail.innerHTML = `
     <div class="schedule-current-card">
@@ -331,6 +378,28 @@ function renderScheduleDayDetail(){
       <p><strong>Currently assigned:</strong> ${escSched(resolvedTime)} ${resolved?.source ? `(${escSched(resolved.source)})` : ''}</p>
       <p><strong>Store:</strong> ${escSched(resolvedStore)} ${ov?.off ? '<span class="sched-pill ov">Off override</span>' : ''}</p>
       <p><strong>New assignment:</strong> ${escSched(scheduleTypeLabel())} at ${escSched(storeLabel)}</p>
+      <p><strong>Clock route:</strong> ${escSched(routeSummary)}</p>
+    </div>
+
+    <div class="schedule-copy-card">
+      <div>
+        <span class="schedule-eyebrow">Copy Schedule</span>
+        <h4>Use another day as the template</h4>
+        <p>Copies the time, store, and assignment type into this editor. Review it, then save it for this week or as weekly recurring.</p>
+      </div>
+      <div class="schedule-copy-actions">
+        <button type="button" class="btn ghost" data-sched-copy-offset="-1" ${i === 0 ? 'disabled' : ''}>Copy previous day</button>
+        <button type="button" class="btn ghost" data-sched-copy-offset="1" ${i === 6 ? 'disabled' : ''}>Copy next day</button>
+        <label>
+          Copy specific day
+          <select id="schedCopySourceDay">
+            <option value="">Choose day...</option>
+            ${copyOptions}
+          </select>
+        </label>
+        <button type="button" class="btn ghost" id="schedCopySourceApply">Copy into editor</button>
+      </div>
+      <small id="schedCopyStatus" class="schedule-copy-status"></small>
     </div>
 
     <div class="schedule-day-form">
@@ -352,6 +421,24 @@ function renderScheduleDayDetail(){
       </label>
     </div>
 
+    <div class="schedule-route-card">
+      <div>
+        <span class="schedule-eyebrow">Multi-Store Route</span>
+        <h4>Clock-in and clock-out stores</h4>
+        <p>Use this when a worker starts in one store and ends in another. The timeclock will enforce these locations for this day.</p>
+      </div>
+      <div class="schedule-route-grid">
+        <div class="schedule-route-store-list">
+          <strong>Allowed clock-in stores</strong>
+          ${renderScheduleStoreChecklist('schedFlowClockInStores', clockInStores)}
+        </div>
+        <div class="schedule-route-store-list">
+          <strong>Allowed clock-out stores</strong>
+          ${renderScheduleStoreChecklist('schedFlowClockOutStores', clockOutStores)}
+        </div>
+      </div>
+    </div>
+
     <div class="schedule-day-actions">
       <button type="button" class="btn primary" id="schedFlowSaveOverride">Save this week only</button>
       <button type="button" class="btn" id="schedFlowSaveRecurring">Save weekly recurring</button>
@@ -370,12 +457,135 @@ function renderScheduleFlow(){
   renderScheduleDayDetail();
 }
 
+function timeInputFromScheduleTimestamp(value){
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function getScheduleCopySource(dayIndex){
+  const sourceDay = addDays(schedWeekStart, dayIndex);
+  const sourceIso = toISODate(sourceDay);
+  const sourceResolved = scheduleWeekState.resolvedByDate.get(sourceIso) || null;
+  const sourceOverride = scheduleWeekState.overridesByDate.get(sourceIso) || null;
+  const sourceException = scheduleWeekState.dayExceptionsByDate.get(sourceIso) || null;
+
+  if (sourceOverride?.off) {
+    return {
+      ok: false,
+      message: `${DOW[dayIndex]} is marked off. Use "Mark off this week" if you want this day off too.`,
+    };
+  }
+
+  if (!sourceResolved) {
+    return {
+      ok: false,
+      message: `${DOW[dayIndex]} has no schedule to copy.`,
+    };
+  }
+
+  return {
+    ok: true,
+    dayIndex,
+    start: sourceOverride?.start_local ? String(sourceOverride.start_local).slice(0, 5) : timeInputFromScheduleTimestamp(sourceResolved.start_ts),
+    end: sourceOverride?.end_local ? String(sourceOverride.end_local).slice(0, 5) : timeInputFromScheduleTimestamp(sourceResolved.end_ts),
+    storeId: sourceOverride?.store_id || sourceResolved.store_id || '',
+    clockInStoreIds: Array.isArray(sourceException?.allowed_clock_in_store_ids) && sourceException.allowed_clock_in_store_ids.length
+      ? sourceException.allowed_clock_in_store_ids
+      : [sourceException?.clock_in_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
+    clockOutStoreIds: Array.isArray(sourceException?.allowed_clock_out_store_ids) && sourceException.allowed_clock_out_store_ids.length
+      ? sourceException.allowed_clock_out_store_ids
+      : [sourceException?.clock_out_store_id || sourceOverride?.store_id || sourceResolved.store_id].filter(Boolean),
+    assignmentType: scheduleAssignmentTypeFromNote(sourceOverride?.note) || scheduleFlowState.assignmentType,
+  };
+}
+
+function getScheduleStoreChoices(selectedIds = []){
+  const selected = new Set((selectedIds || []).filter(Boolean).map(String));
+  const temp = document.createElement('select');
+  temp.innerHTML = storeOptionsHTML('');
+  return [...temp.options]
+    .filter((option) => option.value)
+    .map((option) => ({ id: option.value, name: option.textContent || 'Store', checked: selected.has(String(option.value)) }));
+}
+
+function renderScheduleStoreChecklist(name, selectedIds = []){
+  const stores = getScheduleStoreChoices(selectedIds);
+  if (!stores.length) return `<div class="muted">No active stores are available.</div>`;
+  return stores.map((store) => `
+    <label class="schedule-route-store-chip">
+      <input type="checkbox" name="${escSched(name)}" value="${escSched(store.id)}" ${store.checked ? 'checked' : ''} />
+      <span>${escSched(store.name)}</span>
+    </label>
+  `).join('');
+}
+
+function getCheckedScheduleStoreIds(name){
+  return [...document.querySelectorAll(`#panelSchedule input[name="${name}"]:checked`)]
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function scheduleStoreNameList(ids = []){
+  const names = [...new Set((ids || []).filter(Boolean).map((id) => storeNameById(id)).filter(Boolean))];
+  if (!names.length) return 'No store selected';
+  if (names.length === 1) return names[0];
+  return names.join(', ');
+}
+
+function setScheduleCopyStatus(message = '', type = 'info'){
+  const el = qs('schedCopyStatus');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('is-error', type === 'error');
+  el.classList.toggle('is-success', type === 'success');
+}
+
+function copyScheduleSourceIntoEditor(dayIndex){
+  const source = getScheduleCopySource(dayIndex);
+  if (!source.ok) {
+    setScheduleCopyStatus(source.message || 'Nothing to copy from that day.', 'error');
+    return;
+  }
+
+  const start = qs('schedFlowStart');
+  const end = qs('schedFlowEnd');
+  const store = qs('schedFlowStore');
+
+  if (start) start.value = source.start || '';
+  if (end) end.value = source.end || '';
+  if (store) store.value = source.storeId || '';
+
+  scheduleFlowState.selectedStoreId = source.storeId || scheduleFlowState.selectedStoreId;
+  setScheduleType(source.assignmentType || scheduleFlowState.assignmentType);
+
+  const refreshedStart = qs('schedFlowStart');
+  const refreshedEnd = qs('schedFlowEnd');
+  const refreshedStore = qs('schedFlowStore');
+  if (refreshedStart) refreshedStart.value = source.start || '';
+  if (refreshedEnd) refreshedEnd.value = source.end || '';
+  if (refreshedStore) refreshedStore.value = source.storeId || '';
+  document.querySelectorAll('#panelSchedule input[name="schedFlowClockInStores"]').forEach((input) => {
+    input.checked = source.clockInStoreIds.includes(input.value);
+  });
+  document.querySelectorAll('#panelSchedule input[name="schedFlowClockOutStores"]').forEach((input) => {
+    input.checked = source.clockOutStoreIds.includes(input.value);
+  });
+
+  setScheduleCopyStatus(`Copied ${DOW[dayIndex]} into this day. Review it, then save.`, 'success');
+}
+
 function syncGuidedFieldsToHidden(){
   const i = scheduleFlowState.selectedDayIndex;
   const iso = toISODate(addDays(schedWeekStart, i));
   const start = qs('schedFlowStart')?.value || '';
   const end = qs('schedFlowEnd')?.value || '';
   const storeId = qs('schedFlowStore')?.value || selectedScheduleStoreId();
+  const flowInStores = getCheckedScheduleStoreIds('schedFlowClockInStores');
+  const flowOutStores = getCheckedScheduleStoreIds('schedFlowClockOutStores');
+  const flowInStore = flowInStores[0] || storeId || '';
+  const flowOutStore = flowOutStores[0] || storeId || '';
   const flowEffFrom = scheduleFlowState.syncEffectiveFromToWeek
     ? toISODate(schedWeekStart)
     : (qs('schedFlowEffFrom')?.value || '');
@@ -405,6 +615,21 @@ function syncGuidedFieldsToHidden(){
   if (ovStore) {
     ovStore.disabled = false;
     ovStore.value = storeId || '';
+  }
+
+  const ovAnyIn = qs(`ovAnyIn-${iso}`);
+  const ovAnyOut = qs(`ovAnyOut-${iso}`);
+  const ovInStore = qs(`ovInStore-${iso}`);
+  const ovOutStore = qs(`ovOutStore-${iso}`);
+  if (ovAnyIn) ovAnyIn.checked = false;
+  if (ovAnyOut) ovAnyOut.checked = false;
+  if (ovInStore) {
+    ovInStore.disabled = false;
+    ovInStore.value = flowInStore || '';
+  }
+  if (ovOutStore) {
+    ovOutStore.disabled = false;
+    ovOutStore.value = flowOutStore || '';
   }
 
   const flowStore = qs('schedFlowStore');
@@ -456,10 +681,11 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
     const ovStore = ov?.store_id ? String(ov.store_id) : '';
 
     // Phase 3 exceptions
-    const ovAnyIn  = !!ov?.allow_any_store_in;
-    const ovAnyOut = !!ov?.allow_any_store_out;
-    const ovInStore  = ov?.clock_in_store_id ? String(ov.clock_in_store_id) : '';
-    const ovOutStore = ov?.clock_out_store_id ? String(ov.clock_out_store_id) : '';
+    const dayException = scheduleWeekState.dayExceptionsByDate.get(iso) || null;
+    const ovAnyIn  = !!dayException?.allow_clock_in_any_store;
+    const ovAnyOut = !!dayException?.allow_clock_out_any_store;
+    const ovInStore  = dayException?.clock_in_store_id ? String(dayException.clock_in_store_id) : (ovStore || resolved?.store_id || '');
+    const ovOutStore = dayException?.clock_out_store_id ? String(dayException.clock_out_store_id) : (ovStore || resolved?.store_id || '');
 
     const recDir = storeDirectionsHref(recStorePrefill);
     const ovDir  = storeDirectionsHref(ovStore);
@@ -837,11 +1063,15 @@ async function saveOverride(workISO){
 
   const inStore  = anyIn  ? null : (qs(`ovInStore-${workISO}`)?.value || null);
   const outStore = anyOut ? null : (qs(`ovOutStore-${workISO}`)?.value || null);
+  const allowedInStores = getCheckedScheduleStoreIds('schedFlowClockInStores');
+  const allowedOutStores = getCheckedScheduleStoreIds('schedFlowClockOutStores');
 
   if (!off){
     if (!start || !end) return alert('Enter start and end time, or mark Off.');
     if (end <= start) return alert('End must be after start.');
     if (!storeId) return alert('Pick a store for this override.');
+    if (!allowedInStores.length) return alert('Pick at least one allowed clock-in store.');
+    if (!allowedOutStores.length) return alert('Pick at least one allowed clock-out store.');
   }
 
   // Base payload (existing RPC)
@@ -887,7 +1117,9 @@ if (TRY_V2){
       allow_any_store_in: anyIn,
       allow_any_store_out: anyOut,
       clock_in_store_id: inStore,
-      clock_out_store_id: outStore
+      clock_out_store_id: outStore,
+      allowed_clock_in_store_ids: off ? [] : allowedInStores,
+      allowed_clock_out_store_ids: off ? [] : allowedOutStores
     });
   }
 
@@ -903,6 +1135,11 @@ async function clearOverride(workISO){
     .eq('employee_id', schedEmpId)
     .eq('work_date', workISO);
   if (error) return alert('Clear failed: ' + error.message);
+  await supabaseClient
+    .from('timeclock_day_exceptions')
+    .delete()
+    .eq('employee_id', schedEmpId)
+    .eq('work_date', workISO);
   await loadScheduleWeek();
 }
 
@@ -922,12 +1159,13 @@ async function loadScheduleWeek(){
     }
 
     // data
-    const [resolvedByDate, overridesByDate] = await Promise.all([
+    const [resolvedByDate, overridesByDate, dayExceptionsByDate] = await Promise.all([
       fetchResolvedWeek(schedEmpId, schedWeekStart),
-      fetchWeekOverrides(schedEmpId, schedWeekStart)
+      fetchWeekOverrides(schedEmpId, schedWeekStart),
+      fetchWeekDayExceptions(schedEmpId, schedWeekStart)
     ]);
 
-    scheduleWeekState = { resolvedByDate, overridesByDate };
+    scheduleWeekState = { resolvedByDate, overridesByDate, dayExceptionsByDate };
     renderScheduleGrid(schedWeekStart, resolvedByDate, overridesByDate);
     renderScheduleFlow();
   } catch (err){
@@ -977,6 +1215,17 @@ qs('schedEmpSection').addEventListener('click', (e) => {
     renderScheduleFlow();
   } else if (btn.hasAttribute('data-sched-type')){
     setScheduleType(btn.dataset.schedType);
+  } else if (btn.hasAttribute('data-sched-copy-offset')){
+    const offset = Number(btn.dataset.schedCopyOffset || 0);
+    copyScheduleSourceIntoEditor(scheduleFlowState.selectedDayIndex + offset);
+  } else if (btn.id === 'schedCopySourceApply'){
+    const sourceValue = qs('schedCopySourceDay')?.value || '';
+    const sourceDay = Number(sourceValue);
+    if (!sourceValue || !Number.isInteger(sourceDay) || sourceDay < 0 || sourceDay > 6) {
+      setScheduleCopyStatus('Choose a source day first.', 'error');
+      return;
+    }
+    copyScheduleSourceIntoEditor(sourceDay);
   } else if (btn.id === 'schedFlowSaveOverride'){
     syncGuidedFieldsToHidden();
     const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
@@ -1220,42 +1469,24 @@ async function detectOverrideExtrasSupport(){
 }
 
 async function patchOverrideExceptionExtras(empId, workISO, extras){
-  // If DB doesn’t support these columns, do nothing (prevents 400 spam)
-  const ok = await detectOverrideExtrasSupport();
-  if (!ok) return;
-
   const patch = {
-    allow_any_store_in: !!extras.allow_any_store_in,
-    allow_any_store_out: !!extras.allow_any_store_out,
+    employee_id: empId,
+    work_date: workISO,
+    allow_clock_in_any_store: !!extras.allow_any_store_in,
+    allow_clock_out_any_store: !!extras.allow_any_store_out,
     clock_in_store_id: extras.clock_in_store_id || null,
-    clock_out_store_id: extras.clock_out_store_id || null
+    clock_out_store_id: extras.clock_out_store_id || null,
+    allowed_clock_in_store_ids: extras.allowed_clock_in_store_ids || [],
+    allowed_clock_out_store_ids: extras.allowed_clock_out_store_ids || [],
+    note: 'Schedule multi-store route'
   };
 
   try {
     const { error } = await supabaseClient
-      .from('work_schedule_overrides')
-      .update(patch)
-      .eq('employee_id', empId)
-      .eq('work_date', workISO);
+      .from('timeclock_day_exceptions')
+      .upsert(patch, { onConflict: 'employee_id,work_date' });
 
-    if (error){
-      // If the schema changed mid-session, disable and stop future patch attempts
-      const msg = String(error.message || '');
-      const code = String(error.code || '');
-
-      const isMissingColumn =
-        code === 'PGRST204' ||
-        /schema cache/i.test(msg) ||
-        /Could not find the .* column/i.test(msg) ||
-        /column .* does not exist/i.test(msg);
-
-      if (isMissingColumn){
-        _overrideExtrasSupported = false;
-        return;
-      }
-
-      console.warn('patchOverrideExceptionExtras update error:', error);
-    }
+    if (error) console.warn('patchOverrideExceptionExtras update error:', error);
   } catch (e){
     console.warn('patchOverrideExceptionExtras failed:', e);
   }

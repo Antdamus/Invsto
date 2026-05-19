@@ -336,6 +336,137 @@
   margin: 0;
 }
 
+#panelSchedule .schedule-copy-card{
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr);
+  gap: 14px;
+  align-items: start;
+  border-radius: 16px;
+  border: 1px solid rgba(214,178,94,.18);
+  background:
+    radial-gradient(650px 160px at 0% 0%, rgba(214,178,94,.10), transparent 58%),
+    rgba(255,255,255,.025);
+  padding: 14px;
+}
+
+#panelSchedule .schedule-copy-card h4{
+  margin: 0;
+  color: rgba(247,248,250,.98);
+}
+
+#panelSchedule .schedule-copy-card p{
+  margin: 6px 0 0;
+}
+
+#panelSchedule .schedule-copy-actions{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#panelSchedule .schedule-copy-actions label{
+  display: grid;
+  gap: 7px;
+  grid-column: span 2;
+  color: rgba(203,213,225,.82);
+  font-weight: 900;
+}
+
+#panelSchedule .schedule-copy-actions select{
+  width: 100%;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  color: rgba(247,248,250,.96);
+  padding: 0 13px;
+  outline: none;
+}
+
+#panelSchedule .schedule-copy-actions #schedCopySourceApply{
+  grid-column: span 2;
+}
+
+#panelSchedule .schedule-copy-status{
+  grid-column: 1 / -1;
+  min-height: 20px;
+  color: rgba(203,213,225,.82);
+  font-weight: 800;
+}
+
+#panelSchedule .schedule-copy-status.is-success{
+  color: rgba(125,240,178,.95);
+}
+
+#panelSchedule .schedule-copy-status.is-error{
+  color: rgba(255,150,150,.95);
+}
+
+#panelSchedule .schedule-route-card{
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.35fr);
+  gap: 14px;
+  align-items: start;
+  border-radius: 16px;
+  border: 1px solid rgba(125,196,240,.18);
+  background:
+    radial-gradient(650px 160px at 0% 0%, rgba(125,196,240,.10), transparent 58%),
+    rgba(255,255,255,.025);
+  padding: 14px;
+}
+
+#panelSchedule .schedule-route-card h4{
+  margin: 0;
+  color: rgba(247,248,250,.98);
+}
+
+#panelSchedule .schedule-route-card p{
+  margin: 6px 0 0;
+}
+
+#panelSchedule .schedule-route-grid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#panelSchedule .schedule-route-grid label{
+  display: grid;
+  gap: 7px;
+  color: rgba(203,213,225,.82);
+  font-weight: 900;
+}
+
+#panelSchedule .schedule-route-store-list{
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+#panelSchedule .schedule-route-store-list > strong{
+  color: rgba(247,248,250,.96);
+}
+
+#panelSchedule .schedule-route-store-chip{
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+  color: rgba(231,233,234,.9);
+}
+
+#panelSchedule .schedule-route-store-chip input{
+  width: 18px;
+  height: 18px;
+  accent-color: #7dc4f0;
+  flex: 0 0 auto;
+}
+
 #panelSchedule .schedule-day-form{
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -398,8 +529,20 @@
   }
 
   #panelSchedule .schedule-context-grid,
-  #panelSchedule .schedule-day-form{
+  #panelSchedule .schedule-day-form,
+  #panelSchedule .schedule-copy-card,
+  #panelSchedule .schedule-route-card,
+  #panelSchedule .schedule-route-grid{
     grid-template-columns: 1fr;
+  }
+
+  #panelSchedule .schedule-copy-actions{
+    grid-template-columns: 1fr;
+  }
+
+  #panelSchedule .schedule-copy-actions label,
+  #panelSchedule .schedule-copy-actions #schedCopySourceApply{
+    grid-column: auto;
   }
 
   #panelSchedule .schedule-week-controls{

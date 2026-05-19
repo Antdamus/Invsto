@@ -420,6 +420,17 @@ textarea {
   font-weight: 800;
 }
 
+.history-order-label-control .history-label-tracker-inline {
+  margin-top: 4px;
+  color: rgba(248, 242, 233, 0.86);
+}
+
+.history-label-tracker-inline b {
+  color: var(--history-green);
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
 .history-order-label-control > div:last-child {
   display: flex;
   gap: 8px;
@@ -470,6 +481,30 @@ textarea {
 
 .history-label-details span {
   display: block;
+  overflow-wrap: anywhere;
+}
+
+.label-tracking-confirmation {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(125, 240, 178, 0.32);
+  border-radius: 16px;
+  background: rgba(125, 240, 178, 0.08);
+  color: var(--history-text);
+}
+
+.label-tracking-confirmation small {
+  color: var(--history-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.label-tracking-confirmation strong {
+  color: var(--history-green);
+  font-size: 1.08rem;
   overflow-wrap: anywhere;
 }
 

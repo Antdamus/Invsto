@@ -559,6 +559,16 @@ function normalizeLabelMetadata(metadata = {}, additions = {}) {
   };
 }
 
+function getLabelTrackingDisplay(metadata = {}) {
+  return [...new Set([
+    metadata.trackingNumber,
+    metadata.shippingBarcodeNumber,
+    ...(Array.isArray(metadata.trackingNumbers) ? metadata.trackingNumbers : []),
+    ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
+    ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
+  ].filter(Boolean).map(String))].join(", ");
+}
+
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -1539,13 +1549,17 @@ function renderEbayLabelPanel() {
   const label = getSelectedOrderLabelData();
   const metadata = label.metadata || {};
   const sizeText = formatFileSize(metadata.size);
+  const trackingText = getLabelTrackingDisplay(metadata);
   const summaryText = label.path
-    ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}. Preview before final confirmation.`
+    ? `Label attached${label.uploadedAt ? ` ${formatDate(label.uploadedAt)}` : ""}${sizeText ? ` - ${sizeText}` : ""}${trackingText ? ` - tracker ${trackingText}` : ""}. Preview before final confirmation.`
     : "Waiting for a label from the eBay extension.";
   const detailsHtml = label.path
     ? `
+      <div class="label-tracking-confirmation">
+        <small>Extracted barcode / tracking number</small>
+        <strong>${escapeHtml(trackingText || "Not captured yet")}</strong>
+      </div>
       <div class="selection-grid">
-        <span><small>Tracking</small><b>${escapeHtml(metadata.trackingNumber || metadata.shippingBarcodeNumber || "-")}</b></span>
         <span><small>Shipment</small><b>${escapeHtml(metadata.shipmentId || "-")}</b></span>
         <span><small>Carrier</small><b>${escapeHtml(metadata.carrier || "-")}</b></span>
         <span><small>Service</small><b>${escapeHtml(metadata.service || "-")}</b></span>
@@ -3810,9 +3824,11 @@ async function attachEbayLabelToOrder(transferPayload) {
     ? selectedOrderNumber
     : targetOrderNumbers[0];
   await openPendingNoInventorySessionForLabel(primaryOrderNumber);
+  const trackingText = getLabelTrackingDisplay(labelMetadata);
+  const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
   const attachedMessage = matchingLines.length
-    ? `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}. Preview it before final confirmation.`
-    : `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}. Refresh or open that order to preview it.`;
+    ? `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}.${trackingClause} Preview it before final confirmation.`
+    : `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}.${trackingClause} Refresh or open that order to preview it.`;
   setStatus(attachedMessage, "info");
   return {
     orderNumber: primaryOrderNumber,

@@ -182,7 +182,7 @@ async function fetchTodayScheduleAndExceptions(){
   try{
     const { data, error } = await supabaseClient
       .from('timeclock_day_exceptions')
-      .select('allow_clock_in_any_store, clock_in_store_id, allow_clock_out_any_store, clock_out_store_id, note')
+      .select('allow_clock_in_any_store, clock_in_store_id, allow_clock_out_any_store, clock_out_store_id, allowed_clock_in_store_ids, allowed_clock_out_store_ids, note')
       .eq('employee_id', currentEmployee.id)
       .eq('work_date', todayISO)
       .maybeSingle();
@@ -205,6 +205,20 @@ function pickNearestStoreWithinRadius(lat, lng){
   if (!best) return null;
   const r = Number(best.radius_m ?? 0);
   if (Number.isFinite(r) && r > 0 && bestD <= r) return { store: best, distance_m: bestD };
+  return { store: best, distance_m: bestD };
+}
+
+function pickNearestAllowedStoreWithinRadius(lat, lng, allowedIds = []){
+  const allowed = new Set((allowedIds || []).filter(Boolean).map(String));
+  if (!allowed.size) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const s of activeStores){
+    if (!allowed.has(String(s.id))) continue;
+    const d = haversineMeters(lat, lng, Number(s.lat), Number(s.lng));
+    if (d < bestD){ bestD = d; best = s; }
+  }
+  if (!best) return null;
   return { store: best, distance_m: bestD };
 }
 
@@ -231,6 +245,15 @@ async function resolveStoreForAction(kind, geo){
 
   // If we're clocking OUT, prefer the open shift store unless an out-exception exists.
   if (kind === 'out'){
+    if (Array.isArray(exc?.allowed_clock_out_store_ids) && exc.allowed_clock_out_store_ids.length){
+      const picked = pickNearestAllowedStoreWithinRadius(geo.lat, geo.lng, exc.allowed_clock_out_store_ids);
+      return {
+        store_id: picked?.store?.id || null,
+        store: picked?.store || null,
+        hint: 'Clock-out route: selected stores only',
+        distance_m: picked?.distance_m ?? null
+      };
+    }
     if (exc?.allow_clock_out_any_store){
       const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
       return {
@@ -251,6 +274,15 @@ async function resolveStoreForAction(kind, geo){
   }
 
   // Clocking IN
+  if (Array.isArray(exc?.allowed_clock_in_store_ids) && exc.allowed_clock_in_store_ids.length){
+    const picked = pickNearestAllowedStoreWithinRadius(geo.lat, geo.lng, exc.allowed_clock_in_store_ids);
+    return {
+      store_id: picked?.store?.id || null,
+      store: picked?.store || null,
+      hint: 'Clock-in route: selected stores only',
+      distance_m: picked?.distance_m ?? null
+    };
+  }
   if (exc?.allow_clock_in_any_store){
     const picked = pickNearestStoreWithinRadius(geo.lat, geo.lng);
     return {
@@ -613,8 +645,23 @@ async function refreshShiftStatus(){
     btn.textContent = 'Clock Out';
 
     // Phase 4: show store for active shift
-    const s = open.store_id ? (storeById.get(open.store_id) || null) : (todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null);
-    renderStoreContextLine(s, s ? 'Active shift store' : 'Active shift (store unknown)');
+    if (Array.isArray(todayExceptionRow?.allowed_clock_out_store_ids) && todayExceptionRow.allowed_clock_out_store_ids.length) {
+      const labels = todayExceptionRow.allowed_clock_out_store_ids
+        .map((id) => storeById.get(id)?.name)
+        .filter(Boolean)
+        .join(', ');
+      const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
+      renderStoreContextLine(s, labels ? `Clock-out allowed at: ${labels}` : 'Clock-out route: selected stores only');
+    } else if (todayExceptionRow?.allow_clock_out_any_store) {
+      const s = open.store_id ? (storeById.get(open.store_id) || null) : null;
+      renderStoreContextLine(s, 'Clock-out allowed at any active store today');
+    } else if (todayExceptionRow?.clock_out_store_id) {
+      const s = storeById.get(todayExceptionRow.clock_out_store_id) || null;
+      renderStoreContextLine(s, s ? 'Clock-out route store' : 'Clock-out route store unknown');
+    } else {
+      const s = open.store_id ? (storeById.get(open.store_id) || null) : (todayScheduleRow?.store_id ? (storeById.get(todayScheduleRow.store_id) || null) : null);
+      renderStoreContextLine(s, s ? 'Active shift store' : 'Active shift (store unknown)');
+    }
   } else {
     pill.textContent = 'Not clocked in';
     pill.style.borderColor = 'var(--border)';
