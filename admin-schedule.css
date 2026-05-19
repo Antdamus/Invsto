@@ -254,6 +254,28 @@
   color: rgba(203,213,225,.78);
 }
 
+#panelSchedule .schedule-sync-check{
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 10px;
+  color: rgba(231,233,234,.88);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+#panelSchedule .schedule-sync-check input{
+  width: 18px;
+  height: 18px;
+  accent-color: #9d7bff;
+  flex: 0 0 auto;
+}
+
+#panelSchedule .schedule-date-card input:disabled{
+  opacity: .62;
+  cursor: not-allowed;
+}
+
 #panelSchedule .schedule-week-controls{
   display: grid;
   grid-template-columns: auto minmax(0,1fr) auto;

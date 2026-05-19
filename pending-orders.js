@@ -3562,38 +3562,95 @@ async function loadEbayOrderForLabel(orderNumber) {
   return data || null;
 }
 
+async function loadEbayOrdersForLabels(orderNumbers = []) {
+  const unique = [...new Set(orderNumbers.map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (!unique.length) return [];
+
+  const { data, error } = await supabase
+    .from("ebay_orders")
+    .select(`
+      id,
+      order_number,
+      buyer_username,
+      status,
+      label_status,
+      label_storage_bucket,
+      label_file_path,
+      label_uploaded_at,
+      label_metadata
+    `)
+    .in("order_number", unique);
+
+  if (error) throw new Error(error.message || "Could not look up the eBay orders for this label.");
+  return data || [];
+}
+
 async function attachEbayLabelToOrder(transferPayload) {
   const metadata = transferPayload?.metadata || {};
   const label = transferPayload?.label || {};
-  const orderNumber = normalizeEbayOrderNumber(metadata.orderId);
-  if (!orderNumber) throw new Error("The label transfer did not include a usable eBay order number.");
+  const metadataOrderNumbers = [...new Set([
+    ...(Array.isArray(metadata.orderIds) ? metadata.orderIds : []),
+    ...(Array.isArray(metadata.orderNumbers) ? metadata.orderNumbers : []),
+  ].map(normalizeEbayOrderNumber).filter(Boolean))];
+  const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
+  const metadataOrderNumber = normalizeEbayOrderNumber(metadata.orderId);
+  let targetOrderNumbers = metadataOrderNumber ? [metadataOrderNumber] : [];
+  if (metadata.source === "ebay-bulk-label-confirmation") {
+    if (selectedOrderNumber && (!metadataOrderNumbers.length || metadataOrderNumbers.includes(selectedOrderNumber) || metadataOrderNumber === selectedOrderNumber)) {
+      targetOrderNumbers = [selectedOrderNumber];
+    } else if (metadataOrderNumbers.length) {
+      targetOrderNumbers = metadataOrderNumbers;
+    }
+  }
+  targetOrderNumbers = [...new Set(targetOrderNumbers.map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (!targetOrderNumbers.length) throw new Error("The label transfer did not include a usable eBay order number.");
   if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
 
-  const selectedOrderNumber = String(state.selectedLine?.order?.order_number || "");
-  if (selectedOrderNumber && selectedOrderNumber !== orderNumber) {
-    throw new Error(`This eBay label is for ${orderNumber}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
+  if (selectedOrderNumber && !targetOrderNumbers.includes(selectedOrderNumber)) {
+    throw new Error(`This eBay label is for ${targetOrderNumbers.join(", ")}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
   }
 
-  let matchingLines = getMatchingOrderLines(orderNumber);
+  let matchingLines = targetOrderNumbers.flatMap(getMatchingOrderLines);
   if (!matchingLines.length) {
     await loadOrders();
-    matchingLines = getMatchingOrderLines(orderNumber);
+    matchingLines = targetOrderNumbers.flatMap(getMatchingOrderLines);
   }
 
-  const directOrder = matchingLines[0]?.order || await loadEbayOrderForLabel(orderNumber);
-  if (!directOrder?.id) {
-    throw new Error(`Order ${orderNumber} is not in OG yet. Import the latest eBay order report first, then open that order/session and send the label again.`);
+  const directOrders = await loadEbayOrdersForLabels(targetOrderNumbers);
+  const directOrderByNumber = new Map(directOrders.map((order) => [order.order_number, order]));
+  matchingLines.forEach((line) => {
+    if (line.order?.order_number && !directOrderByNumber.has(line.order.order_number)) {
+      directOrderByNumber.set(line.order.order_number, line.order);
+    }
+  });
+
+  const missingOrderNumbers = targetOrderNumbers.filter((orderNumber) => !directOrderByNumber.get(orderNumber)?.id);
+  if (missingOrderNumbers.length) {
+    throw new Error(`Order ${missingOrderNumbers.join(", ")} ${missingOrderNumbers.length === 1 ? "is" : "are"} not in OG yet. Import the latest eBay order report first, then open the matching order/session and send the label again.`);
   }
-  if (!matchingLines.some(isOpenOrderLine)) {
-    throw createLabelRouteError("history", `Order ${orderNumber} is already closed in the pending queue. Opening order history to attach the label.`);
+  if (!matchingLines.length) {
+    throw createLabelRouteError("history", `Order ${targetOrderNumbers.join(", ")} ${targetOrderNumbers.length === 1 ? "is not" : "are not"} in the pending queue. Opening order history to attach the label.`);
+  }
+
+  const closedOrderNumbers = targetOrderNumbers.filter((orderNumber) => {
+    const lines = matchingLines.filter((line) => line.order?.order_number === orderNumber);
+    return lines.length && !lines.some(isOpenOrderLine);
+  });
+  if (closedOrderNumbers.length) {
+    throw createLabelRouteError("history", `Order ${closedOrderNumbers.join(", ")} ${closedOrderNumbers.length === 1 ? "is" : "are"} already closed in the pending queue. Opening order history to attach the label.`);
   }
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
   const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
-  const destinationPath = [
-    safeStorageSegment(orderNumber, "order"),
-    `${shipmentSegment}.pdf`,
-  ].join("/");
+  const destinationPath = targetOrderNumbers.length > 1
+    ? [
+      "bulk-labels",
+      `${safeStorageSegment(metadata.labelId || metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "bulk-label")}.pdf`,
+    ].join("/")
+    : [
+      safeStorageSegment(targetOrderNumbers[0], "order"),
+      `${shipmentSegment}.pdf`,
+    ].join("/");
 
   const { error: uploadError } = await supabase.storage
     .from(EBAY_LABEL_BUCKET)
@@ -3605,7 +3662,7 @@ async function attachEbayLabelToOrder(transferPayload) {
 
   const orderIds = [...new Set([
     ...matchingLines.map((line) => line.order_id).filter(Boolean),
-    directOrder.id,
+    ...targetOrderNumbers.map((orderNumber) => directOrderByNumber.get(orderNumber)?.id).filter(Boolean),
   ].filter(Boolean))];
   const labelMetadata = {
     ...metadata,
@@ -3621,10 +3678,7 @@ async function attachEbayLabelToOrder(transferPayload) {
   const { error: orderError } = await supabase.rpc("attach_ebay_shipping_label", {
     _order_ids: orderIds,
     _order_line_ids: matchingLines.map((line) => line.id).filter(Boolean),
-    _order_numbers: [...new Set([
-      ...matchingLines.map((line) => line.order?.order_number).filter(Boolean),
-      directOrder.order_number,
-    ].filter(Boolean))],
+    _order_numbers: targetOrderNumbers,
     _shipment_id: metadata.shipmentId || null,
     _label_storage_bucket: EBAY_LABEL_BUCKET,
     _label_file_path: destinationPath,
@@ -3656,13 +3710,17 @@ async function attachEbayLabelToOrder(transferPayload) {
     }).catch(() => null);
   }
 
-  await openPendingNoInventorySessionForLabel(orderNumber);
+  const primaryOrderNumber = selectedOrderNumber && targetOrderNumbers.includes(selectedOrderNumber)
+    ? selectedOrderNumber
+    : targetOrderNumbers[0];
+  await openPendingNoInventorySessionForLabel(primaryOrderNumber);
   const attachedMessage = matchingLines.length
-    ? `Shipping label attached to eBay order ${orderNumber}. Preview it before final confirmation.`
-    : `Shipping label attached to eBay order ${orderNumber}. Refresh or open that order to preview it.`;
+    ? `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}. Preview it before final confirmation.`
+    : `Shipping label attached to eBay order${targetOrderNumbers.length === 1 ? "" : "s"} ${targetOrderNumbers.join(", ")}. Refresh or open that order to preview it.`;
   setStatus(attachedMessage, "info");
   return {
-    orderNumber,
+    orderNumber: primaryOrderNumber,
+    orderNumbers: targetOrderNumbers,
     storagePath: destinationPath,
     uploadedAt: now,
     visibleInCurrentQueue: Boolean(matchingLines.length),
@@ -3683,10 +3741,13 @@ async function handleEbayLabelTransfer(payload) {
   });
   try {
     const attached = await attachEbayLabelToOrder(payload);
+    const attachedOrders = attached.orderNumbers?.length
+      ? attached.orderNumbers.join(", ")
+      : attached.orderNumber;
     postEbayLabelTransferStatus({
       transferId,
       ok: true,
-      message: `Shipping label attached to eBay order ${attached.orderNumber}.`,
+      message: `Shipping label attached to eBay order${attached.orderNumbers?.length > 1 ? "s" : ""} ${attachedOrders}.`,
       ...attached,
     });
   } catch (error) {

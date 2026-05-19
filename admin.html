@@ -427,6 +427,10 @@
                 </div>
                 <div class="schedule-date-card">
                   <span>Recurring starts from</span>
+                  <label class="schedule-sync-check">
+                    <input id="schedFlowEffSync" type="checkbox" checked />
+                    <span>Use selected week of interest</span>
+                  </label>
                   <input id="schedFlowEffFrom" type="date" />
                   <small>Used only when saving weekly recurring hours.</small>
                 </div>
@@ -716,7 +720,7 @@
         <header class="panel-head changes-head">
           <div>
             <h2>Changes</h2>
-            <p class="changes-subtitle">Review inventory edits, stock movement, tray checks, and photo removals by worker, date, and store.</p>
+            <p class="changes-subtitle">Review inventory edits, stock movement, tray checks, schedule changes, and photo removals by worker, date, and store.</p>
           </div>
           <div class="panel-actions">
             <button id="changesRefreshBtn" class="btn ghost" type="button">Refresh</button>
@@ -770,6 +774,7 @@
               <option value="inventory_edit">Inventory edits</option>
               <option value="stock_event">Stock movement</option>
               <option value="tray_event">Tray movement</option>
+              <option value="schedule_event">Schedule changes</option>
               <option value="photo_event">Photo changes</option>
               <option value="revert_event">Reverted changes</option>
               <option value="review">Needs review</option>

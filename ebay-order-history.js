@@ -1278,6 +1278,15 @@ function getRequestedHistoryLabelOrderNumbers() {
   ]);
 }
 
+function getLabelTransferOrderNumbers(payload = {}) {
+  const metadata = payload.metadata || {};
+  return parseHistoryOrderNumbers([
+    metadata.orderId,
+    ...(Array.isArray(metadata.orderIds) ? metadata.orderIds : []),
+    ...(Array.isArray(metadata.orderNumbers) ? metadata.orderNumbers : []),
+  ]);
+}
+
 function getHistoryGroupOrderNumbersForOrder(orderNumber) {
   const normalized = normalizeEbayOrderNumber(orderNumber);
   if (!normalized) return [];
@@ -1422,19 +1431,25 @@ async function attachHistoryLabelToOrder(transferPayload) {
 
   const metadata = transferPayload?.metadata || {};
   const label = transferPayload?.label || {};
-  const orderNumber = normalizeEbayOrderNumber(metadata.orderId);
-  if (!orderNumber) throw new Error("The label transfer did not include a usable eBay order number.");
-  if (!awaiting.orderNumbers.includes(orderNumber)) {
-    throw new Error(`This eBay label is for ${orderNumber}, but this grouped history receiver is waiting for: ${awaiting.orderNumbers.join(", ")}.`);
+  const labelOrderNumbers = getLabelTransferOrderNumbers(transferPayload);
+  if (!labelOrderNumbers.length) throw new Error("The label transfer did not include a usable eBay order number.");
+  const unexpectedOrderNumbers = labelOrderNumbers.filter((orderNumber) => !awaiting.orderNumbers.includes(orderNumber));
+  if (unexpectedOrderNumbers.length) {
+    throw new Error(`This eBay label is for ${labelOrderNumbers.join(", ")}, but this grouped history receiver is waiting for: ${awaiting.orderNumbers.join(", ")}.`);
   }
   if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
   const shipmentSegment = safeStorageSegment(metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "shipment");
-  const destinationPath = [
-    safeStorageSegment(orderNumber, "order"),
-    `${shipmentSegment}.pdf`,
-  ].join("/");
+  const destinationPath = awaiting.orderNumbers.length > 1
+    ? [
+      "bulk-labels",
+      `${safeStorageSegment(metadata.labelId || metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "bulk-label")}.pdf`,
+    ].join("/")
+    : [
+      safeStorageSegment(awaiting.orderNumbers[0], "order"),
+      `${shipmentSegment}.pdf`,
+    ].join("/");
 
   const { error: uploadError } = await supabase.storage
     .from(EBAY_LABEL_BUCKET)
@@ -1559,16 +1574,16 @@ async function handleHistoryLabelTransfer(payload) {
   if (transferId && state.handledLabelTransferIds.has(transferId)) return;
   if (state.labelBusy) return;
   if (!state.awaitingLabelGroup) {
-    const orderNumber = normalizeEbayOrderNumber(payload?.metadata?.orderId);
+    const orderNumbers = getLabelTransferOrderNumbers(payload);
     if (!state.historyLoaded) {
       queueHistoryLabelTransfer(payload);
       return;
     }
-    if (!openHistoryLabelReceiverForOrders([orderNumber])) {
+    if (!openHistoryLabelReceiverForOrders(orderNumbers)) {
       postHistoryLabelTransferStatus({
         transferId,
         ok: false,
-        error: `Order ${orderNumber || "from the label"} was not found in the current order history range. Adjust the history date filter or open the matching completed order group, then send the label again.`,
+        error: `Order ${orderNumbers.join(", ") || "from the label"} was not found in the current order history range. Adjust the history date filter or open the matching completed order group, then send the label again.`,
       });
       return;
     }

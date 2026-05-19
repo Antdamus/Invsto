@@ -191,6 +191,11 @@
   color: #92400e;
 }
 
+.change-badge.schedule_event {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
 .change-badge.photo_event {
   background: #fce7f3;
   color: #9d174d;

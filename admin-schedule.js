@@ -7,7 +7,8 @@ let scheduleFlowState = {
   selectedStoreId: '',
   selectedDayIndex: new Date().getDay(),
   assignmentType: 'store_work',
-  workerSearch: ''
+  workerSearch: '',
+  syncEffectiveFromToWeek: true
 };
 
 function startOfWeekSun(d){
@@ -249,9 +250,18 @@ function renderScheduleStorePicker(){
 function syncScheduleFlowDates(){
   const weekDate = qs('schedFlowWeekDate');
   const effFrom = qs('schedFlowEffFrom');
+  const syncBox = qs('schedFlowEffSync');
   const label = qs('schedFlowWeekLabel');
-  if (weekDate) weekDate.value = toISODate(schedWeekStart);
-  if (effFrom && !effFrom.value) effFrom.value = qs('schedEffFrom')?.value || toISODate(new Date());
+  const weekISO = toISODate(schedWeekStart);
+  if (weekDate) weekDate.value = weekISO;
+  if (syncBox) syncBox.checked = !!scheduleFlowState.syncEffectiveFromToWeek;
+  if (effFrom) {
+    if (scheduleFlowState.syncEffectiveFromToWeek || !effFrom.value) {
+      effFrom.value = weekISO;
+    }
+    effFrom.disabled = !!scheduleFlowState.syncEffectiveFromToWeek;
+  }
+  if (qs('schedEffFrom')) qs('schedEffFrom').value = effFrom?.value || weekISO;
   if (label) label.textContent = weekLabel(schedWeekStart);
 }
 
@@ -366,7 +376,9 @@ function syncGuidedFieldsToHidden(){
   const start = qs('schedFlowStart')?.value || '';
   const end = qs('schedFlowEnd')?.value || '';
   const storeId = qs('schedFlowStore')?.value || selectedScheduleStoreId();
-  const flowEffFrom = qs('schedFlowEffFrom')?.value || '';
+  const flowEffFrom = scheduleFlowState.syncEffectiveFromToWeek
+    ? toISODate(schedWeekStart)
+    : (qs('schedFlowEffFrom')?.value || '');
   if (flowEffFrom && qs('schedEffFrom')) qs('schedEffFrom').value = flowEffFrom;
   scheduleFlowState.selectedStoreId = storeId || scheduleFlowState.selectedStoreId;
 
@@ -942,10 +954,12 @@ async function initSchedulePanel(){
   schedEmpId = null;
 
   // defaults
-  qs('schedEffFrom').value = toISODate(new Date());
+  qs('schedEffFrom').value = toISODate(schedWeekStart);
   qs('schedWeekDate').value = toISODate(schedWeekStart);
   qs('schedFlowEffFrom').value = qs('schedEffFrom').value;
   qs('schedFlowWeekDate').value = qs('schedWeekDate').value;
+  qs('schedFlowEffSync').checked = true;
+  qs('schedFlowEffFrom').disabled = true;
 
 qs('schedEmpSection').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
@@ -1007,6 +1021,12 @@ qs('schedEmpSection').addEventListener('change', (e) => {
   if (id === 'schedFlowEffFrom'){
     const hidden = qs('schedEffFrom');
     if (hidden) hidden.value = e.target.value || toISODate(new Date());
+    return;
+  }
+
+  if (id === 'schedFlowEffSync'){
+    scheduleFlowState.syncEffectiveFromToWeek = !!e.target.checked;
+    syncScheduleFlowDates();
     return;
   }
 

@@ -86,6 +86,19 @@
       restored_by: "Restored by",
       restore_reason: "Restore reason",
       record: "Record",
+      employee_id: "Scheduled worker",
+      target_employee: "Scheduled worker",
+      work_date: "Work date",
+      weekday: "Weekday",
+      effective_from: "Effective from",
+      effective_to: "Effective to",
+      start_local: "Start time",
+      end_local: "End time",
+      off: "Marked off",
+      note: "Schedule note",
+      schedule_note: "Schedule note",
+      request_ip: "Request IP",
+      user_agent: "Browser",
     };
     return names[field] || String(field || "").replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
   }
@@ -240,6 +253,13 @@
   }
 
   function changedFieldEntries(changedFields) {
+    if (Array.isArray(changedFields)) {
+      return changedFields.map((entry) => ({
+        field: entry?.field || "record",
+        from: entry?.from,
+        to: entry?.to,
+      }));
+    }
     if (!changedFields || typeof changedFields !== "object") return [];
     return Object.entries(changedFields).map(([field, change]) => ({
       field,
@@ -497,6 +517,88 @@
     };
   }
 
+  function weekdayLabel(value) {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const index = Number(value);
+    return Number.isInteger(index) && days[index] ? days[index] : "-";
+  }
+
+  function scheduleDateLabel(row) {
+    if (row.work_date) return row.work_date;
+    const day = weekdayLabel(row.weekday);
+    const effective = row.effective_from ? `from ${row.effective_from}` : "weekly";
+    return `${day} ${effective}`;
+  }
+
+  function mapScheduleAudit(row) {
+    const isOverride = row.schedule_table === "work_schedule_overrides";
+    const action = row.action || "";
+    const label = action === "insert" ? "Created" : action === "delete" ? "Deleted" : "Updated";
+    const targetEmployee = state.employees.find((employee) => employee.id === row.employee_id);
+    const target = row.employee_name || targetEmployee?.name || row.employee_email || "Unknown worker";
+    const when = scheduleDateLabel(row);
+    const metaHeaders = row.request_metadata?.headers || {};
+    const requestIp = metaHeaders.cf_connecting_ip || metaHeaders.x_real_ip || metaHeaders.x_forwarded_for || "";
+    const fields = changedFieldEntries(row.changed_fields)
+      .filter((field) => field.field !== "id" && field.field !== "created_by")
+      .map((field) => {
+        if (field.field === "weekday") {
+          return { ...field, from: weekdayLabel(field.from), to: weekdayLabel(field.to) };
+        }
+        if (field.field === "employee_id") {
+          return {
+            ...field,
+            from: field.from ? target : "-",
+            to: field.to ? target : "-",
+          };
+        }
+        if (field.field === "store_id") {
+          return {
+            ...field,
+            from: field.from ? storeLabel(field.from, field.from) : "-",
+            to: field.to ? storeLabel(field.to, row.store_name || field.to) : "-",
+          };
+        }
+        return field;
+      });
+
+    if (target) fields.unshift({ field: "target_employee", from: "-", to: target });
+    if (requestIp) fields.push({ field: "request_ip", from: "-", to: requestIp });
+    if (metaHeaders.user_agent) fields.push({ field: "user_agent", from: "-", to: metaHeaders.user_agent });
+
+    return {
+      id: `schedule-${row.id}`,
+      source: "schedule_audit_log",
+      category: "schedule_event",
+      label,
+      title: `${label} ${isOverride ? "schedule override" : "weekly schedule"}`,
+      at: row.occurred_at,
+      action,
+      tableName: row.schedule_table || "",
+      recordId: row.schedule_id || "",
+      workerId: row.actor_user_id || "",
+      workerEmail: row.actor_email || "",
+      workerName: workerLabel(row.actor_user_id, row.actor_email),
+      workerMetaLabel: "Changed by",
+      targetEmployeeId: row.employee_id || "",
+      targetEmployeeUserId: targetEmployee?.userId || "",
+      targetEmployeeName: target,
+      storeId: row.store_id || "",
+      storeName: storeLabel(row.store_id, row.store_name),
+      itemId: "",
+      itemTitle: "",
+      barcode: "",
+      locationId: "",
+      locationName: "",
+      recordLabel: `${target} - ${when}`,
+      detailLine: `${target} - ${row.store_name || "No store"} - ${when}`,
+      fields,
+      reason: row.schedule_note || "",
+      needsReview: action === "delete",
+      searchText: "",
+    };
+  }
+
   async function selectOrEmpty(queryPromise, label) {
     const { data, error } = await queryPromise;
     if (error) {
@@ -549,7 +651,7 @@
 
     if (status) status.textContent = "Loading change history...";
 
-    const [inventoryChanges, stockEvents, photoEvents, trayEvents, reversionEvents] = await Promise.all([
+    const [inventoryChanges, stockEvents, photoEvents, trayEvents, reversionEvents, scheduleEvents] = await Promise.all([
       selectOrEmpty(
         client.from("inventory_change_log")
           .select("*")
@@ -594,6 +696,15 @@
           .limit(250),
         "change reversions"
       ),
+      selectOrEmpty(
+        client.from("schedule_audit_log")
+          .select("*")
+          .gte("occurred_at", fromIso)
+          .lte("occurred_at", toIso)
+          .order("occurred_at", { ascending: false })
+          .limit(400),
+        "schedule audit log"
+      ),
     ]);
 
     const modificationChanges = inventoryChanges.filter((row) => {
@@ -612,16 +723,20 @@
       ...photoEvents.map(mapPhotoEvent),
       ...trayEvents.map(mapTrayEvent),
       ...reversionEvents.map(mapReversionEvent),
+      ...scheduleEvents.map(mapScheduleAudit),
     ].map((event) => {
       const parts = [
         event.title,
         event.label,
         event.workerName,
         event.workerEmail,
+        event.targetEmployeeName,
         event.reason,
         event.signedByEmail,
         event.storeName,
         event.itemTitle,
+        event.recordLabel,
+        event.detailLine,
         event.barcode,
         event.locationName,
         ...event.fields.flatMap((f) => [f.field, compactValue(f.from), compactValue(f.to)]),
@@ -640,7 +755,7 @@
     const term = (qs("changesSearchInput")?.value || "").trim().toLowerCase();
 
     return state.events.filter((event) => {
-      if (worker && event.workerId !== worker) return false;
+      if (worker && event.workerId !== worker && event.targetEmployeeId !== worker && event.targetEmployeeUserId !== worker) return false;
       if (store && event.storeId !== store) return false;
       if (type === "review" && !event.needsReview) return false;
       if (type && type !== "review" && event.category !== type) return false;
@@ -813,7 +928,7 @@
   }
 
   function renderChangeCard(event) {
-    const itemLine = [
+    const itemLine = event.detailLine || [
       event.itemTitle,
       event.barcode ? `Barcode ${event.barcode}` : "",
       event.locationName ? `Location ${event.locationName}` : "",
@@ -833,10 +948,10 @@
           <time datetime="${escapeHtml(event.at || "")}">${escapeHtml(formatDateTime(event.at))}</time>
         </div>
         <div class="change-meta-grid">
-          <div><span>Worker</span><strong>${escapeHtml(event.workerName)}</strong></div>
+          <div><span>${escapeHtml(event.workerMetaLabel || "Worker")}</span><strong>${escapeHtml(event.workerName)}</strong></div>
           <div><span>Store</span><strong>${escapeHtml(event.storeName)}</strong></div>
           <div><span>Source</span><strong>${escapeHtml(event.source.replaceAll("_", " "))}</strong></div>
-          <div><span>Record</span><strong>${escapeHtml(event.itemTitle || event.locationName || event.itemId || event.locationId || "-")}</strong></div>
+          <div><span>Record</span><strong>${escapeHtml(event.recordLabel || event.itemTitle || event.locationName || event.itemId || event.locationId || "-")}</strong></div>
         </div>
         ${renderPhotoVisuals(event.photoVisuals)}
         <div class="change-fields">

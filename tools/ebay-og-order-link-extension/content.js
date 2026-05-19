@@ -8,6 +8,7 @@
   const FLOATING_ID = "og-ebay-open-all-orders";
   const SINGLE_ORDER_ID = "og-ebay-open-single-order";
   const SEND_LABEL_ID = "og-ebay-send-label";
+  const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
@@ -209,6 +210,23 @@
       || document.querySelector('[data-testid="shipping-actions"] button[aria-label*="Print" i]');
   }
 
+  function getBulkLabelDownloadLink() {
+    return document.querySelector('[data-testid="download-labels-button"]')
+      || document.querySelector('[download][href*="/ship/single/api/label-service/label/"][href*="/download"]')
+      || document.querySelector('.labels-confirmation-page a[href*="/ship/single/api/label-service/label/"][href*="/download"]')
+      || document.querySelector('a[href*="/ship/single/api/label-service/label/"][href*="/download"]')
+      || document.querySelector('.labels-confirmation-page a[href*="/download"]');
+  }
+
+  function isBulkLabelConfirmationPage() {
+    return Boolean(
+      document.querySelector("#bulk-labels-app")
+      && document.querySelector(".labels-confirmation-page")
+      && (document.querySelector('[data-testid="label-generation-success-notice"]') || /label.+successfully generated/i.test(document.body?.innerText || ""))
+      && getBulkLabelDownloadLink()
+    );
+  }
+
   function isElementVisible(element) {
     if (!element) return false;
     const rect = element.getBoundingClientRect();
@@ -394,6 +412,102 @@
     return error?.message || String(error || "Could not capture the eBay label.");
   }
 
+  function uniqueTextMatches(text, pattern) {
+    const regex = pattern.global
+      ? pattern
+      : new RegExp(pattern.source, `${pattern.flags || ""}g`);
+    return [...new Set([...String(text || "").matchAll(regex)].map((match) => match[0]))];
+  }
+
+  function getBulkConfirmationOrderIds() {
+    const fromItemDetails = [...document.querySelectorAll('ul[data-testid="item-details-no-sku"] li')]
+      .map((li) => li.textContent || "")
+      .map((text) => text.match(ORDER_NUMBER_PATTERN)?.[0])
+      .filter(Boolean);
+    const fallbackFromPageText = uniqueTextMatches(document.body?.innerText || "", ORDER_NUMBER_PATTERN);
+    return [...new Set([...fromItemDetails, ...fallbackFromPageText])];
+  }
+
+  function normalizeBulkContextOrderIds(context) {
+    const raw = [
+      ...(Array.isArray(context?.orderIds) ? context.orderIds : []),
+      ...(Array.isArray(context?.orderNumbers) ? context.orderNumbers : []),
+      ...(Array.isArray(context?.orders) ? context.orders.map((entry) => entry?.orderId || entry?.orderNumber || entry) : []),
+    ];
+    return [...new Set(raw.map(normalizeOrderNumber).filter(Boolean))];
+  }
+
+  function getOptionalCachedBulkContext() {
+    const keys = [
+      "ogEbayBulkLabelContext",
+      "og-ebay-bulk-label-context",
+      "og.ebay.bulkLabelContext",
+      "ogBulkLabelContext",
+    ];
+
+    for (const storage of [window.sessionStorage, window.localStorage]) {
+      if (!storage) continue;
+      for (const key of keys) {
+        try {
+          const raw = storage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") return parsed;
+        } catch (_) {}
+      }
+    }
+
+    return null;
+  }
+
+  function getBulkLabelConfirmationSnapshot() {
+    const downloadLink = getBulkLabelDownloadLink();
+    const rawHref = downloadLink?.getAttribute("href") || "";
+    const absoluteLabelUrl = rawHref ? new URL(rawHref, window.location.origin).toString() : "";
+    const labelIdMatch = absoluteLabelUrl.match(/\/label\/([^/]+)\/download/i);
+    const labelId = labelIdMatch?.[1] || "";
+    const shipmentIds = [...document.querySelectorAll('a[href*="shipmentId="]')]
+      .map((link) => {
+        try {
+          return new URL(link.getAttribute("href") || link.href, window.location.origin).searchParams.get("shipmentId") || "";
+        } catch (_) {
+          return "";
+        }
+      })
+      .filter(Boolean);
+    const pageText = document.body?.innerText || "";
+    const cachedBulkContext = getOptionalCachedBulkContext();
+    const extractedOrderIds = getBulkConfirmationOrderIds();
+    const cachedOrderIds = normalizeBulkContextOrderIds(cachedBulkContext);
+    const orderIds = extractedOrderIds.length ? extractedOrderIds : cachedOrderIds;
+    const trackingNumbers = uniqueTextMatches(pageText, /\b\d{20,30}\b/g)
+      .filter((entry) => !orderIds.includes(entry));
+    const labelCountText = cleanText(document.querySelector('[data-testid="label-generation-success-notice"]')?.innerText || "");
+    const labelCount = Number(labelCountText.match(/\b(\d+)\s+label/i)?.[1] || 0) || "";
+    const billingSummaryText = cleanText(document.querySelector(".billing-summary")?.innerText || "");
+    const billingCost = billingSummaryText.match(/\$\s?\d[\d,]*(?:\.\d{2})?/)?.[0] || "";
+
+    return {
+      source: "ebay-bulk-label-confirmation",
+      capturedAt: new Date().toISOString(),
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      labelUrl: absoluteLabelUrl,
+      labelId,
+      shipmentId: shipmentIds[0] || "",
+      shipmentIds: [...new Set(shipmentIds)],
+      orderId: orderIds.length === 1 ? orderIds[0] : "",
+      orderIds,
+      orderNumbers: orderIds,
+      trackingNumbers: [...new Set(trackingNumbers)],
+      cachedBulkContext: cachedBulkContext || null,
+      labelCount,
+      labelCountText,
+      billingSummaryText,
+      billingCost,
+    };
+  }
+
   function getReportErrorMessage(error) {
     if (error instanceof AggregateError) {
       const messages = error.errors
@@ -409,6 +523,13 @@
     if (!button) return;
     button.dataset.statusTone = tone;
     button.textContent = message || "Send Label to OG";
+  }
+
+  function setBulkLabelButtonStatus(message, tone = "info") {
+    const button = document.getElementById(SEND_BULK_LABELS_ID);
+    if (!button) return;
+    button.dataset.statusTone = tone;
+    button.textContent = message || "Send Bulk Labels to OG";
   }
 
   function setAwaitingReportButtonStatus(message, tone = "info") {
@@ -788,6 +909,44 @@
     }
   }
 
+  async function sendBulkLabelToOg() {
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setBulkLabelButtonStatus("Refresh eBay page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    try {
+      setBulkLabelButtonStatus("Finding bulk label...");
+      const metadata = getBulkLabelConfirmationSnapshot();
+      labelLog("bulk metadata", metadata);
+      if (!metadata.labelUrl) throw new Error("Could not find the bulk label download URL.");
+
+      setBulkLabelButtonStatus("Sending to OG...");
+      const label = await fetchLabelUrlFromContentScript(metadata.labelUrl);
+      if (!label.base64) throw new Error("The bulk label URL did not return a readable PDF.");
+
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_LABEL",
+        payload: {
+          metadata,
+          label,
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not hand the bulk label to OG.");
+
+      setBulkLabelButtonStatus(response.opened ? "Opened OG to attach" : "Sent to OG", "success");
+      window.setTimeout(() => setBulkLabelButtonStatus("Send Bulk Labels to OG"), 3500);
+    } catch (error) {
+      console.error("[OG eBay Label] Failed to send bulk label to OG:", error);
+      setBulkLabelButtonStatus("Send failed", "error");
+      window.alert(error?.message || "Failed to send bulk label to OG.");
+      window.setTimeout(() => setBulkLabelButtonStatus("Send Bulk Labels to OG"), 5000);
+    }
+  }
+
   async function fetchReportUrlFromContentScript(url) {
     const response = await fetch(url, { credentials: "include", cache: "no-store" });
     if (!response.ok) throw new Error(`Report URL returned HTTP ${response.status}.`);
@@ -1055,7 +1214,28 @@
         background: #d4f8df;
       }
 
+      #${SEND_BULK_LABELS_ID} {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 42px;
+        margin-top: 10px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 14px Arial, sans-serif;
+        padding: 10px 14px;
+        text-align: center;
+      }
+
+      #${SEND_BULK_LABELS_ID}:hover {
+        background: #d4f8df;
+      }
+
       #${SEND_LABEL_ID}[data-status-tone="error"],
+      #${SEND_BULK_LABELS_ID}[data-status-tone="error"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
@@ -1063,6 +1243,7 @@
       }
 
       #${SEND_LABEL_ID}[data-status-tone="success"],
+      #${SEND_BULK_LABELS_ID}[data-status-tone="success"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
@@ -1235,6 +1416,34 @@
     }
   }
 
+  function injectBulkLabelSendButton() {
+    const downloadLink = getBulkLabelDownloadLink();
+    let button = document.getElementById(SEND_BULK_LABELS_ID);
+
+    if (!isBulkLabelConfirmationPage() || !downloadLink) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = SEND_BULK_LABELS_ID;
+      button.textContent = "Send Bulk Labels to OG";
+      button.title = "Send this eBay bulk label PDF to the current OG Pending Orders session";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendBulkLabelToOg();
+      });
+    }
+
+    const container = downloadLink.parentElement || document.querySelector(".labels-confirmation-page") || document.body;
+    if (!container.contains(button)) {
+      downloadLink.insertAdjacentElement("afterend", button);
+    }
+  }
+
   function injectAwaitingReportButton() {
     let button = document.getElementById(SEND_AWAITING_REPORT_ID);
 
@@ -1317,6 +1526,7 @@
     injectFloatingButton();
     injectSingleOrderButton();
     injectSendLabelButton();
+    injectBulkLabelSendButton();
     injectAwaitingReportButton();
     maybeShowBoxReminder();
   }

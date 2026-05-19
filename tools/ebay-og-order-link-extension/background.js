@@ -190,6 +190,12 @@
     }
     url.searchParams.set("source", "ebay");
     if (payload.metadata?.orderId) url.searchParams.set("orderId", payload.metadata.orderId);
+    const orderIds = Array.isArray(payload.metadata?.orderIds)
+      ? payload.metadata.orderIds
+      : Array.isArray(payload.metadata?.orderNumbers)
+        ? payload.metadata.orderNumbers
+        : [];
+    if (orderIds.length) url.searchParams.set("orderIds", [...new Set(orderIds)].join(","));
     url.searchParams.set("labelTransferId", payload.transferId);
     return url;
   }
@@ -223,6 +229,10 @@
     if (selectedOrder) return selectedOrder === orderId;
     if (Array.isArray(state.awaitingOrderNumbers)) return state.awaitingOrderNumbers.includes(orderId);
     return false;
+  }
+
+  function isBulkLabelTransfer(label = {}) {
+    return label.metadata?.source === "ebay-bulk-label-confirmation";
   }
 
   function queryReceiverState(tab, payload) {
@@ -294,17 +304,24 @@
     const transferId = buildTransferId(label);
     const payload = { ...label, transferId };
     const orderId = String(label.metadata?.orderId || "").trim();
+    const isBulkLabel = isBulkLabelTransfer(label);
     await storePendingLabel(transferId, payload);
 
     const tabs = await findAppTabs(appUrl);
     const receiverStates = await getReceiverStates(tabs, payload);
-    const matchingReceiver = receiverStates.find((state) => stateHasActiveReceiver(state) && stateMatchesOrder(state, orderId));
+    const matchingReceiver = orderId
+      ? receiverStates.find((state) => stateHasActiveReceiver(state) && stateMatchesOrder(state, orderId))
+      : isBulkLabel
+        ? receiverStates.find((state) => stateHasActiveReceiver(state))
+        : null;
     if (matchingReceiver?.tab?.id) {
       const ack = await deliverLabelToTab(matchingReceiver.tab, payload);
       return finishRoutedTransfer(appUrl, payload, ack, { delivered: true, opened: false });
     }
 
-    const activeMismatches = receiverStates.filter((state) => stateHasActiveReceiver(state) && !stateMatchesOrder(state, orderId));
+    const activeMismatches = orderId
+      ? receiverStates.filter((state) => stateHasActiveReceiver(state) && !stateMatchesOrder(state, orderId))
+      : [];
     if (activeMismatches.length) {
       const mismatch = activeMismatches[0];
       await focusTab(mismatch.tab.id);
