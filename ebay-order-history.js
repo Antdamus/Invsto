@@ -326,19 +326,30 @@ async function logout(event) {
 
 function setupDefaultDates() {
   const todayDate = new Date();
-  const fromDate = new Date(todayDate);
-  fromDate.setDate(fromDate.getDate() - 14);
   const today = toDateInputValue(todayDate);
-  if ($("history-from") && !$("history-from").value) $("history-from").value = toDateInputValue(fromDate);
+  if ($("history-from") && !$("history-from").value) $("history-from").value = today;
   if ($("history-to") && !$("history-to").value) $("history-to").value = today;
+  resetHistorySearchInput({ apply: false });
+}
+
+function resetHistorySearchInput(options = {}) {
   const search = $("history-search");
-  if (search) {
-    search.value = "";
-    search.setAttribute("autocomplete", "off");
-    search.setAttribute("autocorrect", "off");
-    search.setAttribute("autocapitalize", "off");
-    search.setAttribute("spellcheck", "false");
-  }
+  if (!search) return;
+  search.value = "";
+  search.defaultValue = "";
+  search.setAttribute("autocomplete", "new-password");
+  search.setAttribute("autocorrect", "off");
+  search.setAttribute("autocapitalize", "off");
+  search.setAttribute("spellcheck", "false");
+  search.setAttribute("data-form-type", "other");
+  search.name = `og-history-search-disabled-${Date.now()}`;
+  if (options.apply !== false && state.historyLoaded) applyFilters();
+}
+
+function preventHistorySearchAutofill() {
+  resetHistorySearchInput({ apply: false });
+  window.setTimeout(() => resetHistorySearchInput({ apply: true }), 100);
+  window.setTimeout(() => resetHistorySearchInput({ apply: true }), 650);
 }
 
 async function loadOrderHistory() {
@@ -525,11 +536,8 @@ function renderWorkerOptions() {
   state.lines.forEach((line) => {
     if (line.fulfilled_by_email) workers.add(line.fulfilled_by_email);
   });
-  [...state.adminEvents, ...state.revertEvents, ...state.labelEvents].forEach((event) => {
-    if (event.signed_by_email) workers.add(event.signed_by_email);
-  });
 
-  select.innerHTML = `<option value="">All workers</option>${[...workers].sort().map((email) => (
+  select.innerHTML = `<option value="">All users</option>${[...workers].sort().map((email) => (
     `<option value="${escapeHtml(email)}">${escapeHtml(email)}</option>`
   )).join("")}`;
   if ([...workers].includes(current)) select.value = current;
@@ -701,7 +709,10 @@ function buildHistoryGroups(lines) {
   const coveredLineIds = new Set();
   const groups = [];
   const completionEvents = getFilteredEvents()
-    .filter((event) => event.category !== "revert" && getEventLineIds(event).some((lineId) => lineById.has(lineId)));
+    .filter((event) =>
+      event.category === "admin"
+      && getEventLineIds(event).some((lineId) => lineById.has(lineId))
+    );
 
   completionEvents.forEach((event) => {
     const eventLineIds = getEventLineIds(event).filter((lineId) => lineById.has(lineId));
@@ -788,6 +799,48 @@ function getAttachedHistoryOrder(orders = []) {
   return orders.find((order) => order?.label_file_path) || null;
 }
 
+function historyGroupHasAttachedLabel(group) {
+  return getUniqueOrdersFromLines(group?.lines || []).some((order) => order?.label_file_path);
+}
+
+function getHistoryGroupCompletedBy(group) {
+  return [...new Set((group?.lines || []).map((line) => line.fulfilled_by_email).filter(Boolean))]
+    .join(", ") || "Unknown";
+}
+
+function compareText(a, b) {
+  return String(a || "").localeCompare(String(b || ""), undefined, { sensitivity: "base", numeric: true });
+}
+
+function getVisibleHistoryGroups() {
+  const labelFilter = $("history-label-filter")?.value || "all";
+  const sort = $("history-sort")?.value || "date_desc";
+  const groups = buildHistoryGroups(state.filteredLines)
+    .filter((group) => {
+      const hasLabel = historyGroupHasAttachedLabel(group);
+      if (labelFilter === "missing") return !hasLabel;
+      if (labelFilter === "attached") return hasLabel;
+      return true;
+    });
+
+  const dateValue = (group) => group.latestAt ? new Date(group.latestAt).getTime() || 0 : 0;
+  const labelValue = (group) => historyGroupHasAttachedLabel(group) ? 1 : 0;
+
+  groups.sort((a, b) => {
+    if (sort === "date_asc") return dateValue(a) - dateValue(b);
+    if (sort === "amount_desc") return Number(b.gross || 0) - Number(a.gross || 0);
+    if (sort === "amount_asc") return Number(a.gross || 0) - Number(b.gross || 0);
+    if (sort === "buyer_asc") return compareText(a.buyer, b.buyer);
+    if (sort === "buyer_desc") return compareText(b.buyer, a.buyer);
+    if (sort === "worker_asc") return compareText(getHistoryGroupCompletedBy(a), getHistoryGroupCompletedBy(b));
+    if (sort === "label_missing") return labelValue(a) - labelValue(b) || dateValue(b) - dateValue(a);
+    if (sort === "label_attached") return labelValue(b) - labelValue(a) || dateValue(b) - dateValue(a);
+    return dateValue(b) - dateValue(a);
+  });
+
+  return groups;
+}
+
 function renderGroupLabelControl(group, orders = []) {
   if (!orders.length) return "";
   const orderNumbers = getOrderNumbersFromOrders(orders);
@@ -822,7 +875,7 @@ function renderHistoryList() {
   const list = $("history-list");
   if (!list) return;
 
-  const groups = buildHistoryGroups(state.filteredLines);
+  const groups = getVisibleHistoryGroups();
   $("history-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
 
   if (!groups.length) {
@@ -972,6 +1025,7 @@ function getFilteredEvents() {
   const term = String($("history-search")?.value || "").trim().toLowerCase();
   const worker = $("history-worker")?.value || "";
   const status = $("history-status")?.value || "all";
+  const lineById = getLineByIdMap(state.lines);
   const events = [
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
@@ -983,14 +1037,39 @@ function getFilteredEvents() {
     if (status === "cancelled" && event.action !== "cancelled") return false;
     if (status === "admin_closeout" && event.category !== "admin") return false;
     if (status === "reverted" && event.category !== "revert") return false;
-    if (worker && event.signed_by_email !== worker) return false;
+
+    const eventLines = getEventLineIds(event).map((lineId) => lineById.get(lineId)).filter(Boolean);
+    if (worker) {
+      const completedByWorker = eventLines.some((line) => line.fulfilled_by_email === worker);
+      if (!completedByWorker && event.signed_by_email !== worker) return false;
+    }
+
     if (term) {
+      const snapshots = Array.isArray(event.payload?.line_snapshots) ? event.payload.line_snapshots : [];
       const haystack = [
         event.action,
         event.notes,
         event.signed_by_email,
         event.label_file_path,
         event.shipment_id,
+        getEventBuyerLabel(event, eventLines),
+        ...eventLines.flatMap((line) => [
+          line.searchText,
+          line.order?.buyer_username,
+          line.order?.order_number,
+          line.order?.sales_record_number,
+          line.item_title,
+          line.item_number,
+          line.transaction_id,
+          line.fulfilled_by_email,
+        ]),
+        ...snapshots.flatMap((snapshot) => [
+          snapshot.buyer_username,
+          snapshot.order_number,
+          snapshot.item_title,
+          snapshot.item_number,
+          snapshot.transaction_id,
+        ]),
         ...(event.order_numbers || []),
         ...(event.order_ids || []),
         ...(event.order_line_ids || []),
@@ -1332,6 +1411,41 @@ async function getHistoryLabelSignedUrl(order) {
   return url;
 }
 
+async function getHistoryLabelPdfObjectUrl(order) {
+  const signedUrl = await getHistoryLabelSignedUrl(order);
+  const response = await fetch(signedUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not read the label PDF (${response.status}).`);
+  const blob = await response.blob();
+  const pdfBlob = blob.type === "application/pdf"
+    ? blob
+    : new Blob([await blob.arrayBuffer()], { type: "application/pdf" });
+  return URL.createObjectURL(pdfBlob);
+}
+
+function writeHistoryLabelPreviewWindow(previewWindow, objectUrl, title = "Shipping label") {
+  if (!previewWindow || previewWindow.closed) {
+    window.open(objectUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  const safeTitle = escapeHtml(title || "Shipping label");
+  previewWindow.document.open();
+  previewWindow.document.write(`<!doctype html>
+    <html>
+      <head>
+        <title>${safeTitle}</title>
+        <style>
+          html, body { margin: 0; height: 100%; background: #111; }
+          iframe { border: 0; width: 100%; height: 100%; display: block; }
+        </style>
+      </head>
+      <body>
+        <iframe src="${objectUrl}" title="${safeTitle}"></iframe>
+      </body>
+    </html>`);
+  previewWindow.document.close();
+}
+
 async function openHistoryLabelWindow(order, targetWindow = null) {
   let previewWindow = targetWindow;
   try {
@@ -1339,12 +1453,11 @@ async function openHistoryLabelWindow(order, targetWindow = null) {
       previewWindow = window.open("about:blank", "_blank");
     }
     if (previewWindow) previewWindow.opener = null;
-    const url = await getHistoryLabelSignedUrl(order);
     if (previewWindow && !previewWindow.closed) {
-      previewWindow.location.href = url;
-    } else {
-      window.open(url, "_blank", "noopener,noreferrer");
+      previewWindow.document.body.innerHTML = "<p style=\"font: 16px sans-serif; padding: 24px;\">Loading shipping label...</p>";
     }
+    const objectUrl = await getHistoryLabelPdfObjectUrl(order);
+    writeHistoryLabelPreviewWindow(previewWindow, objectUrl, `Shipping label ${order?.order_number || ""}`.trim());
   } catch (error) {
     if (previewWindow && !previewWindow.closed) previewWindow.close();
     throw error;
@@ -1518,7 +1631,7 @@ async function attachHistoryLabelToOrder(transferPayload) {
   renderHistoryLabelDetails(state.awaitingLabelGroup);
   renderHistoryList();
   return {
-    orderNumber,
+    orderNumber: awaiting.orderNumbers[0] || "",
     orderNumbers: awaiting.orderNumbers,
     storagePath: destinationPath,
     uploadedAt: now,
@@ -1641,6 +1754,7 @@ async function previewHistoryLabel() {
 }
 
 function setupListeners() {
+  window.addEventListener("pageshow", preventHistorySearchAutofill);
   $("refresh-history")?.addEventListener("click", loadOrderHistory);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("close-proof-trail-modal")?.addEventListener("click", closeProofTrailModal);
@@ -1650,7 +1764,7 @@ function setupListeners() {
   ["history-from", "history-to"].forEach((id) => {
     $(id)?.addEventListener("change", loadOrderHistory);
   });
-  ["history-worker", "history-status", "history-search"].forEach((id) => {
+  ["history-worker", "history-status", "history-label-filter", "history-sort", "history-search"].forEach((id) => {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
   });

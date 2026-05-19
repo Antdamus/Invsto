@@ -136,9 +136,9 @@
             <input id="history-to" type="date" />
           </label>
           <label>
-            Worker
+            Completed by
             <select id="history-worker">
-              <option value="">All workers</option>
+              <option value="">All users</option>
             </select>
           </label>
           <label>
@@ -151,17 +151,40 @@
               <option value="reverted">Reversals only</option>
             </select>
           </label>
+          <label>
+            Shipping label
+            <select id="history-label-filter">
+              <option value="all">All labels</option>
+              <option value="missing">Missing label</option>
+              <option value="attached">Label attached</option>
+            </select>
+          </label>
+          <label>
+            Sort
+            <select id="history-sort">
+              <option value="date_desc">Newest closed first</option>
+              <option value="date_asc">Oldest closed first</option>
+              <option value="amount_desc">Amount high to low</option>
+              <option value="amount_asc">Amount low to high</option>
+              <option value="buyer_asc">Buyer A to Z</option>
+              <option value="buyer_desc">Buyer Z to A</option>
+              <option value="worker_asc">Completed by A to Z</option>
+              <option value="label_missing">Missing labels first</option>
+              <option value="label_attached">Attached labels first</option>
+            </select>
+          </label>
           <label class="wide">
             Search
             <input
               id="history-search"
               type="search"
               placeholder="Buyer, order #, title, item #, worker..."
-              autocomplete="off"
+              autocomplete="new-password"
               autocorrect="off"
               autocapitalize="off"
               spellcheck="false"
-              name="og-order-history-search"
+              name="og-history-search-disabled"
+              data-form-type="other"
               inputmode="search"
             />
           </label>
