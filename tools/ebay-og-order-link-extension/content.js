@@ -9,6 +9,7 @@
   const SINGLE_ORDER_ID = "og-ebay-open-single-order";
   const SEND_LABEL_ID = "og-ebay-send-label";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
+  const BOX_REMINDER_ID = "og-ebay-box-reminder";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
   const REPORT_EVENT_TYPE = "OG_EBAY_AWAITING_REPORT_CAPTURED";
@@ -17,6 +18,9 @@
   const LABEL_PROBE_READY_TIMEOUT_MS = 5000;
   const REPORT_STATUS_TIMEOUT_MS = 120000;
   const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
+  let currentBoxReminderKey = "";
+  let dismissedBoxReminderKey = "";
+  let shownBoxReminderKey = "";
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -263,6 +267,100 @@
       visibleSummaryText: getAwaitingOrdersSummaryText(),
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  function parseCountFromText(value) {
+    const text = cleanText(value);
+    if (!text) return 0;
+    const patterns = [
+      /\b(\d+)\s+(?:item|items|unit|units)\b/i,
+      /\b(?:qty|quantity)\s*:?\s*(\d+)\b/i,
+      /\b(?:item|items|unit|units|selected)\s*:?\s*(\d+)\b/i,
+      /\b(\d+)\s+(?:selected|ready to ship)\b/i,
+      /\b(\d+)\s+(?:order|orders)\s+(?:selected|ready|to ship|in this shipment)\b/i,
+    ];
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      const count = Number(match?.[1] || 0);
+      if (Number.isFinite(count) && count > 0) return count;
+    }
+    return 0;
+  }
+
+  function findPackageDimensionInputs() {
+    const inputs = [...document.querySelectorAll("input")];
+    const findByHints = (hints) => inputs.find((input) => {
+      const haystack = [
+        input.getAttribute("aria-label"),
+        input.getAttribute("name"),
+        input.getAttribute("id"),
+        input.getAttribute("placeholder"),
+      ].map((entry) => String(entry || "").toLowerCase()).join(" ");
+      return hints.some((hint) => haystack.includes(hint));
+    });
+
+    return {
+      length: document.querySelector('input[aria-label="Package length in inches"]') || findByHints(["package length", "length"]),
+      width: document.querySelector('input[aria-label="Package width in inches"]') || findByHints(["package width", "width"]),
+      height: document.querySelector('input[aria-label="Package height in inches"]') || findByHints(["package height", "height"]),
+    };
+  }
+
+  function setInputValue(input, value) {
+    if (!input) return;
+    input.focus();
+    input.value = String(value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.blur();
+  }
+
+  function setPackageDimensionsToFour() {
+    const dimensions = findPackageDimensionInputs();
+    setInputValue(dimensions.length, 4);
+    setInputValue(dimensions.width, 4);
+    setInputValue(dimensions.height, 4);
+  }
+
+  function hasPackageDimensionInputs() {
+    const dimensions = findPackageDimensionInputs();
+    return Boolean(dimensions.length && dimensions.width && dimensions.height);
+  }
+
+  function detectShippingItemCount() {
+    const counts = [];
+    const orderNumbers = uniqueOrderNumbers();
+    if (orderNumbers.length) counts.push(orderNumbers.length);
+
+    const orderSection = document.querySelector('section[aria-label="Order information"]');
+    counts.push(parseCountFromText(orderSection?.querySelector("button.fake-link")?.textContent));
+    counts.push(parseCountFromText(orderSection?.innerText || orderSection?.textContent));
+
+    const targetedSelectors = [
+      '[data-testid="order-page"]',
+      '[data-testid*="item" i]',
+      '[data-testid*="line" i]',
+      '[data-testid*="shipment" i]',
+      '[data-testid*="package" i]',
+      '[aria-label*="item" i]',
+      '[aria-label*="shipment" i]',
+    ];
+    targetedSelectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((element) => {
+        counts.push(parseCountFromText(element.innerText || element.textContent));
+      });
+    });
+
+    return Math.max(0, ...counts.filter((count) => Number.isFinite(count)));
+  }
+
+  function isShippingLabelWorkflowPage() {
+    return Boolean(
+      isSingleLabelPage()
+      || uniqueOrderNumbers().length
+      || getShippingActions()
+      || /\/ship\/(?:single|bulk|label|labels)\b/i.test(window.location.pathname)
+    );
   }
 
   function getLabelMetadata() {
@@ -970,6 +1068,74 @@
         background: #d8f8e2;
         color: #0a5b2b;
       }
+
+      #${BOX_REMINDER_ID} {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(0, 0, 0, .46);
+        font-family: Arial, sans-serif;
+      }
+
+      #${BOX_REMINDER_ID} .og-ebay-box-card {
+        width: min(430px, calc(100vw - 36px));
+        border: 1px solid rgba(155, 100, 24, .42);
+        border-radius: 18px;
+        background: #fffaf0;
+        color: #17120b;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, .34);
+        padding: 22px;
+      }
+
+      #${BOX_REMINDER_ID} h2 {
+        margin: 0 0 8px;
+        font: 900 20px Arial, sans-serif;
+      }
+
+      #${BOX_REMINDER_ID} p {
+        margin: 0 0 16px;
+        color: #513d20;
+        font: 500 14px/1.45 Arial, sans-serif;
+      }
+
+      #${BOX_REMINDER_ID} .og-ebay-box-callout {
+        margin-bottom: 16px;
+        border: 1px solid rgba(155, 100, 24, .28);
+        border-radius: 14px;
+        background: #fff;
+        padding: 12px;
+        font: 900 18px Arial, sans-serif;
+        text-align: center;
+      }
+
+      #${BOX_REMINDER_ID} .og-ebay-box-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+      }
+
+      #${BOX_REMINDER_ID} button {
+        border: 1px solid rgba(23, 18, 11, .18);
+        border-radius: 999px;
+        cursor: pointer;
+        font: 900 13px Arial, sans-serif;
+        padding: 10px 14px;
+      }
+
+      #${BOX_REMINDER_ID} .og-ebay-box-primary {
+        border-color: #116b36;
+        background: #e8fff0;
+        color: #0a5b2b;
+      }
+
+      #${BOX_REMINDER_ID} .og-ebay-box-secondary {
+        background: #fff;
+        color: #513d20;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -1092,6 +1258,59 @@
     }
   }
 
+  function dismissBoxReminder() {
+    dismissedBoxReminderKey = currentBoxReminderKey;
+    document.getElementById(BOX_REMINDER_ID)?.remove();
+  }
+
+  function showBoxReminder(itemCount) {
+    if (document.getElementById(BOX_REMINDER_ID)) return;
+
+    const overlay = document.createElement("div");
+    overlay.id = BOX_REMINDER_ID;
+    overlay.innerHTML = `
+      <div class="og-ebay-box-card" role="dialog" aria-modal="true" aria-labelledby="og-ebay-box-title">
+        <h2 id="og-ebay-box-title">Check the shipping box size</h2>
+        <p>
+          OG detected ${itemCount.toLocaleString()} item${itemCount === 1 ? "" : "s"} on this eBay label workflow.
+          Before buying the label, please change the package dimensions so eBay does not keep the default small box.
+        </p>
+        <div class="og-ebay-box-callout">Example: 4 x 4 x 4 in</div>
+        <div class="og-ebay-box-actions">
+          ${hasPackageDimensionInputs() ? `<button type="button" class="og-ebay-box-primary" data-og-ebay-set-box>Set 4 x 4 x 4</button>` : ""}
+          <button type="button" class="og-ebay-box-secondary" data-og-ebay-close-box>Got it</button>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay || event.target.closest("[data-og-ebay-close-box]")) {
+        dismissBoxReminder();
+        return;
+      }
+      if (event.target.closest("[data-og-ebay-set-box]")) {
+        setPackageDimensionsToFour();
+        dismissBoxReminder();
+      }
+    });
+    document.body.appendChild(overlay);
+  }
+
+  function maybeShowBoxReminder() {
+    if (!isShippingLabelWorkflowPage()) {
+      dismissBoxReminder();
+      return;
+    }
+
+    const itemCount = detectShippingItemCount();
+    if (itemCount < 3) return;
+
+    const reminderKey = `og-ebay-box-reminder:${window.location.pathname}:${window.location.search}:${itemCount}`;
+    currentBoxReminderKey = reminderKey;
+    if (dismissedBoxReminderKey === reminderKey || shownBoxReminderKey === reminderKey) return;
+    shownBoxReminderKey = reminderKey;
+    showBoxReminder(itemCount);
+  }
+
   function injectOgControls() {
     ensureStyles();
     injectRowButtons();
@@ -1099,6 +1318,7 @@
     injectSingleOrderButton();
     injectSendLabelButton();
     injectAwaitingReportButton();
+    maybeShowBoxReminder();
   }
 
   let scheduled = false;

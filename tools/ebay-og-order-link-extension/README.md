@@ -87,3 +87,7 @@ When clicked, it:
 5. Reuses the same Pending Orders CSV import pathway as the manual file picker.
 
 The extension still does not read arbitrary local files from disk. It captures the generated report through page/network blob hooks or by refetching the browser-exposed download URL with the signed-in eBay session.
+
+## Multi-item shipping box reminder
+
+On eBay shipping-label pages, the extension watches for label workflows with 3 or more detected items/orders. When triggered, it shows an OG reminder to change the package dimensions before buying the label, with `4 x 4 x 4 in` shown only as an example size. If eBay's package dimension inputs are visible, the reminder includes a `Set 4 x 4 x 4` button that fills length, width, and height.
