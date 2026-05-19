@@ -132,6 +132,12 @@ function sameLocalDay(a, b = new Date()) {
     && date.getDate() === b.getDate();
 }
 
+function startOfLocalDay(value = new Date()) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function getOrderFromLine(line) {
   const order = line?.ebay_orders || line?.order || {};
   return Array.isArray(order) ? order[0] || {} : order;
@@ -146,16 +152,19 @@ function getUrgentOrderState(shipByDate) {
     return { label: "No ship date", className: "is-normal", rank: 4, dueDate: null };
   }
 
-  const now = new Date();
   const dueDate = new Date(shipByDate);
   if (Number.isNaN(dueDate.getTime())) {
     return { label: "No ship date", className: "is-normal", rank: 4, dueDate: null };
   }
 
-  const msUntilDue = dueDate.getTime() - now.getTime();
-  if (msUntilDue < 0) return { label: "Overdue", className: "is-overdue", rank: 0, dueDate };
-  if (sameLocalDay(dueDate, now)) return { label: "Due today", className: "is-today", rank: 1, dueDate };
-  if (msUntilDue <= 48 * 60 * 60 * 1000) return { label: "Due soon", className: "is-soon", rank: 2, dueDate };
+  const dueDay = startOfLocalDay(dueDate);
+  const today = startOfLocalDay();
+  const tomorrow = startOfLocalDay();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (dueDay < today) return { label: "Overdue", bucket: "overdue", className: "is-overdue", rank: 0, dueDate };
+  if (sameLocalDay(dueDate, today)) return { label: "Due today", bucket: "today", className: "is-today", rank: 1, dueDate };
+  if (dueDay.getTime() === tomorrow.getTime()) return { label: "Due tomorrow", bucket: "tomorrow", className: "is-tomorrow", rank: 2, dueDate };
   return { label: "Upcoming", className: "is-normal", rank: 3, dueDate };
 }
 
@@ -207,35 +216,60 @@ function groupUrgentOrderLines(lines) {
     });
 }
 
-function setUrgentOverdueCount(count, state = "ready", value = 0) {
-  const countEl = document.getElementById("urgent-overdue-count");
-  if (!countEl) return;
+function getUrgentDeadlineStats(groups = []) {
+  const stats = {
+    overdue: { label: "Overdue", buyers: new Set(), orders: 0, lines: 0, value: 0 },
+    today: { label: "Due Today", buyers: new Set(), orders: 0, lines: 0, value: 0 },
+    tomorrow: { label: "Due Tomorrow", buyers: new Set(), orders: 0, lines: 0, value: 0 },
+  };
 
-  countEl.classList.remove("has-overdue", "is-loading", "is-error");
+  groups.forEach((group) => {
+    const bucket = group.urgency?.bucket;
+    if (!stats[bucket]) return;
+    stats[bucket].orders += 1;
+    stats[bucket].lines += Number(group.pendingLines || 0);
+    stats[bucket].value += Number(group.order?.total_price || 0);
+    if (group.buyer) stats[bucket].buyers.add(group.buyer);
+  });
+
+  return stats;
+}
+
+function renderUrgentDeadlineStats(stats = null, state = "ready") {
+  const host = document.getElementById("urgent-due-breakdown");
+  if (!host) return;
 
   if (state === "loading") {
-    countEl.classList.add("is-loading");
-    countEl.textContent = "Overdue orders: ...";
+    host.innerHTML = `<span class="urgent-due-chip is-loading">Loading deadlines...</span>`;
     return;
   }
 
   if (state === "error") {
-    countEl.classList.add("is-error");
-    countEl.textContent = "Overdue orders: —";
+    host.innerHTML = `<span class="urgent-due-chip is-error">Could not load deadline counts</span>`;
     return;
   }
 
-  const safeCount = Math.max(0, Number(count) || 0);
-  const safeValue = Math.max(0, Number(value) || 0);
-  countEl.classList.toggle("has-overdue", safeCount > 0);
-  countEl.textContent = `${safeCount.toLocaleString()} overdue order${safeCount === 1 ? "" : "s"} · ${fmtMoney(safeValue)} overdue value`;
+  const orderWord = (count) => count === 1 ? "order" : "orders";
+  const itemWord = (count) => count === 1 ? "item" : "items";
+  host.innerHTML = ["overdue", "today", "tomorrow"].map((key) => {
+    const bucket = stats[key];
+    const buyers = bucket.buyers.size;
+    return `
+      <span class="urgent-due-chip is-${key}">
+        <b>${escapeHtml(bucket.label)}</b>
+        <strong>${bucket.orders.toLocaleString()} ${orderWord(bucket.orders)}</strong>
+        <small>${buyers.toLocaleString()} buyer${buyers === 1 ? "" : "s"} / ${bucket.lines.toLocaleString()} ${itemWord(bucket.lines)}</small>
+        <em>${fmtMoney(bucket.value)} value</em>
+      </span>
+    `;
+  }).join("");
 }
 
 async function loadUrgentOrders() {
   const container = document.getElementById("urgent-orders-container");
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading urgent orders...</div>`;
-  setUrgentOverdueCount(0, "loading");
+  renderUrgentDeadlineStats(null, "loading");
 
   const { data, error } = await supabase
     .from("ebay_order_lines")
@@ -261,20 +295,16 @@ async function loadUrgentOrders() {
   if (error) {
     console.error("Failed to load urgent eBay orders:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load urgent eBay orders.</div>`;
-    setUrgentOverdueCount(0, "error");
+    renderUrgentDeadlineStats(null, "error");
     return;
   }
 
   const groups = groupUrgentOrderLines(data || []);
-  const overdueCount = groups.filter((group) => group.urgency.rank === 0).length;
-  const overdueValue = groups
-    .filter((group) => group.urgency.rank === 0)
-    .reduce((sum, group) => sum + Number(group.order?.total_price || 0), 0);
-  setUrgentOverdueCount(overdueCount, "ready", overdueValue);
+  renderUrgentDeadlineStats(getUrgentDeadlineStats(groups));
   const urgentGroups = groups.filter((group) => group.urgency.rank <= 2).slice(0, 6);
 
   if (!urgentGroups.length) {
-    container.innerHTML = `<div class="urgent-orders-empty">No eBay orders are overdue or due in the next 48 hours.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">No eBay orders are overdue, due today, or due tomorrow.</div>`;
     return;
   }
 

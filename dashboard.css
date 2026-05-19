@@ -594,28 +594,83 @@ body::before{
   text-decoration: none;
 }
 
-.urgent-overdue-count {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 8px;
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.1);
-  background: rgba(255,255,255,.055);
-  color: rgba(242,243,245,.76);
-  font-size: .82rem;
-  font-weight: 900;
-  letter-spacing: .02em;
+.urgent-due-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
-.urgent-overdue-count.has-overdue {
+.urgent-due-chip {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 16px;
+  background: rgba(255,255,255,.055);
+  color: rgba(242,243,245,.82);
+}
+
+.urgent-due-chip b,
+.urgent-due-chip strong,
+.urgent-due-chip small,
+.urgent-due-chip em {
+  display: block;
+  line-height: 1.25;
+}
+
+.urgent-due-chip b {
+  font-size: .72rem;
+  font-weight: 1000;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.urgent-due-chip strong {
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 1000;
+}
+
+.urgent-due-chip small,
+.urgent-due-chip em {
+  color: var(--muted);
+  font-size: .78rem;
+  font-style: normal;
+}
+
+.urgent-due-chip.is-overdue {
   border-color: rgba(255, 108, 108, .38);
   background: rgba(255, 78, 78, .14);
+}
+
+.urgent-due-chip.is-overdue b,
+.urgent-due-chip.is-overdue small {
   color: rgba(255, 198, 198, .98);
 }
 
-.urgent-overdue-count.is-error {
+.urgent-due-chip.is-today {
+  border-color: rgba(255, 195, 90, .38);
+  background: rgba(255, 195, 90, .12);
+}
+
+.urgent-due-chip.is-today b,
+.urgent-due-chip.is-today small {
+  color: rgba(255,236,190,.96);
+}
+
+.urgent-due-chip.is-tomorrow {
+  border-color: rgba(139, 190, 255, .3);
+  background: rgba(139, 190, 255, .1);
+}
+
+.urgent-due-chip.is-tomorrow b,
+.urgent-due-chip.is-tomorrow small {
+  color: #cbe0ff;
+}
+
+.urgent-due-chip.is-error {
   color: rgba(242,243,245,.58);
 }
 
@@ -657,6 +712,10 @@ body::before{
   border-color: rgba(255, 195, 90, .42);
 }
 
+.urgent-order-card.is-tomorrow {
+  border-color: rgba(139, 190, 255, .32);
+}
+
 .urgent-order-top,
 .urgent-order-meta {
   display: flex;
@@ -680,6 +739,11 @@ body::before{
 .urgent-order-card.is-overdue .urgent-order-badge {
   background: rgba(255, 111, 111, .14);
   color: #ffb4b4;
+}
+
+.urgent-order-card.is-tomorrow .urgent-order-badge {
+  background: rgba(139, 190, 255, .12);
+  color: #cbe0ff;
 }
 
 .urgent-order-card strong {
