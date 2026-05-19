@@ -131,9 +131,26 @@
         </section>
 
       <section class="summary-strip" id="summary-strip">
-        <div><span>Pending Lines</span><strong id="summary-pending">0</strong></div>
-        <div><span>Ship Today</span><strong id="summary-ship-today">0</strong></div>
-        <div><span>Selected Order</span><strong id="summary-selected">None</strong></div>
+        <div>
+          <span>Open Queue</span>
+          <strong id="summary-pending">0 groups</strong>
+          <small id="summary-pending-lines">0 item lines</small>
+        </div>
+        <div class="summary-urgency is-overdue">
+          <span>Overdue</span>
+          <strong id="summary-overdue-orders">0 groups</strong>
+          <small id="summary-overdue-lines">0 item lines</small>
+        </div>
+        <div class="summary-urgency is-today">
+          <span>Due Today</span>
+          <strong id="summary-today-orders">0 groups</strong>
+          <small id="summary-today-lines">0 item lines</small>
+        </div>
+        <div class="summary-urgency is-tomorrow">
+          <span>Due Tomorrow</span>
+          <strong id="summary-tomorrow-orders">0 groups</strong>
+          <small id="summary-tomorrow-lines">0 item lines</small>
+        </div>
       </section>
 
       <section class="checkout-store-panel" aria-label="Checkout store">

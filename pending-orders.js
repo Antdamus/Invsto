@@ -173,10 +173,12 @@ function getOrderUrgency(value) {
 
   const shipDay = startOfLocalDay(shipBy);
   const today = startOfLocalDay();
+  const tomorrow = startOfLocalDay();
+  tomorrow.setDate(tomorrow.getDate() + 1);
   if (shipDay < today) {
     return {
       level: "overdue",
-      label: "Past due",
+      label: "Overdue",
       icon: "alert-triangle",
     };
   }
@@ -186,6 +188,14 @@ function getOrderUrgency(value) {
       level: "today",
       label: "Due today",
       icon: "clock",
+    };
+  }
+
+  if (shipDay.getTime() === tomorrow.getTime()) {
+    return {
+      level: "tomorrow",
+      label: "Due tomorrow",
+      icon: "calendar-days",
     };
   }
 
@@ -1059,11 +1069,28 @@ function applyEbayLaunchOrderSelection() {
 
 function renderSummaryStrip() {
   const openLines = state.orders.filter(isOpenOrderLine);
-  const pending = openLines.length;
-  const shipToday = openLines.filter((line) => sameLocalDay(line.order?.ship_by_date)).length;
-  $("summary-pending").textContent = String(pending);
-  $("summary-ship-today").textContent = String(shipToday);
-  $("summary-selected").textContent = state.selectedLine ? getBuyerLabel(state.selectedLine) : "None";
+  const openGroups = groupLinesByBuyer(openLines);
+  const urgencyCounts = {
+    overdue: { groups: 0, lines: 0 },
+    today: { groups: 0, lines: 0 },
+    tomorrow: { groups: 0, lines: 0 },
+  };
+
+  openGroups.forEach((group) => {
+    const bucket = getOrderUrgency(group.nextShipBy)?.level;
+    if (!urgencyCounts[bucket]) return;
+    urgencyCounts[bucket].groups += 1;
+    urgencyCounts[bucket].lines += group.lines.filter(isOpenOrderLine).length;
+  });
+
+  $("summary-pending").textContent = `${openGroups.length.toLocaleString()} group${openGroups.length === 1 ? "" : "s"}`;
+  $("summary-pending-lines").textContent = `${openLines.length.toLocaleString()} item line${openLines.length === 1 ? "" : "s"}`;
+  $("summary-overdue-orders").textContent = `${urgencyCounts.overdue.groups.toLocaleString()} group${urgencyCounts.overdue.groups === 1 ? "" : "s"}`;
+  $("summary-overdue-lines").textContent = `${urgencyCounts.overdue.lines.toLocaleString()} item line${urgencyCounts.overdue.lines === 1 ? "" : "s"}`;
+  $("summary-today-orders").textContent = `${urgencyCounts.today.groups.toLocaleString()} group${urgencyCounts.today.groups === 1 ? "" : "s"}`;
+  $("summary-today-lines").textContent = `${urgencyCounts.today.lines.toLocaleString()} item line${urgencyCounts.today.lines === 1 ? "" : "s"}`;
+  $("summary-tomorrow-orders").textContent = `${urgencyCounts.tomorrow.groups.toLocaleString()} group${urgencyCounts.tomorrow.groups === 1 ? "" : "s"}`;
+  $("summary-tomorrow-lines").textContent = `${urgencyCounts.tomorrow.lines.toLocaleString()} item line${urgencyCounts.tomorrow.lines === 1 ? "" : "s"}`;
   const buyerGroupCount = groupLinesByBuyer(state.filteredOrders).length;
   const visibleLineCount = state.filteredOrders.length;
   $("order-count-pill").textContent = `${visibleLineCount.toLocaleString()} line${visibleLineCount === 1 ? "" : "s"} / ${buyerGroupCount.toLocaleString()} buyer${buyerGroupCount === 1 ? "" : "s"}`;
@@ -2072,6 +2099,7 @@ function scoreOrderLineForLiveLot(line, lot = state.selectedLiveLot, items = sta
   const urgency = getOrderUrgency(line.order?.ship_by_date);
   if (urgency?.level === "overdue") score += 4;
   if (urgency?.level === "today") score += 3;
+  if (urgency?.level === "tomorrow") score += 1;
 
   return {
     line,
