@@ -7,10 +7,24 @@
 /* -------------------------
    Panel shell + heading
 ------------------------- */
-#panelSchedule{ width: 100%; }
+#panelSchedule{
+  width: 100%;
+  min-width: 0;
+}
+
+#panelSchedule .panel-head,
+#panelSchedule .schedule-flow,
+#panelSchedule .sched-controls,
+#panelSchedule .table-wrapper.sched-table-wrap,
+#panelSchedule .sched-cards,
+#panelSchedule .cal-wrapper{
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
 
 #panelSchedule .panel-head{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 12px auto;
   display:flex;
   align-items:flex-end;
@@ -78,7 +92,6 @@
    Guided scheduling flow
 ------------------------- */
 #panelSchedule .schedule-flow{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 18px;
   display: grid;
   gap: 14px;
@@ -328,9 +341,15 @@
 }
 
 @media (max-width: 820px){
+  #panelSchedule{
+    width: 100%;
+    overflow-x: hidden;
+  }
+
   #panelSchedule .panel-head{
     align-items: stretch;
     flex-direction: column;
+    gap: 12px;
   }
 
   #panelSchedule .panel-head .seg{
@@ -341,6 +360,10 @@
   #panelSchedule .schedule-step{
     padding: 14px;
     border-radius: 18px;
+  }
+
+  #panelSchedule .schedule-flow{
+    gap: 12px;
   }
 
   #panelSchedule .schedule-step-head{
@@ -378,10 +401,30 @@
   #panelSchedule .schedule-day-actions .btn{
     width: 100%;
   }
+
+  #panelSchedule .schedule-pick-card,
+  #panelSchedule .schedule-store-card,
+  #panelSchedule .schedule-day-card{
+    min-height: 72px;
+  }
 }
 
 @media (max-width: 460px){
+  #panelSchedule .schedule-step{
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  #panelSchedule .schedule-step h3{
+    font-size: 24px;
+  }
+
   #panelSchedule .schedule-day-picker{
+    grid-template-columns: 1fr;
+  }
+
+  #panelSchedule .schedule-worker-grid,
+  #panelSchedule .schedule-store-grid{
     grid-template-columns: 1fr;
   }
 }
@@ -390,7 +433,6 @@
    Controls card
 ------------------------- */
 #panelSchedule .sched-controls{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 12px auto;
 
   display: grid;
@@ -495,7 +537,6 @@
    Desktop schedule table wrapper (week view)
 ------------------------- */
 #panelSchedule .table-wrapper.sched-table-wrap{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 14px auto;
 
   border-radius: 14px;
@@ -653,7 +694,6 @@
    --------------------------------------------------------- */
 
 #panelSchedule .sched-cards{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto 14px auto;
   display:none; /* becomes active on mobile breakpoint */
   gap: 12px;
@@ -882,7 +922,6 @@
    Calendar (month view)
 ------------------------- */
 #panelSchedule .cal-wrapper{
-  width: min(var(--page-max, 1320px), calc(100vw - 36px));
   margin: 0 auto;
 
   border-radius: 14px;

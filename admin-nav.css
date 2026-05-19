@@ -239,7 +239,10 @@ body.admin-unified-nav.admin-nav-offset .admin-header {
 
 body.admin-unified-nav.admin-nav-offset .guard-host,
 body.admin-unified-nav.admin-nav-offset .admin-app {
-  max-width: min(1180px, calc(100vw - var(--admin-nav-collapsed) - 36px));
+  width: min(var(--page-max, 1320px), calc(100vw - var(--admin-nav-collapsed) - 48px));
+  max-width: min(var(--page-max, 1320px), calc(100vw - var(--admin-nav-collapsed) - 48px));
+  margin-left: auto;
+  margin-right: auto;
 }
 
 body.admin-unified-nav.admin-nav-offset.add-body .page {
@@ -295,6 +298,8 @@ body.admin-unified-nav.admin-nav-offset .toggle-controller-btn {
   body.admin-unified-nav.admin-nav-offset.add-body .page {
     max-width: none;
     width: auto;
+    margin-left: 0;
+    margin-right: 0;
   }
 
   body.admin-unified-nav.admin-nav-offset .toggle-controller-btn {
