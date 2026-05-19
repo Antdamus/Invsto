@@ -4,7 +4,8 @@
   const APP_URL_KEY = "ogPendingOrdersUrl";
   const PENDING_LABEL_PREFIX = "ogPendingLabel:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
-  const APP_ACK_TIMEOUT_MS = 60000;
+  const APP_ACK_TIMEOUT_MS = 300000;
+  const RECEIVER_STATE_TIMEOUT_MS = 900;
   const downloadCaptures = new Map();
   const appTransferAcks = new Map();
 
@@ -49,22 +50,17 @@
 
   function waitForAppTransferAck(transferId) {
     return new Promise((resolve) => {
-      let lastError = null;
       const timer = setTimeout(() => {
         appTransferAcks.delete(transferId);
         resolve({
           ok: false,
           transferId,
-          error: lastError || "OG received the label handoff, but did not confirm upload within 60 seconds. Open the matching OG label modal/session and try again.",
+          error: "OG received the label handoff, but did not confirm upload within 5 minutes. Open the matching OG label modal/session and try again.",
         });
       }, APP_ACK_TIMEOUT_MS);
 
       appTransferAcks.set(transferId, {
         resolve: (status) => {
-          if (!status?.ok) {
-            lastError = status?.error || status?.message || lastError;
-            return;
-          }
           clearTimeout(timer);
           appTransferAcks.delete(transferId);
           resolve(status);
@@ -124,43 +120,157 @@
     return [...exact, ...sameOrigin];
   }
 
+  function buildAppPageUrl(appUrl, payload, pageName = "") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    if (payload.metadata?.orderId) url.searchParams.set("orderId", payload.metadata.orderId);
+    url.searchParams.set("labelTransferId", payload.transferId);
+    return url;
+  }
+
+  function isPendingOrdersState(state = {}) {
+    return state.pageType === "pending-orders";
+  }
+
+  function getStateOrderNumber(state = {}) {
+    return String(state.selectedOrderNumber || "").trim();
+  }
+
+  function stateHasActiveReceiver(state = {}) {
+    return Boolean(getStateOrderNumber(state))
+      || Boolean(state.labelModalOpen && Array.isArray(state.awaitingOrderNumbers) && state.awaitingOrderNumbers.length);
+  }
+
+  function stateMatchesOrder(state = {}, orderId = "") {
+    if (!orderId) return false;
+    const selectedOrder = getStateOrderNumber(state);
+    if (selectedOrder) return selectedOrder === orderId;
+    if (Array.isArray(state.awaitingOrderNumbers)) return state.awaitingOrderNumbers.includes(orderId);
+    return false;
+  }
+
+  function queryReceiverState(tab, payload) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), RECEIVER_STATE_TIMEOUT_MS);
+      chrome.tabs.sendMessage(tab.id, {
+        type: "OG_EBAY_GET_LABEL_RECEIVER_STATE",
+        payload,
+      }).then((state) => {
+        clearTimeout(timer);
+        resolve(state?.ok ? { ...state, tab } : null);
+      }).catch(() => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+    });
+  }
+
+  async function getReceiverStates(tabs, payload) {
+    const states = await Promise.all(tabs.map((tab) => queryReceiverState(tab, payload)));
+    return states.filter(Boolean);
+  }
+
+  async function deliverLabelToTab(tab, payload) {
+    const appAckPromise = waitForAppTransferAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_LABEL_TRANSFER", payload });
+    await focusTab(tab.id);
+    return appAckPromise;
+  }
+
+  async function openTransferUrl(url, existingTab = null) {
+    const tab = existingTab?.id
+      ? await chrome.tabs.update(existingTab.id, { url: url.toString(), active: true })
+      : await chrome.tabs.create({ url: url.toString(), active: true });
+    if (tab?.id) await focusTab(tab.id);
+    return tab;
+  }
+
+  async function openTransferPageAndWait(appUrl, payload, pageName, existingTab = null) {
+    const appAckPromise = waitForAppTransferAck(payload.transferId);
+    const url = buildAppPageUrl(appUrl, payload, pageName);
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function finishRoutedTransfer(appUrl, payload, firstAck, openedInfo = {}) {
+    if (firstAck?.route === "history") {
+      const historyAck = await openTransferPageAndWait(appUrl, payload, "ebay-order-history.html");
+      return {
+        ...historyAck,
+        transferId: payload.transferId,
+        delivered: false,
+        opened: true,
+        routedTo: "history",
+      };
+    }
+
+    return {
+      ...firstAck,
+      transferId: payload.transferId,
+      ...openedInfo,
+    };
+  }
+
   async function relayLabelToApp(label) {
     const appUrl = await getAppUrl();
     if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
 
     const transferId = buildTransferId(label);
     const payload = { ...label, transferId };
+    const orderId = String(label.metadata?.orderId || "").trim();
     await storePendingLabel(transferId, payload);
-    const appAckPromise = waitForAppTransferAck(transferId);
-    const url = new URL(appUrl.toString());
-    url.searchParams.set("source", "ebay");
-    if (label.metadata?.orderId) url.searchParams.set("orderId", label.metadata.orderId);
-    url.searchParams.set("labelTransferId", transferId);
 
     const tabs = await findAppTabs(appUrl);
-    if (tabs.length) {
-      const deliveries = await Promise.all(tabs.map((tab) =>
-        chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_LABEL_TRANSFER", payload }).catch(() => null)
-      ));
-      if (deliveries.some((delivery) => delivery?.ok)) {
-        const ack = await appAckPromise;
-        return { ...ack, transferId, delivered: true, opened: false };
-      }
+    const receiverStates = await getReceiverStates(tabs, payload);
+    const matchingReceiver = receiverStates.find((state) => stateHasActiveReceiver(state) && stateMatchesOrder(state, orderId));
+    if (matchingReceiver?.tab?.id) {
+      const ack = await deliverLabelToTab(matchingReceiver.tab, payload);
+      return finishRoutedTransfer(appUrl, payload, ack, { delivered: true, opened: false });
+    }
 
-      await chrome.tabs.create({ url: url.toString(), active: true });
-      const ack = await appAckPromise;
+    const activeMismatches = receiverStates.filter((state) => stateHasActiveReceiver(state) && !stateMatchesOrder(state, orderId));
+    if (activeMismatches.length) {
+      const mismatch = activeMismatches[0];
+      await focusTab(mismatch.tab.id);
+      const selected = getStateOrderNumber(mismatch) || (mismatch.awaitingOrderNumbers || []).join(", ");
       return {
-        ...ack,
+        ok: false,
         transferId,
         delivered: false,
-        opened: true,
-        note: "The open OG tab did not have the label bridge yet, so a transfer tab was opened.",
+        opened: false,
+        blocked: true,
+        error: `OG already has an open label/session for ${selected || "another order"}. Close it or open the matching order ${orderId}, then click Send Label to OG again.`,
       };
     }
 
-    await chrome.tabs.create({ url: url.toString(), active: true });
-    const ack = await appAckPromise;
-    return { ...ack, transferId, delivered: false, opened: true };
+    const neutralPending = receiverStates.find((state) => isPendingOrdersState(state) && !stateHasActiveReceiver(state));
+    if (neutralPending?.tab?.id) {
+      const ack = await openTransferPageAndWait(appUrl, payload, "", neutralPending.tab);
+      return finishRoutedTransfer(appUrl, payload, ack, {
+        delivered: false,
+        opened: true,
+        reusedTab: true,
+      });
+    }
+
+    const pendingTab = tabs.find((tab) => {
+      const state = receiverStates.find((entry) => entry.tab?.id === tab.id);
+      return !state && isExactAppTab(tab, appUrl);
+    });
+    if (pendingTab?.id) {
+      const ack = await openTransferPageAndWait(appUrl, payload, "", pendingTab);
+      return finishRoutedTransfer(appUrl, payload, ack, {
+        delivered: false,
+        opened: true,
+        reusedTab: true,
+      });
+    }
+
+    const ack = await openTransferPageAndWait(appUrl, payload, "");
+    return finishRoutedTransfer(appUrl, payload, ack, { delivered: false, opened: true });
   }
 
   function beginDownloadCapture(payload, sender) {

@@ -729,7 +729,7 @@
       button.type = "button";
       button.id = SEND_LABEL_ID;
       button.textContent = "Send Label to OG";
-      button.title = "Capture the eBay download-label PDF and attach it to the open OG Pending Orders page";
+      button.title = "Capture the eBay label PDF and route it to the matching OG pending or completed order";
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();

@@ -6,10 +6,11 @@
     return response?.appUrl || "";
   }
 
-  function sameAppPage(appUrl) {
+  function sameOgAppOrigin(appUrl) {
     try {
       const configured = new URL(appUrl);
-      return configured.origin === window.location.origin && configured.pathname === window.location.pathname;
+      return configured.origin === window.location.origin
+        && /\/(?:pending-orders|ebay-order-history)\.html$/i.test(window.location.pathname);
     } catch (_) {
       return false;
     }
@@ -36,6 +37,33 @@
     }).catch(() => null);
   }
 
+  function requestReceiverState(payload) {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      let settled = false;
+      const finish = (state) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(state);
+      };
+      const timer = window.setTimeout(() => finish(null), 700);
+      const onMessage = (event) => {
+        if (event.source !== window || event.origin !== window.location.origin) return;
+        if (event.data?.type !== "OG_EBAY_LABEL_RECEIVER_STATE_RESPONSE") return;
+        if (event.data?.requestId !== requestId) return;
+        finish(event.data.payload || null);
+      };
+      window.addEventListener("message", onMessage);
+      window.postMessage({
+        type: "OG_EBAY_LABEL_RECEIVER_STATE_REQUEST",
+        requestId,
+        payload,
+      }, window.location.origin);
+    });
+  }
+
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
     if (!transferId) return;
@@ -47,10 +75,20 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "OG_EBAY_LABEL_TRANSFER") return false;
-    postToOgApp(message.payload);
-    sendResponse({ ok: true });
-    return true;
+    if (message?.type === "OG_EBAY_LABEL_TRANSFER") {
+      postToOgApp(message.payload);
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_GET_LABEL_RECEIVER_STATE") {
+      requestReceiverState(message.payload)
+        .then((state) => sendResponse({ ok: true, ...(state || {}) }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    return false;
   });
 
   window.addEventListener("message", (event) => {
@@ -60,7 +98,7 @@
   });
 
   getConfiguredAppUrl().then((appUrl) => {
-    if (!sameAppPage(appUrl)) return;
+    if (!sameOgAppOrigin(appUrl)) return;
     deliverPendingTransferFromUrl();
   });
 })();

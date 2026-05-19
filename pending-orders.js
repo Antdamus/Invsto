@@ -3418,6 +3418,49 @@ function postEbayLabelTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function createLabelRouteError(route, message) {
+  const error = new Error(message);
+  error.route = route;
+  return error;
+}
+
+function isWorkerNoInventoryModalOpen() {
+  return !$("worker-no-inventory-modal")?.classList.contains("hidden");
+}
+
+function getMatchingOrderLines(orderNumber) {
+  return state.orders.filter((line) => String(line.order?.order_number || "") === orderNumber);
+}
+
+async function openPendingNoInventorySessionForLabel(orderNumber) {
+  let matchingLines = getMatchingOrderLines(orderNumber);
+  if (!matchingLines.length) {
+    await loadOrders();
+    matchingLines = getMatchingOrderLines(orderNumber);
+  }
+
+  const openMatch = matchingLines.find(isOpenOrderLine);
+  if (!openMatch) return false;
+
+  state.ebayLaunchOrderNumbers = new Set([orderNumber]);
+  state.ebayLaunchBuyerKeys = new Set(matchingLines.map(getBuyerKey).filter(Boolean));
+  clearLiveLotSelection({ render: false });
+  applyOrderFilters();
+
+  if (state.selectedLine?.id !== openMatch.id) {
+    selectOrderLine(openMatch.id);
+  } else {
+    renderSelectedOrder();
+  }
+
+  if (!isWorkerNoInventoryModalOpen()) {
+    setTimeout(() => openWorkerNoInventoryModal({ autoRequestPhoto: true }), 250);
+  } else {
+    renderEbayLabelPanel();
+  }
+  return true;
+}
+
 async function loadEbayOrderForLabel(orderNumber) {
   const { data, error } = await supabase
     .from("ebay_orders")
@@ -3451,10 +3494,18 @@ async function attachEbayLabelToOrder(transferPayload) {
     throw new Error(`This eBay label is for ${orderNumber}, but the open OG session is ${selectedOrderNumber}. Open the matching OG order/session before sending this label.`);
   }
 
-  const matchingLines = state.orders.filter((line) => String(line.order?.order_number || "") === orderNumber);
+  let matchingLines = getMatchingOrderLines(orderNumber);
+  if (!matchingLines.length) {
+    await loadOrders();
+    matchingLines = getMatchingOrderLines(orderNumber);
+  }
+
   const directOrder = matchingLines[0]?.order || await loadEbayOrderForLabel(orderNumber);
   if (!directOrder?.id) {
     throw new Error(`Order ${orderNumber} is not in OG yet. Import the latest eBay order report first, then open that order/session and send the label again.`);
+  }
+  if (!matchingLines.some(isOpenOrderLine)) {
+    throw createLabelRouteError("history", `Order ${orderNumber} is already closed in the pending queue. Opening order history to attach the label.`);
   }
 
   const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
@@ -3487,19 +3538,20 @@ async function attachEbayLabelToOrder(transferPayload) {
   };
   const now = new Date().toISOString();
 
-  const { error: orderError } = await supabase
-    .from("ebay_orders")
-    .update({
-      ebay_shipment_id: metadata.shipmentId || null,
-      label_status: "label_uploaded",
-      label_storage_bucket: EBAY_LABEL_BUCKET,
-      label_file_path: destinationPath,
-      label_uploaded_at: now,
-      label_uploaded_by: state.user?.id || null,
-      label_metadata: labelMetadata,
-    })
-    .in("id", orderIds);
-  if (orderError) throw new Error(orderError.message || "Could not update the eBay order label status.");
+  const { error: orderError } = await supabase.rpc("attach_ebay_shipping_label", {
+    _order_ids: orderIds,
+    _order_line_ids: matchingLines.map((line) => line.id).filter(Boolean),
+    _order_numbers: [...new Set([
+      ...matchingLines.map((line) => line.order?.order_number).filter(Boolean),
+      directOrder.order_number,
+    ].filter(Boolean))],
+    _shipment_id: metadata.shipmentId || null,
+    _label_storage_bucket: EBAY_LABEL_BUCKET,
+    _label_file_path: destinationPath,
+    _label_metadata: labelMetadata,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (orderError) throw new Error(orderError.message || "Could not update and audit the eBay order label status.");
 
   matchingLines.forEach((line) => {
     line.label_status = "label_uploaded";
@@ -3524,13 +3576,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     }).catch(() => null);
   }
 
-  if (!state.selectedLine || String(state.selectedLine.order?.order_number || "") !== orderNumber) {
-    const openMatch = matchingLines.find(isOpenOrderLine) || matchingLines[0];
-    if (openMatch) selectOrderLine(openMatch.id);
-    else if (!matchingLines.length) await loadOrders();
-  } else {
-    renderSelectedOrder();
-  }
+  await openPendingNoInventorySessionForLabel(orderNumber);
   const attachedMessage = matchingLines.length
     ? `Shipping label attached to eBay order ${orderNumber}. Preview it before final confirmation.`
     : `Shipping label attached to eBay order ${orderNumber}. Refresh or open that order to preview it.`;
@@ -3567,7 +3613,12 @@ async function handleEbayLabelTransfer(payload) {
     console.error("eBay label transfer failed:", error);
     const message = error.message || "Could not attach the eBay label.";
     setEbayLabelTransferStatus(message, "error");
-    postEbayLabelTransferStatus({
+    postEbayLabelTransferStatus(error.route ? {
+      transferId,
+      ok: false,
+      route: error.route,
+      message,
+    } : {
       transferId,
       ok: false,
       error: message,
@@ -3577,9 +3628,28 @@ async function handleEbayLabelTransfer(payload) {
   }
 }
 
+function getPendingLabelReceiverState() {
+  const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
+  return {
+    pageType: "pending-orders",
+    selectedOrderNumber,
+    hasOpenSession: Boolean(selectedOrderNumber),
+    noInventoryModalOpen: isWorkerNoInventoryModalOpen(),
+    canAutoRoute: !selectedOrderNumber,
+  };
+}
+
 function setupEbayLabelReceiver() {
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
+    if (event.data?.type === "OG_EBAY_LABEL_RECEIVER_STATE_REQUEST") {
+      window.postMessage({
+        type: "OG_EBAY_LABEL_RECEIVER_STATE_RESPONSE",
+        requestId: event.data.requestId,
+        payload: getPendingLabelReceiverState(),
+      }, window.location.origin);
+      return;
+    }
     if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
     handleEbayLabelTransfer(event.data.payload);
   });

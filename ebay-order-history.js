@@ -4,12 +4,17 @@ const state = {
   lines: [],
   adminEvents: [],
   revertEvents: [],
+  labelEvents: [],
   relatedAdminEvents: [],
   relatedRevertEvents: [],
+  relatedLabelEvents: [],
   filteredLines: [],
   adminCloseoutLineIds: new Set(),
   selectedRevertLineIds: [],
   awaitingLabelGroup: null,
+  queuedHistoryLabelTransfers: [],
+  pendingHistoryLabelReplacement: null,
+  historyLoaded: false,
   labelPreviewUrls: new Map(),
   handledLabelTransferIds: new Set(),
   labelBusy: false,
@@ -337,6 +342,7 @@ function setupDefaultDates() {
 }
 
 async function loadOrderHistory() {
+  state.historyLoaded = false;
   const list = $("history-list");
   const eventList = $("event-list");
   if (list) list.innerHTML = `<div class="history-empty">Loading order history...</div>`;
@@ -412,11 +418,19 @@ async function loadOrderHistory() {
       .order("created_at", { ascending: false })
       .limit(300)
     : Promise.resolve({ data: [], error: null });
+  const labelEventsQuery = supabase
+    .from("ebay_order_label_events")
+    .select("*")
+    .gte("created_at", fromIso)
+    .lte("created_at", toIso)
+    .order("created_at", { ascending: false })
+    .limit(300);
 
-  const [linesResult, adminEventsResult, revertEventsResult] = await Promise.all([
+  const [linesResult, adminEventsResult, revertEventsResult, labelEventsResult] = await Promise.all([
     linesQuery,
     adminEventsQuery,
     revertEventsQuery,
+    labelEventsQuery,
   ]);
 
   if (linesResult.error) {
@@ -433,13 +447,18 @@ async function loadOrderHistory() {
     console.warn("Failed to load eBay revert events. Push the latest migration if this is new:", revertEventsResult.error);
   }
 
+  if (labelEventsResult.error) {
+    console.warn("Failed to load eBay label audit events. Push the latest label audit migration if this is new:", labelEventsResult.error);
+  }
+
   const closedLines = (linesResult.data || []).map(normalizeLine);
   const closedLineIds = closedLines.map((line) => line.id).filter(Boolean);
   let relatedAdminEvents = [];
   let relatedRevertEvents = [];
+  let relatedLabelEvents = [];
 
   if (closedLineIds.length) {
-    const [relatedAdminResult, relatedRevertResult] = await Promise.all([
+    const [relatedAdminResult, relatedRevertResult, relatedLabelResult] = await Promise.all([
       supabase
         .from("ebay_order_admin_events")
         .select("*")
@@ -452,6 +471,11 @@ async function loadOrderHistory() {
           .overlaps("order_line_ids", closedLineIds)
           .limit(500)
         : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("ebay_order_label_events")
+        .select("*")
+        .overlaps("order_line_ids", closedLineIds)
+        .limit(500),
     ]);
 
     if (relatedAdminResult.error) {
@@ -465,20 +489,31 @@ async function loadOrderHistory() {
     } else {
       relatedRevertEvents = relatedRevertResult.data || [];
     }
+
+    if (relatedLabelResult.error) {
+      console.warn("Failed to load related label events for visible order lines:", relatedLabelResult.error);
+    } else {
+      relatedLabelEvents = relatedLabelResult.data || [];
+    }
   }
 
   state.adminEvents = adminEventsResult.data || [];
   state.revertEvents = revertEventsResult.data || [];
+  state.labelEvents = labelEventsResult.error ? [] : labelEventsResult.data || [];
   state.relatedAdminEvents = relatedAdminEvents;
   state.relatedRevertEvents = relatedRevertEvents;
+  state.relatedLabelEvents = relatedLabelEvents;
   state.adminCloseoutLineIds = new Set(
     [...state.adminEvents, ...state.relatedAdminEvents]
       .filter((event) => event.action === "fulfilled_no_inventory")
       .flatMap((event) => Array.isArray(event.order_line_ids) ? event.order_line_ids : [])
   );
   state.lines = closedLines;
+  state.historyLoaded = true;
   renderWorkerOptions();
   applyFilters();
+  applyHistoryLabelLaunchSelection();
+  drainQueuedHistoryLabelTransfers();
 }
 
 function renderWorkerOptions() {
@@ -490,7 +525,7 @@ function renderWorkerOptions() {
   state.lines.forEach((line) => {
     if (line.fulfilled_by_email) workers.add(line.fulfilled_by_email);
   });
-  [...state.adminEvents, ...state.revertEvents].forEach((event) => {
+  [...state.adminEvents, ...state.revertEvents, ...state.labelEvents].forEach((event) => {
     if (event.signed_by_email) workers.add(event.signed_by_email);
   });
 
@@ -583,8 +618,10 @@ function getRelatedEventsForLineIds(lineIds = []) {
   return [
     ...state.relatedAdminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.relatedRevertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
+    ...state.relatedLabelEvents.map((event) => ({ ...event, category: "label" })),
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
+    ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
   ]
     .filter((event) => getEventLineIds(event).some((lineId) => wanted.has(lineId)))
     .filter((event, index, array) => array.findIndex((entry) => entry.id === event.id && entry.category === event.category) === index)
@@ -593,6 +630,7 @@ function getRelatedEventsForLineIds(lineIds = []) {
 
 function getEventLabel(event) {
   if (event.category === "revert") return "Reverted";
+  if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
   if (event.action === "fulfilled_no_inventory") return "No-inventory completion";
   if (event.action === "cancelled") return "Canceled";
   return event.action || "Event";
@@ -937,6 +975,7 @@ function getFilteredEvents() {
   const events = [
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
+    ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
   ];
 
   return events.filter((event) => {
@@ -950,6 +989,9 @@ function getFilteredEvents() {
         event.action,
         event.notes,
         event.signed_by_email,
+        event.label_file_path,
+        event.shipment_id,
+        ...(event.order_numbers || []),
         ...(event.order_ids || []),
         ...(event.order_line_ids || []),
       ].filter(Boolean).join(" ").toLowerCase();
@@ -965,32 +1007,38 @@ function renderEventList() {
 
   const events = getFilteredEvents().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (!events.length) {
-    list.innerHTML = `<div class="history-empty">No no-inventory completions, cancellations, or reversal events match this view.</div>`;
+    list.innerHTML = `<div class="history-empty">No label, no-inventory, cancellation, or reversal events match this view.</div>`;
     return;
   }
 
   list.innerHTML = events.map((event, eventIndex) => {
     const label = event.category === "revert"
       ? "Order reverted"
-      : event.action === "fulfilled_no_inventory"
-        ? "Packed without inventory removal"
-        : isAdminUser() ? "Canceled by admin" : "Canceled";
+      : event.category === "label"
+        ? event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached"
+        : event.action === "fulfilled_no_inventory"
+          ? "Packed without inventory removal"
+          : isAdminUser() ? "Canceled by admin" : "Canceled";
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
     const gps = getEventGpsLabel(event);
     const store = event.payload?.checkout_store_name || "";
     const evidenceCount = getEventEvidencePhotos(event).length;
+    const eventStatusClass = event.category === "revert" || event.category === "label"
+      ? "is-admin"
+      : event.action === "cancelled" ? "is-cancelled" : "";
+    const eventDetail = event.notes || event.label_file_path || "No note recorded.";
     return `
       <article class="event-card">
-        <span class="history-status ${event.category === "revert" ? "is-admin" : event.action === "cancelled" ? "is-cancelled" : ""}">${escapeHtml(label)}</span>
+        <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>
         <h3>${escapeHtml(event.signed_by_email || "Unknown user")}</h3>
         <div class="event-meta">
           <span>${escapeHtml(formatDateTime(event.created_at))}</span>
-          <span>${Number(event.order_line_ids?.length || event.payload?.reverted_lines || 0).toLocaleString()} line(s)${escapeHtml(units)}</span>
+          <span>${Number(event.order_line_ids?.length || event.payload?.reverted_lines || event.order_numbers?.length || 0).toLocaleString()} line(s)${escapeHtml(units)}</span>
           ${gps ? `<span>${escapeHtml(gps)}</span>` : ""}
           ${store ? `<span>${escapeHtml(store)}</span>` : ""}
           ${evidenceCount ? `<span>${evidenceCount} evidence photo${evidenceCount === 1 ? "" : "s"}</span>` : ""}
         </div>
-        <p>${escapeHtml(event.notes || "No note recorded.")}</p>
+        <p>${escapeHtml(eventDetail)}</p>
         ${evidenceCount ? `<div class="event-photo-grid" data-event-evidence-index="${eventIndex}"></div>` : ""}
       </article>
     `;
@@ -1164,6 +1212,13 @@ function setHistoryLabelStatus(message = "", type = "info") {
   status.classList.toggle("is-success", type === "success");
 }
 
+function setHistoryReplaceButtonVisible(visible) {
+  const button = $("replace-history-label");
+  if (!button) return;
+  button.classList.toggle("hidden", !visible);
+  button.toggleAttribute("disabled", !visible);
+}
+
 function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
   const details = $("history-label-details");
   const preview = $("preview-history-label");
@@ -1199,6 +1254,9 @@ function openHistoryLabelModal(orderNumbers) {
   }
 
   state.awaitingLabelGroup = target;
+  state.pendingHistoryLabelReplacement = null;
+  setHistoryReplaceButtonVisible(false);
+  if ($("done-history-label")) $("done-history-label").textContent = "Done";
   const attachedOrder = getAttachedHistoryOrder(target.orders);
   const orderCount = target.orderNumbers.length || target.orders.length;
   const orderWord = orderCount === 1 ? "order" : "orders";
@@ -1208,6 +1266,46 @@ function openHistoryLabelModal(orderNumbers) {
   renderHistoryLabelDetails(target);
   openModal("history-label-modal");
   setTimeout(() => $("close-history-label-modal")?.focus(), 80);
+}
+
+function getRequestedHistoryLabelOrderNumbers() {
+  const params = new URLSearchParams(window.location.search);
+  return parseHistoryOrderNumbers([
+    params.get("orderId"),
+    params.get("order"),
+    params.get("ebayOrder"),
+    ...(params.get("orderIds") || "").split(","),
+  ]);
+}
+
+function getHistoryGroupOrderNumbersForOrder(orderNumber) {
+  const normalized = normalizeEbayOrderNumber(orderNumber);
+  if (!normalized) return [];
+  const groups = buildHistoryGroups(state.lines);
+  const group = groups.find((entry) =>
+    entry.lines.some((line) => normalizeEbayOrderNumber(line.order?.order_number) === normalized)
+  );
+  if (!group) return [];
+  return getOrderNumbersFromOrders(getUniqueOrdersFromLines(group.lines));
+}
+
+function openHistoryLabelReceiverForOrders(orderNumbers) {
+  const normalized = parseHistoryOrderNumbers(orderNumbers);
+  if (!normalized.length) return false;
+  const groupOrderNumbers = normalized.flatMap(getHistoryGroupOrderNumbersForOrder);
+  const targetNumbers = groupOrderNumbers.length ? [...new Set(groupOrderNumbers)] : normalized;
+  const target = getHistoryLabelTarget(targetNumbers);
+  if (!target?.orders?.length) return false;
+  openHistoryLabelModal(target.orderNumbers);
+  return true;
+}
+
+function applyHistoryLabelLaunchSelection() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.get("labelTransferId")) return;
+  const orderNumbers = getRequestedHistoryLabelOrderNumbers();
+  if (!orderNumbers.length) return;
+  openHistoryLabelReceiverForOrders(orderNumbers);
 }
 
 async function getHistoryLabelSignedUrl(order) {
@@ -1263,7 +1361,10 @@ function handleOpenHistoryLabelButtonClick(orderNumber) {
 }
 
 function closeHistoryLabelModal() {
+  cancelPendingHistoryLabelReplacement();
   state.awaitingLabelGroup = null;
+  setHistoryReplaceButtonVisible(false);
+  if ($("done-history-label")) $("done-history-label").textContent = "Done";
   closeModal("history-label-modal");
 }
 
@@ -1272,6 +1373,45 @@ function postHistoryLabelTransferStatus(payload = {}) {
     type: "OG_EBAY_LABEL_TRANSFER_STATUS",
     payload,
   }, window.location.origin);
+}
+
+function clearExtensionPendingHistoryLabel(transferId) {
+  if (!transferId || !window.chrome?.runtime?.sendMessage) return;
+  chrome.runtime.sendMessage({
+    type: "OG_EBAY_CLEAR_PENDING_LABEL",
+    transferId,
+  }).catch(() => null);
+}
+
+function cancelPendingHistoryLabelReplacement() {
+  const pending = state.pendingHistoryLabelReplacement;
+  if (!pending) return;
+  const transferId = pending.transferId || "";
+  postHistoryLabelTransferStatus({
+    transferId,
+    ok: false,
+    error: "The existing shipping label was kept. Replacement was canceled in OG.",
+  });
+  clearExtensionPendingHistoryLabel(transferId);
+  state.pendingHistoryLabelReplacement = null;
+}
+
+function promptHistoryLabelReplacement(transferPayload) {
+  state.pendingHistoryLabelReplacement = transferPayload;
+  const transferId = transferPayload?.transferId || "";
+  const attachedOrder = getAttachedHistoryOrder(state.awaitingLabelGroup?.orders || []);
+  $("history-label-title").textContent = "Shipping label already attached";
+  $("history-label-subtitle").textContent = "This completed order group already has a shipping label. Preview the existing label, replace it with the new eBay label, or exit without changing it.";
+  setHistoryLabelStatus("Existing label found. Click Replace Label to overwrite it with the new captured label.", "error");
+  setHistoryReplaceButtonVisible(true);
+  if ($("done-history-label")) $("done-history-label").textContent = "Exit";
+  renderHistoryLabelDetails(state.awaitingLabelGroup);
+  openModal("history-label-modal");
+  postHistoryLabelTransferStatus({
+    transferId,
+    phase: "started",
+    message: `Order ${attachedOrder?.order_number || "group"} already has a label. Waiting for replace confirmation in OG.`,
+  });
 }
 
 async function attachHistoryLabelToOrder(transferPayload) {
@@ -1316,20 +1456,19 @@ async function attachHistoryLabelToOrder(transferPayload) {
     capturedAt: label.capturedAt || metadata.capturedAt || new Date().toISOString(),
   };
   const orderIds = [...new Set(awaiting.orders.map((order) => order.id).filter(Boolean))];
+  const historyLabelLines = getHistoryLinesByOrderNumbers(awaiting.orderNumbers);
 
-  const { error: orderError } = await supabase
-    .from("ebay_orders")
-    .update({
-      ebay_shipment_id: metadata.shipmentId || null,
-      label_status: "label_uploaded",
-      label_storage_bucket: EBAY_LABEL_BUCKET,
-      label_file_path: destinationPath,
-      label_uploaded_at: now,
-      label_uploaded_by: state.user?.id || null,
-      label_metadata: labelMetadata,
-    })
-    .in("id", orderIds);
-  if (orderError) throw new Error(orderError.message || "Could not update the eBay order label status.");
+  const { error: orderError } = await supabase.rpc("attach_ebay_shipping_label", {
+    _order_ids: orderIds,
+    _order_line_ids: historyLabelLines.map((line) => line.id).filter(Boolean),
+    _order_numbers: awaiting.orderNumbers,
+    _shipment_id: metadata.shipmentId || null,
+    _label_storage_bucket: EBAY_LABEL_BUCKET,
+    _label_file_path: destinationPath,
+    _label_metadata: labelMetadata,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (orderError) throw new Error(orderError.message || "Could not update and audit the eBay order label status.");
 
   const updatedOrderFields = {
     ebay_shipment_id: metadata.shipmentId || null,
@@ -1347,19 +1486,19 @@ async function attachHistoryLabelToOrder(transferPayload) {
   }));
   state.awaitingLabelGroup.primaryOrder = getAttachedHistoryOrder(state.awaitingLabelGroup.orders) || state.awaitingLabelGroup.orders[0];
 
-  getHistoryLinesByOrderNumbers(awaiting.orderNumbers).forEach((line) => {
+  historyLabelLines.forEach((line) => {
     line.order = { ...line.order, ...updatedOrderFields };
     if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = line.order;
   });
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
-    chrome.runtime.sendMessage({
-      type: "OG_EBAY_CLEAR_PENDING_LABEL",
-      transferId: transferPayload.transferId,
-    }).catch(() => null);
+    clearExtensionPendingHistoryLabel(transferPayload.transferId);
   }
 
   const orderCount = awaiting.orderNumbers.length;
+  state.pendingHistoryLabelReplacement = null;
+  setHistoryReplaceButtonVisible(false);
+  if ($("done-history-label")) $("done-history-label").textContent = "Done";
   setHistoryLabelStatus(`Shipping label attached to this grouped completion (${orderCount} order${orderCount === 1 ? "" : "s"}).`, "success");
   renderHistoryLabelDetails(state.awaitingLabelGroup);
   renderHistoryList();
@@ -1371,13 +1510,21 @@ async function attachHistoryLabelToOrder(transferPayload) {
   };
 }
 
-async function handleHistoryLabelTransfer(payload) {
+function queueHistoryLabelTransfer(payload) {
   const transferId = payload?.transferId || "";
-  if (transferId && state.handledLabelTransferIds.has(transferId)) return;
-  if (state.labelBusy) return;
-  if (!state.awaitingLabelGroup) return;
-  if (transferId) state.handledLabelTransferIds.add(transferId);
+  if (transferId && state.queuedHistoryLabelTransfers.some((entry) => entry?.transferId === transferId)) return;
+  state.queuedHistoryLabelTransfers.push(payload);
+}
 
+function drainQueuedHistoryLabelTransfers() {
+  if (!state.historyLoaded || !state.queuedHistoryLabelTransfers.length) return;
+  const queued = [...state.queuedHistoryLabelTransfers];
+  state.queuedHistoryLabelTransfers = [];
+  queued.forEach((payload) => handleHistoryLabelTransfer(payload));
+}
+
+async function completeHistoryLabelTransfer(payload) {
+  const transferId = payload?.transferId || "";
   state.labelBusy = true;
   setHistoryLabelStatus("Uploading eBay shipping label to OG...");
   postHistoryLabelTransferStatus({
@@ -1407,9 +1554,61 @@ async function handleHistoryLabelTransfer(payload) {
   }
 }
 
+async function handleHistoryLabelTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledLabelTransferIds.has(transferId)) return;
+  if (state.labelBusy) return;
+  if (!state.awaitingLabelGroup) {
+    const orderNumber = normalizeEbayOrderNumber(payload?.metadata?.orderId);
+    if (!state.historyLoaded) {
+      queueHistoryLabelTransfer(payload);
+      return;
+    }
+    if (!openHistoryLabelReceiverForOrders([orderNumber])) {
+      postHistoryLabelTransferStatus({
+        transferId,
+        ok: false,
+        error: `Order ${orderNumber || "from the label"} was not found in the current order history range. Adjust the history date filter or open the matching completed order group, then send the label again.`,
+      });
+      return;
+    }
+  }
+
+  if (getAttachedHistoryOrder(state.awaitingLabelGroup?.orders || [])) {
+    if (transferId) state.handledLabelTransferIds.add(transferId);
+    promptHistoryLabelReplacement(payload);
+    return;
+  }
+
+  if (transferId) state.handledLabelTransferIds.add(transferId);
+  await completeHistoryLabelTransfer(payload);
+}
+
+async function confirmHistoryLabelReplacement() {
+  const payload = state.pendingHistoryLabelReplacement;
+  if (!payload || state.labelBusy) return;
+  state.pendingHistoryLabelReplacement = null;
+  setHistoryReplaceButtonVisible(false);
+  if ($("done-history-label")) $("done-history-label").textContent = "Done";
+  await completeHistoryLabelTransfer(payload);
+}
+
 function setupHistoryLabelReceiver() {
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
+    if (event.data?.type === "OG_EBAY_LABEL_RECEIVER_STATE_REQUEST") {
+      window.postMessage({
+        type: "OG_EBAY_LABEL_RECEIVER_STATE_RESPONSE",
+        requestId: event.data.requestId,
+        payload: {
+          pageType: "order-history",
+          labelModalOpen: !$("history-label-modal")?.classList.contains("hidden"),
+          awaitingOrderNumbers: state.awaitingLabelGroup?.orderNumbers || [],
+          canAutoRoute: false,
+        },
+      }, window.location.origin);
+      return;
+    }
     if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
     handleHistoryLabelTransfer(event.data.payload);
   });
@@ -1449,6 +1648,7 @@ function setupListeners() {
   });
   $("close-history-label-modal")?.addEventListener("click", closeHistoryLabelModal);
   $("done-history-label")?.addEventListener("click", closeHistoryLabelModal);
+  $("replace-history-label")?.addEventListener("click", confirmHistoryLabelReplacement);
   $("preview-history-label")?.addEventListener("click", previewHistoryLabel);
   $("history-label-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-label-modal") closeHistoryLabelModal();
