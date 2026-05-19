@@ -50,6 +50,17 @@ body.stock-body {
   animation: hapticPulse 0.3s ease;
 }
 
+body.modal-open .mobile-header,
+body.modal-open .mobile-menu,
+body.modal-open .toggle-controller-btn,
+body.modal-open .manual-ebay-sale-fab,
+body.modal-open .floating-action-btn,
+body.modal-open #cart-toggle-btn {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
 /* 📌 Sticky Behavior */
 .sticky {
   position: sticky;
@@ -1510,6 +1521,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   position: absolute;
   top: 24px;
   right: 32px;
+  z-index: 30;
   font-size: 2rem;
   color: white;
   cursor: pointer;
@@ -2479,7 +2491,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   position: absolute;
   top: 14px;
   right: 16px;
-  z-index: 2;
+  z-index: 30;
   width: 36px;
   height: 36px;
   border: 0;
@@ -4076,6 +4088,7 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     position: absolute;
     top: 12px;
     right: 16px;
+    z-index: 30;
     font-size: 1.6rem;
     color: #999;
     cursor: pointer;

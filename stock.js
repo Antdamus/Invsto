@@ -3650,7 +3650,7 @@ function ensureStockHistoryModal() {
   let modal = document.getElementById("stock-history-modal");
   if (modal) return modal;
   document.body.insertAdjacentHTML("beforeend", `
-    <div id="stock-history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-history-title">
+    <div id="stock-history-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="stock-history-title" tabindex="-1">
       <div class="stock-history-content">
         <button type="button" id="close-stock-history-modal" class="stock-modal-close" title="Close">&times;</button>
         <div class="stock-history-header">
@@ -3676,6 +3676,10 @@ function ensureStockHistoryModal() {
   modal = document.getElementById("stock-history-modal");
   document.getElementById("close-stock-history-modal")?.addEventListener("click", closeStockHistoryModal);
   modal?.addEventListener("click", async (event) => {
+    if (event.target === modal) {
+      closeStockHistoryModal();
+      return;
+    }
     if (event.target.closest("[data-close-history-photo]")) {
       closeStockHistoryPhotoPreview();
       return;
@@ -3689,6 +3693,9 @@ function ensureStockHistoryModal() {
     if (revertButton) {
       await performStockHistoryRevert(revertButton.dataset.stockHistoryRevertId, revertButton);
     }
+  });
+  modal?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeStockHistoryModal();
   });
   return modal;
 }
@@ -3836,6 +3843,7 @@ async function openStockHistoryModal(itemId) {
   modal.classList.remove("hidden");
   modal.classList.add("show");
   document.body.classList.add("modal-open");
+  modal.focus();
 
   try {
     stockHistoryState.events = await loadStockHistoryEvents(itemId, item);

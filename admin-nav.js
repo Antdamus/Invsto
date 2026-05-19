@@ -131,6 +131,12 @@
 
     const mobileTitle = mobileHeader.querySelector(".mobile-title");
     if (mobileTitle) mobileTitle.textContent = title;
+    const toggle = mobileHeader.querySelector("#menu-toggle");
+    if (toggle) {
+      toggle.type = "button";
+      toggle.setAttribute("aria-controls", "mobile-menu");
+      toggle.setAttribute("aria-expanded", "false");
+    }
 
     let mobileMenu = document.getElementById("mobile-menu");
     if (!mobileMenu) {
@@ -162,10 +168,6 @@
   }
 
   function bindRoleNavEvents() {
-    document.getElementById("menu-toggle")?.addEventListener("click", () => {
-      document.getElementById("mobile-menu")?.classList.toggle("show");
-    });
-
     const logout = async (event) => {
       event.preventDefault();
       if (window.supabase?.auth) await window.supabase.auth.signOut();
@@ -174,6 +176,45 @@
 
     document.getElementById("logout")?.addEventListener("click", logout);
     document.getElementById("logout-mobile")?.addEventListener("click", logout);
+  }
+
+  function setMobileMenuOpen(open) {
+    const menu = document.getElementById("mobile-menu");
+    const toggle = document.getElementById("menu-toggle");
+    if (!menu) return;
+    menu.classList.toggle("show", open);
+    menu.classList.toggle("is-open", open);
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function bindDelegatedMobileNavEvents() {
+    if (window.__ogMobileNavBound) return;
+    window.__ogMobileNavBound = true;
+
+    document.addEventListener("click", (event) => {
+      const toggle = event.target.closest?.("#menu-toggle");
+      if (toggle) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const menu = document.getElementById("mobile-menu");
+        setMobileMenuOpen(!menu?.classList.contains("show"));
+        return;
+      }
+
+      const mobileLink = event.target.closest?.("#mobile-menu a");
+      if (mobileLink) {
+        setMobileMenuOpen(false);
+        return;
+      }
+
+      const clickedMenu = event.target.closest?.("#mobile-menu");
+      const clickedHeader = event.target.closest?.(".mobile-header");
+      if (!clickedMenu && !clickedHeader) setMobileMenuOpen(false);
+    }, true);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    });
   }
 
   function renderRoleNavigation(role = "admin") {
@@ -211,6 +252,7 @@
     }
 
     bindRoleNavEvents();
+    bindDelegatedMobileNavEvents();
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }
 
@@ -244,5 +286,8 @@
     workerItems: WORKER_NAV_ITEMS,
   };
 
-  document.addEventListener("DOMContentLoaded", initRoleNavigation);
+  document.addEventListener("DOMContentLoaded", () => {
+    bindDelegatedMobileNavEvents();
+    initRoleNavigation();
+  });
 })();

@@ -796,8 +796,15 @@ body::before{
 @media (max-width: 768px){
   .mobile-header{ display:flex; }
   .sidebar{ display:none; }
-  .main{ margin-left:0 !important; }
-  .header{ top:64px; } /* below mobile header */
+  .main{
+    margin-left:0 !important;
+    padding-top:72px;
+  }
+  .header{
+    position:relative;
+    top:auto;
+    z-index:1;
+  }
 
   .content{ padding:18px 14px 34px; }
   .page-title{ font-size:1.8rem; }
