@@ -147,6 +147,17 @@
   background-repeat: no-repeat;
 }
 
+#panelSchedule select option{
+  color: #151515;
+  background: #ffffff;
+}
+
+#panelSchedule select option:checked,
+#panelSchedule select option:hover{
+  color: #ffffff;
+  background: #6d5a8f;
+}
+
 #panelSchedule .sched-controls input:focus,
 #panelSchedule .sched-controls select:focus,
 #panelSchedule .sched-controls textarea:focus{
@@ -258,6 +269,56 @@
 #panelSchedule .sched-row .time{ width: 116px; }
 
 #panelSchedule .sched-row .store{ min-width: 240px; }
+
+#panelSchedule .schedule-table input[type="time"],
+#panelSchedule .schedule-table input[type="date"],
+#panelSchedule .schedule-table select{
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  color: rgba(247,248,250,.96);
+  padding: 0 12px;
+  outline: none;
+  box-shadow:
+    0 12px 28px rgba(0,0,0,.24),
+    0 0 0 1px rgba(0,0,0,.22) inset;
+}
+
+#panelSchedule .schedule-table select{
+  appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(247,248,250,.88) 50%),
+    linear-gradient(135deg, rgba(247,248,250,.88) 50%, transparent 50%),
+    linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%,
+    0 0;
+  background-size: 6px 6px, 6px 6px, 100% 100%;
+  background-repeat: no-repeat;
+}
+
+#panelSchedule .schedule-table input[type="time"]{
+  color-scheme: dark;
+}
+
+#panelSchedule .schedule-table input:focus,
+#panelSchedule .schedule-table select:focus{
+  border-color: rgba(157,123,255,.48);
+  box-shadow:
+    0 18px 44px rgba(0,0,0,.36),
+    0 0 0 4px rgba(157,123,255,.13);
+}
+
+#panelSchedule .schedule-table select:disabled,
+#panelSchedule .sched-card select:disabled,
+#panelSchedule .sched-controls select:disabled{
+  opacity: .52;
+  cursor: not-allowed;
+}
 
 /* Resolved line text */
 #panelSchedule .sched-resolved{
@@ -439,6 +500,25 @@
     0 12px 26px rgba(0,0,0,.22),
     0 0 0 1px rgba(0,0,0,.22) inset;
   transition: border-color .18s ease, box-shadow .18s ease, transform .10s ease;
+}
+
+#panelSchedule .sched-card select{
+  appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(247,248,250,.88) 50%),
+    linear-gradient(135deg, rgba(247,248,250,.88) 50%, transparent 50%),
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%,
+    0 0;
+  background-size: 6px 6px, 6px 6px, 100% 100%;
+  background-repeat: no-repeat;
+}
+
+#panelSchedule .sched-card input[type="time"]{
+  color-scheme: dark;
 }
 
 #panelSchedule .sched-card input:focus,

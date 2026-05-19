@@ -1533,6 +1533,45 @@ function setUserError(msg){
   show(el, !!msg);
 }
 
+function setInviteRole(roleValue = 'employee') {
+  const role = ['employee', 'manager', 'admin'].includes(String(roleValue).toLowerCase())
+    ? String(roleValue).toLowerCase()
+    : 'employee';
+  const select = qs('userRole');
+  if (select) select.value = role;
+  document.querySelectorAll('#userModal .role-card').forEach(card => {
+    const active = (card.dataset.role || '').toLowerCase() === role;
+    card.classList.toggle('active', active);
+    card.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function wireInviteRoleCards() {
+  const cards = document.querySelector('#userModal .role-cards');
+  if (!cards || cards.dataset.wired === 'true') return;
+  cards.dataset.wired = 'true';
+
+  cards.querySelectorAll('.role-card').forEach(card => {
+    card.setAttribute('aria-pressed', card.classList.contains('active') ? 'true' : 'false');
+  });
+
+  cards.addEventListener('click', (event) => {
+    const card = event.target.closest('.role-card');
+    if (!card || !cards.contains(card)) return;
+    setInviteRole(card.dataset.role || 'employee');
+    setUserError('');
+  });
+
+  cards.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const card = event.target.closest('.role-card');
+    if (!card || !cards.contains(card)) return;
+    event.preventDefault();
+    setInviteRole(card.dataset.role || 'employee');
+    setUserError('');
+  });
+}
+
 function openUserModal() {
   const bd = qs('userModalBackdrop');
   const md = qs('userModal');
@@ -1540,12 +1579,16 @@ function openUserModal() {
   // Reset fields
   const email = qs('userEmail');
   const name = qs('userDisplayName');
+  const hourly = qs('userHourlyRate');
+  const workerType = qs('userWorkerType');
   if (email) email.value = '';
   if (name) name.value = '';
+  if (hourly) hourly.value = '';
+  if (workerType) workerType.value = 'employee';
+  setUserError('');
 
   // Default role = employee (if present)
-  const role = qs('userRole');
-  if (role) role.value = 'employee';
+  setInviteRole('employee');
 
   // Make visible with the classes your CSS expects
   bd?.classList.remove('hidden');
@@ -2025,6 +2068,7 @@ function wireUsersTab(){
 
 
     // modal controls
+    wireInviteRoleCards();
     qs('userAddBtn')?.addEventListener('click', openUserModal);
     qs('userCloseBtn')?.addEventListener('click', closeUserModal);
     qs('userCancelBtn')?.addEventListener('click', closeUserModal);

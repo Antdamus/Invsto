@@ -207,10 +207,35 @@ function groupUrgentOrderLines(lines) {
     });
 }
 
+function setUrgentOverdueCount(count, state = "ready", value = 0) {
+  const countEl = document.getElementById("urgent-overdue-count");
+  if (!countEl) return;
+
+  countEl.classList.remove("has-overdue", "is-loading", "is-error");
+
+  if (state === "loading") {
+    countEl.classList.add("is-loading");
+    countEl.textContent = "Overdue orders: ...";
+    return;
+  }
+
+  if (state === "error") {
+    countEl.classList.add("is-error");
+    countEl.textContent = "Overdue orders: —";
+    return;
+  }
+
+  const safeCount = Math.max(0, Number(count) || 0);
+  const safeValue = Math.max(0, Number(value) || 0);
+  countEl.classList.toggle("has-overdue", safeCount > 0);
+  countEl.textContent = `${safeCount.toLocaleString()} overdue order${safeCount === 1 ? "" : "s"} · ${fmtMoney(safeValue)} overdue value`;
+}
+
 async function loadUrgentOrders() {
   const container = document.getElementById("urgent-orders-container");
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading urgent orders...</div>`;
+  setUrgentOverdueCount(0, "loading");
 
   const { data, error } = await supabase
     .from("ebay_order_lines")
@@ -226,19 +251,26 @@ async function loadUrgentOrders() {
         order_number,
         buyer_username,
         ship_by_date,
+        total_price,
         status
       )
     `)
     .in("line_status", ["pending", "partially_fulfilled"])
-    .limit(300);
+    .limit(1000);
 
   if (error) {
     console.error("Failed to load urgent eBay orders:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load urgent eBay orders.</div>`;
+    setUrgentOverdueCount(0, "error");
     return;
   }
 
   const groups = groupUrgentOrderLines(data || []);
+  const overdueCount = groups.filter((group) => group.urgency.rank === 0).length;
+  const overdueValue = groups
+    .filter((group) => group.urgency.rank === 0)
+    .reduce((sum, group) => sum + Number(group.order?.total_price || 0), 0);
+  setUrgentOverdueCount(overdueCount, "ready", overdueValue);
   const urgentGroups = groups.filter((group) => group.urgency.rank <= 2).slice(0, 6);
 
   if (!urgentGroups.length) {
@@ -249,12 +281,14 @@ async function loadUrgentOrders() {
   container.innerHTML = urgentGroups.map((group) => {
     const titlePreview = group.titles.slice(0, 2).join(" / ") || "Pending item";
     const extra = group.titles.length > 2 ? ` +${group.titles.length - 2} more` : "";
+    const orderValue = Number(group.order?.total_price || 0);
     return `
       <a class="urgent-order-card ${group.urgency.className}" href="pending-orders.html">
         <div class="urgent-order-top">
           <div>
             <strong>${escapeHtml(group.buyer)}</strong>
             <span>${escapeHtml(group.orderNumber)}</span>
+            <span class="urgent-order-value">${fmtMoney(orderValue)}</span>
           </div>
           <span class="urgent-order-badge">${escapeHtml(group.urgency.label)}</span>
         </div>

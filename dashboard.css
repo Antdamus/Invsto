@@ -594,6 +594,31 @@ body::before{
   text-decoration: none;
 }
 
+.urgent-overdue-count {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.055);
+  color: rgba(242,243,245,.76);
+  font-size: .82rem;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.urgent-overdue-count.has-overdue {
+  border-color: rgba(255, 108, 108, .38);
+  background: rgba(255, 78, 78, .14);
+  color: rgba(255, 198, 198, .98);
+}
+
+.urgent-overdue-count.is-error {
+  color: rgba(242,243,245,.58);
+}
+
 .urgent-orders-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -672,6 +697,25 @@ body::before{
   min-width: 0;
   color: var(--muted);
   line-height: 1.35;
+}
+
+.urgent-order-card .urgent-order-value {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(214,178,94,.28);
+  background: rgba(214,178,94,.11);
+  color: rgba(255,236,190,.98);
+  font-size: .84rem;
+  font-weight: 900;
+}
+
+.urgent-order-card.is-overdue .urgent-order-value {
+  border-color: rgba(255, 111, 111, .34);
+  background: rgba(255, 111, 111, .1);
+  color: rgba(255, 218, 218, .98);
 }
 
 .urgent-order-meta b {
