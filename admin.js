@@ -1730,12 +1730,12 @@ async function inviteUser(){
   }
 }
 
-async function saveUserRow(tr){
+async function saveUserRow(tr, options = {}){
   const employee_id = tr?.dataset?.employeeId;
 
   const display_name = (tr.querySelector('.user-name')?.value || '').trim();
   const role = (tr.querySelector('.user-role')?.value || 'employee').toLowerCase();
-  const worker_type = (tr.querySelector('.user-worker-type')?.value || 'employee').toLowerCase();
+  const worker_type = (tr.querySelector('.user-worker-type, .user-type')?.value || 'employee').toLowerCase();
   const active = !!tr.querySelector('.user-active')?.checked;
 
   // hourly_rate: blank -> null, number -> number
@@ -1757,7 +1757,7 @@ async function saveUserRow(tr){
   if (error) throw error;
   if (!data?.ok) throw new Error(data?.error || 'Update failed.');
 
-  showToast('Saved ✅', 'ok');
+  if (!options?.quiet) showToast('Saved', 'ok');
   await loadUsers();
 }
 

@@ -161,19 +161,91 @@ function scheduleTaxStatusRefresh(rows) {
     }
 
 async function saveUserPhone({ userId, phone, canSms }) {
+  const normalizedPhone = normalizePhoneE164(phone);
+  if (!normalizedPhone) return true;
+
   const { error } = await supabase.rpc("admin_upsert_user_phone", {
     _user_id: userId,
-    _phone_e164: phone,
+    _phone_e164: normalizedPhone,
     _can_sms: canSms
   });
 
   if (error) {
     console.error("Phone save failed", error);
-    alert(error.message);
-    return false;
+    throw new Error(error.message || "Phone save failed.");
   }
 
   return true;
+}
+
+function normalizePhoneE164(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("+")) {
+    const normalized = `+${raw.slice(1).replace(/\D/g, "")}`;
+    if (/^\+\d{7,15}$/.test(normalized)) return normalized;
+    throw new Error("Phone must be a valid number, for example +13055551234.");
+  }
+
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  throw new Error("Phone must be a valid number, for example 3055551234.");
+}
+
+function ensureUserSaveSuccessModal() {
+  if (qs("#userSaveSuccessModal")) return;
+
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <div id="userSaveSuccessBackdrop" class="user-save-success-backdrop hidden" aria-hidden="true"></div>
+    <div id="userSaveSuccessModal" class="user-save-success-modal hidden" role="dialog" aria-modal="true" aria-labelledby="userSaveSuccessTitle">
+      <div class="user-save-success-card">
+        <div class="user-save-success-mark" aria-hidden="true">OK</div>
+        <p class="user-save-success-kicker">User updated</p>
+        <h3 id="userSaveSuccessTitle">Profile changes saved</h3>
+        <p id="userSaveSuccessCopy">The user profile was updated successfully.</p>
+        <button id="userSaveSuccessDone" class="btn primary" type="button">Done</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+
+  const close = () => hideUserSaveSuccessModal();
+  qs("#userSaveSuccessBackdrop")?.addEventListener("click", close);
+  qs("#userSaveSuccessDone")?.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !qs("#userSaveSuccessModal")?.classList.contains("hidden")) close();
+  });
+}
+
+function showUserSaveSuccessModal({ name = "This user", phone = "" } = {}) {
+  ensureUserSaveSuccessModal();
+  const backdrop = qs("#userSaveSuccessBackdrop");
+  const modal = qs("#userSaveSuccessModal");
+  const copy = qs("#userSaveSuccessCopy");
+  if (copy) {
+    copy.textContent = `${name || "This user"} was updated successfully.${phone ? ` Phone saved as ${phone}.` : ""}`;
+  }
+  backdrop?.classList.remove("hidden");
+  modal?.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    backdrop?.classList.add("show");
+    modal?.classList.add("show");
+  });
+  setTimeout(() => qs("#userSaveSuccessDone")?.focus?.(), 80);
+}
+
+function hideUserSaveSuccessModal() {
+  const backdrop = qs("#userSaveSuccessBackdrop");
+  const modal = qs("#userSaveSuccessModal");
+  backdrop?.classList.remove("show");
+  modal?.classList.remove("show");
+  setTimeout(() => {
+    backdrop?.classList.add("hidden");
+    modal?.classList.add("hidden");
+  }, 180);
 }
 
   // ---------- init ----------
@@ -402,11 +474,11 @@ if (!taxStatusLoaded) {
 
   <div class="ud-grid">
     <label class="ud-field ud-span2">
-      <span>Phone (E.164)</span>
+      <span>Phone</span>
       <input
         id="udPhone"
         type="tel"
-        placeholder="+13055551234"
+        placeholder="3055551234 or +13055551234"
         autocomplete="off"
       />
     </label>
@@ -595,6 +667,16 @@ if (!taxStatusLoaded) {
       el.addEventListener("input", watch);
       el.addEventListener("change", watch);
     });
+    qs("#udPhone")?.addEventListener("blur", () => {
+      const input = qs("#udPhone");
+      if (!input?.value.trim()) return;
+      try {
+        input.value = normalizePhoneE164(input.value);
+        setDirtyFromCurrent();
+      } catch (_) {
+        // Let the save action show the full validation message.
+      }
+    });
 
     // Address form button enable/disable
     const updateAddrAddBtn = () => {
@@ -632,24 +714,26 @@ if (!taxStatusLoaded) {
         saveBtn.textContent = "Saving…";
 
         try {
-          await window.saveUserRow(drawerEl);
+          const normalizedPhone = normalizePhoneE164(qs("#udPhone")?.value || "");
+          if (qs("#udPhone") && normalizedPhone) qs("#udPhone").value = normalizedPhone;
+          const savedName = (qs("#udName")?.value || "This user").trim();
+
+          await window.saveUserRow(drawerEl, { quiet: true });
           msg.textContent = "Saved ✅";
           
 if (activeUserId) {
   await saveUserPhone({
     userId: activeUserId,
-    phone: (qs("#udPhone")?.value || "").trim(),
+    phone: normalizedPhone,
     canSms: !!qs("#udCanSms")?.checked
   });
 }
 
-
-          // refresh list
-          if (typeof window.loadUsers === "function") await window.loadUsers();
-
           // reset dirty-state snapshot to current
           drawerSnapshot = readDrawerState();
           setDirty(false);
+          closeUserDrawer({ force: true });
+          showUserSaveSuccessModal({ name: savedName, phone: normalizedPhone });
         } catch (err) {
           msg.textContent = `Save failed: ${err?.message || err}`;
           // re-enable if still dirty

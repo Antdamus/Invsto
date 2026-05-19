@@ -18,6 +18,7 @@ const state = {
   labelPreviewUrls: new Map(),
   handledLabelTransferIds: new Set(),
   labelBusy: false,
+  historySearchUserEdited: false,
   busy: false,
 };
 
@@ -337,19 +338,52 @@ function resetHistorySearchInput(options = {}) {
   if (!search) return;
   search.value = "";
   search.defaultValue = "";
+  state.historySearchUserEdited = false;
   search.setAttribute("autocomplete", "new-password");
   search.setAttribute("autocorrect", "off");
   search.setAttribute("autocapitalize", "off");
   search.setAttribute("spellcheck", "false");
   search.setAttribute("data-form-type", "other");
+  search.setAttribute("data-lpignore", "true");
+  search.setAttribute("data-1p-ignore", "true");
   search.name = `og-history-search-disabled-${Date.now()}`;
   if (options.apply !== false && state.historyLoaded) applyFilters();
 }
 
-function preventHistorySearchAutofill() {
-  resetHistorySearchInput({ apply: false });
-  window.setTimeout(() => resetHistorySearchInput({ apply: true }), 100);
-  window.setTimeout(() => resetHistorySearchInput({ apply: true }), 650);
+function preventHistorySearchAutofill(options = {}) {
+  const force = options.force === true;
+  const search = $("history-search");
+  if (!search) return;
+  if (force || !state.historySearchUserEdited) {
+    resetHistorySearchInput({ apply: options.apply });
+  }
+  window.setTimeout(() => {
+    if (force || !state.historySearchUserEdited) resetHistorySearchInput({ apply: true });
+  }, 100);
+  window.setTimeout(() => {
+    if (force || !state.historySearchUserEdited) resetHistorySearchInput({ apply: true });
+  }, 650);
+}
+
+function setupHistorySearchAutofillGuard() {
+  const search = $("history-search");
+  if (!search) return;
+
+  const markUserEdited = () => {
+    state.historySearchUserEdited = true;
+  };
+  search.addEventListener("input", markUserEdited);
+  search.addEventListener("search", markUserEdited);
+  search.addEventListener("focus", () => {
+    window.setTimeout(() => {
+      if (!state.historySearchUserEdited) resetHistorySearchInput({ apply: true });
+    }, 80);
+  });
+  window.addEventListener("pageshow", () => preventHistorySearchAutofill({ force: true }));
+  window.addEventListener("focus", () => preventHistorySearchAutofill({ force: true }));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) preventHistorySearchAutofill({ force: true });
+  });
 }
 
 async function loadOrderHistory() {
@@ -1837,7 +1871,7 @@ async function previewHistoryLabel() {
 }
 
 function setupListeners() {
-  window.addEventListener("pageshow", preventHistorySearchAutofill);
+  setupHistorySearchAutofillGuard();
   $("refresh-history")?.addEventListener("click", loadOrderHistory);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("close-proof-trail-modal")?.addEventListener("click", closeProofTrailModal);
