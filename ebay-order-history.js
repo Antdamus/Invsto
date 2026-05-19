@@ -18,12 +18,15 @@ const state = {
   labelPreviewUrls: new Map(),
   handledLabelTransferIds: new Set(),
   labelBusy: false,
+  labelBackfillBusy: false,
   historySearchUserEdited: false,
   busy: false,
 };
 
 let evidencePhotoViewerReturnFocus = null;
 const EBAY_LABEL_BUCKET = "ebay-labels";
+const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
+const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 
 function $(id) {
   return document.getElementById(id);
@@ -86,9 +89,11 @@ function getOrderFromLine(line) {
 }
 
 function normalizeLine(row) {
+  const order = getOrderFromLine(row);
+  const labelSearchText = getLabelMetadataSearchText(row.label_metadata, order.label_metadata);
   return {
     ...row,
-    order: getOrderFromLine(row),
+    order,
     searchText: [
       row.item_title,
       row.item_number,
@@ -103,14 +108,96 @@ function normalizeLine(row) {
       row.fulfilled_by_email,
       row.fulfilled_at,
       row.notes,
-      getOrderFromLine(row).order_number,
-      getOrderFromLine(row).buyer_username,
-      getOrderFromLine(row).sales_record_number,
-      getOrderFromLine(row).sale_date,
-      getOrderFromLine(row).paid_on_date,
-      getOrderFromLine(row).ship_by_date,
-      getOrderFromLine(row).status,
+      order.order_number,
+      order.buyer_username,
+      order.sales_record_number,
+      order.sale_date,
+      order.paid_on_date,
+      order.ship_by_date,
+      order.status,
+      labelSearchText,
     ].filter(Boolean).join(" ").toLowerCase(),
+  };
+}
+
+function unique(values) {
+  return [...new Set((values || []).filter(Boolean).map(String))];
+}
+
+function normalizeTrackingNumber(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return /^\d{20,30}$/.test(digits) ? digits : "";
+}
+
+function getTrackingNumbersFromText(text) {
+  const body = String(text || "");
+  return unique([
+    ...(body.match(TRACKING_NUMBER_PATTERN) || []),
+    ...(body.match(FORMATTED_TRACKING_NUMBER_PATTERN) || []),
+  ].map(normalizeTrackingNumber));
+}
+
+function flattenLabelMetadataValues(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(flattenLabelMetadataValues);
+  if (typeof value === "object") return Object.values(value).flatMap(flattenLabelMetadataValues);
+  return [String(value)];
+}
+
+function getLabelMetadataSearchText(...metadataObjects) {
+  const keys = [
+    "trackingNumber",
+    "trackingNumbers",
+    "shippingBarcodeNumber",
+    "shippingBarcodeNumbers",
+    "shipmentId",
+    "shipmentIds",
+    "labelId",
+    "labelIds",
+    "lookupKeys",
+    "labelRows",
+  ];
+  return metadataObjects.flatMap((metadata) => {
+    if (!metadata || typeof metadata !== "object") return [];
+    return keys.flatMap((key) => flattenLabelMetadataValues(metadata[key]));
+  }).filter(Boolean).join(" ");
+}
+
+function normalizeLabelMetadata(metadata = {}, additions = {}) {
+  const trackingNumbers = [...new Set([
+    metadata.trackingNumber,
+    metadata.shippingBarcodeNumber,
+    ...(Array.isArray(metadata.trackingNumbers) ? metadata.trackingNumbers : []),
+    ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
+    ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
+  ].filter(Boolean).map(String))];
+  const shipmentIds = [...new Set([
+    metadata.shipmentId,
+    ...(Array.isArray(metadata.shipmentIds) ? metadata.shipmentIds : []),
+  ].filter(Boolean).map(String))];
+  const orderIds = [...new Set([
+    ...(Array.isArray(metadata.orderIds) ? metadata.orderIds : []),
+    ...(Array.isArray(metadata.orderNumbers) ? metadata.orderNumbers : []),
+    ...(Array.isArray(additions.orderNumbers) ? additions.orderNumbers : []),
+  ].map(normalizeEbayOrderNumber).filter(Boolean))];
+
+  return {
+    ...metadata,
+    trackingNumber: trackingNumbers[0] || "",
+    trackingNumbers,
+    shippingBarcodeNumber: trackingNumbers[0] || "",
+    shippingBarcodeNumbers: trackingNumbers,
+    shipmentId: shipmentIds[0] || metadata.shipmentId || "",
+    shipmentIds,
+    lookupKeys: [...new Set([
+      metadata.orderId,
+      metadata.orderNumber,
+      ...orderIds,
+      metadata.labelId,
+      ...shipmentIds,
+      ...trackingNumbers,
+      ...(Array.isArray(metadata.lookupKeys) ? metadata.lookupKeys : []),
+    ].filter(Boolean).map(String))],
   };
 }
 
@@ -1112,6 +1199,7 @@ function getFilteredEvents() {
         event.signed_by_email,
         event.label_file_path,
         event.shipment_id,
+        getLabelMetadataSearchText(event.label_metadata),
         getEventBuyerLabel(event, eventLines),
         ...eventLines.flatMap((line) => [
           line.searchText,
@@ -1429,6 +1517,7 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
       ${renderHistoryLabelOrderList(orderNumbers)}
       <span><strong>Label:</strong> Attached ${escapeHtml(formatDateTime(order.label_uploaded_at))} - covers ${orderCount} ${orderWord}${size ? ` - ${escapeHtml(size)}` : ""}</span>
+      <span><strong>Tracking:</strong> ${escapeHtml(metadata.trackingNumber || metadata.shippingBarcodeNumber || "-")}</span>
       <span><strong>Shipment:</strong> ${escapeHtml(metadata.shipmentId || order.ebay_shipment_id || "-")}</span>
       <span><strong>Carrier:</strong> ${escapeHtml(metadata.carrier || "-")}</span>
       <span><strong>Service:</strong> ${escapeHtml(metadata.service || "-")}</span>
@@ -1689,7 +1778,7 @@ async function attachHistoryLabelToOrder(transferPayload) {
 
   const now = new Date().toISOString();
   const labelMetadata = {
-    ...metadata,
+    ...normalizeLabelMetadata(metadata, { orderNumbers: awaiting.orderNumbers }),
     coveredOrderNumbers: awaiting.orderNumbers,
     transferId: transferPayload.transferId || null,
     captureSource: label.source || null,
@@ -1732,6 +1821,7 @@ async function attachHistoryLabelToOrder(transferPayload) {
   historyLabelLines.forEach((line) => {
     line.order = { ...line.order, ...updatedOrderFields };
     if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = line.order;
+    line.searchText = normalizeLine(line).searchText;
   });
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {
@@ -1870,10 +1960,263 @@ async function previewHistoryLabel() {
   }
 }
 
+function getExplicitTrackingFromMetadata(metadata = {}) {
+  if (!metadata || typeof metadata !== "object") return [];
+  return getTrackingNumbersFromText([
+    metadata.trackingNumber,
+    metadata.shippingBarcodeNumber,
+    ...(Array.isArray(metadata.trackingNumbers) ? metadata.trackingNumbers : []),
+    ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
+    ...(Array.isArray(metadata.labelRows)
+      ? metadata.labelRows.flatMap((row) => [
+        row?.trackingNumber,
+        row?.shippingBarcodeNumber,
+        ...(Array.isArray(row?.trackingNumbers) ? row.trackingNumbers : []),
+        ...(Array.isArray(row?.shippingBarcodeNumbers) ? row.shippingBarcodeNumbers : []),
+      ])
+      : []),
+  ].filter(Boolean).join(" "));
+}
+
+function configurePdfTrackingReader() {
+  if (!window.pdfjsLib?.getDocument) {
+    throw new Error("PDF reader is not available on this page.");
+  }
+  if (window.pdfjsLib.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+  }
+}
+
+async function extractTrackingNumbersFromPdfBlob(blob) {
+  configurePdfTrackingReader();
+  const data = await blob.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data }).promise;
+  const chunks = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    chunks.push(content.items.map((item) => item.str || "").join(" "));
+  }
+  return getTrackingNumbersFromText(chunks.join("\n"));
+}
+
+function setLabelBackfillStatus(message, tone = "") {
+  const status = $("label-backfill-status");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("is-success", tone === "success");
+  status.classList.toggle("is-error", tone === "error");
+}
+
+function appendLabelBackfillResult(title, detail, tone = "") {
+  const results = $("label-backfill-results");
+  if (!results) return;
+  results.insertAdjacentHTML("beforeend", `
+    <article class="${tone ? `is-${escapeHtml(tone)}` : ""}">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </article>
+  `);
+}
+
+function openLabelBackfillModal() {
+  if (!isAdminUser()) {
+    alert("Only admins can backfill shipping label tracking numbers.");
+    return;
+  }
+  $("label-backfill-results").innerHTML = "";
+  setLabelBackfillStatus("Ready to scan stored shipping labels.");
+  $("start-label-backfill").disabled = false;
+  openModal("label-backfill-modal");
+}
+
+function closeLabelBackfillModal() {
+  if (state.labelBackfillBusy) return;
+  closeModal("label-backfill-modal");
+}
+
+async function fetchLabelBackfillCandidates() {
+  const pageSize = 1000;
+  const maxRows = 5000;
+  const orders = [];
+
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("ebay_orders")
+      .select("id, order_number, ebay_shipment_id, label_storage_bucket, label_file_path, label_uploaded_at, label_metadata")
+      .not("label_file_path", "is", null)
+      .order("label_uploaded_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw error;
+    orders.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+
+  const missingTracking = orders.filter((order) =>
+    order?.id
+    && order?.label_file_path
+    && !getExplicitTrackingFromMetadata(order.label_metadata).length
+  );
+
+  const groups = new Map();
+  missingTracking.forEach((order) => {
+    const bucket = order.label_storage_bucket || EBAY_LABEL_BUCKET;
+    const key = `${bucket}::${order.label_file_path}`;
+    if (!groups.has(key)) groups.set(key, { bucket, path: order.label_file_path, orders: [] });
+    groups.get(key).orders.push(order);
+  });
+
+  return [...groups.values()];
+}
+
+function buildTrackingBackfillPatch(group, trackingNumbers) {
+  const metadataObjects = group.orders.map((order) => order.label_metadata || {});
+  const orderNumbers = unique(group.orders.map((order) => order.order_number));
+  const shipmentIds = unique([
+    ...group.orders.map((order) => order.ebay_shipment_id),
+    ...metadataObjects.flatMap((metadata) => [
+      metadata.shipmentId,
+      ...(Array.isArray(metadata.shipmentIds) ? metadata.shipmentIds : []),
+    ]),
+  ]);
+  const labelIds = unique(metadataObjects.flatMap((metadata) => [
+    metadata.labelId,
+    ...(Array.isArray(metadata.labelIds) ? metadata.labelIds : []),
+  ]));
+  const lookupKeys = unique([
+    ...metadataObjects.flatMap((metadata) => Array.isArray(metadata.lookupKeys) ? metadata.lookupKeys : []),
+    ...orderNumbers,
+    ...shipmentIds,
+    ...labelIds,
+    ...trackingNumbers,
+  ]);
+
+  return {
+    trackingNumber: trackingNumbers[0] || "",
+    trackingNumbers,
+    shippingBarcodeNumber: trackingNumbers[0] || "",
+    shippingBarcodeNumbers: trackingNumbers,
+    shipmentId: shipmentIds[0] || "",
+    shipmentIds,
+    labelIds,
+    lookupKeys,
+    trackingBackfilledAt: new Date().toISOString(),
+    trackingBackfillSource: "stored-label-pdf",
+  };
+}
+
+function mergeBackfilledTrackingIntoLoadedState(group, patch) {
+  const orderIds = new Set(group.orders.map((order) => order.id).filter(Boolean));
+  state.lines.forEach((line) => {
+    const order = getOrderFromLine(line);
+    if (!orderIds.has(order?.id)) return;
+    const updatedOrder = {
+      ...order,
+      label_metadata: {
+        ...(order.label_metadata || {}),
+        ...patch,
+      },
+    };
+    line.order = updatedOrder;
+    if (line.ebay_orders && !Array.isArray(line.ebay_orders)) line.ebay_orders = updatedOrder;
+    line.searchText = normalizeLine(line).searchText;
+  });
+}
+
+async function backfillOneLabelTrackingGroup(group) {
+  const { data: blob, error: downloadError } = await supabase.storage
+    .from(group.bucket || EBAY_LABEL_BUCKET)
+    .download(group.path);
+  if (downloadError) throw new Error(downloadError.message || "Could not download stored label PDF.");
+
+  const trackingNumbers = await extractTrackingNumbersFromPdfBlob(blob);
+  if (!trackingNumbers.length) {
+    throw new Error("No tracking number was readable in this label PDF.");
+  }
+
+  const patch = buildTrackingBackfillPatch(group, trackingNumbers);
+  const orderIds = unique(group.orders.map((order) => order.id));
+  const { error: rpcError } = await supabase.rpc("backfill_ebay_label_tracking_metadata", {
+    _order_ids: orderIds,
+    _label_file_path: group.path,
+    _label_metadata_patch: patch,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (rpcError) throw new Error(rpcError.message || "Could not save tracking metadata.");
+
+  mergeBackfilledTrackingIntoLoadedState(group, patch);
+  return trackingNumbers;
+}
+
+async function startLabelTrackingBackfill() {
+  if (state.labelBackfillBusy) return;
+  state.labelBackfillBusy = true;
+  $("start-label-backfill").disabled = true;
+  $("done-label-backfill").disabled = true;
+  $("label-backfill-results").innerHTML = "";
+  setLabelBackfillStatus("Finding uploaded labels that are missing tracking numbers...");
+
+  let updated = 0;
+  let failed = 0;
+  try {
+    const groups = await fetchLabelBackfillCandidates();
+    if (!groups.length) {
+      setLabelBackfillStatus("All uploaded labels already have tracking metadata.", "success");
+      appendLabelBackfillResult("Nothing to backfill", "Every stored label already has a tracker number saved.", "success");
+      return;
+    }
+
+    setLabelBackfillStatus(`Scanning ${groups.length.toLocaleString()} stored label file${groups.length === 1 ? "" : "s"}...`);
+    for (const [index, group] of groups.entries()) {
+      const orderNumbers = unique(group.orders.map((order) => order.order_number)).join(", ");
+      setLabelBackfillStatus(`Scanning ${index + 1} of ${groups.length}: ${orderNumbers || group.path}`);
+      try {
+        const trackingNumbers = await backfillOneLabelTrackingGroup(group);
+        updated += group.orders.length;
+        appendLabelBackfillResult(
+          `Saved ${trackingNumbers.join(", ")}`,
+          `${orderNumbers || group.path} - ${group.orders.length} order${group.orders.length === 1 ? "" : "s"}`,
+          "success"
+        );
+      } catch (error) {
+        failed += 1;
+        appendLabelBackfillResult(
+          `Could not read ${orderNumbers || group.path}`,
+          error.message || "Tracking number extraction failed.",
+          "error"
+        );
+      }
+    }
+
+    applyFilters();
+    setLabelBackfillStatus(
+      failed
+        ? `Backfill finished: ${updated.toLocaleString()} order${updated === 1 ? "" : "s"} updated, ${failed.toLocaleString()} label file${failed === 1 ? "" : "s"} need review.`
+        : `Backfill finished: ${updated.toLocaleString()} order${updated === 1 ? "" : "s"} updated.`,
+      failed ? "error" : "success"
+    );
+  } catch (error) {
+    console.error("Label tracking backfill failed:", error);
+    setLabelBackfillStatus(error.message || "Could not backfill label tracking numbers.", "error");
+  } finally {
+    state.labelBackfillBusy = false;
+    $("start-label-backfill").disabled = false;
+    $("done-label-backfill").disabled = false;
+  }
+}
+
 function setupListeners() {
   setupHistorySearchAutofillGuard();
   $("refresh-history")?.addEventListener("click", loadOrderHistory);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
+  $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
+  $("start-label-backfill")?.addEventListener("click", startLabelTrackingBackfill);
+  $("done-label-backfill")?.addEventListener("click", closeLabelBackfillModal);
+  $("close-label-backfill-modal")?.addEventListener("click", closeLabelBackfillModal);
+  $("label-backfill-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "label-backfill-modal") closeLabelBackfillModal();
+  });
   $("close-proof-trail-modal")?.addEventListener("click", closeProofTrailModal);
   $("proof-trail-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "proof-trail-modal") closeProofTrailModal();
@@ -1922,6 +2265,13 @@ function setupListeners() {
       if (event.key === "Escape") {
         event.preventDefault();
         closeProofTrailModal();
+      }
+      return;
+    }
+    if (!$("label-backfill-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeLabelBackfillModal();
       }
       return;
     }

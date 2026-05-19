@@ -221,10 +221,11 @@ function getUrgentDeadlineStats(groups = []) {
     overdue: { label: "Overdue", buyers: new Set(), orders: 0, lines: 0, value: 0 },
     today: { label: "Due Today", buyers: new Set(), orders: 0, lines: 0, value: 0 },
     tomorrow: { label: "Due Tomorrow", buyers: new Set(), orders: 0, lines: 0, value: 0 },
+    later: { label: "Later", buyers: new Set(), orders: 0, lines: 0, value: 0 },
   };
 
   groups.forEach((group) => {
-    const bucket = group.urgency?.bucket;
+    const bucket = group.urgency?.bucket || "later";
     if (!stats[bucket]) return;
     stats[bucket].orders += 1;
     stats[bucket].lines += Number(group.pendingLines || 0);
@@ -251,7 +252,7 @@ function renderUrgentDeadlineStats(stats = null, state = "ready") {
 
   const orderWord = (count) => count === 1 ? "order" : "orders";
   const itemWord = (count) => count === 1 ? "item" : "items";
-  host.innerHTML = ["overdue", "today", "tomorrow"].map((key) => {
+  host.innerHTML = ["overdue", "today", "tomorrow", "later"].map((key) => {
     const bucket = stats[key];
     const buyers = bucket.buyers.size;
     return `

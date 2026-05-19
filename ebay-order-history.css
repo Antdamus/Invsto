@@ -722,6 +722,41 @@ textarea {
   color: var(--history-danger);
 }
 
+.label-backfill-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.label-backfill-results article {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.label-backfill-results strong,
+.label-backfill-results span {
+  overflow-wrap: anywhere;
+}
+
+.label-backfill-results span {
+  color: var(--history-muted);
+  font-size: 0.86rem;
+}
+
+.label-backfill-results .is-success strong {
+  color: var(--history-green);
+}
+
+.label-backfill-results .is-error strong {
+  color: var(--history-danger);
+}
+
 .history-modal-actions {
   display: flex;
   justify-content: flex-end;

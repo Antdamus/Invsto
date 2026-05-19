@@ -670,6 +670,16 @@ body::before{
   color: #cbe0ff;
 }
 
+.urgent-due-chip.is-later {
+  border-color: rgba(125, 240, 178, .22);
+  background: rgba(125, 240, 178, .075);
+}
+
+.urgent-due-chip.is-later b,
+.urgent-due-chip.is-later small {
+  color: #b9f4d0;
+}
+
 .urgent-due-chip.is-error {
   color: rgba(242,243,245,.58);
 }

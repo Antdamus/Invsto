@@ -478,6 +478,7 @@ function setupDashboardShell() {
 
 function normalizeLine(line) {
   const order = getOrderFromLine(line);
+  const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
   return {
     ...line,
     order,
@@ -489,7 +490,72 @@ function normalizeLine(line) {
       line.transaction_id,
       line.item_title,
       line.custom_label,
+      labelSearchText,
     ].filter(Boolean).join(" ").toLowerCase(),
+  };
+}
+
+function flattenLabelMetadataValues(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(flattenLabelMetadataValues);
+  if (typeof value === "object") return Object.values(value).flatMap(flattenLabelMetadataValues);
+  return [String(value)];
+}
+
+function getLabelMetadataSearchText(...metadataObjects) {
+  const keys = [
+    "trackingNumber",
+    "trackingNumbers",
+    "shippingBarcodeNumber",
+    "shippingBarcodeNumbers",
+    "shipmentId",
+    "shipmentIds",
+    "labelId",
+    "labelIds",
+    "lookupKeys",
+    "labelRows",
+  ];
+  return metadataObjects.flatMap((metadata) => {
+    if (!metadata || typeof metadata !== "object") return [];
+    return keys.flatMap((key) => flattenLabelMetadataValues(metadata[key]));
+  }).filter(Boolean).join(" ");
+}
+
+function normalizeLabelMetadata(metadata = {}, additions = {}) {
+  const trackingNumbers = [...new Set([
+    metadata.trackingNumber,
+    metadata.shippingBarcodeNumber,
+    ...(Array.isArray(metadata.trackingNumbers) ? metadata.trackingNumbers : []),
+    ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
+    ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
+  ].filter(Boolean).map(String))];
+  const shipmentIds = [...new Set([
+    metadata.shipmentId,
+    ...(Array.isArray(metadata.shipmentIds) ? metadata.shipmentIds : []),
+  ].filter(Boolean).map(String))];
+  const orderIds = [...new Set([
+    ...(Array.isArray(metadata.orderIds) ? metadata.orderIds : []),
+    ...(Array.isArray(metadata.orderNumbers) ? metadata.orderNumbers : []),
+    ...(Array.isArray(additions.orderNumbers) ? additions.orderNumbers : []),
+  ].map(normalizeEbayOrderNumber).filter(Boolean))];
+
+  return {
+    ...metadata,
+    trackingNumber: trackingNumbers[0] || "",
+    trackingNumbers,
+    shippingBarcodeNumber: trackingNumbers[0] || "",
+    shippingBarcodeNumbers: trackingNumbers,
+    shipmentId: shipmentIds[0] || metadata.shipmentId || "",
+    shipmentIds,
+    lookupKeys: [...new Set([
+      metadata.orderId,
+      metadata.orderNumber,
+      ...orderIds,
+      metadata.labelId,
+      ...shipmentIds,
+      ...trackingNumbers,
+      ...(Array.isArray(metadata.lookupKeys) ? metadata.lookupKeys : []),
+    ].filter(Boolean).map(String))],
   };
 }
 
@@ -1479,6 +1545,7 @@ function renderEbayLabelPanel() {
   const detailsHtml = label.path
     ? `
       <div class="selection-grid">
+        <span><small>Tracking</small><b>${escapeHtml(metadata.trackingNumber || metadata.shippingBarcodeNumber || "-")}</b></span>
         <span><small>Shipment</small><b>${escapeHtml(metadata.shipmentId || "-")}</b></span>
         <span><small>Carrier</small><b>${escapeHtml(metadata.carrier || "-")}</b></span>
         <span><small>Service</small><b>${escapeHtml(metadata.service || "-")}</b></span>
@@ -3693,7 +3760,7 @@ async function attachEbayLabelToOrder(transferPayload) {
     ...targetOrderNumbers.map((orderNumber) => directOrderByNumber.get(orderNumber)?.id).filter(Boolean),
   ].filter(Boolean))];
   const labelMetadata = {
-    ...metadata,
+    ...normalizeLabelMetadata(metadata, { orderNumbers: targetOrderNumbers }),
     transferId: transferPayload.transferId || null,
     captureSource: label.source || null,
     labelUrl: label.url || null,
@@ -3729,6 +3796,7 @@ async function attachEbayLabelToOrder(transferPayload) {
       line.order.label_uploaded_at = now;
       line.order.label_metadata = labelMetadata;
     }
+    line.searchText = normalizeLine(line).searchText;
   });
 
   if (transferPayload.transferId && window.chrome?.runtime?.sendMessage) {

@@ -3,6 +3,8 @@
 
   const ORDER_LINK_SELECTOR = 'a[data-testid^="unique-order-id-link-"]';
   const ORDER_NUMBER_PATTERN = /\b\d{2}-\d{5}-\d{5}\b/;
+  const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
+  const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
   const STORAGE_KEY = "ogPendingOrdersUrl";
   const BUTTON_CLASS = "og-ebay-open-order";
   const FLOATING_ID = "og-ebay-open-all-orders";
@@ -26,6 +28,23 @@
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
     return match ? match[0] : "";
+  }
+
+  function unique(values) {
+    return [...new Set((values || []).filter(Boolean))];
+  }
+
+  function normalizeTrackingNumber(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    return /^\d{20,30}$/.test(digits) ? digits : "";
+  }
+
+  function getTrackingNumbersFromText(text) {
+    const body = String(text || "");
+    return unique([
+      ...(body.match(TRACKING_NUMBER_PATTERN) || []),
+      ...(body.match(FORMATTED_TRACKING_NUMBER_PATTERN) || []),
+    ].map(normalizeTrackingNumber));
   }
 
   function getOrderLinks() {
@@ -176,6 +195,32 @@
       }
     }
     return "";
+  }
+
+  function getSingleLabelTrackingNumbers() {
+    const numbers = [];
+    const candidateRows = [...document.querySelectorAll(".eui-label-value-line, div, dl, section, li")];
+
+    for (const row of candidateRows) {
+      const text = row.innerText || row.textContent || "";
+      if (/Tracking number/i.test(text)) {
+        numbers.push(...getTrackingNumbersFromText(text));
+      }
+    }
+
+    document.querySelectorAll('a[href*="backToLabelsHistory?query="], a[href*="showOrderDetails="]').forEach((link) => {
+      try {
+        const url = new URL(link.getAttribute("href") || link.href, window.location.origin);
+        numbers.push(url.searchParams.get("query"));
+        numbers.push(url.searchParams.get("showOrderDetails"));
+      } catch (_) {}
+    });
+
+    if (!numbers.length) {
+      numbers.push(...getTrackingNumbersFromText(document.body?.innerText || ""));
+    }
+
+    return unique(numbers);
   }
 
   function getElementMetadataText(element) {
@@ -386,13 +431,30 @@
     const printButton = getPrintLabelButton();
     const metadataText = getElementMetadataText(downloadButton || printButton || getShippingActions());
     const fromPage = getSingleLabelOrderNumber() || normalizeOrderNumber(window.location.href) || normalizeOrderNumber(metadataText);
+    const orderId = normalizeOrderNumber(parseMetadataValue(metadataText, ["order_id", "orderId", "order_number", "orderNumber"]) || fromPage);
+    const shipmentId = parseMetadataValue(metadataText, ["shipment_id", "shipmentId", "shipmentid"]);
+    const labelId = parseMetadataValue(metadataText, ["label_id", "labelId", "labelid"]);
+    const trackingNumbers = getSingleLabelTrackingNumbers();
     return {
+      source: "ebay-single-label-page",
       orderId: normalizeOrderNumber(parseMetadataValue(metadataText, ["order_id", "orderId", "order_number", "orderNumber"]) || fromPage),
-      shipmentId: parseMetadataValue(metadataText, ["shipment_id", "shipmentId", "shipmentid"]),
+      orderNumber: orderId,
+      shipmentId,
+      labelId,
       carrier: parseMetadataValue(metadataText, ["carrier_code", "carrierCode", "carrier"]),
       service: parseMetadataValue(metadataText, ["service_code", "serviceCode", "service"]),
       packageType: parseMetadataValue(metadataText, ["package_code", "packageCode", "package"]),
       labelCost: parseMetadataValue(metadataText, ["label_cost", "labelCost"]),
+      trackingNumber: trackingNumbers[0] || "",
+      trackingNumbers,
+      shippingBarcodeNumber: trackingNumbers[0] || "",
+      shippingBarcodeNumbers: trackingNumbers,
+      lookupKeys: unique([
+        orderId,
+        shipmentId,
+        labelId,
+        ...trackingNumbers,
+      ]),
       pageUrl: window.location.href,
       capturedAt: new Date().toISOString(),
     };
@@ -460,6 +522,59 @@
     return null;
   }
 
+  function getBulkConfirmationTrackingNumbers() {
+    const bodyText = document.body?.innerText || "";
+    const explicitMatches = [...bodyText.matchAll(/Tracking No\.?:\s*((?:\d[\s-]*){20,30})/gi)]
+      .map((match) => normalizeTrackingNumber(match[1]));
+    return unique(explicitMatches.length ? explicitMatches : getTrackingNumbersFromText(bodyText));
+  }
+
+  function getBulkConfirmationLabelRows() {
+    const candidateRows = [
+      ...document.querySelectorAll(".grid__group, .success-summary-cards, section.card, .labels-confirmation-page article, .labels-confirmation-page section, .labels-confirmation-page li"),
+    ];
+    const rows = [];
+
+    for (const row of candidateRows) {
+      const text = row.innerText || row.textContent || "";
+      const trackingNumbers = getTrackingNumbersFromText(text);
+      const orderIds = unique(
+        [...row.querySelectorAll('ul[data-testid="item-details-no-sku"] li')]
+          .map((li) => (li.textContent || "").match(ORDER_NUMBER_PATTERN)?.[0])
+          .filter(Boolean)
+      );
+      const shipmentIds = unique(
+        [...row.querySelectorAll('a[href*="shipmentId="]')]
+          .map((link) => {
+            try {
+              return new URL(link.getAttribute("href") || link.href, window.location.origin).searchParams.get("shipmentId") || "";
+            } catch (_) {
+              return "";
+            }
+          })
+      );
+
+      if (trackingNumbers.length || orderIds.length || shipmentIds.length) {
+        rows.push({
+          orderIds,
+          orderNumbers: orderIds,
+          trackingNumber: trackingNumbers[0] || "",
+          trackingNumbers,
+          shippingBarcodeNumber: trackingNumbers[0] || "",
+          shippingBarcodeNumbers: trackingNumbers,
+          shipmentIds,
+          rowText: text.slice(0, 2000),
+        });
+      }
+    }
+
+    return rows.filter((row, index, array) => {
+      const key = [row.orderIds.join(","), row.trackingNumbers.join(","), row.shipmentIds.join(",")].join("|");
+      return key.replace(/\|/g, "")
+        && array.findIndex((entry) => [entry.orderIds.join(","), entry.trackingNumbers.join(","), entry.shipmentIds.join(",")].join("|") === key) === index;
+    });
+  }
+
   function getBulkLabelConfirmationSnapshot() {
     const downloadLink = getBulkLabelDownloadLink();
     const rawHref = downloadLink?.getAttribute("href") || "";
@@ -480,7 +595,9 @@
     const extractedOrderIds = getBulkConfirmationOrderIds();
     const cachedOrderIds = normalizeBulkContextOrderIds(cachedBulkContext);
     const orderIds = extractedOrderIds.length ? extractedOrderIds : cachedOrderIds;
-    const trackingNumbers = uniqueTextMatches(pageText, /\b\d{20,30}\b/g)
+    const labelRows = getBulkConfirmationLabelRows();
+    const rowTrackingNumbers = unique(labelRows.flatMap((row) => row.trackingNumbers || []));
+    const trackingNumbers = unique(rowTrackingNumbers.length ? rowTrackingNumbers : getBulkConfirmationTrackingNumbers())
       .filter((entry) => !orderIds.includes(entry));
     const labelCountText = cleanText(document.querySelector('[data-testid="label-generation-success-notice"]')?.innerText || "");
     const labelCount = Number(labelCountText.match(/\b(\d+)\s+label/i)?.[1] || 0) || "";
@@ -499,7 +616,17 @@
       orderId: orderIds.length === 1 ? orderIds[0] : "",
       orderIds,
       orderNumbers: orderIds,
-      trackingNumbers: [...new Set(trackingNumbers)],
+      trackingNumber: trackingNumbers[0] || "",
+      trackingNumbers,
+      shippingBarcodeNumber: trackingNumbers[0] || "",
+      shippingBarcodeNumbers: trackingNumbers,
+      labelRows,
+      lookupKeys: unique([
+        ...orderIds,
+        ...shipmentIds,
+        labelId,
+        ...trackingNumbers,
+      ]),
       cachedBulkContext: cachedBulkContext || null,
       labelCount,
       labelCountText,

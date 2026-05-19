@@ -123,6 +123,10 @@
               <i data-lucide="shield-check"></i>
               Proof Trail
             </button>
+            <button id="backfill-label-tracking" type="button" class="secondary-btn" data-admin-only="true">
+              <i data-lucide="scan-barcode"></i>
+              Backfill Label Tracking
+            </button>
           </div>
         </section>
 
@@ -309,7 +313,25 @@
     </div>
   </div>
 
+  <div id="label-backfill-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="label-backfill-title">
+    <div class="history-modal-card">
+      <button id="close-label-backfill-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Shipping Tracker</span>
+      <h2 id="label-backfill-title">Backfill label tracking</h2>
+      <p>Scan uploaded label PDFs that are missing tracking metadata and save the barcode number back to the order history.</p>
+      <div id="label-backfill-status" class="history-label-status">
+        Ready to scan stored shipping labels.
+      </div>
+      <div id="label-backfill-results" class="label-backfill-results"></div>
+      <div class="history-modal-actions">
+        <button id="start-label-backfill" type="button" class="primary-btn">Start Backfill</button>
+        <button id="done-label-backfill" type="button" class="secondary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="pdf.min.js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
   <script src="ebay-order-history.js"></script>
