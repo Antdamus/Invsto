@@ -558,24 +558,51 @@ function applyFilters() {
     return true;
   });
 
-  renderSummary();
-  renderHistoryList();
+  const visibleGroups = getVisibleHistoryGroups();
+  renderSummary(visibleGroups);
+  renderHistoryList(visibleGroups);
   renderEventList();
 }
 
-function renderSummary() {
-  const shippedLines = state.filteredLines.filter((line) => line.line_status === "fulfilled");
-  const shippedOrderIds = new Set(shippedLines.map((line) => line.order_id));
+function getUniqueLinesFromGroups(groups = []) {
+  const lines = new Map();
+  groups.forEach((group) => {
+    (group.lines || []).forEach((line) => {
+      const key = line.id || `${line.order_id || ""}:${line.item_number || ""}:${line.transaction_id || ""}`;
+      if (key && !lines.has(key)) lines.set(key, line);
+    });
+  });
+  return [...lines.values()];
+}
+
+function getUniqueEventsFromGroups(groups = []) {
+  const events = new Map();
+  groups.forEach((group) => {
+    (group.events || []).forEach((event) => {
+      const key = `${event.category || "event"}:${event.id || event.created_at || JSON.stringify(event.order_line_ids || [])}`;
+      if (!events.has(key)) events.set(key, event);
+    });
+  });
+  return [...events.values()];
+}
+
+function renderSummary(groups = getVisibleHistoryGroups()) {
+  const visibleLines = getUniqueLinesFromGroups(groups);
+  const visibleEvents = getUniqueEventsFromGroups(groups);
+  const shippedLines = visibleLines.filter((line) => line.line_status === "fulfilled");
+  const shippedGroups = groups.filter((group) =>
+    (group.lines || []).some((line) => line.line_status === "fulfilled")
+  );
   const gross = shippedLines.reduce((sum, line) => sum + getLineGross(line), 0);
   const payout = shippedLines.reduce((sum, line) => sum + getLinePayout(line), 0);
-  const filteredEvents = getFilteredEvents();
-  const closeouts = filteredEvents.filter((event) => event.action === "fulfilled_no_inventory").length;
-  const cancelled = state.filteredLines.filter((line) => line.line_status === "cancelled").length;
-  const reverted = filteredEvents
+  const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
+  const closeouts = closeoutEvents.length || visibleLines.filter(isAdminCloseoutLine).length;
+  const cancelled = visibleLines.filter((line) => line.line_status === "cancelled").length;
+  const reverted = visibleEvents
     .filter((event) => event.category === "revert")
     .reduce((sum, event) => sum + Number(event.payload?.reverted_lines || event.order_line_ids?.length || 1), 0);
 
-  $("summary-shipped-orders").textContent = String(shippedOrderIds.size);
+  $("summary-shipped-orders").textContent = String(shippedGroups.length);
   $("summary-shipped-lines").textContent = String(shippedLines.length);
   $("summary-gross").textContent = formatMoney(gross);
   $("summary-payout").textContent = formatMoney(payout);
@@ -871,11 +898,10 @@ function renderGroupLabelControl(group, orders = []) {
   `;
 }
 
-function renderHistoryList() {
+function renderHistoryList(groups = getVisibleHistoryGroups()) {
   const list = $("history-list");
   if (!list) return;
 
-  const groups = getVisibleHistoryGroups();
   $("history-count").textContent = `${groups.length} group${groups.length === 1 ? "" : "s"}`;
 
   if (!groups.length) {
@@ -1266,6 +1292,59 @@ function getHistoryLinesByOrderNumbers(orderNumbers) {
   return state.lines.filter((line) => wanted.has(normalizeEbayOrderNumber(line.order?.order_number)));
 }
 
+function getHistoryLabelOrderDetails(orderNumbers = []) {
+  const wanted = parseHistoryOrderNumbers(orderNumbers);
+  const lineGroups = new Map();
+  getHistoryLinesByOrderNumbers(wanted).forEach((line) => {
+    const orderNumber = normalizeEbayOrderNumber(line.order?.order_number);
+    if (!orderNumber) return;
+    if (!lineGroups.has(orderNumber)) {
+      lineGroups.set(orderNumber, {
+        orderNumber,
+        buyerUsername: line.order?.buyer_username || "",
+        salesRecordNumber: line.order?.sales_record_number || "",
+        itemNumbers: new Set(),
+        transactionIds: new Set(),
+      });
+    }
+    const group = lineGroups.get(orderNumber);
+    if (!group.buyerUsername && line.order?.buyer_username) group.buyerUsername = line.order.buyer_username;
+    if (!group.salesRecordNumber && line.order?.sales_record_number) group.salesRecordNumber = line.order.sales_record_number;
+    if (line.item_number) group.itemNumbers.add(line.item_number);
+    if (line.transaction_id) group.transactionIds.add(line.transaction_id);
+  });
+
+  return wanted.map((orderNumber) => lineGroups.get(orderNumber) || {
+    orderNumber,
+    buyerUsername: "",
+    salesRecordNumber: "",
+    itemNumbers: new Set(),
+    transactionIds: new Set(),
+  });
+}
+
+function renderHistoryLabelOrderList(orderNumbers = []) {
+  const details = getHistoryLabelOrderDetails(orderNumbers);
+  if (!details.length) return "";
+
+  return `
+    <div class="history-label-order-list" aria-label="Orders covered by this shipping label">
+      ${details.map((entry) => {
+        const itemNumbers = [...entry.itemNumbers].filter(Boolean);
+        const transactionIds = [...entry.transactionIds].filter(Boolean);
+        return `
+          <article>
+            <strong>${escapeHtml(entry.buyerUsername || "No buyer username")}</strong>
+            <span>Order: ${escapeHtml(entry.orderNumber || "-")}</span>
+            <span>Action #: ${escapeHtml(itemNumbers.join(", ") || transactionIds.join(", ") || "-")}</span>
+            ${entry.salesRecordNumber ? `<span>Sales record: ${escapeHtml(entry.salesRecordNumber)}</span>` : ""}
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function getHistoryLabelTarget(orderNumbers) {
   const normalized = parseHistoryOrderNumbers(orderNumbers);
   const orders = getHistoryOrdersByNumbers(normalized);
@@ -1314,6 +1393,7 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
   details.innerHTML = labelPath
     ? `
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
+      ${renderHistoryLabelOrderList(orderNumbers)}
       <span><strong>Label:</strong> Attached ${escapeHtml(formatDateTime(order.label_uploaded_at))} - covers ${orderCount} ${orderWord}${size ? ` - ${escapeHtml(size)}` : ""}</span>
       <span><strong>Shipment:</strong> ${escapeHtml(metadata.shipmentId || order.ebay_shipment_id || "-")}</span>
       <span><strong>Carrier:</strong> ${escapeHtml(metadata.carrier || "-")}</span>
@@ -1321,6 +1401,7 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
     `
     : `
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || "-")}</span>
+      ${renderHistoryLabelOrderList(orderNumbers)}
       <span>Waiting for one eBay label PDF for this grouped completion.</span>
     `;
 }
@@ -1629,7 +1710,9 @@ async function attachHistoryLabelToOrder(transferPayload) {
   if ($("done-history-label")) $("done-history-label").textContent = "Done";
   setHistoryLabelStatus(`Shipping label attached to this grouped completion (${orderCount} order${orderCount === 1 ? "" : "s"}).`, "success");
   renderHistoryLabelDetails(state.awaitingLabelGroup);
-  renderHistoryList();
+  const visibleGroups = getVisibleHistoryGroups();
+  renderSummary(visibleGroups);
+  renderHistoryList(visibleGroups);
   return {
     orderNumber: awaiting.orderNumbers[0] || "",
     orderNumbers: awaiting.orderNumbers,
