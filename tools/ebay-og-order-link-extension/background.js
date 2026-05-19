@@ -3,11 +3,14 @@
 
   const APP_URL_KEY = "ogPendingOrdersUrl";
   const PENDING_LABEL_PREFIX = "ogPendingLabel:";
+  const PENDING_REPORT_PREFIX = "ogPendingReport:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
+  const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
   const RECEIVER_STATE_TIMEOUT_MS = 900;
   const downloadCaptures = new Map();
   const appTransferAcks = new Map();
+  const appReportAcks = new Map();
 
   function normalizeUrl(value) {
     try {
@@ -21,6 +24,13 @@
     const orderId = String(label.metadata?.orderId || "order").replace(/[^a-z0-9-]/gi, "-");
     const shipmentId = String(label.metadata?.shipmentId || crypto.randomUUID()).replace(/[^a-z0-9-]/gi, "-");
     return `${orderId}:${shipmentId}:${Date.now()}`;
+  }
+
+  function buildReportTransferId(report = {}) {
+    const file = String(report.report?.filename || report.metadata?.filename || "awaiting-orders-report")
+      .replace(/[^a-z0-9._-]/gi, "-")
+      .slice(0, 70);
+    return `report:${file || "awaiting-orders-report"}:${Date.now()}`;
   }
 
   async function getAppUrl() {
@@ -38,14 +48,34 @@
     });
   }
 
+  async function storePendingReport(transferId, report) {
+    await chrome.storage.local.set({
+      [`${PENDING_REPORT_PREFIX}${transferId}`]: {
+        ...report,
+        transferId,
+        relayedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingLabel(transferId) {
     const key = `${PENDING_LABEL_PREFIX}${transferId}`;
     const stored = await chrome.storage.local.get(key);
     return stored[key] || null;
   }
 
+  async function getPendingReport(transferId) {
+    const key = `${PENDING_REPORT_PREFIX}${transferId}`;
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] || null;
+  }
+
   async function removePendingLabel(transferId) {
     await chrome.storage.local.remove(`${PENDING_LABEL_PREFIX}${transferId}`);
+  }
+
+  async function removePendingReport(transferId) {
+    await chrome.storage.local.remove(`${PENDING_REPORT_PREFIX}${transferId}`);
   }
 
   function waitForAppTransferAck(transferId) {
@@ -69,6 +99,27 @@
     });
   }
 
+  function waitForAppReportAck(transferId) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appReportAcks.delete(transferId);
+        resolve({
+          ok: false,
+          transferId,
+          error: "OG received the eBay report handoff, but did not confirm import within 5 minutes. Open Pending Orders and try again.",
+        });
+      }, APP_ACK_TIMEOUT_MS);
+
+      appReportAcks.set(transferId, {
+        resolve: (status) => {
+          clearTimeout(timer);
+          appReportAcks.delete(transferId);
+          resolve(status);
+        },
+      });
+    });
+  }
+
   async function handleAppTransferStatus(status = {}) {
     const transferId = status.transferId || "";
     if (!transferId) return;
@@ -78,6 +129,18 @@
     }
     if (status.ok) await removePendingLabel(transferId);
     const waiter = appTransferAcks.get(transferId);
+    if (waiter) waiter.resolve(status);
+  }
+
+  async function handleAppReportStatus(status = {}) {
+    const transferId = status.transferId || "";
+    if (!transferId) return;
+    if (status.phase === "started" && status.tabId) {
+      focusTab(status.tabId);
+      return;
+    }
+    if (status.ok) await removePendingReport(transferId);
+    const waiter = appReportAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
 
@@ -128,6 +191,16 @@
     url.searchParams.set("source", "ebay");
     if (payload.metadata?.orderId) url.searchParams.set("orderId", payload.metadata.orderId);
     url.searchParams.set("labelTransferId", payload.transferId);
+    return url;
+  }
+
+  function buildReportPageUrl(appUrl, payload, pageName = "") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    url.searchParams.set("reportTransferId", payload.transferId);
     return url;
   }
 
@@ -273,21 +346,84 @@
     return finishRoutedTransfer(appUrl, payload, ack, { delivered: false, opened: true });
   }
 
+  async function deliverReportToTab(tab, payload) {
+    const appAckPromise = waitForAppReportAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_AWAITING_REPORT_TRANSFER", payload });
+    await focusTab(tab.id);
+    return appAckPromise;
+  }
+
+  async function openReportTransferPageAndWait(appUrl, payload, existingTab = null) {
+    const appAckPromise = waitForAppReportAck(payload.transferId);
+    const url = buildReportPageUrl(appUrl, payload, "pending-orders.html");
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function relayAwaitingReportToApp(reportTransfer) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+
+    const transferId = buildReportTransferId(reportTransfer);
+    const payload = { ...reportTransfer, transferId };
+    await storePendingReport(transferId, payload);
+
+    const tabs = await findAppTabs(appUrl);
+    const pendingTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (pendingTab?.id) {
+      try {
+        const ack = await deliverReportToTab(pendingTab, payload);
+        return {
+          ...ack,
+          transferId,
+          delivered: true,
+          opened: false,
+        };
+      } catch (error) {
+        const ack = await openReportTransferPageAndWait(appUrl, payload, pendingTab);
+        return {
+          ...ack,
+          transferId,
+          delivered: false,
+          opened: true,
+          reusedTab: true,
+          recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
+        };
+      }
+    }
+
+    const reusableTab = tabs[0] || null;
+    const ack = await openReportTransferPageAndWait(appUrl, payload, reusableTab);
+    return {
+      ...ack,
+      transferId,
+      delivered: false,
+      opened: true,
+      reusedTab: Boolean(reusableTab),
+    };
+  }
+
   function beginDownloadCapture(payload, sender) {
     const captureId = crypto.randomUUID();
     const capture = {
       captureId,
       tabId: sender?.tab?.id || null,
+      kind: payload?.kind || "label",
       metadata: payload?.metadata || {},
       pageUrl: payload?.pageUrl || sender?.tab?.url || "",
       startedAt: Date.now(),
+      timeoutMs: payload?.kind === "awaiting-orders-report" ? REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS : DOWNLOAD_CAPTURE_TIMEOUT_MS,
       matchedDownloadIds: new Set(),
       finished: false,
       timer: null,
     };
     capture.timer = setTimeout(() => {
       downloadCaptures.delete(captureId);
-    }, DOWNLOAD_CAPTURE_TIMEOUT_MS);
+    }, capture.timeoutMs);
     downloadCaptures.set(captureId, capture);
     return captureId;
   }
@@ -312,6 +448,12 @@
       capture.pageUrl,
     ].filter(Boolean).join(" ").toLowerCase();
 
+    if (capture.kind === "awaiting-orders-report") {
+      const looksLikeEbayReport = /ebay\.com|blob:https:\/\/www\.ebay\.com/.test(text)
+        && /ordersreport|orders-report|order-report|download|report|csv|xlsx|sh-orders/.test(text);
+      return looksLikeEbayReport;
+    }
+
     const orderId = String(capture.metadata?.orderId || "").toLowerCase();
     const shipmentId = String(capture.metadata?.shipmentId || "").toLowerCase();
     const mentionsCapture = (orderId && text.includes(orderId))
@@ -324,7 +466,7 @@
 
   function getMatchingCapture(item) {
     const captures = [...downloadCaptures.values()]
-      .filter((capture) => Date.now() - capture.startedAt <= DOWNLOAD_CAPTURE_TIMEOUT_MS)
+      .filter((capture) => Date.now() - capture.startedAt <= (capture.timeoutMs || DOWNLOAD_CAPTURE_TIMEOUT_MS))
       .filter((capture) => isLikelyDownloadForCapture(item, capture))
       .sort((a, b) => b.startedAt - a.startedAt);
     return captures[0] || null;
@@ -365,6 +507,53 @@
     };
   }
 
+  function filenameFromDownloadItem(item, fallback = "eBay-OrdersReport.csv") {
+    const raw = String(item?.filename || item?.url || item?.finalUrl || "").split(/[\\/]/).pop() || fallback;
+    try {
+      return decodeURIComponent(raw.split(/[?#]/)[0] || fallback);
+    } catch (_) {
+      return raw.split(/[?#]/)[0] || fallback;
+    }
+  }
+
+  function isLikelyEbayOrdersReportText(text) {
+    return /(^|,|\n)\s*"?Order Number"?\s*(,|\n)/i.test(text)
+      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text)
+      && /(^|,|\n)\s*"?Sales Record Number"?\s*(,|\n)/i.test(text);
+  }
+
+  async function fetchDownloadItemAsReport(item) {
+    const url = item?.finalUrl || item?.url || "";
+    if (!url) throw new Error("The browser download did not expose a URL.");
+    if (url.startsWith("blob:")) {
+      throw new Error("The eBay report used a blob URL. The page probe must capture that before download.");
+    }
+
+    const response = await fetch(url, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`The eBay report download URL returned HTTP ${response.status}.`);
+
+    const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    const sample = new TextDecoder("utf-8").decode(buffer.slice(0, Math.min(buffer.byteLength, 12000)));
+    if (!isLikelyEbayOrdersReportText(sample)) {
+      throw new Error("The browser-exposed report download URL did not return the eBay Orders Report CSV.");
+    }
+    const filename = filenameFromDownloadItem(item);
+    const mimeType = blob.type || item?.mime || "text/csv";
+    return {
+      source: "browser-download-url",
+      url: response.url || url,
+      filename,
+      mimeType,
+      size: blob.size || buffer.byteLength || item?.fileSize || 0,
+      base64: arrayBufferToBase64(buffer),
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   async function handleDownloadCapture(capture, downloadId) {
     if (!capture || capture.finished || capture.matchedDownloadIds.has(downloadId)) return;
     capture.matchedDownloadIds.add(downloadId);
@@ -372,6 +561,23 @@
     try {
       await new Promise((resolve) => setTimeout(resolve, 750));
       const item = await getDownloadItem(downloadId);
+      if (capture.kind === "awaiting-orders-report") {
+        const report = await fetchDownloadItemAsReport(item);
+        const response = await relayAwaitingReportToApp({
+          metadata: capture.metadata,
+          report,
+        });
+        finishDownloadCapture(capture.captureId);
+        if (capture.tabId !== null) {
+          chrome.tabs.sendMessage(capture.tabId, {
+            type: "OG_EBAY_AWAITING_REPORT_CAPTURE_RESULT",
+            captureId: capture.captureId,
+            result: response,
+          }).catch(() => null);
+        }
+        return;
+      }
+
       const label = await fetchDownloadItemAsLabel(item);
       const response = await relayLabelToApp({
         metadata: capture.metadata,
@@ -388,7 +594,9 @@
     } catch (error) {
       if (capture.tabId !== null) {
         chrome.tabs.sendMessage(capture.tabId, {
-          type: "OG_EBAY_DOWNLOAD_CAPTURE_RESULT",
+          type: capture.kind === "awaiting-orders-report"
+            ? "OG_EBAY_AWAITING_REPORT_CAPTURE_RESULT"
+            : "OG_EBAY_DOWNLOAD_CAPTURE_RESULT",
           captureId: capture.captureId,
           result: {
             ok: false,
@@ -438,6 +646,23 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS") {
+      handleAppReportStatus({
+        ...(message.payload || {}),
+        tabId: _sender?.tab?.id || message.payload?.tabId || null,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
+      relayAwaitingReportToApp(message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_BEGIN_DOWNLOAD_CAPTURE") {
       try {
         const captureId = beginDownloadCapture(message.payload, _sender);
@@ -461,8 +686,22 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_GET_PENDING_REPORT") {
+      getPendingReport(message.transferId)
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_CLEAR_PENDING_LABEL") {
       removePendingLabel(message.transferId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CLEAR_PENDING_REPORT") {
+      removePendingReport(message.transferId)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;

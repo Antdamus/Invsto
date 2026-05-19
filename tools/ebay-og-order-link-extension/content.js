@@ -8,10 +8,15 @@
   const FLOATING_ID = "og-ebay-open-all-orders";
   const SINGLE_ORDER_ID = "og-ebay-open-single-order";
   const SEND_LABEL_ID = "og-ebay-send-label";
+  const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
+  const REPORT_EVENT_TYPE = "OG_EBAY_AWAITING_REPORT_CAPTURED";
+  const REPORT_PROBE_READY_EVENT_TYPE = "OG_EBAY_AWAITING_REPORT_PROBE_READY";
   const LABEL_STATUS_TIMEOUT_MS = 30000;
   const LABEL_PROBE_READY_TIMEOUT_MS = 5000;
+  const REPORT_STATUS_TIMEOUT_MS = 120000;
+  const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -200,6 +205,66 @@
       || document.querySelector('[data-testid="shipping-actions"] button[aria-label*="Print" i]');
   }
 
+  function isElementVisible(element) {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return rect.width > 0
+      && rect.height > 0
+      && style.visibility !== "hidden"
+      && style.display !== "none"
+      && !element.closest("[hidden], [aria-hidden='true']");
+  }
+
+  function getPageTextSample() {
+    return [
+      document.title,
+      document.body?.innerText || "",
+      ...[...document.scripts].slice(0, 20).map((script) => script.textContent || ""),
+    ].join("\n");
+  }
+
+  function getAwaitingOrdersSummaryText() {
+    const text = document.body?.innerText || "";
+    const match = text.match(/Results:\s*\d+\s*-\s*\d+\s*of\s*\d+/i)
+      || text.match(/Results:\s*\d+\s*of\s*\d+/i);
+    return cleanText(match?.[0] || "");
+  }
+
+  function getDownloadReportButton() {
+    const scoped = [
+      ...document.querySelectorAll(".downloadReport button, .downloadReport a, [id*='downloadReport' i] button, [id*='downloadReport' i] a, [data-testid*='download' i] button, [data-testid*='download' i] a"),
+    ].find((control) => {
+      const text = cleanText(control.textContent || control.getAttribute("aria-label"));
+      return isElementVisible(control) && /^Download report$/i.test(text);
+    });
+    if (scoped) return scoped;
+
+    return [...document.querySelectorAll("button, a")]
+      .find((control) => {
+        const text = cleanText(control.textContent || control.getAttribute("aria-label"));
+        return isElementVisible(control) && /^Download report$/i.test(text);
+      }) || null;
+  }
+
+  function isAwaitingShipmentOrdersPage() {
+    const sample = getPageTextSample();
+    return /Manage orders awaiting shipment/i.test(sample)
+      && /Results:/i.test(sample)
+      && Boolean(getDownloadReportButton())
+      && (/orders-download-report/i.test(sample) || /Download report/i.test(sample));
+  }
+
+  function getAwaitingReportMetadata() {
+    return {
+      source: "ebay-awaiting-shipment-report",
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      visibleSummaryText: getAwaitingOrdersSummaryText(),
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   function getLabelMetadata() {
     const downloadButton = getDownloadLabelButton();
     const printButton = getPrintLabelButton();
@@ -231,11 +296,28 @@
     return error?.message || String(error || "Could not capture the eBay label.");
   }
 
+  function getReportErrorMessage(error) {
+    if (error instanceof AggregateError) {
+      const messages = error.errors
+        .map((entry) => entry?.message || String(entry || ""))
+        .filter(Boolean);
+      return messages.join(" / ") || "No report file was captured from the eBay Download report action.";
+    }
+    return error?.message || String(error || "Could not capture the eBay orders report.");
+  }
+
   function setLabelButtonStatus(message, tone = "info") {
     const button = document.getElementById(SEND_LABEL_ID);
     if (!button) return;
     button.dataset.statusTone = tone;
     button.textContent = message || "Send Label to OG";
+  }
+
+  function setAwaitingReportButtonStatus(message, tone = "info") {
+    const button = document.getElementById(SEND_AWAITING_REPORT_ID);
+    if (!button) return;
+    button.dataset.statusTone = tone;
+    button.textContent = message || "Send Awaiting Orders Report to OG";
   }
 
   function assertExtensionContextActive() {
@@ -303,6 +385,53 @@
     });
   }
 
+  function injectReportCaptureProbe() {
+    return new Promise((resolve, reject) => {
+      const existing = document.getElementById("og-ebay-report-capture-probe");
+      if (existing) existing.remove();
+
+      const timer = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("The eBay report capture probe did not finish loading."));
+      }, REPORT_PROBE_READY_TIMEOUT_MS);
+
+      function finish() {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve();
+      }
+
+      function onMessage(event) {
+        if (event.source !== window || event.data?.type !== REPORT_PROBE_READY_EVENT_TYPE) return;
+        finish();
+      }
+
+      window.addEventListener("message", onMessage);
+
+      const script = document.createElement("script");
+      script.id = "og-ebay-report-capture-probe";
+      try {
+        assertExtensionContextActive();
+        script.src = chrome.runtime.getURL("report-capture-probe.js");
+      } catch (error) {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        reject(error);
+        return;
+      }
+      script.async = false;
+      script.onload = () => {
+        window.setTimeout(() => script.remove(), 0);
+      };
+      script.onerror = () => {
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        reject(new Error("The extension-hosted eBay report capture probe was blocked or could not load."));
+      };
+      (document.documentElement || document.head).appendChild(script);
+    });
+  }
+
   function waitForCapturedLabel() {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
@@ -321,6 +450,48 @@
 
       window.addEventListener("message", onMessage);
     });
+  }
+
+  function waitForCapturedReport() {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("No eBay orders report file was captured from the Download report action."));
+      }, REPORT_STATUS_TIMEOUT_MS);
+
+      function onMessage(event) {
+        if (event.source !== window || event.data?.type !== REPORT_EVENT_TYPE) return;
+        const payload = event.data.payload || {};
+        if (!payload.base64 && !payload.url) return;
+        if (payload.base64 && !isLikelyEbayOrdersReportBase64(payload.base64)) return;
+        if (!payload.base64 && !/ebay-ordersreport|ordersreport|orders-report/i.test(`${payload.filename || ""} ${payload.url || ""}`)) return;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(payload);
+      }
+
+      window.addEventListener("message", onMessage);
+    });
+  }
+
+  function isLikelyEbayOrdersReportText(text) {
+    return /(^|,|\n)\s*"?Order Number"?\s*(,|\n)/i.test(text)
+      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text)
+      && /(^|,|\n)\s*"?Sales Record Number"?\s*(,|\n)/i.test(text);
+  }
+
+  function isLikelyEbayOrdersReportBase64(base64) {
+    try {
+      const binary = atob(String(base64 || ""));
+      const sampleLength = Math.min(binary.length, 12000);
+      const bytes = new Uint8Array(sampleLength);
+      for (let index = 0; index < sampleLength; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return isLikelyEbayOrdersReportText(new TextDecoder("utf-8").decode(bytes));
+    } catch (_) {
+      return false;
+    }
   }
 
   async function fetchLabelUrlFromContentScript(url) {
@@ -351,6 +522,20 @@
     return response.captureId;
   }
 
+  async function beginReportDownloadCapture(metadata) {
+    assertExtensionContextActive();
+    const response = await chrome.runtime.sendMessage({
+      type: "OG_EBAY_BEGIN_DOWNLOAD_CAPTURE",
+      payload: {
+        kind: "awaiting-orders-report",
+        metadata,
+        pageUrl: window.location.href,
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not prepare the browser report download fallback.");
+    return response.captureId;
+  }
+
   function waitForBackgroundDownloadCapture(captureId) {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
@@ -362,6 +547,36 @@
         if (message?.type !== "OG_EBAY_DOWNLOAD_CAPTURE_RESULT" || message.captureId !== captureId) return false;
         if (!message.result?.ok) {
           labelLog("download fallback did not attach label", message.result);
+          return false;
+        }
+        window.clearTimeout(timer);
+        chrome.runtime.onMessage.removeListener(onMessage);
+        resolve(message.result);
+        return false;
+      }
+
+      try {
+        assertExtensionContextActive();
+      } catch (error) {
+        window.clearTimeout(timer);
+        reject(error);
+        return;
+      }
+      chrome.runtime.onMessage.addListener(onMessage);
+    });
+  }
+
+  function waitForBackgroundReportCapture(captureId) {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        chrome.runtime.onMessage.removeListener(onMessage);
+        reject(new Error("No browser download was captured from eBay's report action."));
+      }, REPORT_STATUS_TIMEOUT_MS + 15000);
+
+      function onMessage(message) {
+        if (message?.type !== "OG_EBAY_AWAITING_REPORT_CAPTURE_RESULT" || message.captureId !== captureId) return false;
+        if (!message.result?.ok) {
+          labelLog("report download fallback did not import", message.result);
           return false;
         }
         window.clearTimeout(timer);
@@ -472,6 +687,102 @@
       setLabelButtonStatus("Capture failed", "error");
       window.alert(`${getErrorMessage(error)}\n\nThe extension now also watches Chrome/Edge downloads. If a PDF still downloads normally but does not attach, send me the console lines that start with [OG eBay Label].`);
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 5000);
+    }
+  }
+
+  async function fetchReportUrlFromContentScript(url) {
+    const response = await fetch(url, { credentials: "include", cache: "no-store" });
+    if (!response.ok) throw new Error(`Report URL returned HTTP ${response.status}.`);
+    const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    const sample = new TextDecoder("utf-8").decode(buffer.slice(0, Math.min(buffer.byteLength, 12000)));
+    if (!isLikelyEbayOrdersReportText(sample)) {
+      throw new Error("The captured report URL did not return the eBay Orders Report CSV.");
+    }
+    const filename = String(response.url || url).split(/[\\/]/).pop()?.split(/[?#]/)[0] || "eBay-OrdersReport.csv";
+    return {
+      source: "content-fetch",
+      url: response.url || url,
+      filename,
+      mimeType: blob.type || "text/csv",
+      size: blob.size || buffer.byteLength,
+      base64: arrayBufferToBase64(buffer),
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
+  async function sendAwaitingOrdersReportToOg() {
+    const reportButton = getDownloadReportButton();
+    if (!isAwaitingShipmentOrdersPage() || !reportButton) {
+      setAwaitingReportButtonStatus("Report button missing", "error");
+      window.alert("Could not find eBay's visible Download report button on the awaiting-shipment orders page.");
+      return;
+    }
+
+    const appUrl = await getConfiguredAppUrl();
+    if (!appUrl) {
+      setAwaitingReportButtonStatus("Set OG URL", "error");
+      window.alert("OG Pending Orders URL was not set. Click the extension icon to set it.");
+      return;
+    }
+
+    const metadata = getAwaitingReportMetadata();
+    let downloadCaptureId = "";
+    try {
+      assertExtensionContextActive();
+      setAwaitingReportButtonStatus("Creating report...");
+      await injectReportCaptureProbe();
+      downloadCaptureId = await beginReportDownloadCapture(metadata);
+    } catch (error) {
+      if (/extension context|reloaded/i.test(error?.message || "")) {
+        setAwaitingReportButtonStatus("Refresh eBay page", "error");
+        window.alert(error.message);
+        return;
+      }
+      console.warn("[OG eBay Report] Capture setup warning:", error);
+    }
+
+    const pageCapturePromise = waitForCapturedReport().then((report) => ({ kind: "page", report }));
+    const downloadCapturePromise = downloadCaptureId
+      ? waitForBackgroundReportCapture(downloadCaptureId).then((result) => ({ kind: "download", result }))
+      : Promise.reject(new Error("Browser download fallback was not available."));
+
+    setAwaitingReportButtonStatus("Waiting for download...");
+    reportButton.click();
+
+    try {
+      const captured = await Promise.any([pageCapturePromise, downloadCapturePromise]);
+      if (captured.kind === "download") {
+        setAwaitingReportButtonStatus(captured.result.opened ? "Opened OG" : "Done", "success");
+        window.setTimeout(() => setAwaitingReportButtonStatus("Send Awaiting Orders Report to OG"), 4500);
+        return;
+      }
+
+      cancelDownloadCapture(downloadCaptureId);
+      let report = captured.report;
+      if (!report.base64 && report.url && !report.url.startsWith("blob:")) {
+        report = await fetchReportUrlFromContentScript(report.url);
+      }
+      if (!report.base64) throw new Error("Captured a report URL, but not a readable report file.");
+
+      setAwaitingReportButtonStatus("Uploading to OG...");
+      assertExtensionContextActive();
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_AWAITING_REPORT",
+        payload: {
+          metadata,
+          report,
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not hand the eBay report to OG.");
+      setAwaitingReportButtonStatus(response.opened ? "Opened OG" : "Done", "success");
+      window.setTimeout(() => setAwaitingReportButtonStatus("Send Awaiting Orders Report to OG"), 4500);
+    } catch (error) {
+      console.error("[OG eBay Report] Capture failed:", error);
+      cancelDownloadCapture(downloadCaptureId);
+      setAwaitingReportButtonStatus("Import failed", "error");
+      window.alert(`${getReportErrorMessage(error)}\n\nThe extension tried both page-level capture and Chrome/Edge download capture. If the report downloaded normally but did not import, send me the console lines that start with [OG eBay Report].`);
+      window.setTimeout(() => setAwaitingReportButtonStatus("Send Awaiting Orders Report to OG"), 6000);
     }
   }
 
@@ -590,7 +901,8 @@
       }
 
       #${FLOATING_ID},
-      #${SINGLE_ORDER_ID} {
+      #${SINGLE_ORDER_ID},
+      #${SEND_AWAITING_REPORT_ID} {
         position: fixed;
         right: 18px;
         bottom: 18px;
@@ -617,6 +929,19 @@
         background: #dcebff;
       }
 
+      #${SEND_AWAITING_REPORT_ID} {
+        bottom: 72px;
+        border-color: #116b36;
+        background: #e8fff0;
+        color: #0a5b2b;
+        max-width: min(360px, calc(100vw - 36px));
+        white-space: normal;
+      }
+
+      #${SEND_AWAITING_REPORT_ID}:hover {
+        background: #d4f8df;
+      }
+
       #${SEND_LABEL_ID} {
         margin-left: 8px;
         border: 1px solid #116b36;
@@ -632,13 +957,15 @@
         background: #d4f8df;
       }
 
-      #${SEND_LABEL_ID}[data-status-tone="error"] {
+      #${SEND_LABEL_ID}[data-status-tone="error"],
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
         color: #9f1f14;
       }
 
-      #${SEND_LABEL_ID}[data-status-tone="success"] {
+      #${SEND_LABEL_ID}[data-status-tone="success"],
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
         color: #0a5b2b;
@@ -742,12 +1069,36 @@
     }
   }
 
+  function injectAwaitingReportButton() {
+    let button = document.getElementById(SEND_AWAITING_REPORT_ID);
+
+    if (!isAwaitingShipmentOrdersPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = SEND_AWAITING_REPORT_ID;
+      button.textContent = "Send Awaiting Orders Report to OG";
+      button.title = "Trigger eBay's full awaiting-shipment orders report and import it into OG Pending Orders";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendAwaitingOrdersReportToOg();
+      });
+      document.body.appendChild(button);
+    }
+  }
+
   function injectOgControls() {
     ensureStyles();
     injectRowButtons();
     injectFloatingButton();
     injectSingleOrderButton();
     injectSendLabelButton();
+    injectAwaitingReportButton();
   }
 
   let scheduled = false;

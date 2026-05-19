@@ -73,3 +73,17 @@ Required extension permissions now include:
 - `downloads` so the background worker can observe an eBay label download URL when the page does not expose the PDF through `fetch`, XHR, or blob hooks.
 - `https://www.ebay.com/*` for eBay page injection.
 - `https://*/*`, `http://localhost/*`, and `http://127.0.0.1/*` for the lightweight OG app bridge. The bridge only activates on the configured Pending Orders URL.
+
+## Send awaiting-shipment report to OG
+
+On eBay Seller Hub pages titled `Manage orders awaiting shipment`, the extension looks for the real visible `Download report` button, the `Results:` grid summary, and eBay's `orders-download-report` module signal. It adds a floating `Send Awaiting Orders Report to OG` button.
+
+When clicked, it:
+
+1. Loads a report capture probe that watches report-ish `fetch`, XHR, object URL, and anchor downloads.
+2. Starts a Chrome/Edge download fallback for the generated `eBay-OrdersReport` file.
+3. Clicks eBay's native `Download report` button, not the bulk `Download selected` action.
+4. Sends the captured report file plus source page metadata to OG Pending Orders.
+5. Reuses the same Pending Orders CSV import pathway as the manual file picker.
+
+The extension still does not read arbitrary local files from disk. It captures the generated report through page/network blob hooks or by refetching the browser-exposed download URL with the signed-in eBay session.

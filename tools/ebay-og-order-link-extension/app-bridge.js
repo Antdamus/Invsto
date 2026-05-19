@@ -16,23 +16,24 @@
     }
   }
 
-  function postToOgApp(payload) {
+  function postToOgApp(payload, type = "OG_EBAY_LABEL_TRANSFER") {
     const message = {
-      type: "OG_EBAY_LABEL_TRANSFER",
+      type,
       payload,
     };
+    const maxAttempts = type === "OG_EBAY_AWAITING_REPORT_TRANSFER" ? 60 : 10;
     window.postMessage(message, window.location.origin);
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
       window.postMessage(message, window.location.origin);
-      if (attempts >= 10) window.clearInterval(timer);
+      if (attempts >= maxAttempts) window.clearInterval(timer);
     }, 1000);
   }
 
-  function relayOgStatusToExtension(payload) {
+  function relayOgStatusToExtension(payload, type = "OG_EBAY_LABEL_TRANSFER_STATUS") {
     chrome.runtime.sendMessage({
-      type: "OG_EBAY_LABEL_TRANSFER_STATUS",
+      type,
       payload,
     }).catch(() => null);
   }
@@ -66,17 +67,32 @@
 
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
-    if (!transferId) return;
-    const response = await chrome.runtime.sendMessage({
-      type: "OG_EBAY_GET_PENDING_LABEL",
-      transferId,
-    }).catch(() => null);
-    if (response?.payload) postToOgApp(response.payload);
+    const reportTransferId = new URLSearchParams(window.location.search).get("reportTransferId");
+    if (transferId) {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_GET_PENDING_LABEL",
+        transferId,
+      }).catch(() => null);
+      if (response?.payload) postToOgApp(response.payload);
+    }
+    if (reportTransferId) {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_GET_PENDING_REPORT",
+        transferId: reportTransferId,
+      }).catch(() => null);
+      if (response?.payload) postToOgApp(response.payload, "OG_EBAY_AWAITING_REPORT_TRANSFER");
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "OG_EBAY_LABEL_TRANSFER") {
       postToOgApp(message.payload);
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER") {
+      postToOgApp(message.payload, "OG_EBAY_AWAITING_REPORT_TRANSFER");
       sendResponse({ ok: true });
       return true;
     }
@@ -93,8 +109,13 @@
 
   window.addEventListener("message", (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
-    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER_STATUS") return;
-    relayOgStatusToExtension(event.data.payload || {});
+    if (event.data?.type === "OG_EBAY_LABEL_TRANSFER_STATUS") {
+      relayOgStatusToExtension(event.data.payload || {});
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS") {
+      relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS");
+    }
   });
 
   getConfiguredAppUrl().then((appUrl) => {

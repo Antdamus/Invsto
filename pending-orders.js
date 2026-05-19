@@ -36,7 +36,9 @@ const state = {
   noInventoryCaptureBusy: false,
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
+  handledEbayReportTransferIds: new Set(),
   ebayLabelBusy: false,
+  ebayReportBusy: false,
   busy: false,
 };
 
@@ -526,7 +528,7 @@ function parseCsv(text) {
 }
 
 function rowsFromEbayCsv(text) {
-  const parsed = parseCsv(text);
+  const parsed = parseCsv(String(text || "").replace(/^\uFEFF/, ""));
   const headerIndex = parsed.findIndex((row) =>
     row.some((cell) => String(cell).trim() === "Order Number")
     && row.some((cell) => String(cell).trim() === "Item Title")
@@ -742,9 +744,115 @@ function formatEbaySnapshotSummary(snapshot) {
   return parts.length ? parts.join(", ") : "";
 }
 
+function parseAwaitingSummaryTotal(value) {
+  const match = String(value || "").match(/\bof\s+([\d,]+)/i);
+  if (!match) return 0;
+  const total = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(total) ? total : 0;
+}
+
+async function importEbayPendingOrdersReport(text, metadata = {}) {
+  const rows = rowsFromEbayCsv(text);
+  const payload = buildOrderImportPayload(rows).map((entry) => ({
+    ...entry,
+    order: {
+      ...entry.order,
+      raw_payload: {
+        ...(entry.order.raw_payload || {}),
+        import_metadata: {
+          originalFilename: metadata.filename || metadata.originalFilename || "",
+          reportGeneratedAt: metadata.reportGeneratedAt || metadata.capturedAt || "",
+          importTimestamp: metadata.importTimestamp || new Date().toISOString(),
+          sourcePageUrl: metadata.pageUrl || "",
+          awaitingShipmentSummaryText: metadata.visibleSummaryText || "",
+          source: metadata.source || "manual-ebay-orders-report",
+        },
+      },
+    },
+  }));
+  if (!payload.length) throw new Error("No usable eBay order rows were found in that CSV.");
+  const expectedAwaitingTotal = parseAwaitingSummaryTotal(metadata.visibleSummaryText);
+  const warnings = [];
+  if (expectedAwaitingTotal && payload.length < expectedAwaitingTotal) {
+    warnings.push(`The eBay page summary said ${metadata.visibleSummaryText}, but the report contained ${payload.length} order(s).`);
+  }
+
+  const incomingNumbers = [...new Set(payload.map((entry) => entry.order.order_number))];
+  const existingOrders = await loadExistingOrdersByNumber(incomingNumbers);
+  const fresh = payload.filter((entry) => !existingOrders.has(entry.order.order_number));
+  const skipped = payload.length - fresh.length;
+
+  let insertedOrders = [];
+  let insertedOrderIds = [];
+  if (fresh.length) {
+    const { data, error: orderError } = await supabase
+      .from("ebay_orders")
+      .insert(fresh.map((entry) => entry.order))
+      .select("id, order_number");
+
+    if (orderError) throw orderError;
+    insertedOrders = data || [];
+    insertedOrderIds = insertedOrders.map((order) => order.id).filter(Boolean);
+  }
+
+  const orderIdByNumber = new Map([
+    ...existingOrders.entries(),
+    ...(insertedOrders || []).map((order) => [order.order_number, order.id]),
+  ]);
+  const lineRows = payload.flatMap((entry) => {
+    const orderId = orderIdByNumber.get(entry.order.order_number);
+    return entry.lines.map((line) => ({ ...line, order_id: orderId }));
+  }).filter((line) => line.order_id);
+
+  const { data: insertedLines, error: lineError } = await supabase
+    .from("ebay_order_lines")
+    .upsert(lineRows, {
+      onConflict: "order_id,item_number,transaction_id",
+      ignoreDuplicates: true,
+    })
+    .select("id, order_id");
+
+  if (lineError) {
+    if (insertedOrderIds.length) {
+      await supabase.from("ebay_orders").delete().in("id", insertedOrderIds);
+    }
+    throw lineError;
+  }
+
+  const insertedLineCount = (insertedLines || []).length;
+  let statusUpdatedOrderCount = 0;
+  if (insertedLineCount) {
+    const orderIdsWithNewLines = [...new Set((insertedLines || []).map((line) => line.order_id).filter(Boolean))];
+    statusUpdatedOrderCount = orderIdsWithNewLines.length;
+    await supabase
+      .from("ebay_orders")
+      .update({ status: "pending" })
+      .in("id", orderIdsWithNewLines)
+      .in("status", ["fulfilled", "cancelled", "archived"]);
+  }
+
+  return {
+    originalFilename: metadata.filename || metadata.originalFilename || "",
+    source: metadata.source || "manual-ebay-orders-report",
+    capturedAt: metadata.capturedAt || "",
+    importedAt: metadata.importTimestamp || new Date().toISOString(),
+    sourcePageUrl: metadata.pageUrl || "",
+    visibleSummaryText: metadata.visibleSummaryText || "",
+    expectedAwaitingTotal,
+    reportRowsRead: rows.length,
+    ordersInReport: payload.length,
+    linesInReport: lineRows.length,
+    newOrdersAdded: insertedOrders.length,
+    existingOrdersChecked: skipped,
+    newLinesAdded: insertedLineCount,
+    ordersReopenedOrUpdated: statusUpdatedOrderCount,
+    warnings,
+  };
+}
+
 async function importEbayOrdersFromCsv() {
   if (!canImportOrders()) {
-    setImportStatus("Only admins can import eBay order reports.", "error");
+    setImportStatus("Your OG user is not allowed to import eBay order reports.", "error");
     return;
   }
 
@@ -755,75 +863,25 @@ async function importEbayOrdersFromCsv() {
   }
 
   const button = $("import-ebay-orders");
-  button.disabled = true;
+  if (button) button.disabled = true;
   setImportStatus("Reading eBay orders report...");
-  let insertedOrderIds = [];
 
   try {
     const text = await file.text();
-    const rows = rowsFromEbayCsv(text);
-    const payload = buildOrderImportPayload(rows);
-    if (!payload.length) throw new Error("No usable eBay order rows were found in that CSV.");
+    const result = await importEbayPendingOrdersReport(text, {
+      source: "manual-ebay-orders-report",
+      filename: file.name,
+      capturedAt: new Date(file.lastModified || Date.now()).toISOString(),
+    });
 
-    const incomingNumbers = [...new Set(payload.map((entry) => entry.order.order_number))];
-    const existingOrders = await loadExistingOrdersByNumber(incomingNumbers);
-    const fresh = payload.filter((entry) => !existingOrders.has(entry.order.order_number));
-    const skipped = payload.length - fresh.length;
-
-    let insertedOrders = [];
-    if (fresh.length) {
-      const { data, error: orderError } = await supabase
-        .from("ebay_orders")
-        .insert(fresh.map((entry) => entry.order))
-        .select("id, order_number");
-
-      if (orderError) throw orderError;
-      insertedOrders = data || [];
-    }
-    insertedOrderIds = (insertedOrders || []).map((order) => order.id).filter(Boolean);
-
-    const orderIdByNumber = new Map([
-      ...existingOrders.entries(),
-      ...(insertedOrders || []).map((order) => [order.order_number, order.id]),
-    ]);
-    const lineRows = payload.flatMap((entry) => {
-      const orderId = orderIdByNumber.get(entry.order.order_number);
-      return entry.lines.map((line) => ({ ...line, order_id: orderId }));
-    }).filter((line) => line.order_id);
-
-    const { data: insertedLines, error: lineError } = await supabase
-      .from("ebay_order_lines")
-      .upsert(lineRows, {
-        onConflict: "order_id,item_number,transaction_id",
-        ignoreDuplicates: true,
-      })
-      .select("id, order_id");
-
-    if (lineError) {
-      if (insertedOrderIds.length) {
-        await supabase.from("ebay_orders").delete().in("id", insertedOrderIds);
-      }
-      throw lineError;
-    }
-
-    const insertedLineCount = (insertedLines || []).length;
-    if (insertedLineCount) {
-      const orderIdsWithNewLines = [...new Set((insertedLines || []).map((line) => line.order_id).filter(Boolean))];
-      await supabase
-        .from("ebay_orders")
-        .update({ status: "pending" })
-        .in("id", orderIdsWithNewLines)
-        .in("status", ["fulfilled", "cancelled", "archived"]);
-    }
-
-    setImportStatus(`Imported ${insertedOrders.length} new order(s) and ${insertedLineCount} new line item(s). Checked ${skipped} existing order(s) for missing lines.`, "success");
+    setImportStatus(`Imported ${result.newOrdersAdded} new order(s) and ${result.newLinesAdded} new line item(s). Checked ${result.existingOrdersChecked} existing order(s) for missing lines.`, "success");
     $("ebay-orders-file").value = "";
     await loadOrders();
   } catch (error) {
     console.error("eBay order import failed:", error);
     setImportStatus(error.message || "Could not import eBay orders.", "error");
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 }
 
@@ -3388,6 +3446,15 @@ function base64ToBlob(base64, mimeType = "application/pdf") {
   return new Blob([bytes], { type: mimeType || "application/pdf" });
 }
 
+function base64ToText(base64) {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
 function safeStorageSegment(value, fallback = "value") {
   const cleaned = String(value || "")
     .trim()
@@ -3414,6 +3481,19 @@ function setEbayLabelTransferStatus(message = "", type = "info") {
 function postEbayLabelTransferStatus(payload = {}) {
   window.postMessage({
     type: "OG_EBAY_LABEL_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
+function setEbayReportTransferStatus(message = "", type = "info") {
+  const text = message || "Waiting for an eBay orders report.";
+  setImportStatus(text, type);
+  setStatus(text, type);
+}
+
+function postEbayReportTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS",
     payload,
   }, window.location.origin);
 }
@@ -3628,6 +3708,69 @@ async function handleEbayLabelTransfer(payload) {
   }
 }
 
+async function importAwaitingReportTransfer(payload) {
+  const metadata = payload?.metadata || {};
+  const report = payload?.report || {};
+  if (!report.base64) throw new Error("The extension did not send a readable eBay report file.");
+
+  const text = base64ToText(report.base64);
+  return importEbayPendingOrdersReport(text, {
+    source: metadata.source || "ebay-awaiting-shipment-report",
+    filename: report.filename || metadata.filename || "eBay-OrdersReport.csv",
+    capturedAt: report.capturedAt || metadata.capturedAt || new Date().toISOString(),
+    reportGeneratedAt: report.capturedAt || metadata.capturedAt || "",
+    importTimestamp: new Date().toISOString(),
+    pageUrl: metadata.pageUrl || report.url || "",
+    visibleSummaryText: metadata.visibleSummaryText || "",
+  });
+}
+
+async function handleEbayAwaitingReportTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledEbayReportTransferIds.has(transferId)) return;
+  if (state.ebayReportBusy) return;
+  if (transferId) state.handledEbayReportTransferIds.add(transferId);
+  state.ebayReportBusy = true;
+  setEbayReportTransferStatus("Report received. Importing orders...");
+  postEbayReportTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Pending Orders accepted the eBay awaiting-shipment report transfer.",
+  });
+
+  try {
+    if (!canImportOrders()) throw new Error("Your OG user is not allowed to import eBay order reports.");
+    const result = await importAwaitingReportTransfer(payload);
+    await loadOrders();
+    const warningText = result.warnings?.length ? ` Warning: ${result.warnings.join(" ")}` : "";
+    const message = `Pending orders updated: ${result.ordersInReport} order(s) in report, ${result.newOrdersAdded} new order(s), ${result.newLinesAdded} new line item(s), ${result.existingOrdersChecked} existing order(s) checked.${warningText}`;
+    setEbayReportTransferStatus(message, result.warnings?.length ? "error" : "success");
+    if (transferId && window.chrome?.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "OG_EBAY_CLEAR_PENDING_REPORT",
+        transferId,
+      }).catch(() => null);
+    }
+    postEbayReportTransferStatus({
+      transferId,
+      ok: true,
+      message,
+      ...result,
+    });
+  } catch (error) {
+    console.error("eBay awaiting report transfer failed:", error);
+    const message = error.message || "Could not import the eBay awaiting-shipment report.";
+    setEbayReportTransferStatus(message, "error");
+    postEbayReportTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  } finally {
+    state.ebayReportBusy = false;
+  }
+}
+
 function getPendingLabelReceiverState() {
   const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
   return {
@@ -3650,8 +3793,13 @@ function setupEbayLabelReceiver() {
       }, window.location.origin);
       return;
     }
-    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
-    handleEbayLabelTransfer(event.data.payload);
+    if (event.data?.type === "OG_EBAY_LABEL_TRANSFER") {
+      handleEbayLabelTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER") {
+      handleEbayAwaitingReportTransfer(event.data.payload);
+    }
   });
 }
 

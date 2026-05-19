@@ -20,7 +20,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "label-capture-probe.js"
+        "label-capture-probe.js",
+        "report-capture-probe.js"
       ],
       "matches": [
         "https://www.ebay.com/*"
