@@ -112,6 +112,31 @@
   font-size: 1.1rem;
 }
 
+.email-status-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 16px 0 0;
+}
+
+.email-status-meta div {
+  min-width: 0;
+}
+
+.email-status-meta dt {
+  color: rgba(242,243,245,.56);
+  font-size: .74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.email-status-meta dd {
+  margin: 3px 0 0;
+  color: rgba(242,243,245,.92);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .email-status-panel.is-success {
   border-color: rgba(85,239,196,.24);
 }
@@ -204,5 +229,9 @@
   .primary-btn,
   .secondary-btn {
     width: 100%;
+  }
+
+  .email-status-meta {
+    grid-template-columns: 1fr;
   }
 }
