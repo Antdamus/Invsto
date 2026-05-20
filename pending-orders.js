@@ -54,6 +54,7 @@ const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
+const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
 
 function $(id) {
   return document.getElementById(id);
@@ -229,6 +230,7 @@ function closeModal(id) {
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
+    || !$("ebay-completed-conflicts-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -764,13 +766,30 @@ async function loadExistingOrdersByNumber(orderNumbers) {
     const chunk = orderNumbers.slice(index, index + 100);
     const { data, error } = await supabase
       .from("ebay_orders")
-      .select("id, order_number")
+      .select("id, order_number, status, buyer_username, buyer_name, total_price, net_payout, imported_at, updated_at")
       .in("order_number", chunk);
 
     if (error) throw error;
-    (data || []).forEach((row) => existing.set(row.order_number, row.id));
+    (data || []).forEach((row) => existing.set(row.order_number, row));
   }
   return existing;
+}
+
+function isClosedEbayImportStatus(status) {
+  return CLOSED_EBAY_IMPORT_STATUSES.has(String(status || "").toLowerCase());
+}
+
+function buildCompletedHistoryConflict(entry, existingOrder) {
+  return {
+    orderNumber: entry.order.order_number,
+    buyerUsername: existingOrder?.buyer_username || entry.order.buyer_username || "",
+    buyerName: existingOrder?.buyer_name || entry.order.buyer_name || "",
+    status: existingOrder?.status || "",
+    reportLineCount: entry.lines.length,
+    totalPrice: Number(existingOrder?.total_price ?? entry.order.total_price ?? 0),
+    shipByDate: entry.order.ship_by_date || "",
+    appUpdatedAt: existingOrder?.updated_at || existingOrder?.imported_at || "",
+  };
 }
 
 function normalizeEbayOrderNumber(value) {
@@ -857,6 +876,7 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
     },
   }));
   if (!payload.length) throw new Error("No usable eBay order rows were found in that CSV.");
+  const reportLineCount = payload.reduce((count, entry) => count + entry.lines.length, 0);
   const expectedAwaitingTotal = parseAwaitingSummaryTotal(metadata.visibleSummaryText);
   const warnings = [];
   if (expectedAwaitingTotal && payload.length < expectedAwaitingTotal) {
@@ -865,8 +885,17 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
 
   const incomingNumbers = [...new Set(payload.map((entry) => entry.order.order_number))];
   const existingOrders = await loadExistingOrdersByNumber(incomingNumbers);
-  const fresh = payload.filter((entry) => !existingOrders.has(entry.order.order_number));
-  const skipped = payload.length - fresh.length;
+  const completedHistoryConflicts = payload
+    .filter((entry) => isClosedEbayImportStatus(existingOrders.get(entry.order.order_number)?.status))
+    .map((entry) => buildCompletedHistoryConflict(entry, existingOrders.get(entry.order.order_number)));
+  const blockedHistoryOrderNumbers = new Set(completedHistoryConflicts.map((entry) => entry.orderNumber));
+  if (completedHistoryConflicts.length) {
+    warnings.push(`${completedHistoryConflicts.length} order(s) from the eBay report are already completed/canceled/archived in OG order history and were not re-imported.`);
+  }
+
+  const importablePayload = payload.filter((entry) => !blockedHistoryOrderNumbers.has(entry.order.order_number));
+  const fresh = importablePayload.filter((entry) => !existingOrders.has(entry.order.order_number));
+  const skipped = importablePayload.length - fresh.length;
 
   let insertedOrders = [];
   let insertedOrderIds = [];
@@ -882,40 +911,37 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
   }
 
   const orderIdByNumber = new Map([
-    ...existingOrders.entries(),
+    ...[...existingOrders.entries()]
+      .filter(([, order]) => !isClosedEbayImportStatus(order?.status))
+      .map(([orderNumber, order]) => [orderNumber, order.id]),
     ...(insertedOrders || []).map((order) => [order.order_number, order.id]),
   ]);
-  const lineRows = payload.flatMap((entry) => {
+  const lineRows = importablePayload.flatMap((entry) => {
     const orderId = orderIdByNumber.get(entry.order.order_number);
     return entry.lines.map((line) => ({ ...line, order_id: orderId }));
   }).filter((line) => line.order_id);
 
-  const { data: insertedLines, error: lineError } = await supabase
-    .from("ebay_order_lines")
-    .upsert(lineRows, {
-      onConflict: "order_id,item_number,transaction_id",
-      ignoreDuplicates: true,
-    })
-    .select("id, order_id");
+  let insertedLineCount = 0;
+  if (lineRows.length) {
+    const { data: insertedLines, error: lineError } = await supabase
+      .from("ebay_order_lines")
+      .upsert(lineRows, {
+        onConflict: "order_id,item_number,transaction_id",
+        ignoreDuplicates: true,
+      })
+      .select("id, order_id");
 
-  if (lineError) {
-    if (insertedOrderIds.length) {
-      await supabase.from("ebay_orders").delete().in("id", insertedOrderIds);
+    if (lineError) {
+      if (insertedOrderIds.length) {
+        await supabase.from("ebay_orders").delete().in("id", insertedOrderIds);
+      }
+      throw lineError;
     }
-    throw lineError;
+
+    insertedLineCount = (insertedLines || []).length;
   }
 
-  const insertedLineCount = (insertedLines || []).length;
-  let statusUpdatedOrderCount = 0;
-  if (insertedLineCount) {
-    const orderIdsWithNewLines = [...new Set((insertedLines || []).map((line) => line.order_id).filter(Boolean))];
-    statusUpdatedOrderCount = orderIdsWithNewLines.length;
-    await supabase
-      .from("ebay_orders")
-      .update({ status: "pending" })
-      .in("id", orderIdsWithNewLines)
-      .in("status", ["fulfilled", "cancelled", "archived"]);
-  }
+  const statusUpdatedOrderCount = 0;
 
   return {
     originalFilename: metadata.filename || metadata.originalFilename || "",
@@ -927,13 +953,57 @@ async function importEbayPendingOrdersReport(text, metadata = {}) {
     expectedAwaitingTotal,
     reportRowsRead: rows.length,
     ordersInReport: payload.length,
-    linesInReport: lineRows.length,
+    linesInReport: reportLineCount,
+    linesCheckedForImport: lineRows.length,
+    completedHistoryConflicts,
+    completedHistoryConflictCount: completedHistoryConflicts.length,
     newOrdersAdded: insertedOrders.length,
     existingOrdersChecked: skipped,
     newLinesAdded: insertedLineCount,
     ordersReopenedOrUpdated: statusUpdatedOrderCount,
     warnings,
   };
+}
+
+function closeCompletedHistoryConflictsModal() {
+  closeModal("ebay-completed-conflicts-modal");
+}
+
+function showCompletedHistoryConflictsModal(conflicts = []) {
+  const cleanConflicts = Array.isArray(conflicts) ? conflicts.filter(Boolean) : [];
+  if (!cleanConflicts.length) return;
+
+  const summary = $("ebay-completed-conflicts-summary");
+  const list = $("ebay-completed-conflicts-list");
+  if (summary) {
+    summary.textContent =
+      `${cleanConflicts.length} order${cleanConflicts.length === 1 ? "" : "s"} still appear in the eBay awaiting-shipment report, but OG already has them closed in order history. They were skipped and not re-imported.`;
+  }
+
+  if (list) {
+    list.replaceChildren();
+    cleanConflicts.forEach((conflict) => {
+      const card = document.createElement("article");
+      card.className = "completed-conflict-card";
+      card.innerHTML = `
+        <div>
+          <strong>${escapeHtml(conflict.orderNumber || "Unknown order")}</strong>
+          <span>${escapeHtml(conflict.buyerUsername || conflict.buyerName || "Unknown buyer")}</span>
+        </div>
+        <div>
+          <span class="status-badge">${escapeHtml(conflict.status || "closed")}</span>
+          <small>${Number(conflict.reportLineCount || 0).toLocaleString()} line${Number(conflict.reportLineCount || 0) === 1 ? "" : "s"} in eBay report</small>
+        </div>
+        <div>
+          <small>Ship by ${escapeHtml(formatDate(conflict.shipByDate))}</small>
+          <small>${formatMoney(conflict.totalPrice || 0)}</small>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  }
+
+  openModal("ebay-completed-conflicts-modal");
 }
 
 async function importEbayOrdersFromCsv() {
@@ -960,9 +1030,13 @@ async function importEbayOrdersFromCsv() {
       capturedAt: new Date(file.lastModified || Date.now()).toISOString(),
     });
 
-    setImportStatus(`Imported ${result.newOrdersAdded} new order(s) and ${result.newLinesAdded} new line item(s). Checked ${result.existingOrdersChecked} existing order(s) for missing lines.`, "success");
+    const historyConflictText = result.completedHistoryConflictCount
+      ? ` Skipped ${result.completedHistoryConflictCount} order(s) already closed in OG order history.`
+      : "";
+    setImportStatus(`Imported ${result.newOrdersAdded} new order(s) and ${result.newLinesAdded} new line item(s). Checked ${result.existingOrdersChecked} existing order(s) for missing lines.${historyConflictText}`, "success");
     $("ebay-orders-file").value = "";
     await loadOrders();
+    showCompletedHistoryConflictsModal(result.completedHistoryConflicts);
   } catch (error) {
     console.error("eBay order import failed:", error);
     setImportStatus(error.message || "Could not import eBay orders.", "error");
@@ -3918,6 +3992,7 @@ async function handleEbayAwaitingReportTransfer(payload) {
     const warningText = result.warnings?.length ? ` Warning: ${result.warnings.join(" ")}` : "";
     const message = `Pending orders updated: ${result.ordersInReport} order(s) in report, ${result.newOrdersAdded} new order(s), ${result.newLinesAdded} new line item(s), ${result.existingOrdersChecked} existing order(s) checked.${warningText}`;
     setEbayReportTransferStatus(message, result.warnings?.length ? "error" : "success");
+    showCompletedHistoryConflictsModal(result.completedHistoryConflicts);
     if (transferId && window.chrome?.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
         type: "OG_EBAY_CLEAR_PENDING_REPORT",
@@ -4078,7 +4153,7 @@ function setupListeners() {
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
-    setImportStatus(file ? `Ready to import ${file.name}. Existing orders will be checked for missing lines.` : "");
+    setImportStatus(file ? `Ready to import ${file.name}. Existing pending orders will be checked for missing lines; closed history orders will be skipped.` : "");
   });
   $("order-search")?.addEventListener("input", () => {
     clearEbayLaunchFilter({ apply: false });
@@ -4096,6 +4171,8 @@ function setupListeners() {
   $("close-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("cancel-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
   $("confirm-admin-order-closeout")?.addEventListener("click", confirmAdminOrderCloseout);
+  $("close-ebay-completed-conflicts")?.addEventListener("click", closeCompletedHistoryConflictsModal);
+  $("dismiss-ebay-completed-conflicts")?.addEventListener("click", closeCompletedHistoryConflictsModal);
   $("find-item")?.addEventListener("click", () => {
     clearItemSearchTimer();
     searchInventoryItems();
@@ -4215,6 +4292,10 @@ function setupListeners() {
     if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();
   });
 
+  $("ebay-completed-conflicts-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "ebay-completed-conflicts-modal") closeCompletedHistoryConflictsModal();
+  });
+
   $("admin-order-closeout-password")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -4238,6 +4319,14 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeAdminOrderCloseoutModal();
+      }
+      return;
+    }
+
+    if (!$("ebay-completed-conflicts-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" || event.key === "Escape") {
+        event.preventDefault();
+        closeCompletedHistoryConflictsModal();
       }
       return;
     }

@@ -543,6 +543,19 @@
     </div>
   </div>
 
+  <div id="ebay-completed-conflicts-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="ebay-completed-conflicts-title">
+    <div class="packing-modal-card bundle-review-card completed-conflicts-card">
+      <button id="close-ebay-completed-conflicts" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">eBay Still Shows Closed Orders</span>
+      <h2 id="ebay-completed-conflicts-title">Already completed in OG</h2>
+      <p id="ebay-completed-conflicts-summary">These orders were skipped during import.</p>
+      <div id="ebay-completed-conflicts-list" class="completed-conflicts-list"></div>
+      <div class="modal-actions">
+        <button id="dismiss-ebay-completed-conflicts" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
