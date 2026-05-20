@@ -8,8 +8,12 @@ let scheduleFlowState = {
   selectedDayIndex: new Date().getDay(),
   assignmentType: 'store_work',
   workerSearch: '',
-  syncEffectiveFromToWeek: true
+  syncEffectiveFromToWeek: true,
+  saving: false
 };
+let scheduleSaveBusy = false;
+let scheduleSaveModalResolve = null;
+let scheduleSaveModalHideTimer = null;
 
 function startOfWeekSun(d){
   const x = new Date(d);
@@ -353,6 +357,7 @@ function renderScheduleDayDetail(){
   const storeLabel = storeId ? storeNameById(storeId) : 'Choose a store';
   const resolvedStore = resolved?.store_id ? storeNameById(resolved.store_id) : '-';
   const resolvedTime = resolved ? `${fmtTimeHM(resolved.start_ts)}-${fmtTimeHM(resolved.end_ts)}` : 'Nothing assigned';
+  const saveDisabled = scheduleFlowState.saving ? 'disabled' : '';
   const startValue = ov?.start_local ? String(ov.start_local).slice(0,5) : (resolved ? new Date(resolved.start_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
   const endValue = ov?.end_local ? String(ov.end_local).slice(0,5) : (resolved ? new Date(resolved.end_ts).toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',hour12:false}) : '');
   const defaultRouteStoreId = storeId || resolved?.store_id || '';
@@ -440,9 +445,9 @@ function renderScheduleDayDetail(){
     </div>
 
     <div class="schedule-day-actions">
-      <button type="button" class="btn primary" id="schedFlowSaveOverride">Save this week only</button>
-      <button type="button" class="btn" id="schedFlowSaveRecurring">Save weekly recurring</button>
-      <button type="button" class="btn ghost" id="schedFlowMarkOff">Mark off this week</button>
+      <button type="button" class="btn primary" id="schedFlowSaveOverride" ${saveDisabled}>Save this week only</button>
+      <button type="button" class="btn" id="schedFlowSaveRecurring" ${saveDisabled}>Save weekly recurring</button>
+      <button type="button" class="btn ghost" id="schedFlowMarkOff" ${saveDisabled}>Mark off this week</button>
       <button type="button" class="btn ghost" id="schedFlowClearOverride">Clear this week</button>
       <button type="button" class="btn ghost" id="schedFlowClearRecurring">Remove recurring</button>
     </div>
@@ -532,6 +537,384 @@ function scheduleStoreNameList(ids = []){
   if (!names.length) return 'No store selected';
   if (names.length === 1) return names[0];
   return names.join(', ');
+}
+
+function scheduleModalById(id){
+  return document.getElementById(id);
+}
+
+function ensureScheduleSaveModal(){
+  if (scheduleModalById('scheduleSaveModal')) return;
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div id="scheduleSaveBackdrop" class="schedule-save-backdrop hidden" aria-hidden="true"></div>
+    <div id="scheduleSaveModal" class="schedule-save-modal hidden" role="dialog" aria-modal="true" aria-labelledby="scheduleSaveTitle">
+      <div class="schedule-save-card">
+        <button id="scheduleSaveClose" class="schedule-save-close" type="button" aria-label="Close">x</button>
+        <div id="scheduleSaveMark" class="schedule-save-mark" aria-hidden="true">OK</div>
+        <p id="scheduleSaveKicker" class="schedule-save-kicker">Schedule saved</p>
+        <h3 id="scheduleSaveTitle">Schedule saved</h3>
+        <p id="scheduleSaveMessage">The schedule was updated.</p>
+        <div id="scheduleSaveDetails" class="schedule-save-details"></div>
+        <div class="schedule-save-actions">
+          <button id="scheduleSaveSecondary" class="btn ghost" type="button">Cancel</button>
+          <button id="scheduleSavePrimary" class="btn primary" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+
+  scheduleModalById('scheduleSaveBackdrop')?.addEventListener('click', () => hideScheduleSaveModal('close'));
+  scheduleModalById('scheduleSaveClose')?.addEventListener('click', () => hideScheduleSaveModal('close'));
+  scheduleModalById('scheduleSaveSecondary')?.addEventListener('click', () => hideScheduleSaveModal('secondary'));
+  scheduleModalById('scheduleSavePrimary')?.addEventListener('click', () => hideScheduleSaveModal('primary'));
+  document.addEventListener('keydown', (event) => {
+    const modal = scheduleModalById('scheduleSaveModal');
+    if (event.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+      hideScheduleSaveModal('close');
+    }
+  });
+}
+
+function hideScheduleSaveModal(result = 'close'){
+  const backdrop = scheduleModalById('scheduleSaveBackdrop');
+  const modal = scheduleModalById('scheduleSaveModal');
+  if (scheduleSaveModalHideTimer) clearTimeout(scheduleSaveModalHideTimer);
+  backdrop?.classList.remove('show');
+  modal?.classList.remove('show');
+  scheduleSaveModalHideTimer = setTimeout(() => {
+    backdrop?.classList.add('hidden');
+    modal?.classList.add('hidden');
+    modal?.classList.remove('is-success', 'is-info', 'is-warning', 'is-danger');
+    scheduleSaveModalHideTimer = null;
+  }, 180);
+
+  const resolver = scheduleSaveModalResolve;
+  scheduleSaveModalResolve = null;
+  if (resolver) resolver(result);
+}
+
+function showScheduleSaveModal({
+  variant = 'success',
+  kicker = 'Schedule saved',
+  title = 'Schedule saved',
+  message = '',
+  details = [],
+  primaryText = 'Done',
+  secondaryText = '',
+} = {}){
+  ensureScheduleSaveModal();
+  if (scheduleSaveModalHideTimer) {
+    clearTimeout(scheduleSaveModalHideTimer);
+    scheduleSaveModalHideTimer = null;
+  }
+  const backdrop = scheduleModalById('scheduleSaveBackdrop');
+  const modal = scheduleModalById('scheduleSaveModal');
+  const mark = scheduleModalById('scheduleSaveMark');
+  const kickerEl = scheduleModalById('scheduleSaveKicker');
+  const titleEl = scheduleModalById('scheduleSaveTitle');
+  const messageEl = scheduleModalById('scheduleSaveMessage');
+  const detailsEl = scheduleModalById('scheduleSaveDetails');
+  const primary = scheduleModalById('scheduleSavePrimary');
+  const secondary = scheduleModalById('scheduleSaveSecondary');
+
+  modal?.classList.remove('is-success', 'is-info', 'is-warning', 'is-danger');
+  modal?.classList.add(`is-${variant}`);
+  if (mark) mark.textContent = variant === 'warning' || variant === 'danger' ? '!' : 'OK';
+  if (kickerEl) kickerEl.textContent = kicker;
+  if (titleEl) titleEl.textContent = title;
+  if (messageEl) messageEl.textContent = message;
+  if (primary) primary.textContent = primaryText || 'Done';
+  if (secondary) {
+    secondary.textContent = secondaryText || '';
+    secondary.classList.toggle('hidden', !secondaryText);
+  }
+  if (detailsEl) {
+    detailsEl.innerHTML = (details || [])
+      .filter((item) => item && (item.value != null || item.text))
+      .map((item) => {
+        if (item.text) return `<div class="schedule-save-detail-full">${escSched(item.text)}</div>`;
+        return `
+          <div class="schedule-save-detail">
+            <span>${escSched(item.label || '')}</span>
+            <strong>${escSched(item.value || '')}</strong>
+          </div>
+        `;
+      })
+      .join('');
+    detailsEl.classList.toggle('hidden', !detailsEl.innerHTML);
+  }
+
+  backdrop?.classList.remove('hidden');
+  modal?.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    backdrop?.classList.add('show');
+    modal?.classList.add('show');
+  });
+  setTimeout(() => primary?.focus?.(), 80);
+
+  return new Promise((resolve) => {
+    scheduleSaveModalResolve = resolve;
+  });
+}
+
+function setScheduleSaveBusy(on){
+  scheduleSaveBusy = !!on;
+  scheduleFlowState.saving = !!on;
+  document
+    .querySelectorAll('#panelSchedule button[id^="schedFlowSave"], #panelSchedule button[data-save-recurring], #panelSchedule button[data-save-override], #panelSchedule button[id="schedFlowMarkOff"]')
+    .forEach((button) => {
+      button.disabled = !!on;
+      button.classList.toggle('is-saving', !!on);
+    });
+}
+
+async function runScheduleSave(task){
+  if (scheduleSaveBusy) {
+    showScheduleSaveModal({
+      variant: 'info',
+      kicker: 'Schedule is saving',
+      title: 'Already working on it',
+      message: 'The previous schedule save is still finishing. Give it a moment before saving again.',
+      primaryText: 'Got it'
+    });
+    return null;
+  }
+
+  setScheduleSaveBusy(true);
+  try {
+    return await task();
+  } catch (err) {
+    console.error('Schedule save failed:', err);
+    const msg =
+      err?.message ||
+      err?.error_description ||
+      (typeof err === 'string' ? err : 'The schedule could not be saved.');
+    showScheduleSaveModal({
+      variant: 'danger',
+      kicker: 'Schedule failed',
+      title: 'Schedule save failed',
+      message: msg,
+      primaryText: 'Done'
+    });
+    return null;
+  } finally {
+    setScheduleSaveBusy(false);
+  }
+}
+
+function normalizeScheduleTime(value){
+  return String(value || '').slice(0, 5);
+}
+
+function normalizeScheduleDate(value){
+  return String(value || '').slice(0, 10);
+}
+
+function normalizeScheduleId(value){
+  return value ? String(value) : '';
+}
+
+function normalizeScheduleNote(value){
+  return String(value || '').trim();
+}
+
+function previousISODate(iso){
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() - 1);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function sameScheduleIdSet(a = [], b = []){
+  const left = [...new Set((a || []).filter(Boolean).map(String))].sort();
+  const right = [...new Set((b || []).filter(Boolean).map(String))].sort();
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function scheduleDraftSummary(draft){
+  if (draft.off) return 'Off this week';
+  const route = draft.allowedInStores || draft.allowedOutStores
+    ? ` · Clock route: ${scheduleStoreNameList(draft.allowedInStores)} -> ${scheduleStoreNameList(draft.allowedOutStores)}`
+    : '';
+  return `${draft.start}-${draft.end} · ${storeNameById(draft.storeId)} · ${scheduleTypeLabel(draft.assignmentType)}${route}`;
+}
+
+function scheduleModalDetailsForDraft(draft){
+  return [
+    { label: 'Worker', value: draft.employeeName || selectedScheduleEmployee()?.display_name || 'Worker' },
+    { label: 'When', value: draft.whenLabel || '' },
+    { label: 'Schedule', value: scheduleDraftSummary(draft) },
+  ];
+}
+
+function getRecurringDraft(weekday){
+  const empId = schedEmpId;
+  const start = normalizeScheduleTime(qs(`recStart-${weekday}`)?.value || '');
+  const end = normalizeScheduleTime(qs(`recEnd-${weekday}`)?.value || '');
+  const storeId = qs(`recStore-${weekday}`)?.value || '';
+  const effFrom = qs('schedEffFrom')?.value || toISODate(new Date());
+  const employee = selectedScheduleEmployee();
+  return {
+    empId,
+    weekday,
+    start,
+    end,
+    storeId,
+    effFrom,
+    note: scheduleTypeNote(),
+    assignmentType: scheduleFlowState.assignmentType,
+    employeeName: employee?.display_name || '',
+    whenLabel: `${DOW[weekday]} weekly from ${effFrom}`
+  };
+}
+
+function recurringRowSameAssignment(row, draft){
+  return normalizeScheduleTime(row?.start_local) === draft.start &&
+    normalizeScheduleTime(row?.end_local) === draft.end &&
+    normalizeScheduleId(row?.store_id) === normalizeScheduleId(draft.storeId) &&
+    normalizeScheduleNote(row?.note) === normalizeScheduleNote(draft.note);
+}
+
+function recurringRowCoversDate(row, iso){
+  const effectiveFrom = normalizeScheduleDate(row?.effective_from);
+  const effectiveTo = normalizeScheduleDate(row?.effective_to);
+  return effectiveFrom <= iso && (!effectiveTo || effectiveTo >= iso);
+}
+
+async function fetchOverlappingRecurringRows(empId, weekday, effFrom){
+  const { data, error } = await supabaseClient
+    .from('work_schedules')
+    .select('id, weekday, start_local, end_local, effective_from, effective_to, store_id, note, active')
+    .eq('employee_id', empId)
+    .eq('weekday', weekday)
+    .eq('active', true)
+    .or(`effective_to.is.null,effective_to.gte.${effFrom}`);
+
+  if (error) throw error;
+  return (data || []).filter((row) => !normalizeScheduleDate(row.effective_to) || normalizeScheduleDate(row.effective_to) >= effFrom);
+}
+
+async function closeRecurringRowsFromDate(empId, weekday, effFrom, excludeIds = []){
+  const rows = await fetchOverlappingRecurringRows(empId, weekday, effFrom);
+  if (!rows.length) return;
+
+  const excluded = new Set((excludeIds || []).filter(Boolean).map(String));
+  const dayBefore = previousISODate(effFrom);
+  const toDelete = [];
+  const capIds = [];
+
+  for (const row of rows){
+    if (excluded.has(String(row.id))) continue;
+    const effectiveFrom = normalizeScheduleDate(row.effective_from);
+    if (effectiveFrom >= effFrom) {
+      toDelete.push(row.id);
+    } else if (dayBefore < effectiveFrom) {
+      toDelete.push(row.id);
+    } else {
+      capIds.push(row.id);
+    }
+  }
+
+  if (capIds.length){
+    const { error } = await supabaseClient
+      .from('work_schedules')
+      .update({ effective_to: dayBefore })
+      .in('id', capIds);
+    if (error) throw error;
+  }
+
+  if (toDelete.length){
+    const { error } = await supabaseClient
+      .from('work_schedules')
+      .delete()
+      .in('id', toDelete);
+    if (error) throw error;
+  }
+}
+
+function getOverrideDraft(workISO){
+  const empId = schedEmpId;
+  const off = !!qs(`ovOff-${workISO}`)?.checked;
+  const start = off ? null : normalizeScheduleTime(qs(`ovStart-${workISO}`)?.value || '');
+  const end = off ? null : normalizeScheduleTime(qs(`ovEnd-${workISO}`)?.value || '');
+  const storeId = off ? '' : (qs(`ovStore-${workISO}`)?.value || '');
+  const anyIn = !!qs(`ovAnyIn-${workISO}`)?.checked;
+  const anyOut = !!qs(`ovAnyOut-${workISO}`)?.checked;
+  const inStore = anyIn ? null : (qs(`ovInStore-${workISO}`)?.value || null);
+  const outStore = anyOut ? null : (qs(`ovOutStore-${workISO}`)?.value || null);
+  const allowedInStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockInStores');
+  const allowedOutStores = off ? [] : getCheckedScheduleStoreIds('schedFlowClockOutStores');
+  const employee = selectedScheduleEmployee();
+  const dayDate = fromISO(workISO);
+
+  return {
+    empId,
+    workISO,
+    off,
+    start,
+    end,
+    storeId,
+    anyIn,
+    anyOut,
+    inStore,
+    outStore,
+    allowedInStores,
+    allowedOutStores,
+    note: off ? null : scheduleTypeNote(),
+    assignmentType: scheduleFlowState.assignmentType,
+    employeeName: employee?.display_name || '',
+    whenLabel: `${DOW[dayDate.getDay()]} ${dayDate.getMonth() + 1}/${dayDate.getDate()}`
+  };
+}
+
+function exceptionStoresForDay(dayException, type, fallbackStoreId = ''){
+  const allowedKey = type === 'in' ? 'allowed_clock_in_store_ids' : 'allowed_clock_out_store_ids';
+  const singleKey = type === 'in' ? 'clock_in_store_id' : 'clock_out_store_id';
+  const allowed = Array.isArray(dayException?.[allowedKey]) ? dayException[allowedKey].filter(Boolean) : [];
+  if (allowed.length) return allowed.map(String);
+  if (dayException?.[singleKey]) return [String(dayException[singleKey])];
+  return fallbackStoreId ? [String(fallbackStoreId)] : [];
+}
+
+function dayExceptionSameAsDraft(dayException, draft){
+  if (draft.off) {
+    return !dayException ||
+      (!dayException.allow_clock_in_any_store &&
+       !dayException.allow_clock_out_any_store &&
+       !dayException.clock_in_store_id &&
+       !dayException.clock_out_store_id &&
+       !exceptionStoresForDay(dayException, 'in').length &&
+       !exceptionStoresForDay(dayException, 'out').length);
+  }
+
+  const allowInSame = !!dayException?.allow_clock_in_any_store === !!draft.anyIn;
+  const allowOutSame = !!dayException?.allow_clock_out_any_store === !!draft.anyOut;
+  const inStores = draft.anyIn ? [] : exceptionStoresForDay(dayException, 'in', draft.storeId);
+  const outStores = draft.anyOut ? [] : exceptionStoresForDay(dayException, 'out', draft.storeId);
+  return allowInSame &&
+    allowOutSame &&
+    sameScheduleIdSet(inStores, draft.allowedInStores) &&
+    sameScheduleIdSet(outStores, draft.allowedOutStores);
+}
+
+function overrideRowSameAsDraft(row, draft){
+  if (!row) return false;
+  if (!!row.off !== !!draft.off) return false;
+  if (draft.off) return true;
+  return normalizeScheduleTime(row.start_local) === draft.start &&
+    normalizeScheduleTime(row.end_local) === draft.end &&
+    normalizeScheduleId(row.store_id) === normalizeScheduleId(draft.storeId) &&
+    normalizeScheduleNote(row.note) === normalizeScheduleNote(draft.note);
+}
+
+function resolvedScheduleSameAsDraft(row, draft){
+  if (!row || draft.off) return false;
+  return normalizeScheduleTime(new Date(row.start_ts).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false })) === draft.start &&
+    normalizeScheduleTime(new Date(row.end_ts).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false })) === draft.end &&
+    normalizeScheduleId(row.store_id) === normalizeScheduleId(draft.storeId);
 }
 
 function setScheduleCopyStatus(message = '', type = 'info'){
@@ -928,30 +1311,81 @@ function renderScheduleGrid(weekStart, resolvedByDate, overridesByDate){
 }
 
 async function saveRecurring(weekday){
-  const empId = schedEmpId;
-  if (!empId) return alert('Choose a worker first.');
-  const start = qs(`recStart-${weekday}`).value || '';
-  const end   = qs(`recEnd-${weekday}`).value || '';
-  const storeId = qs(`recStore-${weekday}`)?.value || null;
-  const effFrom = qs('schedEffFrom').value || toISODate(new Date());
+  return runScheduleSave(async () => {
+    const draft = getRecurringDraft(weekday);
+    const empId = draft.empId;
+    if (!empId) return alert('Choose a worker first.');
 
-  if (!start || !end) return alert('Enter start and end time for recurring.');
-  if (end <= start) return alert('End must be after start.');
-  if (!storeId) return alert('Pick a store for this recurring schedule.');
+    if (!draft.start || !draft.end) return alert('Enter start and end time for recurring.');
+    if (draft.end <= draft.start) return alert('End must be after start.');
+    if (!draft.storeId) return alert('Pick a store for this recurring schedule.');
 
-  const { error } = await supabaseClient.rpc('admin_set_weekday_slot', {
-    _employee_id: empId,
-    _weekday: weekday,
-    _start_local: start,
-    _end_local: end,
-    _effective_from: effFrom,
-    _effective_to: null,
-    _store_id: storeId,
-    _note: scheduleTypeNote()
+    await markAcceptedIfNeeded();
+
+    const overlapping = await fetchOverlappingRecurringRows(empId, weekday, draft.effFrom);
+    const openSame = overlapping.some((row) =>
+      recurringRowCoversDate(row, draft.effFrom) &&
+      !normalizeScheduleDate(row.effective_to) &&
+      recurringRowSameAssignment(row, draft)
+    );
+    const futureDifferent = overlapping.some((row) =>
+      !recurringRowSameAssignment(row, draft) ||
+      (normalizeScheduleDate(row.effective_to) && normalizeScheduleDate(row.effective_to) >= draft.effFrom)
+    );
+
+    if (openSame && !futureDifferent) {
+      showScheduleSaveModal({
+        variant: 'info',
+        kicker: 'Already applied',
+        title: 'This weekly schedule is already set',
+        message: 'No duplicate recurring schedule was created.',
+        details: scheduleModalDetailsForDraft(draft),
+        primaryText: 'Done'
+      });
+      await loadScheduleWeek();
+      return;
+    }
+
+    if (overlapping.length) {
+      const result = await showScheduleSaveModal({
+        variant: 'warning',
+        kicker: 'Replace recurring schedule',
+        title: 'Change the existing weekly schedule?',
+        message: 'There is already a recurring schedule for this worker and weekday. Replacing it will keep history before the selected start date, then apply this new schedule going forward.',
+        details: scheduleModalDetailsForDraft(draft),
+        primaryText: 'Replace schedule',
+        secondaryText: 'Cancel'
+      });
+      if (result !== 'primary') return;
+    }
+
+    const { data: savedRecurring, error } = await supabaseClient.rpc('admin_set_weekday_slot', {
+      _employee_id: empId,
+      _weekday: weekday,
+      _start_local: draft.start,
+      _end_local: draft.end,
+      _effective_from: draft.effFrom,
+      _effective_to: null,
+      _store_id: draft.storeId,
+      _note: draft.note
+    });
+
+    if (error) return alert('Save failed: ' + error.message);
+    if (overlapping.length) {
+      const savedRecurringId = Array.isArray(savedRecurring) ? savedRecurring[0]?.id : savedRecurring?.id;
+      if (!savedRecurringId) throw new Error('The new recurring schedule was saved, but the app could not confirm its row id to safely close the old schedule.');
+      await closeRecurringRowsFromDate(empId, weekday, draft.effFrom, [savedRecurringId]);
+    }
+    await loadScheduleWeek();
+    showScheduleSaveModal({
+      variant: 'success',
+      kicker: 'Recurring schedule saved',
+      title: 'Weekly schedule updated',
+      message: 'The worker schedule is now applied from the selected recurring start date.',
+      details: scheduleModalDetailsForDraft(draft),
+      primaryText: 'Done'
+    });
   });
-
-  if (error) return alert('Save failed: ' + error.message);
-  await loadScheduleWeek();
 }
 
 async function clearRecurring(weekday){
@@ -1046,48 +1480,73 @@ async function clearRecurring(weekday){
 }
 
 async function saveOverride(workISO){
-  const empId = schedEmpId;
-  if (!empId) return alert('Choose a worker first.');
+  return runScheduleSave(async () => {
+    const draft = getOverrideDraft(workISO);
+    const empId = draft.empId;
+    if (!empId) return alert('Choose a worker first.');
 
-  const off = qs(`ovOff-${workISO}`).checked;
-  const s = qs(`ovStart-${workISO}`);
-  const e = qs(`ovEnd-${workISO}`);
-  const start = s?.value || null;
-  const end   = e?.value || null;
+    if (!draft.off){
+      if (!draft.start || !draft.end) return alert('Enter start and end time, or mark Off.');
+      if (draft.end <= draft.start) return alert('End must be after start.');
+      if (!draft.storeId) return alert('Pick a store for this override.');
+      if (!draft.allowedInStores.length) return alert('Pick at least one allowed clock-in store.');
+      if (!draft.allowedOutStores.length) return alert('Pick at least one allowed clock-out store.');
+    }
 
-  const storeId = qs(`ovStore-${workISO}`)?.value || null;
+    const existingOverride = scheduleWeekState.overridesByDate.get(workISO) || null;
+    const existingResolved = scheduleWeekState.resolvedByDate.get(workISO) || null;
+    const existingException = scheduleWeekState.dayExceptionsByDate.get(workISO) || null;
+    const sameOverride = existingOverride &&
+      overrideRowSameAsDraft(existingOverride, draft) &&
+      dayExceptionSameAsDraft(existingException, draft);
+    const sameResolved = !existingOverride &&
+      (draft.off ? !existingResolved : resolvedScheduleSameAsDraft(existingResolved, draft)) &&
+      dayExceptionSameAsDraft(existingException, draft);
 
-  // Phase 3 exception UI reads
-  const anyIn  = !!qs(`ovAnyIn-${workISO}`)?.checked;
-  const anyOut = !!qs(`ovAnyOut-${workISO}`)?.checked;
+    if (sameOverride || sameResolved) {
+      showScheduleSaveModal({
+        variant: 'info',
+        kicker: 'Already applied',
+        title: 'This schedule is already set',
+        message: 'No duplicate one-week schedule was created.',
+        details: scheduleModalDetailsForDraft(draft),
+        primaryText: 'Done'
+      });
+      await loadScheduleWeek();
+      return;
+    }
 
-  const inStore  = anyIn  ? null : (qs(`ovInStore-${workISO}`)?.value || null);
-  const outStore = anyOut ? null : (qs(`ovOutStore-${workISO}`)?.value || null);
-  const allowedInStores = getCheckedScheduleStoreIds('schedFlowClockInStores');
-  const allowedOutStores = getCheckedScheduleStoreIds('schedFlowClockOutStores');
+    if (existingOverride || existingResolved) {
+      const result = await showScheduleSaveModal({
+        variant: 'warning',
+        kicker: 'Replace this day',
+        title: existingOverride ? 'Replace the one-week schedule?' : 'Create a one-week change?',
+        message: existingOverride
+          ? 'This worker already has a saved one-week schedule for this date. Replace it with the schedule below?'
+          : 'This worker already has a resolved schedule for this date. Save this as a one-week change for that day?',
+        details: scheduleModalDetailsForDraft(draft),
+        primaryText: existingOverride ? 'Replace schedule' : 'Save one-week change',
+        secondaryText: 'Cancel'
+      });
+      if (result !== 'primary') return;
+    }
 
-  if (!off){
-    if (!start || !end) return alert('Enter start and end time, or mark Off.');
-    if (end <= start) return alert('End must be after start.');
-    if (!storeId) return alert('Pick a store for this override.');
-    if (!allowedInStores.length) return alert('Pick at least one allowed clock-in store.');
-    if (!allowedOutStores.length) return alert('Pick at least one allowed clock-out store.');
-  }
+    await markAcceptedIfNeeded();
 
-  // Base payload (existing RPC)
-  const base = {
-    _employee_id: empId,
-    _work_date: workISO,
-    _off: off,
-    _start_local: start,
-    _end_local: end,
-    _store_id: off ? null : storeId,
-    _note: off ? null : scheduleTypeNote()
-  };
+    // Base payload (existing RPC)
+    const base = {
+      _employee_id: empId,
+      _work_date: workISO,
+      _off: draft.off,
+      _start_local: draft.start,
+      _end_local: draft.end,
+      _store_id: draft.off ? null : draft.storeId,
+      _note: draft.off ? null : draft.note
+    };
 
-  // Try a v2 RPC first (if you created it in Supabase)
-  // If not available, fall back to old RPC + patch DB columns directly.
-  let usedV2 = false;
+    // Try a v2 RPC first (if you created it in Supabase)
+    // If not available, fall back to old RPC + patch DB columns directly.
+    let usedV2 = false;
 
 // Only try v2 if you explicitly enabled it
 const TRY_V2 = false;
@@ -1096,10 +1555,10 @@ if (TRY_V2){
   try {
     const { error: v2Err } = await supabaseClient.rpc('admin_set_override_v2', {
       ...base,
-      _allow_any_store_in: anyIn,
-      _allow_any_store_out: anyOut,
-      _clock_in_store_id: inStore,
-      _clock_out_store_id: outStore
+      _allow_any_store_in: draft.anyIn,
+      _allow_any_store_out: draft.anyOut,
+      _clock_in_store_id: draft.inStore,
+      _clock_out_store_id: draft.outStore
     });
     if (!v2Err) usedV2 = true;
   } catch (e){
@@ -1114,16 +1573,27 @@ if (TRY_V2){
 
     // Patch exception columns (if present)
     await patchOverrideExceptionExtras(empId, workISO, {
-      allow_any_store_in: anyIn,
-      allow_any_store_out: anyOut,
-      clock_in_store_id: inStore,
-      clock_out_store_id: outStore,
-      allowed_clock_in_store_ids: off ? [] : allowedInStores,
-      allowed_clock_out_store_ids: off ? [] : allowedOutStores
+      allow_any_store_in: draft.anyIn,
+      allow_any_store_out: draft.anyOut,
+      clock_in_store_id: draft.inStore,
+      clock_out_store_id: draft.outStore,
+      allowed_clock_in_store_ids: draft.off ? [] : draft.allowedInStores,
+      allowed_clock_out_store_ids: draft.off ? [] : draft.allowedOutStores
     });
   }
 
   await loadScheduleWeek();
+    showScheduleSaveModal({
+      variant: 'success',
+      kicker: 'Schedule saved',
+      title: draft.off ? 'Worker marked off' : 'One-week schedule saved',
+      message: draft.off
+        ? 'This worker is marked off for the selected date.'
+        : 'The schedule for this specific week was updated.',
+      details: scheduleModalDetailsForDraft(draft),
+      primaryText: 'Done'
+    });
+  });
 }
 
 async function clearOverride(workISO){
@@ -1199,7 +1669,7 @@ async function initSchedulePanel(){
   qs('schedFlowEffSync').checked = true;
   qs('schedFlowEffFrom').disabled = true;
 
-qs('schedEmpSection').addEventListener('click', (e) => {
+qs('schedEmpSection').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
 
@@ -1229,32 +1699,32 @@ qs('schedEmpSection').addEventListener('click', (e) => {
   } else if (btn.id === 'schedFlowSaveOverride'){
     syncGuidedFieldsToHidden();
     const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
-    saveOverride(iso);
+    await saveOverride(iso);
   } else if (btn.id === 'schedFlowSaveRecurring'){
     syncGuidedFieldsToHidden();
-    saveRecurring(scheduleFlowState.selectedDayIndex);
+    await saveRecurring(scheduleFlowState.selectedDayIndex);
   } else if (btn.id === 'schedFlowMarkOff'){
     const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
     const off = qs(`ovOff-${iso}`);
     if (off) off.checked = true;
-    saveOverride(iso);
+    await saveOverride(iso);
   } else if (btn.id === 'schedFlowClearOverride'){
     const iso = toISODate(addDays(schedWeekStart, scheduleFlowState.selectedDayIndex));
-    clearOverride(iso);
+    await clearOverride(iso);
   } else if (btn.id === 'schedFlowClearRecurring'){
-    clearRecurring(scheduleFlowState.selectedDayIndex);
+    await clearRecurring(scheduleFlowState.selectedDayIndex);
   } else if (btn.hasAttribute('data-save-recurring')){
     const weekday = Number(btn.getAttribute('data-save-recurring'));
-    saveRecurring(weekday);
+    await saveRecurring(weekday);
   } else if (btn.hasAttribute('data-clear-recurring')){
     const weekday = Number(btn.getAttribute('data-clear-recurring'));
-    clearRecurring(weekday);
+    await clearRecurring(weekday);
   } else if (btn.hasAttribute('data-save-override')){
     const iso = btn.getAttribute('data-save-override');
-    saveOverride(iso);
+    await saveOverride(iso);
   } else if (btn.hasAttribute('data-clear-override')){
     const iso = btn.getAttribute('data-clear-override');
-    clearOverride(iso);
+    await clearOverride(iso);
   }
 });
 

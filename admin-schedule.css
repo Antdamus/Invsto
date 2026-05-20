@@ -1235,3 +1235,172 @@
   #panelSchedule .cal-day{ min-height: 150px; }
   #panelSchedule .sched-actions .btn{ min-width: 140px; }
 }
+
+/* -------------------------
+   Save / replace confirmation modal
+------------------------- */
+.schedule-save-backdrop{
+  position: fixed;
+  inset: 0;
+  z-index: 7200;
+  background: rgba(0,0,0,.70);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.schedule-save-backdrop.show{
+  opacity: 1;
+}
+
+.schedule-save-modal{
+  position: fixed;
+  inset: 0;
+  z-index: 7210;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+}
+
+.schedule-save-modal.show{
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.schedule-save-card{
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  overflow: auto;
+  padding: 30px;
+  border-radius: 26px;
+  border: 1px solid rgba(240,209,136,.28);
+  background:
+    radial-gradient(620px 300px at 18% 0%, rgba(157,123,255,.18), transparent 60%),
+    radial-gradient(520px 260px at 100% 10%, rgba(240,209,136,.12), transparent 62%),
+    linear-gradient(180deg, rgba(28,26,31,.98), rgba(11,12,14,.98));
+  box-shadow: 0 34px 110px rgba(0,0,0,.74);
+  text-align: center;
+}
+
+.schedule-save-close{
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: rgba(247,248,250,.78);
+  font: 900 20px/1 system-ui, sans-serif;
+}
+
+.schedule-save-mark{
+  display: inline-grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(125,240,178,.38);
+  color: #7df0b2;
+  background: rgba(125,240,178,.10);
+  font-weight: 1000;
+}
+
+.schedule-save-modal.is-info .schedule-save-mark{
+  color: #9cc8ff;
+  border-color: rgba(156,200,255,.36);
+  background: rgba(76,128,255,.12);
+}
+
+.schedule-save-modal.is-warning .schedule-save-mark,
+.schedule-save-modal.is-danger .schedule-save-mark{
+  color: #f0d188;
+  border-color: rgba(240,209,136,.40);
+  background: rgba(240,209,136,.13);
+}
+
+.schedule-save-kicker{
+  margin: 0 0 6px;
+  color: #f0d188;
+  font-size: 12px;
+  font-weight: 1000;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.schedule-save-card h3{
+  margin: 0;
+  color: #f7f4ef;
+  font-size: clamp(28px, 5vw, 42px);
+  line-height: 1.02;
+}
+
+.schedule-save-card p:not(.schedule-save-kicker){
+  margin: 14px auto 20px;
+  max-width: 46rem;
+  color: rgba(231,233,234,.78);
+  line-height: 1.5;
+}
+
+.schedule-save-details{
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 22px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.035);
+  text-align: left;
+}
+
+.schedule-save-detail{
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.schedule-save-detail span{
+  color: rgba(183,192,204,.82);
+  font-weight: 800;
+}
+
+.schedule-save-detail strong,
+.schedule-save-detail-full{
+  color: rgba(247,248,250,.96);
+  font-weight: 900;
+}
+
+.schedule-save-actions{
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#panelSchedule .btn.is-saving,
+#panelSchedule button:disabled{
+  cursor: progress;
+}
+
+@media (max-width: 520px){
+  .schedule-save-card{
+    padding: 24px 18px;
+    border-radius: 22px;
+  }
+
+  .schedule-save-detail{
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .schedule-save-actions .btn{
+    width: 100%;
+  }
+}
