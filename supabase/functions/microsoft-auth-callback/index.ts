@@ -4,10 +4,42 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const DEFAULT_AUTHORITY_HOST = "https://login.microsoftonline.com";
 const DEFAULT_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const COOKIE_NAME = "og_ms_graph_poc";
+const DEFAULT_LOCAL_APP_URL = "http://127.0.0.1:3000/email-triage.html";
+
+class CallbackError extends Error {
+  reason: string;
+  phase: string;
+  status?: number;
+  microsoftError?: string;
+  microsoftErrorCodes?: string;
+
+  constructor(
+    reason: string,
+    message: string,
+    options: {
+      phase?: string;
+      status?: number;
+      microsoftError?: string;
+      microsoftErrorCodes?: string;
+    } = {},
+  ) {
+    super(message);
+    this.name = "CallbackError";
+    this.reason = reason;
+    this.phase = options.phase || "callback";
+    this.status = options.status;
+    this.microsoftError = options.microsoftError;
+    this.microsoftErrorCodes = options.microsoftErrorCodes;
+  }
+}
 
 function requiredEnv(name: string) {
   const value = Deno.env.get(name)?.trim();
-  if (!value) throw new Error(`missing_env:${name}`);
+  if (!value) {
+    throw new CallbackError("missing_env", `${name} is not configured`, {
+      phase: "configuration",
+    });
+  }
   return value;
 }
 
@@ -47,13 +79,17 @@ type VerifiedState = {
 
 async function verifyState(state: string, secret: string): Promise<VerifiedState> {
   const [payload, signature] = state.split(".");
-  if (!payload || !signature) throw new Error("invalid_state");
+  if (!payload || !signature) throw new CallbackError("invalid_state", "OAuth state is malformed", { phase: "state" });
   const expected = await hmacSha256(secret, payload);
-  if (expected !== signature) throw new Error("invalid_state_signature");
+  if (expected !== signature) {
+    throw new CallbackError("invalid_state_signature", "OAuth state signature did not match", { phase: "state" });
+  }
 
   const decoded = decodeJson<{ sub?: string; exp?: number; returnTo?: string }>(payload);
   const now = Math.floor(Date.now() / 1000);
-  if (!decoded.sub || !decoded.exp || decoded.exp < now) throw new Error("expired_state");
+  if (!decoded.sub || !decoded.exp || decoded.exp < now) {
+    throw new CallbackError("expired_state", "OAuth state is missing or expired", { phase: "state" });
+  }
   return decoded as VerifiedState;
 }
 
@@ -70,9 +106,15 @@ async function verifyAdminUser(userId: string) {
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) throw new Error("employee_lookup_failed");
+  if (error) {
+    throw new CallbackError("employee_lookup_failed", "Could not verify callback admin user", {
+      phase: "admin_check",
+    });
+  }
   if (!employee || employee.active === false || String(employee.role || "").toLowerCase() !== "admin") {
-    throw new Error("admin_required");
+    throw new CallbackError("admin_required", "Callback user is not an active admin", {
+      phase: "admin_check",
+    });
   }
 }
 
@@ -132,7 +174,12 @@ async function exchangeCodeForToken(code: string) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.access_token) {
-    throw new Error(`token_exchange_failed:${response.status}`);
+    throw new CallbackError("token_exchange_failed", "Microsoft token exchange failed", {
+      phase: "token_exchange",
+      status: response.status,
+      microsoftError: typeof payload?.error === "string" ? payload.error : undefined,
+      microsoftErrorCodes: Array.isArray(payload?.error_codes) ? payload.error_codes.join(",") : undefined,
+    });
   }
 
   return {
@@ -153,7 +200,13 @@ async function fetchLatestMessages(accessToken: string) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`graph_messages_failed:${response.status}`);
+  if (!response.ok) {
+    throw new CallbackError("graph_messages_failed", "Microsoft Graph latest messages request failed", {
+      phase: "graph_messages",
+      status: response.status,
+      microsoftError: typeof payload?.error?.code === "string" ? payload.error.code : undefined,
+    });
+  }
   return Array.isArray(payload?.value) ? payload.value.map(sanitizeMessage) : [];
 }
 
@@ -174,6 +227,50 @@ function withQuery(location: string, params: Record<string, string>) {
   return url.toString();
 }
 
+function safeReason(error: unknown) {
+  if (error instanceof CallbackError) return error.reason;
+  if (error instanceof Error && error.message.startsWith("microsoft_oauth_error:")) return "microsoft_oauth_error";
+  return "callback_failed";
+}
+
+function safeErrorLog(error: unknown) {
+  if (error instanceof CallbackError) {
+    return {
+      reason: error.reason,
+      phase: error.phase,
+      status: error.status,
+      microsoftError: error.microsoftError,
+      microsoftErrorCodes: error.microsoftErrorCodes,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      reason: safeReason(error),
+      phase: "callback",
+      message: error.message.slice(0, 160),
+    };
+  }
+
+  return {
+    reason: "callback_failed",
+    phase: "callback",
+  };
+}
+
+function getFrontendReturnUrl(stateReturnTo?: string) {
+  const configured = Deno.env.get("EMAIL_TRIAGE_APP_URL")?.trim();
+  const candidate = configured || stateReturnTo || DEFAULT_LOCAL_APP_URL;
+
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("invalid_protocol");
+    return url.toString();
+  } catch {
+    return DEFAULT_LOCAL_APP_URL;
+  }
+}
+
 serve(async (req) => {
   const url = new URL(req.url);
 
@@ -182,8 +279,17 @@ serve(async (req) => {
     const code = url.searchParams.get("code") || "";
     const state = url.searchParams.get("state") || "";
     const oauthError = url.searchParams.get("error") || "";
-    if (oauthError) throw new Error(`microsoft_oauth_error:${oauthError}`);
-    if (!code || !state) throw new Error("missing_code_or_state");
+    if (oauthError) {
+      throw new CallbackError("microsoft_oauth_error", "Microsoft returned an OAuth error", {
+        phase: "microsoft_authorize",
+        microsoftError: oauthError,
+      });
+    }
+    if (!code || !state) {
+      throw new CallbackError("missing_code_or_state", "Callback is missing code or state", {
+        phase: "microsoft_authorize",
+      });
+    }
 
     const statePayload = await verifyState(state, clientSecret);
     await verifyAdminUser(statePayload.sub);
@@ -202,14 +308,16 @@ serve(async (req) => {
       messageCount: messages.length,
     });
 
-    const returnTo = statePayload.returnTo || "/email-triage.html";
+    const returnTo = getFrontendReturnUrl(statePayload.returnTo);
     return redirect(withQuery(returnTo, { outlook: "connected", count: String(messages.length) }), {
       "Set-Cookie": `${COOKIE_NAME}=${encryptedToken}; ${cookieAttributes(req, cookieMaxAge)}`,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[microsoft-auth-callback] failed", { error: message });
-    const fallback = url.searchParams.get("state") ? "email-triage.html" : "/";
-    return redirect(withQuery(new URL(fallback, req.url).toString(), { outlook: "error" }));
+    const errorLog = safeErrorLog(error);
+    console.error("[microsoft-auth-callback] failed", errorLog);
+    return redirect(withQuery(getFrontendReturnUrl(), {
+      outlook: "error",
+      reason: safeReason(error),
+    }));
   }
 });

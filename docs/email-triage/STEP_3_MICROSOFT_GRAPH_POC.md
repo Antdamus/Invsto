@@ -22,11 +22,12 @@ Set these as Supabase Edge Function secrets. Do not put these in browser JavaScr
 ```env
 MICROSOFT_CLIENT_ID=
 MICROSOFT_CLIENT_SECRET=
-MICROSOFT_TENANT_ID=
+MICROSOFT_TENANT_ID=consumers
 MICROSOFT_REDIRECT_URI=
 MICROSOFT_GRAPH_SCOPES=offline_access Mail.Read User.Read
 MICROSOFT_AUTHORITY_HOST=https://login.microsoftonline.com
 MICROSOFT_GRAPH_BASE_URL=https://graph.microsoft.com/v1.0
+EMAIL_TRIAGE_APP_URL=http://127.0.0.1:3000/email-triage.html
 ```
 
 The functions also require the existing Supabase server-side secrets:
@@ -36,10 +37,14 @@ SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
+`MICROSOFT_REDIRECT_URI` is the Microsoft-to-Supabase callback registered in Azure. `EMAIL_TRIAGE_APP_URL` is the Supabase-callback-to-frontend page used after success or failure.
+
+For a personal Hotmail/Outlook mailbox with an app registration that supports Microsoft personal accounts, `MICROSOFT_TENANT_ID` should usually be `consumers`. If the app is intended to support both work/school and personal Microsoft accounts, use `common`. A Directory/tenant GUID is usually for work/school tenant flows and can cause token exchange failures for personal accounts.
+
 For hosted Supabase:
 
 ```bash
-npx supabase secrets set MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... MICROSOFT_TENANT_ID=... MICROSOFT_REDIRECT_URI=...
+npx supabase secrets set MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... MICROSOFT_TENANT_ID=... MICROSOFT_REDIRECT_URI=... EMAIL_TRIAGE_APP_URL=http://127.0.0.1:3000/email-triage.html
 ```
 
 For local functions, place local-only values in a Supabase env file that is ignored by `supabase/.gitignore`, then run functions with that env file.
@@ -59,6 +64,22 @@ http://127.0.0.1:54321/functions/v1/microsoft-auth-callback
 ```
 
 `MICROSOFT_REDIRECT_URI` must match the registered value exactly.
+
+For hosted Supabase testing with the local static page, use:
+
+```env
+MICROSOFT_REDIRECT_URI=https://byhytmarmigalvawkedi.supabase.co/functions/v1/microsoft-auth-callback
+EMAIL_TRIAGE_APP_URL=http://127.0.0.1:3000/email-triage.html
+```
+
+Expected post-callback redirects:
+
+```text
+http://127.0.0.1:3000/email-triage.html?outlook=connected
+http://127.0.0.1:3000/email-triage.html?outlook=error&reason=token_exchange_failed
+```
+
+If the callback returns `outlook=error`, check the `reason` query parameter and the Supabase function logs for `microsoft-auth-callback`. The logs intentionally include only safe fields such as phase, HTTP status, Microsoft error code, and Microsoft numeric error codes. They do not log tokens, refresh tokens, client secrets, or full mailbox payloads.
 
 ## Local Run
 
