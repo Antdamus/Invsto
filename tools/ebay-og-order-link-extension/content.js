@@ -15,6 +15,7 @@
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
+  const URGENT_COVERAGE_WARNING_ID = "og-ebay-urgent-coverage-warning";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
@@ -519,6 +520,13 @@
     return { byOrder, byBuyer, entries };
   }
 
+  function getPriorityPendingLines(...priorities) {
+    return Math.max(
+      0,
+      ...priorities.map((priority) => Number(priority?.pendingLines || 0)).filter((count) => Number.isFinite(count))
+    );
+  }
+
   function ensureRowBadge(row, className, text, title = "") {
     const cell = row?.querySelector?.("td.checkbox-cell") || row?.firstElementChild;
     if (!cell) return null;
@@ -574,7 +582,7 @@
       const count = checkboxes.length;
       const selected = Boolean(count && checkboxes.every((checkbox) => checkbox.checked));
       buttons.forEach((button) => {
-        button.textContent = selected ? `Unselect ${count}` : `Select ${count}`;
+        button.textContent = selected ? `Unselect ${count}` : `Select visible ${count}`;
         button.setAttribute("aria-pressed", selected ? "true" : "false");
         button.title = selected
           ? "Unselect all visible eBay rows for this buyer"
@@ -764,12 +772,13 @@
           buyerKey,
           buyerUsername: info.buyerUsername || ogByOrder?.buyerUsername || ogByBuyer?.buyerUsername || buyerKey,
           buyerDisplayName: info.buyerDisplayName || "",
-          rows: [],
-          orderNumbers: new Set(),
-          originalIndex: info.originalIndex,
-          priorityRank: 99,
-          prioritySource: "none",
-        });
+        rows: [],
+        orderNumbers: new Set(),
+        originalIndex: info.originalIndex,
+        pendingLines: 0,
+        priorityRank: 99,
+        prioritySource: "none",
+      });
       }
 
       const group = groups.get(buyerKey);
@@ -779,6 +788,7 @@
       if (!group.buyerDisplayName && info.buyerDisplayName) group.buyerDisplayName = info.buyerDisplayName;
       if (!group.buyerUsername && info.buyerUsername) group.buyerUsername = info.buyerUsername;
 
+      group.pendingLines = Math.max(group.pendingLines, getPriorityPendingLines(ogByOrder, ogByBuyer));
       const ogRank = getOgPriorityRank(ogByOrder, ogByBuyer);
       const fallbackRank = Number.isFinite(Number(info.shipStatus?.rank)) ? Number(info.shipStatus.rank) : 99;
       const effectiveRank = Math.min(ogRank, fallbackRank);
@@ -814,19 +824,27 @@
         : groupInfo.priorityRank === 1
           ? "DUE TODAY"
           : "BUYER";
-      const lineWord = groupInfo.rowCount === 1 ? "line" : "lines";
+      const totalOgLines = Math.max(Number(groupInfo.pendingLines || 0), groupInfo.rowCount);
+      const hasHiddenLines = totalOgLines > groupInfo.rowCount;
+      const lineText = hasHiddenLines
+        ? `${groupInfo.rowCount} visible / ${totalOgLines} OG lines`
+        : `${groupInfo.rowCount} ${groupInfo.rowCount === 1 ? "line" : "lines"}`;
       const badge = ensureRowBadge(
         row,
         "og-ebay-priority-badge",
-        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${groupInfo.rowCount} ${lineWord}`,
-        `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${lineText}`,
+        hasHiddenLines
+          ? `OG has ${totalOgLines} pending line(s) for this buyer, but only ${groupInfo.rowCount} are visible on this eBay page.`
+          : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
       );
       fillBadgeWithBuyerSelectButton(
         badge,
-        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${groupInfo.rowCount} ${lineWord}`,
+        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${lineText}`,
         groupInfo.buyerKey || groupInfo.buyerUsername,
         groupInfo.rowCount,
-        `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+        hasHiddenLines
+          ? `OG has ${totalOgLines} pending line(s) for this buyer, but only ${groupInfo.rowCount} are visible on this eBay page.`
+          : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
       );
     } else if (groupInfo.rowCount > 1) {
       const badge = ensureRowBadge(
@@ -864,12 +882,13 @@
           const { row } = info;
           row.classList.remove("og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-priority-row", "is-og-pending", "is-og-tomorrow");
           row.classList.add(stripeClass);
-          decorateBuyerGroup(row, {
-            buyerKey: group.buyerKey,
-            buyerUsername: group.buyerUsername,
-            priorityRank: group.priorityRank,
-            rowCount: group.rows.length,
-            groupIndex: index,
+      decorateBuyerGroup(row, {
+        buyerKey: group.buyerKey,
+        buyerUsername: group.buyerUsername,
+        priorityRank: group.priorityRank,
+        pendingLines: group.pendingLines,
+        rowCount: group.rows.length,
+        groupIndex: index,
             isFirst: index === 0,
           });
           tbody.appendChild(row);
@@ -881,6 +900,66 @@
       });
     });
     return moved;
+  }
+
+  function summarizeUrgentCoverage(payload, groups) {
+    const groupByBuyer = new Map(groups.map((group) => [normalizeBuyerKey(group.buyerKey || group.buyerUsername), group]));
+    const urgentPriorities = (Array.isArray(payload?.priorities) ? payload.priorities : [])
+      .filter((entry) => Number(entry?.priorityRank) <= 1);
+
+    let missingBuyerCount = 0;
+    let partialBuyerCount = 0;
+    let hiddenLineCount = 0;
+    let visibleUrgentLineCount = 0;
+
+    urgentPriorities.forEach((entry) => {
+      const buyerKey = normalizeBuyerKey(entry.buyerKey || entry.buyerUsername);
+      const group = groupByBuyer.get(buyerKey);
+      const visibleLines = group?.rows?.length || 0;
+      const pendingLines = Math.max(Number(entry.pendingLines || 0), visibleLines);
+      visibleUrgentLineCount += Math.min(visibleLines, pendingLines);
+
+      if (!visibleLines) {
+        missingBuyerCount += 1;
+        hiddenLineCount += pendingLines;
+      } else if (pendingLines > visibleLines) {
+        partialBuyerCount += 1;
+        hiddenLineCount += pendingLines - visibleLines;
+      }
+    });
+
+    return {
+      hiddenLineCount,
+      missingBuyerCount,
+      partialBuyerCount,
+      urgentBuyerCount: urgentPriorities.length,
+      urgentLineCount: Number(payload?.urgentLineCount || 0) || urgentPriorities.reduce((sum, entry) => sum + Number(entry.pendingLines || 0), 0),
+      visibleUrgentLineCount,
+    };
+  }
+
+  function renderUrgentCoverageWarning(coverage) {
+    let warning = document.getElementById(URGENT_COVERAGE_WARNING_ID);
+    if (!isAwaitingShipmentOrdersPage() || !coverage || Number(coverage.hiddenLineCount || 0) <= 0) {
+      warning?.remove();
+      return;
+    }
+
+    if (!warning) {
+      warning = document.createElement("div");
+      warning.id = URGENT_COVERAGE_WARNING_ID;
+      document.body.appendChild(warning);
+    }
+
+    const hiddenLines = Number(coverage.hiddenLineCount || 0);
+    const missingBuyers = Number(coverage.missingBuyerCount || 0);
+    const partialBuyers = Number(coverage.partialBuyerCount || 0);
+    const pieces = [
+      `${hiddenLines.toLocaleString()} urgent OG line${hiddenLines === 1 ? "" : "s"} not visible on this eBay page`,
+    ];
+    if (missingBuyers) pieces.push(`${missingBuyers.toLocaleString()} buyer${missingBuyers === 1 ? "" : "s"} not shown`);
+    if (partialBuyers) pieces.push(`${partialBuyers.toLocaleString()} buyer${partialBuyers === 1 ? "" : "s"} only partly shown`);
+    warning.textContent = `Safety check: ${pieces.join(" - ")}. Do not rely only on the visible 200 rows.`;
   }
 
   function clearOgPriorityBadges(root = document) {
@@ -905,6 +984,8 @@
     const moved = applyGroupedOrder(groups);
     const withPriority = groups.filter((group) => group.prioritySource === "og" && group.priorityRank <= 1);
     const withEbayUrgency = groups.filter((group) => group.prioritySource === "ebay-visible" && group.priorityRank <= 1);
+    const coverage = summarizeUrgentCoverage(payload, groups);
+    renderUrgentCoverageWarning(coverage);
 
     ogPriorityLastRowSignature = getVisibleOrderRowSignature();
 
@@ -915,6 +996,9 @@
       moved,
       visibleRows: rowInfos.length,
       buyerGroups: groups.length,
+      hiddenUrgentLines: coverage.hiddenLineCount,
+      missingUrgentBuyers: coverage.missingBuyerCount,
+      partialUrgentBuyers: coverage.partialBuyerCount,
       urgentBuyers: payload.urgentBuyerCount || 0,
       overdueBuyers: payload.overdueBuyerCount || 0,
       dueTodayBuyers: payload.dueTodayBuyerCount || 0,
@@ -948,7 +1032,9 @@
       const payload = await requestOgPendingPriorities();
       const result = applyOgPendingPriorities(payload);
       const urgentBuyers = Number(payload.urgentBuyerCount || 0);
-      if (result.matched > 0) {
+      if (Number(result.hiddenUrgentLines || 0) > 0) {
+        updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
+      } else if (result.matched > 0) {
         updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
       } else if (result.ebayMatched > 0) {
         updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
@@ -2121,6 +2207,21 @@
         opacity: .72;
       }
 
+      #${URGENT_COVERAGE_WARNING_ID} {
+        position: fixed;
+        right: 18px;
+        bottom: 288px;
+        z-index: 2147483647;
+        max-width: min(460px, calc(100vw - 36px));
+        border: 2px solid #b42318;
+        border-radius: 18px;
+        background: #fff0ed;
+        color: #7a130c;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, .24);
+        font: 900 13px/1.35 Arial, sans-serif;
+        padding: 12px 14px;
+      }
+
       .og-ebay-actions-highlight {
         outline: 4px solid rgba(11, 114, 231, .45) !important;
         outline-offset: 6px !important;
@@ -2525,6 +2626,7 @@
     if (!isAwaitingShipmentOrdersPage()) {
       button?.remove();
       clearOgPriorityBadges();
+      renderUrgentCoverageWarning(null);
       return;
     }
 
