@@ -35,6 +35,7 @@
   let ogBuyerSelectionHandlersAttached = false;
   let ogBuyerSelectionInProgress = false;
   let ogBuyerSelectionRefreshTimer = null;
+  let ogPartialSelectionWarningTimer = null;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -554,6 +555,11 @@
       .filter((checkbox) => checkbox && !checkbox.disabled);
   }
 
+  function isPartialBuyerGroupRow(row) {
+    return row?.dataset?.ogPartialBuyerGroup === "true"
+      || row?.classList?.contains("is-og-partial-buyer");
+  }
+
   function isBuyerGroupFullySelected(buyerKey) {
     const checkboxes = getBuyerGroupCheckboxes(buyerKey);
     return Boolean(checkboxes.length && checkboxes.every((checkbox) => checkbox.checked));
@@ -563,6 +569,25 @@
     return getEbayAwaitingShipmentRows()
       .map(getRowCheckbox)
       .filter((checkbox) => checkbox && checkbox.checked && !checkbox.disabled);
+  }
+
+  function getSelectedPartialBuyerCheckboxes() {
+    return getSelectedAwaitingOrderCheckboxes()
+      .filter((checkbox) => isPartialBuyerGroupRow(checkbox.closest("tr")));
+  }
+
+  function clearSelectedPartialBuyerRows({ notify = false } = {}) {
+    const checkboxes = getSelectedPartialBuyerCheckboxes();
+    if (!checkboxes.length) return 0;
+    checkboxes.forEach((checkbox) => {
+      setCheckboxChecked(checkbox, false);
+    });
+    refreshBuyerGroupSelectButtons();
+    updateBulkActionsShortcut();
+    if (notify) {
+      window.alert("OG safety check: one or more selected buyers are only partly visible on this eBay page. The extension cleared those boxes so a partial shipping label is not created by mistake.");
+    }
+    return checkboxes.length;
   }
 
   function refreshBuyerGroupSelectButtons(buyerKey = "") {
@@ -582,11 +607,20 @@
       const count = checkboxes.length;
       const selected = Boolean(count && checkboxes.every((checkbox) => checkbox.checked));
       buttons.forEach((button) => {
+        const partial = button.dataset.ogPartialBuyerGroup === "true";
+        const totalOgLines = Number(button.dataset.ogTotalOgLines || 0);
         button.textContent = selected ? `Unselect ${count}` : `Select visible ${count}`;
         button.setAttribute("aria-pressed", selected ? "true" : "false");
-        button.title = selected
-          ? "Unselect all visible eBay rows for this buyer"
-          : "Select all visible eBay rows for this buyer";
+        if (partial && !selected) {
+          button.textContent = "Do not select";
+          button.disabled = true;
+          button.title = `OG has ${totalOgLines || "more"} pending line(s) for this buyer, but only ${count} are visible here. Wait until all lines are visible before generating the label.`;
+        } else {
+          button.disabled = false;
+          button.title = selected
+            ? "Unselect all visible eBay rows for this buyer"
+            : "Select all visible eBay rows for this buyer";
+        }
       });
     });
   }
@@ -645,6 +679,11 @@
 
   async function toggleBuyerGroupSelection(buyerKey) {
     if (ogBuyerSelectionInProgress) return;
+    const firstRow = getBuyerGroupRows(buyerKey)[0];
+    if (isPartialBuyerGroupRow(firstRow)) {
+      window.alert("OG safety check: this buyer is only partly visible on this eBay page. Do not select or buy labels for this buyer until all of their pending lines are visible together.");
+      return;
+    }
     const checkboxes = getBuyerGroupCheckboxes(buyerKey);
     if (!checkboxes.length) return;
     const shouldSelect = !checkboxes.every((checkbox) => checkbox.checked);
@@ -703,7 +742,7 @@
     }
   }
 
-  function fillBadgeWithBuyerSelectButton(badge, label, buyerKey, rowCount, title = "") {
+  function fillBadgeWithBuyerSelectButton(badge, label, buyerKey, rowCount, title = "", options = {}) {
     if (!badge) return;
     const normalizedBuyerKey = normalizeBuyerKey(buyerKey);
     badge.textContent = "";
@@ -719,12 +758,16 @@
     button.className = "og-ebay-select-buyer-group";
     button.dataset.ogBuyerKey = normalizedBuyerKey;
     button.dataset.ogBuyerCount = String(rowCount || "");
+    button.dataset.ogPartialBuyerGroup = options.partial ? "true" : "false";
+    button.dataset.ogTotalOgLines = String(options.totalOgLines || "");
     badge.appendChild(button);
     refreshBuyerGroupSelectButtons(normalizedBuyerKey);
   }
 
   function clearOldOgBadges(row) {
     row?.querySelectorAll?.(".og-ebay-priority-badge, .og-ebay-buyer-badge").forEach((element) => element.remove());
+    row?.removeAttribute?.("data-og-partial-buyer-group");
+    row?.removeAttribute?.("data-og-total-og-lines");
   }
 
   function collectVisibleEbayRows() {
@@ -815,50 +858,61 @@
     row.classList.toggle("og-ebay-buyer-group-first", Boolean(groupInfo.isFirst));
     row.dataset.ogBuyerGroup = groupInfo.buyerUsername || groupInfo.buyerKey || "";
     row.dataset.ogPriorityRank = String(groupInfo.priorityRank ?? 99);
+    const totalOgLines = Math.max(Number(groupInfo.pendingLines || 0), groupInfo.rowCount);
+    const hasHiddenLines = totalOgLines > groupInfo.rowCount;
+    row.dataset.ogPartialBuyerGroup = hasHiddenLines ? "true" : "false";
+    row.dataset.ogTotalOgLines = String(totalOgLines || "");
     row.classList.toggle("is-og-overdue", groupInfo.priorityRank === 0);
     row.classList.toggle("is-og-today", groupInfo.priorityRank === 1);
+    row.classList.toggle("is-og-partial-buyer", hasHiddenLines);
 
     if (groupInfo.isFirst) {
-      const statusLabel = groupInfo.priorityRank === 0
+      const baseStatusLabel = groupInfo.priorityRank === 0
         ? "OVERDUE"
         : groupInfo.priorityRank === 1
           ? "DUE TODAY"
           : "BUYER";
-      const totalOgLines = Math.max(Number(groupInfo.pendingLines || 0), groupInfo.rowCount);
-      const hasHiddenLines = totalOgLines > groupInfo.rowCount;
+      const statusLabel = hasHiddenLines ? "DO NOT SHIP - PARTIAL BUYER" : baseStatusLabel;
       const lineText = hasHiddenLines
-        ? `${groupInfo.rowCount} visible / ${totalOgLines} OG lines`
+        ? `${groupInfo.rowCount} visible of ${totalOgLines} OG lines`
         : `${groupInfo.rowCount} ${groupInfo.rowCount === 1 ? "line" : "lines"}`;
+      const partialTitle = `Do not generate a label for this buyer yet. OG has ${totalOgLines} pending line(s), but only ${groupInfo.rowCount} are visible on this eBay page.`;
       const badge = ensureRowBadge(
         row,
         "og-ebay-priority-badge",
         `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${lineText}`,
-        hasHiddenLines
-          ? `OG has ${totalOgLines} pending line(s) for this buyer, but only ${groupInfo.rowCount} are visible on this eBay page.`
-          : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+        hasHiddenLines ? partialTitle : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
       );
       fillBadgeWithBuyerSelectButton(
         badge,
         `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${lineText}`,
         groupInfo.buyerKey || groupInfo.buyerUsername,
         groupInfo.rowCount,
-        hasHiddenLines
-          ? `OG has ${totalOgLines} pending line(s) for this buyer, but only ${groupInfo.rowCount} are visible on this eBay page.`
-          : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+        hasHiddenLines ? partialTitle : `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`,
+        { partial: hasHiddenLines, totalOgLines }
       );
     } else if (groupInfo.rowCount > 1) {
+      const totalOgLines = Math.max(Number(groupInfo.pendingLines || 0), groupInfo.rowCount);
+      const hasHiddenLines = totalOgLines > groupInfo.rowCount;
+      const sameBuyerLabel = hasHiddenLines
+        ? `PARTIAL BUYER - visible line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount} (${totalOgLines} OG lines)`
+        : `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`;
+      const sameBuyerTitle = hasHiddenLines
+        ? `Do not generate a label yet. This buyer has ${totalOgLines} pending OG line(s), but only ${groupInfo.rowCount} are visible here.`
+        : `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`;
       const badge = ensureRowBadge(
         row,
         "og-ebay-buyer-badge",
-        `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`,
-        `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`
+        sameBuyerLabel,
+        sameBuyerTitle
       );
       fillBadgeWithBuyerSelectButton(
         badge,
-        `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`,
+        sameBuyerLabel,
         groupInfo.buyerKey || groupInfo.buyerUsername,
         groupInfo.rowCount,
-        `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`
+        sameBuyerTitle,
+        { partial: hasHiddenLines, totalOgLines }
       );
     }
   }
@@ -880,7 +934,7 @@
         stripe += 1;
         group.rows.forEach((info, index) => {
           const { row } = info;
-          row.classList.remove("og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-priority-row", "is-og-pending", "is-og-tomorrow");
+          row.classList.remove("og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-priority-row", "is-og-pending", "is-og-tomorrow", "is-og-partial-buyer");
           row.classList.add(stripeClass);
       decorateBuyerGroup(row, {
         buyerKey: group.buyerKey,
@@ -911,6 +965,17 @@
     let partialBuyerCount = 0;
     let hiddenLineCount = 0;
     let visibleUrgentLineCount = 0;
+    let visiblePartialBuyerCount = 0;
+    let visiblePartialHiddenLineCount = 0;
+
+    groups.forEach((group) => {
+      const visibleLines = group?.rows?.length || 0;
+      const pendingLines = Math.max(Number(group?.pendingLines || 0), visibleLines);
+      if (visibleLines && pendingLines > visibleLines) {
+        visiblePartialBuyerCount += 1;
+        visiblePartialHiddenLineCount += pendingLines - visibleLines;
+      }
+    });
 
     urgentPriorities.forEach((entry) => {
       const buyerKey = normalizeBuyerKey(entry.buyerKey || entry.buyerUsername);
@@ -935,12 +1000,16 @@
       urgentBuyerCount: urgentPriorities.length,
       urgentLineCount: Number(payload?.urgentLineCount || 0) || urgentPriorities.reduce((sum, entry) => sum + Number(entry.pendingLines || 0), 0),
       visibleUrgentLineCount,
+      visiblePartialBuyerCount,
+      visiblePartialHiddenLineCount,
     };
   }
 
   function renderUrgentCoverageWarning(coverage) {
     let warning = document.getElementById(URGENT_COVERAGE_WARNING_ID);
-    if (!isAwaitingShipmentOrdersPage() || !coverage || Number(coverage.hiddenLineCount || 0) <= 0) {
+    const hiddenUrgentLines = Number(coverage?.hiddenLineCount || 0);
+    const partialHiddenLines = Number(coverage?.visiblePartialHiddenLineCount || 0);
+    if (!isAwaitingShipmentOrdersPage() || !coverage || (hiddenUrgentLines <= 0 && partialHiddenLines <= 0)) {
       warning?.remove();
       return;
     }
@@ -951,15 +1020,21 @@
       document.body.appendChild(warning);
     }
 
-    const hiddenLines = Number(coverage.hiddenLineCount || 0);
+    const hiddenLines = hiddenUrgentLines;
     const missingBuyers = Number(coverage.missingBuyerCount || 0);
     const partialBuyers = Number(coverage.partialBuyerCount || 0);
-    const pieces = [
-      `${hiddenLines.toLocaleString()} urgent OG line${hiddenLines === 1 ? "" : "s"} not visible on this eBay page`,
-    ];
+    const visiblePartialBuyers = Number(coverage.visiblePartialBuyerCount || 0);
+    const visiblePartialHiddenLines = Number(coverage.visiblePartialHiddenLineCount || 0);
+    const pieces = [];
+    if (hiddenLines) {
+      pieces.push(`${hiddenLines.toLocaleString()} urgent OG line${hiddenLines === 1 ? "" : "s"} not visible on this eBay page`);
+    }
     if (missingBuyers) pieces.push(`${missingBuyers.toLocaleString()} buyer${missingBuyers === 1 ? "" : "s"} not shown`);
     if (partialBuyers) pieces.push(`${partialBuyers.toLocaleString()} buyer${partialBuyers === 1 ? "" : "s"} only partly shown`);
-    warning.textContent = `Safety check: ${pieces.join(" - ")}. Do not rely only on the visible 200 rows.`;
+    if (visiblePartialBuyers) {
+      pieces.push(`${visiblePartialBuyers.toLocaleString()} visible buyer group${visiblePartialBuyers === 1 ? "" : "s"} incomplete (${visiblePartialHiddenLines.toLocaleString()} hidden line${visiblePartialHiddenLines === 1 ? "" : "s"})`);
+    }
+    warning.textContent = `Safety check: ${pieces.join(" - ")}. Do not ship partial buyer groups until all lines are visible together.`;
   }
 
   function clearOgPriorityBadges(root = document) {
@@ -969,9 +1044,11 @@
       row.removeAttribute("data-og-priority-rank");
     });
     root.querySelectorAll(".og-ebay-buyer-group-row").forEach((row) => {
-      row.classList.remove("og-ebay-buyer-group-row", "og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-buyer-group-first", "is-og-overdue", "is-og-today");
+      row.classList.remove("og-ebay-buyer-group-row", "og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-buyer-group-first", "is-og-overdue", "is-og-today", "is-og-partial-buyer");
       row.removeAttribute("data-og-buyer-group");
       row.removeAttribute("data-og-priority-rank");
+      row.removeAttribute("data-og-partial-buyer-group");
+      row.removeAttribute("data-og-total-og-lines");
     });
   }
 
@@ -986,6 +1063,9 @@
     const withEbayUrgency = groups.filter((group) => group.prioritySource === "ebay-visible" && group.priorityRank <= 1);
     const coverage = summarizeUrgentCoverage(payload, groups);
     renderUrgentCoverageWarning(coverage);
+    window.setTimeout(() => {
+      clearSelectedPartialBuyerRows();
+    }, 0);
 
     ogPriorityLastRowSignature = getVisibleOrderRowSignature();
 
@@ -997,8 +1077,10 @@
       visibleRows: rowInfos.length,
       buyerGroups: groups.length,
       hiddenUrgentLines: coverage.hiddenLineCount,
+      hiddenPartialLines: coverage.visiblePartialHiddenLineCount,
       missingUrgentBuyers: coverage.missingBuyerCount,
       partialUrgentBuyers: coverage.partialBuyerCount,
+      visiblePartialBuyers: coverage.visiblePartialBuyerCount,
       urgentBuyers: payload.urgentBuyerCount || 0,
       overdueBuyers: payload.overdueBuyerCount || 0,
       dueTodayBuyers: payload.dueTodayBuyerCount || 0,
@@ -1034,6 +1116,8 @@
       const urgentBuyers = Number(payload.urgentBuyerCount || 0);
       if (Number(result.hiddenUrgentLines || 0) > 0) {
         updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
+      } else if (Number(result.hiddenPartialLines || 0) > 0) {
+        updatePriorityButtonStatus(`${Number(result.visiblePartialBuyers || 0).toLocaleString()} partial buyer group${Number(result.visiblePartialBuyers || 0) === 1 ? "" : "s"}`, "error");
       } else if (result.matched > 0) {
         updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
       } else if (result.ebayMatched > 0) {
@@ -1088,6 +1172,14 @@
 
     document.addEventListener("change", (event) => {
       if (!event.target?.matches?.('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]')) return;
+      const row = event.target.closest("tr");
+      if (event.target.checked && isPartialBuyerGroupRow(row) && !ogBuyerSelectionInProgress) {
+        window.clearTimeout(ogPartialSelectionWarningTimer);
+        ogPartialSelectionWarningTimer = window.setTimeout(() => {
+          clearSelectedPartialBuyerRows({ notify: true });
+        }, 0);
+        return;
+      }
       if (ogBuyerSelectionInProgress) {
         window.clearTimeout(ogBuyerSelectionRefreshTimer);
         ogBuyerSelectionRefreshTimer = window.setTimeout(() => {
@@ -2293,6 +2385,20 @@
         border-left-color: #d97706 !important;
       }
 
+      .og-ebay-buyer-group-row.is-og-partial-buyer {
+        background: rgba(255, 241, 242, .98) !important;
+        box-shadow: inset 0 0 0 3px rgba(190, 18, 60, .2) !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-partial-buyer > td,
+      .og-ebay-buyer-group-row.is-og-partial-buyer > th {
+        background: rgba(255, 241, 242, .98) !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-partial-buyer td:first-child {
+        border-left-color: #be123c !important;
+      }
+
       .og-ebay-priority-badge,
       .og-ebay-buyer-badge {
         display: inline-flex;
@@ -2316,6 +2422,14 @@
 
       .is-og-today .og-ebay-priority-badge {
         background: #d97706;
+      }
+
+      .is-og-partial-buyer .og-ebay-priority-badge,
+      .is-og-partial-buyer .og-ebay-buyer-badge {
+        border: 2px solid #be123c;
+        background: #be123c;
+        color: #fff;
+        box-shadow: 0 2px 8px rgba(190, 18, 60, .2);
       }
 
       .og-ebay-buyer-badge {
@@ -2342,7 +2456,7 @@
       }
 
       .og-ebay-select-buyer-group:disabled {
-        cursor: wait;
+        cursor: not-allowed;
         opacity: .72;
       }
 
