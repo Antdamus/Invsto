@@ -53,6 +53,20 @@
   }
 
   function getOrderLinks() {
+    const awaitingRows = typeof getEbayAwaitingShipmentRows === "function" ? getEbayAwaitingShipmentRows() : [];
+    if (awaitingRows.length) {
+      return awaitingRows
+        .map((row) => {
+          const orderNumber = getRowOrderNumber(row);
+          const link = [...row.querySelectorAll("a[href], [role='link']")]
+            .find((anchor) => normalizeOrderNumber(anchor.textContent || anchor.getAttribute?.("href") || anchor.getAttribute?.("aria-label")) === orderNumber)
+            || row.querySelector('a[href*="/mesh/ord/details"], a[href*="orderid="], a[href*="orderId="]')
+            || row.querySelector("a[href], [role='link']");
+          return { link, orderNumber };
+        })
+        .filter((entry) => entry.link && entry.orderNumber);
+    }
+
     const links = [
       ...document.querySelectorAll(ORDER_LINK_SELECTOR),
       ...document.querySelectorAll("a[href], [role='link']"),
@@ -351,60 +365,133 @@
     };
   }
 
+  function getEbayAwaitingShipmentRows() {
+    return [...document.querySelectorAll('tr.order-info[id^="orderid_"][id$="__order-info"], tr.order-info.order-border')]
+      .filter((row) => row.querySelector('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]'));
+  }
+
+  function getRowCheckbox(row) {
+    return row?.querySelector?.('input[data-testid="order-checkbox"]')
+      || row?.querySelector?.("input[data-ordernumber]")
+      || row?.querySelector?.('input[name^="grid-table-bulk-checkbox_order"]')
+      || null;
+  }
+
+  function getRowOrderNumber(row) {
+    const checkbox = getRowCheckbox(row);
+    const fromCheckbox = checkbox?.dataset?.ordernumber
+      || checkbox?.getAttribute?.("data-ordernumber")
+      || checkbox?.value
+      || "";
+    const fromId = row?.id?.match(ORDER_NUMBER_PATTERN)?.[0] || "";
+    const detailsLink = row?.querySelector?.('a[href*="orderid="], a[href*="orderId="], a[href*="/mesh/ord/details"]');
+    const fromHref = detailsLink?.href?.match(ORDER_NUMBER_PATTERN)?.[0] || "";
+    const fromText = row?.textContent?.match(ORDER_NUMBER_PATTERN)?.[0] || "";
+    return cleanText(fromCheckbox || fromId || fromHref || fromText);
+  }
+
+  function getRowBuyerUsername(row) {
+    const checkbox = getRowCheckbox(row);
+    const fromCheckbox = checkbox?.dataset?.buyerId
+      || checkbox?.getAttribute?.("data-buyer-id")
+      || "";
+    if (fromCheckbox) return cleanText(fromCheckbox);
+
+    const spans = [...(row?.querySelectorAll?.(".buyer-modal-trigger-wrapper button span") || [])]
+      .map((span) => cleanText(span.textContent));
+    if (spans[1]) return spans[1];
+
+    const feedbackLink = row?.querySelector?.('a[href*="/fdbk/feedback_profile/"][href*="q="]');
+    if (feedbackLink) {
+      try {
+        const url = new URL(feedbackLink.getAttribute("href"), window.location.origin);
+        const query = url.searchParams.get("q");
+        if (query) return cleanText(query);
+      } catch (_) {}
+    }
+
+    return "";
+  }
+
+  function getRowBuyerDisplayName(row) {
+    const spans = [...(row?.querySelectorAll?.(".buyer-modal-trigger-wrapper button span") || [])]
+      .map((span) => cleanText(span.textContent));
+    return spans[0] || "";
+  }
+
+  function getRowItemTitle(row) {
+    return cleanText(
+      row?.querySelector?.(".item-title")?.textContent
+      || row?.querySelector?.('a[href*="/itm/"]')?.textContent
+      || ""
+    );
+  }
+
+  function getRowShipStatusText(row) {
+    const status = row?.querySelector?.(".order-status");
+    return cleanText(status?.innerText || status?.textContent || "");
+  }
+
+  function parseShipByDate(statusText) {
+    const match = cleanText(statusText).match(/\bShip by ([A-Z][a-z]+)\s+(\d{1,2})\b/);
+    if (!match) return null;
+    const months = {
+      Jan: 0, January: 0,
+      Feb: 1, February: 1,
+      Mar: 2, March: 2,
+      Apr: 3, April: 3,
+      May: 4,
+      Jun: 5, June: 5,
+      Jul: 6, July: 6,
+      Aug: 7, August: 7,
+      Sep: 8, Sept: 8, September: 8,
+      Oct: 9, October: 9,
+      Nov: 10, November: 10,
+      Dec: 11, December: 11,
+    };
+    const month = months[match[1]];
+    if (month == null) return null;
+    const now = new Date();
+    return new Date(now.getFullYear(), month, Number(match[2]));
+  }
+
+  function startOfLocalDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function getRowShipStatus(row) {
+    const text = getRowShipStatusText(row);
+    if (/shipping overdue/i.test(text)) {
+      return { rank: 0, label: "Overdue", raw: text };
+    }
+    const shipBy = parseShipByDate(text);
+    if (shipBy) {
+      const today = startOfLocalDay(new Date());
+      const shipDay = startOfLocalDay(shipBy);
+      if (shipDay.getTime() < today.getTime()) return { rank: 0, label: "Overdue", raw: text };
+      if (shipDay.getTime() === today.getTime()) return { rank: 1, label: "Due today", raw: text };
+      return { rank: 2, label: text, raw: text };
+    }
+    return { rank: 99, label: text || "No ship status", raw: text };
+  }
+
+  function getAssociatedNoteRow(row) {
+    const orderNumber = getRowOrderNumber(row);
+    if (!orderNumber) return null;
+    try {
+      return document.querySelector(`tr.my-note-row[ordernumber="${CSS.escape(orderNumber)}"]`);
+    } catch (_) {
+      return [...document.querySelectorAll("tr.my-note-row[ordernumber]")]
+        .find((noteRow) => noteRow.getAttribute("ordernumber") === orderNumber) || null;
+    }
+  }
+
   function normalizeBuyerKey(value) {
     return String(value || "").trim().toLowerCase();
   }
 
-  function escapeRegExp(value) {
-    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function getPriorityLabel(entry = {}) {
-    if (entry.priorityRank === 0) return "OG overdue";
-    if (entry.priorityRank === 1) return "OG due today";
-    if (entry.priorityRank === 2) return "OG due tomorrow";
-    return "OG pending";
-  }
-
-  function getPriorityClass(entry = {}) {
-    if (entry.priorityRank === 0) return "is-og-overdue";
-    if (entry.priorityRank === 1) return "is-og-today";
-    if (entry.priorityRank === 2) return "is-og-tomorrow";
-    return "is-og-pending";
-  }
-
-  function getEffectiveRowPriority(row = {}) {
-    return row.priority?.priorityRank <= 1 ? row.priority : row.ebayUrgency;
-  }
-
   function getVisibleOrderRowSignature() {
     return getOrderLinks().map((entry) => entry.orderNumber).join("|");
-  }
-
-  function getOrderLinkCount(root) {
-    if (!root?.querySelectorAll) return 0;
-    return [...root.querySelectorAll("a[href], [role='link']")]
-      .filter((link) => normalizeOrderNumber(link.textContent || link.getAttribute?.("href") || link.getAttribute?.("aria-label")))
-      .length;
-  }
-
-  function getEbayRowUrgency(row) {
-    const text = row?.innerText || row?.textContent || "";
-    if (/shipping\s+overdue|ship\s+by\s+(?:yesterday|[a-z]{3,9}\s+\d{1,2})/i.test(text)) {
-      const shipByMatch = text.match(/ship\s+by\s+([a-z]{3,9})\s+(\d{1,2})/i);
-      if (/shipping\s+overdue/i.test(text)) return { priorityRank: 0, priorityLabel: "eBay overdue", source: "ebay-row" };
-      if (shipByMatch) {
-        const rowDate = new Date(`${shipByMatch[1]} ${shipByMatch[2]}, ${new Date().getFullYear()}`);
-        if (!Number.isNaN(rowDate.getTime())) {
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          rowDate.setHours(0, 0, 0, 0);
-          if (rowDate < today) return { priorityRank: 0, priorityLabel: "eBay overdue", source: "ebay-row" };
-          if (rowDate.getTime() === today.getTime()) return { priorityRank: 1, priorityLabel: "eBay due today", source: "ebay-row" };
-        }
-      }
-    }
-    return null;
   }
 
   function buildPriorityMaps(payload = {}) {
@@ -427,152 +514,206 @@
     return { byOrder, byBuyer, entries };
   }
 
-  function getLikelyOrderRow(link, orderNumber = "") {
-    const direct = link.closest([
-      "tr",
-      "[role='row']",
-      "[data-testid*='order-row' i]",
-      "[data-testid*='order-card' i]",
-      "[data-test-id*='order-row' i]",
-      "[class*='order-row' i]",
-      ".order-card",
-      ".orders-table__row",
-      ".grid__row",
-    ].join(", "));
-    if (direct) return direct;
-
-    let node = link;
-    let best = null;
-    while (node?.parentElement && node.parentElement !== document.body) {
-      const parent = node.parentElement;
-      const text = parent.innerText || parent.textContent || "";
-      const rect = parent.getBoundingClientRect?.();
-      const looksLikeOrderRow = (!orderNumber || text.includes(orderNumber))
-        && /get shipping label|add tracking|ship by|shipping overdue/i.test(text)
-        && rect
-        && rect.width >= 520
-        && rect.height >= 70
-        && rect.height <= Math.max(520, window.innerHeight * 0.75);
-      if (looksLikeOrderRow) best = parent;
-      if (getOrderLinkCount(parent) > 1 && best) return best;
-      if (getOrderLinkCount(parent) > 1) return node;
-      node = parent;
+  function ensureRowBadge(row, className, text, title = "") {
+    const cell = row?.querySelector?.("td.checkbox-cell") || row?.firstElementChild;
+    if (!cell) return null;
+    let badge = cell.querySelector(`.${className}`);
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = className;
+      cell.insertBefore(badge, cell.firstChild);
     }
-    return best || link.parentElement || link;
+    badge.textContent = text;
+    if (title) badge.title = title;
+    return badge;
   }
 
-  function getVisibleEbayOrderRows(priorityMaps) {
-    const rows = new Map();
-    getOrderLinks().forEach(({ link, orderNumber }) => {
-      const row = getLikelyOrderRow(link, orderNumber);
-      if (!row || rows.has(row)) return;
-      const text = row.innerText || row.textContent || "";
-      const orderNumbers = unique([
+  function clearOldOgBadges(row) {
+    row?.querySelectorAll?.(".og-ebay-priority-badge, .og-ebay-buyer-badge").forEach((element) => element.remove());
+  }
+
+  function collectVisibleEbayRows() {
+    return getEbayAwaitingShipmentRows().map((row, originalIndex) => {
+      const orderNumber = getRowOrderNumber(row);
+      const buyerUsername = getRowBuyerUsername(row);
+      return {
+        row,
+        noteRow: getAssociatedNoteRow(row),
+        originalIndex,
         orderNumber,
-        ...(text.match(new RegExp(ORDER_NUMBER_PATTERN.source, "g")) || []),
-      ].map(normalizeOrderNumber));
-      let priority = orderNumbers.map((entry) => priorityMaps.byOrder.get(entry)).find(Boolean) || null;
-      if (!priority) {
-        const lowered = text.toLowerCase();
-        priority = [...priorityMaps.byBuyer.entries()]
-          .filter(([buyerKey]) => buyerKey.length >= 3 && (
-            lowered.includes(buyerKey)
-            || new RegExp(`(^|[^a-z0-9_])${escapeRegExp(buyerKey)}([^a-z0-9_]|$)`, "i").test(lowered)
-          ))
-          .map(([, entry]) => entry)
-          .sort((a, b) => a.priorityRank - b.priorityRank || a.originalPriorityIndex - b.originalPriorityIndex)[0] || null;
+        buyerUsername,
+        buyerKey: normalizeBuyerKey(buyerUsername),
+        buyerDisplayName: getRowBuyerDisplayName(row),
+        itemTitle: getRowItemTitle(row),
+        shipStatus: getRowShipStatus(row),
+      };
+    });
+  }
+
+  function getOgPriorityRank(...priorities) {
+    const ranks = priorities
+      .map((priority) => Number(priority?.priorityRank))
+      .filter((rank) => Number.isFinite(rank));
+    return ranks.length ? Math.min(...ranks) : 99;
+  }
+
+  function groupRowsByBuyer(rowInfos, priorityMaps) {
+    const groups = new Map();
+    rowInfos.forEach((info) => {
+      const ogByOrder = priorityMaps.byOrder.get(info.orderNumber);
+      const ogByBuyer = priorityMaps.byBuyer.get(info.buyerKey);
+      const buyerKey = normalizeBuyerKey(
+        info.buyerUsername
+        || ogByOrder?.buyerUsername
+        || ogByOrder?.buyerKey
+        || ogByBuyer?.buyerUsername
+        || ogByBuyer?.buyerKey
+        || info.orderNumber
+      );
+      if (!buyerKey) return;
+
+      if (!groups.has(buyerKey)) {
+        groups.set(buyerKey, {
+          buyerKey,
+          buyerUsername: info.buyerUsername || ogByOrder?.buyerUsername || ogByBuyer?.buyerUsername || buyerKey,
+          buyerDisplayName: info.buyerDisplayName || "",
+          rows: [],
+          orderNumbers: new Set(),
+          originalIndex: info.originalIndex,
+          priorityRank: 99,
+          prioritySource: "none",
+        });
       }
-      const ebayUrgency = getEbayRowUrgency(row);
-      rows.set(row, {
-        element: row,
-        parent: row.parentElement,
-        orderNumbers,
-        priority,
-        ebayUrgency,
+
+      const group = groups.get(buyerKey);
+      group.rows.push(info);
+      if (info.orderNumber) group.orderNumbers.add(info.orderNumber);
+      group.originalIndex = Math.min(group.originalIndex, info.originalIndex);
+      if (!group.buyerDisplayName && info.buyerDisplayName) group.buyerDisplayName = info.buyerDisplayName;
+      if (!group.buyerUsername && info.buyerUsername) group.buyerUsername = info.buyerUsername;
+
+      const ogRank = getOgPriorityRank(ogByOrder, ogByBuyer);
+      const fallbackRank = Number.isFinite(Number(info.shipStatus?.rank)) ? Number(info.shipStatus.rank) : 99;
+      const effectiveRank = Math.min(ogRank, fallbackRank);
+      if (effectiveRank < group.priorityRank) {
+        group.priorityRank = effectiveRank;
+        group.prioritySource = ogRank <= fallbackRank ? "og" : "ebay-visible";
+      }
+    });
+    return [...groups.values()];
+  }
+
+  function sortBuyerGroups(groups) {
+    return [...groups].sort((a, b) => {
+      const rankA = Number.isFinite(Number(a.priorityRank)) ? Number(a.priorityRank) : 99;
+      const rankB = Number.isFinite(Number(b.priorityRank)) ? Number(b.priorityRank) : 99;
+      if (rankA !== rankB) return rankA - rankB;
+      return a.originalIndex - b.originalIndex;
+    });
+  }
+
+  function decorateBuyerGroup(row, groupInfo) {
+    clearOldOgBadges(row);
+    row.classList.add("og-ebay-buyer-group-row");
+    row.classList.toggle("og-ebay-buyer-group-first", Boolean(groupInfo.isFirst));
+    row.dataset.ogBuyerGroup = groupInfo.buyerUsername || groupInfo.buyerKey || "";
+    row.dataset.ogPriorityRank = String(groupInfo.priorityRank ?? 99);
+    row.classList.toggle("is-og-overdue", groupInfo.priorityRank === 0);
+    row.classList.toggle("is-og-today", groupInfo.priorityRank === 1);
+
+    if (groupInfo.isFirst) {
+      const statusLabel = groupInfo.priorityRank === 0
+        ? "OVERDUE"
+        : groupInfo.priorityRank === 1
+          ? "DUE TODAY"
+          : "BUYER";
+      const lineWord = groupInfo.rowCount === 1 ? "line" : "lines";
+      ensureRowBadge(
+        row,
+        "og-ebay-priority-badge",
+        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${groupInfo.rowCount} ${lineWord}`,
+        `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+      );
+    } else if (groupInfo.rowCount > 1) {
+      ensureRowBadge(
+        row,
+        "og-ebay-buyer-badge",
+        `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`,
+        `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`
+      );
+    }
+  }
+
+  function applyGroupedOrder(sortedGroups) {
+    const groupsByParent = new Map();
+    sortedGroups.forEach((group) => {
+      const parent = group.rows[0]?.row?.parentElement;
+      if (!parent) return;
+      if (!groupsByParent.has(parent)) groupsByParent.set(parent, []);
+      groupsByParent.get(parent).push(group);
+    });
+
+    let moved = 0;
+    groupsByParent.forEach((groups, tbody) => {
+      let stripe = 0;
+      groups.forEach((group) => {
+        const stripeClass = stripe % 2 === 0 ? "og-ebay-buyer-group-a" : "og-ebay-buyer-group-b";
+        stripe += 1;
+        group.rows.forEach((info, index) => {
+          const { row } = info;
+          row.classList.remove("og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-priority-row", "is-og-pending", "is-og-tomorrow");
+          row.classList.add(stripeClass);
+          decorateBuyerGroup(row, {
+            buyerKey: group.buyerKey,
+            buyerUsername: group.buyerUsername,
+            priorityRank: group.priorityRank,
+            rowCount: group.rows.length,
+            groupIndex: index,
+            isFirst: index === 0,
+          });
+          tbody.appendChild(row);
+          moved += 1;
+          if (info.noteRow && info.noteRow.parentElement === tbody) {
+            tbody.appendChild(info.noteRow);
+          }
+        });
       });
     });
-    return [...rows.values()].filter((entry) => entry.parent);
+    return moved;
   }
 
   function clearOgPriorityBadges(root = document) {
-    root.querySelectorAll(".og-ebay-priority-badge").forEach((badge) => badge.remove());
+    root.querySelectorAll(".og-ebay-priority-badge, .og-ebay-buyer-badge").forEach((badge) => badge.remove());
     root.querySelectorAll(".og-ebay-priority-row").forEach((row) => {
       row.classList.remove("og-ebay-priority-row", "is-og-overdue", "is-og-today", "is-og-tomorrow", "is-og-pending");
       row.removeAttribute("data-og-priority-rank");
     });
-  }
-
-  function decoratePriorityRow(row, priority) {
-    row.classList.add("og-ebay-priority-row", getPriorityClass(priority));
-    row.dataset.ogPriorityRank = String(priority.priorityRank);
-    const badgeHost = row.matches("tr") ? row.querySelector("td, th") || row : row;
-    if (badgeHost.querySelector(":scope > .og-ebay-priority-badge")) return;
-
-    const badge = document.createElement("span");
-    badge.className = "og-ebay-priority-badge";
-    badge.textContent = priority.priorityLabel || getPriorityLabel(priority);
-    badge.title = `${priority.buyerUsername || "This buyer"} has ${Number(priority.pendingLines || 0).toLocaleString()} pending line${Number(priority.pendingLines || 0) === 1 ? "" : "s"} in OG.`;
-    badgeHost.insertAdjacentElement("afterbegin", badge);
+    root.querySelectorAll(".og-ebay-buyer-group-row").forEach((row) => {
+      row.classList.remove("og-ebay-buyer-group-row", "og-ebay-buyer-group-a", "og-ebay-buyer-group-b", "og-ebay-buyer-group-first", "is-og-overdue", "is-og-today");
+      row.removeAttribute("data-og-buyer-group");
+      row.removeAttribute("data-og-priority-rank");
+    });
   }
 
   function applyOgPendingPriorities(payload = ogPendingPriorityCache) {
     if (!payload || !isAwaitingShipmentOrdersPage()) return { ok: false, matched: 0, moved: 0 };
     clearOgPriorityBadges();
     const priorityMaps = buildPriorityMaps(payload);
-    const rows = getVisibleEbayOrderRows(priorityMaps);
-    const withPriority = rows.filter((row) => row.priority && row.priority.priorityRank <= 1);
-    const withEbayUrgency = rows.filter((row) => !row.priority && row.ebayUrgency && row.ebayUrgency.priorityRank <= 1);
-    const groupsByParent = new Map();
-    const priorityByBuyer = new Map();
-    rows.forEach((row) => {
-      const effectivePriority = getEffectiveRowPriority(row);
-      if (!effectivePriority?.buyerKey || effectivePriority.priorityRank > 1) return;
-      const existing = priorityByBuyer.get(effectivePriority.buyerKey);
-      if (!existing || effectivePriority.priorityRank < existing.priorityRank) {
-        priorityByBuyer.set(effectivePriority.buyerKey, effectivePriority);
-      }
-    });
-    rows.forEach((row) => {
-      if (getEffectiveRowPriority(row)) return;
-      const lowered = String(row.element.innerText || row.element.textContent || "").toLowerCase();
-      const buyerPriority = [...priorityByBuyer.entries()]
-        .find(([buyerKey]) => buyerKey.length >= 3 && lowered.includes(buyerKey))?.[1];
-      if (buyerPriority) row.priority = buyerPriority;
-    });
-
-    rows.forEach((row, index) => {
-      row.originalIndex = index;
-      if (!groupsByParent.has(row.parent)) groupsByParent.set(row.parent, []);
-      groupsByParent.get(row.parent).push(row);
-    });
-
-    let moved = 0;
-    groupsByParent.forEach((groupRows, parent) => {
-      const sorted = [...groupRows].sort((a, b) => {
-        const aEffectivePriority = getEffectiveRowPriority(a);
-        const bEffectivePriority = getEffectiveRowPriority(b);
-        const aRank = aEffectivePriority?.priorityRank <= 1 ? aEffectivePriority.priorityRank : 99;
-        const bRank = bEffectivePriority?.priorityRank <= 1 ? bEffectivePriority.priorityRank : 99;
-        return aRank - bRank
-          || Number(aEffectivePriority?.originalPriorityIndex ?? 9999) - Number(bEffectivePriority?.originalPriorityIndex ?? 9999)
-          || a.originalIndex - b.originalIndex;
-      });
-      sorted.forEach((row) => {
-        const effectivePriority = getEffectiveRowPriority(row);
-        if (effectivePriority?.priorityRank <= 1) decoratePriorityRow(row.element, effectivePriority);
-        parent.appendChild(row.element);
-      });
-      moved += sorted.filter((row, index) => row.element !== groupRows[index].element).length;
-    });
+    const rowInfos = collectVisibleEbayRows();
+    const groups = sortBuyerGroups(groupRowsByBuyer(rowInfos, priorityMaps));
+    const moved = applyGroupedOrder(groups);
+    const withPriority = groups.filter((group) => group.prioritySource === "og" && group.priorityRank <= 1);
+    const withEbayUrgency = groups.filter((group) => group.prioritySource === "ebay-visible" && group.priorityRank <= 1);
 
     ogPriorityLastRowSignature = getVisibleOrderRowSignature();
 
     return {
       ok: true,
-      matched: withPriority.length,
-      ebayMatched: withEbayUrgency.length,
+      matched: withPriority.reduce((sum, group) => sum + group.rows.length, 0),
+      ebayMatched: withEbayUrgency.reduce((sum, group) => sum + group.rows.length, 0),
       moved,
-      visibleRows: rows.length,
+      visibleRows: rowInfos.length,
+      buyerGroups: groups.length,
       urgentBuyers: payload.urgentBuyerCount || 0,
       overdueBuyers: payload.overdueBuyerCount || 0,
       dueTodayBuyers: payload.dueTodayBuyerCount || 0,
@@ -1665,46 +1806,88 @@
         color: #0a5b2b;
       }
 
-      .og-ebay-priority-row {
+      .og-ebay-buyer-group-row {
         position: relative;
-        outline: 2px solid rgba(127, 86, 217, .52);
-        outline-offset: -2px;
-        background: rgba(244, 239, 255, .72) !important;
+        transition: background-color 160ms ease, box-shadow 160ms ease;
       }
 
-      .og-ebay-priority-row.is-og-overdue {
-        outline-color: rgba(180, 35, 24, .68);
-        background: rgba(255, 240, 237, .86) !important;
+      .og-ebay-buyer-group-a {
+        background: rgba(255, 248, 230, .88) !important;
       }
 
-      .og-ebay-priority-row.is-og-today {
-        outline-color: rgba(155, 100, 24, .72);
-        background: rgba(255, 248, 225, .9) !important;
+      .og-ebay-buyer-group-a > td,
+      .og-ebay-buyer-group-a > th {
+        background: rgba(255, 248, 230, .88) !important;
+      }
+
+      .og-ebay-buyer-group-b {
+        background: rgba(238, 247, 255, .88) !important;
+      }
+
+      .og-ebay-buyer-group-b > td,
+      .og-ebay-buyer-group-b > th {
+        background: rgba(238, 247, 255, .88) !important;
+      }
+
+      .og-ebay-buyer-group-first {
+        border-top: 3px solid #111827 !important;
+      }
+
+      .og-ebay-buyer-group-first > td,
+      .og-ebay-buyer-group-first > th {
+        border-top: 3px solid #111827 !important;
+      }
+
+      .og-ebay-buyer-group-row td:first-child {
+        border-left: 6px solid #9b6418 !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-overdue {
+        background: rgba(255, 238, 238, .94) !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-overdue > td,
+      .og-ebay-buyer-group-row.is-og-overdue > th {
+        background: rgba(255, 238, 238, .94) !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-overdue td:first-child {
+        border-left-color: #c1121f !important;
+      }
+
+      .og-ebay-buyer-group-row.is-og-today td:first-child {
+        border-left-color: #d97706 !important;
+      }
+
+      .og-ebay-priority-badge,
+      .og-ebay-buyer-badge {
+        display: inline-flex;
+        align-items: center;
+        margin: 2px 6px 4px 0;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font: 800 11px/1.2 Arial, sans-serif;
+        letter-spacing: .02em;
+        white-space: nowrap;
       }
 
       .og-ebay-priority-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin: 6px 8px 4px;
-        border: 1px solid rgba(74, 29, 150, .24);
-        border-radius: 999px;
-        background: #fff;
-        color: #4a1d96;
-        font: 900 12px Arial, sans-serif;
-        letter-spacing: .02em;
-        padding: 5px 8px;
-        text-transform: uppercase;
+        background: #111827;
+        color: #fff;
       }
 
-      .og-ebay-priority-row.is-og-overdue > .og-ebay-priority-badge {
-        border-color: rgba(180, 35, 24, .28);
-        color: #9f1f14;
+      .is-og-overdue .og-ebay-priority-badge {
+        background: #c1121f;
       }
 
-      .og-ebay-priority-row.is-og-today > .og-ebay-priority-badge {
-        border-color: rgba(155, 100, 24, .32);
-        color: #6b3f00;
+      .is-og-today .og-ebay-priority-badge {
+        background: #d97706;
+      }
+
+      .og-ebay-buyer-badge {
+        border: 1px solid #fed7aa;
+        background: #fff7ed;
+        color: #7c2d12;
       }
 
       #${SEND_LABEL_ID} {
