@@ -13,6 +13,7 @@
   const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
+  const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
@@ -30,6 +31,8 @@
   let ogPriorityReapplyTimer = null;
   let ogPriorityLastRowSignature = "";
   let ogBuyerSelectionHandlersAttached = false;
+  let ogBuyerSelectionInProgress = false;
+  let ogBuyerSelectionRefreshTimer = null;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -547,20 +550,73 @@
     return Boolean(checkboxes.length && checkboxes.every((checkbox) => checkbox.checked));
   }
 
+  function getSelectedAwaitingOrderCheckboxes() {
+    return getEbayAwaitingShipmentRows()
+      .map(getRowCheckbox)
+      .filter((checkbox) => checkbox && checkbox.checked && !checkbox.disabled);
+  }
+
   function refreshBuyerGroupSelectButtons(buyerKey = "") {
     const selector = buyerKey
       ? `.og-ebay-select-buyer-group[data-og-buyer-key="${CSS.escape(normalizeBuyerKey(buyerKey))}"]`
       : ".og-ebay-select-buyer-group";
+    const buttonsByKey = new Map();
     document.querySelectorAll(selector).forEach((button) => {
-      const key = button.dataset.ogBuyerKey || "";
-      const count = getBuyerGroupCheckboxes(key).length;
-      const selected = isBuyerGroupFullySelected(key);
-      button.textContent = selected ? `Unselect ${count}` : `Select ${count}`;
-      button.setAttribute("aria-pressed", selected ? "true" : "false");
-      button.title = selected
-        ? "Unselect all visible eBay rows for this buyer"
-        : "Select all visible eBay rows for this buyer";
+      const key = normalizeBuyerKey(button.dataset.ogBuyerKey || "");
+      if (!key) return;
+      if (!buttonsByKey.has(key)) buttonsByKey.set(key, []);
+      buttonsByKey.get(key).push(button);
     });
+
+    buttonsByKey.forEach((buttons, key) => {
+      const checkboxes = getBuyerGroupCheckboxes(key);
+      const count = checkboxes.length;
+      const selected = Boolean(count && checkboxes.every((checkbox) => checkbox.checked));
+      buttons.forEach((button) => {
+        button.textContent = selected ? `Unselect ${count}` : `Select ${count}`;
+        button.setAttribute("aria-pressed", selected ? "true" : "false");
+        button.title = selected
+          ? "Unselect all visible eBay rows for this buyer"
+          : "Select all visible eBay rows for this buyer";
+      });
+    });
+  }
+
+  function getSelectedOrdersCount() {
+    const text = document.querySelector("#gridSummary-wrapper-id .shord-selected-count")?.textContent || "";
+    const match = text.match(/\((\d+)\s+orders?\s+selected\)/i);
+    if (match) return Number(match[1]) || 0;
+    return getSelectedAwaitingOrderCheckboxes().length;
+  }
+
+  function getSelectedOrdersText() {
+    const summary = cleanText(document.querySelector("#gridSummary-wrapper-id .summary-content")?.textContent || "");
+    const selected = cleanText(document.querySelector("#gridSummary-wrapper-id .shord-selected-count")?.textContent || "");
+    return cleanText(`${summary} ${selected}`);
+  }
+
+  function getSelectedOrdersSummaryBlock() {
+    return document.querySelector("#gridSummary-wrapper-id .summary.clearfix");
+  }
+
+  function getBulkActionsToolbar() {
+    return document.querySelector("#gridSummary-wrapper-id .summary-actions .bulk-actions");
+  }
+
+  function getBulkShippingDropdownButton() {
+    return document.querySelector("#gridSummary-wrapper-id .bulk-shipping .fake-menu-button__button");
+  }
+
+  function getBulkShippingMenuItemByText(label) {
+    const needle = cleanText(label).toLowerCase();
+    return [...document.querySelectorAll("#gridSummary-wrapper-id .bulk-shipping .fake-menu-button__item")]
+      .find((button) => cleanText(button.textContent).toLowerCase().includes(needle)) || null;
+  }
+
+  function isAnyOrderSelected() {
+    return getSelectedOrdersCount() > 0
+      && Boolean(getBulkActionsToolbar())
+      && Boolean(getBulkShippingDropdownButton());
   }
 
   function setCheckboxChecked(checkbox, checked) {
@@ -574,13 +630,41 @@
     return true;
   }
 
-  function toggleBuyerGroupSelection(buyerKey) {
+  function waitForBrowserPaint() {
+    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  }
+
+  async function toggleBuyerGroupSelection(buyerKey) {
+    if (ogBuyerSelectionInProgress) return;
     const checkboxes = getBuyerGroupCheckboxes(buyerKey);
     if (!checkboxes.length) return;
     const shouldSelect = !checkboxes.every((checkbox) => checkbox.checked);
-    checkboxes.forEach((checkbox) => setCheckboxChecked(checkbox, shouldSelect));
-    refreshBuyerGroupSelectButtons(buyerKey);
-    schedulePriorityReapply({ force: true });
+    const buttons = [...document.querySelectorAll(`.og-ebay-select-buyer-group[data-og-buyer-key="${CSS.escape(normalizeBuyerKey(buyerKey))}"]`)];
+
+    ogBuyerSelectionInProgress = true;
+    buttons.forEach((button) => {
+      button.disabled = true;
+      button.textContent = shouldSelect ? `Selecting ${checkboxes.length}...` : `Unselecting ${checkboxes.length}...`;
+    });
+
+    try {
+      for (let index = 0; index < checkboxes.length; index += 1) {
+        setCheckboxChecked(checkboxes[index], shouldSelect);
+        if (index % 4 === 3) await waitForBrowserPaint();
+      }
+    } finally {
+      ogBuyerSelectionInProgress = false;
+      buttons.forEach((button) => {
+        button.disabled = false;
+      });
+      refreshBuyerGroupSelectButtons(buyerKey);
+      updateBulkActionsShortcut();
+      window.setTimeout(() => {
+        refreshBuyerGroupSelectButtons(buyerKey);
+        updateBulkActionsShortcut();
+      }, 250);
+      if (shouldSelect) window.setTimeout(() => scrollEbayBulkActionsIntoView(), 180);
+    }
   }
 
   function fillBadgeWithBuyerSelectButton(badge, label, buyerKey, rowCount, title = "") {
@@ -890,9 +974,63 @@
 
     document.addEventListener("change", (event) => {
       if (!event.target?.matches?.('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]')) return;
+      if (ogBuyerSelectionInProgress) {
+        window.clearTimeout(ogBuyerSelectionRefreshTimer);
+        ogBuyerSelectionRefreshTimer = window.setTimeout(() => {
+          refreshBuyerGroupSelectButtons();
+          updateBulkActionsShortcut();
+        }, 180);
+        return;
+      }
+      updateBulkActionsShortcut();
       refreshBuyerGroupSelectButtons(getRowBuyerUsername(event.target.closest("tr")));
-      schedulePriorityReapply({ force: true });
     }, true);
+  }
+
+  function getEbayBulkActionsTarget() {
+    return getBulkActionsToolbar()
+      || getSelectedOrdersSummaryBlock()
+      || document.querySelector("#gridSummary-wrapper-id")
+      || document.querySelector("#mainGridContainer");
+  }
+
+  function scrollEbayBulkActionsIntoView() {
+    const target = getEbayBulkActionsTarget();
+    if (!target) {
+      const scroller = document.scrollingElement || document.documentElement || document.body;
+      scroller?.scrollTo?.({ top: 0, behavior: "smooth" });
+      window.scrollTo?.({ top: 0, behavior: "smooth" });
+      return false;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    target.classList.add("og-ebay-actions-highlight");
+    window.setTimeout(() => target.classList.remove("og-ebay-actions-highlight"), 1800);
+    return true;
+  }
+
+  function updateBulkActionsShortcut() {
+    let button = document.getElementById(BULK_ACTIONS_SHORTCUT_ID);
+    const selectedCount = getSelectedOrdersCount();
+
+    if (!isAwaitingShipmentOrdersPage() || selectedCount < 1 || !isAnyOrderSelected()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = BULK_ACTIONS_SHORTCUT_ID;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        scrollEbayBulkActionsIntoView();
+      });
+      document.body.appendChild(button);
+    }
+
+    button.textContent = `Go to selected actions (${selectedCount})`;
+    button.title = getSelectedOrdersText() || "Go to eBay selected-order actions";
   }
 
   function parseCountFromText(value) {
@@ -955,8 +1093,10 @@
 
   function detectShippingItemCount() {
     const counts = [];
-    const orderNumbers = uniqueOrderNumbers();
-    if (orderNumbers.length) counts.push(orderNumbers.length);
+    if (!isAwaitingShipmentOrdersPage()) {
+      const orderNumbers = uniqueOrderNumbers();
+      if (orderNumbers.length) counts.push(orderNumbers.length);
+    }
 
     const orderSection = document.querySelector('section[aria-label="Order information"]');
     counts.push(parseCountFromText(orderSection?.querySelector("button.fake-link")?.textContent));
@@ -981,9 +1121,10 @@
   }
 
   function isShippingLabelWorkflowPage() {
+    if (isAwaitingShipmentOrdersPage()) return false;
     return Boolean(
       isSingleLabelPage()
-      || uniqueOrderNumbers().length
+      || hasPackageDimensionInputs()
       || getShippingActions()
       || /\/ship\/(?:single|bulk|label|labels)\b/i.test(window.location.pathname)
     );
@@ -1850,7 +1991,8 @@
       #${FLOATING_ID},
       #${SINGLE_ORDER_ID},
       #${SEND_AWAITING_REPORT_ID},
-      #${PRIORITIZE_DUE_ORDERS_ID} {
+      #${PRIORITIZE_DUE_ORDERS_ID},
+      #${BULK_ACTIONS_SHORTCUT_ID} {
         position: fixed;
         right: 18px;
         bottom: 18px;
@@ -1901,6 +2043,25 @@
 
       #${PRIORITIZE_DUE_ORDERS_ID}:hover {
         background: #ebe1ff;
+      }
+
+      #${BULK_ACTIONS_SHORTCUT_ID} {
+        bottom: 180px;
+        border-color: #0b72e7;
+        background: #edf5ff;
+        color: #0759b8;
+        max-width: min(330px, calc(100vw - 36px));
+        white-space: normal;
+      }
+
+      #${BULK_ACTIONS_SHORTCUT_ID}:hover {
+        background: #dcebff;
+      }
+
+      .og-ebay-actions-highlight {
+        outline: 4px solid rgba(11, 114, 231, .45) !important;
+        outline-offset: 6px !important;
+        border-radius: 18px !important;
       }
 
       #${PRIORITIZE_DUE_ORDERS_ID}[data-status-tone="error"] {
@@ -2014,6 +2175,11 @@
       .og-ebay-select-buyer-group:hover {
         background: #fff;
         box-shadow: 0 1px 4px rgba(17, 24, 39, .22);
+      }
+
+      .og-ebay-select-buyer-group:disabled {
+        cursor: wait;
+        opacity: .72;
       }
 
       .og-ebay-select-buyer-group[aria-pressed="true"] {
@@ -2169,7 +2335,7 @@
     const orderNumbers = uniqueOrderNumbers();
     let button = document.getElementById(FLOATING_ID);
 
-    if (!orderNumbers.length) {
+    if (isAwaitingShipmentOrdersPage() || !orderNumbers.length) {
       button?.remove();
       return;
     }
@@ -2360,6 +2526,11 @@
       return;
     }
 
+    if (!hasPackageDimensionInputs()) {
+      dismissBoxReminder();
+      return;
+    }
+
     const itemCount = detectShippingItemCount();
     if (itemCount < 3) return;
 
@@ -2380,11 +2551,13 @@
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
     injectPrioritizeDueOrdersButton();
+    updateBulkActionsShortcut();
     maybeShowBoxReminder();
   }
 
   let scheduled = false;
   function scheduleInject() {
+    if (ogBuyerSelectionInProgress) return;
     if (scheduled) return;
     scheduled = true;
     window.setTimeout(() => {
