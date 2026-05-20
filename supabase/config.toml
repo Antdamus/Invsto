@@ -502,3 +502,8 @@ entrypoint = "./functions/process-inventory-image/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/microsoft-auth-callback/index.ts"
+
+[functions.microsoft-mailbox-status]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/microsoft-mailbox-status/index.ts"
