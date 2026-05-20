@@ -86,7 +86,44 @@ For incremental mode, if `email_sync_states.delta_link` exists, the stored delta
 
 The previous good `delta_link` is not overwritten during paging.
 
-The function saves a new `delta_link` and `delta_token_hash` only when Graph returns a final `@odata.deltaLink`. If the safe page cap is reached before a final delta link, the run can still succeed, but `delta_checkpoint_saved` is `false`.
+The function saves a new `delta_link` and `delta_token_hash` only when Graph returns a final `@odata.deltaLink`.
+
+Microsoft Graph can return either:
+
+- `@odata.nextLink`: more pages remain in the current delta cycle
+- `@odata.deltaLink`: the delta cycle is complete and this is the new checkpoint
+
+When `@odata.deltaLink` is reached, `email_sync_states` is marked complete:
+
+```text
+status = idle
+delta_link = final deltaLink
+delta_token_hash = sha256(deltaLink)
+last_successful_sync_at = now()
+```
+
+When the safe page cap is reached while `@odata.nextLink` still exists, the sync is partial. The function does not mark the state `idle`, does not set a new `last_successful_sync_at`, and does not expose the continuation URL to the browser. Instead it leaves:
+
+```text
+status = syncing
+delta_link = previous checkpoint or null
+delta_token_hash = previous hash or null
+```
+
+and stores the continuation only inside `email_sync_states.metadata`:
+
+```json
+{
+  "partial_sync": true,
+  "continuation_link": "...",
+  "continuation_saved_at": "...",
+  "pages_fetched_before_pause": 5,
+  "more_pages_available": true,
+  "delta_checkpoint_saved": false
+}
+```
+
+The next `initial_backfill` or `incremental` call resumes from that saved continuation before starting a fresh initial delta request. Once Graph returns `@odata.deltaLink`, continuation metadata is cleared and the state returns to `idle`.
 
 Manual resync starts from a fresh delta path and does not delete existing messages.
 
@@ -202,11 +239,13 @@ Expected response:
   "messages_updated": 0,
   "messages_deleted": 0,
   "attachments_seen": 0,
+  "partial": true,
+  "more_pages_available": true,
   "delta_checkpoint_saved": false
 }
 ```
 
-`delta_checkpoint_saved` may be `true` when Graph returns the final delta link within the page cap.
+If `delta_checkpoint_saved` is `true`, `partial` is `false` and `more_pages_available` is `false`. If `partial` and `more_pages_available` are `true`, run the same request again to resume from the saved continuation.
 
 Repeat with:
 
@@ -224,6 +263,7 @@ Expected repeat behavior:
 - no duplicate `email_messages` rows
 - `messages_updated` may increase
 - final delta checkpoint updates only when Graph returns `@odata.deltaLink`
+- when a continuation exists, the function resumes that continuation before starting a fresh initial path
 
 ## Supabase Verification Checklist
 
@@ -234,7 +274,10 @@ Verify:
 - `email_message_recipients` has normalized recipient rows
 - `email_message_bodies` has rows when Graph returned body content
 - `email_sync_runs` has a succeeded or failed run with safe counters
-- `email_sync_states.status` returns to `idle` after success
+- `email_sync_states.status` returns to `idle` only after `delta_link` is saved
+- partial runs keep `email_sync_states.status = syncing`
+- partial runs keep `email_sync_states.delta_link` null until the final `@odata.deltaLink` arrives
+- partial runs store continuation details only in `email_sync_states.metadata`
 - `email_sync_states.delta_link` is populated only internally after a complete delta cycle
 - browser response does not include delta links, access tokens, refresh tokens, encrypted token fields, client secret, or raw body payloads
 
@@ -252,11 +295,66 @@ order by started_at desc
 limit 5;
 
 select status, delta_link is not null as has_delta_link,
-       last_successful_sync_at, last_error_code, consecutive_error_count
+       last_successful_sync_at, last_error_code, consecutive_error_count,
+       metadata->>'partial_sync' as partial_sync,
+       metadata ? 'continuation_link' as has_continuation
 from public.email_sync_states
 order by updated_at desc
 limit 5;
 ```
+
+## Partial Sync Manual Test
+
+Deploy the function:
+
+```bash
+npx supabase functions deploy microsoft-email-sync --project-ref byhytmarmigalvawkedi
+```
+
+Run from browser DevTools:
+
+```js
+const { data } = await window.supabase.auth.getSession();
+
+const response = await fetch(`${window.SUPABASE_URL}/functions/v1/microsoft-email-sync`, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${data.session.access_token}`,
+    apikey: window.SUPABASE_ANON_KEY,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    mode: "initial_backfill",
+    folder: "inbox",
+    maxPages: 5,
+    pageSize: 50
+  })
+});
+
+await response.json();
+```
+
+If the final delta link is reached:
+
+```text
+delta_checkpoint_saved = true
+more_pages_available = false
+email_sync_states.delta_link populated
+email_sync_states.status = idle
+```
+
+If more pages remain:
+
+```text
+partial = true
+more_pages_available = true
+delta_checkpoint_saved = false
+email_sync_states.delta_link still NULL
+email_sync_states.status = syncing
+email_sync_states.metadata contains continuation info
+```
+
+Run the same request again to resume. The browser response never includes the `delta_link`, `nextLink`, or `continuation_link`.
 
 ## Known Limits
 

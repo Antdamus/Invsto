@@ -63,6 +63,7 @@ type EmailSyncState = {
   id: string;
   delta_link: string | null;
   consecutive_error_count: number | null;
+  metadata: Record<string, unknown> | null;
 };
 
 type TokenRefreshResult = {
@@ -322,6 +323,22 @@ function graphDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function continuationLink(metadata: Record<string, unknown> | null | undefined) {
+  const value = metadata?.continuation_link;
+  return typeof value === "string" && value.startsWith("https://") ? value : null;
+}
+
+function withoutContinuation(metadata: Record<string, unknown> | null | undefined) {
+  const next = { ...(metadata || {}) };
+  delete next.partial_sync;
+  delete next.continuation_link;
+  delete next.continuation_saved_at;
+  delete next.pages_fetched_before_pause;
+  delete next.more_pages_available;
+  delete next.delta_checkpoint_saved;
+  return next;
+}
+
 function stripHtml(html: string) {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -423,7 +440,7 @@ async function loadModel(supabase: ServiceClient) {
 
   const { data: syncState, error: syncStateError } = await supabase
     .from("email_sync_states")
-    .select("id, delta_link, consecutive_error_count")
+    .select("id, delta_link, consecutive_error_count, metadata")
     .eq("mailbox_id", mailbox.id)
     .eq("folder_id", folder.id)
     .eq("sync_scope", "folder_messages")
@@ -946,9 +963,11 @@ serve(async (req) => {
       last_error_at: null,
     });
 
-    let nextUrl = input.mode === "incremental" && model.syncState.delta_link
-      ? model.syncState.delta_link
-      : initialDeltaUrl(model.folder.provider_folder_id, input.pageSize);
+    const savedContinuationLink = input.mode === "manual_resync" ? null : continuationLink(model.syncState.metadata);
+    let nextUrl = savedContinuationLink ||
+      (input.mode === "incremental" && model.syncState.delta_link
+        ? model.syncState.delta_link
+        : initialDeltaUrl(model.folder.provider_folder_id, input.pageSize));
     let finalDeltaLink: string | null = null;
 
     for (let page = 0; page < input.maxPages && nextUrl; page += 1) {
@@ -972,18 +991,58 @@ serve(async (req) => {
       await updateSyncRun(supabase, syncRunId, counters);
     }
 
+    const deltaCheckpointSaved = Boolean(finalDeltaLink);
+    const partialSync = !deltaCheckpointSaved;
+    const morePagesAvailable = Boolean(nextUrl && !finalDeltaLink);
     const deltaTokenHash = finalDeltaLink ? await sha256Hex(finalDeltaLink) : null;
-    await updateSyncState(supabase, syncStateId, {
-      ...(finalDeltaLink ? {
+    if (finalDeltaLink) {
+      await updateSyncState(supabase, syncStateId, {
         delta_link: finalDeltaLink,
         delta_token_hash: deltaTokenHash,
         last_successful_sync_at: new Date().toISOString(),
-      } : {}),
-      status: "idle",
-      consecutive_error_count: 0,
-      last_error_code: null,
-      last_error_at: null,
-    });
+        status: "idle",
+        consecutive_error_count: 0,
+        last_error_code: null,
+        last_error_at: null,
+        metadata: {
+          ...withoutContinuation(model.syncState.metadata),
+          last_delta_checkpoint_saved_at: new Date().toISOString(),
+          resumed_from_continuation: Boolean(savedContinuationLink),
+        },
+      });
+    } else if (morePagesAvailable) {
+      await updateSyncState(supabase, syncStateId, {
+        status: "syncing",
+        ...(model.syncState.delta_link ? {} : { last_successful_sync_at: null }),
+        last_error_code: null,
+        last_error_at: null,
+        metadata: {
+          ...withoutContinuation(model.syncState.metadata),
+          partial_sync: true,
+          continuation_link: nextUrl,
+          continuation_saved_at: new Date().toISOString(),
+          pages_fetched_before_pause: counters.pages_fetched,
+          more_pages_available: true,
+          delta_checkpoint_saved: false,
+          resumed_from_continuation: Boolean(savedContinuationLink),
+        },
+      });
+    } else {
+      await updateSyncState(supabase, syncStateId, {
+        status: "syncing",
+        ...(model.syncState.delta_link ? {} : { last_successful_sync_at: null }),
+        last_error_code: "sync_incomplete_no_checkpoint",
+        last_error_at: new Date().toISOString(),
+        metadata: {
+          ...withoutContinuation(model.syncState.metadata),
+          partial_sync: true,
+          more_pages_available: false,
+          delta_checkpoint_saved: false,
+          pages_fetched_before_pause: counters.pages_fetched,
+          incomplete_reason: "missing_delta_or_next_link",
+        },
+      });
+    }
 
     await supabase
       .from("email_mailboxes")
@@ -1007,8 +1066,11 @@ serve(async (req) => {
       completed_at: new Date().toISOString(),
       metadata: {
         function: "microsoft-email-sync",
-        delta_checkpoint_saved: Boolean(finalDeltaLink),
-        page_cap_reached: Boolean(nextUrl),
+        delta_checkpoint_saved: deltaCheckpointSaved,
+        partial_sync: partialSync,
+        more_pages_available: morePagesAvailable,
+        page_cap_reached: morePagesAvailable,
+        resumed_from_continuation: Boolean(savedContinuationLink),
       },
     });
 
@@ -1034,7 +1096,9 @@ serve(async (req) => {
       messages_updated: counters.messages_updated,
       messages_deleted: counters.messages_deleted,
       attachments_seen: counters.attachments_seen,
-      delta_checkpoint_saved: Boolean(finalDeltaLink),
+      partial: partialSync,
+      more_pages_available: morePagesAvailable,
+      delta_checkpoint_saved: deltaCheckpointSaved,
     });
   } catch (error) {
     const safe = safeError(error);
