@@ -431,6 +431,39 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.history-extra-label-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.history-extra-label-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(243, 212, 156, 0.2);
+  border-radius: 14px;
+  background: rgba(227, 189, 119, 0.055);
+}
+
+.history-extra-label-list strong,
+.history-extra-label-list span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.history-extra-label-list strong {
+  color: var(--history-gold-strong);
+}
+
+.history-extra-label-list span {
+  color: var(--history-muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .history-order-label-control > div:last-child {
   display: flex;
   gap: 8px;
@@ -471,6 +504,61 @@ textarea {
 
 .history-label-status.is-success {
   color: var(--history-green);
+}
+
+.history-extra-label-photo-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid rgba(243, 212, 156, 0.24);
+  border-radius: 18px;
+  background: rgba(227, 189, 119, 0.08);
+}
+
+.history-extra-label-photo-panel.hidden {
+  display: none;
+}
+
+.history-extra-label-photo-panel h3 {
+  margin: 0;
+  color: var(--history-text);
+  font-size: 1.05rem;
+}
+
+.history-extra-label-photo-panel p {
+  margin: 0;
+  color: var(--history-muted);
+  font-weight: 700;
+}
+
+.history-extra-label-photo-panel input[type="file"] {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--history-text);
+}
+
+.history-extra-label-photo-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history-extra-label-photo-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid rgba(125, 240, 178, 0.22);
+  border-radius: 999px;
+  color: var(--history-green);
+  background: rgba(125, 240, 178, 0.08);
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .history-label-details {
@@ -853,5 +941,14 @@ body.modal-open {
 
   .history-label-order-list article {
     grid-template-columns: 1fr;
+  }
+
+  .history-order-label-control,
+  .history-extra-label-list article {
+    grid-template-columns: 1fr;
+  }
+
+  .history-extra-label-list {
+    padding-inline: 12px;
   }
 }

@@ -65,6 +65,33 @@
     });
   }
 
+  function requestPendingPriorities(payload) {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      let settled = false;
+      const finish = (state) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(state);
+      };
+      const timer = window.setTimeout(() => finish(null), 1500);
+      const onMessage = (event) => {
+        if (event.source !== window || event.origin !== window.location.origin) return;
+        if (event.data?.type !== "OG_EBAY_PENDING_PRIORITIES_RESPONSE") return;
+        if (event.data?.requestId !== requestId) return;
+        finish(event.data.payload || null);
+      };
+      window.addEventListener("message", onMessage);
+      window.postMessage({
+        type: "OG_EBAY_PENDING_PRIORITIES_REQUEST",
+        requestId,
+        payload,
+      }, window.location.origin);
+    });
+  }
+
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
     const reportTransferId = new URLSearchParams(window.location.search).get("reportTransferId");
@@ -100,6 +127,13 @@
     if (message?.type === "OG_EBAY_GET_LABEL_RECEIVER_STATE") {
       requestReceiverState(message.payload)
         .then((state) => sendResponse({ ok: true, ...(state || {}) }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_GET_PENDING_PRIORITIES") {
+      requestPendingPriorities(message.payload)
+        .then((state) => sendResponse(state ? { ok: true, ...state } : { ok: false, error: "OG Pending Orders did not answer with due-order priorities." }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
     }

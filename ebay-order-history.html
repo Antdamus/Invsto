@@ -290,9 +290,17 @@
         Waiting for an eBay label transfer...
       </div>
       <div id="history-label-details" class="history-label-details"></div>
+      <div id="history-extra-label-photo-panel" class="history-extra-label-photo-panel hidden">
+        <span class="eyebrow">Forgotten Items Proof</span>
+        <h3>Take a photo of the missing items</h3>
+        <p>This extra label will be saved only after a proof photo is attached for the articles that were left out of the first shipment.</p>
+        <input id="history-extra-label-photo" type="file" accept="image/*" capture="environment" multiple />
+        <div id="history-extra-label-photo-list" class="history-extra-label-photo-list"></div>
+      </div>
       <div class="history-modal-actions">
         <button id="preview-history-label" type="button" class="secondary-btn hidden">Preview Label</button>
         <button id="replace-history-label" type="button" class="primary-btn hidden">Replace Label</button>
+        <button id="add-extra-history-label" type="button" class="primary-btn hidden" disabled>Add Extra Label</button>
         <button id="done-history-label" type="button" class="primary-btn">Done</button>
       </div>
     </div>

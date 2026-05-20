@@ -3955,6 +3955,83 @@ function getPendingLabelReceiverState() {
   };
 }
 
+function normalizeEbayPriorityBuyerKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getEbayPriorityRank(shipByDate) {
+  const urgency = getOrderUrgency(shipByDate);
+  if (urgency?.level === "overdue") return 0;
+  if (urgency?.level === "today") return 1;
+  if (urgency?.level === "tomorrow") return 2;
+  if (shipByDate) return 3;
+  return 4;
+}
+
+function buildEbayPendingPriorityPayload() {
+  const groups = new Map();
+  state.orders.filter(isOpenOrderLine).forEach((line) => {
+    const buyerUsername = String(line.order?.buyer_username || "").trim();
+    const buyerKey = normalizeEbayPriorityBuyerKey(buyerUsername || getBuyerLabel(line));
+    if (!buyerKey) return;
+
+    if (!groups.has(buyerKey)) {
+      groups.set(buyerKey, {
+        buyerKey,
+        buyerUsername: buyerUsername || getBuyerLabel(line),
+        orderNumbers: new Set(),
+        pendingLines: 0,
+        pendingUnits: 0,
+        nextShipBy: "",
+        priorityRank: 4,
+        priorityLabel: "Pending",
+      });
+    }
+
+    const group = groups.get(buyerKey);
+    const orderNumber = normalizeEbayOrderNumber(line.order?.order_number);
+    if (orderNumber) group.orderNumbers.add(orderNumber);
+    group.pendingLines += 1;
+    group.pendingUnits += getRemainingLineQuantity(line) || 0;
+
+    const shipBy = line.order?.ship_by_date || "";
+    const rank = getEbayPriorityRank(shipBy);
+    if (
+      rank < group.priorityRank
+      || (rank === group.priorityRank && getShipTimestamp(shipBy) < getShipTimestamp(group.nextShipBy))
+    ) {
+      const urgency = getOrderUrgency(shipBy);
+      group.nextShipBy = shipBy;
+      group.priorityRank = rank;
+      group.priorityLabel = urgency?.label || (shipBy ? "Upcoming" : "Pending");
+    }
+  });
+
+  const priorities = [...groups.values()]
+    .map((group) => ({
+      ...group,
+      orderNumbers: [...group.orderNumbers],
+    }))
+    .sort((a, b) =>
+      a.priorityRank - b.priorityRank
+      || getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy)
+      || a.buyerUsername.localeCompare(b.buyerUsername, undefined, { sensitivity: "base" })
+    );
+
+  const urgent = priorities.filter((entry) => entry.priorityRank <= 1);
+  return {
+    source: "og-pending-orders",
+    pageUrl: window.location.href,
+    generatedAt: new Date().toISOString(),
+    priorities,
+    urgentBuyerCount: urgent.length,
+    overdueBuyerCount: priorities.filter((entry) => entry.priorityRank === 0).length,
+    dueTodayBuyerCount: priorities.filter((entry) => entry.priorityRank === 1).length,
+    urgentLineCount: urgent.reduce((sum, entry) => sum + Number(entry.pendingLines || 0), 0),
+    urgentUnitCount: urgent.reduce((sum, entry) => sum + Number(entry.pendingUnits || 0), 0),
+  };
+}
+
 function setupEbayLabelReceiver() {
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
@@ -3963,6 +4040,14 @@ function setupEbayLabelReceiver() {
         type: "OG_EBAY_LABEL_RECEIVER_STATE_RESPONSE",
         requestId: event.data.requestId,
         payload: getPendingLabelReceiverState(),
+      }, window.location.origin);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_PENDING_PRIORITIES_REQUEST") {
+      window.postMessage({
+        type: "OG_EBAY_PENDING_PRIORITIES_RESPONSE",
+        requestId: event.data.requestId,
+        payload: buildEbayPendingPriorityPayload(),
       }, window.location.origin);
       return;
     }

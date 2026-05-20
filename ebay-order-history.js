@@ -14,6 +14,7 @@ const state = {
   awaitingLabelGroup: null,
   queuedHistoryLabelTransfers: [],
   pendingHistoryLabelReplacement: null,
+  pendingHistoryExtraLabelTransfer: null,
   historyLoaded: false,
   labelPreviewUrls: new Map(),
   handledLabelTransferIds: new Set(),
@@ -25,6 +26,7 @@ const state = {
 
 let evidencePhotoViewerReturnFocus = null;
 const EBAY_LABEL_BUCKET = "ebay-labels";
+const EXTRA_LABEL_EVIDENCE_BUCKET = "order-evidence-photos";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 
@@ -163,6 +165,32 @@ function getLabelMetadataSearchText(...metadataObjects) {
   }).filter(Boolean).join(" ");
 }
 
+function getLabelEventSearchTextForLine(line) {
+  const lineId = line?.id || "";
+  const orderNumber = normalizeEbayOrderNumber(line?.order?.order_number);
+  const events = new Map();
+  [...state.labelEvents, ...state.relatedLabelEvents].forEach((event) => {
+    const key = event.id || `${event.label_file_path}:${event.created_at}`;
+    if (!events.has(key)) events.set(key, event);
+  });
+  return [...events.values()]
+    .filter((event) =>
+      (lineId && (event.order_line_ids || []).includes(lineId))
+      || (orderNumber && (event.order_numbers || []).map(normalizeEbayOrderNumber).includes(orderNumber))
+    )
+    .flatMap((event) => [
+      event.action,
+      event.shipment_id,
+      event.label_file_path,
+      event.signed_by_email,
+      getLabelMetadataSearchText(event.label_metadata),
+      ...(event.order_numbers || []),
+    ])
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function normalizeLabelMetadata(metadata = {}, additions = {}) {
   const trackingNumbers = [...new Set([
     metadata.trackingNumber,
@@ -265,7 +293,7 @@ function getEventGpsLabel(event) {
 }
 
 function getEventEvidencePhotos(event) {
-  const photos = event?.payload?.evidence_photos;
+  const photos = event?.payload?.evidence_photos || event?.label_metadata?.evidence_photos;
   return Array.isArray(photos)
     ? photos.filter((photo) => photo?.bucket && photo?.path)
     : [];
@@ -685,7 +713,7 @@ function applyFilters() {
     if (status === "cancelled" && line.line_status !== "cancelled") return false;
     if (status === "admin_closeout" && !isAdminCloseoutLine(line)) return false;
     if (worker && line.fulfilled_by_email !== worker) return false;
-    if (term && !line.searchText.includes(term)) return false;
+    if (term && !line.searchText.includes(term) && !getLabelEventSearchTextForLine(line).includes(term)) return false;
     return true;
   });
 
@@ -961,6 +989,53 @@ function historyGroupHasAttachedLabel(group) {
   return getUniqueOrdersFromLines(group?.lines || []).some((order) => order?.label_file_path);
 }
 
+function getExtraLabelEventsForOrderNumbers(orderNumbers = []) {
+  const wanted = new Set(parseHistoryOrderNumbers(orderNumbers));
+  if (!wanted.size) return [];
+  const events = new Map();
+  [...state.labelEvents, ...state.relatedLabelEvents].forEach((event) => {
+    const key = event.id || `${event.label_file_path}:${event.created_at}`;
+    if (!events.has(key)) events.set(key, event);
+  });
+  return [...events.values()]
+    .filter((event) => event.action === "extra_label")
+    .filter((event) => (event.order_numbers || []).some((orderNumber) => wanted.has(normalizeEbayOrderNumber(orderNumber))))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function renderExtraLabelEvents(orderNumbers = []) {
+  const events = getExtraLabelEventsForOrderNumbers(orderNumbers);
+  if (!events.length) return "";
+
+  return `
+    <div class="history-extra-label-list" aria-label="Extra shipping labels">
+      ${events.map((event, index) => {
+        const trackingText = getLabelTrackingDisplay(event.label_metadata || {});
+        const evidenceCount = getEventEvidencePhotos(event).length;
+        return `
+          <article>
+            <div>
+              <strong>Extra label ${events.length - index}</strong>
+              <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
+              <span>Tracker: ${escapeHtml(trackingText || "Not captured yet")}</span>
+              <span>${evidenceCount} forgotten-item photo${evidenceCount === 1 ? "" : "s"}</span>
+            </div>
+            <button type="button" class="secondary-btn history-label-open-btn" data-history-extra-label-open="${escapeHtml(event.id)}">Open Extra Label</button>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function bindHistoryExtraLabelOpenButtons(root = document) {
+  root.querySelectorAll("[data-history-extra-label-open]").forEach((button) => {
+    if (button.dataset.extraLabelBound === "true") return;
+    button.dataset.extraLabelBound = "true";
+    button.addEventListener("click", () => handleOpenHistoryExtraLabelButtonClick(button.dataset.historyExtraLabelOpen));
+  });
+}
+
 function getHistoryGroupCompletedBy(group) {
   return [...new Set((group?.lines || []).map((line) => line.fulfilled_by_email).filter(Boolean))]
     .join(", ") || "Unknown";
@@ -1011,6 +1086,7 @@ function renderGroupLabelControl(group, orders = []) {
   const labelSummary = labelPath
     ? `Attached ${formatDateTime(attachedOrder.label_uploaded_at)} - ${attachedCount >= orderCount ? `covers ${orderCount} ${orderWord}` : `${attachedCount} of ${orderCount} ${orderWord}`}`
     : `One label for this grouped completion - ${orderCount} ${orderWord}`;
+  const extraLabelEvents = getExtraLabelEventsForOrderNumbers(orderNumbers);
   const encodedOrderNumbers = escapeHtml(orderNumbers.join(","));
 
   return `
@@ -1025,8 +1101,10 @@ function renderGroupLabelControl(group, orders = []) {
         <div>
           ${labelPath ? `<button type="button" class="secondary-btn history-label-open-btn" data-history-label-open-group="${encodedOrderNumbers}">Open Label</button>` : ""}
           <button type="button" class="secondary-btn history-label-btn" data-history-label-group="${encodedOrderNumbers}">${labelPath ? "Replace Label" : "Add Label"}</button>
+          ${labelPath ? `<button type="button" class="secondary-btn history-label-btn" data-history-label-extra-group="${encodedOrderNumbers}">Add Extra Label</button>` : ""}
         </div>
       </div>
+      ${extraLabelEvents.length ? renderExtraLabelEvents(orderNumbers) : ""}
     </div>
   `;
 }
@@ -1133,8 +1211,14 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     card.querySelectorAll("[data-history-label-group]").forEach((button) => {
       button.addEventListener("click", () => handleHistoryLabelButtonClick(button.dataset.historyLabelGroup));
     });
+    card.querySelectorAll("[data-history-label-extra-group]").forEach((button) => {
+      button.addEventListener("click", () => handleHistoryExtraLabelButtonClick(button.dataset.historyLabelExtraGroup));
+    });
     card.querySelectorAll("[data-history-label-open-group]").forEach((button) => {
       button.addEventListener("click", () => handleOpenHistoryLabelButtonClick(button.dataset.historyLabelOpenGroup));
+    });
+    card.querySelectorAll("[data-history-extra-label-open]").forEach((button) => {
+      button.addEventListener("click", () => handleOpenHistoryExtraLabelButtonClick(button.dataset.historyExtraLabelOpen));
     });
     card.querySelectorAll("[data-revert-line]").forEach((button) => {
       button.addEventListener("click", () => openRevertModal([button.dataset.revertLine].filter(Boolean)));
@@ -1254,7 +1338,7 @@ function renderEventList() {
     const label = event.category === "revert"
       ? "Order reverted"
       : event.category === "label"
-        ? event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached"
+        ? event.action === "extra_label" ? "Extra shipping label added" : event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached"
         : event.action === "fulfilled_no_inventory"
           ? "Packed without inventory removal"
           : isAdminUser() ? "Canceled by admin" : "Canceled";
@@ -1265,7 +1349,7 @@ function renderEventList() {
     const eventStatusClass = event.category === "revert" || event.category === "label"
       ? "is-admin"
       : event.action === "cancelled" ? "is-cancelled" : "";
-    const eventDetail = event.notes || event.label_file_path || "No note recorded.";
+    const eventDetail = event.notes || event.label_metadata?.notes || event.label_file_path || "No note recorded.";
     return `
       <article class="event-card">
         <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>
@@ -1511,6 +1595,42 @@ function setHistoryReplaceButtonVisible(visible) {
   button.toggleAttribute("disabled", !visible);
 }
 
+function setHistoryExtraLabelButtonVisible(visible) {
+  const button = $("add-extra-history-label");
+  if (!button) return;
+  button.classList.toggle("hidden", !visible);
+  button.toggleAttribute("disabled", !visible || !getHistoryExtraLabelPhotoFiles().length);
+}
+
+function getHistoryExtraLabelPhotoFiles() {
+  return [...($("history-extra-label-photo")?.files || [])].filter((file) => file?.type?.startsWith("image/"));
+}
+
+function resetHistoryExtraLabelPhotoPanel() {
+  const input = $("history-extra-label-photo");
+  if (input) input.value = "";
+  const list = $("history-extra-label-photo-list");
+  if (list) list.innerHTML = "";
+  $("history-extra-label-photo-panel")?.classList.add("hidden");
+  setHistoryExtraLabelButtonVisible(false);
+}
+
+function showHistoryExtraLabelPhotoPanel() {
+  $("history-extra-label-photo-panel")?.classList.remove("hidden");
+  renderHistoryExtraLabelPhotoList();
+}
+
+function renderHistoryExtraLabelPhotoList() {
+  const files = getHistoryExtraLabelPhotoFiles();
+  const list = $("history-extra-label-photo-list");
+  if (list) {
+    list.innerHTML = files.length
+      ? files.map((file) => `<span>${escapeHtml(file.name || "Missing item photo")}</span>`).join("")
+      : `<span>Photo required before saving extra label</span>`;
+  }
+  setHistoryExtraLabelButtonVisible(Boolean(state.pendingHistoryExtraLabelTransfer));
+}
+
 function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
   const details = $("history-label-details");
   const preview = $("preview-history-label");
@@ -1529,6 +1649,7 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
     ? `
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || order?.order_number || "-")}</span>
       ${renderHistoryLabelOrderList(orderNumbers)}
+      ${renderExtraLabelEvents(orderNumbers)}
       <span><strong>Label:</strong> Attached ${escapeHtml(formatDateTime(order.label_uploaded_at))} - covers ${orderCount} ${orderWord}${size ? ` - ${escapeHtml(size)}` : ""}</span>
       <div class="label-tracking-confirmation">
         <small>Extracted barcode / tracking number</small>
@@ -1541,8 +1662,10 @@ function renderHistoryLabelDetails(target = state.awaitingLabelGroup) {
     : `
       <span><strong>Orders:</strong> ${escapeHtml(orderNumbers.join(", ") || "-")}</span>
       ${renderHistoryLabelOrderList(orderNumbers)}
+      ${renderExtraLabelEvents(orderNumbers)}
       <span>Waiting for one eBay label PDF for this grouped completion.</span>
     `;
+  bindHistoryExtraLabelOpenButtons(details);
 }
 
 function openHistoryLabelModal(orderNumbers) {
@@ -1554,7 +1677,9 @@ function openHistoryLabelModal(orderNumbers) {
 
   state.awaitingLabelGroup = target;
   state.pendingHistoryLabelReplacement = null;
+  state.pendingHistoryExtraLabelTransfer = null;
   setHistoryReplaceButtonVisible(false);
+  resetHistoryExtraLabelPhotoPanel();
   if ($("done-history-label")) $("done-history-label").textContent = "Done";
   const attachedOrder = getAttachedHistoryOrder(target.orders);
   const orderCount = target.orderNumbers.length || target.orders.length;
@@ -1642,6 +1767,21 @@ async function getHistoryLabelPdfObjectUrl(order) {
   return URL.createObjectURL(pdfBlob);
 }
 
+async function getHistoryLabelPdfObjectUrlFromPath(bucket, path) {
+  if (!path) throw new Error("No shipping label file path is available.");
+  const { data, error } = await supabase.storage.from(bucket || EBAY_LABEL_BUCKET).createSignedUrl(path, 60 * 60);
+  if (error) throw new Error(error.message || "Could not create a label preview link.");
+  const signedUrl = data?.signedUrl || "";
+  if (!signedUrl) throw new Error("Could not create a label preview link.");
+  const response = await fetch(signedUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not read the label PDF (${response.status}).`);
+  const blob = await response.blob();
+  const pdfBlob = blob.type === "application/pdf"
+    ? blob
+    : new Blob([await blob.arrayBuffer()], { type: "application/pdf" });
+  return URL.createObjectURL(pdfBlob);
+}
+
 function writeHistoryLabelPreviewWindow(previewWindow, objectUrl, title = "Shipping label") {
   if (!previewWindow || previewWindow.closed) {
     window.open(objectUrl, "_blank", "noopener,noreferrer");
@@ -1688,6 +1828,12 @@ function handleHistoryLabelButtonClick(orderNumber) {
   openHistoryLabelModal(orderNumber);
 }
 
+function handleHistoryExtraLabelButtonClick(orderNumber) {
+  openHistoryLabelModal(orderNumber);
+  $("history-label-title").textContent = "Add extra shipping label";
+  $("history-label-subtitle").textContent = "Use this when a closed order needs a second label because articles were forgotten. Send the new eBay label, then attach a proof photo of the missing items.";
+}
+
 function handleOpenHistoryLabelButtonClick(orderNumber) {
   const target = getHistoryLabelTarget(orderNumber);
   const order = getAttachedHistoryOrder(target?.orders || []);
@@ -1703,9 +1849,11 @@ function handleOpenHistoryLabelButtonClick(orderNumber) {
 }
 
 function closeHistoryLabelModal() {
+  cancelPendingHistoryExtraLabel();
   cancelPendingHistoryLabelReplacement();
   state.awaitingLabelGroup = null;
   setHistoryReplaceButtonVisible(false);
+  resetHistoryExtraLabelPhotoPanel();
   if ($("done-history-label")) $("done-history-label").textContent = "Done";
   closeModal("history-label-modal");
 }
@@ -1738,14 +1886,33 @@ function cancelPendingHistoryLabelReplacement() {
   state.pendingHistoryLabelReplacement = null;
 }
 
+function cancelPendingHistoryExtraLabel() {
+  const pending = state.pendingHistoryExtraLabelTransfer;
+  if (!pending) return;
+  const transferId = pending.transferId || "";
+  postHistoryLabelTransferStatus({
+    transferId,
+    ok: false,
+    error: "The extra shipping label was not saved. A forgotten-items photo is required.",
+  });
+  clearExtensionPendingHistoryLabel(transferId);
+  state.pendingHistoryExtraLabelTransfer = null;
+  if (state.pendingHistoryLabelReplacement?.transferId === transferId) {
+    state.pendingHistoryLabelReplacement = null;
+  }
+}
+
 function promptHistoryLabelReplacement(transferPayload) {
   state.pendingHistoryLabelReplacement = transferPayload;
+  state.pendingHistoryExtraLabelTransfer = transferPayload;
   const transferId = transferPayload?.transferId || "";
   const attachedOrder = getAttachedHistoryOrder(state.awaitingLabelGroup?.orders || []);
   $("history-label-title").textContent = "Shipping label already attached";
-  $("history-label-subtitle").textContent = "This completed order group already has a shipping label. Preview the existing label, replace it with the new eBay label, or exit without changing it.";
-  setHistoryLabelStatus("Existing label found. Click Replace Label to overwrite it with the new captured label.", "error");
+  $("history-label-subtitle").textContent = "This completed order group already has a shipping label. Replace the existing label, or add this as an extra label when items were forgotten.";
+  setHistoryLabelStatus("Existing label found. To save this as an extra label, take a photo of the forgotten items first.", "error");
   setHistoryReplaceButtonVisible(true);
+  showHistoryExtraLabelPhotoPanel();
+  setHistoryExtraLabelButtonVisible(true);
   if ($("done-history-label")) $("done-history-label").textContent = "Exit";
   renderHistoryLabelDetails(state.awaitingLabelGroup);
   openModal("history-label-modal");
@@ -1754,6 +1921,40 @@ function promptHistoryLabelReplacement(transferPayload) {
     phase: "started",
     message: `Order ${attachedOrder?.order_number || "group"} already has a label. Waiting for replace confirmation in OG.`,
   });
+}
+
+async function uploadHistoryExtraLabelEvidencePhotos(files, orderNumbers = [], transferId = "") {
+  const cleanOrder = safeStorageSegment(orderNumbers.join("-") || "extra-label", "extra-label");
+  const cleanTransfer = safeStorageSegment(transferId || crypto.randomUUID(), "transfer");
+  const uploaded = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const path = [
+      "extra-labels",
+      cleanOrder,
+      `${Date.now()}-${cleanTransfer}-${index + 1}.${extension}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EXTRA_LABEL_EVIDENCE_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+    if (error) throw new Error(error.message || "Could not upload the forgotten-items photo.");
+    uploaded.push({
+      bucket: EXTRA_LABEL_EVIDENCE_BUCKET,
+      path,
+      label: `Forgotten items photo ${index + 1}`,
+      original_name: file.name || "",
+      mime_type: file.type || "image/jpeg",
+      size_bytes: file.size || 0,
+      uploaded_at: new Date().toISOString(),
+    });
+  }
+
+  return uploaded;
 }
 
 async function attachHistoryLabelToOrder(transferPayload) {
@@ -1863,6 +2064,113 @@ async function attachHistoryLabelToOrder(transferPayload) {
   };
 }
 
+async function attachHistoryExtraLabelToOrder(transferPayload) {
+  const awaiting = state.awaitingLabelGroup;
+  if (!awaiting?.orders?.length) {
+    throw new Error("Open a history group's label modal before adding an extra label.");
+  }
+
+  const files = getHistoryExtraLabelPhotoFiles();
+  if (!files.length) {
+    throw new Error("Take or choose a photo of the forgotten items before saving the extra label.");
+  }
+
+  const metadata = transferPayload?.metadata || {};
+  const label = transferPayload?.label || {};
+  const labelOrderNumbers = getLabelTransferOrderNumbers(transferPayload);
+  if (!labelOrderNumbers.length) throw new Error("The label transfer did not include a usable eBay order number.");
+  const unexpectedOrderNumbers = labelOrderNumbers.filter((orderNumber) => !awaiting.orderNumbers.includes(orderNumber));
+  if (unexpectedOrderNumbers.length) {
+    throw new Error(`This eBay label is for ${labelOrderNumbers.join(", ")}, but this grouped history receiver is waiting for: ${awaiting.orderNumbers.join(", ")}.`);
+  }
+  if (!label.base64) throw new Error("The extension did not send a readable PDF payload.");
+
+  const evidencePhotos = await uploadHistoryExtraLabelEvidencePhotos(files, awaiting.orderNumbers, transferPayload.transferId || "");
+  const blob = base64ToBlob(label.base64, label.mimeType || "application/pdf");
+  const destinationPath = [
+    "extra-labels",
+    `${safeStorageSegment(metadata.labelId || metadata.shipmentId || transferPayload.transferId || crypto.randomUUID(), "extra-label")}.pdf`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(EBAY_LABEL_BUCKET)
+    .upload(destinationPath, blob, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+  if (uploadError) throw new Error(uploadError.message || "Could not upload the extra eBay label PDF.");
+
+  const labelMetadata = {
+    ...normalizeLabelMetadata(metadata, { orderNumbers: awaiting.orderNumbers }),
+    coveredOrderNumbers: awaiting.orderNumbers,
+    extraLabelReason: "forgotten_items_after_closeout",
+    requiresMissingItemsPhoto: true,
+    evidence_photos: evidencePhotos,
+    transferId: transferPayload.transferId || null,
+    captureSource: label.source || null,
+    labelUrl: label.url || null,
+    mimeType: label.mimeType || "application/pdf",
+    size: label.size || blob.size,
+    capturedAt: label.capturedAt || metadata.capturedAt || new Date().toISOString(),
+  };
+  const orderIds = [...new Set(awaiting.orders.map((order) => order.id).filter(Boolean))];
+  const historyLabelLines = getHistoryLinesByOrderNumbers(awaiting.orderNumbers);
+
+  const { data, error: orderError } = await supabase.rpc("attach_ebay_extra_shipping_label", {
+    _order_ids: orderIds,
+    _order_line_ids: historyLabelLines.map((line) => line.id).filter(Boolean),
+    _order_numbers: awaiting.orderNumbers,
+    _shipment_id: metadata.shipmentId || null,
+    _label_storage_bucket: EBAY_LABEL_BUCKET,
+    _label_file_path: destinationPath,
+    _label_metadata: labelMetadata,
+    _evidence_photos: evidencePhotos,
+    _notes: "Extra shipping label added because items were forgotten after the order was closed.",
+    _signed_by_email: state.user?.email || null,
+  });
+  if (orderError) throw new Error(orderError.message || "Could not audit the extra eBay label.");
+
+  const eventId = data?.[0]?.audit_event_id || crypto.randomUUID();
+  const now = new Date().toISOString();
+  state.labelEvents.unshift({
+    id: eventId,
+    action: "extra_label",
+    order_ids: orderIds,
+    order_line_ids: historyLabelLines.map((line) => line.id).filter(Boolean),
+    order_numbers: awaiting.orderNumbers,
+    shipment_id: metadata.shipmentId || null,
+    label_storage_bucket: EBAY_LABEL_BUCKET,
+    label_file_path: destinationPath,
+    previous_label_file_paths: awaiting.orders.map((order) => order.label_file_path).filter(Boolean),
+    label_metadata: labelMetadata,
+    signed_by_email: state.user?.email || null,
+    source: "extension",
+    created_at: now,
+  });
+
+  clearExtensionPendingHistoryLabel(transferPayload.transferId);
+  state.pendingHistoryExtraLabelTransfer = null;
+  state.pendingHistoryLabelReplacement = null;
+  setHistoryReplaceButtonVisible(false);
+  resetHistoryExtraLabelPhotoPanel();
+  if ($("done-history-label")) $("done-history-label").textContent = "Done";
+  const trackingText = getLabelTrackingDisplay(labelMetadata);
+  const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
+  setHistoryLabelStatus(`Extra label saved for forgotten items, and the proof photo was attached.${trackingClause}`, "success");
+  renderHistoryLabelDetails(state.awaitingLabelGroup);
+  const visibleGroups = getVisibleHistoryGroups();
+  renderSummary(visibleGroups);
+  renderHistoryList(visibleGroups);
+  return {
+    orderNumber: awaiting.orderNumbers[0] || "",
+    orderNumbers: awaiting.orderNumbers,
+    storagePath: destinationPath,
+    uploadedAt: now,
+    extraLabel: true,
+    evidencePhotoCount: evidencePhotos.length,
+  };
+}
+
 function queueHistoryLabelTransfer(payload) {
   const transferId = payload?.transferId || "";
   if (transferId && state.queuedHistoryLabelTransfers.some((entry) => entry?.transferId === transferId)) return;
@@ -1941,9 +2249,45 @@ async function confirmHistoryLabelReplacement() {
   const payload = state.pendingHistoryLabelReplacement;
   if (!payload || state.labelBusy) return;
   state.pendingHistoryLabelReplacement = null;
+  state.pendingHistoryExtraLabelTransfer = null;
+  resetHistoryExtraLabelPhotoPanel();
   setHistoryReplaceButtonVisible(false);
   if ($("done-history-label")) $("done-history-label").textContent = "Done";
   await completeHistoryLabelTransfer(payload);
+}
+
+async function confirmHistoryExtraLabel() {
+  const payload = state.pendingHistoryExtraLabelTransfer;
+  const transferId = payload?.transferId || "";
+  if (!payload || state.labelBusy) return;
+
+  state.labelBusy = true;
+  setHistoryLabelStatus("Uploading extra label and forgotten-items photo...");
+  postHistoryLabelTransferStatus({
+    transferId,
+    phase: "started",
+    message: "History label modal accepted the extra eBay label transfer.",
+  });
+  try {
+    const attached = await attachHistoryExtraLabelToOrder(payload);
+    postHistoryLabelTransferStatus({
+      transferId,
+      ok: true,
+      message: `Extra shipping label attached to history group for ${attached.orderNumbers.join(", ")}.`,
+      ...attached,
+    });
+  } catch (error) {
+    console.error("Extra past order label transfer failed:", error);
+    const message = error.message || "Could not attach the extra eBay label.";
+    setHistoryLabelStatus(message, "error");
+    postHistoryLabelTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  } finally {
+    state.labelBusy = false;
+  }
 }
 
 function setupHistoryLabelReceiver() {
@@ -2142,6 +2486,22 @@ function mergeBackfilledTrackingIntoLoadedState(group, patch) {
   });
 }
 
+function handleOpenHistoryExtraLabelButtonClick(eventId) {
+  const event = state.labelEvents.find((entry) => entry.id === eventId);
+  if (!event?.label_file_path) {
+    window.alert("Could not find that extra label file.");
+    return;
+  }
+  const previewWindow = window.open("about:blank", "_blank");
+  if (previewWindow) previewWindow.opener = null;
+  getHistoryLabelPdfObjectUrlFromPath(event.label_storage_bucket || EBAY_LABEL_BUCKET, event.label_file_path)
+    .then((objectUrl) => writeHistoryLabelPreviewWindow(previewWindow, objectUrl, "Extra shipping label"))
+    .catch((error) => {
+      if (previewWindow && !previewWindow.closed) previewWindow.close();
+      window.alert(error.message || "Could not open the extra shipping label.");
+    });
+}
+
 async function backfillOneLabelTrackingGroup(group) {
   const { data: blob, error: downloadError } = await supabase.storage
     .from(group.bucket || EBAY_LABEL_BUCKET)
@@ -2256,6 +2616,8 @@ function setupListeners() {
   $("close-history-label-modal")?.addEventListener("click", closeHistoryLabelModal);
   $("done-history-label")?.addEventListener("click", closeHistoryLabelModal);
   $("replace-history-label")?.addEventListener("click", confirmHistoryLabelReplacement);
+  $("add-extra-history-label")?.addEventListener("click", confirmHistoryExtraLabel);
+  $("history-extra-label-photo")?.addEventListener("change", renderHistoryExtraLabelPhotoList);
   $("preview-history-label")?.addEventListener("click", previewHistoryLabel);
   $("history-label-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "history-label-modal") closeHistoryLabelModal();

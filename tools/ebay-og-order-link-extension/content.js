@@ -12,6 +12,7 @@
   const SEND_LABEL_ID = "og-ebay-send-label";
   const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
+  const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
@@ -24,6 +25,10 @@
   let currentBoxReminderKey = "";
   let dismissedBoxReminderKey = "";
   let shownBoxReminderKey = "";
+  let ogPendingPriorityCache = null;
+  let ogPriorityAutoAttemptKey = "";
+  let ogPriorityReapplyTimer = null;
+  let ogPriorityLastRowSignature = "";
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -48,12 +53,26 @@
   }
 
   function getOrderLinks() {
-    return [...document.querySelectorAll(ORDER_LINK_SELECTOR)]
+    const links = [
+      ...document.querySelectorAll(ORDER_LINK_SELECTOR),
+      ...document.querySelectorAll("a[href], [role='link']"),
+    ];
+    const seen = new Set();
+    return links
       .map((link) => ({
         link,
-        orderNumber: normalizeOrderNumber(link.textContent || link.getAttribute("href") || link.dataset.testid),
+        orderNumber: normalizeOrderNumber([
+          link.textContent,
+          link.getAttribute?.("aria-label"),
+          link.getAttribute?.("href"),
+          link.dataset?.testid,
+        ].filter(Boolean).join(" ")),
       }))
-      .filter((entry) => entry.orderNumber);
+      .filter((entry) => {
+        if (!entry.orderNumber || seen.has(entry.link)) return false;
+        seen.add(entry.link);
+        return true;
+      });
   }
 
   function uniqueOrderNumbers() {
@@ -330,6 +349,300 @@
       visibleSummaryText: getAwaitingOrdersSummaryText(),
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  function normalizeBuyerKey(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function getPriorityLabel(entry = {}) {
+    if (entry.priorityRank === 0) return "OG overdue";
+    if (entry.priorityRank === 1) return "OG due today";
+    if (entry.priorityRank === 2) return "OG due tomorrow";
+    return "OG pending";
+  }
+
+  function getPriorityClass(entry = {}) {
+    if (entry.priorityRank === 0) return "is-og-overdue";
+    if (entry.priorityRank === 1) return "is-og-today";
+    if (entry.priorityRank === 2) return "is-og-tomorrow";
+    return "is-og-pending";
+  }
+
+  function getEffectiveRowPriority(row = {}) {
+    return row.priority?.priorityRank <= 1 ? row.priority : row.ebayUrgency;
+  }
+
+  function getVisibleOrderRowSignature() {
+    return getOrderLinks().map((entry) => entry.orderNumber).join("|");
+  }
+
+  function getOrderLinkCount(root) {
+    if (!root?.querySelectorAll) return 0;
+    return [...root.querySelectorAll("a[href], [role='link']")]
+      .filter((link) => normalizeOrderNumber(link.textContent || link.getAttribute?.("href") || link.getAttribute?.("aria-label")))
+      .length;
+  }
+
+  function getEbayRowUrgency(row) {
+    const text = row?.innerText || row?.textContent || "";
+    if (/shipping\s+overdue|ship\s+by\s+(?:yesterday|[a-z]{3,9}\s+\d{1,2})/i.test(text)) {
+      const shipByMatch = text.match(/ship\s+by\s+([a-z]{3,9})\s+(\d{1,2})/i);
+      if (/shipping\s+overdue/i.test(text)) return { priorityRank: 0, priorityLabel: "eBay overdue", source: "ebay-row" };
+      if (shipByMatch) {
+        const rowDate = new Date(`${shipByMatch[1]} ${shipByMatch[2]}, ${new Date().getFullYear()}`);
+        if (!Number.isNaN(rowDate.getTime())) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          rowDate.setHours(0, 0, 0, 0);
+          if (rowDate < today) return { priorityRank: 0, priorityLabel: "eBay overdue", source: "ebay-row" };
+          if (rowDate.getTime() === today.getTime()) return { priorityRank: 1, priorityLabel: "eBay due today", source: "ebay-row" };
+        }
+      }
+    }
+    return null;
+  }
+
+  function buildPriorityMaps(payload = {}) {
+    const entries = Array.isArray(payload.priorities) ? payload.priorities : [];
+    const byOrder = new Map();
+    const byBuyer = new Map();
+    entries.forEach((entry, index) => {
+      const normalized = {
+        ...entry,
+        originalPriorityIndex: index,
+        priorityRank: Number.isFinite(Number(entry.priorityRank)) ? Number(entry.priorityRank) : 4,
+        buyerKey: normalizeBuyerKey(entry.buyerKey || entry.buyerUsername),
+      };
+      if (normalized.buyerKey) byBuyer.set(normalized.buyerKey, normalized);
+      (Array.isArray(entry.orderNumbers) ? entry.orderNumbers : []).forEach((orderNumber) => {
+        const normalizedOrder = normalizeOrderNumber(orderNumber);
+        if (normalizedOrder) byOrder.set(normalizedOrder, normalized);
+      });
+    });
+    return { byOrder, byBuyer, entries };
+  }
+
+  function getLikelyOrderRow(link, orderNumber = "") {
+    const direct = link.closest([
+      "tr",
+      "[role='row']",
+      "[data-testid*='order-row' i]",
+      "[data-testid*='order-card' i]",
+      "[data-test-id*='order-row' i]",
+      "[class*='order-row' i]",
+      ".order-card",
+      ".orders-table__row",
+      ".grid__row",
+    ].join(", "));
+    if (direct) return direct;
+
+    let node = link;
+    let best = null;
+    while (node?.parentElement && node.parentElement !== document.body) {
+      const parent = node.parentElement;
+      const text = parent.innerText || parent.textContent || "";
+      const rect = parent.getBoundingClientRect?.();
+      const looksLikeOrderRow = (!orderNumber || text.includes(orderNumber))
+        && /get shipping label|add tracking|ship by|shipping overdue/i.test(text)
+        && rect
+        && rect.width >= 520
+        && rect.height >= 70
+        && rect.height <= Math.max(520, window.innerHeight * 0.75);
+      if (looksLikeOrderRow) best = parent;
+      if (getOrderLinkCount(parent) > 1 && best) return best;
+      if (getOrderLinkCount(parent) > 1) return node;
+      node = parent;
+    }
+    return best || link.parentElement || link;
+  }
+
+  function getVisibleEbayOrderRows(priorityMaps) {
+    const rows = new Map();
+    getOrderLinks().forEach(({ link, orderNumber }) => {
+      const row = getLikelyOrderRow(link, orderNumber);
+      if (!row || rows.has(row)) return;
+      const text = row.innerText || row.textContent || "";
+      const orderNumbers = unique([
+        orderNumber,
+        ...(text.match(new RegExp(ORDER_NUMBER_PATTERN.source, "g")) || []),
+      ].map(normalizeOrderNumber));
+      let priority = orderNumbers.map((entry) => priorityMaps.byOrder.get(entry)).find(Boolean) || null;
+      if (!priority) {
+        const lowered = text.toLowerCase();
+        priority = [...priorityMaps.byBuyer.entries()]
+          .filter(([buyerKey]) => buyerKey.length >= 3 && (
+            lowered.includes(buyerKey)
+            || new RegExp(`(^|[^a-z0-9_])${escapeRegExp(buyerKey)}([^a-z0-9_]|$)`, "i").test(lowered)
+          ))
+          .map(([, entry]) => entry)
+          .sort((a, b) => a.priorityRank - b.priorityRank || a.originalPriorityIndex - b.originalPriorityIndex)[0] || null;
+      }
+      const ebayUrgency = getEbayRowUrgency(row);
+      rows.set(row, {
+        element: row,
+        parent: row.parentElement,
+        orderNumbers,
+        priority,
+        ebayUrgency,
+      });
+    });
+    return [...rows.values()].filter((entry) => entry.parent);
+  }
+
+  function clearOgPriorityBadges(root = document) {
+    root.querySelectorAll(".og-ebay-priority-badge").forEach((badge) => badge.remove());
+    root.querySelectorAll(".og-ebay-priority-row").forEach((row) => {
+      row.classList.remove("og-ebay-priority-row", "is-og-overdue", "is-og-today", "is-og-tomorrow", "is-og-pending");
+      row.removeAttribute("data-og-priority-rank");
+    });
+  }
+
+  function decoratePriorityRow(row, priority) {
+    row.classList.add("og-ebay-priority-row", getPriorityClass(priority));
+    row.dataset.ogPriorityRank = String(priority.priorityRank);
+    const badgeHost = row.matches("tr") ? row.querySelector("td, th") || row : row;
+    if (badgeHost.querySelector(":scope > .og-ebay-priority-badge")) return;
+
+    const badge = document.createElement("span");
+    badge.className = "og-ebay-priority-badge";
+    badge.textContent = priority.priorityLabel || getPriorityLabel(priority);
+    badge.title = `${priority.buyerUsername || "This buyer"} has ${Number(priority.pendingLines || 0).toLocaleString()} pending line${Number(priority.pendingLines || 0) === 1 ? "" : "s"} in OG.`;
+    badgeHost.insertAdjacentElement("afterbegin", badge);
+  }
+
+  function applyOgPendingPriorities(payload = ogPendingPriorityCache) {
+    if (!payload || !isAwaitingShipmentOrdersPage()) return { ok: false, matched: 0, moved: 0 };
+    clearOgPriorityBadges();
+    const priorityMaps = buildPriorityMaps(payload);
+    const rows = getVisibleEbayOrderRows(priorityMaps);
+    const withPriority = rows.filter((row) => row.priority && row.priority.priorityRank <= 1);
+    const withEbayUrgency = rows.filter((row) => !row.priority && row.ebayUrgency && row.ebayUrgency.priorityRank <= 1);
+    const groupsByParent = new Map();
+    const priorityByBuyer = new Map();
+    rows.forEach((row) => {
+      const effectivePriority = getEffectiveRowPriority(row);
+      if (!effectivePriority?.buyerKey || effectivePriority.priorityRank > 1) return;
+      const existing = priorityByBuyer.get(effectivePriority.buyerKey);
+      if (!existing || effectivePriority.priorityRank < existing.priorityRank) {
+        priorityByBuyer.set(effectivePriority.buyerKey, effectivePriority);
+      }
+    });
+    rows.forEach((row) => {
+      if (getEffectiveRowPriority(row)) return;
+      const lowered = String(row.element.innerText || row.element.textContent || "").toLowerCase();
+      const buyerPriority = [...priorityByBuyer.entries()]
+        .find(([buyerKey]) => buyerKey.length >= 3 && lowered.includes(buyerKey))?.[1];
+      if (buyerPriority) row.priority = buyerPriority;
+    });
+
+    rows.forEach((row, index) => {
+      row.originalIndex = index;
+      if (!groupsByParent.has(row.parent)) groupsByParent.set(row.parent, []);
+      groupsByParent.get(row.parent).push(row);
+    });
+
+    let moved = 0;
+    groupsByParent.forEach((groupRows, parent) => {
+      const sorted = [...groupRows].sort((a, b) => {
+        const aEffectivePriority = getEffectiveRowPriority(a);
+        const bEffectivePriority = getEffectiveRowPriority(b);
+        const aRank = aEffectivePriority?.priorityRank <= 1 ? aEffectivePriority.priorityRank : 99;
+        const bRank = bEffectivePriority?.priorityRank <= 1 ? bEffectivePriority.priorityRank : 99;
+        return aRank - bRank
+          || Number(aEffectivePriority?.originalPriorityIndex ?? 9999) - Number(bEffectivePriority?.originalPriorityIndex ?? 9999)
+          || a.originalIndex - b.originalIndex;
+      });
+      sorted.forEach((row) => {
+        const effectivePriority = getEffectiveRowPriority(row);
+        if (effectivePriority?.priorityRank <= 1) decoratePriorityRow(row.element, effectivePriority);
+        parent.appendChild(row.element);
+      });
+      moved += sorted.filter((row, index) => row.element !== groupRows[index].element).length;
+    });
+
+    ogPriorityLastRowSignature = getVisibleOrderRowSignature();
+
+    return {
+      ok: true,
+      matched: withPriority.length,
+      ebayMatched: withEbayUrgency.length,
+      moved,
+      visibleRows: rows.length,
+      urgentBuyers: payload.urgentBuyerCount || 0,
+      overdueBuyers: payload.overdueBuyerCount || 0,
+      dueTodayBuyers: payload.dueTodayBuyerCount || 0,
+    };
+  }
+
+  async function requestOgPendingPriorities() {
+    const response = await chrome.runtime.sendMessage({
+      type: "OG_EBAY_GET_PENDING_PRIORITIES",
+      payload: {
+        pageUrl: window.location.href,
+        visibleOrderNumbers: uniqueOrderNumbers(),
+        requestedAt: new Date().toISOString(),
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not get OG due-order priorities.");
+    ogPendingPriorityCache = response;
+    return response;
+  }
+
+  function updatePriorityButtonStatus(text, tone = "") {
+    const button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone;
+  }
+
+  async function prioritizeEbayRowsFromOg({ silent = false } = {}) {
+    try {
+      if (!silent) updatePriorityButtonStatus("Loading OG priorities...");
+      const payload = await requestOgPendingPriorities();
+      const result = applyOgPendingPriorities(payload);
+      const urgentBuyers = Number(payload.urgentBuyerCount || 0);
+      if (result.matched > 0) {
+        updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
+      } else if (result.ebayMatched > 0) {
+        updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
+      } else if (urgentBuyers > 0) {
+        updatePriorityButtonStatus(`${urgentBuyers} urgent OG buyer${urgentBuyers === 1 ? "" : "s"} not matched here`, "success");
+      } else {
+        updatePriorityButtonStatus("No overdue/today OG buyers", "success");
+      }
+      return result;
+    } catch (error) {
+      if (!silent) {
+        console.warn("[OG eBay Priority]", error);
+        updatePriorityButtonStatus("Open OG Pending Orders to sort", "error");
+      }
+      return { ok: false, error: error.message || String(error) };
+    }
+  }
+
+  function maybeAutoPrioritizeEbayRows() {
+    if (!isAwaitingShipmentOrdersPage()) return;
+    const key = `${window.location.pathname}${window.location.search}`;
+    if (ogPriorityAutoAttemptKey === key) return;
+    ogPriorityAutoAttemptKey = key;
+    window.setTimeout(() => {
+      prioritizeEbayRowsFromOg({ silent: true });
+    }, 1500);
+  }
+
+  function schedulePriorityReapply() {
+    if (!ogPendingPriorityCache || ogPriorityReapplyTimer) return;
+    const signature = getVisibleOrderRowSignature();
+    if (!signature || signature === ogPriorityLastRowSignature) return;
+    ogPriorityReapplyTimer = window.setTimeout(() => {
+      ogPriorityReapplyTimer = null;
+      applyOgPendingPriorities(ogPendingPriorityCache);
+    }, 450);
   }
 
   function parseCountFromText(value) {
@@ -1286,7 +1599,8 @@
 
       #${FLOATING_ID},
       #${SINGLE_ORDER_ID},
-      #${SEND_AWAITING_REPORT_ID} {
+      #${SEND_AWAITING_REPORT_ID},
+      #${PRIORITIZE_DUE_ORDERS_ID} {
         position: fixed;
         right: 18px;
         bottom: 18px;
@@ -1324,6 +1638,73 @@
 
       #${SEND_AWAITING_REPORT_ID}:hover {
         background: #d4f8df;
+      }
+
+      #${PRIORITIZE_DUE_ORDERS_ID} {
+        bottom: 126px;
+        border-color: #7f56d9;
+        background: #f4efff;
+        color: #4a1d96;
+        max-width: min(340px, calc(100vw - 36px));
+        white-space: normal;
+      }
+
+      #${PRIORITIZE_DUE_ORDERS_ID}:hover {
+        background: #ebe1ff;
+      }
+
+      #${PRIORITIZE_DUE_ORDERS_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      #${PRIORITIZE_DUE_ORDERS_ID}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
+      }
+
+      .og-ebay-priority-row {
+        position: relative;
+        outline: 2px solid rgba(127, 86, 217, .52);
+        outline-offset: -2px;
+        background: rgba(244, 239, 255, .72) !important;
+      }
+
+      .og-ebay-priority-row.is-og-overdue {
+        outline-color: rgba(180, 35, 24, .68);
+        background: rgba(255, 240, 237, .86) !important;
+      }
+
+      .og-ebay-priority-row.is-og-today {
+        outline-color: rgba(155, 100, 24, .72);
+        background: rgba(255, 248, 225, .9) !important;
+      }
+
+      .og-ebay-priority-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 6px 8px 4px;
+        border: 1px solid rgba(74, 29, 150, .24);
+        border-radius: 999px;
+        background: #fff;
+        color: #4a1d96;
+        font: 900 12px Arial, sans-serif;
+        letter-spacing: .02em;
+        padding: 5px 8px;
+        text-transform: uppercase;
+      }
+
+      .og-ebay-priority-row.is-og-overdue > .og-ebay-priority-badge {
+        border-color: rgba(180, 35, 24, .28);
+        color: #9f1f14;
+      }
+
+      .og-ebay-priority-row.is-og-today > .og-ebay-priority-badge {
+        border-color: rgba(155, 100, 24, .32);
+        color: #6b3f00;
       }
 
       #${SEND_LABEL_ID} {
@@ -1594,6 +1975,33 @@
     }
   }
 
+  function injectPrioritizeDueOrdersButton() {
+    let button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
+
+    if (!isAwaitingShipmentOrdersPage()) {
+      button?.remove();
+      clearOgPriorityBadges();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = PRIORITIZE_DUE_ORDERS_ID;
+      button.textContent = "Prioritize OG Due Orders";
+      button.title = "Move visible eBay rows for OG overdue or due-today buyers to the top of this eBay page";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        prioritizeEbayRowsFromOg();
+      });
+      document.body.appendChild(button);
+    }
+
+    maybeAutoPrioritizeEbayRows();
+    schedulePriorityReapply();
+  }
+
   function dismissBoxReminder() {
     dismissedBoxReminderKey = currentBoxReminderKey;
     document.getElementById(BOX_REMINDER_ID)?.remove();
@@ -1655,6 +2063,7 @@
     injectSendLabelButton();
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
+    injectPrioritizeDueOrdersButton();
     maybeShowBoxReminder();
   }
 
