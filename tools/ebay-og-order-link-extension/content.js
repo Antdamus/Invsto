@@ -29,6 +29,7 @@
   let ogPriorityAutoAttemptKey = "";
   let ogPriorityReapplyTimer = null;
   let ogPriorityLastRowSignature = "";
+  let ogBuyerSelectionHandlersAttached = false;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -528,6 +529,80 @@
     return badge;
   }
 
+  function getBuyerGroupRows(buyerKey) {
+    const normalizedBuyerKey = normalizeBuyerKey(buyerKey);
+    if (!normalizedBuyerKey) return [];
+    return getEbayAwaitingShipmentRows()
+      .filter((row) => normalizeBuyerKey(getRowBuyerUsername(row) || row.dataset.ogBuyerGroup) === normalizedBuyerKey);
+  }
+
+  function getBuyerGroupCheckboxes(buyerKey) {
+    return getBuyerGroupRows(buyerKey)
+      .map(getRowCheckbox)
+      .filter((checkbox) => checkbox && !checkbox.disabled);
+  }
+
+  function isBuyerGroupFullySelected(buyerKey) {
+    const checkboxes = getBuyerGroupCheckboxes(buyerKey);
+    return Boolean(checkboxes.length && checkboxes.every((checkbox) => checkbox.checked));
+  }
+
+  function refreshBuyerGroupSelectButtons(buyerKey = "") {
+    const selector = buyerKey
+      ? `.og-ebay-select-buyer-group[data-og-buyer-key="${CSS.escape(normalizeBuyerKey(buyerKey))}"]`
+      : ".og-ebay-select-buyer-group";
+    document.querySelectorAll(selector).forEach((button) => {
+      const key = button.dataset.ogBuyerKey || "";
+      const count = getBuyerGroupCheckboxes(key).length;
+      const selected = isBuyerGroupFullySelected(key);
+      button.textContent = selected ? `Unselect ${count}` : `Select ${count}`;
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+      button.title = selected
+        ? "Unselect all visible eBay rows for this buyer"
+        : "Select all visible eBay rows for this buyer";
+    });
+  }
+
+  function setCheckboxChecked(checkbox, checked) {
+    if (!checkbox || checkbox.disabled || checkbox.checked === checked) return false;
+    checkbox.click();
+    if (checkbox.checked !== checked) {
+      checkbox.checked = checked;
+      checkbox.dispatchEvent(new Event("input", { bubbles: true }));
+      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return true;
+  }
+
+  function toggleBuyerGroupSelection(buyerKey) {
+    const checkboxes = getBuyerGroupCheckboxes(buyerKey);
+    if (!checkboxes.length) return;
+    const shouldSelect = !checkboxes.every((checkbox) => checkbox.checked);
+    checkboxes.forEach((checkbox) => setCheckboxChecked(checkbox, shouldSelect));
+    refreshBuyerGroupSelectButtons(buyerKey);
+    schedulePriorityReapply({ force: true });
+  }
+
+  function fillBadgeWithBuyerSelectButton(badge, label, buyerKey, rowCount, title = "") {
+    if (!badge) return;
+    const normalizedBuyerKey = normalizeBuyerKey(buyerKey);
+    badge.textContent = "";
+    if (title) badge.title = title;
+
+    const labelText = document.createElement("span");
+    labelText.textContent = label;
+    badge.appendChild(labelText);
+
+    if (!normalizedBuyerKey) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "og-ebay-select-buyer-group";
+    button.dataset.ogBuyerKey = normalizedBuyerKey;
+    button.dataset.ogBuyerCount = String(rowCount || "");
+    badge.appendChild(button);
+    refreshBuyerGroupSelectButtons(normalizedBuyerKey);
+  }
+
   function clearOldOgBadges(row) {
     row?.querySelectorAll?.(".og-ebay-priority-badge, .og-ebay-buyer-badge").forEach((element) => element.remove());
   }
@@ -628,17 +703,31 @@
           ? "DUE TODAY"
           : "BUYER";
       const lineWord = groupInfo.rowCount === 1 ? "line" : "lines";
-      ensureRowBadge(
+      const badge = ensureRowBadge(
         row,
         "og-ebay-priority-badge",
         `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${groupInfo.rowCount} ${lineWord}`,
         `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
       );
+      fillBadgeWithBuyerSelectButton(
+        badge,
+        `${statusLabel} - Buyer: ${groupInfo.buyerUsername || groupInfo.buyerKey} - ${groupInfo.rowCount} ${lineWord}`,
+        groupInfo.buyerKey || groupInfo.buyerUsername,
+        groupInfo.rowCount,
+        `This buyer has ${groupInfo.rowCount} visible eBay row${groupInfo.rowCount === 1 ? "" : "s"}.`
+      );
     } else if (groupInfo.rowCount > 1) {
-      ensureRowBadge(
+      const badge = ensureRowBadge(
         row,
         "og-ebay-buyer-badge",
         `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`,
+        `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`
+      );
+      fillBadgeWithBuyerSelectButton(
+        badge,
+        `Same buyer - line ${groupInfo.groupIndex + 1} of ${groupInfo.rowCount}`,
+        groupInfo.buyerKey || groupInfo.buyerUsername,
+        groupInfo.rowCount,
         `This row belongs with ${groupInfo.buyerUsername || groupInfo.buyerKey}.`
       );
     }
@@ -776,14 +865,34 @@
     }, 1500);
   }
 
-  function schedulePriorityReapply() {
+  function schedulePriorityReapply({ force = false } = {}) {
     if (!ogPendingPriorityCache || ogPriorityReapplyTimer) return;
     const signature = getVisibleOrderRowSignature();
-    if (!signature || signature === ogPriorityLastRowSignature) return;
+    if (!force && (!signature || signature === ogPriorityLastRowSignature)) return;
     ogPriorityReapplyTimer = window.setTimeout(() => {
       ogPriorityReapplyTimer = null;
       applyOgPendingPriorities(ogPendingPriorityCache);
+      refreshBuyerGroupSelectButtons();
     }, 450);
+  }
+
+  function attachBuyerGroupSelectionHandlers() {
+    if (ogBuyerSelectionHandlersAttached) return;
+    ogBuyerSelectionHandlersAttached = true;
+
+    document.addEventListener("click", (event) => {
+      const button = event.target?.closest?.(".og-ebay-select-buyer-group");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleBuyerGroupSelection(button.dataset.ogBuyerKey || "");
+    }, true);
+
+    document.addEventListener("change", (event) => {
+      if (!event.target?.matches?.('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]')) return;
+      refreshBuyerGroupSelectButtons(getRowBuyerUsername(event.target.closest("tr")));
+      schedulePriorityReapply({ force: true });
+    }, true);
   }
 
   function parseCountFromText(value) {
@@ -1890,6 +1999,29 @@
         color: #7c2d12;
       }
 
+      .og-ebay-select-buyer-group {
+        appearance: none;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, .92);
+        color: inherit;
+        cursor: pointer;
+        font: 900 11px/1 Arial, sans-serif;
+        margin-left: 8px;
+        padding: 4px 7px;
+      }
+
+      .og-ebay-select-buyer-group:hover {
+        background: #fff;
+        box-shadow: 0 1px 4px rgba(17, 24, 39, .22);
+      }
+
+      .og-ebay-select-buyer-group[aria-pressed="true"] {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+      }
+
       #${SEND_LABEL_ID} {
         margin-left: 8px;
         border: 1px solid #116b36;
@@ -2240,6 +2372,7 @@
 
   function injectOgControls() {
     ensureStyles();
+    attachBuyerGroupSelectionHandlers();
     injectRowButtons();
     injectFloatingButton();
     injectSingleOrderButton();
