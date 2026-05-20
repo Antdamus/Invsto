@@ -517,3 +517,8 @@ entrypoint = "./functions/microsoft-mailbox-disconnect/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/microsoft-email-bootstrap/index.ts"
+
+[functions.microsoft-email-sync]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/microsoft-email-sync/index.ts"
