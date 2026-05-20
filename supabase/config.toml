@@ -522,3 +522,8 @@ entrypoint = "./functions/microsoft-email-bootstrap/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/microsoft-email-sync/index.ts"
+
+[functions.microsoft-email-process]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/microsoft-email-process/index.ts"
