@@ -56,13 +56,17 @@
             <p>Sign in with Microsoft to prove the OAuth callback, server-side token exchange, and latest mailbox read.</p>
           </div>
           <div class="email-triage-actions">
+            <button type="button" id="refresh-messages" class="secondary-btn hidden">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
             <button type="button" id="connect-outlook" class="primary-btn">
               <i data-lucide="mail-plus"></i>
               Connect Outlook Mailbox
             </button>
-            <button type="button" id="refresh-messages" class="secondary-btn hidden">
-              <i data-lucide="refresh-cw"></i>
-              Refresh
+            <button type="button" id="disconnect-outlook" class="danger-btn hidden">
+              <i data-lucide="unlink"></i>
+              Disconnect Outlook
             </button>
           </div>
         </section>

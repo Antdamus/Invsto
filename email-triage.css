@@ -52,7 +52,8 @@
 }
 
 .primary-btn,
-.secondary-btn {
+.secondary-btn,
+.danger-btn {
   min-height: 44px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,.12);
@@ -76,14 +77,25 @@
   background: rgba(255,255,255,.05);
 }
 
+.danger-btn {
+  background: rgba(255,99,132,.1);
+  border-color: rgba(255,99,132,.28);
+}
+
 .primary-btn:hover,
-.secondary-btn:hover {
+.secondary-btn:hover,
+.danger-btn:hover {
   transform: translateY(-1px);
   border-color: rgba(214,178,94,.42);
 }
 
+.danger-btn:hover {
+  border-color: rgba(255,99,132,.48);
+}
+
 .primary-btn:disabled,
-.secondary-btn:disabled {
+.secondary-btn:disabled,
+.danger-btn:disabled {
   opacity: .58;
   cursor: wait;
   transform: none;
@@ -227,7 +239,8 @@
   }
 
   .primary-btn,
-  .secondary-btn {
+  .secondary-btn,
+  .danger-btn {
     width: 100%;
   }
 

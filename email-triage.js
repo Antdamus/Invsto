@@ -4,10 +4,12 @@
   const START_FUNCTION = "microsoft-auth-start";
   const MESSAGES_FUNCTION = "microsoft-latest-messages";
   const STATUS_FUNCTION = "microsoft-mailbox-status";
+  const DISCONNECT_FUNCTION = "microsoft-mailbox-disconnect";
 
   const els = {
     connect: document.getElementById("connect-outlook"),
     refresh: document.getElementById("refresh-messages"),
+    disconnect: document.getElementById("disconnect-outlook"),
     statusPanel: document.getElementById("email-status-panel"),
     statusKicker: document.getElementById("email-status-kicker"),
     statusTitle: document.getElementById("email-status-title"),
@@ -73,6 +75,8 @@
       unauthorized: "Your admin session expired. Sign in again before loading mailbox status.",
       invalid_session: "Your admin session expired. Sign in again before loading messages.",
       missing_authorization: "Your admin session was not sent to the mailbox function.",
+      forbidden: "Only active admins can disconnect the Outlook mailbox.",
+      disconnect_failed: "Outlook could not be disconnected. Try again, then check the Edge Function logs if it continues.",
       status_lookup_failed: "Mailbox status could not be loaded. Try refreshing the page.",
       connection_lookup_failed: "Mailbox connection records could not be checked. Try refreshing the page.",
       missing_connection_secret: "The mailbox connection is missing its server-side secret. Reconnect Outlook to restore access.",
@@ -111,7 +115,7 @@
   }
 
   function setLoading(isLoading) {
-    [els.connect, els.refresh].forEach((button) => {
+    [els.connect, els.refresh, els.disconnect].forEach((button) => {
       if (!button) return;
       button.disabled = isLoading;
       button.setAttribute("aria-busy", isLoading ? "true" : "false");
@@ -122,6 +126,7 @@
     if (mode === "connected") {
       els.refresh?.classList.remove("hidden", "secondary-btn");
       els.refresh?.classList.add("primary-btn");
+      els.disconnect?.classList.remove("hidden");
       if (els.connect) {
         els.connect.classList.remove("hidden", "primary-btn");
         els.connect.classList.add("secondary-btn");
@@ -130,6 +135,7 @@
     } else if (mode === "attention") {
       els.refresh?.classList.remove("hidden", "primary-btn");
       els.refresh?.classList.add("secondary-btn");
+      els.disconnect?.classList.remove("hidden");
       if (els.connect) {
         els.connect.classList.remove("hidden", "secondary-btn");
         els.connect.classList.add("primary-btn");
@@ -137,6 +143,7 @@
       }
     } else {
       els.refresh?.classList.add("hidden");
+      els.disconnect?.classList.add("hidden");
       if (els.connect) {
         els.connect.classList.remove("hidden", "secondary-btn");
         els.connect.classList.add("primary-btn");
@@ -324,6 +331,37 @@
     }
   }
 
+  async function disconnectOutlook(context) {
+    const confirmed = window.confirm("Disconnect Outlook for email triage? This removes the stored server-side refresh token and stops automatic mailbox loading.");
+    if (!confirmed) return;
+
+    setLoading(true);
+    setStatus("Disconnecting", "Disconnecting Outlook mailbox", "Removing the persisted mailbox secret from the server.");
+
+    try {
+      await edgeFetch(DISCONNECT_FUNCTION, context.session, {
+        method: "POST",
+        body: "{}",
+      });
+      renderDisconnectedStatus();
+      setStatus(
+        "Disconnected",
+        "Outlook mailbox disconnected",
+        "Connect Outlook Mailbox is available when you are ready to reconnect.",
+      );
+    } catch (error) {
+      const code = error.code || error.message;
+      if (code === "mailbox_not_connected") {
+        renderDisconnectedStatus();
+        return;
+      }
+      setButtonMode("attention");
+      setStatus("Mailbox needs attention", "Could not disconnect Outlook", safeErrorMessage(code), "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handleOutlookQueryNotice() {
     const params = new URLSearchParams(window.location.search);
     const outlook = params.get("outlook");
@@ -344,6 +382,7 @@
 
     els.connect?.addEventListener("click", () => connectOutlook(context));
     els.refresh?.addEventListener("click", () => loadMessages(context));
+    els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
 
     handleOutlookQueryNotice();
 

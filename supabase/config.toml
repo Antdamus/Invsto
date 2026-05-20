@@ -507,3 +507,8 @@ entrypoint = "./functions/microsoft-auth-callback/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/microsoft-mailbox-status/index.ts"
+
+[functions.microsoft-mailbox-disconnect]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/microsoft-mailbox-disconnect/index.ts"
