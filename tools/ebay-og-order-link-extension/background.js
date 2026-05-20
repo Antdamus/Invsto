@@ -8,6 +8,7 @@
   const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
   const RECEIVER_STATE_TIMEOUT_MS = 900;
+  const DEFAULT_AWAITING_SHIPMENT_URL = "https://www.ebay.com/sh/ord/?filter=status:AWAITING_SHIPMENT";
   const downloadCaptures = new Map();
   const appTransferAcks = new Map();
   const appReportAcks = new Map();
@@ -181,6 +182,117 @@
     const exact = tabs.filter((tab) => isExactAppTab(tab, appUrl));
     const sameOrigin = tabs.filter((tab) => isSameOriginOgTab(tab, appUrl) && !exact.some((entry) => entry.id === tab.id));
     return [...exact, ...sameOrigin];
+  }
+
+  function isEbayTab(tab) {
+    const tabUrl = normalizeUrl(tab?.url);
+    return Boolean(tabUrl && /(^|\.)ebay\.com$/i.test(tabUrl.hostname));
+  }
+
+  function isAwaitingShipmentTab(tab) {
+    const tabUrl = normalizeUrl(tab?.url);
+    if (!tabUrl || !/(^|\.)ebay\.com$/i.test(tabUrl.hostname)) return false;
+    const path = tabUrl.pathname.replace(/\/+$/, "");
+    if (path !== "/sh/ord") return false;
+    const sample = `${tabUrl.search} ${tabUrl.hash} ${tab?.title || ""}`;
+    return /AWAITING_SHIPMENT|awaiting shipment/i.test(sample);
+  }
+
+  function waitForTabComplete(tabId, timeoutMs = 25000, options = {}) {
+    const allowAlreadyComplete = options.allowAlreadyComplete !== false;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = async () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        const tab = await chrome.tabs.get(tabId).catch(() => null);
+        resolve(tab);
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      const onUpdated = (updatedTabId, changeInfo) => {
+        if (updatedTabId === tabId && changeInfo.status === "complete") finish();
+      };
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      if (allowAlreadyComplete) {
+        chrome.tabs.get(tabId).then((tab) => {
+          if (tab?.status === "complete") finish();
+        }).catch(() => null);
+      }
+    });
+  }
+
+  async function askAwaitingTabToOrganize(tabId, payload = {}) {
+    const message = {
+      type: "OG_EBAY_REORGANIZE_AWAITING_QUEUE",
+      payload: {
+        source: "og-pending-queue-changed",
+        requestedAt: new Date().toISOString(),
+        ...payload,
+      },
+    };
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt ? 800 : 1200));
+      const response = await chrome.tabs.sendMessage(tabId, message).catch(() => null);
+      if (response?.ok) return response;
+    }
+    return { ok: false, error: "The eBay page reloaded, but the organizer content script did not answer yet." };
+  }
+
+  async function refreshAwaitingShipmentQueue(payload = {}, sender = null) {
+    const tabs = await chrome.tabs.query({});
+    const awaitingTabs = tabs.filter(isAwaitingShipmentTab);
+    let targetTab = awaitingTabs.find((tab) => tab.active) || awaitingTabs[0] || null;
+    let opened = false;
+    let reloaded = false;
+
+    if (targetTab?.id) {
+      await focusTab(targetTab.id);
+      await chrome.tabs.reload(targetTab.id);
+      reloaded = true;
+    } else if (sender?.tab?.id && isEbayTab(sender.tab)) {
+      targetTab = await chrome.tabs.update(sender.tab.id, {
+        url: DEFAULT_AWAITING_SHIPMENT_URL,
+        active: true,
+      });
+      opened = true;
+    } else {
+      targetTab = await chrome.tabs.create({
+        url: DEFAULT_AWAITING_SHIPMENT_URL,
+        active: true,
+      });
+      opened = true;
+    }
+
+    if (targetTab?.id) await focusTab(targetTab.id);
+    const completedTab = targetTab?.id
+      ? await waitForTabComplete(targetTab.id, 25000, { allowAlreadyComplete: !reloaded })
+      : null;
+    if (completedTab?.id) await askAwaitingTabToOrganize(completedTab.id, payload);
+
+    return {
+      ok: Boolean(targetTab?.id),
+      tabId: targetTab?.id || null,
+      opened,
+      reloaded,
+    };
+  }
+
+  function shouldRefreshQueueAfterLabelAck(response = {}) {
+    return Boolean(response?.ok && (response.routedTo === "history" || response.extraLabel));
+  }
+
+  async function refreshQueueAfterHistoryLabelAck(response = {}, sender = null) {
+    if (!shouldRefreshQueueAfterLabelAck(response)) return response;
+    const awaitingRefresh = await refreshAwaitingShipmentQueue({
+      reason: response.extraLabel ? "history-extra-label-attached" : "history-label-attached",
+      orderNumber: response.orderNumber || "",
+      orderNumbers: response.orderNumbers || [],
+      transferId: response.transferId || "",
+    }, sender).catch((error) => ({ ok: false, error: error.message || String(error) }));
+    return { ...response, awaitingRefresh };
   }
 
   function buildAppPageUrl(appUrl, payload, pageName = "") {
@@ -621,12 +733,13 @@
         metadata: capture.metadata,
         label,
       });
+      const finalResponse = await refreshQueueAfterHistoryLabelAck(response, { tab: { id: capture.tabId } });
       finishDownloadCapture(capture.captureId);
       if (capture.tabId !== null) {
         chrome.tabs.sendMessage(capture.tabId, {
           type: "OG_EBAY_DOWNLOAD_CAPTURE_RESULT",
           captureId: capture.captureId,
-          result: response,
+          result: finalResponse,
         }).catch(() => null);
       }
     } catch (error) {
@@ -669,6 +782,7 @@
 
     if (message.type === "OG_EBAY_SEND_LABEL") {
       relayLabelToApp(message.payload)
+        .then((response) => refreshQueueAfterHistoryLabelAck(response, _sender))
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -696,6 +810,13 @@
 
     if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
       relayAwaitingReportToApp(message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
+      refreshAwaitingShipmentQueue(message.payload || {}, _sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;

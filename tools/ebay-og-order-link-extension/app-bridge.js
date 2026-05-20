@@ -149,6 +149,10 @@
     }
     if (event.data?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS") {
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS");
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
+      relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_PENDING_QUEUE_CHANGED");
     }
   });
 

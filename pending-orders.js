@@ -3264,6 +3264,10 @@ async function confirmWorkerNoInventoryCompletion() {
     if (errorEl) errorEl.textContent = "";
     if (confirmButton) confirmButton.disabled = true;
     const currentBuyerKey = state.activeBuyerKey;
+    const completedOrderNumbers = [...new Set(selectedLineIds
+      .map((lineId) => state.orders.find((entry) => entry.id === lineId)?.order?.order_number)
+      .map(normalizeEbayOrderNumber)
+      .filter(Boolean))];
     const selectedPhotoCount = getSelectedNoInventoryEvidencePhotos().length;
     setNoInventoryPhotoStatus(
       selectedPhotoCount
@@ -3293,6 +3297,12 @@ async function confirmWorkerNoInventoryCompletion() {
     closeWorkerNoInventoryModal();
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
+    postEbayPendingQueueChanged({
+      action: "no_inventory_completion",
+      orderNumbers: completedOrderNumbers,
+      lineCount: selectedLineIds.length,
+      updatedLines: data?.[0]?.updated_lines || selectedLineIds.length,
+    });
 
     const nextBuyerLine = getNextPackableLine(currentBuyerKey);
     if (nextBuyerLine) {
@@ -3405,6 +3415,10 @@ async function confirmAdminOrderCloseout() {
     state.busy = true;
     if (errorEl) errorEl.textContent = "";
     $("confirm-admin-order-closeout").disabled = true;
+    const closedOrderNumbers = [...new Set(lines
+      .map((line) => line.order?.order_number)
+      .map(normalizeEbayOrderNumber)
+      .filter(Boolean))];
 
     const valid = await verifyAdminPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
@@ -3421,6 +3435,12 @@ async function confirmAdminOrderCloseout() {
     clearAdminOrderSelection();
     setImportStatus(`Closed ${data?.[0]?.updated_lines || lines.length} order line(s).`, "success");
     await loadOrders();
+    postEbayPendingQueueChanged({
+      action: `admin_${state.adminCloseoutAction || "closeout"}`,
+      orderNumbers: closedOrderNumbers,
+      lineCount: lines.length,
+      updatedLines: data?.[0]?.updated_lines || lines.length,
+    });
   } catch (error) {
     console.error("Admin order closeout failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not close selected orders.";
@@ -3537,6 +3557,12 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     : `Confirming and removing ${staged.length} packed item(s)...`);
 
   try {
+    const completedOrderNumbers = [...new Set((liveItems.length && !staged.length
+      ? [state.selectedLine?.order?.order_number]
+      : staged.map((entry) => entry.line?.order?.order_number))
+      .map(normalizeEbayOrderNumber)
+      .filter(Boolean))];
+    const completedLineCount = liveItems.length && !staged.length ? 1 : staged.length;
     const changedItemIds = [];
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
@@ -3575,6 +3601,12 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     state.stagedFulfillments.clear();
     setStatus("Packed bundle confirmed. Stock was removed and signed.", "info");
     await loadOrders();
+    postEbayPendingQueueChanged({
+      action: liveItems.length && !staged.length ? "live_lot_fulfillment" : "inventory_fulfillment",
+      orderNumbers: completedOrderNumbers,
+      lineCount: completedLineCount,
+      changedItemCount: [...new Set(changedItemIds)].length,
+    });
 
     const nextBuyerLine = getNextPackableLine(state.activeBuyerKey);
     if (nextBuyerLine) {
@@ -3678,6 +3710,22 @@ function postEbayReportTransferStatus(payload = {}) {
   window.postMessage({
     type: "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS",
     payload,
+  }, window.location.origin);
+}
+
+function postEbayPendingQueueChanged(payload = {}) {
+  const orderNumbers = [...new Set((payload.orderNumbers || [])
+    .map(normalizeEbayOrderNumber)
+    .filter(Boolean))];
+  window.postMessage({
+    type: "OG_EBAY_PENDING_QUEUE_CHANGED",
+    payload: {
+      source: "og-pending-orders",
+      pageUrl: window.location.href,
+      changedAt: new Date().toISOString(),
+      ...payload,
+      orderNumbers,
+    },
   }, window.location.origin);
 }
 

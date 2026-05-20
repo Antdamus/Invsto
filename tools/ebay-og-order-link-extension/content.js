@@ -2845,6 +2845,30 @@
     }, 250);
   }
 
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== "OG_EBAY_REORGANIZE_AWAITING_QUEUE") return false;
+
+    (async () => {
+      if (!isAwaitingShipmentOrdersPage()) {
+        sendResponse({ ok: false, error: "This is not the eBay awaiting-shipment orders page." });
+        return;
+      }
+
+      injectOgControls();
+      updatePriorityButtonStatus("Refreshing OG priorities...");
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+      const result = await prioritizeEbayRowsFromOg({ silent: false });
+      updateBulkActionsShortcut();
+      sendResponse({ ok: Boolean(result?.ok), result });
+    })().catch((error) => {
+      console.warn("[OG eBay Priority] Refresh after queue change failed:", error);
+      updatePriorityButtonStatus("Refresh needs OG Pending Orders", "error");
+      sendResponse({ ok: false, error: error.message || String(error) });
+    });
+
+    return true;
+  });
+
   injectOgControls();
   new MutationObserver(scheduleInject).observe(document.body, {
     childList: true,
