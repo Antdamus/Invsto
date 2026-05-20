@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - Email Triage</title>
+
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="email-triage.css" />
+
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Email Triage</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links"></nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links"></nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="admin-greeting">Email Triage</strong>
+            <div class="sub">Outlook proof of connection</div>
+          </div>
+
+          <div class="header-pills" aria-label="Connection context">
+            <div class="pill">Scope: <b>Mail.Read</b></div>
+            <div class="pill">Mode: <b>Admin</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content email-triage-content">
+        <section class="email-triage-hero">
+          <div>
+            <span class="eyebrow">Microsoft Graph</span>
+            <h1>Connect Outlook Mailbox</h1>
+            <p>Sign in with Microsoft to prove the OAuth callback, server-side token exchange, and latest mailbox read.</p>
+          </div>
+          <div class="email-triage-actions">
+            <button type="button" id="connect-outlook" class="primary-btn">
+              <i data-lucide="mail-plus"></i>
+              Connect Outlook Mailbox
+            </button>
+            <button type="button" id="refresh-messages" class="secondary-btn hidden">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+          </div>
+        </section>
+
+        <section id="email-status-panel" class="email-status-panel" aria-live="polite">
+          <span id="email-status-kicker">Not connected</span>
+          <strong id="email-status-title">Outlook connection required</strong>
+          <p id="email-status-detail">Connect the OG mailbox to display the latest 10 messages.</p>
+        </section>
+
+        <section id="email-messages-section" class="email-messages-section hidden" aria-label="Latest Outlook emails">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Latest Outlook Emails</h3>
+              <div class="section-sub">Sanitized message previews returned by Microsoft Graph</div>
+            </div>
+            <span id="message-count-pill" class="email-count-pill">0 messages</span>
+          </div>
+
+          <div class="email-table-wrap">
+            <table class="email-table">
+              <thead>
+                <tr>
+                  <th>Sender</th>
+                  <th>Subject</th>
+                  <th>Received</th>
+                  <th>Preview</th>
+                </tr>
+              </thead>
+              <tbody id="email-messages-body">
+                <tr>
+                  <td colspan="4">No messages loaded.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="admin-nav.js"></script>
+  <script src="email-triage.js"></script>
+</body>
+</html>

@@ -14,6 +14,7 @@
     { href: "past-live-sales.html", label: "Past Live Sales", mark: "PL" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
+    { href: "email-triage.html", label: "Email Triage", mark: "ET" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
   ];
 
@@ -53,7 +54,7 @@
 
   function waitForSupabaseReady(timeoutMs = 8000) {
     return new Promise((resolve) => {
-      if (window.supabase) {
+      if (window.supabase?.auth?.getSession) {
         resolve(window.supabase);
         return;
       }
@@ -67,6 +68,7 @@
 
       document.addEventListener("supabase-ready", () => {
         if (settled) return;
+        if (!window.supabase?.auth?.getSession) return;
         settled = true;
         window.clearTimeout(timeout);
         resolve(window.supabase || null);
