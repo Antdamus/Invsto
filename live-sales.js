@@ -2447,6 +2447,7 @@ async function createOrLoadLot(options = {}) {
     return null;
   } finally {
     state.busy = false;
+    updateScanGate();
   }
 }
 
@@ -3495,6 +3496,7 @@ async function finalizeCurrentBag() {
     setStatus(error.message || "Could not finish this auction bag.", "error");
   } finally {
     state.busy = false;
+    updateScanGate();
   }
 }
 
