@@ -14,6 +14,7 @@
   const ADMIN_VIEW_TIMEOUT_MS = 15000;
   const MESSAGE_DETAIL_TIMEOUT_MS = 15000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
+  const DENSITY_STORAGE_KEY = "og-email-triage-density";
   const CATEGORY_GROUPS = [
     { id: "all", label: "All", categories: [] },
     { id: "return_requests", label: "Return Requests", categories: ["return_request", "refund_request", "cancellation_request"] },
@@ -41,7 +42,11 @@
     classificationAdminStatus: document.getElementById("classification-admin-status"),
     classificationAdminSummary: document.getElementById("classification-admin-summary"),
     classificationSort: document.getElementById("classification-sort"),
+    classificationFiltersToggle: document.getElementById("classification-filters-toggle"),
+    classificationFiltersLabel: document.getElementById("classification-filters-label"),
+    classificationFilterPanel: document.getElementById("classification-filter-panel"),
     classificationFilterToggles: document.querySelectorAll("[data-classification-filter]"),
+    classificationDensityInputs: document.querySelectorAll("input[name='classification-density']"),
     classificationCategoryList: document.getElementById("classification-category-list"),
     classificationList: document.getElementById("classification-list"),
     classificationDetail: document.getElementById("classification-detail"),
@@ -59,13 +64,32 @@
     selectedCategory: "all",
     selectedClassificationId: null,
     activeFilters: [],
+    filtersExpanded: false,
     sortMode: "newest",
+    densityMode: getStoredDensityMode(),
     messageDetailsById: {},
     messageDetailLoadingId: null,
     messageDetailErrorsById: {},
     expandedMessageIds: {},
     updatedAt: null,
   };
+
+  function getStoredDensityMode() {
+    try {
+      const stored = window.localStorage?.getItem(DENSITY_STORAGE_KEY);
+      return stored === "compact" ? "compact" : "expanded";
+    } catch (error) {
+      return "expanded";
+    }
+  }
+
+  function storeDensityMode(mode) {
+    try {
+      window.localStorage?.setItem(DENSITY_STORAGE_KEY, mode);
+    } catch (error) {
+      // Ignore storage failures; density still works for the current session.
+    }
+  }
 
   function waitForSupabaseReady(timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
@@ -690,6 +714,11 @@
     ].join("");
   }
 
+  function filterToggleLabel(activeCount) {
+    if (!activeCount) return "Filters";
+    return `Filters (${activeCount} active)`;
+  }
+
   function renderCategorySidebar(state, data) {
     if (!els.classificationCategoryList) return;
 
@@ -724,6 +753,8 @@
       return;
     }
 
+    const compactMode = state.densityMode === "compact";
+
     els.classificationList.innerHTML = rows.map((classification) => {
       const selected = state.selectedClassificationId === classification.id;
       const humanReview = hasHumanReviewSignal(classification);
@@ -732,11 +763,30 @@
       const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
       const categoryBadge = renderBadge(humanizeValue(classification.category || "Uncategorized"), "category");
       const confidenceBadge = renderBadge(formatConfidence(classification.confidence), confidenceBadgeVariant(classification));
+      const priorityBadge = renderBadge(`${humanizeValue(workflowPriority(classification))} Priority`, priorityBadgeVariant(classification));
+      const urgencyBadge = renderBadge(humanizeValue(workflowUrgency(classification)), urgencyBadgeVariant(classification));
       const workflowBadges = renderWorkflowBadges(classification);
       const riskBadges = [
         classification.chargeback_risk === true ? renderBadge("Chargeback Risk", "critical") : "",
         classification.refund_risk === true ? renderBadge("Refund Risk", "danger") : "",
       ].join("");
+
+      if (compactMode) {
+        return `
+          <button type="button" class="classification-row is-compact${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
+            <span class="classification-compact-main">
+              <strong>${escapeHtml(getClassificationTitle(classification))}</strong>
+              <span>${escapeHtml(getClassificationSender(classification))}</span>
+            </span>
+            <span class="classification-compact-badges">
+              ${categoryBadge}
+              ${priorityBadge}
+              ${urgencyBadge}
+            </span>
+            <span class="classification-compact-time">${escapeHtml(ageLabel)}</span>
+          </button>
+        `;
+      }
 
       return `
         <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
@@ -982,9 +1032,27 @@
     if (els.classificationSort && els.classificationSort.value !== state.sortMode) {
       els.classificationSort.value = state.sortMode;
     }
+    const activeFilterCount = state.activeFilters.length;
+    const filtersExpanded = state.filtersExpanded === true;
+    if (els.classificationFiltersLabel) {
+      els.classificationFiltersLabel.textContent = filterToggleLabel(activeFilterCount);
+    }
+    if (els.classificationFiltersToggle) {
+      els.classificationFiltersToggle.setAttribute("aria-expanded", filtersExpanded ? "true" : "false");
+      els.classificationFiltersToggle.classList.toggle("has-active-filters", activeFilterCount > 0);
+      els.classificationFiltersToggle.classList.toggle("is-expanded", filtersExpanded);
+    }
+    if (els.classificationFilterPanel) {
+      els.classificationFilterPanel.hidden = !filtersExpanded;
+      els.classificationFilterPanel.classList.toggle("is-expanded", filtersExpanded);
+    }
     els.classificationFilterToggles?.forEach((input) => {
       input.checked = state.activeFilters.includes(input.getAttribute("data-classification-filter"));
     });
+    els.classificationDensityInputs?.forEach((input) => {
+      input.checked = input.value === state.densityMode;
+    });
+    els.classificationList?.classList.toggle("is-compact-density", state.densityMode === "compact");
 
     if (els.classificationAdminSummary) {
       els.classificationAdminSummary.innerHTML = [
@@ -1314,6 +1382,21 @@
       setAdminClassificationState({
         sortMode,
         selectedClassificationId: firstMatch?.id || null,
+      });
+    });
+
+    els.classificationFiltersToggle?.addEventListener("click", () => {
+      setAdminClassificationState({
+        filtersExpanded: !adminClassificationState.filtersExpanded,
+      });
+    });
+
+    els.classificationDensityInputs?.forEach((input) => {
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        const densityMode = input.value === "compact" ? "compact" : "expanded";
+        storeDensityMode(densityMode);
+        setAdminClassificationState({ densityMode });
       });
     });
 
