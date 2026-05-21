@@ -11,7 +11,7 @@ const SUPPORTED_MODES = [
   "replay_processing",
   "resume_sync_replay",
 ] as const;
-const SUPPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
+const SUPPORTED_JOB_TYPES = ["normalize", "match_order", "classify"] as const;
 const ACTIVE_JOB_STATUSES = ["queued", "running"];
 const TERMINAL_JOB_STATUSES = ["succeeded", "failed", "skipped"];
 const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "skipped"];
@@ -193,6 +193,18 @@ function unique(values: Array<string | null | undefined>) {
 
 function jobKey(messageId: string, jobType: string) {
   return `${messageId}:${jobType}`;
+}
+
+function replayPriority(jobType: string) {
+  if (jobType === "normalize") return 40;
+  if (jobType === "match_order") return 50;
+  return 60;
+}
+
+function requeuePriority(jobType: string) {
+  if (jobType === "normalize") return 45;
+  if (jobType === "match_order") return 55;
+  return 65;
 }
 
 function cleanErrorMessage(value: unknown) {
@@ -612,7 +624,7 @@ async function requeueFailedJobs(supabase: ServiceClient, input: OpsInput, opera
       message_id: job.message_id,
       job_type: job.job_type,
       status: "queued",
-      priority: job.job_type === "normalize" ? 45 : 55,
+      priority: requeuePriority(String(job.job_type)),
       attempt_count: 0,
       max_attempts: job.max_attempts || 3,
       available_at: new Date().toISOString(),
@@ -695,7 +707,7 @@ async function replayProcessing(supabase: ServiceClient, input: OpsInput, operat
         message_id: message.id,
         job_type: jobType,
         status: "queued",
-        priority: jobType === "normalize" ? 40 : 50,
+        priority: replayPriority(jobType),
         attempt_count: 0,
         max_attempts: 3,
         available_at: new Date().toISOString(),
