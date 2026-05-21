@@ -32,6 +32,7 @@
   let ogPriorityAutoAttemptKey = "";
   let ogPriorityReapplyTimer = null;
   let ogPriorityLastRowSignature = "";
+  const ogLocallyClosedAwaitingOrders = new Set();
   let ogBuyerSelectionHandlersAttached = false;
   let ogBuyerSelectionInProgress = false;
   let ogBuyerSelectionRefreshTimer = null;
@@ -382,9 +383,20 @@
     };
   }
 
-  function getEbayAwaitingShipmentRows() {
+  function getRawEbayAwaitingShipmentRows() {
     return [...document.querySelectorAll('tr.order-info[id^="orderid_"][id$="__order-info"], tr.order-info.order-border')]
       .filter((row) => row.querySelector('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]'));
+  }
+
+  function isOgLocallyClosedAwaitingRow(row) {
+    const orderNumber = getRowOrderNumber(row);
+    return row?.dataset?.ogClosedInOg === "true"
+      || Boolean(orderNumber && ogLocallyClosedAwaitingOrders.has(orderNumber));
+  }
+
+  function getEbayAwaitingShipmentRows(options = {}) {
+    return getRawEbayAwaitingShipmentRows()
+      .filter((row) => options.includeOgClosed || !isOgLocallyClosedAwaitingRow(row));
   }
 
   function getRowCheckbox(row) {
@@ -501,6 +513,93 @@
       return [...document.querySelectorAll("tr.my-note-row[ordernumber]")]
         .find((noteRow) => noteRow.getAttribute("ordernumber") === orderNumber) || null;
     }
+  }
+
+  function setRelatedAwaitingRowsClosed(row, closed = true) {
+    const orderNumber = getRowOrderNumber(row);
+    const rows = [row, getAssociatedNoteRow(row)].filter(Boolean);
+    rows.forEach((entry) => {
+      entry.classList.toggle("og-ebay-closed-in-og", closed);
+      entry.dataset.ogClosedInOg = closed ? "true" : "";
+      if (!closed) entry.removeAttribute("data-og-closed-in-og");
+    });
+    if (closed && orderNumber) ogLocallyClosedAwaitingOrders.add(orderNumber);
+    if (!closed && orderNumber) ogLocallyClosedAwaitingOrders.delete(orderNumber);
+  }
+
+  function syncLocallyClosedAwaitingRows() {
+    if (!ogLocallyClosedAwaitingOrders.size) return;
+    getRawEbayAwaitingShipmentRows().forEach((row) => {
+      const orderNumber = getRowOrderNumber(row);
+      if (orderNumber && ogLocallyClosedAwaitingOrders.has(orderNumber)) {
+        setRelatedAwaitingRowsClosed(row, true);
+      }
+    });
+  }
+
+  function shouldHideRowsForPendingQueueChange(payload = {}) {
+    const action = String(payload.action || "").toLowerCase();
+    return [
+      "no_inventory_completion",
+      "inventory_fulfillment",
+      "live_lot_fulfillment",
+      "admin_cancelled",
+      "admin_fulfilled_no_inventory",
+      "admin_archived",
+      "admin_closeout",
+    ].includes(action);
+  }
+
+  function getPendingOrderNumbersFromPriorityPayload(payload = {}) {
+    const pending = new Set();
+    (Array.isArray(payload.priorities) ? payload.priorities : []).forEach((entry) => {
+      (Array.isArray(entry.orderNumbers) ? entry.orderNumbers : [])
+        .map(normalizeOrderNumber)
+        .filter(Boolean)
+        .forEach((orderNumber) => pending.add(orderNumber));
+    });
+    return pending;
+  }
+
+  function hideClosedAwaitingRowsFromOg(payload = {}, priorityPayload = null) {
+    if (!shouldHideRowsForPendingQueueChange(payload)) {
+      return { hiddenRows: 0, orderNumbers: [], stillPendingOrderNumbers: [] };
+    }
+
+    const orderNumbers = unique([
+      payload.orderNumber,
+      ...(Array.isArray(payload.orderNumbers) ? payload.orderNumbers : []),
+    ].map(normalizeOrderNumber));
+    if (!orderNumbers.length) return { hiddenRows: 0, orderNumbers: [], stillPendingOrderNumbers: [] };
+
+    const pendingOrderNumbers = priorityPayload ? getPendingOrderNumbersFromPriorityPayload(priorityPayload) : null;
+    const stillPendingOrderNumbers = pendingOrderNumbers
+      ? orderNumbers.filter((orderNumber) => pendingOrderNumbers.has(orderNumber))
+      : [];
+    const closed = new Set(pendingOrderNumbers
+      ? orderNumbers.filter((orderNumber) => !pendingOrderNumbers.has(orderNumber))
+      : orderNumbers);
+    let hiddenRows = 0;
+    getEbayAwaitingShipmentRows({ includeOgClosed: true }).forEach((row) => {
+      const orderNumber = getRowOrderNumber(row);
+      if (!closed.has(orderNumber) || isOgLocallyClosedAwaitingRow(row)) return;
+      const checkbox = getRowCheckbox(row);
+      if (checkbox?.checked) {
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setRelatedAwaitingRowsClosed(row, true);
+      hiddenRows += 1;
+    });
+
+    if (hiddenRows) {
+      ogPriorityLastRowSignature = "";
+      renderUrgentCoverageWarning(null);
+      updateBulkActionsShortcut();
+      refreshBuyerGroupSelectButtons();
+    }
+
+    return { hiddenRows, orderNumbers, stillPendingOrderNumbers };
   }
 
   function normalizeBuyerKey(value) {
@@ -1118,25 +1217,29 @@
     button.dataset.statusTone = tone;
   }
 
+  function updatePriorityButtonStatusFromResult(result = {}, payload = {}) {
+    const urgentBuyers = Number(payload.urgentBuyerCount || 0);
+    if (Number(result.hiddenUrgentLines || 0) > 0) {
+      updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
+    } else if (Number(result.hiddenPartialLines || 0) > 0) {
+      updatePriorityButtonStatus(`${Number(result.visiblePartialBuyers || 0).toLocaleString()} partial buyer group${Number(result.visiblePartialBuyers || 0) === 1 ? "" : "s"}`, "error");
+    } else if (result.matched > 0) {
+      updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
+    } else if (result.ebayMatched > 0) {
+      updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
+    } else if (urgentBuyers > 0) {
+      updatePriorityButtonStatus(`${urgentBuyers} urgent OG buyer${urgentBuyers === 1 ? "" : "s"} not matched here`, "success");
+    } else {
+      updatePriorityButtonStatus("No overdue/today OG buyers", "success");
+    }
+  }
+
   async function prioritizeEbayRowsFromOg({ silent = false } = {}) {
     try {
       if (!silent) updatePriorityButtonStatus("Loading OG priorities...");
       const payload = await requestOgPendingPriorities();
       const result = applyOgPendingPriorities(payload);
-      const urgentBuyers = Number(payload.urgentBuyerCount || 0);
-      if (Number(result.hiddenUrgentLines || 0) > 0) {
-        updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
-      } else if (Number(result.hiddenPartialLines || 0) > 0) {
-        updatePriorityButtonStatus(`${Number(result.visiblePartialBuyers || 0).toLocaleString()} partial buyer group${Number(result.visiblePartialBuyers || 0) === 1 ? "" : "s"}`, "error");
-      } else if (result.matched > 0) {
-        updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
-      } else if (result.ebayMatched > 0) {
-        updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
-      } else if (urgentBuyers > 0) {
-        updatePriorityButtonStatus(`${urgentBuyers} urgent OG buyer${urgentBuyers === 1 ? "" : "s"} not matched here`, "success");
-      } else {
-        updatePriorityButtonStatus("No overdue/today OG buyers", "success");
-      }
+      updatePriorityButtonStatusFromResult(result, payload);
       return result;
     } catch (error) {
       if (!silent) {
@@ -2346,6 +2449,10 @@
         transition: background-color 160ms ease, box-shadow 160ms ease;
       }
 
+      .og-ebay-closed-in-og {
+        display: none !important;
+      }
+
       .og-ebay-buyer-group-a {
         background: rgba(255, 248, 230, .88) !important;
       }
@@ -2832,6 +2939,7 @@
   function injectOgControls() {
     ensureStyles();
     attachBuyerGroupSelectionHandlers();
+    syncLocallyClosedAwaitingRows();
     injectRowButtons();
     injectFloatingButton();
     injectSingleOrderButton();
@@ -2865,10 +2973,24 @@
 
       injectOgControls();
       updatePriorityButtonStatus("Refreshing OG priorities...");
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
-      const result = await prioritizeEbayRowsFromOg({ silent: false });
+      await new Promise((resolve) => window.setTimeout(resolve, message.payload?.fastRefresh ? 80 : 250));
+      const priorityPayload = await requestOgPendingPriorities();
+      const hidden = hideClosedAwaitingRowsFromOg(message.payload || {}, priorityPayload);
+      const result = applyOgPendingPriorities(priorityPayload);
+      updatePriorityButtonStatusFromResult(result, priorityPayload);
+      if (hidden.hiddenRows && result?.ok) {
+        updatePriorityButtonStatus(
+          `Hid ${hidden.hiddenRows} completed order${hidden.hiddenRows === 1 ? "" : "s"}; sorted ${Number(result.visibleRows || 0).toLocaleString()} visible row${Number(result.visibleRows || 0) === 1 ? "" : "s"}`,
+          "success"
+        );
+      } else if (hidden.stillPendingOrderNumbers?.length && result?.ok) {
+        updatePriorityButtonStatus(
+          `Order still has OG pending work; sorted ${Number(result.visibleRows || 0).toLocaleString()} visible row${Number(result.visibleRows || 0) === 1 ? "" : "s"}`,
+          "success"
+        );
+      }
       updateBulkActionsShortcut();
-      sendResponse({ ok: Boolean(result?.ok), result });
+      sendResponse({ ok: Boolean(result?.ok), result, hidden });
     })().catch((error) => {
       console.warn("[OG eBay Priority] Refresh after queue change failed:", error);
       updatePriorityButtonStatus("Refresh needs OG Pending Orders", "error");

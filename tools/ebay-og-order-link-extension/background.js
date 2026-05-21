@@ -223,7 +223,7 @@
     });
   }
 
-  async function askAwaitingTabToOrganize(tabId, payload = {}) {
+  async function askAwaitingTabToOrganize(tabId, payload = {}, options = {}) {
     const message = {
       type: "OG_EBAY_REORGANIZE_AWAITING_QUEUE",
       payload: {
@@ -232,13 +232,17 @@
         ...payload,
       },
     };
+    const attempts = Math.max(1, Number(options.attempts || 6));
+    const initialDelayMs = Number(options.initialDelayMs ?? 1200);
+    const retryDelayMs = Number(options.retryDelayMs ?? 800);
 
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, attempt ? 800 : 1200));
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const delay = attempt ? retryDelayMs : initialDelayMs;
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       const response = await chrome.tabs.sendMessage(tabId, message).catch(() => null);
       if (response?.ok) return response;
     }
-    return { ok: false, error: "The eBay page reloaded, but the organizer content script did not answer yet." };
+    return { ok: false, error: "The eBay organizer content script did not answer yet." };
   }
 
   async function refreshAwaitingShipmentQueue(payload = {}, sender = null) {
@@ -247,11 +251,27 @@
     let targetTab = awaitingTabs.find((tab) => tab.active) || awaitingTabs[0] || null;
     let opened = false;
     let reloaded = false;
+    let organized = false;
+    let organizeResult = null;
+    const forceReload = payload?.forceReload === true;
 
     if (targetTab?.id) {
       await focusTab(targetTab.id);
-      await chrome.tabs.reload(targetTab.id);
-      reloaded = true;
+      if (!forceReload) {
+        organizeResult = await askAwaitingTabToOrganize(targetTab.id, {
+          ...payload,
+          fastRefresh: true,
+        }, {
+          attempts: 2,
+          initialDelayMs: 0,
+          retryDelayMs: 250,
+        });
+        organized = Boolean(organizeResult?.ok);
+      }
+      if (!organized) {
+        await chrome.tabs.reload(targetTab.id);
+        reloaded = true;
+      }
     } else if (sender?.tab?.id && isEbayTab(sender.tab)) {
       targetTab = await chrome.tabs.update(sender.tab.id, {
         url: DEFAULT_AWAITING_SHIPMENT_URL,
@@ -270,13 +290,19 @@
     const completedTab = targetTab?.id
       ? await waitForTabComplete(targetTab.id, 25000, { allowAlreadyComplete: !reloaded })
       : null;
-    if (completedTab?.id) await askAwaitingTabToOrganize(completedTab.id, payload);
+    if (completedTab?.id && !organized) {
+      organizeResult = await askAwaitingTabToOrganize(completedTab.id, payload);
+      organized = Boolean(organizeResult?.ok);
+    }
 
     return {
       ok: Boolean(targetTab?.id),
       tabId: targetTab?.id || null,
       opened,
       reloaded,
+      organized,
+      fastRefresh: organized && !reloaded && !opened,
+      organizeResult,
     };
   }
 
