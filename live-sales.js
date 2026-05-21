@@ -3,6 +3,7 @@
 const state = {
   user: null,
   employee: null,
+  employees: [],
   stores: [],
   sessions: [],
   currentSession: null,
@@ -100,6 +101,60 @@ function getStoreName(storeId) {
 
 function getSessionStoreName(session = state.currentSession) {
   return session?.store_id ? getStoreName(session.store_id) : "No store";
+}
+
+function getEmployeeLabel(employee = {}) {
+  return employee.display_name || employee.email || "Unnamed seller";
+}
+
+function getEmployeeById(id) {
+  const needle = String(id || "");
+  if (!needle) return null;
+  return state.employees.find((employee) => String(employee.id) === needle) || null;
+}
+
+function getEmployeeSnapshotLabel(snapshot = {}) {
+  return snapshot.display_name || snapshot.email || "";
+}
+
+function getEmployeeReferenceLabel(employeeId, snapshot = {}) {
+  const fromDirectory = getEmployeeById(employeeId);
+  if (fromDirectory) return getEmployeeLabel(fromDirectory);
+  return getEmployeeSnapshotLabel(snapshot);
+}
+
+function getLotOwnerLabel(lot = state.currentLot) {
+  if (!lot) return "";
+  return getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {});
+}
+
+function getSessionSellerSummary(session = state.currentSession) {
+  if (!session) return "";
+  const primary = getEmployeeReferenceLabel(
+    session.primary_seller_employee_id,
+    session.seller_snapshot?.primary || {}
+  );
+  const coSellerIds = Array.isArray(session.co_seller_employee_ids) ? session.co_seller_employee_ids : [];
+  const coSellerCount = coSellerIds.length;
+  if (!primary && !coSellerCount) return "";
+  return `${primary || "Main seller"}${coSellerCount ? ` + ${coSellerCount} more` : ""}`;
+}
+
+function getSelectedCoSellerIds() {
+  const primaryId = $("session-primary-seller")?.value || "";
+  return [...($("session-co-sellers")?.selectedOptions || [])]
+    .map((option) => option.value)
+    .filter(Boolean)
+    .filter((id) => id !== primaryId);
+}
+
+function getSelectedBagOwnerId() {
+  return $("bag-owner-select")?.value
+    || $("label-bag-owner-select")?.value
+    || state.currentLot?.owner_employee_id
+    || state.currentSession?.primary_seller_employee_id
+    || state.employee?.id
+    || null;
 }
 
 function getSourceRole(source = {}) {
@@ -257,7 +312,7 @@ async function loadCurrentWorker() {
   state.user = sessionData.session.user;
   const { data: employee, error } = await supabase
     .from("employees")
-    .select("id, display_name, role, active")
+    .select("id, display_name, email, role, active")
     .eq("user_id", state.user.id)
     .maybeSingle();
 
@@ -268,6 +323,45 @@ async function loadCurrentWorker() {
 
   state.employee = employee;
   return true;
+}
+
+async function loadSellerDirectory() {
+  let data = [];
+  let error = null;
+
+  const rpcResult = await supabase.rpc("get_live_sale_seller_directory");
+  if (rpcResult.error) {
+    const fallback = await supabase
+      .from("employees")
+      .select("id, display_name, email, role, active")
+      .eq("active", true)
+      .order("display_name", { ascending: true });
+    data = fallback.data || [];
+    error = fallback.error;
+  } else {
+    data = rpcResult.data || [];
+  }
+
+  if (error) {
+    console.warn("Live sale seller directory unavailable:", error);
+    data = [];
+  }
+
+  const byId = new Map();
+  [...data, state.employee].filter(Boolean).forEach((employee) => {
+    if (!employee.id) return;
+    byId.set(String(employee.id), {
+      id: employee.id,
+      display_name: employee.display_name || employee.email || "Unnamed seller",
+      email: employee.email || "",
+      role: employee.role || "",
+      active: employee.active !== false,
+    });
+  });
+
+  state.employees = [...byId.values()]
+    .filter((employee) => employee.active !== false)
+    .sort((a, b) => getEmployeeLabel(a).localeCompare(getEmployeeLabel(b)));
 }
 
 function setupShell() {
@@ -404,6 +498,7 @@ function renderSessions() {
           <span>
             <strong>${escapeHtml(session.title || "Live Sale")}</strong>
             <small>${escapeHtml(session.session_code || "")} - ${escapeHtml(getStoreName(session.store_id) || "No store")} - ${escapeHtml(formatDate(session.started_at))}</small>
+            ${getSessionSellerSummary(session) ? `<small>Sellers: ${escapeHtml(getSessionSellerSummary(session))}</small>` : ""}
           </span>
           <b>Use</b>
         `;
@@ -452,9 +547,11 @@ function renderCurrentLot() {
   }
 
   card.className = "current-lot-card";
+  const ownerLabel = getLotOwnerLabel() || "No owner selected";
   card.innerHTML = `
     <strong>Auction ${escapeHtml(state.currentLot.auction_number)}</strong>
     <span>Bag ID ${escapeHtml(state.currentLot.lot_code)} - ${escapeHtml(state.currentLot.status || "open")}</span>
+    <span>Owner ${escapeHtml(ownerLabel)}</span>
     <small>
       ${state.currentLot.label_path
         ? `<button type="button" class="current-lot-label-btn" data-print-current-lot-label>Print DYMO label again</button>`
@@ -485,11 +582,15 @@ function updateScanGate() {
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
   $("open-bag-history")?.toggleAttribute("disabled", !state.currentSession || state.busy);
   $("cancel-session")?.toggleAttribute("disabled", !state.currentSession || state.busy);
+  const ownerEnabled = Boolean(state.currentLot && state.currentLot.status !== "packed" && !state.busy);
+  $("bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
+  $("label-bag-owner-select")?.toggleAttribute("disabled", !ownerEnabled);
 }
 
 function renderAll() {
   renderFlowState();
   renderSessions();
+  renderSellerControls();
   renderSummary();
   renderCurrentLot();
   renderManifest();
@@ -1589,6 +1690,7 @@ function lotMatchesBagHistorySearch(lot, term) {
     lot.status,
     lot.notes,
     lot.label_path,
+    getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}),
     ...getBagHistoryItemsForLot(lot.id).flatMap((entry) => [
       entry.item?.title,
       entry.item?.barcode,
@@ -1653,6 +1755,7 @@ function renderBagHistory() {
         <b class="bag-status-badge ${getBagStatusClass(lot.status)}">${escapeHtml(lot.status || "open")}</b>
       </div>
       <span>${escapeHtml(lot.lot_code || "Bag")} - ${totals.types.toLocaleString()} type${totals.types === 1 ? "" : "s"} / ${totals.units.toLocaleString()} unit${totals.units === 1 ? "" : "s"}</span>
+      <small>Owner: ${escapeHtml(getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}) || "Unassigned")}</small>
       <small>${escapeHtml(formatDate(lot.created_at))}${lot.label_path ? " - label ready" : ""}</small>
     `;
     button.addEventListener("click", () => {
@@ -1690,6 +1793,7 @@ function renderBagHistoryDetail() {
       <span>Bag ${escapeHtml(lot.lot_code || "-")}</span>
       <span>${totals.types.toLocaleString()} item type${totals.types === 1 ? "" : "s"}</span>
       <span>${totals.units.toLocaleString()} total unit${totals.units === 1 ? "" : "s"}</span>
+      <span>Owner ${escapeHtml(getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}) || "Unassigned")}</span>
       <span>Created ${escapeHtml(formatDate(lot.created_at))}</span>
       ${lot.closed_at ? `<span>Closed ${escapeHtml(formatDate(lot.closed_at))}</span>` : ""}
       ${lot.label_path ? `<button type="button" class="bag-detail-label-btn" data-print-live-label="${escapeHtml(lot.id)}">Print DYMO Label</button>` : "<span>No DYMO label yet</span>"}
@@ -1927,6 +2031,8 @@ async function startSession() {
   const notes = $("session-notes")?.value?.trim() || null;
   const startAuctionInput = $("session-start-auction-number");
   const startAuctionNumber = startAuctionInput?.value?.trim() || "";
+  const primarySellerId = $("session-primary-seller")?.value || state.employee?.id || null;
+  const coSellerIds = getSelectedCoSellerIds();
 
   if (!storeId) {
     setStatus("Select the store where the live sale is happening.", "error");
@@ -1940,6 +2046,12 @@ async function startSession() {
     return;
   }
 
+  if (!primarySellerId) {
+    setStatus("Select the main seller for this live show.", "error");
+    $("session-primary-seller")?.focus();
+    return;
+  }
+
   try {
     saveStoreId(storeId);
     state.pendingStartAuctionNumber = startAuctionNumber;
@@ -1950,6 +2062,8 @@ async function startSession() {
       _store_id: storeId,
       _notes: notes,
       _signed_by_email: state.user?.email || null,
+      _primary_seller_employee_id: primarySellerId,
+      _co_seller_employee_ids: coSellerIds,
     });
     if (error) throw error;
     state.currentSession = Array.isArray(data) ? data[0] : data;
@@ -2120,6 +2234,7 @@ async function createOrLoadLot(options = {}) {
   }
 
   const auctionNumber = String(options.auctionNumber ?? $("auction-number")?.value ?? "").trim();
+  const ownerEmployeeId = options.ownerEmployeeId || getSelectedBagOwnerId();
   if (!auctionNumber) {
     setStatus("Enter the auction number first.", "error");
     $("auction-number")?.focus();
@@ -2134,6 +2249,7 @@ async function createOrLoadLot(options = {}) {
       _auction_number: auctionNumber,
       _notes: null,
       _signed_by_email: state.user?.email || null,
+      _owner_employee_id: ownerEmployeeId,
     });
     if (error) throw error;
     state.currentLot = Array.isArray(data) ? data[0] : data;
@@ -2151,6 +2267,39 @@ async function createOrLoadLot(options = {}) {
     return null;
   } finally {
     state.busy = false;
+  }
+}
+
+async function updateCurrentLotOwner(ownerEmployeeId, options = {}) {
+  if (!state.currentLot?.id || !ownerEmployeeId || state.busy) return;
+  if (String(state.currentLot.owner_employee_id || "") === String(ownerEmployeeId)) {
+    renderSellerControls();
+    updateScanGate();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    updateScanGate();
+    if (!options.silent) setStatus("Updating this bag owner...");
+    const { data, error } = await supabase.rpc("update_live_sale_lot_owner", {
+      _lot_id: state.currentLot.id,
+      _owner_employee_id: ownerEmployeeId,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    state.currentLot = Array.isArray(data) ? data[0] : data;
+    if (!options.silent) {
+      setStatus(`Bag owner updated to ${getLotOwnerLabel() || "selected seller"}.`, "success");
+    }
+    renderAll();
+  } catch (error) {
+    console.error("Update live sale bag owner failed:", error);
+    setStatus(error.message || "Could not update this bag owner.", "error");
+    renderSellerControls();
+  } finally {
+    state.busy = false;
+    updateScanGate();
   }
 }
 
@@ -2674,6 +2823,83 @@ async function addManualLiveSaleItem() {
   }
 }
 
+function populateEmployeeSelect(select, {
+  selectedValue = "",
+  excludeIds = [],
+  placeholder = "Select seller",
+  allowEmpty = true,
+  multipleValues = [],
+} = {}) {
+  if (!select) return;
+
+  const excluded = new Set(excludeIds.filter(Boolean).map(String));
+  const selectedSet = new Set(multipleValues.filter(Boolean).map(String));
+  const currentValue = selectedValue || select.value || "";
+
+  select.replaceChildren();
+
+  if (allowEmpty && !select.multiple) {
+    const placeholderOption = document.createElement("option");
+    placeholderOption.value = "";
+    placeholderOption.textContent = placeholder;
+    select.appendChild(placeholderOption);
+  }
+
+  state.employees
+    .filter((employee) => !excluded.has(String(employee.id)))
+    .forEach((employee) => {
+      const option = document.createElement("option");
+      option.value = employee.id;
+      option.textContent = getEmployeeLabel(employee);
+      if (employee.email && employee.email !== employee.display_name) {
+        option.title = employee.email;
+      }
+      if (select.multiple) {
+        option.selected = selectedSet.has(String(employee.id));
+      }
+      select.appendChild(option);
+    });
+
+  if (!select.multiple) {
+    select.value = currentValue && state.employees.some((employee) => String(employee.id) === String(currentValue))
+      ? currentValue
+      : "";
+  }
+}
+
+function renderSellerControls() {
+  const activeSession = Boolean(state.currentSession);
+  const primarySelect = $("session-primary-seller");
+  const coSellerSelect = $("session-co-sellers");
+  const bagOwnerSelect = $("bag-owner-select");
+  const labelBagOwnerSelect = $("label-bag-owner-select");
+  const primaryId = state.currentSession?.primary_seller_employee_id || primarySelect?.value || state.employee?.id || "";
+  const coSellerIds = Array.isArray(state.currentSession?.co_seller_employee_ids)
+    ? state.currentSession.co_seller_employee_ids
+    : [...(coSellerSelect?.selectedOptions || [])].map((option) => option.value).filter(Boolean);
+  const ownerId = state.currentLot?.owner_employee_id || primaryId || state.employee?.id || "";
+
+  populateEmployeeSelect(primarySelect, {
+    selectedValue: primaryId,
+    placeholder: state.employees.length ? "Select main seller" : "No sellers found",
+  });
+  if (primarySelect) primarySelect.disabled = activeSession || state.busy;
+
+  populateEmployeeSelect(coSellerSelect, {
+    excludeIds: [primarySelect?.value || primaryId],
+    allowEmpty: false,
+    multipleValues: coSellerIds,
+  });
+  if (coSellerSelect) coSellerSelect.disabled = activeSession || state.busy;
+
+  [bagOwnerSelect, labelBagOwnerSelect].forEach((select) => {
+    populateEmployeeSelect(select, {
+      selectedValue: ownerId,
+      placeholder: state.employees.length ? "Select bag owner" : "No sellers found",
+    });
+  });
+}
+
 async function releaseManifestGroup(group) {
   if (!group) return;
   const ok = window.confirm("Release this item from the auction bag reservation?");
@@ -3049,6 +3275,12 @@ async function finalizeCurrentBag() {
   try {
     state.busy = true;
     setStatus("Printing label and preparing the next bag...");
+    const selectedOwnerId = getSelectedBagOwnerId();
+    if (selectedOwnerId && String(selectedOwnerId) !== String(state.currentLot?.owner_employee_id || "")) {
+      state.busy = false;
+      await updateCurrentLotOwner(selectedOwnerId, { silent: true });
+      state.busy = true;
+    }
     await updateCurrentLotAuctionNumber(auctionNumber);
     if ($("label-free-text")) $("label-free-text").value = auctionNumber;
     const printed = await generateLiveLabel({ suppressStatus: true });
@@ -3091,8 +3323,27 @@ function setupListeners() {
   $("session-start-auction-number")?.addEventListener("input", (event) => {
     event.target.dataset.autoAuctionStart = event.target.value.trim() ? "false" : "true";
   });
+  $("session-primary-seller")?.addEventListener("change", () => {
+    if (!state.currentSession) {
+      renderSellerControls();
+    }
+  });
+  $("session-co-sellers")?.addEventListener("change", () => {
+    if (!state.currentSession) {
+      renderSellerControls();
+    }
+  });
+  const handleBagOwnerChange = (event) => {
+    const ownerId = event.target.value || "";
+    if ($("bag-owner-select") && $("bag-owner-select") !== event.target) $("bag-owner-select").value = ownerId;
+    if ($("label-bag-owner-select") && $("label-bag-owner-select") !== event.target) $("label-bag-owner-select").value = ownerId;
+    if (ownerId) updateCurrentLotOwner(ownerId);
+  };
+  $("bag-owner-select")?.addEventListener("change", handleBagOwnerChange);
+  $("label-bag-owner-select")?.addEventListener("change", handleBagOwnerChange);
   $("refresh-live-sales")?.addEventListener("click", async () => {
     await loadStores();
+    await loadSellerDirectory();
     await loadSessions();
     if (state.currentLot) await reloadCurrentLot();
     await loadLotItems();
@@ -3282,6 +3533,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     titleInput.value = formatSessionTitleDate();
     titleInput.dataset.autoTitle = "true";
   }
+  await loadSellerDirectory();
   await loadStores();
   await loadSessions({ keepSelection: false });
   if (state.currentSession) await prepareNextBag();

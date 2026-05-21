@@ -231,6 +231,25 @@ body.live-label-step #current-lot-card {
   background: #ffffff;
 }
 
+.live-panel select[multiple] {
+  min-height: 118px;
+  padding: 8px;
+}
+
+.live-panel select[multiple] option {
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.bag-owner-field {
+  margin: 0 0 14px;
+}
+
+.bag-owner-field select,
+#label-bag-owner-select {
+  max-width: 420px;
+}
+
 .live-panel input:focus,
 .live-panel select:focus,
 .live-panel textarea:focus {

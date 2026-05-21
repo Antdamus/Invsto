@@ -134,6 +134,18 @@
                 Session Title
                 <input id="session-title" type="text" placeholder="Friday live show" />
               </label>
+              <label>
+                Main Seller
+                <select id="session-primary-seller">
+                  <option value="">Loading sellers...</option>
+                </select>
+              </label>
+              <label>
+                Additional Sellers
+                <select id="session-co-sellers" multiple size="3">
+                </select>
+                <small>Select anyone else performing this same live show.</small>
+              </label>
               <label class="session-start-auction-field">
                 Start Auction #
                 <input id="session-start-auction-number" type="text" placeholder="Example: 001 or 400" inputmode="numeric" autocomplete="off" />
@@ -160,6 +172,12 @@
             <label>
               Auction Number
               <input id="auction-number" type="text" placeholder="Scan or type auction number" autocomplete="off" />
+            </label>
+            <label>
+              Bag Owner
+              <select id="label-bag-owner-select">
+                <option value="">Select seller</option>
+              </select>
             </label>
             <label class="optional-label-text">
               Small Label Text
@@ -202,6 +220,13 @@
               <span><b>Space</b> next scan</span>
               <span><b>Enter</b> finish bag</span>
             </div>
+            <label class="bag-owner-field">
+              Bag Owner
+              <select id="bag-owner-select" disabled>
+                <option value="">Select seller</option>
+              </select>
+              <small>This seller owns the current auction bag.</small>
+            </label>
             <div class="scan-row">
               <input id="item-scan" type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
               <button id="scan-item" type="button" class="secondary-btn" disabled>Scan</button>
