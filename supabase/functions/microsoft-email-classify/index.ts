@@ -1236,7 +1236,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   ] = await Promise.all([
     supabase
       .from("email_message_classifications")
-      .select("id, message_id, category, confidence, summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
+      .select("id, message_id, category, subcategory, confidence, priority, urgency, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at")
       .eq("source", "ai")
       .order("created_at", { ascending: false })
       .limit(input.classificationLimit),
@@ -1267,6 +1267,23 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   if (replayResult.error) throw new ClassifierError("admin_view_replay_failed", { phase: "admin_view_replay" });
   if (failedJobsResult.error) throw new ClassifierError("admin_view_failed_jobs_failed", { phase: "admin_view_failed_jobs" });
 
+  const messageIds = uniqueStrings(
+    (classificationsResult.data || []).map((row: Record<string, any>) => row.message_id),
+    input.classificationLimit,
+  );
+  const messageMetadataById = new Map<string, Record<string, any>>();
+  if (messageIds.length) {
+    const { data: messageRows, error: messageError } = await supabase
+      .from("email_messages")
+      .select("id, subject, from_name, from_email, sender_name, sender_email, received_at, body_preview")
+      .in("id", messageIds);
+
+    if (messageError) throw new ClassifierError("admin_view_message_metadata_failed", { phase: "admin_view_message_metadata" });
+    for (const message of messageRows || []) {
+      messageMetadataById.set(String(message.id), message as Record<string, any>);
+    }
+  }
+
   const replayOperations = (replayResult.data || []).map((event: Record<string, any>) => ({
     id: event.id,
     reason: event.reason,
@@ -1281,18 +1298,33 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   return {
     ok: true,
     mode: "admin_view",
-    classifications: (classificationsResult.data || []).map((row: Record<string, any>) => ({
-      id: row.id,
-      message_id: row.message_id,
-      category: row.category,
-      confidence: row.confidence === null ? null : Number(row.confidence),
-      summary: row.summary,
-      recommended_action: row.recommended_action,
-      requires_human_review: row.requires_human_review,
-      safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
-      validation_status: row.validation_status,
-      created_at: row.created_at,
-    })),
+    classifications: (classificationsResult.data || []).map((row: Record<string, any>) => {
+      const message = messageMetadataById.get(String(row.message_id)) || {};
+      return {
+        id: row.id,
+        message_id: row.message_id,
+        message_subject: shortText(message.subject, 300) || null,
+        message_sender_name: shortText(message.from_name || message.sender_name, 120) || null,
+        message_sender_email: shortText(message.from_email || message.sender_email, 180).toLowerCase() || null,
+        message_received_at: message.received_at || null,
+        message_body_preview: shortText(message.body_preview, 800) || null,
+        category: row.category,
+        subcategory: row.subcategory,
+        confidence: row.confidence === null ? null : Number(row.confidence),
+        priority: row.priority,
+        urgency: row.urgency,
+        response_needed: row.response_needed,
+        summary: row.summary,
+        reasoning_summary: row.reasoning_summary,
+        recommended_action: row.recommended_action,
+        requires_human_review: row.requires_human_review,
+        safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
+        validation_status: row.validation_status,
+        classification_run_id: row.classification_run_id,
+        input_version: row.input_version,
+        created_at: row.created_at,
+      };
+    }),
     replay_operations: replayOperations,
     failed_jobs: (failedJobsResult.data || []).map((job: Record<string, any>) => ({
       id: job.id,

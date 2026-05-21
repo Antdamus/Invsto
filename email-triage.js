@@ -39,6 +39,8 @@
     classificationAdminDebug: document.getElementById("classification-admin-debug"),
     classificationAdminStatus: document.getElementById("classification-admin-status"),
     classificationAdminSummary: document.getElementById("classification-admin-summary"),
+    classificationSort: document.getElementById("classification-sort"),
+    classificationFilterToggles: document.querySelectorAll("[data-classification-filter]"),
     classificationCategoryList: document.getElementById("classification-category-list"),
     classificationList: document.getElementById("classification-list"),
     classificationDetail: document.getElementById("classification-detail"),
@@ -55,6 +57,8 @@
     data: normalizeAdminViewPayload({}),
     selectedCategory: "all",
     selectedClassificationId: null,
+    activeFilters: [],
+    sortMode: "newest",
     updatedAt: null,
   };
 
@@ -98,6 +102,19 @@
       hour: "numeric",
       minute: "2-digit",
     });
+  }
+
+  function formatEmailAge(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Age unavailable";
+    const diffMs = Math.max(0, Date.now() - date.getTime());
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) return "Just received";
+    if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} old`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours} ${hours === 1 ? "hour" : "hours"} old`;
+    const days = Math.floor(hours / 24);
+    return `${days} ${days === 1 ? "day" : "days"} old`;
   }
 
   function safeErrorMessage(code) {
@@ -359,20 +376,64 @@
     return text ? text.slice(0, 8) : "unknown";
   }
 
-  function sortedClassifications(data) {
+  function classificationTimeMs(classification) {
+    const date = new Date(getClassificationReceivedAt(classification) || classification?.created_at || 0);
+    const time = date.getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+
+  function confidenceNumber(classification) {
+    const confidence = Number(classification?.confidence);
+    return Number.isFinite(confidence) ? confidence : -1;
+  }
+
+  function sortedClassifications(data, sortMode = "newest") {
     return [...(data?.classifications || [])].sort((left, right) => {
-      const leftTime = new Date(left.received_at || left.created_at || 0).getTime();
-      const rightTime = new Date(right.received_at || right.created_at || 0).getTime();
-      return rightTime - leftTime;
+      if (sortMode === "oldest") return classificationTimeMs(left) - classificationTimeMs(right);
+      if (sortMode === "confidence_high") return confidenceNumber(right) - confidenceNumber(left);
+      if (sortMode === "confidence_low") return confidenceNumber(left) - confidenceNumber(right);
+      if (sortMode === "human_review") {
+        const reviewDelta = Number(hasHumanReviewSignal(right)) - Number(hasHumanReviewSignal(left));
+        if (reviewDelta !== 0) return reviewDelta;
+      }
+      return classificationTimeMs(right) - classificationTimeMs(left);
     });
   }
 
-  function hasHumanReviewSignal(classification) {
-    const safetyFlags = Array.isArray(classification?.safety_flags) ? classification.safety_flags : [];
+  function hasLowConfidenceSignal(classification) {
     const confidence = Number(classification?.confidence);
+    return Number.isFinite(confidence) && confidence < LOW_CONFIDENCE_THRESHOLD;
+  }
+
+  function hasSafetyFlags(classification) {
+    return Array.isArray(classification?.safety_flags) && classification.safety_flags.length > 0;
+  }
+
+  function hasHumanReviewSignal(classification) {
     return classification?.requires_human_review === true
-      || safetyFlags.length > 0
-      || (Number.isFinite(confidence) && confidence < LOW_CONFIDENCE_THRESHOLD);
+      || hasSafetyFlags(classification)
+      || hasLowConfidenceSignal(classification);
+  }
+
+  function isInvalidClassification(classification) {
+    return String(classification?.validation_status || "").toLowerCase() === "invalid";
+  }
+
+  function isOlderThan(classification, thresholdMs) {
+    const time = classificationTimeMs(classification);
+    return time > 0 && Date.now() - time >= thresholdMs;
+  }
+
+  function matchesActiveFilters(classification, activeFilters = []) {
+    return activeFilters.every((filter) => {
+      if (filter === "needs_review") return classification?.requires_human_review === true;
+      if (filter === "low_confidence") return hasLowConfidenceSignal(classification);
+      if (filter === "safety_flags") return hasSafetyFlags(classification);
+      if (filter === "invalid") return isInvalidClassification(classification);
+      if (filter === "older_24h") return isOlderThan(classification, 24 * 60 * 60 * 1000);
+      if (filter === "older_3d") return isOlderThan(classification, 3 * 24 * 60 * 60 * 1000);
+      return true;
+    });
   }
 
   function categoryMatchesGroup(classification, groupId) {
@@ -384,8 +445,11 @@
     return group.categories.includes(String(classification?.category || ""));
   }
 
-  function filteredClassifications(data, groupId) {
-    return sortedClassifications(data).filter((classification) => categoryMatchesGroup(classification, groupId));
+  function filteredClassifications(data, groupId, activeFilters = [], sortMode = "newest") {
+    return sortedClassifications(data, sortMode).filter((classification) => (
+      categoryMatchesGroup(classification, groupId)
+      && matchesActiveFilters(classification, activeFilters)
+    ));
   }
 
   function getClassificationTitle(classification) {
@@ -396,7 +460,19 @@
   }
 
   function getClassificationSender(classification) {
-    return classification?.from
+    const name = classification?.message_sender_name
+      || classification?.from_name
+      || classification?.sender_name
+      || "";
+    const email = classification?.message_sender_email
+      || classification?.from_email
+      || classification?.sender_email
+      || "";
+
+    if (name && email) return `${name} <${email}>`;
+    return name
+      || email
+      || classification?.from
       || classification?.from_email
       || classification?.sender_email
       || classification?.from_name
@@ -405,7 +481,13 @@
   }
 
   function getClassificationReceivedAt(classification) {
-    return classification?.received_at || classification?.message_received_at || "";
+    return classification?.message_received_at || classification?.received_at || "";
+  }
+
+  function getClassificationPreview(classification) {
+    return classification?.message_body_preview
+      || classification?.summary
+      || "No body preview available.";
   }
 
   function renderPillList(values = [], emptyLabel = "None") {
@@ -420,8 +502,11 @@
     const classifications = data.classifications || [];
     els.classificationCategoryList.innerHTML = CATEGORY_GROUPS.map((group) => {
       const count = group.id === "all"
-        ? classifications.length
-        : classifications.filter((classification) => categoryMatchesGroup(classification, group.id)).length;
+        ? classifications.filter((classification) => matchesActiveFilters(classification, state.activeFilters)).length
+        : classifications.filter((classification) => (
+          categoryMatchesGroup(classification, group.id)
+          && matchesActiveFilters(classification, state.activeFilters)
+        )).length;
       const active = state.selectedCategory === group.id;
 
       return `
@@ -436,10 +521,10 @@
   function renderClassificationList(state, data) {
     if (!els.classificationList) return;
 
-    const rows = filteredClassifications(data, state.selectedCategory);
+    const rows = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode);
     if (!rows.length) {
       const emptyText = data.classifications.length
-        ? "No classifications match this category."
+        ? "No classifications match these filters."
         : "No classified emails returned yet.";
       els.classificationList.innerHTML = `<div class="classification-empty">${escapeHtml(emptyText)}</div>`;
       return;
@@ -450,6 +535,7 @@
       const humanReview = hasHumanReviewSignal(classification);
       const receivedAt = getClassificationReceivedAt(classification);
       const dateLabel = receivedAt ? formatDateTime(receivedAt) : `Classified ${formatDateTime(classification.created_at)}`;
+      const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
 
       return `
         <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
@@ -461,7 +547,11 @@
             <span>${escapeHtml(humanizeValue(classification.category || "uncategorized"))}</span>
             <span>${escapeHtml(dateLabel)}</span>
           </span>
-          <span class="classification-row-preview">${escapeHtml(classification.summary || "No AI summary available.")}</span>
+          <span class="classification-row-meta">
+            <span>${escapeHtml(getClassificationSender(classification))}</span>
+            <span>${escapeHtml(ageLabel)}</span>
+          </span>
+          <span class="classification-row-preview">${escapeHtml(getClassificationPreview(classification))}</span>
           ${humanReview ? `<span class="classification-review-flag">Human review</span>` : ""}
         </button>
       `;
@@ -483,6 +573,7 @@
 
     const receivedAt = getClassificationReceivedAt(selected);
     const humanReview = hasHumanReviewSignal(selected);
+    const ageLabel = receivedAt ? formatEmailAge(receivedAt) : "Age unavailable";
 
     els.classificationDetail.innerHTML = `
       <div class="classification-detail-head">
@@ -493,8 +584,16 @@
 
       <dl class="classification-detail-grid">
         <div>
+          <dt>Sender</dt>
+          <dd>${escapeHtml(getClassificationSender(selected))}</dd>
+        </div>
+        <div>
           <dt>Received</dt>
           <dd>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Unavailable")}</dd>
+        </div>
+        <div>
+          <dt>Email Age</dt>
+          <dd>${escapeHtml(ageLabel)}</dd>
         </div>
         <div>
           <dt>Classified</dt>
@@ -517,6 +616,10 @@
           <dd>${escapeHtml(humanizeValue(selected.recommended_action || "review_only"))}</dd>
         </div>
         <div>
+          <dt>Response Needed</dt>
+          <dd>${selected.response_needed === true ? "Yes" : "No"}</dd>
+        </div>
+        <div>
           <dt>Validation</dt>
           <dd>${escapeHtml(humanizeValue(selected.validation_status || "unknown"))}</dd>
         </div>
@@ -525,6 +628,11 @@
       <div class="classification-detail-section">
         <h4>AI Summary</h4>
         <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
+      </div>
+
+      <div class="classification-detail-section">
+        <h4>Body Preview</h4>
+        <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
       </div>
 
       <div class="classification-detail-section">
@@ -562,10 +670,13 @@
 
     const data = state.data || normalizeAdminViewPayload({});
     if (!state.selectedClassificationId && data.classifications.length) {
-      const selected = filteredClassifications(data, state.selectedCategory)[0];
+      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
       state.selectedClassificationId = selected?.id || null;
     } else if (state.selectedClassificationId && !data.classifications.some((classification) => classification.id === state.selectedClassificationId)) {
-      const selected = filteredClassifications(data, state.selectedCategory)[0];
+      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
+      state.selectedClassificationId = selected?.id || null;
+    } else if (state.selectedClassificationId && !filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode).some((classification) => classification.id === state.selectedClassificationId)) {
+      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
       state.selectedClassificationId = selected?.id || null;
     }
 
@@ -578,15 +689,23 @@
     }[state.status] || "Waiting for admin session.";
 
     if (els.classificationAdminStatus) els.classificationAdminStatus.textContent = statusText;
+    if (els.classificationSort && els.classificationSort.value !== state.sortMode) {
+      els.classificationSort.value = state.sortMode;
+    }
+    els.classificationFilterToggles?.forEach((input) => {
+      input.checked = state.activeFilters.includes(input.getAttribute("data-classification-filter"));
+    });
 
     if (els.classificationAdminSummary) {
       els.classificationAdminSummary.innerHTML = [
-        { label: "Classifications", value: data.classifications.length },
-        { label: "Replay ops", value: data.replay_operations.length },
-        { label: "Failed jobs", value: data.failed_jobs.length },
         { label: "Queued", value: data.queue_summary.queued },
-        { label: "Running", value: data.queue_summary.processing },
+        { label: "Processing", value: data.queue_summary.processing },
+        { label: "Succeeded", value: data.queue_summary.succeeded },
+        { label: "Failed", value: data.queue_summary.failed },
+        { label: "Valid", value: data.validation_diagnostics.valid_classifications },
+        { label: "Invalid", value: data.validation_diagnostics.invalid_classifications },
         { label: "Review", value: data.validation_diagnostics.requires_human_review },
+        { label: "Replay Generated", value: data.validation_diagnostics.replay_generated_classifications },
       ].map((item) => `
         <div>
           <span>${escapeHtml(item.label)}</span>
@@ -802,7 +921,12 @@
 
       const selectedCategory = button.getAttribute("data-category-id") || "all";
       const data = adminClassificationState.data || normalizeAdminViewPayload({});
-      const firstMatch = filteredClassifications(data, selectedCategory)[0] || null;
+      const firstMatch = filteredClassifications(
+        data,
+        selectedCategory,
+        adminClassificationState.activeFilters,
+        adminClassificationState.sortMode,
+      )[0] || null;
 
       setAdminClassificationState({
         selectedCategory,
@@ -816,6 +940,43 @@
 
       setAdminClassificationState({
         selectedClassificationId: button.getAttribute("data-classification-id"),
+      });
+    });
+
+    els.classificationSort?.addEventListener("change", (event) => {
+      const sortMode = event.target.value || "newest";
+      const data = adminClassificationState.data || normalizeAdminViewPayload({});
+      const firstMatch = filteredClassifications(
+        data,
+        adminClassificationState.selectedCategory,
+        adminClassificationState.activeFilters,
+        sortMode,
+      )[0] || null;
+
+      setAdminClassificationState({
+        sortMode,
+        selectedClassificationId: firstMatch?.id || null,
+      });
+    });
+
+    els.classificationFilterToggles?.forEach((input) => {
+      input.addEventListener("change", () => {
+        const activeFilters = [...(els.classificationFilterToggles || [])]
+          .filter((item) => item.checked)
+          .map((item) => item.getAttribute("data-classification-filter"))
+          .filter(Boolean);
+        const data = adminClassificationState.data || normalizeAdminViewPayload({});
+        const firstMatch = filteredClassifications(
+          data,
+          adminClassificationState.selectedCategory,
+          activeFilters,
+          adminClassificationState.sortMode,
+        )[0] || null;
+
+        setAdminClassificationState({
+          activeFilters,
+          selectedClassificationId: firstMatch?.id || null,
+        });
       });
     });
   }

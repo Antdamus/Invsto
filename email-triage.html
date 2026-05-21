@@ -90,6 +90,26 @@
             </button>
           </div>
           <div id="classification-admin-summary" class="classification-admin-summary"></div>
+          <div class="classification-admin-controls" aria-label="Classification filters and sorting">
+            <label class="classification-sort-control" for="classification-sort">
+              <span>Sort</span>
+              <select id="classification-sort">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="confidence_high">Highest confidence</option>
+                <option value="confidence_low">Lowest confidence</option>
+                <option value="human_review">Human review first</option>
+              </select>
+            </label>
+            <div class="classification-filter-toggles" aria-label="Human review filters">
+              <label><input type="checkbox" data-classification-filter="needs_review" /> Needs Human Review</label>
+              <label><input type="checkbox" data-classification-filter="low_confidence" /> Low Confidence</label>
+              <label><input type="checkbox" data-classification-filter="safety_flags" /> Safety Flags</label>
+              <label><input type="checkbox" data-classification-filter="invalid" /> Invalid Classifications</label>
+              <label><input type="checkbox" data-classification-filter="older_24h" /> Older Than 24 Hours</label>
+              <label><input type="checkbox" data-classification-filter="older_3d" /> Older Than 3 Days</label>
+            </div>
+          </div>
           <div class="classification-inbox-shell">
             <aside class="classification-category-sidebar" aria-label="Classification categories">
               <div id="classification-category-list" class="classification-category-list"></div>
