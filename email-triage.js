@@ -12,6 +12,7 @@
     failedJobLimit: 20,
   };
   const ADMIN_VIEW_TIMEOUT_MS = 15000;
+  const MESSAGE_DETAIL_TIMEOUT_MS = 15000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const CATEGORY_GROUPS = [
     { id: "all", label: "All", categories: [] },
@@ -59,6 +60,9 @@
     selectedClassificationId: null,
     activeFilters: [],
     sortMode: "newest",
+    messageDetailsById: {},
+    messageDetailLoadingId: null,
+    messageDetailErrorsById: {},
     updatedAt: null,
   };
 
@@ -358,6 +362,41 @@
     }
   }
 
+  async function fetchMessageDetail(context, messageId) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Message detail session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), MESSAGE_DETAIL_TIMEOUT_MS);
+
+    try {
+      return await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: "message_detail",
+          messageId,
+        }),
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   function humanizeValue(value) {
     return String(value || "")
       .replace(/_/g, " ")
@@ -496,6 +535,31 @@
     return safeValues.map((value) => `<span class="classification-pill">${escapeHtml(humanizeValue(value))}</span>`).join("");
   }
 
+  function renderBadge(value, variant = "default") {
+    return `<span class="classification-badge is-${escapeHtml(variant)}">${escapeHtml(value)}</span>`;
+  }
+
+  function confidenceBadgeVariant(classification) {
+    if (hasLowConfidenceSignal(classification)) return "warning";
+    const confidence = Number(classification?.confidence);
+    if (Number.isFinite(confidence) && confidence >= 0.9) return "success";
+    return "default";
+  }
+
+  function statusBadgeVariant(value) {
+    const status = String(value || "").toLowerCase();
+    if (status === "valid") return "success";
+    if (status === "invalid") return "danger";
+    return "muted";
+  }
+
+  function actionBadgeVariant(value) {
+    const action = String(value || "").toLowerCase();
+    if (action.includes("security") || action.includes("escalate")) return "danger";
+    if (action.includes("review") || action.includes("refund") || action.includes("return") || action.includes("cancellation")) return "warning";
+    return "default";
+  }
+
   function renderCategorySidebar(state, data) {
     if (!els.classificationCategoryList) return;
 
@@ -510,7 +574,7 @@
       const active = state.selectedCategory === group.id;
 
       return `
-        <button type="button" class="classification-category-button${active ? " is-active" : ""}" data-category-id="${escapeHtml(group.id)}">
+        <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}" data-category-id="${escapeHtml(group.id)}">
           <span>${escapeHtml(group.label)}</span>
           <b>${escapeHtml(count)}</b>
         </button>
@@ -536,15 +600,17 @@
       const receivedAt = getClassificationReceivedAt(classification);
       const dateLabel = receivedAt ? formatDateTime(receivedAt) : `Classified ${formatDateTime(classification.created_at)}`;
       const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
+      const categoryBadge = renderBadge(humanizeValue(classification.category || "Uncategorized"), "category");
+      const confidenceBadge = renderBadge(formatConfidence(classification.confidence), confidenceBadgeVariant(classification));
 
       return `
         <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
           <span class="classification-row-top">
             <strong>${escapeHtml(getClassificationTitle(classification))}</strong>
-            <span>${escapeHtml(formatConfidence(classification.confidence))}</span>
+            ${confidenceBadge}
           </span>
           <span class="classification-row-meta">
-            <span>${escapeHtml(humanizeValue(classification.category || "uncategorized"))}</span>
+            ${categoryBadge}
             <span>${escapeHtml(dateLabel)}</span>
           </span>
           <span class="classification-row-meta">
@@ -552,10 +618,54 @@
             <span>${escapeHtml(ageLabel)}</span>
           </span>
           <span class="classification-row-preview">${escapeHtml(getClassificationPreview(classification))}</span>
-          ${humanReview ? `<span class="classification-review-flag">Human review</span>` : ""}
+          ${humanReview ? renderBadge("Human review", "warning") : ""}
         </button>
       `;
     }).join("");
+  }
+
+  function renderEmailBodySection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const detail = messageId ? state.messageDetailsById[messageId] : null;
+    const error = messageId ? state.messageDetailErrorsById[messageId] : null;
+    const isLoading = state.messageDetailLoadingId === messageId;
+    const bodyText = detail?.normalized_text || "";
+    const bodySource = detail?.body_source ? `Source: ${humanizeValue(detail.body_source)}` : "Preview only";
+    const chars = detail
+      ? `${Number(detail.body_chars_returned || 0).toLocaleString()} of ${Number(detail.body_chars_original || 0).toLocaleString()} chars`
+      : "";
+
+    if (detail) {
+      return `
+        <div class="classification-detail-section email-body-section">
+          <div class="classification-section-title-row">
+            <h4>Email Body</h4>
+            ${renderBadge(bodySource, "muted")}
+          </div>
+          ${detail.body_truncated ? `
+            <div class="classification-notice is-warning">
+              Body is capped for admin viewing. Showing ${escapeHtml(chars)}.
+            </div>
+          ` : ""}
+          <pre class="classification-email-body">${escapeHtml(bodyText || "No body text available.")}</pre>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="classification-detail-section email-body-section">
+        <div class="classification-section-title-row">
+          <h4>Email Body</h4>
+          ${renderBadge(bodySource, "muted")}
+        </div>
+        <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
+        ${error ? `<div class="classification-notice is-error">Could not load full email text: ${escapeHtml(error)}</div>` : ""}
+        <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+          <i data-lucide="${isLoading ? "loader-circle" : "file-text"}"></i>
+          ${isLoading ? "Loading Email" : "View Full Email"}
+        </button>
+      </div>
+    `;
   }
 
   function renderClassificationDetail(state, data) {
@@ -574,82 +684,86 @@
     const receivedAt = getClassificationReceivedAt(selected);
     const humanReview = hasHumanReviewSignal(selected);
     const ageLabel = receivedAt ? formatEmailAge(receivedAt) : "Age unavailable";
+    const reviewBadge = humanReview ? renderBadge("Human review", "warning") : renderBadge("No review flag", "muted");
+    const categoryBadge = renderBadge(humanizeValue(selected.category || "Uncategorized"), "category");
+    const confidenceBadge = renderBadge(formatConfidence(selected.confidence), confidenceBadgeVariant(selected));
+    const validationBadge = renderBadge(humanizeValue(selected.validation_status || "Unknown"), statusBadgeVariant(selected.validation_status));
+    const actionBadge = renderBadge(humanizeValue(selected.recommended_action || "Review only"), actionBadgeVariant(selected.recommended_action));
 
     els.classificationDetail.innerHTML = `
       <div class="classification-detail-head">
         <span class="eyebrow">${humanReview ? "Human Review" : "Classification"}</span>
         <h3>${escapeHtml(getClassificationTitle(selected))}</h3>
         <div>${escapeHtml(getClassificationSender(selected))}</div>
+        <div class="classification-head-badges">
+          ${categoryBadge}
+          ${confidenceBadge}
+          ${reviewBadge}
+          ${validationBadge}
+        </div>
       </div>
 
-      <dl class="classification-detail-grid">
-        <div>
-          <dt>Sender</dt>
-          <dd>${escapeHtml(getClassificationSender(selected))}</dd>
-        </div>
-        <div>
-          <dt>Received</dt>
-          <dd>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Unavailable")}</dd>
-        </div>
-        <div>
-          <dt>Email Age</dt>
-          <dd>${escapeHtml(ageLabel)}</dd>
-        </div>
-        <div>
-          <dt>Classified</dt>
-          <dd>${escapeHtml(formatDateTime(selected.created_at))}</dd>
-        </div>
-        <div>
-          <dt>Category</dt>
-          <dd>${escapeHtml(humanizeValue(selected.category || "Uncategorized"))}</dd>
-        </div>
-        <div>
-          <dt>Confidence</dt>
-          <dd>${escapeHtml(formatConfidence(selected.confidence))}</dd>
-        </div>
-        <div>
-          <dt>Requires Review</dt>
-          <dd>${selected.requires_human_review === true ? "Yes" : "No"}</dd>
-        </div>
-        <div>
-          <dt>Recommended Action</dt>
-          <dd>${escapeHtml(humanizeValue(selected.recommended_action || "review_only"))}</dd>
-        </div>
-        <div>
-          <dt>Response Needed</dt>
-          <dd>${selected.response_needed === true ? "Yes" : "No"}</dd>
-        </div>
-        <div>
-          <dt>Validation</dt>
-          <dd>${escapeHtml(humanizeValue(selected.validation_status || "unknown"))}</dd>
-        </div>
-      </dl>
+      <div class="classification-detail-section">
+        <h4>Message</h4>
+        <dl class="classification-detail-grid">
+          <div>
+            <dt>Sender</dt>
+            <dd>${escapeHtml(getClassificationSender(selected))}</dd>
+          </div>
+          <div>
+            <dt>Received</dt>
+            <dd>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Unavailable")}</dd>
+          </div>
+          <div>
+            <dt>Email Age</dt>
+            <dd>${escapeHtml(ageLabel)}</dd>
+          </div>
+          <div>
+            <dt>Classified</dt>
+            <dd>${escapeHtml(formatDateTime(selected.created_at))}</dd>
+          </div>
+        </dl>
+      </div>
 
       <div class="classification-detail-section">
-        <h4>AI Summary</h4>
+        <h4>AI Classification</h4>
+        <div class="classification-pill-list">
+          ${categoryBadge}
+          ${confidenceBadge}
+          ${validationBadge}
+          ${renderBadge(`Priority: ${humanizeValue(selected.priority || "unknown")}`, "muted")}
+          ${renderBadge(`Urgency: ${humanizeValue(selected.urgency || "unknown")}`, "muted")}
+        </div>
         <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
       </div>
 
       <div class="classification-detail-section">
-        <h4>Body Preview</h4>
-        <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
+        <h4>Recommended Action</h4>
+        <div class="classification-pill-list">
+          ${actionBadge}
+          ${renderBadge(selected.response_needed === true ? "Response needed" : "No response needed", selected.response_needed === true ? "warning" : "muted")}
+        </div>
+        <p>${escapeHtml(selected.reasoning_summary || "No reasoning summary available.")}</p>
       </div>
 
       <div class="classification-detail-section">
-        <h4>Human Review</h4>
+        <h4>Safety / Review</h4>
+        <div class="classification-pill-list">
+          ${reviewBadge}
+          ${renderPillList(selected.safety_flags, "No safety flags")}
+        </div>
         <p>${humanReview ? "Required or recommended based on review flags, safety flags, or confidence." : "No human-review signal returned."}</p>
       </div>
 
-      <div class="classification-detail-section">
-        <h4>Safety Flags</h4>
-        <div class="classification-pill-list">${renderPillList(selected.safety_flags, "No safety flags")}</div>
-      </div>
+      ${renderEmailBodySection(state, selected)}
 
       <div class="classification-detail-section">
         <h4>Message Reference</h4>
         <p class="classification-mono">${escapeHtml(selected.message_id || "Unavailable")}</p>
       </div>
     `;
+
+    if (window.lucide?.createIcons) window.lucide.createIcons();
   }
 
   function setAdminClassificationState(next) {
@@ -756,6 +870,44 @@
         updatedAt: new Date().toISOString(),
       });
       console.error("[email-triage] admin_view classification fetch failed:", error);
+    }
+  }
+
+  async function loadMessageDetail(context, messageId) {
+    if (!messageId) return;
+    if (adminClassificationState.messageDetailsById[messageId]) return;
+
+    setAdminClassificationState({
+      messageDetailLoadingId: messageId,
+      messageDetailErrorsById: {
+        ...adminClassificationState.messageDetailErrorsById,
+        [messageId]: null,
+      },
+    });
+
+    try {
+      const detail = await fetchMessageDetail(context, messageId);
+      setAdminClassificationState({
+        messageDetailLoadingId: null,
+        messageDetailsById: {
+          ...adminClassificationState.messageDetailsById,
+          [messageId]: detail,
+        },
+        messageDetailErrorsById: {
+          ...adminClassificationState.messageDetailErrorsById,
+          [messageId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "message_detail_failed";
+      setAdminClassificationState({
+        messageDetailLoadingId: null,
+        messageDetailErrorsById: {
+          ...adminClassificationState.messageDetailErrorsById,
+          [messageId]: code,
+        },
+      });
+      console.error("[email-triage] message_detail fetch failed:", error);
     }
   }
 
@@ -914,7 +1066,7 @@
     }
   }
 
-  function bindClassificationInboxEvents() {
+  function bindClassificationInboxEvents(context) {
     els.classificationCategoryList?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-category-id]");
       if (!button) return;
@@ -941,6 +1093,12 @@
       setAdminClassificationState({
         selectedClassificationId: button.getAttribute("data-classification-id"),
       });
+    });
+
+    els.classificationDetail?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-message-detail-action='load']");
+      if (!button) return;
+      loadMessageDetail(context, button.getAttribute("data-message-id"));
     });
 
     els.classificationSort?.addEventListener("change", (event) => {
@@ -989,7 +1147,7 @@
     els.refresh?.addEventListener("click", () => loadMessages(context));
     els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
-    bindClassificationInboxEvents();
+    bindClassificationInboxEvents(context);
 
     handleOutlookQueryNotice();
     loadAdminClassificationData(context);

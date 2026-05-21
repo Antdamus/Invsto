@@ -10,8 +10,9 @@ const HEAD_CHARS = 12000;
 const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
 const OPENAI_TIMEOUT_MS = 30000;
+const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -284,6 +285,9 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
+  if (mode === "message_detail" && !messageId) {
+    throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+  }
   if (mode === "dry_run" && !messageId && !mailboxId) {
     throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
   }
@@ -328,6 +332,27 @@ function cleanWhitespace(value: unknown) {
 
 function shortText(value: unknown, maxLength: number) {
   return cleanWhitespace(value).slice(0, maxLength);
+}
+
+function safeBodyText(value: unknown) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+}
+
+function capMessageDetailBody(value: unknown, maxLength = MESSAGE_DETAIL_BODY_CHAR_LIMIT) {
+  const text = safeBodyText(value);
+  const original = text.length;
+  const capped = text.slice(0, maxLength);
+  return {
+    text: capped,
+    body_truncated: original > capped.length,
+    body_chars_original: original,
+    body_chars_returned: capped.length,
+  };
 }
 
 function uniqueStrings(values: unknown[], maxItems = 20) {
@@ -1351,6 +1376,90 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   };
 }
 
+async function adminMessageDetail(supabase: ServiceClient, input: Input) {
+  if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+
+  const [
+    messageResult,
+    bodyResult,
+    classificationResult,
+  ] = await Promise.all([
+    supabase
+      .from("email_messages")
+      .select("id, subject, from_name, from_email, sender_name, sender_email, received_at, sent_at, body_preview, body_content_type, has_attachments, sync_status")
+      .eq("id", input.messageId)
+      .maybeSingle(),
+    supabase
+      .from("email_message_bodies")
+      .select("body_text, normalized_text, normalization_version, redaction_status")
+      .eq("message_id", input.messageId)
+      .maybeSingle(),
+    supabase
+      .from("email_message_classifications")
+      .select("id, category, subcategory, confidence, priority, urgency, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
+      .eq("message_id", input.messageId)
+      .eq("source", "ai")
+      .order("created_at", { ascending: false })
+      .limit(1),
+  ]);
+
+  if (messageResult.error) throw new ClassifierError("message_lookup_failed", { phase: "message_detail_lookup", messageId: input.messageId });
+  if (!messageResult.data?.id) throw new ClassifierError("message_not_found", { status: 404, phase: "message_detail_lookup", messageId: input.messageId });
+  if (messageResult.data.sync_status !== "active") {
+    throw new ClassifierError("message_not_active", { status: 400, phase: "message_detail_lookup", messageId: input.messageId });
+  }
+  if (bodyResult.error) throw new ClassifierError("body_lookup_failed", { phase: "message_detail_body", messageId: input.messageId });
+  if (classificationResult.error) {
+    throw new ClassifierError("classification_lookup_failed", { phase: "message_detail_classification", messageId: input.messageId });
+  }
+
+  const message = messageResult.data as Record<string, any>;
+  const body = bodyResult.data as Record<string, any> | null;
+  const sourceText = body?.normalized_text || body?.body_text || message.body_preview || "";
+  const bodySource = body?.normalized_text ? "normalized_text" : body?.body_text ? "body_text" : message.body_preview ? "body_preview" : "none";
+  const cappedBody = capMessageDetailBody(sourceText);
+  const classification = Array.isArray(classificationResult.data) ? classificationResult.data[0] : null;
+
+  return {
+    ok: true,
+    mode: "message_detail",
+    message_id: message.id,
+    subject: shortText(message.subject, 300) || null,
+    from_name: shortText(message.from_name, 120) || null,
+    from_email: shortText(message.from_email, 180).toLowerCase() || null,
+    sender_name: shortText(message.sender_name, 120) || null,
+    sender_email: shortText(message.sender_email, 180).toLowerCase() || null,
+    received_at: message.received_at || null,
+    sent_at: message.sent_at || null,
+    body_preview: shortText(message.body_preview, 800) || null,
+    body_content_type: shortText(message.body_content_type, 80) || null,
+    body_source: bodySource,
+    normalized_text: cappedBody.text,
+    body_truncated: cappedBody.body_truncated,
+    body_chars_original: cappedBody.body_chars_original,
+    body_chars_returned: cappedBody.body_chars_returned,
+    normalization_version: shortText(body?.normalization_version, 120) || null,
+    redaction_status: shortText(body?.redaction_status, 120) || null,
+    has_attachments: message.has_attachments === true,
+    classification: classification ? {
+      id: classification.id,
+      category: classification.category,
+      subcategory: classification.subcategory,
+      confidence: classification.confidence === null ? null : Number(classification.confidence),
+      priority: classification.priority,
+      urgency: classification.urgency,
+      response_needed: classification.response_needed,
+      summary: classification.summary,
+      reasoning_summary: classification.reasoning_summary,
+      recommended_action: classification.recommended_action,
+      requires_human_review: classification.requires_human_review,
+      safety_flags: Array.isArray(classification.safety_flags) ? classification.safety_flags : [],
+      validation_status: classification.validation_status,
+      created_at: classification.created_at,
+    } : null,
+  };
+}
+
 async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
   if (input.classificationRunId) {
     const { data: rows, error } = await supabase
@@ -1587,6 +1696,10 @@ serve(async (req) => {
 
     if (input.mode === "admin_view") {
       return json(req, 200, await adminClassificationView(supabase, input));
+    }
+
+    if (input.mode === "message_detail") {
+      return json(req, 200, await adminMessageDetail(supabase, input));
     }
 
     const promptVersionValue = promptVersion();
