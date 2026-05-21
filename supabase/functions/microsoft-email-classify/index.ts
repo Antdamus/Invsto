@@ -2,8 +2,8 @@ import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CLASSIFIER_NAME = "og-email-triage-classifier";
-const CLASSIFIER_VERSION = "4b.3-v1";
-const TAXONOMY_VERSION = "step-4b.3-v1";
+const CLASSIFIER_VERSION = "4b.4-v1";
+const TAXONOMY_VERSION = "step-4b.4-v1";
 const TRUNCATION_VERSION = "head-12000-tail-2000-v1";
 const LINK_CONTEXT_VERSION = "links-compact-v1";
 const HEAD_CHARS = 12000;
@@ -11,7 +11,7 @@ const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
 const OPENAI_TIMEOUT_MS = 30000;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -57,8 +57,34 @@ const SAFETY_FLAGS = [
   "ambiguous_order_match",
   "body_truncated",
   "possible_spam",
+  "hallucinated_entity_removed",
 ] as const;
+const SENSITIVE_REVIEW_CATEGORIES = new Set([
+  "refund_request",
+  "return_request",
+  "cancellation_request",
+  "item_not_received",
+  "item_not_as_described",
+  "payment_issue",
+  "account_security",
+]);
+const REVIEW_SAFETY_FLAGS = new Set(["low_confidence", "account_security", "payment_or_refund"]);
+const ACTIVE_JOB_STATUSES = ["queued", "running"];
 const ENTITY_KEYS = ["order_numbers", "item_numbers", "buyer_usernames", "tracking_numbers"] as const;
+const REQUIRED_OUTPUT_FIELDS = [
+  "category",
+  "subcategory",
+  "priority",
+  "urgency",
+  "response_needed",
+  "human_review_required",
+  "confidence",
+  "summary",
+  "recommended_action",
+  "detected_entities",
+  "reasoning_summary",
+  "safety_flags",
+];
 const TRANSIENT_OPENAI_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -105,6 +131,12 @@ type ValidClassification = {
   reasoning_summary: string;
   safety_flags: string[];
 };
+type ValidationMetadata = {
+  hallucination_guard?: {
+    removed_entities: number;
+  };
+  safety_overrides?: string[];
+};
 type Counters = {
   jobs_enqueued: number;
   jobs_processed: number;
@@ -113,10 +145,23 @@ type Counters = {
   jobs_skipped: number;
   classifications_created: number;
 };
+type DryRunCounters = {
+  messages_tested: number;
+  valid_outputs: number;
+  invalid_outputs: number;
+  would_classify: number;
+};
 type Input = {
   mode: Mode;
   limit: number;
   messageId: string | null;
+  mailboxId: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  classificationRunId: string | null;
+  reason: string;
+  replaySource: string;
+  idempotencyKey: string | null;
 };
 
 class ClassifierError extends Error {
@@ -210,7 +255,7 @@ async function requireAdmin(req: Request, supabase: ServiceClient) {
     throw new ClassifierError("admin_required", { status: 403, phase: "auth" });
   }
 
-  return { userId: user.id };
+  return { userId: user.id, email: user.email || null };
 }
 
 async function parseInput(req: Request): Promise<Input> {
@@ -219,10 +264,30 @@ async function parseInput(req: Request): Promise<Input> {
   const mode = SUPPORTED_MODES.includes(requestedMode as Mode) ? requestedMode as Mode : "enqueue_and_process";
   const limit = Math.min(Math.max(Number(body?.limit) || 25, 1), MAX_LIMIT);
   const messageId = typeof body?.messageId === "string" && body.messageId.trim() ? body.messageId.trim() : null;
+  const mailboxId = typeof body?.mailboxId === "string" && body.mailboxId.trim() ? body.mailboxId.trim() : null;
+  const startDate = typeof body?.startDate === "string" && body.startDate.trim() ? body.startDate.trim() : null;
+  const endDate = typeof body?.endDate === "string" && body.endDate.trim() ? body.endDate.trim() : null;
+  const classificationRunId = typeof body?.classificationRunId === "string" && body.classificationRunId.trim()
+    ? body.classificationRunId.trim()
+    : null;
+  const reason = shortText(body?.reason, 500);
+  const replaySource = shortText(body?.replaySource || "microsoft-email-classify", 120) || "microsoft-email-classify";
+  const idempotencyKey = typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()
+    ? body.idempotencyKey.trim().slice(0, 200)
+    : null;
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
-  return { mode, limit, messageId };
+  if (mode === "dry_run" && !messageId && !mailboxId) {
+    throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
+  }
+  if (mode === "replay_classification" && !reason) {
+    throw new ClassifierError("reason_required", { status: 400, phase: "input" });
+  }
+  if (mode === "replay_classification" && !messageId && !mailboxId && !classificationRunId) {
+    throw new ClassifierError("replay_selector_required", { status: 400, phase: "input" });
+  }
+  return { mode, limit, messageId, mailboxId, startDate, endDate, classificationRunId, reason, replaySource, idempotencyKey };
 }
 
 async function sha256Hex(value: string) {
@@ -306,13 +371,13 @@ function jsonSchema() {
     ],
     properties: {
       category: { type: "string", enum: CATEGORIES },
-      subcategory: { type: "string" },
+      subcategory: { type: ["string", "null"], maxLength: 80 },
       priority: { type: "string", enum: PRIORITIES },
       urgency: { type: "string", enum: URGENCIES },
       response_needed: { type: "boolean" },
       human_review_required: { type: "boolean" },
       confidence: { type: "number", minimum: 0, maximum: 1 },
-      summary: { type: "string", maxLength: 220 },
+      summary: { type: "string", maxLength: 280 },
       recommended_action: { type: "string", enum: RECOMMENDED_ACTIONS },
       detected_entities: {
         type: "object",
@@ -324,7 +389,7 @@ function jsonSchema() {
           maxItems: 20,
         }])),
       },
-      reasoning_summary: { type: "string", maxLength: 220 },
+      reasoning_summary: { type: "string", maxLength: 280 },
       safety_flags: {
         type: "array",
         items: { type: "string", enum: SAFETY_FLAGS },
@@ -486,12 +551,82 @@ async function existingValidClassification(supabase: ServiceClient, messageId: s
   return data?.id ? String(data.id) : null;
 }
 
-function validateClassification(value: unknown): { ok: true; value: ValidClassification } | { ok: false; errors: string[]; safeOutput: Record<string, unknown> | null } {
+function groundingText(input: ClassifierInput) {
+  const pieces = [
+    stableStringify(input.message),
+    stableStringify(input.participants),
+    stableStringify(input.deterministic_links),
+    input.body.text,
+  ];
+  return cleanWhitespace(pieces.join(" ")).toLowerCase();
+}
+
+function entityIsGrounded(entity: string, haystack: string) {
+  const normalized = cleanWhitespace(entity).toLowerCase();
+  if (!normalized) return false;
+  return haystack.includes(normalized);
+}
+
+function enforceSafetyAndGrounding(classification: ValidClassification, input: ClassifierInput) {
+  const metadata: ValidationMetadata = {};
+  const safetyFlags = new Set(classification.safety_flags);
+  const overrides = new Set<string>();
+
+  if (classification.confidence < 0.75) {
+    safetyFlags.add("low_confidence");
+    classification.human_review_required = true;
+    overrides.add("low_confidence_review");
+  }
+  if (SENSITIVE_REVIEW_CATEGORIES.has(classification.category)) {
+    classification.human_review_required = true;
+    overrides.add("sensitive_category_review");
+  }
+  for (const flag of safetyFlags) {
+    if (REVIEW_SAFETY_FLAGS.has(flag)) {
+      classification.human_review_required = true;
+      overrides.add("safety_flag_review");
+    }
+  }
+  if (classification.category === "account_security") {
+    classification.recommended_action = "security_review";
+    safetyFlags.add("account_security");
+    overrides.add("account_security_action");
+  } else if (classification.confidence < 0.6 || classification.category === "internal_or_other") {
+    classification.recommended_action = "review_only";
+    classification.human_review_required = true;
+    overrides.add("poor_confidence_review_only");
+  }
+
+  const haystack = groundingText(input);
+  let removedEntities = 0;
+  for (const key of ENTITY_KEYS) {
+    const values = classification.detected_entities[key] || [];
+    const grounded = values.filter((value) => entityIsGrounded(value, haystack));
+    removedEntities += values.length - grounded.length;
+    classification.detected_entities[key] = grounded;
+  }
+  if (removedEntities > 0) {
+    safetyFlags.add("hallucinated_entity_removed");
+    metadata.hallucination_guard = { removed_entities: removedEntities };
+  }
+
+  classification.safety_flags = [...safetyFlags].filter((flag) => SAFETY_FLAGS.includes(flag as typeof SAFETY_FLAGS[number]));
+  if (overrides.size) metadata.safety_overrides = [...overrides];
+  return { classification, metadata };
+}
+
+function validateClassification(
+  value: unknown,
+  input: ClassifierInput,
+): { ok: true; value: ValidClassification; metadata: ValidationMetadata } | { ok: false; errors: string[]; safeOutput: Record<string, unknown> | null } {
   const errors: string[] = [];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, errors: ["output_not_object"], safeOutput: null };
   }
   const row = value as Record<string, unknown>;
+  for (const field of REQUIRED_OUTPUT_FIELDS) {
+    if (!(field in row)) errors.push("missing_required_field");
+  }
   const category = String(row.category || "");
   const priority = String(row.priority || "");
   const urgency = String(row.urgency || "");
@@ -509,16 +644,23 @@ function validateClassification(value: unknown): { ok: true; value: ValidClassif
   if (!URGENCIES.includes(urgency as typeof URGENCIES[number])) errors.push("invalid_urgency");
   if (!RECOMMENDED_ACTIONS.includes(recommendedAction as typeof RECOMMENDED_ACTIONS[number])) errors.push("invalid_recommended_action");
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) errors.push("invalid_confidence");
-  if (!summary || summary.length > 220) errors.push("invalid_summary");
-  if (!reasoningSummary || reasoningSummary.length > 220) errors.push("invalid_reasoning_summary");
+  if (row.subcategory !== null && typeof row.subcategory !== "string") errors.push("invalid_subcategory");
+  if (!summary || summary.length > 280) errors.push("invalid_summary");
+  if (!reasoningSummary || reasoningSummary.length > 280) errors.push("invalid_reasoning_summary");
   if (!detected) errors.push("invalid_detected_entities");
   if (!safetyFlags) errors.push("invalid_safety_flags");
 
   const detectedEntities: Record<string, string[]> = {};
   if (detected) {
+    for (const key of Object.keys(detected)) {
+      if (!ENTITY_KEYS.includes(key as typeof ENTITY_KEYS[number])) errors.push("invalid_detected_entities_key");
+    }
     for (const key of ENTITY_KEYS) {
       const values = detected[key];
       if (!Array.isArray(values)) errors.push(`invalid_detected_entities_${key}`);
+      if (Array.isArray(values) && values.some((value) => typeof value !== "string")) {
+        errors.push(`invalid_detected_entities_${key}`);
+      }
       detectedEntities[key] = Array.isArray(values) ? uniqueStrings(values, 20) : [];
     }
   }
@@ -532,7 +674,7 @@ function validateClassification(value: unknown): { ok: true; value: ValidClassif
   if (typeof responseNeeded !== "boolean") errors.push("invalid_response_needed");
   if (typeof humanReviewRequired !== "boolean") errors.push("invalid_human_review_required");
 
-  const subcategory = cleanWhitespace(row.subcategory || "unclassifiable").slice(0, 80) || "unclassifiable";
+  const subcategory = row.subcategory === null ? null : cleanWhitespace(row.subcategory).slice(0, 80) || null;
   const safeOutput = {
     category,
     subcategory,
@@ -541,15 +683,16 @@ function validateClassification(value: unknown): { ok: true; value: ValidClassif
     response_needed: responseNeeded === true,
     human_review_required: humanReviewRequired !== false,
     confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
-    summary: summary.slice(0, 220),
+    summary: summary.slice(0, 280),
     recommended_action: recommendedAction,
     detected_entities: detectedEntities,
-    reasoning_summary: reasoningSummary.slice(0, 220),
+    reasoning_summary: reasoningSummary.slice(0, 280),
     safety_flags: normalizedSafetyFlags.filter((flag) => SAFETY_FLAGS.includes(flag as typeof SAFETY_FLAGS[number])),
   };
 
   if (errors.length) return { ok: false, errors: [...new Set(errors)], safeOutput };
-  return { ok: true, value: safeOutput as ValidClassification };
+  const hardened = enforceSafetyAndGrounding(safeOutput as ValidClassification, input);
+  return { ok: true, value: hardened.classification, metadata: hardened.metadata };
 }
 
 async function callOpenAI(input: ClassifierInput, prompt: string, model: string) {
@@ -631,6 +774,7 @@ async function insertClassification(
     validationStatus: "valid" | "invalid";
     validationErrors: string[];
     rawSafeOutput: Record<string, unknown> | null;
+    validationMetadata?: ValidationMetadata;
   },
 ) {
   const nowIso = new Date().toISOString();
@@ -641,7 +785,6 @@ async function insertClassification(
       .eq("message_id", values.messageId)
       .eq("source", "ai")
       .eq("classifier_name", CLASSIFIER_NAME)
-      .eq("classifier_version", CLASSIFIER_VERSION)
       .eq("is_current", true);
     if (supersedeError) {
       throw new ClassifierError("classification_supersede_failed", { phase: "classification_write", messageId: values.messageId });
@@ -677,6 +820,7 @@ async function insertClassification(
     body_chars_sent: values.bodyMeta.body_chars_sent,
     truncation_strategy: values.bodyMeta.truncation_strategy,
     body_source: values.bodyMeta.source,
+    validation_metadata: values.validationMetadata || {},
   };
 
   const { data, error } = await supabase
@@ -837,6 +981,22 @@ function retryDelaySeconds(attempt: number) {
   return Math.min(60 * Math.max(attempt, 1), 300);
 }
 
+function validationDiagnosticCodes(errors: string[]) {
+  const diagnostics = new Set<string>();
+  for (const error of errors) {
+    if (error === "openai_invalid_json") diagnostics.add("invalid_json");
+    if (error.startsWith("invalid_")) diagnostics.add(error.replace(/^invalid_/, "invalid_"));
+    if (error.includes("required") || error.includes("missing")) diagnostics.add("missing_required_field");
+  }
+  for (const error of errors) {
+    if (["invalid_category", "invalid_priority", "invalid_urgency", "invalid_recommended_action", "invalid_safety_flag"].includes(error)) {
+      diagnostics.add("invalid_enum");
+    }
+    if (error === "invalid_confidence") diagnostics.add("confidence_out_of_range");
+  }
+  return [...diagnostics].slice(0, 20);
+}
+
 async function processJob(supabase: ServiceClient, job: ProcessingJob, actorId: string, prompt: string, promptHash: string, promptVersionValue: string, model: string) {
   await markJob(supabase, job, "running");
   const nextAttempt = Number(job.attempt_count || 0) + 1;
@@ -871,7 +1031,7 @@ async function processJob(supabase: ServiceClient, job: ProcessingJob, actorId: 
     }
 
     const aiOutput = await callOpenAI(classifierInput, prompt, model);
-    const validation = validateClassification(aiOutput);
+    const validation = validateClassification(aiOutput, classifierInput);
     if (!validation.ok) {
       await insertClassification(supabase, {
         messageId: job.message_id,
@@ -911,6 +1071,7 @@ async function processJob(supabase: ServiceClient, job: ProcessingJob, actorId: 
       validationStatus: "valid",
       validationErrors: [],
       rawSafeOutput: validation.value,
+      validationMetadata: validation.metadata,
     });
 
     await markJob(supabase, job, "succeeded", {
@@ -925,6 +1086,7 @@ async function processJob(supabase: ServiceClient, job: ProcessingJob, actorId: 
         body_truncated: classifierInput.body.body_truncated,
         body_chars_original: classifierInput.body.body_chars_original,
         body_chars_sent: classifierInput.body.body_chars_sent,
+        validation_metadata: validation.metadata,
       },
     });
     return { status: "succeeded" as const, classifications_created: 1 };
@@ -957,6 +1119,7 @@ async function processJob(supabase: ServiceClient, job: ProcessingJob, actorId: 
         error: safe.code,
         phase: safe.phase,
         validation_errors: safe.validationErrors,
+        validation_diagnostics: validationDiagnosticCodes(safe.validationErrors.length ? safe.validationErrors : [safe.code]),
         retryable: safe.transient,
         attempts_exhausted: safe.transient && nextAttempt >= Number(job.max_attempts || 3),
       },
@@ -999,6 +1162,231 @@ function blankCounters(): Counters {
   };
 }
 
+function blankDryRunCounters(): DryRunCounters {
+  return {
+    messages_tested: 0,
+    valid_outputs: 0,
+    invalid_outputs: 0,
+    would_classify: 0,
+  };
+}
+
+async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
+  if (input.classificationRunId) {
+    const { data: rows, error } = await supabase
+      .from("email_message_classifications")
+      .select("message_id, email_messages!inner(id, mailbox_id, received_at, sync_status)")
+      .eq("classification_run_id", input.classificationRunId)
+      .limit(input.limit);
+    if (error) throw new ClassifierError("classification_run_lookup_failed", { phase: "message_select" });
+    return (rows || [])
+      .map((row: Record<string, any>) => row.email_messages)
+      .filter((message: Record<string, unknown> | null) => message?.sync_status === "active")
+      .map((message: Record<string, unknown>) => ({ id: String(message.id), mailbox_id: String(message.mailbox_id) }));
+  }
+
+  let query = supabase
+    .from("email_messages")
+    .select("id, mailbox_id")
+    .eq("sync_status", "active")
+    .order("received_at", { ascending: false, nullsFirst: false })
+    .limit(input.limit);
+  if (input.messageId) query = query.eq("id", input.messageId);
+  if (input.mailboxId) query = query.eq("mailbox_id", input.mailboxId);
+  if (input.startDate) query = query.gte("received_at", input.startDate);
+  if (input.endDate) query = query.lte("received_at", input.endDate);
+
+  const { data, error } = await query;
+  if (error) throw new ClassifierError("message_select_failed", { phase: "message_select" });
+  if (input.messageId && !data?.length) throw new ClassifierError("message_not_found", { status: 404, phase: "message_select" });
+  return (data || []).map((message: Record<string, unknown>) => ({
+    id: String(message.id),
+    mailbox_id: String(message.mailbox_id),
+  }));
+}
+
+async function dryRunClassifications(
+  supabase: ServiceClient,
+  input: Input,
+  prompt: string,
+  promptHash: string,
+  promptVersionValue: string,
+  model: string,
+) {
+  const counters = blankDryRunCounters();
+  const messages = await loadSelectedMessages(supabase, input);
+  for (const message of messages) {
+    counters.messages_tested += 1;
+    try {
+      const classifierInput = await loadClassifierInput(supabase, message.id, promptVersionValue);
+      await sha256Hex(stableStringify({
+        classifier_name: CLASSIFIER_NAME,
+        classifier_version: CLASSIFIER_VERSION,
+        taxonomy_version: TAXONOMY_VERSION,
+        prompt_hash: promptHash,
+        input_version: classifierInputVersion(promptHash),
+        input: classifierInput,
+      }));
+      const aiOutput = await callOpenAI(classifierInput, prompt, model);
+      const validation = validateClassification(aiOutput, classifierInput);
+      if (validation.ok) {
+        counters.valid_outputs += 1;
+        counters.would_classify += 1;
+      } else {
+        counters.invalid_outputs += 1;
+      }
+    } catch (error) {
+      const safe = safeError(error);
+      counters.invalid_outputs += 1;
+      console.error("[microsoft-email-classify] dry-run message failed", {
+        phase: safe.phase,
+        error: safe.code,
+        message_id: message.id,
+      });
+    }
+  }
+  return counters;
+}
+
+async function existingReplayOperation(supabase: ServiceClient, input: Input) {
+  if (!input.idempotencyKey) return null;
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .select("id, new_job_ids, payload")
+    .eq("event_type", "classification_replay")
+    .eq("idempotency_key", input.idempotencyKey)
+    .maybeSingle();
+  if (error) throw new ClassifierError("idempotency_lookup_failed", { phase: "idempotency_lookup" });
+  return data as Record<string, any> | null;
+}
+
+async function activeClassifyMessageIds(supabase: ServiceClient, messageIds: string[]) {
+  const active = new Set<string>();
+  if (!messageIds.length) return active;
+  for (let index = 0; index < messageIds.length; index += 100) {
+    const { data, error } = await supabase
+      .from("email_processing_jobs")
+      .select("message_id")
+      .in("message_id", messageIds.slice(index, index + 100))
+      .eq("job_type", "classify")
+      .in("status", ACTIVE_JOB_STATUSES);
+    if (error) throw new ClassifierError("active_job_lookup_failed", { phase: "active_job_lookup" });
+    for (const row of data || []) active.add(String(row.message_id));
+  }
+  return active;
+}
+
+async function replayClassification(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+  promptHash: string,
+  promptVersionValue: string,
+) {
+  const existing = await existingReplayOperation(supabase, input);
+  if (existing) {
+    const payload = existing.payload && typeof existing.payload === "object" ? existing.payload : {};
+    return {
+      ok: true,
+      mode: "replay_classification",
+      idempotent: true,
+      jobs_enqueued: Number(payload.jobs_enqueued || 0),
+      jobs_skipped_active: Number(payload.jobs_skipped_active || 0),
+      operation_id: existing.id,
+      operational_event_id: existing.id,
+    };
+  }
+
+  const messages = await loadSelectedMessages(supabase, input);
+  const messageIds = messages.map((message) => message.id);
+  const active = await activeClassifyMessageIds(supabase, messageIds);
+  const operationId = crypto.randomUUID();
+  const inputVersion = `v1:classification_replay:${operationId}:${CLASSIFIER_VERSION}`;
+  const rows = messages
+    .filter((message) => !active.has(message.id))
+    .map((message) => ({
+      message_id: message.id,
+      job_type: "classify",
+      input_version: inputVersion,
+      status: "queued",
+      priority: 65,
+      attempt_count: 0,
+      max_attempts: 3,
+      available_at: new Date().toISOString(),
+      metadata: {
+        classifier_name: CLASSIFIER_NAME,
+        classifier_version: CLASSIFIER_VERSION,
+        prompt_hash: promptHash,
+        prompt_version: promptVersionValue,
+        replay_source: input.replaySource,
+        replay_reason: input.reason,
+        operational_event_id: operationId,
+        replay_selector: {
+          message_id: input.messageId,
+          mailbox_id: input.mailboxId,
+          start_date: input.startDate,
+          end_date: input.endDate,
+          classification_run_id: input.classificationRunId,
+        },
+      },
+    }));
+
+  const { data: inserted, error: insertError } = rows.length
+    ? await supabase.from("email_processing_jobs").insert(rows).select("id")
+    : { data: [], error: null };
+  if (insertError) throw new ClassifierError("replay_job_insert_failed", { phase: "job_insert" });
+  const newJobIds = (inserted || []).map((row: { id: string }) => row.id);
+  const mailboxIds = [...new Set(messages.map((message) => message.mailbox_id).filter(Boolean))];
+  const payload = {
+    messages_selected: messageIds.length,
+    jobs_enqueued: newJobIds.length,
+    jobs_skipped_active: messageIds.length - rows.length,
+    input_version: inputVersion,
+    classifier_name: CLASSIFIER_NAME,
+    classifier_version: CLASSIFIER_VERSION,
+    prompt_version: promptVersionValue,
+    replay_selector: {
+      message_id: input.messageId,
+      mailbox_id: input.mailboxId,
+      start_date: input.startDate,
+      end_date: input.endDate,
+      classification_run_id: input.classificationRunId,
+      limit: input.limit,
+    },
+  };
+
+  const { data: event, error: eventError } = await supabase
+    .from("email_operational_events")
+    .insert({
+      id: operationId,
+      event_type: "classification_replay",
+      mailbox_id: mailboxIds.length === 1 ? mailboxIds[0] : input.mailboxId,
+      message_ids: messageIds,
+      job_ids: [],
+      new_job_ids: newJobIds,
+      job_types: ["classify"],
+      reason: input.reason,
+      initiated_by: admin.userId,
+      initiated_by_email: admin.email,
+      processor_version: CLASSIFIER_VERSION,
+      replay_source: input.replaySource,
+      idempotency_key: input.idempotencyKey,
+      payload,
+    })
+    .select("id")
+    .single();
+  if (eventError || !event?.id) throw new ClassifierError("audit_insert_failed", { phase: "audit_insert" });
+
+  return {
+    ok: true,
+    mode: "replay_classification",
+    jobs_enqueued: newJobIds.length,
+    jobs_skipped_active: messageIds.length - rows.length,
+    operation_id: operationId,
+    operational_event_id: String(event.id),
+  };
+}
+
 function safeError(error: unknown, job?: ProcessingJob) {
   if (error instanceof ClassifierError) return error;
   return new ClassifierError("unexpected_error", {
@@ -1026,7 +1414,21 @@ serve(async (req) => {
       link_context_version: LINK_CONTEXT_VERSION,
       schema: jsonSchema(),
     }));
-    const model = modelName();
+    const model = ["dry_run", "process_queued", "enqueue_and_process", "process_message"].includes(input.mode)
+      ? modelName()
+      : "";
+
+    if (input.mode === "dry_run") {
+      return json(req, 200, {
+        ok: true,
+        mode: input.mode,
+        ...await dryRunClassifications(supabase, input, prompt, promptHash, promptVersionValue, model),
+      });
+    }
+
+    if (input.mode === "replay_classification") {
+      return json(req, 200, await replayClassification(supabase, input, admin, promptHash, promptVersionValue));
+    }
 
     if (["enqueue_only", "enqueue_and_process", "process_message"].includes(input.mode)) {
       counters.jobs_enqueued = await enqueueJobs(supabase, input, promptHash);

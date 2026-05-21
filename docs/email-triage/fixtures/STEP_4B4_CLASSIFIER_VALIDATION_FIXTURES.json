@@ -1,0 +1,88 @@
+{
+  "description": "Safe Step 4B.4 regression fixtures for classifier validation logic. These contain no real email body text.",
+  "cases": [
+    {
+      "name": "low_confidence_forces_review",
+      "ai_output": {
+        "category": "buyer_message",
+        "subcategory": null,
+        "priority": "medium",
+        "urgency": "soon",
+        "response_needed": true,
+        "human_review_required": false,
+        "confidence": 0.7,
+        "summary": "Buyer appears to need help with an order question.",
+        "recommended_action": "review_and_reply",
+        "detected_entities": {
+          "order_numbers": [],
+          "item_numbers": [],
+          "buyer_usernames": ["examplebuyer"],
+          "tracking_numbers": []
+        },
+        "reasoning_summary": "The message asks for assistance but has limited deterministic context.",
+        "safety_flags": []
+      },
+      "grounding_text": "Subject: examplebuyer sent a message",
+      "expected_overrides": {
+        "human_review_required": true,
+        "safety_flags_include": ["low_confidence"]
+      }
+    },
+    {
+      "name": "account_security_forces_security_review",
+      "ai_output": {
+        "category": "account_security",
+        "subcategory": "login_or_security_alert",
+        "priority": "critical",
+        "urgency": "immediate",
+        "response_needed": false,
+        "human_review_required": false,
+        "confidence": 0.91,
+        "summary": "Platform notice reports account security activity.",
+        "recommended_action": "review_only",
+        "detected_entities": {
+          "order_numbers": [],
+          "item_numbers": [],
+          "buyer_usernames": [],
+          "tracking_numbers": []
+        },
+        "reasoning_summary": "The stored metadata indicates an account security notice.",
+        "safety_flags": []
+      },
+      "grounding_text": "Subject: account security alert",
+      "expected_overrides": {
+        "human_review_required": true,
+        "recommended_action": "security_review",
+        "safety_flags_include": ["account_security"]
+      }
+    },
+    {
+      "name": "ungrounded_entity_removed",
+      "ai_output": {
+        "category": "shipping_issue",
+        "subcategory": "tracking_update",
+        "priority": "medium",
+        "urgency": "today",
+        "response_needed": true,
+        "human_review_required": false,
+        "confidence": 0.82,
+        "summary": "Buyer asks about shipment tracking.",
+        "recommended_action": "check_shipping_status",
+        "detected_entities": {
+          "order_numbers": ["00-00000-00000"],
+          "item_numbers": [],
+          "buyer_usernames": [],
+          "tracking_numbers": ["1ZNOTINCONTEXT"]
+        },
+        "reasoning_summary": "The message refers to a shipping update.",
+        "safety_flags": []
+      },
+      "grounding_text": "Subject: tracking question for order 00-00000-00000",
+      "expected_overrides": {
+        "removed_entities": 1,
+        "tracking_numbers": [],
+        "safety_flags_include": ["hallucinated_entity_removed"]
+      }
+    }
+  ]
+}
