@@ -1,0 +1,283 @@
+alter table public.ebay_return_cases
+  alter column order_id drop not null;
+
+alter table public.ebay_return_cases
+  alter column order_number drop not null;
+
+alter table public.ebay_return_cases
+  add column if not exists case_type text;
+
+update public.ebay_return_cases
+set case_type = 'matched_order'
+where case_type is null;
+
+alter table public.ebay_return_cases
+  alter column case_type set default 'matched_order';
+
+alter table public.ebay_return_cases
+  alter column case_type set not null;
+
+alter table public.ebay_return_cases
+  drop constraint if exists ebay_return_cases_case_type_check;
+
+alter table public.ebay_return_cases
+  add constraint ebay_return_cases_case_type_check
+  check (case_type in ('matched_order', 'unmatched_legacy', 'refund_only'));
+
+create index if not exists ebay_return_cases_case_type_status_idx
+  on public.ebay_return_cases(case_type, status, opened_at desc);
+
+create or replace function public.open_unmatched_ebay_return_case(
+  _ebay_return_id text default null,
+  _buyer_username text default null,
+  _item_number text default null,
+  _item_title text default null,
+  _transaction_id text default null,
+  _return_reason text default null,
+  _return_status text default null,
+  _return_action text default null,
+  _return_initiated text default null,
+  _refund_text text default null,
+  _details_url text default null,
+  _page_url text default null,
+  _notes text default null,
+  _raw_payload jsonb default '{}'::jsonb,
+  _signed_by_email text default null
+)
+returns table (
+  return_case_id uuid,
+  task_id uuid
+)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_case public.ebay_return_cases;
+  v_task public.ebay_return_tasks;
+  v_ebay_return_id text := nullif(btrim(coalesce(_ebay_return_id, '')), '');
+  v_buyer_username text := nullif(btrim(coalesce(_buyer_username, '')), '');
+  v_item_number text := nullif(btrim(coalesce(_item_number, '')), '');
+  v_item_title text := nullif(btrim(coalesce(_item_title, '')), '');
+  v_transaction_id text := nullif(btrim(coalesce(_transaction_id, '')), '');
+  v_reason text := nullif(btrim(coalesce(_return_reason, '')), '');
+  v_return_status text := nullif(btrim(coalesce(_return_status, '')), '');
+  v_return_action text := nullif(btrim(coalesce(_return_action, '')), '');
+  v_return_initiated text := nullif(btrim(coalesce(_return_initiated, '')), '');
+  v_refund_text text := nullif(btrim(coalesce(_refund_text, '')), '');
+  v_details_url text := nullif(btrim(coalesce(_details_url, '')), '');
+  v_page_url text := nullif(btrim(coalesce(_page_url, '')), '');
+  v_notes text := nullif(btrim(coalesce(_notes, '')), '');
+  v_signed_email text := nullif(btrim(coalesce(_signed_by_email, '')), '');
+  v_payload jsonb := case
+    when jsonb_typeof(coalesce(_raw_payload, '{}'::jsonb)) = 'object'
+      then coalesce(_raw_payload, '{}'::jsonb)
+    else jsonb_build_object('payload', _raw_payload)
+  end;
+  v_case_payload jsonb;
+  v_audit_note text;
+begin
+  if not public.can_manage_inventory() then
+    raise exception 'Not allowed to open eBay return cases' using errcode = '42501';
+  end if;
+
+  v_audit_note := concat_ws(E'\n',
+    'No matching OG fulfilled order history was found for this eBay return/refund.',
+    v_notes
+  );
+
+  v_case_payload := v_payload || jsonb_build_object(
+    'source', 'ebay_return_extension',
+    'caseType', 'unmatched_legacy',
+    'unmatchedReason', 'No matching fulfilled OG order line was found.',
+    'ebayReturnId', v_ebay_return_id,
+    'buyerUsername', v_buyer_username,
+    'itemNumber', v_item_number,
+    'itemTitle', v_item_title,
+    'transactionId', v_transaction_id,
+    'returnReason', v_reason,
+    'returnStatus', v_return_status,
+    'returnAction', v_return_action,
+    'returnInitiated', v_return_initiated,
+    'refundText', v_refund_text,
+    'detailsUrl', v_details_url,
+    'pageUrl', v_page_url
+  );
+
+  select *
+    into v_case
+  from public.ebay_return_cases
+  where order_id is null
+    and case_type in ('unmatched_legacy', 'refund_only')
+    and status not in ('closed', 'cancelled')
+    and (
+      (v_ebay_return_id is not null and ebay_return_id = v_ebay_return_id)
+      or (
+        v_ebay_return_id is null
+        and v_item_number is not null
+        and v_buyer_username is not null
+        and raw_payload->>'itemNumber' = v_item_number
+        and raw_payload->>'buyerUsername' = v_buyer_username
+      )
+    )
+  order by opened_at desc
+  limit 1;
+
+  if not found then
+    insert into public.ebay_return_cases (
+      order_id,
+      order_number,
+      case_type,
+      ebay_return_id,
+      buyer_username,
+      return_reason,
+      status,
+      opened_at,
+      created_by,
+      created_by_email,
+      notes,
+      raw_payload
+    )
+    values (
+      null,
+      null,
+      'unmatched_legacy',
+      v_ebay_return_id,
+      v_buyer_username,
+      v_reason,
+      'needs_review',
+      now(),
+      auth.uid(),
+      v_signed_email,
+      v_audit_note,
+      v_case_payload
+    )
+    returning * into v_case;
+
+    insert into public.ebay_return_events (
+      return_case_id,
+      action,
+      order_id,
+      order_line_ids,
+      notes,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_case.id,
+      'return_created',
+      null,
+      '{}'::uuid[],
+      v_audit_note,
+      auth.uid(),
+      v_signed_email,
+      v_case_payload
+    );
+  else
+    update public.ebay_return_cases
+    set ebay_return_id = coalesce(v_ebay_return_id, ebay_return_id),
+        buyer_username = coalesce(v_buyer_username, buyer_username),
+        return_reason = coalesce(v_reason, return_reason),
+        notes = concat_ws(E'\n\n', nullif(notes, ''), v_notes),
+        raw_payload = coalesce(raw_payload, '{}'::jsonb) || v_case_payload,
+        status = case when status = 'closed' then status else 'needs_review' end
+    where id = v_case.id
+    returning * into v_case;
+
+    insert into public.ebay_return_events (
+      return_case_id,
+      action,
+      order_id,
+      order_line_ids,
+      notes,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_case.id,
+      'return_created',
+      null,
+      '{}'::uuid[],
+      'Unmatched eBay return details refreshed from the eBay returns page.',
+      auth.uid(),
+      v_signed_email,
+      v_case_payload
+    );
+  end if;
+
+  select *
+    into v_task
+  from public.ebay_return_tasks
+  where return_case_id = v_case.id
+    and task_type = 'return_review'
+    and status not in ('resolved', 'cancelled')
+  order by created_at desc
+  limit 1;
+
+  if not found then
+    insert into public.ebay_return_tasks (
+      return_case_id,
+      order_id,
+      order_line_ids,
+      task_type,
+      title,
+      question,
+      status,
+      priority,
+      created_by,
+      created_by_email,
+      metadata
+    )
+    values (
+      v_case.id,
+      null,
+      '{}'::uuid[],
+      'return_review',
+      'Review unmatched eBay return/refund',
+      'No matching OG order history was found. Review the eBay buyer, item, reason, and refund details before deciding the next step.',
+      'open',
+      'high',
+      auth.uid(),
+      v_signed_email,
+      v_case_payload
+    )
+    returning * into v_task;
+
+    insert into public.ebay_return_task_events (
+      task_id,
+      return_case_id,
+      action,
+      new_status,
+      notes,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_task.id,
+      v_case.id,
+      'created',
+      v_task.status,
+      'Legacy/unmatched eBay return review task opened from the eBay returns page.',
+      auth.uid(),
+      v_signed_email,
+      v_task.metadata
+    );
+  else
+    update public.ebay_return_tasks
+    set metadata = coalesce(metadata, '{}'::jsonb) || v_case_payload,
+        priority = case when priority in ('urgent', 'high') then priority else 'high' end
+    where id = v_task.id
+    returning * into v_task;
+  end if;
+
+  return_case_id := v_case.id;
+  task_id := v_task.id;
+  return next;
+end;
+$$;
+
+revoke all on function public.open_unmatched_ebay_return_case(text, text, text, text, text, text, text, text, text, text, text, text, text, jsonb, text) from public;
+grant execute on function public.open_unmatched_ebay_return_case(text, text, text, text, text, text, text, text, text, text, text, text, text, jsonb, text) to authenticated;

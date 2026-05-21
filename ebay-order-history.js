@@ -932,17 +932,27 @@ function getReturnTaskLines(task = {}) {
 function getReturnTaskSearchText(task = {}) {
   const returnCase = getReturnTaskCase(task);
   const lines = getReturnTaskLines(task);
+  const metadata = returnCase.raw_payload || task.metadata || {};
   return [
     task.title,
     task.question,
     task.status,
     task.priority,
     task.assigned_to_email,
+    task.task_type,
+    returnCase.case_type,
     returnCase.order_number,
     returnCase.ebay_return_id,
     returnCase.buyer_username,
     returnCase.return_reason,
     returnCase.return_tracking_number,
+    metadata.itemNumber,
+    metadata.itemTitle,
+    metadata.transactionId,
+    metadata.returnStatus,
+    metadata.returnAction,
+    metadata.refundText,
+    metadata.unmatchedReason,
     ...(lines || []).flatMap((line) => [
       line.item_title,
       line.item_number,
@@ -1047,7 +1057,18 @@ async function loadReturnQueue() {
 
 function getReturnTaskLineSummary(task = {}) {
   const lines = getReturnTaskLines(task);
-  if (!lines.length) return "No line details loaded";
+  const returnCase = getReturnTaskCase(task);
+  if (!lines.length) {
+    const metadata = returnCase.raw_payload || task.metadata || {};
+    if (returnCase.case_type === "unmatched_legacy" || metadata.caseType === "unmatched_legacy") {
+      const item = [metadata.itemNumber || metadata.item_number, metadata.itemTitle || metadata.item_title]
+        .filter(Boolean)
+        .join(" - ");
+      const reason = returnCase.return_reason || metadata.returnReason || metadata.return_reason || "";
+      return `No matched OG order history${item ? ` - ${item}` : ""}${reason ? ` (${reason})` : ""}`;
+    }
+    return "No line details loaded";
+  }
   const first = lines[0];
   const extra = lines.length > 1 ? ` +${lines.length - 1} more` : "";
   return `${first.item_number || "No item #"} - ${first.item_title || "Returned item"}${extra}`;
@@ -1071,6 +1092,9 @@ function renderReturnQueue() {
     const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
     const lineIds = getReturnTaskLineIds(task);
     const dueText = task.due_at ? formatDateTime(task.due_at) : "No due date";
+    const orderLabel = returnCase.order_number || (
+      returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
+    );
     return `
       <article class="return-task-card is-${escapeHtml(task.status || "open")} priority-${escapeHtml(task.priority || "normal")}" data-return-task-id="${escapeHtml(task.id)}">
         <div class="return-task-main">
@@ -1086,7 +1110,7 @@ function renderReturnQueue() {
             </div>
             <div class="return-task-meta">
               <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
-              <span>Order ${escapeHtml(returnCase.order_number || "-")}</span>
+              <span>Order ${escapeHtml(orderLabel)}</span>
               <span>${escapeHtml(returnCase.buyer_username || "No buyer")}</span>
             </div>
             <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
@@ -1247,7 +1271,7 @@ function applyReturnTaskLaunchSelection() {
   renderReturnQueue();
   window.setTimeout(() => {
     document.querySelector(`[data-return-task-id="${CSS.escape(taskId)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    openReturnTaskIntake(taskId);
+    if (getReturnTaskLineIds(task).length) openReturnTaskIntake(taskId);
   }, 120);
 }
 
@@ -2823,6 +2847,13 @@ function buildReturnTransferNote(info = {}) {
   ].filter(Boolean).join("\n");
 }
 
+function buildUnmatchedReturnTransferNote(info = {}) {
+  return [
+    "No matching OG fulfilled order history was found for this eBay return/refund. Treat this as a legacy/unmatched review task.",
+    buildReturnTransferNote(info),
+  ].filter(Boolean).join("\n");
+}
+
 function returnTransferMatchesLine(info = {}, line = {}) {
   const itemNumber = normalizeReturnLookup(info.itemNumber);
   const transactionId = normalizeReturnLookup(info.transactionId);
@@ -2967,6 +2998,43 @@ async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {
   if (options.refreshQueue !== false) {
     await loadReturnQueue().catch((queueError) => {
       console.warn("Could not refresh return task queue after opening eBay return:", queueError);
+    });
+  }
+  return result;
+}
+
+async function ensureUnmatchedReturnTaskForTransfer(payload = {}, options = {}) {
+  const info = getReturnTransferInfo(payload);
+  const metadata = payload.metadata || {};
+  const rawPayload = {
+    ...metadata,
+    ...info,
+    transferId: payload.transferId || null,
+    matchedLineIds: [],
+    unmatchedReason: "No matching fulfilled OG order line was found.",
+  };
+  const { data, error } = await supabase.rpc("open_unmatched_ebay_return_case", {
+    _ebay_return_id: info.returnId || metadata.returnId || null,
+    _buyer_username: info.buyerUsername || metadata.buyerUsername || null,
+    _item_number: info.itemNumber || metadata.itemNumber || null,
+    _item_title: info.itemTitle || metadata.itemTitle || null,
+    _transaction_id: info.transactionId || metadata.transactionId || null,
+    _return_reason: info.returnReason || metadata.returnReason || null,
+    _return_status: info.returnStatus || metadata.returnStatus || null,
+    _return_action: info.returnAction || metadata.returnAction || null,
+    _return_initiated: info.returnInitiated || metadata.returnInitiated || null,
+    _refund_text: info.refundText || metadata.refundText || null,
+    _details_url: info.detailsUrl || metadata.detailsUrl || null,
+    _page_url: info.pageUrl || metadata.pageUrl || null,
+    _notes: buildUnmatchedReturnTransferNote(info) || null,
+    _raw_payload: rawPayload,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] || {} : data || {};
+  if (options.refreshQueue !== false) {
+    await loadReturnQueue().catch((queueError) => {
+      console.warn("Could not refresh return task queue after opening unmatched eBay return:", queueError);
     });
   }
   return result;
@@ -3921,7 +3989,25 @@ async function openReturnIntakeForTransfer(payload = {}) {
   const info = getReturnTransferInfo(payload);
   const lines = await findReturnTransferLines(payload);
   if (!lines.length) {
-    throw new Error(`Could not match eBay return ${info.returnId || ""} to a fulfilled OG order line. Item ${info.itemNumber || "unknown"} / buyer ${info.buyerUsername || "unknown"} was not found.`);
+    const opened = await ensureUnmatchedReturnTaskForTransfer(payload);
+    if ($("return-task-status-filter")) $("return-task-status-filter").value = "pending";
+    if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
+    if ($("return-task-search")) $("return-task-search").value = info.returnId || info.itemNumber || info.buyerUsername || "";
+    renderReturnQueue();
+    window.setTimeout(() => {
+      $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    postHistoryReturnTransferStatus({
+      transferId,
+      ok: true,
+      opened: true,
+      unmatched: true,
+      routedTo: "return_queue",
+      returnCaseId: opened?.return_case_id || null,
+      taskId: opened?.task_id || null,
+      message: "Created an unmatched eBay return review task because no fulfilled OG order history match was found.",
+    });
+    return;
   }
 
   const lineIds = lines.map((line) => line.id).filter(Boolean);
@@ -3953,11 +4039,14 @@ async function importReturnBatchTransfer(payload = {}) {
     try {
       const lines = await findReturnTransferLines(itemPayload);
       if (!lines.length) {
+        const opened = await ensureUnmatchedReturnTaskForTransfer(itemPayload, { refreshQueue: false });
         unmatchedReturns.push({
           returnId: info.returnId || "",
           itemNumber: info.itemNumber || "",
           buyerUsername: info.buyerUsername || "",
-          reason: "No matching fulfilled OG order line was found.",
+          returnCaseId: opened?.return_case_id || null,
+          taskId: opened?.task_id || null,
+          reason: "Created a legacy/unmatched return review task because no matching fulfilled OG order line was found.",
         });
         continue;
       }
@@ -3997,22 +4086,27 @@ async function importReturnBatchTransfer(payload = {}) {
   const importedCount = importedReturns.length;
   const unmatchedCount = unmatchedReturns.length;
   const failedCount = failedReturns.length;
-  const ok = importedCount > 0;
+  const processedCount = importedCount + unmatchedCount;
+  const ok = processedCount > 0;
   const error = ok
     ? ""
-    : failedReturns[0]?.error || "None of the eBay returns matched fulfilled OG order lines. Import the matching orders or check item/buyer details.";
+    : failedReturns[0]?.error || "None of the eBay returns could be imported into the OG return queue.";
   const message = ok
-    ? `Imported ${importedCount} eBay return${importedCount === 1 ? "" : "s"} into the OG return queue.`
+    ? [
+      importedCount ? `${importedCount} matched return${importedCount === 1 ? "" : "s"}` : "",
+      unmatchedCount ? `${unmatchedCount} legacy/unmatched review task${unmatchedCount === 1 ? "" : "s"}` : "",
+    ].filter(Boolean).join(" and ") + " imported into the OG return queue."
     : error;
 
   postHistoryReturnTransferStatus({
     transferId,
     ok,
     opened: true,
-    imported: importedCount,
+    imported: processedCount,
     importedCount,
     unmatched: unmatchedCount,
     unmatchedCount,
+    unmatchedCreated: unmatchedCount,
     failed: failedCount,
     failedCount,
     importedReturns,
@@ -4024,8 +4118,10 @@ async function importReturnBatchTransfer(payload = {}) {
 
   return {
     ok,
+    processedCount,
     importedCount,
     unmatchedCount,
+    unmatchedCreated: unmatchedCount,
     failedCount,
     importedReturns,
     unmatchedReturns,
