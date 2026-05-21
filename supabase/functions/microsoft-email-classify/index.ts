@@ -35,6 +35,10 @@ const CATEGORIES = [
 ] as const;
 const PRIORITIES = ["low", "medium", "high", "critical"] as const;
 const URGENCIES = ["none", "later", "soon", "today", "immediate"] as const;
+const PRIORITY_LEVELS = ["low", "medium", "high", "critical"] as const;
+const URGENCY_LEVELS = ["low", "today", "immediate"] as const;
+const RESPONSE_TIMINGS = ["no_response_needed", "within_72_hours", "within_24_hours", "immediate_attention"] as const;
+const CUSTOMER_RISKS = ["low", "medium", "high", "critical"] as const;
 const RECOMMENDED_ACTIONS = [
   "no_action",
   "archive_or_ignore",
@@ -70,6 +74,14 @@ const SENSITIVE_REVIEW_CATEGORIES = new Set([
   "account_security",
 ]);
 const REVIEW_SAFETY_FLAGS = new Set(["low_confidence", "account_security", "payment_or_refund"]);
+const REFUND_RISK_CATEGORIES = new Set([
+  "refund_request",
+  "return_request",
+  "cancellation_request",
+  "item_not_received",
+  "item_not_as_described",
+  "payment_issue",
+]);
 const ACTIVE_JOB_STATUSES = ["queued", "running"];
 const ENTITY_KEYS = ["order_numbers", "item_numbers", "buyer_usernames", "tracking_numbers"] as const;
 const REQUIRED_OUTPUT_FIELDS = [
@@ -77,6 +89,12 @@ const REQUIRED_OUTPUT_FIELDS = [
   "subcategory",
   "priority",
   "urgency",
+  "priority_level",
+  "urgency_level",
+  "response_timing",
+  "customer_risk",
+  "refund_risk",
+  "chargeback_risk",
   "response_needed",
   "human_review_required",
   "confidence",
@@ -123,6 +141,12 @@ type ValidClassification = {
   subcategory: string | null;
   priority: string;
   urgency: string;
+  priority_level: string;
+  urgency_level: string;
+  response_timing: string;
+  customer_risk: string;
+  refund_risk: boolean;
+  chargeback_risk: boolean;
   response_needed: boolean;
   human_review_required: boolean;
   confidence: number;
@@ -384,12 +408,21 @@ Classification is advisory only. Do not recommend sending email automatically or
 Allowed category values: ${CATEGORIES.join(", ")}.
 Allowed priority values: ${PRIORITIES.join(", ")}.
 Allowed urgency values: ${URGENCIES.join(", ")}.
+Allowed priority_level values: ${PRIORITY_LEVELS.join(", ")}.
+Allowed urgency_level values: ${URGENCY_LEVELS.join(", ")}.
+Allowed response_timing values: ${RESPONSE_TIMINGS.join(", ")}.
+Allowed customer_risk values: ${CUSTOMER_RISKS.join(", ")}.
 Allowed recommended_action values: ${RECOMMENDED_ACTIONS.join(", ")}.
 Allowed safety_flags values: ${SAFETY_FLAGS.join(", ")}.
 
 Use only the supplied stored email context. Do not infer facts that are not supported.
 Set human_review_required true for low confidence, ambiguity, account security, refunds, returns, cancellations, item-not-received, item-not-as-described, payment issues, or order-impacting decisions.
 If confidence is below 0.60, use category "internal_or_other", recommended_action "review_only", human_review_required true, and include "low_confidence" in safety_flags.
+Add workflow metadata for operator triage only. Consider buyer anger, refund requests, threat language, chargeback language, delivery disputes, and time sensitivity.
+Use priority_level "critical" and urgency_level "immediate" for chargeback threats, legal/threatening language, account security, or severe order-risk situations.
+Use priority_level "high" and urgency_level "today" for angry buyers, refund/return disputes, item-not-received, item-not-as-described, or time-sensitive delivery issues.
+Use priority_level "low", urgency_level "low", and response_timing "no_response_needed" for shipping labels, routine notices, marketing, spam, and informational messages that do not need an operator response.
+Set refund_risk true only when a refund, return, cancellation, payment dispute, item-not-received, or item-not-as-described issue is present. Set chargeback_risk true only when chargeback, payment dispute escalation, bank/card dispute, or similar threat language is present.
 Keep summary and reasoning_summary short. reasoning_summary must be a concise reason, not hidden reasoning.
 
 Prompt version: ${version}.
@@ -405,6 +438,12 @@ function jsonSchema() {
       "subcategory",
       "priority",
       "urgency",
+      "priority_level",
+      "urgency_level",
+      "response_timing",
+      "customer_risk",
+      "refund_risk",
+      "chargeback_risk",
       "response_needed",
       "human_review_required",
       "confidence",
@@ -419,6 +458,12 @@ function jsonSchema() {
       subcategory: { type: ["string", "null"], maxLength: 80 },
       priority: { type: "string", enum: PRIORITIES },
       urgency: { type: "string", enum: URGENCIES },
+      priority_level: { type: "string", enum: PRIORITY_LEVELS },
+      urgency_level: { type: "string", enum: URGENCY_LEVELS },
+      response_timing: { type: "string", enum: RESPONSE_TIMINGS },
+      customer_risk: { type: "string", enum: CUSTOMER_RISKS },
+      refund_risk: { type: "boolean" },
+      chargeback_risk: { type: "boolean" },
       response_needed: { type: "boolean" },
       human_review_required: { type: "boolean" },
       confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -635,11 +680,42 @@ function enforceSafetyAndGrounding(classification: ValidClassification, input: C
   if (classification.category === "account_security") {
     classification.recommended_action = "security_review";
     safetyFlags.add("account_security");
+    classification.priority_level = "critical";
+    classification.urgency_level = "immediate";
+    classification.response_timing = "immediate_attention";
+    classification.customer_risk = "critical";
     overrides.add("account_security_action");
   } else if (classification.confidence < 0.6 || classification.category === "internal_or_other") {
     classification.recommended_action = "review_only";
     classification.human_review_required = true;
     overrides.add("poor_confidence_review_only");
+  }
+  if (REFUND_RISK_CATEGORIES.has(classification.category)) {
+    classification.refund_risk = true;
+    safetyFlags.add("payment_or_refund");
+    if (classification.priority_level === "low") classification.priority_level = "high";
+    if (classification.urgency_level === "low") classification.urgency_level = "today";
+    if (classification.response_timing === "no_response_needed") classification.response_timing = "within_24_hours";
+    overrides.add("refund_risk_workflow");
+  }
+  if (classification.chargeback_risk) {
+    classification.priority_level = "critical";
+    classification.urgency_level = "immediate";
+    classification.response_timing = "immediate_attention";
+    classification.customer_risk = "critical";
+    classification.human_review_required = true;
+    safetyFlags.add("payment_or_refund");
+    overrides.add("chargeback_risk_workflow");
+  }
+  if (classification.response_timing === "immediate_attention") {
+    classification.urgency_level = "immediate";
+  } else if (classification.response_timing === "within_24_hours" && classification.urgency_level === "low") {
+    classification.urgency_level = "today";
+  } else if (classification.response_timing === "no_response_needed") {
+    classification.response_needed = false;
+  }
+  if (classification.priority_level === "critical" || classification.urgency_level === "immediate") {
+    classification.human_review_required = true;
   }
 
   const haystack = groundingText(input);
@@ -675,6 +751,10 @@ function validateClassification(
   const category = String(row.category || "");
   const priority = String(row.priority || "");
   const urgency = String(row.urgency || "");
+  const priorityLevel = String(row.priority_level || "");
+  const urgencyLevel = String(row.urgency_level || "");
+  const responseTiming = String(row.response_timing || "");
+  const customerRisk = String(row.customer_risk || "");
   const recommendedAction = String(row.recommended_action || "");
   const confidence = Number(row.confidence);
   const summary = cleanWhitespace(row.summary);
@@ -687,6 +767,10 @@ function validateClassification(
   if (!CATEGORIES.includes(category as typeof CATEGORIES[number])) errors.push("invalid_category");
   if (!PRIORITIES.includes(priority as typeof PRIORITIES[number])) errors.push("invalid_priority");
   if (!URGENCIES.includes(urgency as typeof URGENCIES[number])) errors.push("invalid_urgency");
+  if (!PRIORITY_LEVELS.includes(priorityLevel as typeof PRIORITY_LEVELS[number])) errors.push("invalid_priority_level");
+  if (!URGENCY_LEVELS.includes(urgencyLevel as typeof URGENCY_LEVELS[number])) errors.push("invalid_urgency_level");
+  if (!RESPONSE_TIMINGS.includes(responseTiming as typeof RESPONSE_TIMINGS[number])) errors.push("invalid_response_timing");
+  if (!CUSTOMER_RISKS.includes(customerRisk as typeof CUSTOMER_RISKS[number])) errors.push("invalid_customer_risk");
   if (!RECOMMENDED_ACTIONS.includes(recommendedAction as typeof RECOMMENDED_ACTIONS[number])) errors.push("invalid_recommended_action");
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) errors.push("invalid_confidence");
   if (row.subcategory !== null && typeof row.subcategory !== "string") errors.push("invalid_subcategory");
@@ -715,8 +799,12 @@ function validateClassification(
   }
 
   const responseNeeded = row.response_needed;
+  const refundRisk = row.refund_risk;
+  const chargebackRisk = row.chargeback_risk;
   const humanReviewRequired = row.human_review_required;
   if (typeof responseNeeded !== "boolean") errors.push("invalid_response_needed");
+  if (typeof refundRisk !== "boolean") errors.push("invalid_refund_risk");
+  if (typeof chargebackRisk !== "boolean") errors.push("invalid_chargeback_risk");
   if (typeof humanReviewRequired !== "boolean") errors.push("invalid_human_review_required");
 
   const subcategory = row.subcategory === null ? null : cleanWhitespace(row.subcategory).slice(0, 80) || null;
@@ -725,6 +813,12 @@ function validateClassification(
     subcategory,
     priority,
     urgency,
+    priority_level: priorityLevel,
+    urgency_level: urgencyLevel,
+    response_timing: responseTiming,
+    customer_risk: customerRisk,
+    refund_risk: refundRisk === true,
+    chargeback_risk: chargebackRisk === true,
     response_needed: responseNeeded === true,
     human_review_required: humanReviewRequired !== false,
     confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
@@ -841,6 +935,12 @@ async function insertClassification(
     subcategory: "unclassifiable",
     priority: "medium",
     urgency: "none",
+    priority_level: "medium",
+    urgency_level: "low",
+    response_timing: "no_response_needed",
+    customer_risk: "medium",
+    refund_risk: false,
+    chargeback_risk: false,
     response_needed: false,
     human_review_required: true,
     confidence: 0,
@@ -879,6 +979,12 @@ async function insertClassification(
       subcategory: classification.subcategory,
       confidence: classification.confidence,
       priority: classification.priority,
+      priority_level: classification.priority_level,
+      urgency_level: classification.urgency_level,
+      response_timing: classification.response_timing,
+      customer_risk: classification.customer_risk,
+      refund_risk: classification.refund_risk,
+      chargeback_risk: classification.chargeback_risk,
       requires_human_review: classification.human_review_required,
       reasoning_summary: classification.reasoning_summary,
       evidence,
@@ -1034,7 +1140,17 @@ function validationDiagnosticCodes(errors: string[]) {
     if (error.includes("required") || error.includes("missing")) diagnostics.add("missing_required_field");
   }
   for (const error of errors) {
-    if (["invalid_category", "invalid_priority", "invalid_urgency", "invalid_recommended_action", "invalid_safety_flag"].includes(error)) {
+    if ([
+      "invalid_category",
+      "invalid_priority",
+      "invalid_urgency",
+      "invalid_priority_level",
+      "invalid_urgency_level",
+      "invalid_response_timing",
+      "invalid_customer_risk",
+      "invalid_recommended_action",
+      "invalid_safety_flag",
+    ].includes(error)) {
       diagnostics.add("invalid_enum");
     }
     if (error === "invalid_confidence") diagnostics.add("confidence_out_of_range");
@@ -1261,7 +1377,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   ] = await Promise.all([
     supabase
       .from("email_message_classifications")
-      .select("id, message_id, category, subcategory, confidence, priority, urgency, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at")
+      .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at")
       .eq("source", "ai")
       .order("created_at", { ascending: false })
       .limit(input.classificationLimit),
@@ -1338,6 +1454,12 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
         confidence: row.confidence === null ? null : Number(row.confidence),
         priority: row.priority,
         urgency: row.urgency,
+        priority_level: row.priority_level,
+        urgency_level: row.urgency_level,
+        response_timing: row.response_timing,
+        customer_risk: row.customer_risk,
+        refund_risk: row.refund_risk === true,
+        chargeback_risk: row.chargeback_risk === true,
         response_needed: row.response_needed,
         summary: row.summary,
         reasoning_summary: row.reasoning_summary,
@@ -1396,7 +1518,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       .maybeSingle(),
     supabase
       .from("email_message_classifications")
-      .select("id, category, subcategory, confidence, priority, urgency, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
+      .select("id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
       .eq("message_id", input.messageId)
       .eq("source", "ai")
       .order("created_at", { ascending: false })
@@ -1448,6 +1570,12 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       confidence: classification.confidence === null ? null : Number(classification.confidence),
       priority: classification.priority,
       urgency: classification.urgency,
+      priority_level: classification.priority_level,
+      urgency_level: classification.urgency_level,
+      response_timing: classification.response_timing,
+      customer_risk: classification.customer_risk,
+      refund_risk: classification.refund_risk === true,
+      chargeback_risk: classification.chargeback_risk === true,
       response_needed: classification.response_needed,
       summary: classification.summary,
       reasoning_summary: classification.reasoning_summary,

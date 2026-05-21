@@ -405,6 +405,15 @@
   text-transform: uppercase;
 }
 
+.classification-workflow-badges {
+  display: inline-flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
 .classification-row-preview {
   color: rgba(242,243,245,.72);
   font-size: .88rem;
@@ -466,6 +475,10 @@
   color: rgba(242,243,245,.94);
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.classification-workflow-grid dd {
+  display: flex;
 }
 
 .classification-detail-section {
@@ -545,6 +558,13 @@
   border-color: rgba(255,99,132,.28);
   background: rgba(255,99,132,.1);
   color: #ff9ab0;
+}
+
+.classification-badge.is-critical {
+  border-color: rgba(255,58,58,.42);
+  background: rgba(255,58,58,.16);
+  color: #ffb0b0;
+  box-shadow: 0 0 0 1px rgba(255,58,58,.08);
 }
 
 .classification-body-action {

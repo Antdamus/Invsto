@@ -63,6 +63,7 @@
     messageDetailsById: {},
     messageDetailLoadingId: null,
     messageDetailErrorsById: {},
+    expandedMessageIds: {},
     updatedAt: null,
   };
 
@@ -426,6 +427,61 @@
     return Number.isFinite(confidence) ? confidence : -1;
   }
 
+  function workflowPriority(classification) {
+    return String(classification?.priority_level || classification?.priority || "low").toLowerCase();
+  }
+
+  function workflowUrgency(classification) {
+    const urgency = String(classification?.urgency_level || classification?.urgency || "low").toLowerCase();
+    if (urgency === "none" || urgency === "later" || urgency === "soon") return "low";
+    return urgency;
+  }
+
+  function workflowResponseTiming(classification) {
+    const timing = String(classification?.response_timing || "").toLowerCase();
+    if (timing) return timing;
+    if (workflowUrgency(classification) === "immediate") return "immediate_attention";
+    if (workflowUrgency(classification) === "today") return "within_24_hours";
+    return classification?.response_needed === true ? "within_72_hours" : "no_response_needed";
+  }
+
+  function workflowCustomerRisk(classification) {
+    return String(classification?.customer_risk || workflowPriority(classification) || "low").toLowerCase();
+  }
+
+  function priorityRank(classification) {
+    return { low: 1, medium: 2, high: 3, critical: 4 }[workflowPriority(classification)] || 0;
+  }
+
+  function urgencyRank(classification) {
+    return { low: 1, today: 2, immediate: 3 }[workflowUrgency(classification)] || 0;
+  }
+
+  function responseTimingRank(classification) {
+    return {
+      no_response_needed: 0,
+      within_72_hours: 1,
+      within_24_hours: 2,
+      immediate_attention: 3,
+    }[workflowResponseTiming(classification)] || 0;
+  }
+
+  function isImmediateAttention(classification) {
+    return workflowUrgency(classification) === "immediate" || workflowResponseTiming(classification) === "immediate_attention";
+  }
+
+  function needsResponseToday(classification) {
+    return classification?.response_needed === true
+      && (workflowUrgency(classification) === "today"
+        || workflowUrgency(classification) === "immediate"
+        || workflowResponseTiming(classification) === "within_24_hours"
+        || workflowResponseTiming(classification) === "immediate_attention");
+  }
+
+  function isUrgentWorkflow(classification) {
+    return urgencyRank(classification) >= 2 || priorityRank(classification) >= 3 || responseTimingRank(classification) >= 2;
+  }
+
   function sortedClassifications(data, sortMode = "newest") {
     return [...(data?.classifications || [])].sort((left, right) => {
       if (sortMode === "oldest") return classificationTimeMs(left) - classificationTimeMs(right);
@@ -434,6 +490,31 @@
       if (sortMode === "human_review") {
         const reviewDelta = Number(hasHumanReviewSignal(right)) - Number(hasHumanReviewSignal(left));
         if (reviewDelta !== 0) return reviewDelta;
+      }
+      if (sortMode === "priority_high") {
+        const priorityDelta = priorityRank(right) - priorityRank(left);
+        if (priorityDelta !== 0) return priorityDelta;
+      }
+      if (sortMode === "priority_low") {
+        const priorityDelta = priorityRank(left) - priorityRank(right);
+        if (priorityDelta !== 0) return priorityDelta;
+      }
+      if (sortMode === "urgency_first") {
+        const urgencyDelta = urgencyRank(right) - urgencyRank(left);
+        if (urgencyDelta !== 0) return urgencyDelta;
+        const priorityDelta = priorityRank(right) - priorityRank(left);
+        if (priorityDelta !== 0) return priorityDelta;
+      }
+      if (sortMode === "immediate_attention") {
+        const immediateDelta = Number(isImmediateAttention(right)) - Number(isImmediateAttention(left));
+        if (immediateDelta !== 0) return immediateDelta;
+        const timingDelta = responseTimingRank(right) - responseTimingRank(left);
+        if (timingDelta !== 0) return timingDelta;
+      }
+      if (sortMode === "oldest_urgent") {
+        const urgentDelta = Number(isUrgentWorkflow(right)) - Number(isUrgentWorkflow(left));
+        if (urgentDelta !== 0) return urgentDelta;
+        if (isUrgentWorkflow(left) && isUrgentWorkflow(right)) return classificationTimeMs(left) - classificationTimeMs(right);
       }
       return classificationTimeMs(right) - classificationTimeMs(left);
     });
@@ -471,6 +552,12 @@
       if (filter === "invalid") return isInvalidClassification(classification);
       if (filter === "older_24h") return isOlderThan(classification, 24 * 60 * 60 * 1000);
       if (filter === "older_3d") return isOlderThan(classification, 3 * 24 * 60 * 60 * 1000);
+      if (filter === "critical_priority") return workflowPriority(classification) === "critical";
+      if (filter === "high_priority") return workflowPriority(classification) === "high";
+      if (filter === "immediate_attention") return isImmediateAttention(classification);
+      if (filter === "needs_response_today") return needsResponseToday(classification);
+      if (filter === "refund_risk") return classification?.refund_risk === true;
+      if (filter === "chargeback_risk") return classification?.chargeback_risk === true;
       return true;
     });
   }
@@ -560,6 +647,49 @@
     return "default";
   }
 
+  function priorityBadgeVariant(classification) {
+    const priority = workflowPriority(classification);
+    if (priority === "critical") return "critical";
+    if (priority === "high") return "danger";
+    if (priority === "medium") return "warning";
+    return "muted";
+  }
+
+  function urgencyBadgeVariant(classification) {
+    const urgency = workflowUrgency(classification);
+    if (urgency === "immediate") return "critical";
+    if (urgency === "today") return "warning";
+    return "muted";
+  }
+
+  function timingBadgeLabel(classification) {
+    const timing = workflowResponseTiming(classification);
+    const labels = {
+      no_response_needed: "No Response",
+      within_72_hours: "72H",
+      within_24_hours: "24H",
+      immediate_attention: "Immediate",
+    };
+    return labels[timing] || humanizeValue(timing || "Unknown");
+  }
+
+  function timingBadgeVariant(classification) {
+    const timing = workflowResponseTiming(classification);
+    if (timing === "immediate_attention") return "critical";
+    if (timing === "within_24_hours") return "warning";
+    if (timing === "within_72_hours") return "default";
+    return "muted";
+  }
+
+  function renderWorkflowBadges(classification, options = {}) {
+    const prefix = options.prefix || "";
+    return [
+      renderBadge(`${prefix}${humanizeValue(workflowPriority(classification))} Priority`, priorityBadgeVariant(classification)),
+      renderBadge(`${prefix}${humanizeValue(workflowUrgency(classification))}`, urgencyBadgeVariant(classification)),
+      renderBadge(`${prefix}${timingBadgeLabel(classification)}`, timingBadgeVariant(classification)),
+    ].join("");
+  }
+
   function renderCategorySidebar(state, data) {
     if (!els.classificationCategoryList) return;
 
@@ -602,6 +732,11 @@
       const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
       const categoryBadge = renderBadge(humanizeValue(classification.category || "Uncategorized"), "category");
       const confidenceBadge = renderBadge(formatConfidence(classification.confidence), confidenceBadgeVariant(classification));
+      const workflowBadges = renderWorkflowBadges(classification);
+      const riskBadges = [
+        classification.chargeback_risk === true ? renderBadge("Chargeback Risk", "critical") : "",
+        classification.refund_risk === true ? renderBadge("Refund Risk", "danger") : "",
+      ].join("");
 
       return `
         <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
@@ -611,6 +746,9 @@
           </span>
           <span class="classification-row-meta">
             ${categoryBadge}
+            <span class="classification-workflow-badges">${workflowBadges}${riskBadges}</span>
+          </span>
+          <span class="classification-row-meta">
             <span>${escapeHtml(dateLabel)}</span>
           </span>
           <span class="classification-row-meta">
@@ -629,13 +767,14 @@
     const detail = messageId ? state.messageDetailsById[messageId] : null;
     const error = messageId ? state.messageDetailErrorsById[messageId] : null;
     const isLoading = state.messageDetailLoadingId === messageId;
+    const isExpanded = state.expandedMessageIds[messageId] === true;
     const bodyText = detail?.normalized_text || "";
     const bodySource = detail?.body_source ? `Source: ${humanizeValue(detail.body_source)}` : "Preview only";
     const chars = detail
       ? `${Number(detail.body_chars_returned || 0).toLocaleString()} of ${Number(detail.body_chars_original || 0).toLocaleString()} chars`
       : "";
 
-    if (detail) {
+    if (detail && isExpanded) {
       return `
         <div class="classification-detail-section email-body-section">
           <div class="classification-section-title-row">
@@ -648,6 +787,10 @@
             </div>
           ` : ""}
           <pre class="classification-email-body">${escapeHtml(bodyText || "No body text available.")}</pre>
+          <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="collapse" data-message-id="${escapeHtml(messageId)}">
+            <i data-lucide="chevron-up"></i>
+            Collapse Email
+          </button>
         </div>
       `;
     }
@@ -660,8 +803,8 @@
         </div>
         <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
         ${error ? `<div class="classification-notice is-error">Could not load full email text: ${escapeHtml(error)}</div>` : ""}
-        <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="load" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
-          <i data-lucide="${isLoading ? "loader-circle" : "file-text"}"></i>
+        <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="${detail ? "expand" : "load"}" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+          <i data-lucide="${isLoading ? "loader-circle" : detail ? "chevron-down" : "file-text"}"></i>
           ${isLoading ? "Loading Email" : "View Full Email"}
         </button>
       </div>
@@ -689,6 +832,10 @@
     const confidenceBadge = renderBadge(formatConfidence(selected.confidence), confidenceBadgeVariant(selected));
     const validationBadge = renderBadge(humanizeValue(selected.validation_status || "Unknown"), statusBadgeVariant(selected.validation_status));
     const actionBadge = renderBadge(humanizeValue(selected.recommended_action || "Review only"), actionBadgeVariant(selected.recommended_action));
+    const workflowBadges = renderWorkflowBadges(selected);
+    const refundRiskBadge = renderBadge(selected.refund_risk === true ? "Refund Risk" : "No Refund Risk", selected.refund_risk === true ? "danger" : "muted");
+    const chargebackRiskBadge = renderBadge(selected.chargeback_risk === true ? "Chargeback Risk" : "No Chargeback Risk", selected.chargeback_risk === true ? "critical" : "muted");
+    const customerRiskBadge = renderBadge(`Customer Risk: ${humanizeValue(workflowCustomerRisk(selected))}`, priorityBadgeVariant({ priority_level: workflowCustomerRisk(selected) }));
 
     els.classificationDetail.innerHTML = `
       <div class="classification-detail-head">
@@ -697,6 +844,7 @@
         <div>${escapeHtml(getClassificationSender(selected))}</div>
         <div class="classification-head-badges">
           ${categoryBadge}
+          ${workflowBadges}
           ${confidenceBadge}
           ${reviewBadge}
           ${validationBadge}
@@ -731,10 +879,38 @@
           ${categoryBadge}
           ${confidenceBadge}
           ${validationBadge}
-          ${renderBadge(`Priority: ${humanizeValue(selected.priority || "unknown")}`, "muted")}
-          ${renderBadge(`Urgency: ${humanizeValue(selected.urgency || "unknown")}`, "muted")}
         </div>
         <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
+      </div>
+
+      <div class="classification-detail-section">
+        <h4>Workflow Priority</h4>
+        <dl class="classification-detail-grid classification-workflow-grid">
+          <div>
+            <dt>Priority</dt>
+            <dd>${renderBadge(humanizeValue(workflowPriority(selected)), priorityBadgeVariant(selected))}</dd>
+          </div>
+          <div>
+            <dt>Urgency</dt>
+            <dd>${renderBadge(humanizeValue(workflowUrgency(selected)), urgencyBadgeVariant(selected))}</dd>
+          </div>
+          <div>
+            <dt>Response Timing</dt>
+            <dd>${renderBadge(timingBadgeLabel(selected), timingBadgeVariant(selected))}</dd>
+          </div>
+          <div>
+            <dt>Customer Risk</dt>
+            <dd>${customerRiskBadge}</dd>
+          </div>
+          <div>
+            <dt>Refund Risk</dt>
+            <dd>${refundRiskBadge}</dd>
+          </div>
+          <div>
+            <dt>Chargeback Risk</dt>
+            <dd>${chargebackRiskBadge}</dd>
+          </div>
+        </dl>
       </div>
 
       <div class="classification-detail-section">
@@ -892,6 +1068,10 @@
         messageDetailsById: {
           ...adminClassificationState.messageDetailsById,
           [messageId]: detail,
+        },
+        expandedMessageIds: {
+          ...adminClassificationState.expandedMessageIds,
+          [messageId]: true,
         },
         messageDetailErrorsById: {
           ...adminClassificationState.messageDetailErrorsById,
@@ -1096,9 +1276,29 @@
     });
 
     els.classificationDetail?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-message-detail-action='load']");
+      const button = event.target.closest("[data-message-detail-action]");
       if (!button) return;
-      loadMessageDetail(context, button.getAttribute("data-message-id"));
+      const messageId = button.getAttribute("data-message-id");
+      const action = button.getAttribute("data-message-detail-action");
+      if (action === "collapse") {
+        setAdminClassificationState({
+          expandedMessageIds: {
+            ...adminClassificationState.expandedMessageIds,
+            [messageId]: false,
+          },
+        });
+        return;
+      }
+      if (action === "expand") {
+        setAdminClassificationState({
+          expandedMessageIds: {
+            ...adminClassificationState.expandedMessageIds,
+            [messageId]: true,
+          },
+        });
+        return;
+      }
+      loadMessageDetail(context, messageId);
     });
 
     els.classificationSort?.addEventListener("change", (event) => {

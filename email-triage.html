@@ -99,6 +99,11 @@
                 <option value="confidence_high">Highest confidence</option>
                 <option value="confidence_low">Lowest confidence</option>
                 <option value="human_review">Human review first</option>
+                <option value="priority_high">Priority High → Low</option>
+                <option value="priority_low">Priority Low → High</option>
+                <option value="urgency_first">Urgency First</option>
+                <option value="immediate_attention">Immediate Attention First</option>
+                <option value="oldest_urgent">Oldest Urgent First</option>
               </select>
             </label>
             <div class="classification-filter-toggles" aria-label="Human review filters">
@@ -108,6 +113,12 @@
               <label><input type="checkbox" data-classification-filter="invalid" /> Invalid Classifications</label>
               <label><input type="checkbox" data-classification-filter="older_24h" /> Older Than 24 Hours</label>
               <label><input type="checkbox" data-classification-filter="older_3d" /> Older Than 3 Days</label>
+              <label><input type="checkbox" data-classification-filter="critical_priority" /> Critical Priority</label>
+              <label><input type="checkbox" data-classification-filter="high_priority" /> High Priority</label>
+              <label><input type="checkbox" data-classification-filter="immediate_attention" /> Immediate Attention</label>
+              <label><input type="checkbox" data-classification-filter="needs_response_today" /> Needs Response Today</label>
+              <label><input type="checkbox" data-classification-filter="refund_risk" /> Refund Risk</label>
+              <label><input type="checkbox" data-classification-filter="chargeback_risk" /> Chargeback Risk</label>
             </div>
           </div>
           <div class="classification-inbox-shell">
