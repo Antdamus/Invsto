@@ -10,7 +10,7 @@
     try {
       const configured = new URL(appUrl);
       return configured.origin === window.location.origin
-        && /\/(?:pending-orders|ebay-order-history)\.html$/i.test(window.location.pathname);
+        && /\/(?:pending-orders|ebay-order-history|ebay-returns)\.html$/i.test(window.location.pathname);
     } catch (_) {
       return false;
     }

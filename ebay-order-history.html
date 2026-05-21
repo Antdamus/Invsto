@@ -29,6 +29,7 @@
       <a href="stock.html">Stock</a>
       <a href="pending-orders.html">Pending Orders</a>
       <a href="ebay-order-history.html" class="active">Order History</a>
+      <a href="ebay-returns.html">Returns</a>
       <a href="timeclock.html">Timesheet</a>
       <a href="admin.html">Admin</a>
       <a href="#" id="logout-mobile">Logout</a>
@@ -76,6 +77,10 @@
             <i class="ti ti-history"></i>
             <span class="link-text">Order History</span>
           </a>
+          <a class="nav-link" href="ebay-returns.html">
+            <i class="ti ti-rotate-clockwise"></i>
+            <span class="link-text">Returns</span>
+          </a>
           <a class="nav-link" href="timeclock.html">
             <i class="ti ti-clock"></i>
             <span class="link-text">Timesheet</span>
@@ -115,6 +120,10 @@
               <i data-lucide="refresh-cw"></i>
               Refresh
             </button>
+            <a href="ebay-returns.html" class="secondary-btn">
+              <i data-lucide="rotate-ccw"></i>
+              Returns
+            </a>
             <a href="pending-orders.html" class="secondary-btn">
               <i data-lucide="truck"></i>
               Pending Orders
@@ -230,51 +239,6 @@
           <div class="history-summary-card" data-admin-only="true">
             <span>Reversals</span>
             <strong id="summary-reversals">0</strong>
-          </div>
-        </section>
-
-        <section id="return-work-queue" class="history-board return-work-queue">
-          <div class="history-board-head">
-            <div>
-              <span class="eyebrow">Return Work Queue</span>
-              <h2>Pending Returns</h2>
-            </div>
-            <div class="return-queue-actions">
-              <span id="return-task-count" class="history-count">0 tasks</span>
-              <button id="refresh-return-queue" type="button" class="secondary-btn">
-                <i data-lucide="refresh-cw"></i>
-                Refresh Returns
-              </button>
-            </div>
-          </div>
-          <div class="return-queue-filters">
-            <label>
-              Task status
-              <select id="return-task-status-filter">
-                <option value="pending">Pending only</option>
-                <option value="mine">Assigned to me</option>
-                <option value="open">Open</option>
-                <option value="assigned">Assigned</option>
-                <option value="in_progress">In progress</option>
-                <option value="blocked">Blocked</option>
-                <option value="resolved">Resolved</option>
-                <option value="all">All tasks</option>
-              </select>
-            </label>
-            <label>
-              Assignee
-              <select id="return-task-assignee-filter">
-                <option value="">All assignees</option>
-                <option value="unassigned">Unassigned</option>
-              </select>
-            </label>
-            <label>
-              Search returns
-              <input id="return-task-search" type="search" placeholder="Buyer, return ID, order, item, question..." />
-            </label>
-          </div>
-          <div id="return-task-list" class="return-task-list">
-            <div class="history-empty">Loading return tasks...</div>
           </div>
         </section>
 

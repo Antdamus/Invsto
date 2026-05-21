@@ -1,31 +1,206 @@
-alter table public.ebay_return_cases
-  alter column order_id drop not null;
+create or replace function public.open_ebay_return_case(
+  _order_id uuid,
+  _order_line_ids uuid[],
+  _order_number text default null,
+  _ebay_return_id text default null,
+  _buyer_username text default null,
+  _return_reason text default null,
+  _notes text default null,
+  _raw_payload jsonb default '{}'::jsonb,
+  _signed_by_email text default null
+)
+returns table (
+  return_case_id uuid,
+  task_id uuid
+)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_order public.ebay_orders;
+  v_case public.ebay_return_cases;
+  v_task public.ebay_return_tasks;
+  v_line_ids uuid[] := coalesce(_order_line_ids, '{}'::uuid[]);
+  v_ebay_return_id text := nullif(btrim(coalesce(_ebay_return_id, '')), '');
+  v_reason text := nullif(btrim(coalesce(_return_reason, '')), '');
+  v_notes text := nullif(btrim(coalesce(_notes, '')), '');
+  v_signed_email text := nullif(btrim(coalesce(_signed_by_email, '')), '');
+  v_payload jsonb := case
+    when jsonb_typeof(coalesce(_raw_payload, '{}'::jsonb)) = 'object'
+      then coalesce(_raw_payload, '{}'::jsonb)
+    else jsonb_build_object('payload', _raw_payload)
+  end;
+begin
+  if not public.can_manage_inventory() then
+    raise exception 'Not allowed to open eBay return cases' using errcode = '42501';
+  end if;
 
-alter table public.ebay_return_cases
-  alter column order_number drop not null;
+  select *
+    into v_order
+  from public.ebay_orders
+  where id = _order_id;
 
-alter table public.ebay_return_cases
-  add column if not exists case_type text;
+  if not found then
+    raise exception 'eBay order not found' using errcode = 'P0002';
+  end if;
 
-update public.ebay_return_cases
-set case_type = 'matched_order'
-where case_type is null;
+  select *
+    into v_case
+  from public.ebay_return_cases
+  where order_id = v_order.id
+    and status not in ('closed', 'cancelled')
+    and (
+      v_ebay_return_id is null
+      or ebay_return_id is null
+      or ebay_return_id = v_ebay_return_id
+    )
+  order by opened_at desc
+  limit 1;
 
-alter table public.ebay_return_cases
-  alter column case_type set default 'matched_order';
+  if not found then
+    insert into public.ebay_return_cases (
+      order_id,
+      order_number,
+      ebay_return_id,
+      buyer_username,
+      return_reason,
+      status,
+      opened_at,
+      created_by,
+      created_by_email,
+      notes,
+      raw_payload
+    )
+    values (
+      v_order.id,
+      coalesce(nullif(btrim(_order_number), ''), v_order.order_number),
+      v_ebay_return_id,
+      coalesce(nullif(btrim(_buyer_username), ''), v_order.buyer_username),
+      v_reason,
+      'open',
+      now(),
+      auth.uid(),
+      v_signed_email,
+      v_notes,
+      v_payload || jsonb_build_object('source', 'ebay_return_extension')
+    )
+    returning * into v_case;
 
-alter table public.ebay_return_cases
-  alter column case_type set not null;
+    insert into public.ebay_return_events (
+      return_case_id,
+      action,
+      order_id,
+      order_line_ids,
+      notes,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_case.id,
+      'return_created',
+      v_order.id,
+      v_line_ids,
+      v_notes,
+      auth.uid(),
+      v_signed_email,
+      jsonb_build_object(
+        'source', 'ebay_return_extension',
+        'order_number', v_order.order_number,
+        'buyer_username', v_case.buyer_username,
+        'return_reason', v_reason,
+        'ebay_return_id', v_ebay_return_id
+      ) || v_payload
+    );
+  else
+    update public.ebay_return_cases
+    set ebay_return_id = coalesce(v_ebay_return_id, ebay_return_id),
+        return_reason = coalesce(v_reason, return_reason),
+        buyer_username = coalesce(nullif(btrim(_buyer_username), ''), buyer_username),
+        notes = coalesce(v_notes, notes),
+        raw_payload = coalesce(raw_payload, '{}'::jsonb) || v_payload || jsonb_build_object('source', 'ebay_return_extension')
+    where id = v_case.id
+    returning * into v_case;
+  end if;
 
-alter table public.ebay_return_cases
-  drop constraint if exists ebay_return_cases_case_type_check;
+  select *
+    into v_task
+  from public.ebay_return_tasks t
+  where t.return_case_id = v_case.id
+    and t.task_type = 'return_intake'
+    and t.status not in ('resolved', 'cancelled')
+  order by t.created_at desc
+  limit 1;
 
-alter table public.ebay_return_cases
-  add constraint ebay_return_cases_case_type_check
-  check (case_type in ('matched_order', 'unmatched_legacy', 'refund_only'));
+  if not found then
+    insert into public.ebay_return_tasks (
+      return_case_id,
+      order_id,
+      order_line_ids,
+      task_type,
+      title,
+      question,
+      status,
+      priority,
+      created_by,
+      created_by_email,
+      metadata
+    )
+    values (
+      v_case.id,
+      v_order.id,
+      v_line_ids,
+      'return_intake',
+      'Complete eBay return intake',
+      'Inspect the returned item, attach evidence photos, choose the disposition, and save the return.',
+      'open',
+      case when v_reason ilike '%description%' or v_reason ilike '%authentic%' then 'high' else 'normal' end,
+      auth.uid(),
+      v_signed_email,
+      v_payload || jsonb_build_object(
+        'source', 'ebay_return_extension',
+        'order_number', v_order.order_number,
+        'buyer_username', v_case.buyer_username,
+        'ebay_return_id', v_ebay_return_id,
+        'return_reason', v_reason
+      )
+    )
+    returning * into v_task;
 
-create index if not exists ebay_return_cases_case_type_status_idx
-  on public.ebay_return_cases(case_type, status, opened_at desc);
+    insert into public.ebay_return_task_events (
+      task_id,
+      return_case_id,
+      action,
+      new_status,
+      notes,
+      signed_by,
+      signed_by_email,
+      payload
+    )
+    values (
+      v_task.id,
+      v_case.id,
+      'created',
+      v_task.status,
+      'Return intake task opened from eBay returns page.',
+      auth.uid(),
+      v_signed_email,
+      v_task.metadata
+    );
+  else
+    update public.ebay_return_tasks
+    set order_line_ids = case when cardinality(v_line_ids) > 0 then v_line_ids else order_line_ids end,
+        metadata = coalesce(metadata, '{}'::jsonb) || v_payload
+    where id = v_task.id
+    returning * into v_task;
+  end if;
+
+  return_case_id := v_case.id;
+  task_id := v_task.id;
+  return next;
+end;
+$$;
 
 create or replace function public.open_unmatched_ebay_return_case(
   _ebay_return_id text default null,
@@ -279,5 +454,7 @@ begin
 end;
 $$;
 
+revoke all on function public.open_ebay_return_case(uuid, uuid[], text, text, text, text, text, jsonb, text) from public;
 revoke all on function public.open_unmatched_ebay_return_case(text, text, text, text, text, text, text, text, text, text, text, text, text, jsonb, text) from public;
+grant execute on function public.open_ebay_return_case(uuid, uuid[], text, text, text, text, text, jsonb, text) to authenticated;
 grant execute on function public.open_unmatched_ebay_return_case(text, text, text, text, text, text, text, text, text, text, text, text, text, jsonb, text) to authenticated;

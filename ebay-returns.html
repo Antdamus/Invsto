@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - eBay Returns</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="ebay-order-history.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body data-page="ebay-returns">
+  <div class="mobile-header">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open Menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span class="mobile-title">Returns</span>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <nav class="mobile-nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="pending-orders.html">Pending Orders</a>
+      <a href="ebay-order-history.html">Order History</a>
+      <a href="ebay-returns.html" class="active">Returns</a>
+      <a href="timeclock.html">Timesheet</a>
+      <a href="#" id="logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="dashboard.html">
+            <i class="ti ti-layout-dashboard"></i>
+            <span class="link-text">Dashboard</span>
+          </a>
+          <a class="nav-link" href="pending-orders.html">
+            <i class="ti ti-truck-delivery"></i>
+            <span class="link-text">Pending Orders</span>
+          </a>
+          <a class="nav-link" href="ebay-order-history.html">
+            <i class="ti ti-history"></i>
+            <span class="link-text">Order History</span>
+          </a>
+          <a class="nav-link active" href="ebay-returns.html">
+            <i class="ti ti-rotate-clockwise"></i>
+            <span class="link-text">Returns</span>
+          </a>
+          <a class="nav-link" href="#" id="logout">
+            <i class="ti ti-logout"></i>
+            <span class="link-text">Logout</span>
+          </a>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="history-greeting">eBay Returns</strong>
+            <div id="history-subtitle" class="sub">Return queue, assignments, unmatched refunds, and intake photos.</div>
+          </div>
+          <div class="header-pills" aria-label="Page context">
+            <div class="pill">Scope: <b>eBay</b></div>
+            <div class="pill">Mode: <b id="history-mode-label">Returns</b></div>
+            <div class="pill" id="history-date-pill">Date: <b>-</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content order-history-content">
+        <section class="order-history-hero">
+          <div>
+            <span class="eyebrow">Returns Workbench</span>
+            <h1>Returns and Refund Reviews</h1>
+            <p>Import visible eBay returns, assign questions, intake returned items with photos, and review old refunds that do not match OG order history.</p>
+          </div>
+          <div class="history-actions">
+            <button id="refresh-return-queue" type="button" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+            <a href="ebay-order-history.html" class="secondary-btn">
+              <i data-lucide="history"></i>
+              Order History
+            </a>
+            <a href="pending-orders.html" class="secondary-btn">
+              <i data-lucide="truck"></i>
+              Pending Orders
+            </a>
+          </div>
+        </section>
+
+        <section id="return-work-queue" class="history-board return-work-queue">
+          <div class="history-board-head">
+            <div>
+              <span class="eyebrow">Return Work Queue</span>
+              <h2>Pending Returns</h2>
+            </div>
+            <div class="return-queue-actions">
+              <span id="return-task-count" class="history-count">0 tasks</span>
+            </div>
+          </div>
+          <div class="return-queue-filters">
+            <label>
+              Task status
+              <select id="return-task-status-filter">
+                <option value="pending">Pending only</option>
+                <option value="mine">Assigned to me</option>
+                <option value="open">Open</option>
+                <option value="assigned">Assigned</option>
+                <option value="in_progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="resolved">Resolved</option>
+                <option value="all">All tasks</option>
+              </select>
+            </label>
+            <label>
+              Assignee
+              <select id="return-task-assignee-filter">
+                <option value="">All assignees</option>
+                <option value="unassigned">Unassigned</option>
+              </select>
+            </label>
+            <label>
+              Search returns
+              <input id="return-task-search" type="search" placeholder="Buyer, return ID, order, item, question..." />
+            </label>
+          </div>
+          <div id="return-task-list" class="return-task-list">
+            <div class="history-empty">Loading return tasks...</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="return-intake-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="return-intake-title">
+    <div class="history-modal-card return-intake-modal-card">
+      <button id="close-return-intake-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Return Intake</span>
+      <h2 id="return-intake-title">Start return</h2>
+      <p id="return-intake-subtitle">Record what came back before anything is placed into sellable inventory.</p>
+
+      <div id="return-intake-status" class="history-label-status">
+        Select returned lines, attach evidence photos, and choose the disposition.
+      </div>
+
+      <div class="return-intake-grid">
+        <label class="modal-field">
+          Return reason
+          <select id="return-reason">
+            <option value="">Unknown / not listed</option>
+            <option value="buyer_changed_mind">Buyer changed mind</option>
+            <option value="not_as_described">Not as described</option>
+            <option value="damaged">Damaged</option>
+            <option value="wrong_item">Wrong item</option>
+            <option value="missing_parts">Missing parts</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Return tracking
+          <input id="return-tracking" type="text" placeholder="Scan or paste tracking number" />
+        </label>
+        <label class="modal-field">
+          eBay return ID
+          <input id="return-ebay-id" type="text" placeholder="Optional case/return id" />
+        </label>
+        <label class="modal-field">
+          Restock destination
+          <input id="return-destination-scan" type="text" placeholder="Scan tray/location for restock items" />
+        </label>
+      </div>
+
+      <div class="return-location-actions">
+        <button id="find-return-destination" type="button" class="secondary-btn">Find Location</button>
+        <div id="return-destination-summary" class="return-destination-summary">No restock destination selected.</div>
+      </div>
+      <div id="return-location-results" class="return-location-results"></div>
+
+      <section class="return-photo-panel" aria-label="Return evidence photos">
+        <div>
+          <span class="eyebrow">Return Photos</span>
+          <h3>Evidence Photos</h3>
+          <p>Use the OG phone app to photograph the returned item, packaging, and condition before saving the return.</p>
+        </div>
+        <div class="return-camera-row">
+          <label>
+            Camera Station
+            <select id="return-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="return-camera-actions">
+            <button id="refresh-return-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-return-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+          </div>
+        </div>
+        <p id="return-photo-status" class="history-label-status"></p>
+        <div class="return-photo-toolbar hidden" aria-label="Return evidence photo upload selection">
+          <span id="return-photo-selection-summary"></span>
+          <div>
+            <button id="select-all-return-photos" type="button" class="secondary-btn">Select All Photos</button>
+            <button id="deselect-all-return-photos" type="button" class="secondary-btn">Deselect Photos</button>
+          </div>
+        </div>
+        <div id="return-photo-grid" class="return-photo-grid">
+          <div class="history-empty">No return photos added.</div>
+        </div>
+        <label class="modal-field return-file-fallback">
+          Fallback file upload
+          <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
+        </label>
+        <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
+      </section>
+
+      <div id="return-line-list" class="return-line-list"></div>
+
+      <label class="modal-field">
+        Return note
+        <textarea id="return-note" rows="3" placeholder="Condition, packaging, refund notes, or anything unusual"></textarea>
+      </label>
+
+      <p id="return-error" class="history-error"></p>
+      <div class="history-modal-actions">
+        <button id="cancel-return-intake" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-return-intake" type="button" class="primary-btn">Save Return</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="evidence-photo-viewer-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="evidence-photo-viewer-title">
+    <div class="history-modal-card evidence-viewer-card">
+      <button id="close-evidence-photo-viewer" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Evidence Photo</span>
+      <h2 id="evidence-photo-viewer-title">Evidence photo</h2>
+      <div class="evidence-viewer-frame">
+        <img id="evidence-photo-viewer-image" alt="Evidence photo preview" />
+      </div>
+      <p id="evidence-photo-viewer-caption" class="evidence-viewer-caption"></p>
+      <div class="history-modal-actions">
+        <button id="dismiss-evidence-photo-viewer" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="admin-nav.js"></script>
+  <script src="ebay-order-history.js"></script>
+</body>
+</html>

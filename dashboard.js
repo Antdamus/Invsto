@@ -414,7 +414,7 @@ async function loadAdminReturnTasks() {
     const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
     const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "blocked" ? "is-overdue" : "is-soon";
     return `
-      <a class="urgent-order-card ${urgentClass}" href="ebay-order-history.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
+      <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
         <div class="urgent-order-top">
           <div>
             <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>

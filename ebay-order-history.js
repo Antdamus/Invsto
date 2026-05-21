@@ -106,6 +106,16 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function isReturnsWorkbenchPage() {
+  return document.body?.dataset?.page === "ebay-returns"
+    || /\/ebay-returns\.html$/i.test(window.location.pathname || "");
+}
+
+function isModalOpen(id) {
+  const element = $(id);
+  return Boolean(element && !element.classList.contains("hidden"));
+}
+
 function waitForSupabaseReady() {
   return new Promise((resolve) => {
     if (window.supabase) return resolve(window.supabase);
@@ -559,15 +569,20 @@ async function checkHistoryAuth() {
   state.user = session.user;
   state.employee = employee;
   const greeting = $("history-greeting");
-  if (greeting) greeting.textContent = `eBay Order History${employee.display_name ? ` - ${employee.display_name}` : ""}`;
+  if (greeting) {
+    const pageTitle = isReturnsWorkbenchPage() ? "eBay Returns" : "eBay Order History";
+    greeting.textContent = `${pageTitle}${employee.display_name ? ` - ${employee.display_name}` : ""}`;
+  }
   const subtitle = $("history-subtitle");
   if (subtitle) {
-    subtitle.textContent = isAdminUser()
-      ? "Admin shipping monitor - completed, canceled, and reverted orders"
-      : "Search completed orders and open packing proof photos.";
+    subtitle.textContent = isReturnsWorkbenchPage()
+      ? "Return queue, assignments, unmatched refunds, and intake photos."
+      : isAdminUser()
+        ? "Admin shipping monitor - completed, canceled, and reverted orders"
+        : "Search completed orders and open packing proof photos.";
   }
   const mode = $("history-mode-label");
-  if (mode) mode.textContent = isAdminUser() ? "Admin" : "Proof";
+  if (mode) mode.textContent = isReturnsWorkbenchPage() ? "Returns" : isAdminUser() ? "Admin" : "Proof";
   if (!isAdminUser()) {
     document.body.classList.add("history-worker-proof-mode");
     $("history-status")?.querySelector('option[value="reverted"]')?.remove();
@@ -1276,7 +1291,7 @@ function applyReturnTaskLaunchSelection() {
 }
 
 async function refreshHistoryAndReturns() {
-  await loadOrderHistory();
+  if (!isReturnsWorkbenchPage()) await loadOrderHistory();
   await loadReturnQueue();
 }
 
@@ -2968,7 +2983,7 @@ function applyReturnTransferPrefill(payload = {}, lines = []) {
   }
   if ($("history-status")) $("history-status").value = "all";
   if ($("history-label-filter")) $("history-label-filter").value = "all";
-  applyFilters();
+  if (!isReturnsWorkbenchPage() && $("history-list")) applyFilters();
 }
 
 async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {}) {
@@ -3114,7 +3129,7 @@ async function confirmReturnIntake() {
     }
     setReturnIntakeStatus(`Return saved. ${Number(result.restocked_units || 0).toLocaleString()} unit${Number(result.restocked_units || 0) === 1 ? "" : "s"} restocked.`, "success");
     closeReturnIntakeModal();
-    await loadOrderHistory();
+    if (!isReturnsWorkbenchPage()) await loadOrderHistory();
     await loadReturnQueue();
   } catch (error) {
     console.error("Return intake failed:", error);
@@ -4153,8 +4168,8 @@ async function handleHistoryReturnTransfer(payload) {
     transferId,
     phase: "started",
     message: isReturnBatchTransfer(payload)
-      ? "Order History is importing the eBay returns."
-      : "Order History is matching the eBay return.",
+      ? "OG Returns is importing the eBay returns."
+      : "OG Returns is matching the eBay return.",
   });
 
   try {
@@ -4189,8 +4204,8 @@ function setupHistoryLabelReceiver() {
         type: "OG_EBAY_LABEL_RECEIVER_STATE_RESPONSE",
         requestId: event.data.requestId,
         payload: {
-          pageType: "order-history",
-          labelModalOpen: !$("history-label-modal")?.classList.contains("hidden"),
+          pageType: isReturnsWorkbenchPage() ? "returns" : "order-history",
+          labelModalOpen: Boolean($("history-label-modal") && !$("history-label-modal").classList.contains("hidden")),
           awaitingOrderNumbers: state.awaitingLabelGroup?.orderNumbers || [],
           canAutoRoute: false,
         },
@@ -4556,35 +4571,35 @@ function setupListeners() {
     }
   });
   document.addEventListener("keydown", (event) => {
-    if (!$("evidence-photo-viewer-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("evidence-photo-viewer-modal")) {
       if (event.key === "Escape" || event.key === "Enter") {
         event.preventDefault();
         closeEvidencePhotoViewer();
       }
       return;
     }
-    if (!$("proof-trail-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("proof-trail-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeProofTrailModal();
       }
       return;
     }
-    if (!$("label-backfill-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("label-backfill-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeLabelBackfillModal();
       }
       return;
     }
-    if (!$("history-label-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("history-label-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeHistoryLabelModal();
       }
       return;
     }
-    if (!$("return-intake-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("return-intake-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeReturnIntakeModal();
@@ -4594,7 +4609,7 @@ function setupListeners() {
       }
       return;
     }
-    if (!$("revert-order-modal")?.classList.contains("hidden")) {
+    if (isModalOpen("revert-order-modal")) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeRevertModal();
@@ -4614,7 +4629,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupDefaultDates();
   setupHistoryLabelReceiver();
   setupListeners();
-  await loadOrderHistory();
-  await loadReturnQueue();
+  if (isReturnsWorkbenchPage()) {
+    state.historyLoaded = true;
+    await loadReturnQueue();
+    drainQueuedHistoryReturnTransfers();
+  } else {
+    await loadOrderHistory();
+    if ($("return-task-list")) await loadReturnQueue();
+  }
   if (window.lucide) window.lucide.createIcons();
 });

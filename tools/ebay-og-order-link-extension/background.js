@@ -165,7 +165,7 @@
         resolve({
           ok: false,
           transferId,
-          error: "OG Order History opened, but did not confirm the return intake modal within 5 minutes.",
+          error: "OG Returns opened, but did not confirm the return workflow within 5 minutes.",
         });
       }, APP_ACK_TIMEOUT_MS);
 
@@ -256,7 +256,7 @@
   function isSameOriginOgTab(tab, appUrl) {
     const tabUrl = normalizeUrl(tab?.url);
     if (!tabUrl || !appUrl || tabUrl.origin !== appUrl.origin) return false;
-    return /\/(?:pending-orders|ebay-order-history)\.html$/i.test(tabUrl.pathname);
+    return /\/(?:pending-orders|ebay-order-history|ebay-returns)\.html$/i.test(tabUrl.pathname);
   }
 
   async function findAppTabs(appUrl) {
@@ -445,7 +445,7 @@
     return url;
   }
 
-  function buildReturnPageUrl(appUrl, payload, pageName = "ebay-order-history.html") {
+  function buildReturnPageUrl(appUrl, payload, pageName = "ebay-returns.html") {
     const url = new URL(appUrl.toString());
     if (pageName) {
       url.pathname = url.pathname.replace(/[^/]*$/, pageName);
@@ -698,14 +698,19 @@
     await storePendingReturn(transferId, payload);
 
     const tabs = await findAppTabs(appUrl);
+    const returnsTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/ebay-returns\.html$/i.test(tabUrl.pathname);
+    });
     const historyTab = tabs.find((tab) => {
       const tabUrl = normalizeUrl(tab?.url);
       return tabUrl?.origin === appUrl.origin && /\/ebay-order-history\.html$/i.test(tabUrl.pathname);
     });
+    const returnWorkflowTab = returnsTab || historyTab;
 
-    if (historyTab?.id) {
+    if (returnWorkflowTab?.id) {
       try {
-        const ack = await deliverReturnToTab(historyTab, payload);
+        const ack = await deliverReturnToTab(returnWorkflowTab, payload);
         return {
           ...ack,
           transferId,
@@ -713,7 +718,7 @@
           opened: false,
         };
       } catch (error) {
-        const ack = await openReturnTransferPageAndWait(appUrl, payload, historyTab);
+        const ack = await openReturnTransferPageAndWait(appUrl, payload, returnWorkflowTab);
         return {
           ...ack,
           transferId,

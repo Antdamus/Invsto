@@ -3592,7 +3592,7 @@
     button.className = SEND_RETURN_BUTTON_CLASS;
     button.dataset.ogReturnId = returnInfo.returnId;
     button.textContent = "Open Return in OG";
-    button.title = `Open eBay return ${returnInfo.returnId} in OG Order History`;
+    button.title = `Open eBay return ${returnInfo.returnId} in OG Returns`;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

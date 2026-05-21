@@ -300,11 +300,11 @@ begin
 
   select *
     into v_task
-  from public.ebay_return_tasks
-  where return_case_id = v_case.id
-    and task_type = 'return_intake'
-    and status not in ('resolved', 'cancelled')
-  order by created_at desc
+  from public.ebay_return_tasks t
+  where t.return_case_id = v_case.id
+    and t.task_type = 'return_intake'
+    and t.status not in ('resolved', 'cancelled')
+  order by t.created_at desc
   limit 1;
 
   if not found then
