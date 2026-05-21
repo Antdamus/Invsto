@@ -12,6 +12,8 @@
   const SEND_LABEL_ID = "og-ebay-send-label";
   const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
+  const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
+  const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
@@ -37,6 +39,8 @@
   let ogBuyerSelectionInProgress = false;
   let ogBuyerSelectionRefreshTimer = null;
   let ogPartialSelectionWarningTimer = null;
+  let ogReturnEntriesCache = null;
+  let ogReturnEntriesSignature = "";
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -103,6 +107,15 @@
 
   function cleanText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function getText(selector, root = document) {
@@ -373,6 +386,14 @@
       && Boolean(getDownloadReportButton());
   }
 
+  function isEbayReturnsPage() {
+    const url = new URL(window.location.href);
+    const sample = getPageTextSample();
+    return /\/sh\/ord\/?$/i.test(url.pathname)
+      && /returns?|currentpage_SHOrderReturn|returnid/i.test(`${url.search} ${url.hash} ${sample}`)
+      && /table of returns|return requested|return shipped|return delivered|waiting for buyer to ship|return id/i.test(sample);
+  }
+
   function getAwaitingReportMetadata() {
     return {
       source: "ebay-awaiting-shipment-report",
@@ -381,6 +402,225 @@
       visibleSummaryText: getAwaitingOrdersSummaryText(),
       capturedAt: new Date().toISOString(),
     };
+  }
+
+  function normalizeReturnReasonText(value) {
+    return cleanText(String(value || "").replace(/^reason:\s*/i, ""));
+  }
+
+  function decodeReturnText(value) {
+    const text = String(value || "");
+    if (!/[&<>]/.test(text)) return cleanText(text);
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = text;
+    return cleanText(textarea.value || text);
+  }
+
+  function textSpansToText(value) {
+    if (!value) return "";
+    if (typeof value === "string") return cleanText(value);
+    if (Array.isArray(value)) return cleanText(value.map(textSpansToText).join(" "));
+    if (typeof value === "object") {
+      if (Array.isArray(value.textSpans)) return textSpansToText(value.textSpans);
+      if (Object.prototype.hasOwnProperty.call(value, "text")) return cleanText(value.text);
+    }
+    return "";
+  }
+
+  function getActionUrl(value) {
+    if (!value || typeof value !== "object") return "";
+    if (typeof value.URL === "string") return value.URL;
+    if (value.action && typeof value.action === "object") return getActionUrl(value.action);
+    return "";
+  }
+
+  function getReturnDetailsUrl(member = {}) {
+    const direct = getActionUrl(member.returnDetails)
+      || getActionUrl(member.lineActions?.model?.defaultAction)
+      || getActionUrl(member.lineActions?.model?.actionValues?.[0]);
+    if (direct) return direct;
+    const returnId = cleanText(member.returnId || "");
+    return returnId ? `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${encodeURIComponent(returnId)}` : "";
+  }
+
+  function getReturnTransactionId(member = {}) {
+    const urls = [
+      getActionUrl(member.buyerDetails?.buyerid),
+      ...(Array.isArray(member.lineActions?.model?.actionValues)
+        ? member.lineActions.model.actionValues.map(getActionUrl)
+        : []),
+    ];
+    for (const url of urls) {
+      try {
+        const parsed = new URL(url, window.location.origin);
+        const transId = parsed.searchParams.get("transId");
+        if (transId) return transId;
+      } catch (_) {}
+    }
+    return "";
+  }
+
+  function normalizeReturnMember(member = {}) {
+    const listing = member.lineItems?.[0]?.listing || {};
+    const returnId = cleanText(member.returnId || textSpansToText(member.returnDetails));
+    const itemNumber = cleanText(listing.listingId || "");
+    if (!returnId || !itemNumber) return null;
+    const detailsUrl = getReturnDetailsUrl(member);
+    const returnReason = normalizeReturnReasonText(textSpansToText(member.returnReason));
+    return {
+      source: "ebay-returns-page",
+      returnId,
+      itemNumber,
+      transactionId: getReturnTransactionId(member),
+      itemTitle: textSpansToText(listing.title) || cleanText(listing.image?.title || ""),
+      quantity: Number(listing.quantity?.value || textSpansToText(listing.quantity).match(/\d+/)?.[0] || 1),
+      buyerUsername: textSpansToText(member.buyerDetails?.buyerid),
+      returnStatus: textSpansToText(member.returnStatus),
+      returnAction: textSpansToText(member.returnAction),
+      returnReason,
+      returnInitiated: textSpansToText(member.returnInitiated).replace(/^requested:\s*/i, ""),
+      refundText: textSpansToText(member.refundDetails),
+      detailsUrl,
+      itemUrl: getActionUrl(listing.title),
+      imageUrl: listing.image?.URL || "",
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      capturedAt: new Date().toISOString(),
+      rawReturn: {
+        returnId,
+        buyerDetails: member.buyerDetails || null,
+        returnStatus: member.returnStatus || null,
+        returnAction: member.returnAction || null,
+        returnReason: member.returnReason || null,
+        returnInitiated: member.returnInitiated || null,
+        refundDetails: member.refundDetails || null,
+        lineItems: member.lineItems || null,
+        lineActions: member.lineActions || null,
+      },
+    };
+  }
+
+  function collectReturnMembersFromJson(value, results = [], seen = new WeakSet(), limit = { count: 0 }) {
+    if (!value || typeof value !== "object" || seen.has(value) || limit.count > 25000) return results;
+    seen.add(value);
+    limit.count += 1;
+
+    const normalized = value.returnId && Array.isArray(value.lineItems) ? normalizeReturnMember(value) : null;
+    if (normalized) results.push(normalized);
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => collectReturnMembersFromJson(entry, results, seen, limit));
+      return results;
+    }
+
+    Object.values(value).forEach((entry) => collectReturnMembersFromJson(entry, results, seen, limit));
+    return results;
+  }
+
+  function readLastRegexMatch(text, regex) {
+    let found = "";
+    for (const match of text.matchAll(regex)) {
+      if (match?.[1]) found = decodeReturnText(match[1]);
+    }
+    return found;
+  }
+
+  function readFirstRegexMatch(text, regex) {
+    const match = text.match(regex);
+    return decodeReturnText(match?.[1] || "");
+  }
+
+  function extractReturnMembersFromText(rawText = "") {
+    const text = rawText.replace(/&quot;/g, '"').replace(/&#34;/g, '"');
+    const results = [];
+    for (const match of text.matchAll(/"returnId"\s*:\s*"([^"]+)"/g)) {
+      const returnId = decodeReturnText(match[1]);
+      const before = text.slice(Math.max(0, match.index - 7000), match.index);
+      const after = text.slice(match.index, match.index + 12000);
+      const itemNumber = readLastRegexMatch(before, /"listingId"\s*:\s*"([^"]+)"/g);
+      if (!returnId || !itemNumber) continue;
+      const buyerUsername = readFirstRegexMatch(after, /"buyerid"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/);
+      const returnDetailsUrl = readFirstRegexMatch(after, /"URL"\s*:\s*"(https:\/\/www\.ebay\.com\/rtn\/Return\/ReturnsDetail\?returnId=[^"]+)"/);
+      const reportBuyerUrl = readFirstRegexMatch(after, /"URL"\s*:\s*"(http:\/\/spd\.ebay\.com\/RBASellerHub[^"]+)"/);
+      let transactionId = "";
+      try {
+        transactionId = new URL(reportBuyerUrl).searchParams.get("transId") || "";
+      } catch (_) {}
+      results.push({
+        source: "ebay-returns-page",
+        returnId,
+        itemNumber,
+        transactionId,
+        itemTitle: readLastRegexMatch(before, /"title"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/g),
+        quantity: Number(readLastRegexMatch(before, /"quantity"\s*:\s*\{(?:"textSpans".*?)?"value"\s*:\s*(\d+)/gs) || 1),
+        buyerUsername,
+        returnStatus: readFirstRegexMatch(after, /"returnStatus"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        returnAction: readFirstRegexMatch(after, /"returnAction"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        returnReason: normalizeReturnReasonText(readFirstRegexMatch(after, /"returnReason"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/)),
+        returnInitiated: readFirstRegexMatch(after, /"returnInitiated"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/).replace(/^requested:\s*/i, ""),
+        refundText: readFirstRegexMatch(after, /"refundDetails"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        detailsUrl: returnDetailsUrl || `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${encodeURIComponent(returnId)}`,
+        itemUrl: readLastRegexMatch(before, /"URL"\s*:\s*"(https:\/\/www\.ebay\.com\/itm\/[^"]+)"/g),
+        imageUrl: readLastRegexMatch(before, /"image"\s*:\s*\{.*?"URL"\s*:\s*"([^"]+)"/gs),
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt: new Date().toISOString(),
+        rawReturn: {
+          returnId,
+          itemNumber,
+          transactionId,
+          buyerUsername,
+        },
+      });
+    }
+    return results;
+  }
+
+  function getEbayReturnJsonTextCandidates() {
+    const scripts = [...document.scripts]
+      .map((script) => script.textContent || "")
+      .filter((text) => text.includes('"returnId"') || text.includes("Return ID:"));
+    return [...scripts, document.documentElement?.innerHTML || ""].filter(Boolean);
+  }
+
+  function getEbayReturnEntries() {
+    if (!isEbayReturnsPage()) return [];
+    const signature = `${window.location.href}|${document.scripts.length}|${document.body?.innerText?.length || 0}`;
+    if (ogReturnEntriesCache && ogReturnEntriesSignature === signature) return ogReturnEntriesCache;
+    const entries = [];
+    getEbayReturnJsonTextCandidates().forEach((text) => {
+      const beforeCount = entries.length;
+      try {
+        const parsed = JSON.parse(text);
+        entries.push(...collectReturnMembersFromJson(parsed));
+        if (entries.length === beforeCount) entries.push(...extractReturnMembersFromText(text));
+      } catch (_) {
+        entries.push(...extractReturnMembersFromText(text));
+      }
+    });
+    const byReturnId = new Map();
+    entries.forEach((entry) => {
+      if (!entry?.returnId || !entry?.itemNumber) return;
+      const existing = byReturnId.get(entry.returnId);
+      byReturnId.set(entry.returnId, {
+        ...(existing || {}),
+        ...entry,
+        rawReturn: entry.rawReturn || existing?.rawReturn || null,
+      });
+    });
+    ogReturnEntriesSignature = signature;
+    ogReturnEntriesCache = [...byReturnId.values()].sort((a, b) => String(a.returnId).localeCompare(String(b.returnId), undefined, { numeric: true }));
+    return ogReturnEntriesCache;
+  }
+
+  function findReturnAnchor(returnInfo = {}) {
+    const returnId = String(returnInfo.returnId || "");
+    if (!returnId) return null;
+    return [...document.querySelectorAll("a[href]")]
+      .find((anchor) => {
+        const href = anchor.getAttribute("href") || anchor.href || "";
+        return href.includes(`returnId=${returnId}`) || cleanText(anchor.textContent) === returnId;
+      }) || null;
   }
 
   function getRawEbayAwaitingShipmentRows() {
@@ -2316,6 +2556,57 @@
     }
   }
 
+  function setReturnButtonStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone;
+    button.disabled = /opening|sending|matching/i.test(text);
+  }
+
+  async function sendReturnToOg(returnInfo, button = null) {
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setReturnButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    const payload = {
+      return: {
+        ...returnInfo,
+        capturedAt: new Date().toISOString(),
+        pageUrl: window.location.href,
+        pageTitle: document.title || returnInfo.pageTitle || "",
+      },
+      metadata: {
+        source: "ebay-returns-page",
+        returnId: returnInfo.returnId || "",
+        buyerUsername: returnInfo.buyerUsername || "",
+        itemNumber: returnInfo.itemNumber || "",
+        transactionId: returnInfo.transactionId || "",
+        pageUrl: window.location.href,
+        capturedAt: new Date().toISOString(),
+      },
+    };
+
+    try {
+      setReturnButtonStatus(button, "Opening OG...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_RETURN",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not open the OG return workflow.");
+      setReturnButtonStatus(button, response.opened ? "Opened in OG" : "Sent to OG", "success");
+      window.setTimeout(() => setReturnButtonStatus(button, "Open Return in OG"), 3500);
+    } catch (error) {
+      console.error("[OG eBay Return] Transfer failed:", error);
+      setReturnButtonStatus(button, "Send failed", "error");
+      window.alert(error?.message || "Could not send this eBay return to OG.");
+      window.setTimeout(() => setReturnButtonStatus(button, "Open Return in OG"), 5000);
+    }
+  }
+
   async function sendBulkLabelToOg() {
     try {
       assertExtensionContextActive();
@@ -2931,9 +3222,63 @@
         background: #d4f8df;
       }
 
+      .${SEND_RETURN_BUTTON_CLASS} {
+        margin-left: 8px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 12px Arial, sans-serif;
+        padding: 7px 10px;
+      }
+
+      .${SEND_RETURN_BUTTON_CLASS}:hover {
+        background: #d4f8df;
+      }
+
+      #${SEND_RETURN_PANEL_ID} {
+        position: fixed;
+        right: 16px;
+        bottom: 154px;
+        z-index: 2147483646;
+        width: min(360px, calc(100vw - 32px));
+        border: 1px solid rgba(17, 107, 54, .32);
+        border-radius: 16px;
+        background: #f6fff9;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, .22);
+        color: #0f2a1b;
+        font-family: Arial, sans-serif;
+        padding: 12px;
+      }
+
+      #${SEND_RETURN_PANEL_ID} strong {
+        display: block;
+        margin-bottom: 8px;
+        font: 900 14px Arial, sans-serif;
+      }
+
+      #${SEND_RETURN_PANEL_ID} article {
+        display: grid;
+        gap: 5px;
+        border-top: 1px solid rgba(17, 107, 54, .18);
+        padding: 9px 0;
+      }
+
+      #${SEND_RETURN_PANEL_ID} article:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      #${SEND_RETURN_PANEL_ID} span {
+        color: #254c33;
+        font: 700 12px/1.35 Arial, sans-serif;
+      }
+
       #${SEND_LABEL_ID}[data-status-tone="error"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="error"],
-      #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"] {
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"],
+      .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
         color: #9f1f14;
@@ -2941,7 +3286,8 @@
 
       #${SEND_LABEL_ID}[data-status-tone="success"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="success"],
-      #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"] {
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"],
+      .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
         color: #0a5b2b;
@@ -3164,6 +3510,67 @@
     }
   }
 
+  function createReturnSendButton(returnInfo) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = SEND_RETURN_BUTTON_CLASS;
+    button.dataset.ogReturnId = returnInfo.returnId;
+    button.textContent = "Open Return in OG";
+    button.title = `Open eBay return ${returnInfo.returnId} in OG Order History`;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sendReturnToOg(returnInfo, button);
+    });
+    return button;
+  }
+
+  function injectReturnPageButtons() {
+    const returns = getEbayReturnEntries();
+    let panel = document.getElementById(SEND_RETURN_PANEL_ID);
+    document.querySelectorAll(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
+      const returnId = button.dataset.ogReturnId || "";
+      if (!returns.some((entry) => entry.returnId === returnId)) button.remove();
+    });
+
+    if (!returns.length) {
+      panel?.remove();
+      return;
+    }
+
+    returns.forEach((returnInfo) => {
+      const anchor = findReturnAnchor(returnInfo);
+      const parent = anchor?.parentElement;
+      if (!parent || parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) return;
+      const button = createReturnSendButton(returnInfo);
+      button.dataset.ogReturnRowButton = "true";
+      anchor.insertAdjacentElement("afterend", button);
+    });
+
+    if (!panel) {
+      panel = document.createElement("aside");
+      panel.id = SEND_RETURN_PANEL_ID;
+      document.body.appendChild(panel);
+    }
+
+    panel.innerHTML = `
+      <strong>OG Returns (${returns.length})</strong>
+      ${returns.slice(0, 6).map((entry) => `
+        <article data-og-return-panel-row="${entry.returnId}">
+          <span>${escapeHtml(entry.buyerUsername || "Unknown buyer")} - ${escapeHtml(entry.itemNumber || "No item #")}</span>
+          <span>${escapeHtml(entry.itemTitle || entry.returnStatus || "eBay return")}</span>
+        </article>
+      `).join("")}
+      ${returns.length > 6 ? `<span>${returns.length - 6} more return${returns.length - 6 === 1 ? "" : "s"} on this page.</span>` : ""}
+    `;
+
+    returns.slice(0, 6).forEach((returnInfo) => {
+      const row = panel.querySelector(`[data-og-return-panel-row="${returnInfo.returnId}"]`);
+      if (!row || row.querySelector(`.${SEND_RETURN_BUTTON_CLASS}`)) return;
+      row.appendChild(createReturnSendButton(returnInfo));
+    });
+  }
+
   function injectPrioritizeDueOrdersButton() {
     let button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
 
@@ -3260,6 +3667,7 @@
     injectSendLabelButton();
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
+    injectReturnPageButtons();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();
     maybeShowBoxReminder();

@@ -23,6 +23,10 @@ const state = {
   returnEvidencePhotos: [],
   returnEvidencePhotoUploadKeys: new Set(),
   returnCaptureBusy: false,
+  activeReturnTransfer: null,
+  queuedHistoryReturnTransfers: [],
+  handledReturnTransferIds: new Set(),
+  processingReturnTransferIds: new Set(),
   awaitingLabelGroup: null,
   queuedHistoryLabelTransfers: [],
   pendingHistoryLabelReplacement: null,
@@ -50,6 +54,49 @@ const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
+const ORDER_HISTORY_LINE_SELECT = `
+  id,
+  order_id,
+  item_number,
+  transaction_id,
+  item_title,
+  custom_label,
+  quantity,
+  sold_for,
+  shipping_and_handling,
+  total_price,
+  net_payout,
+  line_status,
+  internal_item_id,
+  stock_location_row_id,
+  location_id,
+  fulfilled_quantity,
+  fulfilled_by,
+  fulfilled_by_email,
+  fulfilled_at,
+  sale_id,
+  sale_item_id,
+  stock_transaction_id,
+  notes,
+  ebay_orders!inner(
+    id,
+    order_number,
+    sales_record_number,
+    buyer_username,
+    sale_date,
+    paid_on_date,
+    ship_by_date,
+    status,
+    total_price,
+    net_payout,
+    ebay_shipment_id,
+    label_status,
+    label_storage_bucket,
+    label_file_path,
+    label_uploaded_at,
+    label_metadata
+  )
+`;
 
 function $(id) {
   return document.getElementById(id);
@@ -622,49 +669,7 @@ async function loadOrderHistory() {
 
   const linesQuery = supabase
     .from("ebay_order_lines")
-    .select(`
-      id,
-      order_id,
-      item_number,
-      transaction_id,
-      item_title,
-      custom_label,
-      quantity,
-      sold_for,
-      shipping_and_handling,
-      total_price,
-      net_payout,
-      line_status,
-      internal_item_id,
-      stock_location_row_id,
-      location_id,
-      fulfilled_quantity,
-      fulfilled_by,
-      fulfilled_by_email,
-      fulfilled_at,
-      sale_id,
-      sale_item_id,
-      stock_transaction_id,
-      notes,
-      ebay_orders!inner(
-        id,
-        order_number,
-        sales_record_number,
-        buyer_username,
-        sale_date,
-        paid_on_date,
-        ship_by_date,
-        status,
-        total_price,
-        net_payout,
-        ebay_shipment_id,
-        label_status,
-        label_storage_bucket,
-        label_file_path,
-        label_uploaded_at,
-        label_metadata
-      )
-    `)
+    .select(ORDER_HISTORY_LINE_SELECT)
     .in("line_status", ["fulfilled", "cancelled", "skipped"])
     .gte("fulfilled_at", fromIso)
     .lte("fulfilled_at", toIso)
@@ -827,6 +832,7 @@ async function loadOrderHistory() {
   applyFilters();
   applyHistoryLabelLaunchSelection();
   drainQueuedHistoryLabelTransfers();
+  drainQueuedHistoryReturnTransfers();
 }
 
 function renderWorkerOptions() {
@@ -2404,8 +2410,120 @@ function closeReturnIntakeModal() {
   state.returnDestinationLocation = null;
   state.returnEvidencePhotos = [];
   state.returnEvidencePhotoUploadKeys.clear();
+  state.activeReturnTransfer = null;
   renderReturnEvidencePhotos();
   closeModal("return-intake-modal");
+}
+
+function getReturnTransferInfo(payload = {}) {
+  return payload.return || payload.metadata || payload || {};
+}
+
+function normalizeReturnLookup(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function mapEbayReturnReasonToValue(reason = "") {
+  const text = normalizeReturnLookup(reason);
+  if (!text) return "";
+  if (/description|photo|not as described|doesn.?t match/.test(text)) return "not_as_described";
+  if (/changed|mind|no longer|don.?t want/.test(text)) return "buyer_changed_mind";
+  if (/damaged|broken/.test(text)) return "damaged";
+  if (/wrong item|incorrect item/.test(text)) return "wrong_item";
+  if (/missing|parts|piece/.test(text)) return "missing_parts";
+  return "other";
+}
+
+function buildReturnTransferNote(info = {}) {
+  return [
+    info.returnStatus ? `eBay status: ${info.returnStatus}` : "",
+    info.returnAction ? `eBay action: ${info.returnAction}` : "",
+    info.returnInitiated ? `Requested: ${info.returnInitiated}` : "",
+    info.refundText ? `Refund: ${info.refundText}` : "",
+    info.detailsUrl ? `Details: ${info.detailsUrl}` : "",
+    info.pageUrl ? `Captured from: ${info.pageUrl}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function returnTransferMatchesLine(info = {}, line = {}) {
+  const itemNumber = normalizeReturnLookup(info.itemNumber);
+  const transactionId = normalizeReturnLookup(info.transactionId);
+  const buyer = normalizeReturnLookup(info.buyerUsername);
+  const title = normalizeReturnLookup(info.itemTitle);
+  if (transactionId && normalizeReturnLookup(line.transaction_id) === transactionId) return true;
+  if (itemNumber && normalizeReturnLookup(line.item_number) !== itemNumber) return false;
+  if (buyer && normalizeReturnLookup(line.order?.buyer_username) !== buyer) return false;
+  if (!itemNumber && title && normalizeReturnLookup(line.item_title) !== title) return false;
+  return Boolean(itemNumber || title);
+}
+
+function mergeHistoryLines(rows = []) {
+  const byId = new Map(state.lines.map((line) => [line.id, line]));
+  rows.map(normalizeLine).forEach((line) => {
+    if (line.id) byId.set(line.id, line);
+  });
+  state.lines = [...byId.values()];
+}
+
+async function fetchReturnTransferLines(info = {}) {
+  const transactionId = String(info.transactionId || "").trim();
+  const itemNumber = String(info.itemNumber || "").trim();
+  if (!transactionId && !itemNumber) return [];
+
+  let query = supabase
+    .from("ebay_order_lines")
+    .select(ORDER_HISTORY_LINE_SELECT)
+    .eq("line_status", "fulfilled")
+    .order("fulfilled_at", { ascending: false })
+    .limit(50);
+
+  query = transactionId ? query.eq("transaction_id", transactionId) : query.eq("item_number", itemNumber);
+  const { data, error } = await query;
+  if (error) throw error;
+  const normalized = (data || []).map(normalizeLine);
+  return normalized.filter((line) => returnTransferMatchesLine(info, line));
+}
+
+async function findReturnTransferLines(payload = {}) {
+  const info = getReturnTransferInfo(payload);
+  let matches = state.lines.filter((line) => returnTransferMatchesLine(info, line));
+  if (!matches.length) {
+    const fetched = await fetchReturnTransferLines(info);
+    if (fetched.length) {
+      mergeHistoryLines(fetched);
+      matches = fetched;
+    }
+  }
+  if (!matches.length) return [];
+
+  if (info.transactionId) return matches.slice(0, 1);
+  const buyer = normalizeReturnLookup(info.buyerUsername);
+  const itemNumber = normalizeReturnLookup(info.itemNumber);
+  return matches
+    .filter((line) => !buyer || normalizeReturnLookup(line.order?.buyer_username) === buyer)
+    .filter((line) => !itemNumber || normalizeReturnLookup(line.item_number) === itemNumber)
+    .sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0))
+    .slice(0, 5);
+}
+
+function applyReturnTransferPrefill(payload = {}, lines = []) {
+  const info = getReturnTransferInfo(payload);
+  state.activeReturnTransfer = payload;
+  $("return-ebay-id").value = info.returnId || "";
+  $("return-reason").value = mapEbayReturnReasonToValue(info.returnReason);
+  const note = buildReturnTransferNote(info);
+  $("return-note").value = note;
+  const buyer = info.buyerUsername || lines[0]?.order?.buyer_username || "buyer";
+  const item = info.itemNumber || lines[0]?.item_number || "item";
+  setReturnIntakeStatus(`Matched eBay return ${info.returnId || ""} for ${buyer} / ${item}. Add return photos, inspect the item, then save.`, "success");
+  const search = $("history-search");
+  if (search) {
+    search.value = info.itemNumber || info.buyerUsername || info.returnId || "";
+    state.historySearchUserEdited = true;
+  }
+  if ($("history-status")) $("history-status").value = "all";
+  if ($("history-label-filter")) $("history-label-filter").value = "all";
+  applyFilters();
 }
 
 function getReturnLineField(attribute, lineId) {
@@ -3319,6 +3437,92 @@ async function confirmHistoryExtraLabel() {
   }
 }
 
+function postHistoryReturnTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_RETURN_TRANSFER_STATUS",
+    payload: {
+      ...payload,
+      tabId: null,
+    },
+  }, window.location.origin);
+}
+
+function queueHistoryReturnTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.queuedHistoryReturnTransfers.some((entry) => entry?.transferId === transferId)) return;
+  state.queuedHistoryReturnTransfers.push(payload);
+}
+
+function drainQueuedHistoryReturnTransfers() {
+  if (!state.historyLoaded || !state.queuedHistoryReturnTransfers.length) return;
+  const queued = state.queuedHistoryReturnTransfers.splice(0);
+  queued.forEach((payload) => handleHistoryReturnTransfer(payload));
+}
+
+async function openReturnIntakeForTransfer(payload = {}) {
+  const transferId = payload?.transferId || "";
+  const info = getReturnTransferInfo(payload);
+  const lines = await findReturnTransferLines(payload);
+  if (!lines.length) {
+    throw new Error(`Could not match eBay return ${info.returnId || ""} to a fulfilled OG order line. Item ${info.itemNumber || "unknown"} / buyer ${info.buyerUsername || "unknown"} was not found.`);
+  }
+
+  const lineIds = lines.map((line) => line.id).filter(Boolean);
+  openReturnIntakeModal(lineIds);
+  applyReturnTransferPrefill(payload, lines);
+  postHistoryReturnTransferStatus({
+    transferId,
+    ok: true,
+    opened: true,
+    matchedLineIds: lineIds,
+    orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
+    message: "OG return intake modal opened for the eBay return.",
+  });
+}
+
+async function handleHistoryReturnTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledReturnTransferIds.has(transferId)) {
+    postHistoryReturnTransferStatus({
+      transferId,
+      ok: true,
+      opened: true,
+      message: "Return transfer is already open in OG.",
+    });
+    return;
+  }
+  if (transferId && state.processingReturnTransferIds.has(transferId)) return;
+
+  if (!state.historyLoaded) {
+    queueHistoryReturnTransfer(payload);
+    return;
+  }
+
+  postHistoryReturnTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Order History is matching the eBay return.",
+  });
+
+  try {
+    if (transferId) state.processingReturnTransferIds.add(transferId);
+    await openReturnIntakeForTransfer(payload);
+    if (transferId) state.handledReturnTransferIds.add(transferId);
+  } catch (error) {
+    const message = error.message || "Could not open the OG return workflow.";
+    console.error("eBay return transfer failed:", error);
+    if (transferId) state.handledReturnTransferIds.add(transferId);
+    postHistoryReturnTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+    alert(message);
+  } finally {
+    if (transferId) state.processingReturnTransferIds.delete(transferId);
+  }
+}
+
 function setupHistoryLabelReceiver() {
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
@@ -3335,8 +3539,13 @@ function setupHistoryLabelReceiver() {
       }, window.location.origin);
       return;
     }
-    if (event.data?.type !== "OG_EBAY_LABEL_TRANSFER") return;
-    handleHistoryLabelTransfer(event.data.payload);
+    if (event.data?.type === "OG_EBAY_LABEL_TRANSFER") {
+      handleHistoryLabelTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_RETURN_TRANSFER") {
+      handleHistoryReturnTransfer(event.data.payload);
+    }
   });
 }
 

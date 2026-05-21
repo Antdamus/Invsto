@@ -4,6 +4,7 @@
   const APP_URL_KEY = "ogPendingOrdersUrl";
   const PENDING_LABEL_PREFIX = "ogPendingLabel:";
   const PENDING_REPORT_PREFIX = "ogPendingReport:";
+  const PENDING_RETURN_PREFIX = "ogPendingReturn:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
   const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
@@ -12,6 +13,7 @@
   const downloadCaptures = new Map();
   const appTransferAcks = new Map();
   const appReportAcks = new Map();
+  const appReturnAcks = new Map();
   let pendingPriorityCache = null;
   let pendingPriorityCacheAt = 0;
   const PENDING_PRIORITY_CACHE_TTL_MS = 15000;
@@ -35,6 +37,13 @@
       .replace(/[^a-z0-9._-]/gi, "-")
       .slice(0, 70);
     return `report:${file || "awaiting-orders-report"}:${Date.now()}`;
+  }
+
+  function buildReturnTransferId(returnTransfer = {}) {
+    const data = returnTransfer.return || returnTransfer.metadata || {};
+    const returnId = String(data.returnId || "return").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    const itemNumber = String(data.itemNumber || "item").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    return `return:${returnId || "return"}:${itemNumber || "item"}:${Date.now()}`;
   }
 
   async function getAppUrl() {
@@ -62,6 +71,16 @@
     });
   }
 
+  async function storePendingReturn(transferId, returnTransfer) {
+    await chrome.storage.local.set({
+      [`${PENDING_RETURN_PREFIX}${transferId}`]: {
+        ...returnTransfer,
+        transferId,
+        relayedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingLabel(transferId) {
     const key = `${PENDING_LABEL_PREFIX}${transferId}`;
     const stored = await chrome.storage.local.get(key);
@@ -74,12 +93,22 @@
     return stored[key] || null;
   }
 
+  async function getPendingReturn(transferId) {
+    const key = `${PENDING_RETURN_PREFIX}${transferId}`;
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] || null;
+  }
+
   async function removePendingLabel(transferId) {
     await chrome.storage.local.remove(`${PENDING_LABEL_PREFIX}${transferId}`);
   }
 
   async function removePendingReport(transferId) {
     await chrome.storage.local.remove(`${PENDING_REPORT_PREFIX}${transferId}`);
+  }
+
+  async function removePendingReturn(transferId) {
+    await chrome.storage.local.remove(`${PENDING_RETURN_PREFIX}${transferId}`);
   }
 
   function waitForAppTransferAck(transferId) {
@@ -124,6 +153,27 @@
     });
   }
 
+  function waitForAppReturnAck(transferId) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appReturnAcks.delete(transferId);
+        resolve({
+          ok: false,
+          transferId,
+          error: "OG Order History opened, but did not confirm the return intake modal within 5 minutes.",
+        });
+      }, APP_ACK_TIMEOUT_MS);
+
+      appReturnAcks.set(transferId, {
+        resolve: (status) => {
+          clearTimeout(timer);
+          appReturnAcks.delete(transferId);
+          resolve(status);
+        },
+      });
+    });
+  }
+
   async function handleAppTransferStatus(status = {}, sender = null) {
     const transferId = status.transferId || "";
     if (!transferId) return;
@@ -157,6 +207,18 @@
     }
     if (status.ok) await removePendingReport(transferId);
     const waiter = appReportAcks.get(transferId);
+    if (waiter) waiter.resolve(status);
+  }
+
+  async function handleAppReturnStatus(status = {}) {
+    const transferId = status.transferId || "";
+    if (!transferId) return;
+    if (status.phase === "started" && status.tabId) {
+      focusTab(status.tabId);
+      return;
+    }
+    if (status.ok) await removePendingReturn(transferId);
+    const waiter = appReturnAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
 
@@ -378,6 +440,18 @@
     return url;
   }
 
+  function buildReturnPageUrl(appUrl, payload, pageName = "ebay-order-history.html") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    url.searchParams.set("returnTransferId", payload.transferId);
+    if (payload.return?.returnId) url.searchParams.set("ebayReturnId", payload.return.returnId);
+    if (payload.return?.itemNumber) url.searchParams.set("itemNumber", payload.return.itemNumber);
+    return url;
+  }
+
   function isPendingOrdersState(state = {}) {
     return state.pageType === "pending-orders";
   }
@@ -583,6 +657,67 @@
 
     const reusableTab = tabs[0] || null;
     const ack = await openReportTransferPageAndWait(appUrl, payload, reusableTab);
+    return {
+      ...ack,
+      transferId,
+      delivered: false,
+      opened: true,
+      reusedTab: Boolean(reusableTab),
+    };
+  }
+
+  async function deliverReturnToTab(tab, payload) {
+    const appAckPromise = waitForAppReturnAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_RETURN_TRANSFER", payload });
+    await focusTab(tab.id);
+    return appAckPromise;
+  }
+
+  async function openReturnTransferPageAndWait(appUrl, payload, existingTab = null) {
+    const appAckPromise = waitForAppReturnAck(payload.transferId);
+    const url = buildReturnPageUrl(appUrl, payload);
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function relayReturnToApp(returnTransfer) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+
+    const transferId = buildReturnTransferId(returnTransfer);
+    const payload = { ...returnTransfer, transferId };
+    await storePendingReturn(transferId, payload);
+
+    const tabs = await findAppTabs(appUrl);
+    const historyTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/ebay-order-history\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (historyTab?.id) {
+      try {
+        const ack = await deliverReturnToTab(historyTab, payload);
+        return {
+          ...ack,
+          transferId,
+          delivered: true,
+          opened: false,
+        };
+      } catch (error) {
+        const ack = await openReturnTransferPageAndWait(appUrl, payload, historyTab);
+        return {
+          ...ack,
+          transferId,
+          delivered: false,
+          opened: true,
+          reusedTab: true,
+          recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
+        };
+      }
+    }
+
+    const reusableTab = tabs[0] || null;
+    const ack = await openReturnTransferPageAndWait(appUrl, payload, reusableTab);
     return {
       ...ack,
       transferId,
@@ -878,8 +1013,25 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_RETURN_TRANSFER_STATUS") {
+      handleAppReturnStatus({
+        ...(message.payload || {}),
+        tabId: _sender?.tab?.id || message.payload?.tabId || null,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
       relayAwaitingReportToApp(message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_SEND_RETURN") {
+      relayReturnToApp(message.payload)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -929,6 +1081,13 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_GET_PENDING_RETURN") {
+      getPendingReturn(message.transferId)
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_CLEAR_PENDING_LABEL") {
       removePendingLabel(message.transferId)
         .then(() => sendResponse({ ok: true }))
@@ -938,6 +1097,13 @@
 
     if (message.type === "OG_EBAY_CLEAR_PENDING_REPORT") {
       removePendingReport(message.transferId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CLEAR_PENDING_RETURN") {
+      removePendingReturn(message.transferId)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;

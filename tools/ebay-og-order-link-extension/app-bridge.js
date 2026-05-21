@@ -21,7 +21,7 @@
       type,
       payload,
     };
-    const maxAttempts = type === "OG_EBAY_AWAITING_REPORT_TRANSFER" ? 60 : 10;
+    const maxAttempts = ["OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER"].includes(type) ? 60 : 10;
     window.postMessage(message, window.location.origin);
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -95,6 +95,7 @@
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
     const reportTransferId = new URLSearchParams(window.location.search).get("reportTransferId");
+    const returnTransferId = new URLSearchParams(window.location.search).get("returnTransferId");
     if (transferId) {
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_GET_PENDING_LABEL",
@@ -109,6 +110,13 @@
       }).catch(() => null);
       if (response?.payload) postToOgApp(response.payload, "OG_EBAY_AWAITING_REPORT_TRANSFER");
     }
+    if (returnTransferId) {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_GET_PENDING_RETURN",
+        transferId: returnTransferId,
+      }).catch(() => null);
+      if (response?.payload) postToOgApp(response.payload, "OG_EBAY_RETURN_TRANSFER");
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -120,6 +128,12 @@
 
     if (message?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER") {
       postToOgApp(message.payload, "OG_EBAY_AWAITING_REPORT_TRANSFER");
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_RETURN_TRANSFER") {
+      postToOgApp(message.payload, "OG_EBAY_RETURN_TRANSFER");
       sendResponse({ ok: true });
       return true;
     }
@@ -149,6 +163,10 @@
     }
     if (event.data?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS") {
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_AWAITING_REPORT_TRANSFER_STATUS");
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_RETURN_TRANSFER_STATUS") {
+      relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_RETURN_TRANSFER_STATUS");
       return;
     }
     if (event.data?.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
