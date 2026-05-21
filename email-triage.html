@@ -81,7 +81,7 @@
         <section id="classification-admin-debug" class="classification-admin-debug hidden" aria-live="polite">
           <div class="section-head">
             <div>
-              <h3 class="section-title">Classification Admin Fetch</h3>
+              <h3 class="section-title">Classification Inbox</h3>
               <div id="classification-admin-status" class="section-sub">Waiting for admin session.</div>
             </div>
             <button type="button" id="refresh-classification-admin" class="secondary-btn">
@@ -90,7 +90,19 @@
             </button>
           </div>
           <div id="classification-admin-summary" class="classification-admin-summary"></div>
-          <pre id="classification-admin-json" class="classification-admin-json">{}</pre>
+          <div class="classification-inbox-shell">
+            <aside class="classification-category-sidebar" aria-label="Classification categories">
+              <div id="classification-category-list" class="classification-category-list"></div>
+            </aside>
+
+            <div class="classification-list-panel" aria-label="Classified emails">
+              <div id="classification-list" class="classification-list"></div>
+            </div>
+
+            <aside class="classification-detail-panel" aria-label="Selected email classification">
+              <div id="classification-detail" class="classification-detail"></div>
+            </aside>
+          </div>
         </section>
 
         <section id="email-messages-section" class="email-messages-section hidden" aria-label="Latest Outlook emails">

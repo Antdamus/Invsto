@@ -7,11 +7,21 @@
   const DISCONNECT_FUNCTION = "microsoft-mailbox-disconnect";
   const CLASSIFY_FUNCTION = "microsoft-email-classify";
   const ADMIN_VIEW_DEFAULT_LIMITS = {
-    classificationLimit: 20,
+    classificationLimit: 50,
     replayLimit: 20,
     failedJobLimit: 20,
   };
   const ADMIN_VIEW_TIMEOUT_MS = 15000;
+  const LOW_CONFIDENCE_THRESHOLD = 0.75;
+  const CATEGORY_GROUPS = [
+    { id: "all", label: "All", categories: [] },
+    { id: "return_requests", label: "Return Requests", categories: ["return_request", "refund_request", "cancellation_request"] },
+    { id: "item_not_as_described", label: "Item Not As Described", categories: ["item_not_as_described"] },
+    { id: "shipping_labels", label: "Shipping Labels", categories: ["shipping_label", "shipping_issue", "item_not_received"] },
+    { id: "marketing_promotion", label: "Marketing/Promotion", categories: ["marketing_or_promotion"] },
+    { id: "internal_other", label: "Internal/Other", categories: ["internal_or_other", "spam_or_noise", "platform_notice", "buyer_message", "order_paid", "payment_issue", "offer_or_negotiation", "inventory_question", "authenticity_or_condition_question", "account_security"] },
+    { id: "human_review", label: "Human Review", categories: [] },
+  ];
 
   const els = {
     connect: document.getElementById("connect-outlook"),
@@ -29,7 +39,9 @@
     classificationAdminDebug: document.getElementById("classification-admin-debug"),
     classificationAdminStatus: document.getElementById("classification-admin-status"),
     classificationAdminSummary: document.getElementById("classification-admin-summary"),
-    classificationAdminJson: document.getElementById("classification-admin-json"),
+    classificationCategoryList: document.getElementById("classification-category-list"),
+    classificationList: document.getElementById("classification-list"),
+    classificationDetail: document.getElementById("classification-detail"),
     greeting: document.getElementById("admin-greeting"),
   };
 
@@ -41,6 +53,8 @@
     empty_results: false,
     error: null,
     data: normalizeAdminViewPayload({}),
+    selectedCategory: "all",
+    selectedClassificationId: null,
     updatedAt: null,
   };
 
@@ -327,6 +341,209 @@
     }
   }
 
+  function humanizeValue(value) {
+    return String(value || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+      .trim();
+  }
+
+  function formatConfidence(value) {
+    const confidence = Number(value);
+    if (!Number.isFinite(confidence)) return "--";
+    return `${Math.round(confidence * 100)}%`;
+  }
+
+  function compactId(value) {
+    const text = String(value || "");
+    return text ? text.slice(0, 8) : "unknown";
+  }
+
+  function sortedClassifications(data) {
+    return [...(data?.classifications || [])].sort((left, right) => {
+      const leftTime = new Date(left.received_at || left.created_at || 0).getTime();
+      const rightTime = new Date(right.received_at || right.created_at || 0).getTime();
+      return rightTime - leftTime;
+    });
+  }
+
+  function hasHumanReviewSignal(classification) {
+    const safetyFlags = Array.isArray(classification?.safety_flags) ? classification.safety_flags : [];
+    const confidence = Number(classification?.confidence);
+    return classification?.requires_human_review === true
+      || safetyFlags.length > 0
+      || (Number.isFinite(confidence) && confidence < LOW_CONFIDENCE_THRESHOLD);
+  }
+
+  function categoryMatchesGroup(classification, groupId) {
+    if (groupId === "all") return true;
+    if (groupId === "human_review") return hasHumanReviewSignal(classification);
+
+    const group = CATEGORY_GROUPS.find((item) => item.id === groupId);
+    if (!group) return true;
+    return group.categories.includes(String(classification?.category || ""));
+  }
+
+  function filteredClassifications(data, groupId) {
+    return sortedClassifications(data).filter((classification) => categoryMatchesGroup(classification, groupId));
+  }
+
+  function getClassificationTitle(classification) {
+    return classification?.subject
+      || classification?.message_subject
+      || classification?.subject_normalized
+      || `Email ${compactId(classification?.message_id)}`;
+  }
+
+  function getClassificationSender(classification) {
+    return classification?.from
+      || classification?.from_email
+      || classification?.sender_email
+      || classification?.from_name
+      || classification?.sender_name
+      || "Sender unavailable";
+  }
+
+  function getClassificationReceivedAt(classification) {
+    return classification?.received_at || classification?.message_received_at || "";
+  }
+
+  function renderPillList(values = [], emptyLabel = "None") {
+    const safeValues = Array.isArray(values) ? values.filter(Boolean) : [];
+    if (!safeValues.length) return `<span class="classification-pill is-muted">${escapeHtml(emptyLabel)}</span>`;
+    return safeValues.map((value) => `<span class="classification-pill">${escapeHtml(humanizeValue(value))}</span>`).join("");
+  }
+
+  function renderCategorySidebar(state, data) {
+    if (!els.classificationCategoryList) return;
+
+    const classifications = data.classifications || [];
+    els.classificationCategoryList.innerHTML = CATEGORY_GROUPS.map((group) => {
+      const count = group.id === "all"
+        ? classifications.length
+        : classifications.filter((classification) => categoryMatchesGroup(classification, group.id)).length;
+      const active = state.selectedCategory === group.id;
+
+      return `
+        <button type="button" class="classification-category-button${active ? " is-active" : ""}" data-category-id="${escapeHtml(group.id)}">
+          <span>${escapeHtml(group.label)}</span>
+          <b>${escapeHtml(count)}</b>
+        </button>
+      `;
+    }).join("");
+  }
+
+  function renderClassificationList(state, data) {
+    if (!els.classificationList) return;
+
+    const rows = filteredClassifications(data, state.selectedCategory);
+    if (!rows.length) {
+      const emptyText = data.classifications.length
+        ? "No classifications match this category."
+        : "No classified emails returned yet.";
+      els.classificationList.innerHTML = `<div class="classification-empty">${escapeHtml(emptyText)}</div>`;
+      return;
+    }
+
+    els.classificationList.innerHTML = rows.map((classification) => {
+      const selected = state.selectedClassificationId === classification.id;
+      const humanReview = hasHumanReviewSignal(classification);
+      const receivedAt = getClassificationReceivedAt(classification);
+      const dateLabel = receivedAt ? formatDateTime(receivedAt) : `Classified ${formatDateTime(classification.created_at)}`;
+
+      return `
+        <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
+          <span class="classification-row-top">
+            <strong>${escapeHtml(getClassificationTitle(classification))}</strong>
+            <span>${escapeHtml(formatConfidence(classification.confidence))}</span>
+          </span>
+          <span class="classification-row-meta">
+            <span>${escapeHtml(humanizeValue(classification.category || "uncategorized"))}</span>
+            <span>${escapeHtml(dateLabel)}</span>
+          </span>
+          <span class="classification-row-preview">${escapeHtml(classification.summary || "No AI summary available.")}</span>
+          ${humanReview ? `<span class="classification-review-flag">Human review</span>` : ""}
+        </button>
+      `;
+    }).join("");
+  }
+
+  function renderClassificationDetail(state, data) {
+    if (!els.classificationDetail) return;
+
+    const selected = (data.classifications || []).find((classification) => classification.id === state.selectedClassificationId);
+    if (!selected) {
+      els.classificationDetail.innerHTML = `
+        <div class="classification-empty">
+          Select a classified email to inspect AI triage details.
+        </div>
+      `;
+      return;
+    }
+
+    const receivedAt = getClassificationReceivedAt(selected);
+    const humanReview = hasHumanReviewSignal(selected);
+
+    els.classificationDetail.innerHTML = `
+      <div class="classification-detail-head">
+        <span class="eyebrow">${humanReview ? "Human Review" : "Classification"}</span>
+        <h3>${escapeHtml(getClassificationTitle(selected))}</h3>
+        <div>${escapeHtml(getClassificationSender(selected))}</div>
+      </div>
+
+      <dl class="classification-detail-grid">
+        <div>
+          <dt>Received</dt>
+          <dd>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Unavailable")}</dd>
+        </div>
+        <div>
+          <dt>Classified</dt>
+          <dd>${escapeHtml(formatDateTime(selected.created_at))}</dd>
+        </div>
+        <div>
+          <dt>Category</dt>
+          <dd>${escapeHtml(humanizeValue(selected.category || "Uncategorized"))}</dd>
+        </div>
+        <div>
+          <dt>Confidence</dt>
+          <dd>${escapeHtml(formatConfidence(selected.confidence))}</dd>
+        </div>
+        <div>
+          <dt>Requires Review</dt>
+          <dd>${selected.requires_human_review === true ? "Yes" : "No"}</dd>
+        </div>
+        <div>
+          <dt>Recommended Action</dt>
+          <dd>${escapeHtml(humanizeValue(selected.recommended_action || "review_only"))}</dd>
+        </div>
+        <div>
+          <dt>Validation</dt>
+          <dd>${escapeHtml(humanizeValue(selected.validation_status || "unknown"))}</dd>
+        </div>
+      </dl>
+
+      <div class="classification-detail-section">
+        <h4>AI Summary</h4>
+        <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
+      </div>
+
+      <div class="classification-detail-section">
+        <h4>Human Review</h4>
+        <p>${humanReview ? "Required or recommended based on review flags, safety flags, or confidence." : "No human-review signal returned."}</p>
+      </div>
+
+      <div class="classification-detail-section">
+        <h4>Safety Flags</h4>
+        <div class="classification-pill-list">${renderPillList(selected.safety_flags, "No safety flags")}</div>
+      </div>
+
+      <div class="classification-detail-section">
+        <h4>Message Reference</h4>
+        <p class="classification-mono">${escapeHtml(selected.message_id || "Unavailable")}</p>
+      </div>
+    `;
+  }
+
   function setAdminClassificationState(next) {
     Object.assign(adminClassificationState, next);
     renderAdminClassificationDebug(adminClassificationState);
@@ -343,17 +560,25 @@
       els.refreshClassificationAdmin.setAttribute("aria-busy", state.loading ? "true" : "false");
     }
 
+    const data = state.data || normalizeAdminViewPayload({});
+    if (!state.selectedClassificationId && data.classifications.length) {
+      const selected = filteredClassifications(data, state.selectedCategory)[0];
+      state.selectedClassificationId = selected?.id || null;
+    } else if (state.selectedClassificationId && !data.classifications.some((classification) => classification.id === state.selectedClassificationId)) {
+      const selected = filteredClassifications(data, state.selectedCategory)[0];
+      state.selectedClassificationId = selected?.id || null;
+    }
+
     const statusText = {
       idle: "Waiting for admin session.",
       loading: "Fetching admin_view payload.",
-      ready: state.empty_results ? "Fetch succeeded. No classification operations returned yet." : "Fetch succeeded. Admin data is ready for future UI rendering.",
+      ready: state.empty_results ? "Fetch succeeded. No classification operations returned yet." : "Fetch succeeded. Browse classifications below.",
       fetch_failed: `Fetch failed: ${state.error || "unknown_error"}`,
       unauthorized: "Unauthorized. Sign in again with an active admin account.",
     }[state.status] || "Waiting for admin session.";
 
     if (els.classificationAdminStatus) els.classificationAdminStatus.textContent = statusText;
 
-    const data = state.data || normalizeAdminViewPayload({});
     if (els.classificationAdminSummary) {
       els.classificationAdminSummary.innerHTML = [
         { label: "Classifications", value: data.classifications.length },
@@ -370,17 +595,9 @@
       `).join("");
     }
 
-    if (els.classificationAdminJson) {
-      els.classificationAdminJson.textContent = JSON.stringify({
-        state: state.status,
-        loading: state.loading,
-        fetch_failed: state.fetch_failed,
-        unauthorized: state.unauthorized,
-        empty_results: state.empty_results,
-        updated_at: state.updatedAt,
-        data,
-      }, null, 2);
-    }
+    renderCategorySidebar(state, data);
+    renderClassificationList(state, data);
+    renderClassificationDetail(state, data);
   }
 
   async function loadAdminClassificationData(context) {
@@ -578,6 +795,31 @@
     }
   }
 
+  function bindClassificationInboxEvents() {
+    els.classificationCategoryList?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-category-id]");
+      if (!button) return;
+
+      const selectedCategory = button.getAttribute("data-category-id") || "all";
+      const data = adminClassificationState.data || normalizeAdminViewPayload({});
+      const firstMatch = filteredClassifications(data, selectedCategory)[0] || null;
+
+      setAdminClassificationState({
+        selectedCategory,
+        selectedClassificationId: firstMatch?.id || null,
+      });
+    });
+
+    els.classificationList?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-classification-id]");
+      if (!button) return;
+
+      setAdminClassificationState({
+        selectedClassificationId: button.getAttribute("data-classification-id"),
+      });
+    });
+  }
+
   async function init() {
     const context = await requireAdmin();
     if (!context) return;
@@ -586,6 +828,7 @@
     els.refresh?.addEventListener("click", () => loadMessages(context));
     els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
+    bindClassificationInboxEvents();
 
     handleOutlookQueryNotice();
     loadAdminClassificationData(context);
