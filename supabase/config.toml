@@ -528,6 +528,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/microsoft-email-process/index.ts"
 
+[functions.microsoft-email-classify]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/microsoft-email-classify/index.ts"
+
 [functions.microsoft-email-ops]
 enabled = true
 verify_jwt = true
