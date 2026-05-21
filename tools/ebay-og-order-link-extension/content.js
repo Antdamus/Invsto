@@ -390,9 +390,9 @@
   function isEbayReturnsPage() {
     const url = new URL(window.location.href);
     const sample = getPageTextSample();
-    return /\/sh\/ord\/?$/i.test(url.pathname)
-      && /returns?|currentpage_SHOrderReturn|returnid/i.test(`${url.search} ${url.hash} ${sample}`)
-      && /table of returns|return requested|return shipped|return delivered|waiting for buyer to ship|return id/i.test(sample);
+    const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${sample}`;
+    return /currentpage_SHOrderReturn|pageTopLevelModId"?\s*:\s*"app-mod-returns-wrapper"|app-mod-returns-wrapper|page"?\s*:\s*\{[^}]*id"?\s*:\s*"RETURNS"|Manage returns|Table of returns/i.test(pageMarkers)
+      && /returns?|returnId|Return ID|return requested|return shipped|return delivered|waiting for buyer to ship|issue refund/i.test(pageMarkers);
   }
 
   function getAwaitingReportMetadata() {
@@ -3602,6 +3602,7 @@
   }
 
   function injectReturnPageButtons() {
+    const looksLikeReturnsPage = isEbayReturnsPage();
     const returns = getEbayReturnEntries();
     let panel = document.getElementById(SEND_RETURN_PANEL_ID);
     document.querySelectorAll(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
@@ -3610,7 +3611,20 @@
     });
 
     if (!returns.length) {
-      panel?.remove();
+      if (looksLikeReturnsPage) {
+        if (!panel) {
+          panel = document.createElement("aside");
+          panel.id = SEND_RETURN_PANEL_ID;
+          document.body.appendChild(panel);
+        }
+        panel.innerHTML = `
+          <strong>OG Returns</strong>
+          <button id="${SEND_RETURN_BATCH_ID}" type="button" disabled data-status-tone="error">Finding eBay returns...</button>
+          <span>OG is waiting for eBay to render the return table. Refresh if this stays here.</span>
+        `;
+      } else {
+        panel?.remove();
+      }
       return;
     }
 

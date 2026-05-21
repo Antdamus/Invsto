@@ -286,6 +286,7 @@
                 </div>
                 <div class="detail-actions">
                   <span id="selected-order-status" class="status-badge">Pending</span>
+                  <button id="cancel-pending-order" type="button" class="secondary-btn danger-btn">Mark Order Canceled</button>
                   <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
                 </div>
               </div>
@@ -516,6 +517,36 @@
       <p id="no-inventory-photo-viewer-caption"></p>
       <div class="modal-actions">
         <button id="dismiss-no-inventory-photo-viewer" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="worker-cancel-order-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="worker-cancel-order-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card">
+      <button id="close-worker-cancel-order" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Canceled on eBay</span>
+      <h2 id="worker-cancel-order-title">Mark order canceled?</h2>
+      <p id="worker-cancel-order-subtitle">This removes the selected pending order line(s) from the packing queue without removing stock.</p>
+      <div class="no-inventory-toolbar">
+        <span id="worker-cancel-order-count" class="count-pill">0 selected</span>
+        <div>
+          <button id="select-all-worker-cancel-order" type="button" class="secondary-btn">Select All</button>
+          <button id="deselect-all-worker-cancel-order" type="button" class="secondary-btn">Deselect All</button>
+        </div>
+      </div>
+      <div id="worker-cancel-order-list" class="bundle-review-list"></div>
+      <label class="modal-field">
+        Required Note
+        <textarea id="worker-cancel-order-note" rows="3" placeholder="Example: Buyer canceled on eBay / order refunded."></textarea>
+      </label>
+      <label class="modal-field">
+        Password Signature
+        <input id="worker-cancel-order-password" type="password" autocomplete="current-password" placeholder="Sign this cancellation" />
+      </label>
+      <p id="worker-cancel-order-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-worker-cancel-order" type="button" class="secondary-btn">Exit</button>
+        <button id="confirm-worker-cancel-order" type="button" class="primary-btn danger-primary-btn">Sign and Mark Canceled</button>
       </div>
     </div>
   </div>

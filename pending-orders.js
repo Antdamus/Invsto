@@ -34,6 +34,8 @@ const state = {
   noInventoryEvidencePhotos: [],
   noInventoryEvidencePhotoUploadKeys: new Set(),
   noInventoryCaptureBusy: false,
+  workerCancelCandidates: [],
+  workerCancelLineIds: new Set(),
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
@@ -1341,6 +1343,11 @@ function getNoInventoryCandidateLines(line = state.selectedLine) {
   return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
 }
 
+function getCancelableOrderLines(line = state.selectedLine) {
+  if (!line?.order_id) return [];
+  return state.orders.filter((entry) => entry.order_id === line.order_id && isOpenOrderLine(entry));
+}
+
 function isAdminCloseoutSelectable(line) {
   return isAdminUser()
     && isOpenOrderLine(line);
@@ -1599,6 +1606,8 @@ function renderSelectedOrder() {
   $("selected-order-title").textContent = order.order_number || "eBay order";
   $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
+  $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
+  $("complete-no-inventory")?.toggleAttribute("disabled", !isNoInventoryCompletionLine(line));
   $("money-grid")?.classList.toggle("hidden", !isAdminUser());
   $("detail-sold-for").textContent = formatMoney(line.sold_for);
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
@@ -3339,6 +3348,181 @@ async function confirmWorkerNoInventoryCompletion() {
   }
 }
 
+function updateWorkerCancelOrderSelectionSummary() {
+  const count = [...state.workerCancelLineIds].filter((lineId) =>
+    state.workerCancelCandidates.some((line) => line.id === lineId)
+  ).length;
+  const countEl = $("worker-cancel-order-count");
+  if (countEl) countEl.textContent = `${count} selected`;
+  $("confirm-worker-cancel-order")?.toggleAttribute("disabled", count === 0);
+}
+
+function setWorkerCancelOrderLineSelection(lineId, checked) {
+  if (checked) state.workerCancelLineIds.add(lineId);
+  else state.workerCancelLineIds.delete(lineId);
+  renderWorkerCancelOrderList();
+}
+
+function setAllWorkerCancelOrderLines(checked) {
+  state.workerCancelLineIds = new Set(checked ? state.workerCancelCandidates.map((line) => line.id) : []);
+  renderWorkerCancelOrderList();
+}
+
+function renderWorkerCancelOrderList() {
+  const list = $("worker-cancel-order-list");
+  if (!list) return;
+  if (!state.workerCancelCandidates.length) {
+    list.innerHTML = `<div class="empty-state">No open lines are available to cancel for this order.</div>`;
+    updateWorkerCancelOrderSelectionSummary();
+    return;
+  }
+
+  list.innerHTML = state.workerCancelCandidates.map((line) => {
+    const order = line.order || {};
+    const selected = state.workerCancelLineIds.has(line.id);
+    return `
+      <article class="bundle-review-item no-inventory-line ${selected ? "is-selected" : ""}" data-worker-cancel-card="${escapeHtml(line.id)}">
+        <label class="no-inventory-check" aria-label="Select canceled line">
+          <input type="checkbox" data-worker-cancel-line="${escapeHtml(line.id)}" ${selected ? "checked" : ""} />
+        </label>
+        <div class="bundle-review-copy">
+          <div class="no-inventory-line-head">
+            <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <span>${escapeHtml(order.order_number || "No order")}</span>
+          </div>
+          <span>${escapeHtml(order.buyer_username || "No buyer")} - ${escapeHtml(line.item_number || "No item #")}</span>
+          <small>Qty ${Number(getRemainingLineQuantity(line) || line.quantity || 1).toLocaleString()} - ${escapeHtml(line.line_status || "pending")}</small>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-worker-cancel-line]").forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", (event) => {
+      setWorkerCancelOrderLineSelection(event.currentTarget.dataset.workerCancelLine, event.currentTarget.checked);
+    });
+  });
+  list.querySelectorAll("[data-worker-cancel-card]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const lineId = card.dataset.workerCancelCard;
+      setWorkerCancelOrderLineSelection(lineId, !state.workerCancelLineIds.has(lineId));
+    });
+  });
+  updateWorkerCancelOrderSelectionSummary();
+}
+
+function closeWorkerCancelOrderModal() {
+  state.workerCancelCandidates = [];
+  state.workerCancelLineIds = new Set();
+  $("worker-cancel-order-note").value = "";
+  $("worker-cancel-order-password").value = "";
+  $("worker-cancel-order-error").textContent = "";
+  closeModal("worker-cancel-order-modal");
+}
+
+function openWorkerCancelOrderModal() {
+  const line = state.selectedLine;
+  if (!line) {
+    setStatus("Select an eBay order first.", "error");
+    return;
+  }
+  if (!isOpenOrderLine(line)) {
+    setStatus("This eBay line is already closed.", "error");
+    return;
+  }
+
+  const candidates = getCancelableOrderLines(line);
+  if (!candidates.length) {
+    setStatus("No open lines are available to cancel for this order.", "error");
+    return;
+  }
+
+  const order = line.order || {};
+  state.workerCancelCandidates = candidates;
+  state.workerCancelLineIds = new Set(candidates.map((entry) => entry.id));
+  $("worker-cancel-order-title").textContent = `Mark ${order.order_number || "this order"} canceled?`;
+  $("worker-cancel-order-subtitle").textContent =
+    `This closes ${candidates.length} open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
+  $("worker-cancel-order-note").value = "";
+  $("worker-cancel-order-password").value = "";
+  $("worker-cancel-order-error").textContent = "";
+  renderWorkerCancelOrderList();
+  openModal("worker-cancel-order-modal");
+  setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
+}
+
+async function confirmWorkerCancelOrder() {
+  if (state.busy) return;
+  const errorEl = $("worker-cancel-order-error");
+  const confirmButton = $("confirm-worker-cancel-order");
+  const note = String($("worker-cancel-order-note")?.value || "").trim();
+  const password = String($("worker-cancel-order-password")?.value || "").trim();
+  const validCandidateIds = new Set(state.workerCancelCandidates.map((line) => line.id));
+  const selectedLineIds = [...state.workerCancelLineIds].filter((lineId) => validCandidateIds.has(lineId));
+
+  if (!selectedLineIds.length) {
+    if (errorEl) errorEl.textContent = "Select at least one pending order line to cancel.";
+    return;
+  }
+  if (!note) {
+    if (errorEl) errorEl.textContent = "A note is required.";
+    $("worker-cancel-order-note")?.focus();
+    return;
+  }
+  if (!password) {
+    if (errorEl) errorEl.textContent = "Password signature is required.";
+    $("worker-cancel-order-password")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    if (errorEl) errorEl.textContent = "";
+    if (confirmButton) confirmButton.disabled = true;
+    const currentBuyerKey = state.activeBuyerKey;
+    const cancelledOrderNumbers = [...new Set(selectedLineIds
+      .map((lineId) => state.orders.find((entry) => entry.id === lineId)?.order?.order_number)
+      .map(normalizeEbayOrderNumber)
+      .filter(Boolean))];
+
+    const valid = await verifyCurrentUserPassword(password);
+    if (!valid) throw new Error("Incorrect password. Please try again.");
+
+    const { data, error } = await supabase.rpc("cancel_ebay_order_lines", {
+      _order_line_ids: selectedLineIds,
+      _notes: note,
+      _signed_by_email: state.user.email,
+      _checkout_store_id: state.checkoutStoreId || null,
+    });
+    if (error) throw error;
+
+    selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
+    closeWorkerCancelOrderModal();
+    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked canceled. The signed audit trail was recorded.`, "info");
+    await loadOrders();
+    postEbayPendingQueueChanged({
+      action: "worker_cancelled_order",
+      orderNumbers: cancelledOrderNumbers,
+      lineCount: selectedLineIds.length,
+      updatedLines: data?.[0]?.updated_lines || selectedLineIds.length,
+    });
+
+    const nextBuyerLine = getNextPackableLine(currentBuyerKey);
+    if (nextBuyerLine) {
+      selectOrderLine(nextBuyerLine.id);
+      return;
+    }
+    clearSelection();
+  } catch (error) {
+    console.error("Worker order cancellation failed:", error);
+    if (errorEl) errorEl.textContent = error.message || "Could not mark this order canceled.";
+  } finally {
+    state.busy = false;
+    if (confirmButton) confirmButton.disabled = false;
+  }
+}
+
 function getAdminCloseoutActionCopy(action) {
   if (action === "cancelled") {
     return {
@@ -3400,7 +3584,7 @@ function openAdminOrderCloseoutModal(action) {
   setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
 }
 
-async function verifyAdminPassword(password) {
+async function verifyCurrentUserPassword(password) {
   if (!state.user?.email || !password) return false;
   const { error } = await supabase.auth.signInWithPassword({
     email: state.user.email,
@@ -3440,7 +3624,7 @@ async function confirmAdminOrderCloseout() {
       .map(normalizeEbayOrderNumber)
       .filter(Boolean))];
 
-    const valid = await verifyAdminPassword(password);
+    const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
@@ -4305,6 +4489,7 @@ function setupListeners() {
   });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
+  $("cancel-pending-order")?.addEventListener("click", openWorkerCancelOrderModal);
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
@@ -4319,6 +4504,11 @@ function setupListeners() {
   $("confirm-worker-no-inventory")?.addEventListener("click", confirmWorkerNoInventoryCompletion);
   $("cancel-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
+  $("confirm-worker-cancel-order")?.addEventListener("click", confirmWorkerCancelOrder);
+  $("cancel-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
+  $("close-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
+  $("select-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(true));
+  $("deselect-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(false));
   $("select-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(true));
   $("deselect-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(false));
   $("no-inventory-capture-station")?.addEventListener("change", (event) => {
@@ -4395,6 +4585,10 @@ function setupListeners() {
     if (event.target.id === "worker-no-inventory-modal") closeWorkerNoInventoryModal();
   });
 
+  $("worker-cancel-order-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "worker-cancel-order-modal") closeWorkerCancelOrderModal();
+  });
+
   $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
   });
@@ -4413,6 +4607,13 @@ function setupListeners() {
     if (event.key === "Enter") {
       event.preventDefault();
       confirmAdminOrderCloseout();
+    }
+  });
+
+  $("worker-cancel-order-password")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmWorkerCancelOrder();
     }
   });
 
@@ -4456,6 +4657,17 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeWorkerNoInventoryModal();
+      }
+      return;
+    }
+
+    if (!$("worker-cancel-order-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        confirmWorkerCancelOrder();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeWorkerCancelOrderModal();
       }
       return;
     }
