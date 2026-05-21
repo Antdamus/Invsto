@@ -5,11 +5,19 @@
   const MESSAGES_FUNCTION = "microsoft-latest-messages";
   const STATUS_FUNCTION = "microsoft-mailbox-status";
   const DISCONNECT_FUNCTION = "microsoft-mailbox-disconnect";
+  const CLASSIFY_FUNCTION = "microsoft-email-classify";
+  const ADMIN_VIEW_DEFAULT_LIMITS = {
+    classificationLimit: 20,
+    replayLimit: 20,
+    failedJobLimit: 20,
+  };
+  const ADMIN_VIEW_TIMEOUT_MS = 15000;
 
   const els = {
     connect: document.getElementById("connect-outlook"),
     refresh: document.getElementById("refresh-messages"),
     disconnect: document.getElementById("disconnect-outlook"),
+    refreshClassificationAdmin: document.getElementById("refresh-classification-admin"),
     statusPanel: document.getElementById("email-status-panel"),
     statusKicker: document.getElementById("email-status-kicker"),
     statusTitle: document.getElementById("email-status-title"),
@@ -18,7 +26,22 @@
     messagesSection: document.getElementById("email-messages-section"),
     messagesBody: document.getElementById("email-messages-body"),
     countPill: document.getElementById("message-count-pill"),
+    classificationAdminDebug: document.getElementById("classification-admin-debug"),
+    classificationAdminStatus: document.getElementById("classification-admin-status"),
+    classificationAdminSummary: document.getElementById("classification-admin-summary"),
+    classificationAdminJson: document.getElementById("classification-admin-json"),
     greeting: document.getElementById("admin-greeting"),
+  };
+
+  const adminClassificationState = {
+    status: "idle",
+    loading: false,
+    fetch_failed: false,
+    unauthorized: false,
+    empty_results: false,
+    error: null,
+    data: normalizeAdminViewPayload({}),
+    updatedAt: null,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -198,6 +221,12 @@
   }
 
   async function edgeFetch(functionName, session, options = {}) {
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
     const headers = {
       Authorization: `Bearer ${session.access_token}`,
       apikey: window.SUPABASE_ANON_KEY,
@@ -219,6 +248,179 @@
       throw error;
     }
     return payload;
+  }
+
+  function normalizeAdminViewPayload(payload) {
+    const classifications = Array.isArray(payload?.classifications) ? payload.classifications : [];
+    const replayOperations = Array.isArray(payload?.replay_operations) ? payload.replay_operations : [];
+    const failedJobs = Array.isArray(payload?.failed_jobs) ? payload.failed_jobs : [];
+    const queueSummary = payload?.queue_summary && typeof payload.queue_summary === "object"
+      ? payload.queue_summary
+      : {};
+    const validationDiagnostics = payload?.validation_diagnostics && typeof payload.validation_diagnostics === "object"
+      ? payload.validation_diagnostics
+      : {};
+
+    return {
+      classifications,
+      replay_operations: replayOperations,
+      failed_jobs: failedJobs,
+      queue_summary: {
+        queued: Number(queueSummary.queued || 0),
+        processing: Number(queueSummary.processing || 0),
+        succeeded: Number(queueSummary.succeeded || 0),
+        failed: Number(queueSummary.failed || 0),
+      },
+      validation_diagnostics: {
+        valid_classifications: Number(validationDiagnostics.valid_classifications || 0),
+        invalid_classifications: Number(validationDiagnostics.invalid_classifications || 0),
+        requires_human_review: Number(validationDiagnostics.requires_human_review || 0),
+        replay_generated_classifications: Number(validationDiagnostics.replay_generated_classifications || 0),
+      },
+    };
+  }
+
+  function isAdminViewEmpty(data) {
+    return !data.classifications.length
+      && !data.replay_operations.length
+      && !data.failed_jobs.length
+      && Object.values(data.queue_summary).every((value) => Number(value || 0) === 0)
+      && Object.values(data.validation_diagnostics).every((value) => Number(value || 0) === 0);
+  }
+
+  async function fetchAdminClassificationView(context, limits = ADMIN_VIEW_DEFAULT_LIMITS) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Classification admin session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), ADMIN_VIEW_TIMEOUT_MS);
+
+    try {
+      const payload = await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: "admin_view",
+          classificationLimit: limits.classificationLimit || ADMIN_VIEW_DEFAULT_LIMITS.classificationLimit,
+          replayLimit: limits.replayLimit || ADMIN_VIEW_DEFAULT_LIMITS.replayLimit,
+          failedJobLimit: limits.failedJobLimit || ADMIN_VIEW_DEFAULT_LIMITS.failedJobLimit,
+        }),
+      });
+
+      return normalizeAdminViewPayload(payload);
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  function setAdminClassificationState(next) {
+    Object.assign(adminClassificationState, next);
+    renderAdminClassificationDebug(adminClassificationState);
+  }
+
+  function renderAdminClassificationDebug(state) {
+    if (!els.classificationAdminDebug) return;
+
+    els.classificationAdminDebug.classList.remove("hidden");
+    els.classificationAdminDebug.classList.toggle("is-error", state.fetch_failed || state.unauthorized);
+    els.classificationAdminDebug.classList.toggle("is-empty", state.empty_results);
+    if (els.refreshClassificationAdmin) {
+      els.refreshClassificationAdmin.disabled = state.loading;
+      els.refreshClassificationAdmin.setAttribute("aria-busy", state.loading ? "true" : "false");
+    }
+
+    const statusText = {
+      idle: "Waiting for admin session.",
+      loading: "Fetching admin_view payload.",
+      ready: state.empty_results ? "Fetch succeeded. No classification operations returned yet." : "Fetch succeeded. Admin data is ready for future UI rendering.",
+      fetch_failed: `Fetch failed: ${state.error || "unknown_error"}`,
+      unauthorized: "Unauthorized. Sign in again with an active admin account.",
+    }[state.status] || "Waiting for admin session.";
+
+    if (els.classificationAdminStatus) els.classificationAdminStatus.textContent = statusText;
+
+    const data = state.data || normalizeAdminViewPayload({});
+    if (els.classificationAdminSummary) {
+      els.classificationAdminSummary.innerHTML = [
+        { label: "Classifications", value: data.classifications.length },
+        { label: "Replay ops", value: data.replay_operations.length },
+        { label: "Failed jobs", value: data.failed_jobs.length },
+        { label: "Queued", value: data.queue_summary.queued },
+        { label: "Running", value: data.queue_summary.processing },
+        { label: "Review", value: data.validation_diagnostics.requires_human_review },
+      ].map((item) => `
+        <div>
+          <span>${escapeHtml(item.label)}</span>
+          <strong>${escapeHtml(item.value)}</strong>
+        </div>
+      `).join("");
+    }
+
+    if (els.classificationAdminJson) {
+      els.classificationAdminJson.textContent = JSON.stringify({
+        state: state.status,
+        loading: state.loading,
+        fetch_failed: state.fetch_failed,
+        unauthorized: state.unauthorized,
+        empty_results: state.empty_results,
+        updated_at: state.updatedAt,
+        data,
+      }, null, 2);
+    }
+  }
+
+  async function loadAdminClassificationData(context) {
+    setAdminClassificationState({
+      status: "loading",
+      loading: true,
+      fetch_failed: false,
+      unauthorized: false,
+      empty_results: false,
+      error: null,
+    });
+
+    try {
+      const data = await fetchAdminClassificationView(context);
+      const empty = isAdminViewEmpty(data);
+      setAdminClassificationState({
+        status: "ready",
+        loading: false,
+        fetch_failed: false,
+        unauthorized: false,
+        empty_results: empty,
+        error: null,
+        data,
+        updatedAt: new Date().toISOString(),
+      });
+      console.log("[email-triage] admin_view classification data", data);
+    } catch (error) {
+      const code = error.code || error.message || "fetch_failed";
+      const unauthorized = code === "unauthorized" || code === "invalid_session" || code === "admin_required" || code === "request_failed_401" || code === "request_failed_403";
+      setAdminClassificationState({
+        status: unauthorized ? "unauthorized" : "fetch_failed",
+        loading: false,
+        fetch_failed: !unauthorized,
+        unauthorized,
+        empty_results: false,
+        error: code,
+        updatedAt: new Date().toISOString(),
+      });
+      console.error("[email-triage] admin_view classification fetch failed:", error);
+    }
   }
 
   async function loadMailboxStatus(context) {
@@ -383,8 +585,10 @@
     els.connect?.addEventListener("click", () => connectOutlook(context));
     els.refresh?.addEventListener("click", () => loadMessages(context));
     els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
+    els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
 
     handleOutlookQueryNotice();
+    loadAdminClassificationData(context);
 
     setLoading(true);
     setStatus("Checking", "Checking persisted Outlook connection", "Loading mailbox status from the Supabase Edge Function.");

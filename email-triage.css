@@ -6,7 +6,8 @@
 
 .email-triage-hero,
 .email-status-panel,
-.email-messages-section {
+.email-messages-section,
+.classification-admin-debug {
   border: 1px solid rgba(255,255,255,.08);
   background: rgba(12,13,16,.72);
   border-radius: 18px;
@@ -161,6 +162,62 @@
   padding: 18px;
 }
 
+.classification-admin-debug {
+  padding: 18px;
+}
+
+.classification-admin-debug.is-error {
+  border-color: rgba(255,99,132,.32);
+}
+
+.classification-admin-debug.is-empty {
+  border-color: rgba(214,178,94,.22);
+}
+
+.classification-admin-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.classification-admin-summary div {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+  padding: 12px;
+}
+
+.classification-admin-summary span {
+  display: block;
+  color: rgba(242,243,245,.58);
+  font-size: .74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.classification-admin-summary strong {
+  display: block;
+  margin-top: 4px;
+  color: rgba(242,243,245,.95);
+  font-size: 1.2rem;
+}
+
+.classification-admin-json {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(0,0,0,.28);
+  color: rgba(242,243,245,.86);
+  font-size: .8rem;
+  line-height: 1.45;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
 .email-count-pill {
   border: 1px solid rgba(214,178,94,.25);
   background: rgba(214,178,94,.12);
@@ -246,5 +303,9 @@
 
   .email-status-meta {
     grid-template-columns: 1fr;
+  }
+
+  .classification-admin-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

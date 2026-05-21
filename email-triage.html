@@ -78,6 +78,21 @@
           <dl id="email-status-meta" class="email-status-meta hidden"></dl>
         </section>
 
+        <section id="classification-admin-debug" class="classification-admin-debug hidden" aria-live="polite">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Classification Admin Fetch</h3>
+              <div id="classification-admin-status" class="section-sub">Waiting for admin session.</div>
+            </div>
+            <button type="button" id="refresh-classification-admin" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh Data
+            </button>
+          </div>
+          <div id="classification-admin-summary" class="classification-admin-summary"></div>
+          <pre id="classification-admin-json" class="classification-admin-json">{}</pre>
+        </section>
+
         <section id="email-messages-section" class="email-messages-section hidden" aria-label="Latest Outlook emails">
           <div class="section-head">
             <div>
