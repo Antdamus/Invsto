@@ -314,6 +314,63 @@ async function loadWorkerStoreTransferAlerts() {
   `).join("");
 }
 
+function getWorkerReturnTaskLabel(task = {}) {
+  if (task.task_type === "return_intake") return "Intake";
+  if (task.task_type === "return_review") return "Review";
+  if (task.task_type === "question") return "Question";
+  return "Return";
+}
+
+async function loadWorkerReturnTasks(userId) {
+  const container = $("worker-return-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading return tasks...</div>`;
+  if (!userId) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned return tasks.</div>`;
+    return;
+  }
+
+  const { data, error } = await window.supabase
+    .from("ebay_return_tasks")
+    .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .eq("assigned_to_user_id", userId)
+    .in("status", ["open", "assigned", "in_progress", "blocked"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) {
+    console.warn("Failed to load worker return tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load return tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No return tasks are currently assigned to you.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "blocked" ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="ebay-order-history.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>
+            <span>${escapeHtml(returnCase.order_number || returnCase.ebay_return_id || "Return case")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getWorkerReturnTaskLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.question || task.title || returnCase.return_reason || "Return needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(task.status.replace(/_/g, " "))} / ${escapeHtml(task.priority)}</span>
+          <span>Due ${escapeHtml(task.due_at ? fmtDate(task.due_at) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** ---------- UI helpers ---------- */
 function setSoftError(msg) {
   const el = $("soft-error");
@@ -887,6 +944,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await enforceContractorAgreementGate(window.supabase);
     await loadWorkerUrgentOrders();
     await loadWorkerStoreTransferAlerts();
+    await loadWorkerReturnTasks(userId);
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();
@@ -965,6 +1023,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     state.timers.refresh = setInterval(async () => {
       try {
         await refreshCurrentView(state);
+        await loadWorkerReturnTasks(userId);
 
         const curKey = monthKey(startOfMonthLocal(new Date()));
         const selKey = monthKey(state.selectedMonthStart);

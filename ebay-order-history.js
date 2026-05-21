@@ -7,6 +7,10 @@ const state = {
   labelEvents: [],
   returnCases: [],
   returnEvents: [],
+  returnTasks: [],
+  returnTaskLines: new Map(),
+  returnAssignees: [],
+  returnTaskLaunchApplied: false,
   relatedAdminEvents: [],
   relatedRevertEvents: [],
   relatedLabelEvents: [],
@@ -543,7 +547,7 @@ async function checkHistoryAuth() {
 
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("role, active, display_name")
+    .select("id, user_id, email, role, active, display_name")
     .eq("user_id", session.user.id)
     .maybeSingle();
 
@@ -567,6 +571,7 @@ async function checkHistoryAuth() {
   if (!isAdminUser()) {
     document.body.classList.add("history-worker-proof-mode");
     $("history-status")?.querySelector('option[value="reverted"]')?.remove();
+    if ($("return-task-status-filter")) $("return-task-status-filter").value = "mine";
   }
   if (window.OGRoleNavigation?.render) {
     window.OGRoleNavigation.render(isAdminUser() ? "admin" : "worker");
@@ -876,6 +881,379 @@ function applyFilters() {
   renderSummary(visibleGroups);
   renderHistoryList(visibleGroups);
   renderEventList();
+}
+
+function getReturnTaskStatusLabel(status = "") {
+  const labels = {
+    open: "Open",
+    assigned: "Assigned",
+    in_progress: "In progress",
+    blocked: "Blocked",
+    resolved: "Resolved",
+    cancelled: "Cancelled",
+  };
+  return labels[status] || String(status || "Task").replace(/_/g, " ");
+}
+
+function getReturnTaskTypeLabel(type = "") {
+  const labels = {
+    return_intake: "Intake",
+    return_review: "Review",
+    question: "Question",
+    follow_up: "Follow-up",
+  };
+  return labels[type] || String(type || "Task").replace(/_/g, " ");
+}
+
+function getReturnTaskPriorityLabel(priority = "") {
+  const labels = {
+    low: "Low",
+    normal: "Normal",
+    high: "High",
+    urgent: "Urgent",
+  };
+  return labels[priority] || "Normal";
+}
+
+function getReturnTaskCase(task = {}) {
+  const entry = task.ebay_return_cases || task.return_case || {};
+  return Array.isArray(entry) ? entry[0] || {} : entry;
+}
+
+function getReturnTaskLineIds(task = {}) {
+  return Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+}
+
+function getReturnTaskLines(task = {}) {
+  const ids = new Set(getReturnTaskLineIds(task));
+  return [...ids].map((id) => state.returnTaskLines.get(id)).filter(Boolean);
+}
+
+function getReturnTaskSearchText(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  const lines = getReturnTaskLines(task);
+  return [
+    task.title,
+    task.question,
+    task.status,
+    task.priority,
+    task.assigned_to_email,
+    returnCase.order_number,
+    returnCase.ebay_return_id,
+    returnCase.buyer_username,
+    returnCase.return_reason,
+    returnCase.return_tracking_number,
+    ...(lines || []).flatMap((line) => [
+      line.item_title,
+      line.item_number,
+      line.transaction_id,
+      line.order?.order_number,
+      line.order?.buyer_username,
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function getFilteredReturnTasks() {
+  const statusFilter = $("return-task-status-filter")?.value || "pending";
+  const assigneeFilter = $("return-task-assignee-filter")?.value || "";
+  const term = String($("return-task-search")?.value || "").trim().toLowerCase();
+  const pendingStatuses = new Set(["open", "assigned", "in_progress", "blocked"]);
+  return state.returnTasks.filter((task) => {
+    if (statusFilter === "pending" && !pendingStatuses.has(task.status)) return false;
+    if (statusFilter === "mine" && task.assigned_to_user_id !== state.user?.id) return false;
+    if (!["pending", "mine", "all"].includes(statusFilter) && task.status !== statusFilter) return false;
+    if (assigneeFilter === "unassigned" && task.assigned_to_user_id) return false;
+    if (assigneeFilter && assigneeFilter !== "unassigned" && task.assigned_to_user_id !== assigneeFilter) return false;
+    if (term && !getReturnTaskSearchText(task).includes(term)) return false;
+    return true;
+  });
+}
+
+function renderReturnAssigneeOptions(selectedUserId = "") {
+  return [
+    `<option value="">Unassigned</option>`,
+    ...state.returnAssignees.map((employee) => (
+      `<option value="${escapeHtml(employee.user_id || "")}" ${employee.user_id === selectedUserId ? "selected" : ""}>${escapeHtml(employee.display_name || employee.email || "Worker")}</option>`
+    )),
+  ].join("");
+}
+
+function renderReturnAssigneeFilter() {
+  const select = $("return-task-assignee-filter");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `
+    <option value="">All assignees</option>
+    <option value="unassigned">Unassigned</option>
+    ${state.returnAssignees.map((employee) => (
+      `<option value="${escapeHtml(employee.user_id || "")}">${escapeHtml(employee.display_name || employee.email || "Worker")}</option>`
+    )).join("")}
+  `;
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+async function loadReturnAssignees() {
+  const { data, error } = await supabase
+    .from("employees")
+    .select("id, user_id, display_name, email, role, active")
+    .eq("active", true)
+    .order("display_name", { ascending: true });
+  if (error) throw error;
+  state.returnAssignees = (data || []).filter((employee) => employee.user_id);
+  renderReturnAssigneeFilter();
+}
+
+async function loadReturnTaskLines(tasks = []) {
+  const ids = [...new Set(tasks.flatMap(getReturnTaskLineIds))];
+  state.returnTaskLines = new Map();
+  if (!ids.length) return;
+  const { data, error } = await supabase
+    .from("ebay_order_lines")
+    .select(ORDER_HISTORY_LINE_SELECT)
+    .in("id", ids)
+    .limit(1000);
+  if (error) {
+    console.warn("Failed to load return task line details:", error);
+    return;
+  }
+  (data || []).map(normalizeLine).forEach((line) => {
+    state.returnTaskLines.set(line.id, line);
+  });
+}
+
+async function loadReturnQueue() {
+  const list = $("return-task-list");
+  if (list) list.innerHTML = `<div class="history-empty">Loading return tasks...</div>`;
+
+  try {
+    if (!state.returnAssignees.length) await loadReturnAssignees();
+    const { data, error } = await supabase
+      .from("ebay_return_tasks")
+      .select("*, ebay_return_cases(*)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    state.returnTasks = data || [];
+    await loadReturnTaskLines(state.returnTasks);
+    renderReturnQueue();
+    applyReturnTaskLaunchSelection();
+  } catch (error) {
+    console.error("Failed to load eBay return queue:", error);
+    if (list) {
+      list.innerHTML = `<div class="history-empty">Could not load return tasks. Push the latest return task migration if this is new.</div>`;
+    }
+  }
+}
+
+function getReturnTaskLineSummary(task = {}) {
+  const lines = getReturnTaskLines(task);
+  if (!lines.length) return "No line details loaded";
+  const first = lines[0];
+  const extra = lines.length > 1 ? ` +${lines.length - 1} more` : "";
+  return `${first.item_number || "No item #"} - ${first.item_title || "Returned item"}${extra}`;
+}
+
+function renderReturnQueue() {
+  const list = $("return-task-list");
+  const count = $("return-task-count");
+  if (!list) return;
+  const tasks = getFilteredReturnTasks();
+  if (count) count.textContent = `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
+
+  if (!tasks.length) {
+    list.innerHTML = `<div class="history-empty">No return tasks match this view.</div>`;
+    return;
+  }
+
+  list.innerHTML = tasks.map((task) => {
+    const returnCase = getReturnTaskCase(task);
+    const pending = !["resolved", "cancelled"].includes(task.status);
+    const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
+    const lineIds = getReturnTaskLineIds(task);
+    const dueText = task.due_at ? formatDateTime(task.due_at) : "No due date";
+    return `
+      <article class="return-task-card is-${escapeHtml(task.status || "open")} priority-${escapeHtml(task.priority || "normal")}" data-return-task-id="${escapeHtml(task.id)}">
+        <div class="return-task-main">
+          <div>
+            <span class="eyebrow">${escapeHtml(getReturnTaskTypeLabel(task.task_type))}</span>
+            <h3>${escapeHtml(task.title || "Return task")}</h3>
+            <p>${escapeHtml(task.question || "No question recorded.")}</p>
+            <div class="return-task-meta">
+              <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
+              <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
+              <span>Due: ${escapeHtml(dueText)}</span>
+              <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+            </div>
+            <div class="return-task-meta">
+              <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
+              <span>Order ${escapeHtml(returnCase.order_number || "-")}</span>
+              <span>${escapeHtml(returnCase.buyer_username || "No buyer")}</span>
+            </div>
+            <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
+          </div>
+          <div class="return-task-buttons">
+            ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+            ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
+            ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
+          </div>
+        </div>
+        ${isAdminUser() ? `
+          <div class="return-task-admin">
+            <label>
+              Assign to
+              <select data-return-task-assignee="${escapeHtml(task.id)}">
+                ${renderReturnAssigneeOptions(task.assigned_to_user_id || "")}
+              </select>
+            </label>
+            <label>
+              Priority
+              <select data-return-task-priority="${escapeHtml(task.id)}">
+                ${["low", "normal", "high", "urgent"].map((value) => `<option value="${value}" ${task.priority === value ? "selected" : ""}>${escapeHtml(getReturnTaskPriorityLabel(value))}</option>`).join("")}
+              </select>
+            </label>
+            <label>
+              Due
+              <input type="datetime-local" data-return-task-due="${escapeHtml(task.id)}" value="${escapeHtml(task.due_at ? toDateTimeLocalValue(task.due_at) : "")}" />
+            </label>
+            <label class="wide">
+              Assignment note
+              <input type="text" data-return-task-note="${escapeHtml(task.id)}" placeholder="Optional note for assignment changes" />
+            </label>
+            <button type="button" class="secondary-btn" data-return-task-assign="${escapeHtml(task.id)}">Save Assignment</button>
+            <label class="wide question">
+              New question / instruction
+              <textarea rows="2" data-return-task-question="${escapeHtml(task.id)}" placeholder="Question or instruction for this return"></textarea>
+            </label>
+            <button type="button" class="secondary-btn" data-return-task-create-question="${escapeHtml(task.id)}">Assign Question</button>
+          </div>
+        ` : ""}
+      </article>
+    `;
+  }).join("");
+
+  bindReturnQueueActions();
+}
+
+function toDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function getReturnTaskById(taskId) {
+  return state.returnTasks.find((task) => task.id === taskId) || null;
+}
+
+function openReturnTaskIntake(taskId) {
+  const task = getReturnTaskById(taskId);
+  if (!task) return;
+  const lineIds = getReturnTaskLineIds(task);
+  if (!lineIds.length) return;
+  const fetchedLines = getReturnTaskLines(task);
+  if (fetchedLines.length) mergeHistoryLines(fetchedLines);
+  openReturnIntakeModal(lineIds);
+  const returnCase = getReturnTaskCase(task);
+  $("return-ebay-id").value = returnCase.ebay_return_id || "";
+  $("return-reason").value = mapEbayReturnReasonToValue(returnCase.return_reason);
+  $("return-note").value = [
+    returnCase.notes || "",
+    task.question ? `Task: ${task.question}` : "",
+  ].filter(Boolean).join("\n\n");
+  setReturnIntakeStatus(`Opened return task for ${returnCase.order_number || "this order"}. Attach photos, inspect the item, then save.`, "success");
+}
+
+async function assignReturnTask(taskId) {
+  const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
+  const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
+  const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
+  const note = document.querySelector(`[data-return-task-note="${CSS.escape(taskId)}"]`)?.value || "";
+  const { error } = await supabase.rpc("assign_ebay_return_task", {
+    _task_id: taskId,
+    _assigned_to_user_id: assignee || null,
+    _priority: priority,
+    _due_at: dueValue ? new Date(dueValue).toISOString() : null,
+    _notes: note || null,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  await loadReturnQueue();
+}
+
+async function createReturnQuestionTask(taskId) {
+  const task = getReturnTaskById(taskId);
+  if (!task) return;
+  const question = document.querySelector(`[data-return-task-question="${CSS.escape(taskId)}"]`)?.value || "";
+  const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
+  const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
+  const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
+  const { error } = await supabase.rpc("create_ebay_return_question_task", {
+    _return_case_id: task.return_case_id,
+    _question: question,
+    _assigned_to_user_id: assignee || null,
+    _priority: priority,
+    _due_at: dueValue ? new Date(dueValue).toISOString() : null,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  await loadReturnQueue();
+}
+
+async function updateReturnTaskStatus(taskId, status) {
+  const resolution = status === "resolved"
+    ? window.prompt("Resolution note for this return task?", "Handled in return workflow.")
+    : null;
+  if (status === "resolved" && resolution === null) return;
+  const { error } = await supabase.rpc("update_ebay_return_task_status", {
+    _task_id: taskId,
+    _status: status,
+    _resolution_notes: resolution || null,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  await loadReturnQueue();
+}
+
+function bindReturnQueueActions() {
+  document.querySelectorAll("[data-return-task-open]").forEach((button) => {
+    button.addEventListener("click", () => openReturnTaskIntake(button.dataset.returnTaskOpen));
+  });
+  document.querySelectorAll("[data-return-task-start]").forEach((button) => {
+    button.addEventListener("click", () => updateReturnTaskStatus(button.dataset.returnTaskStart, "in_progress").catch((error) => alert(error.message || "Could not start task.")));
+  });
+  document.querySelectorAll("[data-return-task-resolve]").forEach((button) => {
+    button.addEventListener("click", () => updateReturnTaskStatus(button.dataset.returnTaskResolve, "resolved").catch((error) => alert(error.message || "Could not resolve task.")));
+  });
+  document.querySelectorAll("[data-return-task-assign]").forEach((button) => {
+    button.addEventListener("click", () => assignReturnTask(button.dataset.returnTaskAssign).catch((error) => alert(error.message || "Could not assign task.")));
+  });
+  document.querySelectorAll("[data-return-task-create-question]").forEach((button) => {
+    button.addEventListener("click", () => createReturnQuestionTask(button.dataset.returnTaskCreateQuestion).catch((error) => alert(error.message || "Could not create question task.")));
+  });
+}
+
+function applyReturnTaskLaunchSelection() {
+  if (state.returnTaskLaunchApplied) return;
+  const params = new URLSearchParams(window.location.search);
+  const taskId = params.get("returnTaskId");
+  if (!taskId) return;
+  const task = getReturnTaskById(taskId);
+  if (!task) return;
+  state.returnTaskLaunchApplied = true;
+  const returnCase = getReturnTaskCase(task);
+  $("return-task-status-filter").value = "all";
+  $("return-task-search").value = returnCase.ebay_return_id || returnCase.order_number || task.title || "";
+  renderReturnQueue();
+  window.setTimeout(() => {
+    document.querySelector(`[data-return-task-id="${CSS.escape(taskId)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    openReturnTaskIntake(taskId);
+  }, 120);
+}
+
+async function refreshHistoryAndReturns() {
+  await loadOrderHistory();
+  await loadReturnQueue();
 }
 
 function getUniqueLinesFromGroups(groups = []) {
@@ -2526,6 +2904,36 @@ function applyReturnTransferPrefill(payload = {}, lines = []) {
   applyFilters();
 }
 
+async function ensureReturnTaskForTransfer(payload = {}, lines = []) {
+  const info = getReturnTransferInfo(payload);
+  const firstLine = lines[0];
+  const order = firstLine?.order || {};
+  if (!order.id) return null;
+  const lineIds = lines.map((line) => line.id).filter(Boolean);
+  const { data, error } = await supabase.rpc("open_ebay_return_case", {
+    _order_id: order.id,
+    _order_line_ids: lineIds,
+    _order_number: order.order_number || null,
+    _ebay_return_id: info.returnId || null,
+    _buyer_username: info.buyerUsername || order.buyer_username || null,
+    _return_reason: info.returnReason || null,
+    _notes: buildReturnTransferNote(info) || null,
+    _raw_payload: {
+      ...(info || {}),
+      transferId: payload.transferId || null,
+      matchedLineIds: lineIds,
+      matchedOrderNumber: order.order_number || null,
+    },
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] || {} : data || {};
+  await loadReturnQueue().catch((queueError) => {
+    console.warn("Could not refresh return task queue after opening eBay return:", queueError);
+  });
+  return result;
+}
+
 function getReturnLineField(attribute, lineId) {
   return [...document.querySelectorAll(`[${attribute}]`)]
     .find((element) => element.getAttribute(attribute) === lineId) || null;
@@ -2588,9 +2996,20 @@ async function confirmReturnIntake() {
     if (error) throw error;
 
     const result = Array.isArray(data) ? data[0] || {} : data || {};
+    const returnCaseIds = Array.isArray(result.return_case_ids) ? result.return_case_ids : [];
+    if (returnCaseIds.length) {
+      await supabase.rpc("sync_ebay_return_tasks_after_intake", {
+        _return_case_ids: returnCaseIds,
+        _notes: "Return intake saved from OG.",
+        _signed_by_email: state.user?.email || null,
+      }).catch((syncError) => {
+        console.warn("Could not sync return task queue after intake:", syncError);
+      });
+    }
     setReturnIntakeStatus(`Return saved. ${Number(result.restocked_units || 0).toLocaleString()} unit${Number(result.restocked_units || 0) === 1 ? "" : "s"} restocked.`, "success");
     closeReturnIntakeModal();
     await loadOrderHistory();
+    await loadReturnQueue();
   } catch (error) {
     console.error("Return intake failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not save this return.";
@@ -3468,12 +3887,15 @@ async function openReturnIntakeForTransfer(payload = {}) {
   }
 
   const lineIds = lines.map((line) => line.id).filter(Boolean);
+  const opened = await ensureReturnTaskForTransfer(payload, lines);
   openReturnIntakeModal(lineIds);
   applyReturnTransferPrefill(payload, lines);
   postHistoryReturnTransferStatus({
     transferId,
     ok: true,
     opened: true,
+    returnCaseId: opened?.return_case_id || null,
+    taskId: opened?.task_id || null,
     matchedLineIds: lineIds,
     orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
     message: "OG return intake modal opened for the eBay return.",
@@ -3824,7 +4246,8 @@ async function startLabelTrackingBackfill() {
 
 function setupListeners() {
   setupHistorySearchAutofillGuard();
-  $("refresh-history")?.addEventListener("click", loadOrderHistory);
+  $("refresh-history")?.addEventListener("click", refreshHistoryAndReturns);
+  $("refresh-return-queue")?.addEventListener("click", loadReturnQueue);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
   $("start-label-backfill")?.addEventListener("click", startLabelTrackingBackfill);
@@ -3843,6 +4266,10 @@ function setupListeners() {
   ["history-worker", "history-status", "history-label-filter", "history-sort", "history-search"].forEach((id) => {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
+  });
+  ["return-task-status-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
+    $(id)?.addEventListener("input", renderReturnQueue);
+    $(id)?.addEventListener("change", renderReturnQueue);
   });
 
   $("close-revert-modal")?.addEventListener("click", closeRevertModal);
@@ -3952,5 +4379,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupHistoryLabelReceiver();
   setupListeners();
   await loadOrderHistory();
+  await loadReturnQueue();
   if (window.lucide) window.lucide.createIcons();
 });
