@@ -37,6 +37,7 @@ const state = {
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
+  ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
   busy: false,
@@ -3113,7 +3114,10 @@ function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
   el.classList.toggle("is-warn", tone !== "good");
 }
 
-function closeWorkerNoInventoryModal() {
+function closeWorkerNoInventoryModal(options = {}) {
+  if (!options.suppressEbayReturn) {
+    postEbayLabelExitReturnToQueue();
+  }
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
@@ -3309,7 +3313,8 @@ async function confirmWorkerNoInventoryCompletion() {
     if (error) throw error;
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
-    closeWorkerNoInventoryModal();
+    state.ebayLabelReturnContext = null;
+    closeWorkerNoInventoryModal({ suppressEbayReturn: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
@@ -3744,6 +3749,34 @@ function postEbayPendingQueueChanged(payload = {}) {
   }, window.location.origin);
 }
 
+function postEbayLabelExitReturnToQueue(reason = "pending-label-session-exit") {
+  const context = state.ebayLabelReturnContext;
+  if (!context) return false;
+  const orderNumbers = [...new Set([
+    context.orderNumber,
+    ...(Array.isArray(context.orderNumbers) ? context.orderNumbers : []),
+  ].map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (context.transferId) {
+    postEbayLabelTransferStatus({
+      transferId: context.transferId,
+      ok: true,
+      canceled: true,
+      returnToAwaiting: true,
+      reason,
+      orderNumber: orderNumbers[0] || "",
+      orderNumbers,
+      message: "OG label session was closed. Returning to eBay awaiting shipments.",
+    });
+  } else {
+    postEbayPendingQueueChanged({
+      action: reason,
+      orderNumbers,
+    });
+  }
+  state.ebayLabelReturnContext = null;
+  return true;
+}
+
 function createLabelRouteError(route, message) {
   const error = new Error(message);
   error.route = route;
@@ -3960,6 +3993,11 @@ async function attachEbayLabelToOrder(transferPayload) {
   const primaryOrderNumber = selectedOrderNumber && targetOrderNumbers.includes(selectedOrderNumber)
     ? selectedOrderNumber
     : targetOrderNumbers[0];
+  state.ebayLabelReturnContext = {
+    transferId: transferPayload.transferId || "",
+    orderNumber: primaryOrderNumber,
+    orderNumbers: targetOrderNumbers,
+  };
   await openPendingNoInventorySessionForLabel(primaryOrderNumber);
   const trackingText = getLabelTrackingDisplay(labelMetadata);
   const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";

@@ -2894,16 +2894,29 @@ function clearExtensionPendingHistoryLabel(transferId) {
   }).catch(() => null);
 }
 
+function postHistoryLabelExitStatus(pending, reason = "history-label-exit") {
+  const transferId = pending?.transferId || "";
+  if (!transferId) return false;
+  const orderNumbers = state.awaitingLabelGroup?.orderNumbers || getLabelTransferOrderNumbers(pending);
+  postHistoryLabelTransferStatus({
+    transferId,
+    ok: true,
+    canceled: true,
+    returnToAwaiting: true,
+    reason,
+    orderNumber: orderNumbers[0] || "",
+    orderNumbers,
+    message: "Existing OG label was kept. Returning to eBay awaiting shipments.",
+  });
+  clearExtensionPendingHistoryLabel(transferId);
+  return true;
+}
+
 function cancelPendingHistoryLabelReplacement() {
   const pending = state.pendingHistoryLabelReplacement;
   if (!pending) return;
   const transferId = pending.transferId || "";
-  postHistoryLabelTransferStatus({
-    transferId,
-    ok: false,
-    error: "The existing shipping label was kept. Replacement was canceled in OG.",
-  });
-  clearExtensionPendingHistoryLabel(transferId);
+  postHistoryLabelExitStatus(pending, "history-label-replacement-exit");
   state.pendingHistoryLabelReplacement = null;
 }
 
@@ -2911,12 +2924,7 @@ function cancelPendingHistoryExtraLabel() {
   const pending = state.pendingHistoryExtraLabelTransfer;
   if (!pending) return;
   const transferId = pending.transferId || "";
-  postHistoryLabelTransferStatus({
-    transferId,
-    ok: false,
-    error: "The extra shipping label was not saved. A forgotten-items photo is required.",
-  });
-  clearExtensionPendingHistoryLabel(transferId);
+  postHistoryLabelExitStatus(pending, "history-extra-label-exit");
   state.pendingHistoryExtraLabelTransfer = null;
   if (state.pendingHistoryLabelReplacement?.transferId === transferId) {
     state.pendingHistoryLabelReplacement = null;

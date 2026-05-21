@@ -1440,6 +1440,18 @@
     return response;
   }
 
+  async function getOrganizerPriorityPayload(messagePayload = {}) {
+    const prefetched = messagePayload?.priorityPayload;
+    if (prefetched?.ok && Array.isArray(prefetched.priorities)) {
+      ogPendingPriorityCache = prefetched;
+      return prefetched;
+    }
+    if (prefetched?.error) {
+      console.warn("[OG eBay Priority] Prefetch failed, requesting live priorities:", prefetched.error);
+    }
+    return requestOgPendingPriorities();
+  }
+
   function updatePriorityButtonStatus(text, tone = "") {
     const button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
     if (!button) return;
@@ -2271,7 +2283,7 @@
     try {
       const captured = await Promise.any([pageCapturePromise, downloadCapturePromise]);
       if (captured.kind === "download") {
-        setLabelButtonStatus(captured.result.opened ? "Opened OG to attach" : "Attached to OG", "success");
+        setLabelButtonStatus(captured.result.canceled ? "Returned to queue" : captured.result.opened ? "Opened OG to attach" : "Attached to OG", "success");
         window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
         return;
       }
@@ -2293,7 +2305,7 @@
         },
       });
       if (!response?.ok) throw new Error(response?.error || "Could not hand the label to OG.");
-      setLabelButtonStatus(response.opened ? "Opened OG to attach" : "Attached to OG", "success");
+      setLabelButtonStatus(response.canceled ? "Returned to queue" : response.opened ? "Opened OG to attach" : "Attached to OG", "success");
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
     } catch (error) {
       console.error("[OG eBay Label] Capture failed:", error);
@@ -2332,7 +2344,7 @@
       });
       if (!response?.ok) throw new Error(response?.error || "Could not hand the bulk label to OG.");
 
-      setBulkLabelButtonStatus(response.opened ? "Opened OG to attach" : "Sent to OG", "success");
+      setBulkLabelButtonStatus(response.canceled ? "Returned to queue" : response.opened ? "Opened OG to attach" : "Sent to OG", "success");
       window.setTimeout(() => setBulkLabelButtonStatus("Send Bulk Labels to OG"), 3500);
     } catch (error) {
       console.error("[OG eBay Label] Failed to send bulk label to OG:", error);
@@ -3274,9 +3286,9 @@
       }
 
       injectOgControls();
-      updatePriorityButtonStatus("Refreshing OG priorities...");
-      await new Promise((resolve) => window.setTimeout(resolve, message.payload?.fastRefresh ? 80 : 250));
-      const priorityPayload = await requestOgPendingPriorities();
+      updatePriorityButtonStatus(message.payload?.priorityPayload?.ok ? "Sorting with OG priorities..." : "Refreshing OG priorities...");
+      await new Promise((resolve) => window.setTimeout(resolve, message.payload?.fastRefresh ? 40 : 160));
+      const priorityPayload = await getOrganizerPriorityPayload(message.payload || {});
       const hidden = hideClosedAwaitingRowsFromOg(message.payload || {}, priorityPayload);
       const result = applyOgPendingPriorities(priorityPayload);
       updatePriorityButtonStatusFromResult(result, priorityPayload);

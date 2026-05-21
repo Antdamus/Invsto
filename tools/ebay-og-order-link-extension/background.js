@@ -12,6 +12,9 @@
   const downloadCaptures = new Map();
   const appTransferAcks = new Map();
   const appReportAcks = new Map();
+  let pendingPriorityCache = null;
+  let pendingPriorityCacheAt = 0;
+  const PENDING_PRIORITY_CACHE_TTL_MS = 15000;
 
   function normalizeUrl(value) {
     try {
@@ -121,7 +124,7 @@
     });
   }
 
-  async function handleAppTransferStatus(status = {}) {
+  async function handleAppTransferStatus(status = {}, sender = null) {
     const transferId = status.transferId || "";
     if (!transferId) return;
     if (status.phase === "started" && status.tabId) {
@@ -130,7 +133,19 @@
     }
     if (status.ok) await removePendingLabel(transferId);
     const waiter = appTransferAcks.get(transferId);
-    if (waiter) waiter.resolve(status);
+    if (waiter) {
+      waiter.resolve(status);
+      return;
+    }
+    if (status.returnToAwaiting) {
+      await refreshAwaitingShipmentQueue({
+        reason: status.reason || "og-label-exit",
+        orderNumber: status.orderNumber || "",
+        orderNumbers: status.orderNumbers || [],
+        transferId,
+        fastRefresh: true,
+      }, sender).catch(() => null);
+    }
   }
 
   async function handleAppReportStatus(status = {}) {
@@ -246,6 +261,11 @@
   }
 
   async function refreshAwaitingShipmentQueue(payload = {}, sender = null) {
+    const priorityPromise = getPendingOrderPriorities({
+      ...payload,
+      useCache: false,
+      requestedFor: "awaiting-queue-refresh",
+    }).catch((error) => ({ ok: false, error: error.message || String(error) }));
     const tabs = await chrome.tabs.query({});
     const awaitingTabs = tabs.filter(isAwaitingShipmentTab);
     let targetTab = awaitingTabs.find((tab) => tab.active) || awaitingTabs[0] || null;
@@ -258,8 +278,10 @@
     if (targetTab?.id) {
       await focusTab(targetTab.id);
       if (!forceReload) {
+        const priorityPayload = await priorityPromise;
         organizeResult = await askAwaitingTabToOrganize(targetTab.id, {
           ...payload,
+          priorityPayload,
           fastRefresh: true,
         }, {
           attempts: 2,
@@ -291,7 +313,15 @@
       ? await waitForTabComplete(targetTab.id, 25000, { allowAlreadyComplete: !reloaded })
       : null;
     if (completedTab?.id && !organized) {
-      organizeResult = await askAwaitingTabToOrganize(completedTab.id, payload);
+      const priorityPayload = await priorityPromise;
+      organizeResult = await askAwaitingTabToOrganize(completedTab.id, {
+        ...payload,
+        priorityPayload,
+      }, {
+        initialDelayMs: opened ? 250 : 650,
+        retryDelayMs: 350,
+        attempts: opened ? 10 : 6,
+      });
       organized = Boolean(organizeResult?.ok);
     }
 
@@ -563,6 +593,19 @@
   }
 
   async function getPendingOrderPriorities(payload = {}) {
+    const cacheAllowed = payload.useCache !== false;
+    if (
+      cacheAllowed
+      && pendingPriorityCache
+      && Date.now() - pendingPriorityCacheAt < PENDING_PRIORITY_CACHE_TTL_MS
+    ) {
+      return {
+        ...pendingPriorityCache,
+        ok: true,
+        cacheHit: true,
+      };
+    }
+
     const appUrl = await getAppUrl();
     if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
 
@@ -580,6 +623,8 @@
       payload,
     });
     if (!response?.ok) throw new Error(response?.error || "OG Pending Orders did not return due-order priorities.");
+    pendingPriorityCache = response;
+    pendingPriorityCacheAt = Date.now();
     return response;
   }
 
@@ -817,7 +862,7 @@
       handleAppTransferStatus({
         ...(message.payload || {}),
         tabId: _sender?.tab?.id || message.payload?.tabId || null,
-      })
+      }, _sender)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
