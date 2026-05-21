@@ -40,6 +40,11 @@
   }
 
   function buildReturnTransferId(returnTransfer = {}) {
+    if (Array.isArray(returnTransfer.returns) && returnTransfer.returns.length) {
+      const first = returnTransfer.returns[0] || {};
+      const firstId = String(first.returnId || first.itemNumber || "return").replace(/[^a-z0-9._-]/gi, "-").slice(0, 50);
+      return `return-batch:${returnTransfer.returns.length}:${firstId || "return"}:${Date.now()}`;
+    }
     const data = returnTransfer.return || returnTransfer.metadata || {};
     const returnId = String(data.returnId || "return").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
     const itemNumber = String(data.itemNumber || "item").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
@@ -449,6 +454,10 @@
     url.searchParams.set("returnTransferId", payload.transferId);
     if (payload.return?.returnId) url.searchParams.set("ebayReturnId", payload.return.returnId);
     if (payload.return?.itemNumber) url.searchParams.set("itemNumber", payload.return.itemNumber);
+    if (Array.isArray(payload.returns) && payload.returns.length) {
+      url.searchParams.set("returnBatch", "1");
+      url.searchParams.set("returnCount", String(payload.returns.length));
+    }
     return url;
   }
 
@@ -1030,7 +1039,7 @@
       return true;
     }
 
-    if (message.type === "OG_EBAY_SEND_RETURN") {
+    if (message.type === "OG_EBAY_SEND_RETURN" || message.type === "OG_EBAY_SEND_RETURN_BATCH") {
       relayReturnToApp(message.payload)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));

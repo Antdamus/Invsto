@@ -13,6 +13,7 @@
   const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
   const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
+  const SEND_RETURN_BATCH_ID = "og-ebay-send-return-batch";
   const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
@@ -2563,19 +2564,12 @@
     button.disabled = /opening|sending|matching/i.test(text);
   }
 
-  async function sendReturnToOg(returnInfo, button = null) {
-    try {
-      assertExtensionContextActive();
-    } catch (error) {
-      setReturnButtonStatus(button, "Refresh page", "error");
-      window.alert(error.message);
-      return;
-    }
-
-    const payload = {
+  function buildReturnTransferPayload(returnInfo = {}) {
+    const capturedAt = new Date().toISOString();
+    return {
       return: {
         ...returnInfo,
-        capturedAt: new Date().toISOString(),
+        capturedAt,
         pageUrl: window.location.href,
         pageTitle: document.title || returnInfo.pageTitle || "",
       },
@@ -2586,9 +2580,41 @@
         itemNumber: returnInfo.itemNumber || "",
         transactionId: returnInfo.transactionId || "",
         pageUrl: window.location.href,
-        capturedAt: new Date().toISOString(),
+        pageTitle: document.title || "",
+        capturedAt,
       },
     };
+  }
+
+  function buildReturnBatchTransferPayload(returns = []) {
+    const capturedAt = new Date().toISOString();
+    return {
+      returns: returns.map((returnInfo) => ({
+        ...returnInfo,
+        capturedAt,
+        pageUrl: window.location.href,
+        pageTitle: document.title || returnInfo.pageTitle || "",
+      })),
+      metadata: {
+        source: "ebay-returns-page-batch",
+        returnCount: returns.length,
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt,
+      },
+    };
+  }
+
+  async function sendReturnToOg(returnInfo, button = null) {
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setReturnButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    const payload = buildReturnTransferPayload(returnInfo);
 
     try {
       setReturnButtonStatus(button, "Opening OG...");
@@ -2604,6 +2630,37 @@
       setReturnButtonStatus(button, "Send failed", "error");
       window.alert(error?.message || "Could not send this eBay return to OG.");
       window.setTimeout(() => setReturnButtonStatus(button, "Open Return in OG"), 5000);
+    }
+  }
+
+  async function sendReturnBatchToOg(returns = [], button = null) {
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setReturnButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    const payload = buildReturnBatchTransferPayload(returns);
+
+    try {
+      setReturnButtonStatus(button, "Sending returns...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_RETURN_BATCH",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not export the eBay returns to OG.");
+      const imported = Number(response.imported || response.importedCount || 0);
+      const unmatched = Number(response.unmatched || response.unmatchedCount || 0);
+      const suffix = unmatched ? `, ${unmatched} unmatched` : "";
+      setReturnButtonStatus(button, imported ? `Sent ${imported}${suffix}` : "Sent to OG", "success");
+      window.setTimeout(() => setReturnButtonStatus(button, "Export Visible Returns to OG"), 4000);
+    } catch (error) {
+      console.error("[OG eBay Return] Batch transfer failed:", error);
+      setReturnButtonStatus(button, "Export failed", "error");
+      window.alert(error?.message || "Could not export these eBay returns to OG.");
+      window.setTimeout(() => setReturnButtonStatus(button, "Export Visible Returns to OG"), 5000);
     }
   }
 
@@ -3237,6 +3294,23 @@
         background: #d4f8df;
       }
 
+      #${SEND_RETURN_BATCH_ID} {
+        width: 100%;
+        margin: 2px 0 10px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 900 13px Arial, sans-serif;
+        padding: 9px 12px;
+        text-align: center;
+      }
+
+      #${SEND_RETURN_BATCH_ID}:hover {
+        background: #d4f8df;
+      }
+
       #${SEND_RETURN_PANEL_ID} {
         position: fixed;
         right: 16px;
@@ -3278,6 +3352,7 @@
       #${SEND_LABEL_ID}[data-status-tone="error"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="error"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"],
+      #${SEND_RETURN_BATCH_ID}[data-status-tone="error"],
       .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
@@ -3287,6 +3362,7 @@
       #${SEND_LABEL_ID}[data-status-tone="success"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="success"],
       #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"],
+      #${SEND_RETURN_BATCH_ID}[data-status-tone="success"],
       .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
@@ -3555,6 +3631,7 @@
 
     panel.innerHTML = `
       <strong>OG Returns (${returns.length})</strong>
+      <button id="${SEND_RETURN_BATCH_ID}" type="button" title="Export the visible eBay returns on this page to OG Return Work Queue">Export Visible Returns to OG</button>
       ${returns.slice(0, 6).map((entry) => `
         <article data-og-return-panel-row="${entry.returnId}">
           <span>${escapeHtml(entry.buyerUsername || "Unknown buyer")} - ${escapeHtml(entry.itemNumber || "No item #")}</span>
@@ -3563,6 +3640,12 @@
       `).join("")}
       ${returns.length > 6 ? `<span>${returns.length - 6} more return${returns.length - 6 === 1 ? "" : "s"} on this page.</span>` : ""}
     `;
+
+    panel.querySelector(`#${SEND_RETURN_BATCH_ID}`)?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sendReturnBatchToOg(returns, event.currentTarget);
+    });
 
     returns.slice(0, 6).forEach((returnInfo) => {
       const row = panel.querySelector(`[data-og-return-panel-row="${returnInfo.returnId}"]`);

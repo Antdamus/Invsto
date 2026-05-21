@@ -2884,6 +2884,42 @@ async function findReturnTransferLines(payload = {}) {
     .slice(0, 5);
 }
 
+function isReturnBatchTransfer(payload = {}) {
+  return Array.isArray(payload.returns) && payload.returns.length > 0;
+}
+
+function buildReturnBatchItemPayload(payload = {}, returnInfo = {}, index = 0) {
+  const metadata = payload.metadata || {};
+  const returnId = returnInfo.returnId || "";
+  const itemNumber = returnInfo.itemNumber || "";
+  return {
+    return: {
+      ...returnInfo,
+      batchTransferId: payload.transferId || "",
+      batchIndex: index + 1,
+      batchReturnCount: Array.isArray(payload.returns) ? payload.returns.length : 0,
+      pageUrl: returnInfo.pageUrl || metadata.pageUrl || "",
+      pageTitle: returnInfo.pageTitle || metadata.pageTitle || "",
+      capturedAt: returnInfo.capturedAt || metadata.capturedAt || new Date().toISOString(),
+    },
+    metadata: {
+      ...metadata,
+      source: "ebay-returns-page-batch-item",
+      batchTransferId: payload.transferId || "",
+      batchIndex: index + 1,
+      returnId,
+      itemNumber,
+      buyerUsername: returnInfo.buyerUsername || "",
+      transactionId: returnInfo.transactionId || "",
+      pageUrl: returnInfo.pageUrl || metadata.pageUrl || "",
+      capturedAt: returnInfo.capturedAt || metadata.capturedAt || new Date().toISOString(),
+    },
+    transferId: payload.transferId
+      ? `${payload.transferId}:${returnId || itemNumber || index + 1}`
+      : "",
+  };
+}
+
 function applyReturnTransferPrefill(payload = {}, lines = []) {
   const info = getReturnTransferInfo(payload);
   state.activeReturnTransfer = payload;
@@ -2904,7 +2940,7 @@ function applyReturnTransferPrefill(payload = {}, lines = []) {
   applyFilters();
 }
 
-async function ensureReturnTaskForTransfer(payload = {}, lines = []) {
+async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {}) {
   const info = getReturnTransferInfo(payload);
   const firstLine = lines[0];
   const order = firstLine?.order || {};
@@ -2928,9 +2964,11 @@ async function ensureReturnTaskForTransfer(payload = {}, lines = []) {
   });
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] || {} : data || {};
-  await loadReturnQueue().catch((queueError) => {
-    console.warn("Could not refresh return task queue after opening eBay return:", queueError);
-  });
+  if (options.refreshQueue !== false) {
+    await loadReturnQueue().catch((queueError) => {
+      console.warn("Could not refresh return task queue after opening eBay return:", queueError);
+    });
+  }
   return result;
 }
 
@@ -3902,6 +3940,101 @@ async function openReturnIntakeForTransfer(payload = {}) {
   });
 }
 
+async function importReturnBatchTransfer(payload = {}) {
+  const transferId = payload?.transferId || "";
+  const returns = Array.isArray(payload.returns) ? payload.returns.filter(Boolean) : [];
+  const importedReturns = [];
+  const unmatchedReturns = [];
+  const failedReturns = [];
+
+  for (const [index, returnInfo] of returns.entries()) {
+    const itemPayload = buildReturnBatchItemPayload(payload, returnInfo, index);
+    const info = getReturnTransferInfo(itemPayload);
+    try {
+      const lines = await findReturnTransferLines(itemPayload);
+      if (!lines.length) {
+        unmatchedReturns.push({
+          returnId: info.returnId || "",
+          itemNumber: info.itemNumber || "",
+          buyerUsername: info.buyerUsername || "",
+          reason: "No matching fulfilled OG order line was found.",
+        });
+        continue;
+      }
+
+      const opened = await ensureReturnTaskForTransfer(itemPayload, lines, { refreshQueue: false });
+      importedReturns.push({
+        returnId: info.returnId || "",
+        itemNumber: info.itemNumber || "",
+        buyerUsername: info.buyerUsername || "",
+        returnCaseId: opened?.return_case_id || null,
+        taskId: opened?.task_id || null,
+        matchedLineIds: lines.map((line) => line.id).filter(Boolean),
+        orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
+      });
+    } catch (error) {
+      failedReturns.push({
+        returnId: info.returnId || "",
+        itemNumber: info.itemNumber || "",
+        buyerUsername: info.buyerUsername || "",
+        error: error.message || "Could not import this return.",
+      });
+    }
+  }
+
+  await loadReturnQueue().catch((queueError) => {
+    console.warn("Could not refresh return task queue after importing eBay returns:", queueError);
+  });
+
+  if ($("return-task-status-filter")) $("return-task-status-filter").value = "pending";
+  if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
+  if ($("return-task-search")) $("return-task-search").value = "";
+  renderReturnQueue();
+  window.setTimeout(() => {
+    $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
+
+  const importedCount = importedReturns.length;
+  const unmatchedCount = unmatchedReturns.length;
+  const failedCount = failedReturns.length;
+  const ok = importedCount > 0;
+  const error = ok
+    ? ""
+    : failedReturns[0]?.error || "None of the eBay returns matched fulfilled OG order lines. Import the matching orders or check item/buyer details.";
+  const message = ok
+    ? `Imported ${importedCount} eBay return${importedCount === 1 ? "" : "s"} into the OG return queue.`
+    : error;
+
+  postHistoryReturnTransferStatus({
+    transferId,
+    ok,
+    opened: true,
+    imported: importedCount,
+    importedCount,
+    unmatched: unmatchedCount,
+    unmatchedCount,
+    failed: failedCount,
+    failedCount,
+    importedReturns,
+    unmatchedReturns,
+    failedReturns,
+    error,
+    message,
+  });
+
+  return {
+    ok,
+    importedCount,
+    unmatchedCount,
+    failedCount,
+    importedReturns,
+    unmatchedReturns,
+    failedReturns,
+    error,
+    message,
+  };
+}
+
 async function handleHistoryReturnTransfer(payload) {
   const transferId = payload?.transferId || "";
   if (transferId && state.handledReturnTransferIds.has(transferId)) {
@@ -3923,12 +4056,19 @@ async function handleHistoryReturnTransfer(payload) {
   postHistoryReturnTransferStatus({
     transferId,
     phase: "started",
-    message: "Order History is matching the eBay return.",
+    message: isReturnBatchTransfer(payload)
+      ? "Order History is importing the eBay returns."
+      : "Order History is matching the eBay return.",
   });
 
   try {
     if (transferId) state.processingReturnTransferIds.add(transferId);
-    await openReturnIntakeForTransfer(payload);
+    if (isReturnBatchTransfer(payload)) {
+      const summary = await importReturnBatchTransfer(payload);
+      if (!summary.ok && summary.error) alert(summary.error);
+    } else {
+      await openReturnIntakeForTransfer(payload);
+    }
     if (transferId) state.handledReturnTransferIds.add(transferId);
   } catch (error) {
     const message = error.message || "Could not open the OG return workflow.";
