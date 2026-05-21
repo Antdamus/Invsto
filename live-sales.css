@@ -697,6 +697,26 @@ body.live-label-step #current-lot-card {
   padding-right: 4px;
 }
 
+.manifest-bag-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+
+.manifest-bag-meta span {
+  border: 1px solid rgba(231, 192, 114, 0.2);
+  border-radius: 999px;
+  background: rgba(231, 192, 114, 0.08);
+  color: var(--live-muted);
+  padding: 7px 10px;
+  font-weight: 800;
+}
+
+.manifest-bag-meta b {
+  color: var(--live-gold);
+}
+
 .manifest-item {
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr) auto;
@@ -1340,6 +1360,7 @@ body.live-label-step #current-lot-card {
 }
 
 .live-edit-dialog input,
+.live-edit-dialog select,
 .live-edit-dialog textarea {
   width: 100%;
   min-width: 0;
@@ -1353,9 +1374,15 @@ body.live-label-step #current-lot-card {
 }
 
 .live-edit-dialog input:focus,
+.live-edit-dialog select:focus,
 .live-edit-dialog textarea:focus {
   border-color: var(--live-border-strong);
   box-shadow: 0 0 0 4px rgba(231, 192, 114, 0.12);
+}
+
+.live-edit-dialog select option {
+  color: #121212;
+  background: #fff;
 }
 
 .live-edit-close {

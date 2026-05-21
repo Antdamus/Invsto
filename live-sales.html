@@ -279,6 +279,7 @@
               </div>
               <button id="cancel-lot" type="button" class="secondary-btn danger-btn">Cancel Bag</button>
             </div>
+            <div id="manifest-bag-meta" class="manifest-bag-meta"></div>
             <div id="lot-manifest" class="manifest-list">
               <div class="empty-state">No bag selected.</div>
             </div>
@@ -394,6 +395,34 @@
       <div class="button-row">
         <button id="edit-bag-confirm" type="button" class="primary-btn">Apply Correction</button>
         <button id="edit-bag-cancel" type="button" class="secondary-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="owner-correction-modal" class="live-edit-modal" hidden>
+    <div class="live-edit-backdrop" data-close-owner-correction></div>
+    <div class="live-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="owner-correction-title">
+      <button id="owner-correction-close" type="button" class="live-edit-close" aria-label="Close owner correction modal">x</button>
+      <div class="live-edit-head">
+        <span class="eyebrow">Signed Bag Update</span>
+        <h2 id="owner-correction-title">Change Bag Owner</h2>
+        <p id="owner-correction-summary">The current owner must approve this change with their password.</p>
+      </div>
+      <div id="owner-correction-current" class="edit-current-card"></div>
+      <label>
+        New Bag Owner
+        <select id="owner-correction-select">
+          <option value="">Select owner</option>
+        </select>
+      </label>
+      <label>
+        Current Owner Password
+        <input id="owner-correction-password" type="password" placeholder="Password from the current bag owner" autocomplete="current-password" />
+      </label>
+      <p id="owner-correction-error" class="status-line is-error" aria-live="polite"></p>
+      <div class="button-row">
+        <button id="owner-correction-confirm" type="button" class="primary-btn">Save Owner Change</button>
+        <button id="owner-correction-cancel" type="button" class="secondary-btn">Cancel</button>
       </div>
     </div>
   </div>

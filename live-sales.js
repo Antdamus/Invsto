@@ -32,6 +32,7 @@ const state = {
   editReplacementItem: null,
   editSourceRows: [],
   editSelectedSourceRow: null,
+  ownerEditLot: null,
   pendingStartAuctionNumber: "",
   busy: false,
 };
@@ -126,6 +127,12 @@ function getEmployeeReferenceLabel(employeeId, snapshot = {}) {
 function getLotOwnerLabel(lot = state.currentLot) {
   if (!lot) return "";
   return getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {});
+}
+
+function getLotOwnerEmail(lot = state.currentLot) {
+  if (!lot) return "";
+  const employee = getEmployeeById(lot.owner_employee_id);
+  return employee?.email || lot.owner_snapshot?.email || "";
 }
 
 function getSessionSellerSummary(session = state.currentSession) {
@@ -826,12 +833,23 @@ async function loadLotSourceAvailability() {
 
 function renderManifest() {
   const list = $("lot-manifest");
+  const meta = $("manifest-bag-meta");
   if (!list) return;
   list.replaceChildren();
 
   if (!state.currentLot) {
+    if (meta) meta.innerHTML = `<span>No current auction bag.</span>`;
     list.innerHTML = `<div class="empty-state">No bag selected.</div>`;
     return;
+  }
+
+  if (meta) {
+    meta.innerHTML = `
+      <span><b>Auction</b> ${escapeHtml(state.currentLot.auction_number || "-")}</span>
+      <span><b>Owner</b> ${escapeHtml(getLotOwnerLabel() || "Unassigned")}</span>
+      <span><b>Bag</b> ${escapeHtml(state.currentLot.lot_code || "-")}</span>
+      <span><b>Status</b> ${escapeHtml(state.currentLot.status || "open")}</span>
+    `;
   }
 
   if (!state.lotItems.length) {
@@ -1796,6 +1814,7 @@ function renderBagHistoryDetail() {
       <span>Owner ${escapeHtml(getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}) || "Unassigned")}</span>
       <span>Created ${escapeHtml(formatDate(lot.created_at))}</span>
       ${lot.closed_at ? `<span>Closed ${escapeHtml(formatDate(lot.closed_at))}</span>` : ""}
+      ${lot.status !== "cancelled" ? `<button type="button" class="bag-detail-label-btn" data-change-bag-owner="${escapeHtml(lot.id)}">Change Owner</button>` : ""}
       ${lot.label_path ? `<button type="button" class="bag-detail-label-btn" data-print-live-label="${escapeHtml(lot.id)}">Print DYMO Label</button>` : "<span>No DYMO label yet</span>"}
     </div>
     ${lot.notes ? `<p class="subtle-text">${escapeHtml(lot.notes)}</p>` : ""}
@@ -1814,6 +1833,9 @@ function renderBagHistoryDetail() {
         button.textContent = originalText;
       }
     }
+  });
+  header.querySelector("[data-change-bag-owner]")?.addEventListener("click", () => {
+    openOwnerCorrectionModal(lot);
   });
 
   const itemsWrap = document.createElement("div");
@@ -1861,6 +1883,147 @@ function renderBagHistoryDetail() {
       if (group) openEditBagItemModal(group, lot);
     });
   });
+}
+
+function setOwnerCorrectionError(message = "") {
+  const el = $("owner-correction-error");
+  if (el) el.textContent = message;
+}
+
+function setOwnerCorrectionBusy(isBusy) {
+  $("owner-correction-confirm")?.toggleAttribute("disabled", isBusy);
+  $("owner-correction-cancel")?.toggleAttribute("disabled", isBusy);
+  $("owner-correction-close")?.toggleAttribute("disabled", isBusy);
+  $("owner-correction-select")?.toggleAttribute("disabled", isBusy);
+  $("owner-correction-password")?.toggleAttribute("disabled", isBusy);
+}
+
+function openOwnerCorrectionModal(lot) {
+  if (!lot) return;
+  state.ownerEditLot = lot;
+  const modal = $("owner-correction-modal");
+  if (!modal) return;
+
+  const ownerLabel = getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}) || "Unassigned";
+  const ownerEmail = getLotOwnerEmail(lot);
+  const summary = $("owner-correction-summary");
+  if (summary) {
+    summary.textContent = ownerEmail
+      ? `The current owner, ${ownerLabel}, must approve this change with their password.`
+      : "This bag has no saved owner email yet, so the current signed-in worker must approve the change.";
+  }
+
+  const current = $("owner-correction-current");
+  if (current) {
+    current.innerHTML = `
+      <span class="eyebrow">Current Bag</span>
+      <strong>Auction ${escapeHtml(lot.auction_number || "-")}</strong>
+      <span>Owner: ${escapeHtml(ownerLabel)}</span>
+      <span>Bag: ${escapeHtml(lot.lot_code || "-")} - ${escapeHtml(lot.status || "open")}</span>
+    `;
+  }
+
+  populateEmployeeSelect($("owner-correction-select"), {
+    selectedValue: lot.owner_employee_id || state.employee?.id || "",
+    placeholder: "Select new owner",
+  });
+  if ($("owner-correction-password")) $("owner-correction-password").value = "";
+  setOwnerCorrectionError("");
+  setOwnerCorrectionBusy(false);
+  modal.hidden = false;
+  setTimeout(() => $("owner-correction-select")?.focus(), 80);
+}
+
+function closeOwnerCorrectionModal(options = {}) {
+  const modal = $("owner-correction-modal");
+  if (!modal || modal.hidden) return;
+  if (state.busy && options.force !== true) return;
+  modal.hidden = true;
+  state.ownerEditLot = null;
+  setOwnerCorrectionError("");
+  setOwnerCorrectionBusy(false);
+}
+
+async function verifyPasswordForEmail(email, password) {
+  const cleanEmail = String(email || "").trim();
+  if (!cleanEmail || !password) return false;
+  const response = await fetch(`${window.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      apikey: window.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${window.SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: cleanEmail,
+      password,
+    }),
+  });
+  if (!response.ok) return false;
+  return true;
+}
+
+async function submitOwnerCorrection() {
+  const lot = state.ownerEditLot;
+  if (!lot || state.busy) return;
+
+  const newOwnerId = $("owner-correction-select")?.value || "";
+  const password = $("owner-correction-password")?.value || "";
+  const currentOwnerEmail = getLotOwnerEmail(lot) || state.user?.email || "";
+  const currentOwnerLabel = getEmployeeReferenceLabel(lot.owner_employee_id, lot.owner_snapshot || {}) || state.employee?.display_name || "current owner";
+
+  if (!newOwnerId) {
+    setOwnerCorrectionError("Select the new bag owner.");
+    $("owner-correction-select")?.focus();
+    return;
+  }
+
+  if (String(newOwnerId) === String(lot.owner_employee_id || "")) {
+    setOwnerCorrectionError("This bag is already assigned to that owner.");
+    return;
+  }
+
+  if (!password) {
+    setOwnerCorrectionError(`Enter the password for ${currentOwnerLabel}.`);
+    $("owner-correction-password")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    setOwnerCorrectionBusy(true);
+    setOwnerCorrectionError("Verifying owner password...");
+    const verified = await verifyPasswordForEmail(currentOwnerEmail, password);
+    if (!verified) {
+      throw new Error("Password did not match the current bag owner.");
+    }
+
+    setOwnerCorrectionError("Saving owner change and audit trail...");
+    const { data, error } = await supabase.rpc("update_live_sale_lot_owner", {
+      _lot_id: lot.id,
+      _owner_employee_id: newOwnerId,
+      _signed_by_email: state.user?.email || null,
+      _verified_owner_email: currentOwnerEmail,
+    });
+    if (error) throw error;
+
+    const updatedLot = Array.isArray(data) ? data[0] : data;
+    if (String(state.currentLot?.id || "") === String(updatedLot?.id || "")) {
+      state.currentLot = updatedLot;
+    }
+    const bagIndex = state.bagHistoryLots.findIndex((entry) => String(entry.id) === String(updatedLot?.id || ""));
+    if (bagIndex >= 0) state.bagHistoryLots[bagIndex] = updatedLot;
+    closeOwnerCorrectionModal({ force: true });
+    renderAll();
+    renderBagHistory();
+    setStatus(`Bag owner updated for auction ${updatedLot?.auction_number || lot.auction_number || "-"}.`, "success");
+  } catch (error) {
+    console.error("Owner correction failed:", error);
+    setOwnerCorrectionError(error.message || "Could not update the bag owner.");
+  } finally {
+    state.busy = false;
+    setOwnerCorrectionBusy(false);
+  }
 }
 
 async function loadBagHistory() {
@@ -2286,6 +2449,7 @@ async function updateCurrentLotOwner(ownerEmployeeId, options = {}) {
       _lot_id: state.currentLot.id,
       _owner_employee_id: ownerEmployeeId,
       _signed_by_email: state.user?.email || null,
+      _verified_owner_email: options.verifiedOwnerEmail || null,
     });
     if (error) throw error;
     state.currentLot = Array.isArray(data) ? data[0] : data;
@@ -3426,6 +3590,18 @@ function setupListeners() {
   document.querySelectorAll("[data-close-edit-bag-item]").forEach((node) => {
     node.addEventListener("click", closeEditBagItemModal);
   });
+  $("owner-correction-confirm")?.addEventListener("click", submitOwnerCorrection);
+  $("owner-correction-cancel")?.addEventListener("click", closeOwnerCorrectionModal);
+  $("owner-correction-close")?.addEventListener("click", closeOwnerCorrectionModal);
+  document.querySelectorAll("[data-close-owner-correction]").forEach((node) => {
+    node.addEventListener("click", closeOwnerCorrectionModal);
+  });
+  $("owner-correction-password")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitOwnerCorrection();
+    }
+  });
   $("edit-bag-replacement-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -3498,6 +3674,12 @@ function setupListeners() {
     if (!$("edit-bag-item-modal")?.hidden && event.key === "Escape") {
       event.preventDefault();
       closeEditBagItemModal();
+      return;
+    }
+
+    if (!$("owner-correction-modal")?.hidden && event.key === "Escape") {
+      event.preventDefault();
+      closeOwnerCorrectionModal();
       return;
     }
 
