@@ -535,6 +535,40 @@
         </div>
       </div>
       <div id="worker-cancel-order-list" class="bundle-review-list"></div>
+      <section class="no-inventory-evidence" aria-label="Canceled order evidence photos">
+        <div>
+          <span class="eyebrow">Optional Photos</span>
+          <h3>Cancellation Evidence</h3>
+          <p>Attach photos when the cancellation needs proof or extra context. These photos are saved with the signed audit trail.</p>
+        </div>
+        <div class="no-inventory-camera-row">
+          <label>
+            Camera Station
+            <select id="worker-cancel-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="no-inventory-camera-actions">
+            <button id="refresh-worker-cancel-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-worker-cancel-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+            <label class="secondary-btn folder-photo-picker">
+              Add Photos From Folder
+              <input id="worker-cancel-evidence-file" type="file" accept="image/*" multiple />
+            </label>
+          </div>
+        </div>
+        <p id="worker-cancel-photo-status" class="fulfill-status"></p>
+        <div class="worker-cancel-photo-toolbar no-inventory-photo-toolbar hidden" aria-label="Cancellation evidence photo upload selection">
+          <span id="worker-cancel-photo-selection-summary"></span>
+          <div>
+            <button id="select-all-worker-cancel-photos" type="button" class="secondary-btn">Select All Photos</button>
+            <button id="deselect-all-worker-cancel-photos" type="button" class="secondary-btn">Deselect Photos</button>
+          </div>
+        </div>
+        <div id="worker-cancel-photo-grid" class="no-inventory-photo-grid">
+          <div class="empty-state">No cancellation photos added.</div>
+        </div>
+      </section>
       <label class="modal-field">
         Required Note
         <textarea id="worker-cancel-order-note" rows="3" placeholder="Example: Buyer canceled on eBay / order refunded."></textarea>

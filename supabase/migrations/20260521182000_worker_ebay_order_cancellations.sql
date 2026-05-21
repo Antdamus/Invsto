@@ -5,11 +5,14 @@
 alter table public.ebay_order_admin_events
   add column if not exists checkout_store_id uuid references public.store_locations(id) on delete set null;
 
+drop function if exists public.cancel_ebay_order_lines(uuid[], text, text, uuid);
+
 create or replace function public.cancel_ebay_order_lines(
   _order_line_ids uuid[],
   _notes text,
   _signed_by_email text default null,
-  _checkout_store_id uuid default null
+  _checkout_store_id uuid default null,
+  _evidence_photos jsonb default '[]'::jsonb
 )
 returns table (
   updated_lines integer,
@@ -25,8 +28,14 @@ declare
   v_note text := nullif(btrim(coalesce(_notes, '')), '');
   v_signed_email text := nullif(btrim(coalesce(_signed_by_email, '')), '');
   v_now timestamptz := now();
+  v_evidence_photos jsonb := case
+    when jsonb_typeof(coalesce(_evidence_photos, '[]'::jsonb)) = 'array'
+      then coalesce(_evidence_photos, '[]'::jsonb)
+    else '[]'::jsonb
+  end;
   v_order_ids uuid[] := '{}'::uuid[];
   v_updated_line_ids uuid[] := '{}'::uuid[];
+  v_snapshots jsonb := '[]'::jsonb;
   v_order_id uuid;
   v_order_status text;
   v_store_name text;
@@ -82,6 +91,15 @@ begin
     if not (v_line.order_id = any(v_order_ids)) then
       v_order_ids := array_append(v_order_ids, v_line.order_id);
     end if;
+
+    v_snapshots := v_snapshots || jsonb_build_array(jsonb_build_object(
+      'order_id', v_line.order_id,
+      'order_line_id', v_line.id,
+      'item_title', v_line.item_title,
+      'item_number', v_line.item_number,
+      'custom_label', v_line.custom_label,
+      'quantity', v_line.quantity
+    ));
   end loop;
 
   if v_updated_lines = 0 then
@@ -147,7 +165,10 @@ begin
       'updated_orders', v_updated_orders,
       'cancelled_at', v_now,
       'checkout_store_id', _checkout_store_id,
-      'checkout_store_name', v_store_name
+      'checkout_store_name', v_store_name,
+      'evidence_bucket', 'order-evidence-photos',
+      'evidence_photos', v_evidence_photos,
+      'line_snapshots', v_snapshots
     )
   );
 
@@ -157,5 +178,5 @@ begin
 end;
 $$;
 
-revoke all on function public.cancel_ebay_order_lines(uuid[], text, text, uuid) from public;
-grant execute on function public.cancel_ebay_order_lines(uuid[], text, text, uuid) to authenticated;
+revoke all on function public.cancel_ebay_order_lines(uuid[], text, text, uuid, jsonb) from public;
+grant execute on function public.cancel_ebay_order_lines(uuid[], text, text, uuid, jsonb) to authenticated;

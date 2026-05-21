@@ -36,6 +36,9 @@ const state = {
   noInventoryCaptureBusy: false,
   workerCancelCandidates: [],
   workerCancelLineIds: new Set(),
+  workerCancelEvidencePhotos: [],
+  workerCancelEvidencePhotoUploadKeys: new Set(),
+  workerCancelCaptureBusy: false,
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
@@ -2642,24 +2645,31 @@ function getPreferredNoInventoryCaptureStationHints() {
 }
 
 function renderNoInventoryCaptureStations() {
-  const select = $("no-inventory-capture-station");
-  if (!select) return;
+  const selects = [
+    $("no-inventory-capture-station"),
+    $("worker-cancel-capture-station"),
+  ].filter(Boolean);
+  if (!selects.length) return;
   const stations = state.noInventoryCaptureStations;
 
   if (!stations.length) {
-    select.innerHTML = '<option value="">No active stations</option>';
-    select.disabled = true;
+    selects.forEach((select) => {
+      select.innerHTML = '<option value="">No active stations</option>';
+      select.disabled = true;
+    });
     return;
   }
 
-  select.replaceChildren(new Option("Choose station", ""));
-  stations.forEach((station) => {
-    select.appendChild(new Option(station.name || station.id, station.id));
+  selects.forEach((select) => {
+    select.replaceChildren(new Option("Choose station", ""));
+    stations.forEach((station) => {
+      select.appendChild(new Option(station.name || station.id, station.id));
+    });
+    select.value = stations.some((station) => station.id === state.selectedNoInventoryCaptureStationId)
+      ? state.selectedNoInventoryCaptureStationId
+      : "";
+    select.disabled = false;
   });
-  select.value = stations.some((station) => station.id === state.selectedNoInventoryCaptureStationId)
-    ? state.selectedNoInventoryCaptureStationId
-    : "";
-  select.disabled = false;
 }
 
 function setSelectedNoInventoryCaptureStation(stationId = "") {
@@ -2669,6 +2679,10 @@ function setSelectedNoInventoryCaptureStation(stationId = "") {
   const select = $("no-inventory-capture-station");
   if (select && select.value !== state.selectedNoInventoryCaptureStationId) {
     select.value = state.selectedNoInventoryCaptureStationId;
+  }
+  const cancelSelect = $("worker-cancel-capture-station");
+  if (cancelSelect && cancelSelect.value !== state.selectedNoInventoryCaptureStationId) {
+    cancelSelect.value = state.selectedNoInventoryCaptureStationId;
   }
 
   try {
@@ -2753,9 +2767,10 @@ async function getNoInventoryCaptureJobPhotoCount(jobId) {
   return count || 0;
 }
 
-async function pollNoInventoryCaptureJob(job, station = {}) {
+async function pollNoInventoryCaptureJob(job, station = {}, options = {}) {
   const jobId = job?.id || job;
   const stationName = station.name || "";
+  const statusSetter = options.statusSetter || setNoInventoryPhotoStatus;
   const startedAt = Date.now();
   let lastPhotoCount = 0;
   let lastPhotoChangeAt = startedAt;
@@ -2787,7 +2802,7 @@ async function pollNoInventoryCaptureJob(job, station = {}) {
         : data.status === "uploading"
           ? `Camera is uploading${stationName ? ` on ${stationName}` : ""}...`
           : `Capture status: ${data.status || "waiting"}`;
-    setNoInventoryPhotoStatus(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
+    statusSetter(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
     await delayNoInventoryCapture(NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS);
   }
 
@@ -2848,7 +2863,7 @@ async function noInventoryCaptureRowsToEvidencePhotos(rows) {
 }
 
 function getNoInventoryEvidencePhotoKey(photo) {
-  return `${photo?.bucket || ""}:${photo?.path || ""}`;
+  return photo?.localId || `${photo?.bucket || ""}:${photo?.path || ""}`;
 }
 
 function getSelectedNoInventoryEvidencePhotos() {
@@ -2876,6 +2891,13 @@ function setAllNoInventoryEvidencePhotosSelected(selected) {
 
 function setNoInventoryPhotoStatus(message = "", type = "info") {
   const el = $("no-inventory-photo-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+}
+
+function setWorkerCancelPhotoStatus(message = "", type = "info") {
+  const el = $("worker-cancel-photo-status");
   if (!el) return;
   el.textContent = message;
   el.classList.toggle("is-error", type === "error");
@@ -2910,6 +2932,15 @@ function getNoInventoryEvidenceSourceLabel() {
   );
 }
 
+async function getEvidencePhotoBlob(photo, index = 0) {
+  if ((typeof File !== "undefined" && photo?.file instanceof File) || (typeof Blob !== "undefined" && photo?.file instanceof Blob)) return photo.file;
+  const response = await fetch(photo.previewUrl);
+  if (!response.ok) {
+    throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
+  }
+  return response.blob();
+}
+
 async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
   const selectedPhotos = getSelectedNoInventoryEvidencePhotos();
   if (!selectedPhotos.length) return [];
@@ -2923,12 +2954,7 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
 
   for (let index = 0; index < selectedPhotos.length; index += 1) {
     const photo = selectedPhotos[index];
-    const response = await fetch(photo.previewUrl);
-    if (!response.ok) {
-      throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
-    }
-
-    const blob = await response.blob();
+    const blob = await getEvidencePhotoBlob(photo, index);
     const extension = getNoInventoryEvidenceFileExtension(photo, blob);
     const originalName = safeNoInventoryEvidenceSegment(photo.path.split("/").pop(), `photo-${index + 1}`);
     const destinationPath = [
@@ -3046,6 +3072,241 @@ function closeNoInventoryEvidencePhotoViewer() {
   if (image) image.removeAttribute("src");
   closeModal("no-inventory-photo-viewer-modal");
   setTimeout(() => $("request-no-inventory-photo")?.focus(), 80);
+}
+
+function getSelectedWorkerCancelEvidencePhotos() {
+  return state.workerCancelEvidencePhotos.filter((photo) => (
+    state.workerCancelEvidencePhotoUploadKeys.has(getNoInventoryEvidencePhotoKey(photo))
+  ));
+}
+
+function updateWorkerCancelEvidencePhotoSelectionSummary() {
+  const summary = $("worker-cancel-photo-selection-summary");
+  if (!summary) return;
+  const total = state.workerCancelEvidencePhotos.length;
+  const selected = getSelectedWorkerCancelEvidencePhotos().length;
+  summary.textContent = total
+    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for upload.`
+    : "";
+}
+
+function renderWorkerCancelEvidencePhotos() {
+  const grid = $("worker-cancel-photo-grid");
+  if (!grid) return;
+  const toolbar = document.querySelector(".worker-cancel-photo-toolbar");
+  toolbar?.classList.toggle("hidden", !state.workerCancelEvidencePhotos.length);
+  if (!state.workerCancelEvidencePhotos.length) {
+    grid.innerHTML = `<div class="empty-state">No cancellation photos added.</div>`;
+    updateWorkerCancelEvidencePhotoSelectionSummary();
+    return;
+  }
+
+  grid.innerHTML = state.workerCancelEvidencePhotos.map((photo, index) => {
+    const key = getNoInventoryEvidencePhotoKey(photo);
+    const selected = state.workerCancelEvidencePhotoUploadKeys.has(key);
+    return `
+      <article class="no-inventory-photo-card ${selected ? "is-selected" : ""}">
+        <label class="no-inventory-photo-select">
+          <input
+            type="checkbox"
+            data-worker-cancel-photo-select="${escapeHtml(key)}"
+            ${selected ? "checked" : ""}
+          />
+          <span>Upload</span>
+        </label>
+        <button type="button" data-worker-cancel-photo-index="${index}" title="Open cancellation photo">
+          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}" />
+          <span>${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}</span>
+        </button>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("[data-worker-cancel-photo-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openWorkerCancelEvidencePhotoViewer(Number(button.dataset.workerCancelPhotoIndex || 0));
+    });
+  });
+  grid.querySelectorAll("[data-worker-cancel-photo-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.workerCancelEvidencePhotoUploadKeys.add(checkbox.dataset.workerCancelPhotoSelect);
+      else state.workerCancelEvidencePhotoUploadKeys.delete(checkbox.dataset.workerCancelPhotoSelect);
+      renderWorkerCancelEvidencePhotos();
+    });
+  });
+  updateWorkerCancelEvidencePhotoSelectionSummary();
+}
+
+function setAllWorkerCancelEvidencePhotosSelected(selected) {
+  state.workerCancelEvidencePhotoUploadKeys.clear();
+  if (selected) {
+    state.workerCancelEvidencePhotos.forEach((photo) => {
+      state.workerCancelEvidencePhotoUploadKeys.add(getNoInventoryEvidencePhotoKey(photo));
+    });
+  }
+  renderWorkerCancelEvidencePhotos();
+}
+
+function openWorkerCancelEvidencePhotoViewer(index) {
+  const photo = state.workerCancelEvidencePhotos[index];
+  if (!photo?.previewUrl) return;
+  const image = $("no-inventory-photo-viewer-image");
+  const caption = $("no-inventory-photo-viewer-caption");
+  if (image) {
+    image.src = photo.previewUrl;
+    image.alt = photo.label || `Cancellation photo ${index + 1}`;
+  }
+  if (caption) {
+    caption.textContent = `${photo.label || `Cancellation photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
+  }
+  openModal("no-inventory-photo-viewer-modal");
+  setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
+}
+
+function handleWorkerCancelEvidenceFiles(event) {
+  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  if (!files.length) {
+    setWorkerCancelPhotoStatus("Choose image files to attach.", "error");
+    return;
+  }
+  files.forEach((file, index) => {
+    const localId = `local:${crypto.randomUUID()}`;
+    const photo = {
+      localId,
+      file,
+      bucket: "",
+      path: file.name || `folder-photo-${index + 1}`,
+      previewUrl: URL.createObjectURL(file),
+      thumbnailUrl: "",
+      label: file.name || `Folder photo ${index + 1}`,
+      mime_type: file.type || "image/jpeg",
+      created_at: new Date().toISOString(),
+    };
+    photo.thumbnailUrl = photo.previewUrl;
+    state.workerCancelEvidencePhotos.push(photo);
+    state.workerCancelEvidencePhotoUploadKeys.add(localId);
+  });
+  renderWorkerCancelEvidencePhotos();
+  setWorkerCancelPhotoStatus(`${files.length} folder photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
+  if (event.target) event.target.value = "";
+}
+
+async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
+  const selectedPhotos = getSelectedWorkerCancelEvidencePhotos();
+  if (!selectedPhotos.length) return [];
+
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderLabel = getNoInventoryEvidenceSourceLabel();
+  const selectedSuffix = selectedLineIds.length === 1
+    ? safeNoInventoryEvidenceSegment(selectedLineIds[0], "line")
+    : `${selectedLineIds.length}-lines`;
+  const savedPhotos = [];
+
+  for (let index = 0; index < selectedPhotos.length; index += 1) {
+    const photo = selectedPhotos[index];
+    const blob = await getEvidencePhotoBlob(photo, index);
+    const extension = getNoInventoryEvidenceFileExtension(photo, blob);
+    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `cancel-photo-${index + 1}`);
+    const destinationPath = [
+      "pending-order-cancellations",
+      dateFolder,
+      orderLabel,
+      `${Date.now()}-${crypto.randomUUID()}-${selectedSuffix}-${originalName}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(destinationPath, blob, {
+        contentType: blob.type || photo.mime_type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (error) throw new Error(error.message || `Could not save cancellation photo ${index + 1}.`);
+
+    savedPhotos.push({
+      bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: photo.bucket || null,
+      source_path: photo.path || null,
+      capture_job_id: photo.capture_job_id || null,
+      sort_order: index,
+      label: photo.label || `Cancellation photo ${index + 1}`,
+      mime_type: blob.type || photo.mime_type || null,
+      size_bytes: blob.size || photo.size_bytes || 0,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  return savedPhotos;
+}
+
+async function requestWorkerCancelEvidencePhoto() {
+  if (state.workerCancelCaptureBusy) return;
+  try {
+    state.workerCancelCaptureBusy = true;
+    $("request-worker-cancel-photo")?.toggleAttribute("disabled", true);
+
+    if (!state.noInventoryCaptureStations.length) {
+      await loadNoInventoryCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedNoInventoryCaptureStation();
+    if (!station) {
+      setWorkerCancelPhotoStatus("Choose a camera station before taking cancellation photos.", "error");
+      $("worker-cancel-capture-station")?.focus();
+      return;
+    }
+
+    setWorkerCancelPhotoStatus(`Sending camera request to ${station.name || "selected station"}...`, "info");
+    const job = await createNoInventoryCaptureJob(station.id);
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "pending-order-cancelled",
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+        orderLineIds: [...state.workerCancelLineIds],
+      },
+    }));
+
+    const completedJob = await pollNoInventoryCaptureJob(job, station, { statusSetter: setWorkerCancelPhotoStatus });
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || "Camera capture failed.");
+    }
+
+    let photoRows = await loadNoInventoryCaptureJobPhotos(completedJob.id);
+    if (!photoRows.length && completedJob.storage_bucket && completedJob.storage_path) {
+      photoRows = [{
+        id: completedJob.id,
+        capture_job_id: completedJob.id,
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        mime_type: completedJob.mime_type || "image/jpeg",
+        label: "Cancellation photo",
+        created_at: completedJob.capture_completed_at || completedJob.upload_completed_at || new Date().toISOString(),
+      }];
+    }
+    if (!photoRows.length) throw new Error("Camera finished but no photos were attached.");
+
+    const photos = await noInventoryCaptureRowsToEvidencePhotos(photoRows);
+    const existing = new Set(state.workerCancelEvidencePhotos.map((photo) => `${photo.bucket}:${photo.path}`));
+    photos.forEach((photo) => {
+      const key = getNoInventoryEvidencePhotoKey(photo);
+      if (!existing.has(`${photo.bucket}:${photo.path}`)) {
+        state.workerCancelEvidencePhotos.push(photo);
+        state.workerCancelEvidencePhotoUploadKeys.add(key);
+      }
+    });
+    renderWorkerCancelEvidencePhotos();
+    setWorkerCancelPhotoStatus(`${photos.length} cancellation photo${photos.length === 1 ? "" : "s"} added and selected.`, "info");
+  } catch (error) {
+    console.error("Cancellation evidence photo capture failed:", error);
+    setWorkerCancelPhotoStatus(error?.message || "Could not take cancellation photo.", "error");
+  } finally {
+    state.workerCancelCaptureBusy = false;
+    $("request-worker-cancel-photo")?.toggleAttribute("disabled", false);
+  }
 }
 
 async function requestNoInventoryEvidencePhoto() {
@@ -3413,11 +3674,18 @@ function renderWorkerCancelOrderList() {
 }
 
 function closeWorkerCancelOrderModal() {
+  state.workerCancelEvidencePhotos.forEach((photo) => {
+    if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+  });
   state.workerCancelCandidates = [];
   state.workerCancelLineIds = new Set();
+  state.workerCancelEvidencePhotos = [];
+  state.workerCancelEvidencePhotoUploadKeys.clear();
   $("worker-cancel-order-note").value = "";
   $("worker-cancel-order-password").value = "";
   $("worker-cancel-order-error").textContent = "";
+  setWorkerCancelPhotoStatus("");
+  renderWorkerCancelEvidencePhotos();
   closeModal("worker-cancel-order-modal");
 }
 
@@ -3441,15 +3709,27 @@ function openWorkerCancelOrderModal() {
   const order = line.order || {};
   state.workerCancelCandidates = candidates;
   state.workerCancelLineIds = new Set(candidates.map((entry) => entry.id));
+  state.workerCancelEvidencePhotos.forEach((photo) => {
+    if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+  });
+  state.workerCancelEvidencePhotos = [];
+  state.workerCancelEvidencePhotoUploadKeys.clear();
   $("worker-cancel-order-title").textContent = `Mark ${order.order_number || "this order"} canceled?`;
   $("worker-cancel-order-subtitle").textContent =
     `This closes ${candidates.length} open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
   $("worker-cancel-order-note").value = "";
   $("worker-cancel-order-password").value = "";
   $("worker-cancel-order-error").textContent = "";
+  setWorkerCancelPhotoStatus("");
   renderWorkerCancelOrderList();
+  renderWorkerCancelEvidencePhotos();
   openModal("worker-cancel-order-modal");
   setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
+
+  loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not load cancellation capture stations:", error);
+    setWorkerCancelPhotoStatus(error?.message || "Could not load capture stations.", "error");
+  });
 }
 
 async function confirmWorkerCancelOrder() {
@@ -3489,11 +3769,23 @@ async function confirmWorkerCancelOrder() {
     const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
+    const selectedPhotoCount = getSelectedWorkerCancelEvidencePhotos().length;
+    setWorkerCancelPhotoStatus(
+      selectedPhotoCount
+        ? "Saving selected cancellation photos into the order evidence repository..."
+        : state.workerCancelEvidencePhotos.length
+          ? "No cancellation photos selected for upload; signing cancellation without photo proof."
+          : "",
+      "info"
+    );
+    const savedEvidencePhotos = await persistWorkerCancelEvidencePhotos(selectedLineIds);
+
     const { data, error } = await supabase.rpc("cancel_ebay_order_lines", {
       _order_line_ids: selectedLineIds,
       _notes: note,
       _signed_by_email: state.user.email,
       _checkout_store_id: state.checkoutStoreId || null,
+      _evidence_photos: savedEvidencePhotos,
     });
     if (error) throw error;
 
@@ -4509,6 +4801,18 @@ function setupListeners() {
   $("close-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
   $("select-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(true));
   $("deselect-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(false));
+  $("worker-cancel-capture-station")?.addEventListener("change", (event) => {
+    setSelectedNoInventoryCaptureStation(event.target.value);
+  });
+  $("refresh-worker-cancel-stations")?.addEventListener("click", () => {
+    loadNoInventoryCaptureStations().then(() => {
+      setWorkerCancelPhotoStatus("Camera stations refreshed.", "info");
+    }).catch((error) => setWorkerCancelPhotoStatus(error?.message || "Could not refresh stations.", "error"));
+  });
+  $("request-worker-cancel-photo")?.addEventListener("click", requestWorkerCancelEvidencePhoto);
+  $("worker-cancel-evidence-file")?.addEventListener("change", handleWorkerCancelEvidenceFiles);
+  $("select-all-worker-cancel-photos")?.addEventListener("click", () => setAllWorkerCancelEvidencePhotosSelected(true));
+  $("deselect-all-worker-cancel-photos")?.addEventListener("click", () => setAllWorkerCancelEvidencePhotosSelected(false));
   $("select-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(true));
   $("deselect-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(false));
   $("no-inventory-capture-station")?.addEventListener("change", (event) => {
