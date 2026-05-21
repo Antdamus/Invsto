@@ -197,6 +197,21 @@ body.live-label-step #current-lot-card {
   font-weight: 800;
 }
 
+.live-panel label small {
+  color: var(--live-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.session-start-auction-field {
+  grid-column: 1 / -1;
+}
+
+.session-start-auction-field input {
+  max-width: 280px;
+}
+
 .live-panel input,
 .live-panel select,
 .live-panel textarea {
@@ -368,6 +383,53 @@ body.live-label-step #current-lot-card {
   color: var(--live-gold);
 }
 
+.manual-live-item-box {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 14px;
+  border: 1px solid rgba(167, 139, 250, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.manual-live-item-head,
+.manual-live-item-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.manual-live-item-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.manual-live-item-head strong {
+  display: block;
+  color: var(--live-text);
+  font-size: 1.05rem;
+}
+
+.manual-live-item-head > span {
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  border-radius: 999px;
+  color: #ddd6fe;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.manual-live-item-grid {
+  grid-template-columns: minmax(0, 1fr) 110px;
+}
+
+.manual-live-item-add {
+  justify-self: start;
+}
+
 .primary-btn,
 .secondary-btn {
   display: inline-flex;
@@ -479,6 +541,20 @@ body.live-label-step #current-lot-card {
   border-color: rgba(96, 165, 250, 0.3);
   background: rgba(96, 165, 250, 0.12);
   color: #bfdbfe;
+}
+
+.source-kind-badge.is-manual {
+  border-color: rgba(167, 139, 250, 0.34);
+  background: rgba(167, 139, 250, 0.14);
+  color: #ddd6fe;
+}
+
+.manifest-item.is-manual,
+.bag-detail-item.is-manual {
+  border-color: rgba(167, 139, 250, 0.24);
+  background:
+    linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.035);
 }
 
 .session-btn small,
@@ -1487,8 +1563,14 @@ body.live-label-step #current-lot-card {
 
   .form-grid,
   .scan-row,
+  .manual-live-item-head,
+  .manual-live-item-grid,
   .edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .manual-live-item-add {
+    width: 100%;
   }
 
   .manifest-item {

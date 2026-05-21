@@ -31,6 +31,7 @@ const state = {
   editReplacementItem: null,
   editSourceRows: [],
   editSelectedSourceRow: null,
+  pendingStartAuctionNumber: "",
   busy: false,
 };
 
@@ -108,6 +109,7 @@ function getSourceRole(source = {}) {
 }
 
 function getSourceKindLabel(source = {}) {
+  if (source?.location_role === "manual" || source?.type === "manual") return "Manual";
   const role = getSourceRole(source);
   if (role === "tray") return "Tray";
   if (role === "container") return "Storage Container";
@@ -115,10 +117,41 @@ function getSourceKindLabel(source = {}) {
 }
 
 function getSourceKindClass(source = {}) {
+  if (source?.location_role === "manual" || source?.type === "manual") return "is-manual";
   const role = getSourceRole(source);
   if (role === "tray") return "is-tray";
   if (role === "container") return "is-container";
   return "is-storage";
+}
+
+function normalizeManualLiveSaleItem(row = {}) {
+  const category = String(row.item_category || "General").trim() || "General";
+  const description = String(row.item_description || "").trim();
+  return {
+    ...row,
+    is_manual: true,
+    item_id: null,
+    source_stock_location_row_id: null,
+    source_location_id: null,
+    scanned_at: row.created_at,
+    scanned_by: row.created_by,
+    scanned_by_email: row.created_by_email,
+    item: {
+      id: "",
+      title: description || category,
+      description,
+      barcode: "Manual",
+      photos: [],
+      photo_url: "",
+    },
+    source_location: {
+      id: "",
+      location_name: "Manual entry",
+      location_code: "",
+      location_role: "manual",
+      type: "manual",
+    },
+  };
 }
 
 function formatSessionTitleDate(value = new Date()) {
@@ -133,7 +166,9 @@ function getLiveSalesStoreStorageKey() {
 }
 
 function getAuctionNumberStorageKey() {
-  return `og-live-sales-last-auction:${state.user?.id || "anonymous"}:${state.currentSession?.store_id || "no-store"}`;
+  const selectedStoreId = $("session-store-select")?.value || "";
+  const storeId = state.currentSession?.store_id || selectedStoreId || readSavedStoreId() || "no-store";
+  return `og-live-sales-last-auction:${state.user?.id || "anonymous"}:${storeId}`;
 }
 
 function readSavedStoreId() {
@@ -179,6 +214,21 @@ function incrementAuctionNumber(value) {
   const [, prefix, digits] = match;
   const nextNumber = String(Number(digits) + 1).padStart(digits.length, "0");
   return `${prefix}${nextNumber}`;
+}
+
+function getSuggestedStartingAuctionNumber() {
+  return incrementAuctionNumber(readLastAuctionNumber());
+}
+
+function syncStartingAuctionSuggestion({ force = false } = {}) {
+  const input = $("session-start-auction-number");
+  if (!input || state.currentSession) return;
+
+  const shouldUpdate = force || input.dataset.autoAuctionStart !== "false" || !input.value.trim();
+  if (!shouldUpdate) return;
+
+  input.value = getSuggestedStartingAuctionNumber();
+  input.dataset.autoAuctionStart = "true";
 }
 
 function setFlowStep(step) {
@@ -307,6 +357,7 @@ function renderStoreSelect() {
   else if (saved && state.stores.some((store) => store.id === saved)) select.value = saved;
   else if (state.stores.length === 1) select.value = state.stores[0].id;
   select.disabled = false;
+  syncStartingAuctionSuggestion();
 }
 
 async function loadSessions({ keepSelection = true } = {}) {
@@ -426,6 +477,10 @@ function updateScanGate() {
   );
   $("item-scan")?.toggleAttribute("disabled", !enabled);
   $("scan-item")?.toggleAttribute("disabled", !enabled);
+  $("manual-live-item-category")?.toggleAttribute("disabled", !enabled);
+  $("manual-live-item-quantity")?.toggleAttribute("disabled", !enabled);
+  $("manual-live-item-description")?.toggleAttribute("disabled", !enabled);
+  $("add-manual-live-item")?.toggleAttribute("disabled", !enabled || state.busy);
   $("generate-live-label")?.toggleAttribute("disabled", !state.currentLot || !getManifestGroups().length);
   $("cancel-lot")?.toggleAttribute("disabled", !state.currentLot || state.currentLot.status === "packed");
   $("open-bag-history")?.toggleAttribute("disabled", !state.currentSession || state.busy);
@@ -555,22 +610,32 @@ async function loadLotItems() {
     return;
   }
 
-  const { data, error } = await supabase
-    .from("live_sale_lot_items")
-    .select(`
-      *,
-      item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
-      source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
-    `)
-    .eq("lot_id", state.currentLot.id)
-    .order("scanned_at", { ascending: true });
+  const [inventoryResult, manualResult] = await Promise.all([
+    supabase
+      .from("live_sale_lot_items")
+      .select(`
+        *,
+        item:item_id(id,title,description,barcode,weight,sale_price,photos,photo_url),
+        source_location:source_location_id(id,location_name,location_code,store_id,tray_current_store_id,is_tray,location_role,type,parent_location_id)
+      `)
+      .eq("lot_id", state.currentLot.id)
+      .order("scanned_at", { ascending: true }),
+    supabase
+      .from("live_sale_manual_lot_items")
+      .select("*")
+      .eq("lot_id", state.currentLot.id)
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (error) {
-    console.warn("Live sale lot items failed to load:", error);
+  if (inventoryResult.error || manualResult.error) {
+    console.warn("Live sale lot items failed to load:", inventoryResult.error || manualResult.error);
     state.lotItems = [];
     state.lotSourceAvailability = new Map();
   } else {
-    state.lotItems = data || [];
+    state.lotItems = [
+      ...(inventoryResult.data || []),
+      ...(manualResult.data || []).map(normalizeManualLiveSaleItem),
+    ].sort((a, b) => new Date(a.scanned_at || a.created_at || 0) - new Date(b.scanned_at || b.created_at || 0));
     await loadLotSourceAvailability();
   }
 
@@ -684,9 +749,9 @@ function renderManifest() {
     const maxQuantity = Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0));
     const canIncrease = Number(group.quantity || 0) < maxQuantity;
     const article = document.createElement("article");
-    article.className = "manifest-item";
+    article.className = `manifest-item${group.isManual ? " is-manual" : ""}`;
     article.innerHTML = `
-      <div class="manifest-thumb"><span>No photo</span></div>
+      <div class="manifest-thumb"><span>${group.isManual ? "Manual" : "No photo"}</span></div>
       <div class="manifest-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${renderManifestSourceSummary(group)}</span>
@@ -699,8 +764,8 @@ function renderManifest() {
           <input class="manifest-qty-input" data-manifest-qty-input data-group-key="${escapeHtml(group.key)}" type="number" min="0" max="${maxQuantity}" step="1" value="${Number(group.quantity || 0)}" title="Maximum available for the selected source(s): ${maxQuantity}" />
           <button type="button" class="tiny-btn" data-qty-action="increase" data-group-key="${escapeHtml(group.key)}" ${canIncrease ? "" : "disabled"}>+</button>
         </div>
-        <small class="manifest-max-note">Max ${maxQuantity.toLocaleString()}</small>
-        <button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>
+        <small class="manifest-max-note">${group.isManual ? "Counts only" : `Max ${maxQuantity.toLocaleString()}`}</small>
+        ${group.isManual ? "" : `<button type="button" class="tiny-btn" data-edit-group="${escapeHtml(group.key)}">Edit</button>`}
         <button type="button" class="tiny-btn" data-release-group="${escapeHtml(group.key)}">Release</button>
       </div>
     `;
@@ -774,6 +839,46 @@ function getManifestGroups() {
   state.lotItems
     .filter((entry) => entry.status === "reserved")
     .forEach((entry) => {
+      if (entry.is_manual) {
+        const category = String(entry.item_category || "General").trim() || "General";
+        const description = String(entry.item_description || "").trim();
+        const key = `manual:${category.toLowerCase()}::${description.toLowerCase()}`;
+        const quantity = Number(entry.quantity || 0);
+        const elapsed = Number(entry.show_elapsed_seconds ?? 0);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            itemId: "",
+            isManual: true,
+            manualCategory: category,
+            manualDescription: description,
+            item: entry.item || { title: description || category, barcode: "Manual" },
+            quantity: 0,
+            showElapsedSeconds: elapsed,
+            lastShowElapsedSeconds: elapsed,
+            sourcesByKey: new Map(),
+          });
+        }
+        const group = groups.get(key);
+        group.quantity += quantity;
+        group.showElapsedSeconds = Math.min(Number(group.showElapsedSeconds ?? elapsed), elapsed);
+        group.lastShowElapsedSeconds = Math.max(Number(group.lastShowElapsedSeconds ?? elapsed), elapsed);
+        if (!group.sourcesByKey.has("manual")) {
+          group.sourcesByKey.set("manual", {
+            key: "manual",
+            sourceStockLocationRowId: "",
+            sourceLocation: entry.source_location || {},
+            quantity: 0,
+            showElapsedSeconds: elapsed,
+            lastShowElapsedSeconds: elapsed,
+            maxQuantity: 9999,
+            availableExtra: 9999,
+          });
+        }
+        const source = group.sourcesByKey.get("manual");
+        source.quantity += quantity;
+        return;
+      }
       const itemId = entry.item_id || entry.item?.id || "";
       const sourceRowId = entry.source_stock_location_row_id || "";
       const sourceKey = sourceRowId || entry.source_location_id || "unknown";
@@ -854,6 +959,10 @@ function getSourceLocationLabel(source = {}) {
 }
 
 function renderManifestSourceSummary(group) {
+  if (group?.isManual) {
+    const description = group.manualDescription ? ` - ${group.manualDescription}` : "";
+    return `<b class="source-kind-badge is-manual">Manual</b> ${escapeHtml(group.manualCategory || "General")}${escapeHtml(description)}`;
+  }
   const sources = group.sources || [];
   const item = group.item || {};
   if (sources.length <= 1) {
@@ -867,6 +976,7 @@ function renderManifestSourceSummary(group) {
 }
 
 function renderManifestSourceBreakdown(group, { showMax = true } = {}) {
+  if (group?.isManual) return "";
   const sources = group.sources || [];
   if (sources.length <= 1) return "";
   return `
@@ -1307,7 +1417,7 @@ async function applyEditBagCorrection() {
     } else {
       const changed = await saveManifestGroupQuantity(group, quantity, `Live bag correction: ${reason}`, lot);
       if (changed) {
-        await bumpInventoryVersion(group.itemId ? [group.itemId] : []);
+        if (group.itemId) await bumpInventoryVersion([group.itemId]);
         await recordLiveBagCorrectionEvent({
           action: "quantity_correction",
           reason,
@@ -1359,6 +1469,49 @@ function getBagHistoryItemsForLot(lotId) {
 function getBagHistoryGroups(lotId) {
   const groups = new Map();
   getBagHistoryItemsForLot(lotId).forEach((entry) => {
+    if (entry.is_manual) {
+      const category = String(entry.item_category || "General").trim() || "General";
+      const description = String(entry.item_description || "").trim();
+      const status = entry.status || "reserved";
+      const key = `manual:${category.toLowerCase()}::${description.toLowerCase()}::${status}`;
+      const quantity = Number(entry.quantity || 0);
+      const elapsed = Number(entry.show_elapsed_seconds ?? 0);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          itemId: "",
+          isManual: true,
+          manualCategory: category,
+          manualDescription: description,
+          item: entry.item || { title: description || category, barcode: "Manual" },
+          status,
+          quantity: 0,
+          showElapsedSeconds: elapsed,
+          lastShowElapsedSeconds: elapsed,
+          scannedAt: entry.scanned_at,
+          sourcesByKey: new Map(),
+        });
+      }
+      const group = groups.get(key);
+      group.quantity += quantity;
+      group.showElapsedSeconds = Math.min(Number(group.showElapsedSeconds ?? elapsed), elapsed);
+      group.lastShowElapsedSeconds = Math.max(Number(group.lastShowElapsedSeconds ?? elapsed), elapsed);
+      if (!group.sourcesByKey.has("manual")) {
+        group.sourcesByKey.set("manual", {
+          key: "manual",
+          sourceStockLocationRowId: "",
+          sourceLocation: entry.source_location || {},
+          quantity: 0,
+          showElapsedSeconds: elapsed,
+          lastShowElapsedSeconds: elapsed,
+          maxQuantity: 0,
+        });
+      }
+      const source = group.sourcesByKey.get("manual");
+      source.quantity += quantity;
+      source.maxQuantity = source.quantity;
+      return;
+    }
     const itemId = entry.item_id || entry.item?.id || "";
     const sourceRowId = entry.source_stock_location_row_id || "";
     const sourceKey = sourceRowId || entry.source_location_id || "unknown";
@@ -1439,6 +1592,8 @@ function lotMatchesBagHistorySearch(lot, term) {
     ...getBagHistoryItemsForLot(lot.id).flatMap((entry) => [
       entry.item?.title,
       entry.item?.barcode,
+      entry.item_category,
+      entry.item_description,
       entry.source_location?.location_name,
       entry.source_location?.location_code,
       entry.status,
@@ -1568,11 +1723,11 @@ function renderBagHistoryDetail() {
 
   groups.forEach((group) => {
     const item = group.item || {};
-    const canEditGroup = group.status === "reserved" && ["open", "reserved", "released"].includes(String(lot.status || ""));
+    const canEditGroup = !group.isManual && group.status === "reserved" && ["open", "reserved", "released"].includes(String(lot.status || ""));
     const row = document.createElement("article");
-    row.className = "bag-detail-item";
+    row.className = `bag-detail-item${group.isManual ? " is-manual" : ""}`;
     row.innerHTML = `
-      <div class="bag-detail-thumb"><span>No photo</span></div>
+      <div class="bag-detail-thumb"><span>${group.isManual ? "Manual" : "No photo"}</span></div>
       <div class="bag-detail-copy">
         <strong>${escapeHtml(item.title || "Untitled item")}</strong>
         <span>${renderManifestSourceSummary(group)}</span>
@@ -1610,7 +1765,7 @@ async function loadBagHistory() {
   renderBagHistory();
 
   try {
-    const [lotsResult, itemsResult] = await Promise.all([
+    const [lotsResult, itemsResult, manualItemsResult] = await Promise.all([
       supabase
         .from("live_sale_lots")
         .select("*")
@@ -1625,13 +1780,22 @@ async function loadBagHistory() {
         `)
         .eq("session_id", state.currentSession.id)
         .order("scanned_at", { ascending: true }),
+      supabase
+        .from("live_sale_manual_lot_items")
+        .select("*")
+        .eq("session_id", state.currentSession.id)
+        .order("created_at", { ascending: true }),
     ]);
 
     if (lotsResult.error) throw lotsResult.error;
     if (itemsResult.error) throw itemsResult.error;
+    if (manualItemsResult.error) throw manualItemsResult.error;
 
     state.bagHistoryLots = lotsResult.data || [];
-    state.bagHistoryItems = itemsResult.data || [];
+    state.bagHistoryItems = [
+      ...(itemsResult.data || []),
+      ...(manualItemsResult.data || []).map(normalizeManualLiveSaleItem),
+    ].sort((a, b) => new Date(a.scanned_at || a.created_at || 0) - new Date(b.scanned_at || b.created_at || 0));
     if (
       state.currentLot?.id
       && state.bagHistoryLots.some((lot) => String(lot.id) === String(state.currentLot.id))
@@ -1761,6 +1925,8 @@ async function startSession() {
     if (titleInput) titleInput.value = title;
   }
   const notes = $("session-notes")?.value?.trim() || null;
+  const startAuctionInput = $("session-start-auction-number");
+  const startAuctionNumber = startAuctionInput?.value?.trim() || "";
 
   if (!storeId) {
     setStatus("Select the store where the live sale is happening.", "error");
@@ -1768,8 +1934,15 @@ async function startSession() {
     return;
   }
 
+  if (!startAuctionNumber) {
+    setStatus("Enter the auction number where this live session should start.", "error");
+    startAuctionInput?.focus();
+    return;
+  }
+
   try {
     saveStoreId(storeId);
+    state.pendingStartAuctionNumber = startAuctionNumber;
     state.busy = true;
     setStatus("Starting live sale session...");
     const { data, error } = await supabase.rpc("start_live_sale_session", {
@@ -1784,9 +1957,10 @@ async function startSession() {
     await loadSessions({ keepSelection: true });
     state.busy = false;
     await prepareNextBag();
-    setStatus("Show session started. Scan the first item into the current bag.", "success");
+    setStatus(`Show session started at auction ${startAuctionNumber}. Scan the first item into the current bag.`, "success");
   } catch (error) {
     console.error("Start live sale session failed:", error);
+    state.pendingStartAuctionNumber = "";
     setStatus(error.message || "Could not start the live sale session.", "error");
   } finally {
     state.busy = false;
@@ -1970,9 +2144,11 @@ async function createOrLoadLot(options = {}) {
     setFlowStep("scan");
     if (!options.silent) setStatus("Bag is ready. Scan the first item barcode.", "success");
     if (options.focusScan !== false) setTimeout(() => focusItemScanner(), 80);
+    return state.currentLot;
   } catch (error) {
     console.error("Create live sale lot failed:", error);
     setStatus(error.message || "Could not create the auction bag.", "error");
+    return null;
   } finally {
     state.busy = false;
   }
@@ -2034,11 +2210,19 @@ async function prepareNextBag() {
     return;
   }
 
-  const nextAuctionNumber = await getNextAuctionNumber();
+  const usePendingStart = Boolean(state.pendingStartAuctionNumber);
+  const nextAuctionNumber = usePendingStart
+    ? state.pendingStartAuctionNumber
+    : await getNextAuctionNumber();
   if ($("auction-number")) $("auction-number").value = nextAuctionNumber;
   if ($("label-free-text")) $("label-free-text").value = nextAuctionNumber;
-  await createOrLoadLot({ auctionNumber: nextAuctionNumber, silent: true, focusScan: true });
-  setStatus(`Bag ${nextAuctionNumber} is ready. Scan items, press Space for the next scan, or press Enter on an empty scanner to print.`, "success");
+  const createdLot = await createOrLoadLot({ auctionNumber: nextAuctionNumber, silent: true, focusScan: true });
+  if (createdLot && usePendingStart) {
+    state.pendingStartAuctionNumber = "";
+  }
+  if (createdLot) {
+    setStatus(`Bag ${nextAuctionNumber} is ready. Scan items, press Space for the next scan, or press Enter on an empty scanner to print.`, "success");
+  }
 }
 
 async function findRecoverableCurrentLot() {
@@ -2449,6 +2633,47 @@ function clearScan() {
   updateScanGate();
 }
 
+async function addManualLiveSaleItem() {
+  if (state.busy) return;
+  if (!state.currentLot) {
+    setStatus("Create or load an auction bag before adding a general item.", "error");
+    return;
+  }
+
+  const category = String($("manual-live-item-category")?.value || "Other").trim() || "Other";
+  const description = String($("manual-live-item-description")?.value || "").trim();
+  const quantity = Math.max(1, parseInt(String($("manual-live-item-quantity")?.value || "1"), 10) || 1);
+
+  try {
+    state.busy = true;
+    updateScanGate();
+    setStatus("Adding general item to this auction bag...");
+    const { error } = await supabase.rpc("add_live_sale_manual_lot_item", {
+      _lot_id: state.currentLot.id,
+      _category: category,
+      _description: description || null,
+      _quantity: quantity,
+      _signed_by_email: state.user?.email || null,
+      _notes: "Added from live sale manual item control",
+    });
+    if (error) throw error;
+
+    if ($("manual-live-item-description")) $("manual-live-item-description").value = "";
+    if ($("manual-live-item-quantity")) $("manual-live-item-quantity").value = "1";
+    await reloadCurrentLot();
+    await loadLotItems();
+    setFlowStep("scan");
+    setStatus(`Added ${quantity.toLocaleString()} ${category.toLowerCase()}${quantity === 1 ? "" : "s"} to this bag.`, "success");
+    setTimeout(() => focusItemScanner(), 80);
+  } catch (error) {
+    console.error("Add manual live sale item failed:", error);
+    setStatus(error.message || "Could not add that general item.", "error");
+  } finally {
+    state.busy = false;
+    updateScanGate();
+  }
+}
+
 async function releaseManifestGroup(group) {
   if (!group) return;
   const ok = window.confirm("Release this item from the auction bag reservation?");
@@ -2460,6 +2685,19 @@ async function saveManifestGroupQuantity(group, quantity, note = "Updated quanti
   if (!group) return false;
   if (!lot?.id) throw new Error("Auction bag was not found.");
   const nextQuantity = Math.max(0, parseInt(String(quantity), 10) || 0);
+  if (group.isManual) {
+    if (nextQuantity === Number(group.quantity || 0)) return false;
+    const { error } = await supabase.rpc("set_live_sale_manual_lot_item_group_quantity", {
+      _lot_id: lot.id,
+      _category: group.manualCategory || "General",
+      _description: group.manualDescription || null,
+      _quantity: nextQuantity,
+      _signed_by_email: state.user?.email || null,
+      _notes: note,
+    });
+    if (error) throw error;
+    return true;
+  }
   const maxQuantity = Math.max(Number(group.maxQuantity || 0), Number(group.quantity || 0));
   if (nextQuantity > maxQuantity) {
     throw new Error(`Only ${maxQuantity.toLocaleString()} unit(s) are available for this item in the selected source(s).`);
@@ -2501,7 +2739,7 @@ async function setManifestGroupQuantity(group, quantity, note = "Updated quantit
       setTimeout(() => focusItemScanner(), 80);
       return;
     }
-    await bumpInventoryVersion(group.itemId ? [group.itemId] : []);
+    if (group.itemId) await bumpInventoryVersion([group.itemId]);
     await reloadCurrentLot();
     await loadLotItems();
     setStatus(nextQuantity > 0 ? "Quantity updated. Scanner is ready." : "Item released from this bag.", "success");
@@ -2773,8 +3011,8 @@ function finishBagScanning() {
     setStatus("Start a bag before confirming an auction number.", "error");
     return;
   }
-  if (!state.lotItems.length) {
-    setStatus("Scan at least one item before printing the auction bag label.", "error");
+  if (!getManifestGroups().length) {
+    setStatus("Scan at least one item or add one general item before printing the auction bag label.", "error");
     focusItemScanner();
     return;
   }
@@ -2845,9 +3083,13 @@ function scheduleItemSearch() {
 function setupListeners() {
   $("session-store-select")?.addEventListener("change", (event) => {
     saveStoreId(event.target.value || "");
+    syncStartingAuctionSuggestion();
   });
   $("session-title")?.addEventListener("input", (event) => {
     event.target.dataset.autoTitle = "false";
+  });
+  $("session-start-auction-number")?.addEventListener("input", (event) => {
+    event.target.dataset.autoAuctionStart = event.target.value.trim() ? "false" : "true";
   });
   $("refresh-live-sales")?.addEventListener("click", async () => {
     await loadStores();
@@ -2890,6 +3132,15 @@ function setupListeners() {
   $("create-lot")?.addEventListener("click", () => createOrLoadLot());
   $("generate-live-label")?.addEventListener("click", finalizeCurrentBag);
   $("scan-item")?.addEventListener("click", findItemForScan);
+  $("add-manual-live-item")?.addEventListener("click", addManualLiveSaleItem);
+  ["manual-live-item-category", "manual-live-item-quantity", "manual-live-item-description"].forEach((id) => {
+    $(id)?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addManualLiveSaleItem();
+      }
+    });
+  });
   $("clear-scan")?.addEventListener("click", () => {
     clearScan();
     setStatus("");

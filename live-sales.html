@@ -134,6 +134,11 @@
                 Session Title
                 <input id="session-title" type="text" placeholder="Friday live show" />
               </label>
+              <label class="session-start-auction-field">
+                Start Auction #
+                <input id="session-start-auction-number" type="text" placeholder="Example: 001 or 400" inputmode="numeric" autocomplete="off" />
+                <small>First bag in this live session will use this auction number.</small>
+              </label>
             </div>
             <textarea id="session-notes" rows="2" placeholder="Optional show notes"></textarea>
             <div class="button-row">
@@ -201,6 +206,38 @@
               <input id="item-scan" type="search" placeholder="Scan item barcode" autocomplete="off" disabled />
               <button id="scan-item" type="button" class="secondary-btn" disabled>Scan</button>
             </div>
+            <section class="manual-live-item-box" aria-label="Add general non-inventory item">
+              <div class="manual-live-item-head">
+                <div>
+                  <span class="eyebrow">No Inventory Item</span>
+                  <strong>Add General Item</strong>
+                </div>
+                <span>Counts only</span>
+              </div>
+              <div class="manual-live-item-grid">
+                <label>
+                  Type
+                  <select id="manual-live-item-category" disabled>
+                    <option value="Pendant">Pendant</option>
+                    <option value="Watch">Watch</option>
+                    <option value="Bracelet">Bracelet</option>
+                    <option value="Earring">Earring</option>
+                    <option value="Ring">Ring</option>
+                    <option value="Chain">Chain</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+                <label>
+                  Qty
+                  <input id="manual-live-item-quantity" type="number" min="1" step="1" value="1" disabled />
+                </label>
+              </div>
+              <label>
+                Short description
+                <input id="manual-live-item-description" type="text" placeholder="Example: small silver pendant, no barcode yet" autocomplete="off" disabled />
+              </label>
+              <button id="add-manual-live-item" type="button" class="secondary-btn manual-live-item-add" disabled>Add General Item</button>
+            </section>
             <div id="item-match-card" class="match-card empty">Scan an item after a bag is selected.</div>
             <div id="source-results" class="source-results"></div>
             <div class="button-row">
