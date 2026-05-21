@@ -31,6 +31,7 @@ const state = {
   queuedHistoryReturnTransfers: [],
   handledReturnTransferIds: new Set(),
   processingReturnTransferIds: new Set(),
+  lastReturnImportSummary: null,
   awaitingLabelGroup: null,
   queuedHistoryLabelTransfers: [],
   pendingHistoryLabelReplacement: null,
@@ -138,6 +139,11 @@ function formatMoney(value) {
   return number.toLocaleString(undefined, { style: "currency", currency: "USD" });
 }
 
+function parseMoney(value) {
+  const number = Number(String(value || "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(number) ? number : 0;
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -147,6 +153,17 @@ function formatDateTime(value) {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+  });
+}
+
+function formatDateOnly(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
@@ -1106,7 +1123,10 @@ function renderReturnQueue() {
     const pending = !["resolved", "cancelled"].includes(task.status);
     const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
     const lineIds = getReturnTaskLineIds(task);
-    const dueText = task.due_at ? formatDateTime(task.due_at) : "No due date";
+    const dueInfo = getReturnTaskDueInfo(task);
+    const refundInfo = getReturnTaskRefundInfo(task);
+    const requestedLabel = getReturnTaskRequestedLabel(task);
+    const dueText = dueInfo.date ? formatDateOnly(dueInfo.date) : dueInfo.label;
     const orderLabel = returnCase.order_number || (
       returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
     );
@@ -1120,13 +1140,30 @@ function renderReturnQueue() {
             <div class="return-task-meta">
               <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
               <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
-              <span>Due: ${escapeHtml(dueText)}</span>
+              <span>Resolve by: ${escapeHtml(dueText)}</span>
               <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
             </div>
             <div class="return-task-meta">
               <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
               <span>Order ${escapeHtml(orderLabel)}</span>
               <span>${escapeHtml(returnCase.buyer_username || "No buyer")}</span>
+            </div>
+            <div class="return-task-facts">
+              <span>
+                <small>Return value</small>
+                <b>${escapeHtml(refundInfo.label)}</b>
+                <em>${escapeHtml(refundInfo.detail)}</em>
+              </span>
+              <span>
+                <small>eBay deadline</small>
+                <b>${escapeHtml(dueInfo.label)}</b>
+                <em>${escapeHtml(dueInfo.sourceText || "No eBay action text captured")}</em>
+              </span>
+              <span>
+                <small>Requested</small>
+                <b>${escapeHtml(requestedLabel || "-")}</b>
+                <em>${escapeHtml(returnCase.return_reason || getReturnTaskPayload(task).returnReason || "No reason captured")}</em>
+              </span>
             </div>
             <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
           </div>
@@ -2998,6 +3035,110 @@ function getReturnTaskPayload(task = {}) {
   };
 }
 
+function parseReturnDateText(value = "", referenceValue = "") {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const match = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2})(?:,\s*(\d{4}))?\b/);
+  if (!match) return null;
+
+  const monthNames = {
+    jan: 0, january: 0,
+    feb: 1, february: 1,
+    mar: 2, march: 2,
+    apr: 3, april: 3,
+    may: 4,
+    jun: 5, june: 5,
+    jul: 6, july: 6,
+    aug: 7, august: 7,
+    sep: 8, sept: 8, september: 8,
+    oct: 9, october: 9,
+    nov: 10, november: 10,
+    dec: 11, december: 11,
+  };
+  const month = monthNames[match[1].toLowerCase()];
+  const day = Number(match[2]);
+  if (month === undefined || !day) return null;
+
+  const reference = referenceValue ? parseReturnDateText(referenceValue) : null;
+  let year = match[3] ? Number(match[3]) : reference?.getFullYear?.() || new Date().getFullYear();
+  let date = new Date(year, month, day, 23, 59, 59, 999);
+  if (!match[3] && reference && date < reference) {
+    year += 1;
+    date = new Date(year, month, day, 23, 59, 59, 999);
+  }
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getReturnTaskDueInfo(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const rawDue = task.due_at || metadata.returnDueAt || metadata.return_due_at || "";
+  const parsedDue = rawDue ? new Date(rawDue) : parseReturnDateText(metadata.returnAction || metadata.return_action, metadata.returnInitiated || metadata.return_initiated);
+  const hasDue = parsedDue && !Number.isNaN(parsedDue.getTime());
+  const actionText = metadata.returnAction || metadata.return_action || "";
+  return {
+    date: hasDue ? parsedDue : null,
+    iso: hasDue ? parsedDue.toISOString() : "",
+    label: hasDue ? formatDateOnly(parsedDue) : "No response deadline captured",
+    sourceText: actionText || (task.due_at ? "OG task due date" : ""),
+  };
+}
+
+function getReturnTaskRequestedLabel(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const requested = metadata.returnInitiated || metadata.return_initiated || "";
+  const requestedDate = parseReturnDateText(requested);
+  if (requestedDate) return formatDateOnly(requestedDate);
+  return requested || formatDateOnly(getReturnTaskCase(task).opened_at);
+}
+
+function getReturnTaskRefundInfo(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const lines = getReturnTaskLines(task);
+  const refundText = metadata.refundText || metadata.refund_text || "";
+  const refundAmount = Number(metadata.refundAmount || metadata.refund_amount || parseMoney(refundText) || 0);
+  const lineTotal = lines.reduce((sum, line) => sum + Number(line.total_price || line.sold_for || 0), 0);
+  return {
+    refundText,
+    refundAmount,
+    lineTotal,
+    label: refundText || (refundAmount ? formatMoney(refundAmount) : lineTotal ? formatMoney(lineTotal) : "No value captured"),
+    detail: lineTotal ? `OG line total ${formatMoney(lineTotal)}` : "No matched OG order value",
+  };
+}
+
+function buildReturnExportMetadataPatch(payload = {}) {
+  const info = getReturnTransferInfo(payload);
+  const dueInfo = {
+    date: parseReturnDateText(info.returnAction, info.returnInitiated),
+  };
+  const dueAt = dueInfo.date && !Number.isNaN(dueInfo.date.getTime()) ? dueInfo.date.toISOString() : "";
+  const refundAmount = parseMoney(info.refundText);
+  return {
+    returnDueAt: dueAt || null,
+    returnDueText: info.returnAction || null,
+    refundAmount: refundAmount || null,
+    exportMetadataUpdatedAt: new Date().toISOString(),
+  };
+}
+
+async function enrichReturnTaskFromTransfer(taskId, payload = {}) {
+  if (!taskId) return null;
+  const patch = buildReturnExportMetadataPatch(payload);
+  const dueAt = patch.returnDueAt || null;
+  const hasPatch = Object.values(patch).some((value) => value !== null && value !== "");
+  if (!hasPatch && !dueAt) return null;
+
+  const { data, error } = await supabase.rpc("update_ebay_return_task_export_metadata", {
+    _task_id: taskId,
+    _due_at: dueAt,
+    _metadata_patch: patch,
+    _notes: "Return metadata updated from eBay return export.",
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  return data || null;
+}
+
 function findExistingReturnTaskForTransfer(payload = {}, lines = [], taskType = "") {
   const info = getReturnTransferInfo(payload);
   const returnId = normalizeReturnLookup(info.returnId || payload.metadata?.returnId);
@@ -3065,6 +3206,11 @@ async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {
   });
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] || {} : data || {};
+  if (result.task_id) {
+    await enrichReturnTaskFromTransfer(result.task_id, payload).catch((metadataError) => {
+      console.warn("Could not save parsed eBay return deadline/value metadata:", metadataError);
+    });
+  }
   if (options.refreshQueue !== false) {
     await loadReturnQueue().catch((queueError) => {
       console.warn("Could not refresh return task queue after opening eBay return:", queueError);
@@ -3111,6 +3257,11 @@ async function ensureUnmatchedReturnTaskForTransfer(payload = {}, options = {}) 
   });
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] || {} : data || {};
+  if (result.task_id) {
+    await enrichReturnTaskFromTransfer(result.task_id, payload).catch((metadataError) => {
+      console.warn("Could not save parsed unmatched eBay return deadline/value metadata:", metadataError);
+    });
+  }
   if (options.refreshQueue !== false) {
     await loadReturnQueue().catch((queueError) => {
       console.warn("Could not refresh return task queue after opening unmatched eBay return:", queueError);
@@ -4051,6 +4202,71 @@ function postHistoryReturnTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
+  const panel = $("return-import-summary");
+  const count = $("return-import-count");
+  const details = $("return-import-details");
+  if (!panel || !details) return;
+
+  if (!summary) {
+    panel.classList.add("hidden");
+    details.innerHTML = "";
+    if (count) count.textContent = "0 imported";
+    return;
+  }
+
+  const requested = Number(summary.requestedCount || 0);
+  const matched = Number(summary.importedCreatedCount ?? summary.importedCount ?? 0);
+  const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
+  const failed = Number(summary.failedCount || 0);
+  const duplicate = Number(summary.duplicateResolvedCount || 0);
+  const processed = Number(summary.processedCount || matched + unmatched + duplicate);
+  const missing = Math.max(0, requested - processed - failed);
+  const failedReturns = Array.isArray(summary.failedReturns) ? summary.failedReturns : [];
+  const unmatchedReturns = Array.isArray(summary.unmatchedReturns) ? summary.unmatchedReturns : [];
+
+  panel.classList.remove("hidden");
+  panel.classList.toggle("is-error", Boolean(failed || missing));
+  if (count) {
+    count.textContent = failed || missing
+      ? `${failed + missing} issue${failed + missing === 1 ? "" : "s"}`
+      : `${processed} imported`;
+  }
+
+  details.innerHTML = `
+    <div class="return-import-grid">
+      <span><small>Visible on eBay</small><b>${requested.toLocaleString()}</b></span>
+      <span><small>Matched to OG</small><b>${matched.toLocaleString()}</b></span>
+      <span><small>Missing OG match</small><b>${unmatched.toLocaleString()}</b></span>
+      <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
+      <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
+      <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
+    </div>
+    ${summary.message ? `<p class="return-import-message">${escapeHtml(summary.message)}</p>` : ""}
+    ${unmatchedReturns.length ? `
+      <div class="return-import-list">
+        <strong>Missing OG matches</strong>
+        ${unmatchedReturns.slice(0, 8).map((entry) => `
+          <p>${escapeHtml(entry.returnId || "No return ID")} - ${escapeHtml(entry.buyerUsername || "No buyer")} - ${escapeHtml(entry.itemNumber || "No item #")} - ${escapeHtml(entry.reason || "Review task opened")}</p>
+        `).join("")}
+      </div>
+    ` : ""}
+    ${failedReturns.length ? `
+      <div class="return-import-list is-error">
+        <strong>Rejected by OG</strong>
+        ${failedReturns.slice(0, 8).map((entry) => `
+          <p>${escapeHtml(entry.returnId || "No return ID")} - ${escapeHtml(entry.buyerUsername || "No buyer")} - ${escapeHtml(entry.itemNumber || "No item #")} - ${escapeHtml(entry.error || "Import failed")}</p>
+        `).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function setLastReturnImportSummary(summary) {
+  state.lastReturnImportSummary = summary || null;
+  renderReturnImportSummary(state.lastReturnImportSummary);
+}
+
 function queueHistoryReturnTransfer(payload) {
   const transferId = payload?.transferId || "";
   if (transferId && state.queuedHistoryReturnTransfers.some((entry) => entry?.transferId === transferId)) return;
@@ -4076,6 +4292,34 @@ async function openReturnIntakeForTransfer(payload = {}) {
     window.setTimeout(() => {
       $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
+    setLastReturnImportSummary({
+      transferId,
+      ok: true,
+      requestedCount: 1,
+      processedCount: 1,
+      importedCount: 0,
+      importedCreatedCount: 0,
+      unmatchedCount: 1,
+      unmatchedCreated: opened?.duplicateResolved ? 0 : 1,
+      failedCount: 0,
+      duplicateResolvedCount: opened?.duplicateResolved ? 1 : 0,
+      importedReturns: [],
+      unmatchedReturns: [{
+        returnId: info.returnId || "",
+        itemNumber: info.itemNumber || "",
+        buyerUsername: info.buyerUsername || "",
+        returnCaseId: opened?.return_case_id || null,
+        taskId: opened?.task_id || null,
+        duplicateResolved: Boolean(opened?.duplicateResolved),
+        reason: opened?.duplicateResolved
+          ? "Already resolved in OG; no duplicate review task was opened."
+          : "No matching fulfilled OG order line was found.",
+      }],
+      failedReturns: [],
+      message: opened?.duplicateResolved
+        ? "This unmatched eBay return was already resolved in OG, so no duplicate task was opened."
+        : "Created an unmatched eBay return review task because no fulfilled OG order history match was found.",
+    });
     postHistoryReturnTransferStatus({
       transferId,
       ok: true,
@@ -4102,6 +4346,31 @@ async function openReturnIntakeForTransfer(payload = {}) {
     window.setTimeout(() => {
       $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
+    setLastReturnImportSummary({
+      transferId,
+      ok: true,
+      requestedCount: 1,
+      processedCount: 1,
+      importedCount: 1,
+      importedCreatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedCreated: 0,
+      failedCount: 0,
+      duplicateResolvedCount: 1,
+      importedReturns: [{
+        returnId: info.returnId || "",
+        itemNumber: info.itemNumber || "",
+        buyerUsername: info.buyerUsername || "",
+        returnCaseId: opened.return_case_id || null,
+        taskId: opened.task_id || null,
+        duplicateResolved: true,
+        matchedLineIds: lineIds,
+        orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
+      }],
+      unmatchedReturns: [],
+      failedReturns: [],
+      message: "This eBay return was already resolved in OG, so no duplicate task was opened.",
+    });
     postHistoryReturnTransferStatus({
       transferId,
       ok: true,
@@ -4117,6 +4386,31 @@ async function openReturnIntakeForTransfer(payload = {}) {
   }
   openReturnIntakeModal(lineIds);
   applyReturnTransferPrefill(payload, lines);
+  setLastReturnImportSummary({
+    transferId,
+    ok: true,
+    requestedCount: 1,
+    processedCount: 1,
+    importedCount: 1,
+    importedCreatedCount: 1,
+    unmatchedCount: 0,
+    unmatchedCreated: 0,
+    failedCount: 0,
+    duplicateResolvedCount: 0,
+    importedReturns: [{
+      returnId: info.returnId || "",
+      itemNumber: info.itemNumber || "",
+      buyerUsername: info.buyerUsername || "",
+      returnCaseId: opened?.return_case_id || null,
+      taskId: opened?.task_id || null,
+      duplicateResolved: false,
+      matchedLineIds: lineIds,
+      orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
+    }],
+    unmatchedReturns: [],
+    failedReturns: [],
+    message: "OG return intake modal opened for the eBay return.",
+  });
   postHistoryReturnTransferStatus({
     transferId,
     ok: true,
@@ -4220,9 +4514,10 @@ async function importReturnBatchTransfer(payload = {}) {
     ].filter(Boolean).join("; ") + "."
     : error;
 
-  postHistoryReturnTransferStatus({
+  const summary = {
     transferId,
     ok,
+    requestedCount: returns.length,
     opened: true,
     imported: processedCount,
     importedCount,
@@ -4238,23 +4533,11 @@ async function importReturnBatchTransfer(payload = {}) {
     failedReturns,
     error,
     message,
-  });
-
-  return {
-    ok,
-    processedCount,
-    importedCount,
-    importedCreatedCount,
-    unmatchedCount,
-    unmatchedCreated: unmatchedCreatedCount,
-    failedCount,
-    duplicateResolvedCount,
-    importedReturns,
-    unmatchedReturns,
-    failedReturns,
-    error,
-    message,
   };
+
+  setLastReturnImportSummary(summary);
+  postHistoryReturnTransferStatus(summary);
+  return summary;
 }
 
 async function handleHistoryReturnTransfer(payload) {
@@ -4296,6 +4579,36 @@ async function handleHistoryReturnTransfer(payload) {
     const message = error.message || "Could not open the OG return workflow.";
     console.error("eBay return transfer failed:", error);
     if (transferId) state.handledReturnTransferIds.add(transferId);
+    const failedReturnInfos = isReturnBatchTransfer(payload)
+      ? payload.returns.map((info) => ({
+        returnId: info.returnId || "",
+        itemNumber: info.itemNumber || "",
+        buyerUsername: info.buyerUsername || "",
+        error: message,
+      }))
+      : [{
+        returnId: getReturnTransferInfo(payload).returnId || "",
+        itemNumber: getReturnTransferInfo(payload).itemNumber || "",
+        buyerUsername: getReturnTransferInfo(payload).buyerUsername || "",
+        error: message,
+      }];
+    setLastReturnImportSummary({
+      transferId,
+      ok: false,
+      requestedCount: failedReturnInfos.length,
+      processedCount: 0,
+      importedCount: 0,
+      importedCreatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedCreated: 0,
+      failedCount: failedReturnInfos.length,
+      duplicateResolvedCount: 0,
+      importedReturns: [],
+      unmatchedReturns: [],
+      failedReturns: failedReturnInfos,
+      error: message,
+      message,
+    });
     postHistoryReturnTransferStatus({
       transferId,
       ok: false,

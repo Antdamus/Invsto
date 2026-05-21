@@ -2651,10 +2651,17 @@
         payload,
       });
       if (!response?.ok) throw new Error(response?.error || "Could not export the eBay returns to OG.");
-      const imported = Number(response.imported || response.importedCount || 0);
-      const unmatched = Number(response.unmatched || response.unmatchedCount || 0);
-      const suffix = unmatched ? `, ${unmatched} unmatched` : "";
-      setReturnButtonStatus(button, imported ? `Sent ${imported}${suffix}` : "Sent to OG", "success");
+      const matched = Number(response.importedCreatedCount ?? response.importedCount ?? 0);
+      const unmatched = Number(response.unmatchedCreated ?? response.unmatchedCount ?? response.unmatched ?? 0);
+      const failed = Number(response.failed || response.failedCount || 0);
+      const duplicates = Number(response.duplicateResolvedCount || 0);
+      const parts = [
+        matched ? `${matched} matched` : "",
+        unmatched ? `${unmatched} missing OG match` : "",
+        failed ? `${failed} rejected` : "",
+        duplicates ? `${duplicates} duplicate` : "",
+      ].filter(Boolean);
+      setReturnButtonStatus(button, parts.length ? parts.join(", ") : "Sent to OG", failed ? "error" : "success");
       window.setTimeout(() => setReturnButtonStatus(button, "Export Visible Returns to OG"), 4000);
     } catch (error) {
       console.error("[OG eBay Return] Batch transfer failed:", error);
