@@ -355,11 +355,41 @@
       </div>
       <div id="return-location-results" class="return-location-results"></div>
 
-      <label class="modal-field">
-        Evidence photos
-        <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
-      </label>
-      <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
+      <section class="return-photo-panel" aria-label="Return evidence photos">
+        <div>
+          <span class="eyebrow">Return Photos</span>
+          <h3>Evidence Photos</h3>
+          <p>Use the OG phone app to photograph the returned item, packaging, and condition before saving the return.</p>
+        </div>
+        <div class="return-camera-row">
+          <label>
+            Camera Station
+            <select id="return-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="return-camera-actions">
+            <button id="refresh-return-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-return-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+          </div>
+        </div>
+        <p id="return-photo-status" class="history-label-status"></p>
+        <div class="return-photo-toolbar hidden" aria-label="Return evidence photo upload selection">
+          <span id="return-photo-selection-summary"></span>
+          <div>
+            <button id="select-all-return-photos" type="button" class="secondary-btn">Select All Photos</button>
+            <button id="deselect-all-return-photos" type="button" class="secondary-btn">Deselect Photos</button>
+          </div>
+        </div>
+        <div id="return-photo-grid" class="return-photo-grid">
+          <div class="history-empty">No return photos added.</div>
+        </div>
+        <label class="modal-field return-file-fallback">
+          Fallback file upload
+          <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
+        </label>
+        <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
+      </section>
 
       <div id="return-line-list" class="return-line-list"></div>
 

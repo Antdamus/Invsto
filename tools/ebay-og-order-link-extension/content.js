@@ -786,6 +786,36 @@
     return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
   }
 
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function waitForBulkActionsReady({ expectedSelectedCount = 0, timeoutMs = 5000 } = {}) {
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < timeoutMs) {
+      const selectedCount = getSelectedOrdersCount();
+      const checkedCount = getSelectedAwaitingOrderCheckboxes().length;
+      const effectiveCount = Math.max(selectedCount, checkedCount);
+      if (
+        effectiveCount >= Math.max(Number(expectedSelectedCount || 0), 1)
+        && Boolean(getBulkActionsToolbar())
+        && Boolean(getBulkShippingDropdownButton())
+      ) {
+        return true;
+      }
+      await delay(120);
+    }
+    return isAnyOrderSelected();
+  }
+
+  async function focusEbayBulkActionsWhenReady({ expectedSelectedCount = 0, onlyIfSelected = false } = {}) {
+    if (onlyIfSelected && !getSelectedAwaitingOrderCheckboxes().length && getSelectedOrdersCount() < 1) return false;
+    const ready = await waitForBulkActionsReady({ expectedSelectedCount });
+    updateBulkActionsShortcut();
+    if (!ready && onlyIfSelected) return false;
+    return scrollEbayBulkActionsIntoView();
+  }
+
   async function toggleBuyerGroupSelection(buyerKey) {
     if (ogBuyerSelectionInProgress) return;
     const firstRow = getBuyerGroupRows(buyerKey)[0];
@@ -809,6 +839,14 @@
         setCheckboxChecked(checkboxes[index], shouldSelect);
         if (index % 4 === 3) await waitForBrowserPaint();
       }
+      if (shouldSelect) {
+        buttons.forEach((button) => {
+          button.textContent = "Opening actions...";
+        });
+        await focusEbayBulkActionsWhenReady({
+          expectedSelectedCount: getSelectedAwaitingOrderCheckboxes().length || checkboxes.length,
+        });
+      }
     } finally {
       ogBuyerSelectionInProgress = false;
       buttons.forEach((button) => {
@@ -820,7 +858,6 @@
         refreshBuyerGroupSelectButtons(buyerKey);
         updateBulkActionsShortcut();
       }, 250);
-      if (shouldSelect) window.setTimeout(() => scrollEbayBulkActionsIntoView(), 180);
     }
   }
 
@@ -961,6 +998,64 @@
     });
   }
 
+  function normalizePriorityLines(entry = {}) {
+    const lines = Array.isArray(entry.lines) ? entry.lines : [];
+    if (lines.length) {
+      return lines.map((line, index) => ({
+        orderNumber: normalizeOrderNumber(line.orderNumber),
+        itemNumber: cleanText(line.itemNumber || line.item_number || ""),
+        transactionId: cleanText(line.transactionId || line.transaction_id || ""),
+        itemTitle: cleanText(line.itemTitle || line.item_title || ""),
+        remainingQuantity: Number(line.remainingQuantity || line.remaining_quantity || 0) || 0,
+        shipByDate: line.shipByDate || line.ship_by_date || entry.nextShipBy || "",
+        priorityLabel: cleanText(line.priorityLabel || entry.priorityLabel || ""),
+        index,
+      }));
+    }
+    return (Array.isArray(entry.orderNumbers) ? entry.orderNumbers : [])
+      .map(normalizeOrderNumber)
+      .filter(Boolean)
+      .map((orderNumber, index) => ({
+        orderNumber,
+        itemNumber: "",
+        transactionId: "",
+        itemTitle: "",
+        remainingQuantity: 0,
+        shipByDate: entry.nextShipBy || "",
+        priorityLabel: cleanText(entry.priorityLabel || ""),
+        index,
+      }));
+  }
+
+  function getHiddenPriorityLines(entry = {}, group = null) {
+    const lines = normalizePriorityLines(entry);
+    if (!group?.rows?.length) return lines;
+
+    const visibleCountsByOrder = new Map();
+    group.rows.forEach((info) => {
+      const orderNumber = normalizeOrderNumber(info.orderNumber);
+      if (!orderNumber) return;
+      visibleCountsByOrder.set(orderNumber, (visibleCountsByOrder.get(orderNumber) || 0) + 1);
+    });
+
+    const hidden = [];
+    lines.forEach((line) => {
+      const orderNumber = normalizeOrderNumber(line.orderNumber);
+      const visibleCount = orderNumber ? Number(visibleCountsByOrder.get(orderNumber) || 0) : 0;
+      if (visibleCount > 0) {
+        visibleCountsByOrder.set(orderNumber, visibleCount - 1);
+        return;
+      }
+      hidden.push(line);
+    });
+    return hidden;
+  }
+
+  function getPriorityEntryLineCount(entry = {}) {
+    const lines = normalizePriorityLines(entry);
+    return lines.length || Number(entry.pendingLines || 0) || 0;
+  }
+
   function decorateBuyerGroup(row, groupInfo) {
     clearOldOgBadges(row);
     row.classList.add("og-ebay-buyer-group-row");
@@ -1067,8 +1162,12 @@
 
   function summarizeUrgentCoverage(payload, groups) {
     const groupByBuyer = new Map(groups.map((group) => [normalizeBuyerKey(group.buyerKey || group.buyerUsername), group]));
+    const priorityByBuyer = new Map((Array.isArray(payload?.priorities) ? payload.priorities : [])
+      .map((entry) => [normalizeBuyerKey(entry.buyerKey || entry.buyerUsername), entry])
+      .filter(([buyerKey]) => Boolean(buyerKey)));
     const urgentPriorities = (Array.isArray(payload?.priorities) ? payload.priorities : [])
       .filter((entry) => Number(entry?.priorityRank) <= 1);
+    const hiddenDetailsByBuyer = new Map();
 
     let missingBuyerCount = 0;
     let partialBuyerCount = 0;
@@ -1077,12 +1176,41 @@
     let visiblePartialBuyerCount = 0;
     let visiblePartialHiddenLineCount = 0;
 
+    const addHiddenDetail = (entry = {}, group = null, hiddenCount = 0, reason = "") => {
+      const buyerKey = normalizeBuyerKey(entry.buyerKey || entry.buyerUsername || group?.buyerKey || group?.buyerUsername);
+      if (!buyerKey || hiddenDetailsByBuyer.has(buyerKey)) return;
+      const hiddenLines = getHiddenPriorityLines(entry, group);
+      hiddenDetailsByBuyer.set(buyerKey, {
+        buyerKey,
+        buyerUsername: entry.buyerUsername || group?.buyerUsername || buyerKey,
+        priorityLabel: entry.priorityLabel || "",
+        priorityRank: Number(entry.priorityRank ?? group?.priorityRank ?? 99),
+        hiddenLineCount: Math.max(Number(hiddenCount || 0), hiddenLines.length || 0),
+        pendingLines: Math.max(getPriorityEntryLineCount(entry), Number(entry.pendingLines || 0), Number(group?.pendingLines || 0)),
+        visibleLines: Number(group?.rows?.length || 0),
+        orderNumbers: unique([
+          ...(Array.isArray(entry.orderNumbers) ? entry.orderNumbers : []),
+          ...[...(group?.orderNumbers || [])],
+        ].map(normalizeOrderNumber)),
+        reason,
+        hiddenLines,
+      });
+    };
+
     groups.forEach((group) => {
       const visibleLines = group?.rows?.length || 0;
       const pendingLines = Math.max(Number(group?.pendingLines || 0), visibleLines);
       if (visibleLines && pendingLines > visibleLines) {
         visiblePartialBuyerCount += 1;
         visiblePartialHiddenLineCount += pendingLines - visibleLines;
+        const buyerKey = normalizeBuyerKey(group.buyerKey || group.buyerUsername);
+        addHiddenDetail(priorityByBuyer.get(buyerKey) || {
+          buyerKey,
+          buyerUsername: group.buyerUsername || buyerKey,
+          pendingLines,
+          orderNumbers: [...(group.orderNumbers || [])],
+          priorityRank: group.priorityRank,
+        }, group, pendingLines - visibleLines, "visible-partial");
       }
     });
 
@@ -1096,9 +1224,11 @@
       if (!visibleLines) {
         missingBuyerCount += 1;
         hiddenLineCount += pendingLines;
+        addHiddenDetail(entry, null, pendingLines, "missing");
       } else if (pendingLines > visibleLines) {
         partialBuyerCount += 1;
         hiddenLineCount += pendingLines - visibleLines;
+        addHiddenDetail(entry, group, pendingLines - visibleLines, "urgent-partial");
       }
     });
 
@@ -1111,7 +1241,79 @@
       visibleUrgentLineCount,
       visiblePartialBuyerCount,
       visiblePartialHiddenLineCount,
+      hiddenDetails: [...hiddenDetailsByBuyer.values()]
+        .sort((a, b) =>
+          a.priorityRank - b.priorityRank
+          || b.hiddenLineCount - a.hiddenLineCount
+          || String(a.buyerUsername || "").localeCompare(String(b.buyerUsername || ""), undefined, { sensitivity: "base" })
+        ),
     };
+  }
+
+  function getHiddenLineSummary(line = {}) {
+    const parts = [];
+    if (line.itemNumber) parts.push(`#${line.itemNumber}`);
+    else if (line.transactionId) parts.push(`Transaction ${line.transactionId}`);
+    else if (line.orderNumber) parts.push(`Order ${line.orderNumber}`);
+    if (line.itemTitle) parts.push(line.itemTitle);
+    if (line.remainingQuantity) parts.push(`Qty ${line.remainingQuantity}`);
+    return parts.join(" - ") || "Pending OG line";
+  }
+
+  function buildHiddenCoverageDetails(details = []) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "og-ebay-hidden-coverage-details";
+
+    if (!details.length) {
+      const empty = document.createElement("p");
+      empty.className = "og-ebay-hidden-empty";
+      empty.textContent = "Open or refresh OG Pending Orders to load buyer/item details for the hidden lines.";
+      wrapper.appendChild(empty);
+      return wrapper;
+    }
+
+    const shownDetails = details.slice(0, 12);
+    shownDetails.forEach((detail) => {
+      const article = document.createElement("article");
+      const title = document.createElement("strong");
+      const count = Number(detail.hiddenLineCount || detail.hiddenLines?.length || 0);
+      const visible = Number(detail.visibleLines || 0);
+      const pending = Number(detail.pendingLines || 0);
+      title.textContent = `${detail.buyerUsername || detail.buyerKey || "Unknown buyer"} - ${count || "Some"} hidden line${count === 1 ? "" : "s"}`;
+      article.appendChild(title);
+
+      const meta = document.createElement("span");
+      meta.textContent = [
+        detail.priorityLabel || "",
+        pending ? `${pending} OG pending` : "",
+        visible ? `${visible} visible here` : "not visible here",
+      ].filter(Boolean).join(" - ");
+      article.appendChild(meta);
+
+      const list = document.createElement("ul");
+      (detail.hiddenLines || []).slice(0, 6).forEach((line) => {
+        const item = document.createElement("li");
+        item.textContent = getHiddenLineSummary(line);
+        list.appendChild(item);
+      });
+      const unlisted = Math.max(0, count - (detail.hiddenLines || []).slice(0, 6).length);
+      if (unlisted > 0) {
+        const more = document.createElement("li");
+        more.textContent = `${unlisted} more hidden line${unlisted === 1 ? "" : "s"} for this buyer`;
+        list.appendChild(more);
+      }
+      article.appendChild(list);
+      wrapper.appendChild(article);
+    });
+
+    if (details.length > shownDetails.length) {
+      const more = document.createElement("p");
+      more.className = "og-ebay-hidden-empty";
+      more.textContent = `${details.length - shownDetails.length} more buyer${details.length - shownDetails.length === 1 ? "" : "s"} hidden. Open OG Pending Orders for the full queue.`;
+      wrapper.appendChild(more);
+    }
+
+    return wrapper;
   }
 
   function renderUrgentCoverageWarning(coverage) {
@@ -1141,9 +1343,37 @@
     if (missingBuyers) pieces.push(`${missingBuyers.toLocaleString()} buyer${missingBuyers === 1 ? "" : "s"} not shown`);
     if (partialBuyers) pieces.push(`${partialBuyers.toLocaleString()} buyer${partialBuyers === 1 ? "" : "s"} only partly shown`);
     if (visiblePartialBuyers) {
-      pieces.push(`${visiblePartialBuyers.toLocaleString()} visible buyer group${visiblePartialBuyers === 1 ? "" : "s"} incomplete (${visiblePartialHiddenLines.toLocaleString()} hidden line${visiblePartialHiddenLines === 1 ? "" : "s"})`);
+        pieces.push(`${visiblePartialBuyers.toLocaleString()} visible buyer group${visiblePartialBuyers === 1 ? "" : "s"} incomplete (${visiblePartialHiddenLines.toLocaleString()} hidden line${visiblePartialHiddenLines === 1 ? "" : "s"})`);
     }
-    warning.textContent = `Safety check: ${pieces.join(" - ")}. Do not ship partial buyer groups until all lines are visible together.`;
+    const wasExpanded = warning.dataset.ogExpanded === "true";
+    warning.textContent = "";
+
+    const summary = document.createElement("div");
+    summary.className = "og-ebay-coverage-summary";
+    summary.textContent = `Safety check: ${pieces.join(" - ")}. Do not ship partial buyer groups until all lines are visible together.`;
+    warning.appendChild(summary);
+
+    const actions = document.createElement("div");
+    actions.className = "og-ebay-coverage-actions";
+    const detailsButton = document.createElement("button");
+    detailsButton.type = "button";
+    detailsButton.className = "og-ebay-coverage-details-toggle";
+    detailsButton.textContent = wasExpanded ? "Hide hidden lines" : "Show hidden lines";
+    actions.appendChild(detailsButton);
+    warning.appendChild(actions);
+
+    const details = buildHiddenCoverageDetails(coverage.hiddenDetails || []);
+    details.hidden = !wasExpanded;
+    warning.appendChild(details);
+
+    detailsButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const expanded = warning.dataset.ogExpanded !== "true";
+      warning.dataset.ogExpanded = expanded ? "true" : "false";
+      details.hidden = !expanded;
+      detailsButton.textContent = expanded ? "Hide hidden lines" : "Show hidden lines";
+    });
   }
 
   function clearOgPriorityBadges(root = document) {
@@ -2416,7 +2646,9 @@
         right: 18px;
         bottom: 288px;
         z-index: 2147483647;
-        max-width: min(460px, calc(100vw - 36px));
+        max-width: min(520px, calc(100vw - 36px));
+        max-height: min(68vh, 720px);
+        overflow: auto;
         border: 2px solid #b42318;
         border-radius: 18px;
         background: #fff0ed;
@@ -2424,6 +2656,76 @@
         box-shadow: 0 14px 34px rgba(0, 0, 0, .24);
         font: 900 13px/1.35 Arial, sans-serif;
         padding: 12px 14px;
+      }
+
+      .og-ebay-coverage-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
+
+      .og-ebay-coverage-details-toggle {
+        appearance: none;
+        border: 1px solid #b42318;
+        border-radius: 999px;
+        background: #fff;
+        color: #7a130c;
+        cursor: pointer;
+        font: 900 12px/1 Arial, sans-serif;
+        padding: 7px 10px;
+      }
+
+      .og-ebay-coverage-details-toggle:hover {
+        background: #ffe1dc;
+      }
+
+      .og-ebay-hidden-coverage-details {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .og-ebay-hidden-coverage-details[hidden] {
+        display: none !important;
+      }
+
+      .og-ebay-hidden-coverage-details article {
+        display: grid;
+        gap: 4px;
+        padding: 9px 10px;
+        border: 1px solid rgba(180, 35, 24, .28);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, .76);
+      }
+
+      .og-ebay-hidden-coverage-details strong,
+      .og-ebay-hidden-coverage-details span,
+      .og-ebay-hidden-coverage-details li,
+      .og-ebay-hidden-empty {
+        overflow-wrap: anywhere;
+      }
+
+      .og-ebay-hidden-coverage-details span {
+        color: #9f1f14;
+        font: 800 12px/1.3 Arial, sans-serif;
+      }
+
+      .og-ebay-hidden-coverage-details ul {
+        display: grid;
+        gap: 3px;
+        margin: 2px 0 0;
+        padding-left: 18px;
+      }
+
+      .og-ebay-hidden-coverage-details li {
+        color: #57100b;
+        font: 800 12px/1.35 Arial, sans-serif;
+      }
+
+      .og-ebay-hidden-empty {
+        margin: 0;
+        color: #9f1f14;
+        font: 800 12px/1.35 Arial, sans-serif;
       }
 
       .og-ebay-actions-highlight {
@@ -2990,6 +3292,7 @@
         );
       }
       updateBulkActionsShortcut();
+      await focusEbayBulkActionsWhenReady({ onlyIfSelected: true });
       sendResponse({ ok: Boolean(result?.ok), result, hidden });
     })().catch((error) => {
       console.warn("[OG eBay Priority] Refresh after queue change failed:", error);

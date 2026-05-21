@@ -18,6 +18,11 @@ const state = {
   returnSelectedLineIds: new Set(),
   returnDestinationLocation: null,
   returnLocations: [],
+  returnCaptureStations: [],
+  selectedReturnCaptureStationId: "",
+  returnEvidencePhotos: [],
+  returnEvidencePhotoUploadKeys: new Set(),
+  returnCaptureBusy: false,
   awaitingLabelGroup: null,
   queuedHistoryLabelTransfers: [],
   pendingHistoryLabelReplacement: null,
@@ -35,6 +40,14 @@ let evidencePhotoViewerReturnFocus = null;
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const EXTRA_LABEL_EVIDENCE_BUCKET = "order-evidence-photos";
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
+const RETURN_CAPTURE_STATION_TABLE = "capture_stations";
+const RETURN_CAPTURE_JOB_TABLE = "capture_jobs";
+const RETURN_CAPTURE_PHOTO_TABLE = "capture_job_photos";
+const RETURN_CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
+const RETURN_CAPTURE_POLL_INTERVAL_MS = 1500;
+const RETURN_CAPTURE_PHOTO_SETTLE_MS = 3000;
+const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 
@@ -1776,7 +1789,508 @@ function renderReturnEvidencePhotoList() {
   if (!list) return;
   list.innerHTML = files.length
     ? files.map((file) => `<span>${escapeHtml(file.name)}${file.size ? ` - ${escapeHtml(formatFileSize(file.size))}` : ""}</span>`).join("")
-    : `<span>Evidence photos required before saving a return</span>`;
+    : `<span>Fallback files optional when phone photos are attached</span>`;
+}
+
+function delayReturnCapture(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPreferredReturnCaptureStationHints() {
+  try {
+    return {
+      stationId: String(window.OG_CAPTURE_STATION_ID || localStorage.getItem("og.captureStationId") || "").trim(),
+      stationName: String(window.OG_CAPTURE_STATION_NAME || localStorage.getItem("og.captureStationName") || "").trim(),
+    };
+  } catch (_) {
+    return { stationId: "", stationName: "" };
+  }
+}
+
+function setReturnPhotoStatus(message = "", type = "info") {
+  const el = $("return-photo-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function renderReturnCaptureStations() {
+  const select = $("return-capture-station");
+  if (!select) return;
+  const stations = state.returnCaptureStations;
+
+  if (!stations.length) {
+    select.innerHTML = '<option value="">No active stations</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.replaceChildren(new Option("Choose station", ""));
+  stations.forEach((station) => {
+    select.appendChild(new Option(station.name || station.id, station.id));
+  });
+  select.value = stations.some((station) => station.id === state.selectedReturnCaptureStationId)
+    ? state.selectedReturnCaptureStationId
+    : "";
+  select.disabled = false;
+}
+
+function setSelectedReturnCaptureStation(stationId = "") {
+  const station = state.returnCaptureStations.find((entry) => entry.id === stationId) || null;
+  state.selectedReturnCaptureStationId = station?.id || "";
+
+  const select = $("return-capture-station");
+  if (select && select.value !== state.selectedReturnCaptureStationId) {
+    select.value = state.selectedReturnCaptureStationId;
+  }
+
+  try {
+    if (station) {
+      localStorage.setItem("og.captureStationId", station.id);
+      localStorage.setItem("og.captureStationName", station.name || "");
+    }
+  } catch (_) {}
+
+  return station;
+}
+
+async function loadReturnCaptureStations({ silent = false } = {}) {
+  const select = $("return-capture-station");
+  if (select) {
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading stations...</option>';
+  }
+
+  const { data, error } = await supabase
+    .from(RETURN_CAPTURE_STATION_TABLE)
+    .select("id, name, active")
+    .eq("active", true)
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(error.message || "Could not load capture stations.");
+
+  state.returnCaptureStations = Array.isArray(data) ? data : [];
+  const { stationId, stationName } = getPreferredReturnCaptureStationHints();
+  const nextStation = state.returnCaptureStations.find((station) => station.id === state.selectedReturnCaptureStationId)
+    || state.returnCaptureStations.find((station) => station.id === stationId)
+    || state.returnCaptureStations.find((station) => String(station.name || "").trim().toLowerCase() === stationName.toLowerCase())
+    || state.returnCaptureStations[0]
+    || null;
+
+  setSelectedReturnCaptureStation(nextStation?.id || "");
+  renderReturnCaptureStations();
+
+  if (!silent) {
+    setReturnPhotoStatus(nextStation ? `Ready to take return photos on ${nextStation.name || "selected station"}.` : "No active capture stations are available.", nextStation ? "info" : "error");
+  }
+
+  return state.returnCaptureStations;
+}
+
+function getSelectedReturnCaptureStation() {
+  return state.returnCaptureStations.find((station) => station.id === state.selectedReturnCaptureStationId) || null;
+}
+
+async function createReturnCaptureJob(stationId) {
+  const { data, error } = await supabase
+    .from(RETURN_CAPTURE_JOB_TABLE)
+    .insert({
+      station_id: stationId,
+      status: "queued",
+      requested_at: new Date().toISOString(),
+      requested_by_email: state.user?.email || null,
+    })
+    .select("id, station_id, status, requested_at")
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "Failed to create capture job.");
+  return data;
+}
+
+function returnCaptureJobHasUpload(job) {
+  return Boolean(job?.storage_bucket && job?.storage_path)
+    || Boolean(job?.upload_completed_at)
+    || Boolean(job?.capture_completed_at && job?.storage_path);
+}
+
+async function getReturnCaptureJobPhotoCount(jobId) {
+  const { count, error } = await supabase
+    .from(RETURN_CAPTURE_PHOTO_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("capture_job_id", jobId);
+
+  if (error) {
+    console.warn("Could not check return capture photo count:", error);
+    return 0;
+  }
+  return count || 0;
+}
+
+async function pollReturnCaptureJob(job, station = {}) {
+  const jobId = job?.id || job;
+  const stationName = station.name || "";
+  const startedAt = Date.now();
+  let lastPhotoCount = 0;
+  let lastPhotoChangeAt = startedAt;
+
+  while ((Date.now() - startedAt) < RETURN_CAPTURE_POLL_TIMEOUT_MS) {
+    const { data, error } = await supabase
+      .from(RETURN_CAPTURE_JOB_TABLE)
+      .select("id, station_id, status, storage_bucket, storage_path, capture_completed_at, upload_completed_at, mime_type, file_size_bytes, failure_code, failure_message, requested_at")
+      .eq("id", jobId)
+      .single();
+
+    if (error || !data) throw new Error(error?.message || "Failed to poll capture job.");
+    if (data.status === "completed" || data.status === "failed") return data;
+
+    const photoCount = await getReturnCaptureJobPhotoCount(jobId);
+    if (photoCount !== lastPhotoCount) {
+      lastPhotoCount = photoCount;
+      lastPhotoChangeAt = Date.now();
+    }
+    if (returnCaptureJobHasUpload(data)) return { ...data, status: "completed" };
+    if (photoCount > 0 && (Date.now() - lastPhotoChangeAt) >= RETURN_CAPTURE_PHOTO_SETTLE_MS) {
+      return { ...data, status: "completed" };
+    }
+
+    const label = data.status === "queued"
+      ? `Capture queued${stationName ? ` on ${stationName}` : ""}. Waiting for camera...`
+      : data.status === "capturing"
+        ? `Camera is capturing${stationName ? ` on ${stationName}` : ""}...`
+        : data.status === "uploading"
+          ? `Camera is uploading${stationName ? ` on ${stationName}` : ""}...`
+          : `Capture status: ${data.status || "waiting"}`;
+    setReturnPhotoStatus(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
+    await delayReturnCapture(RETURN_CAPTURE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Timed out waiting for camera capture.");
+}
+
+async function loadReturnCaptureJobPhotos(jobId) {
+  const { data, error } = await supabase
+    .from(RETURN_CAPTURE_PHOTO_TABLE)
+    .select("id, capture_job_id, sort_order, is_primary, storage_bucket, storage_path, mime_type, file_size_bytes, label, created_at")
+    .eq("capture_job_id", jobId)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw new Error(error.message || "Failed to load capture photos.");
+  return Array.isArray(data) ? data : [];
+}
+
+async function createReturnSignedImageUrl(bucket, path, options = {}) {
+  if (!bucket || !path) return "";
+  try {
+    const { data, error } = options.transform
+      ? await supabase.storage.from(bucket).createSignedUrl(path, RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS, { transform: options.transform })
+      : await supabase.storage.from(bucket).createSignedUrl(path, RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS);
+    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!options.transform) return "";
+  } catch (_) {
+    if (!options.transform) return "";
+  }
+  return createReturnSignedImageUrl(bucket, path);
+}
+
+async function returnCaptureRowsToEvidencePhotos(rows) {
+  const photos = [];
+  for (let index = 0; index < (rows || []).length; index += 1) {
+    const row = rows[index];
+    const bucket = String(row?.storage_bucket || "").trim();
+    const path = String(row?.storage_path || "").trim();
+    if (!bucket || !path) continue;
+    const [previewUrl, thumbnailUrl] = await Promise.all([
+      createReturnSignedImageUrl(bucket, path),
+      createReturnSignedImageUrl(bucket, path, { transform: RETURN_THUMBNAIL_TRANSFORM }),
+    ]);
+    if (!previewUrl) continue;
+    photos.push({
+      id: row.id || `${bucket}:${path}`,
+      bucket,
+      path,
+      previewUrl,
+      thumbnailUrl: thumbnailUrl || previewUrl,
+      capture_job_id: row.capture_job_id || "",
+      sort_order: row.sort_order ?? index,
+      label: row.label || `Return photo ${index + 1}`,
+      mime_type: row.mime_type || "image/jpeg",
+      size_bytes: row.file_size_bytes || 0,
+      created_at: row.created_at || new Date().toISOString(),
+    });
+  }
+  return photos;
+}
+
+function getReturnEvidencePhotoKey(photo) {
+  return `${photo?.bucket || ""}:${photo?.path || ""}`;
+}
+
+function getSelectedReturnEvidencePhotos() {
+  return state.returnEvidencePhotos.filter((photo) => (
+    state.returnEvidencePhotoUploadKeys.has(getReturnEvidencePhotoKey(photo))
+  ));
+}
+
+function setReturnEvidencePhotoSelected(photoKey, selected) {
+  if (!photoKey) return;
+  if (selected) state.returnEvidencePhotoUploadKeys.add(photoKey);
+  else state.returnEvidencePhotoUploadKeys.delete(photoKey);
+  renderReturnEvidencePhotos();
+}
+
+function setAllReturnEvidencePhotosSelected(selected) {
+  state.returnEvidencePhotoUploadKeys.clear();
+  if (selected) {
+    state.returnEvidencePhotos.forEach((photo) => {
+      state.returnEvidencePhotoUploadKeys.add(getReturnEvidencePhotoKey(photo));
+    });
+  }
+  renderReturnEvidencePhotos();
+}
+
+function getReturnEvidenceFileExtension(source, blob) {
+  const value = `${source?.path || source?.name || ""} ${source?.mime_type || source?.type || ""} ${blob?.type || ""}`.toLowerCase();
+  if (value.includes("png")) return "png";
+  if (value.includes("webp")) return "webp";
+  if (value.includes("heic")) return "heic";
+  if (value.includes("heif")) return "heif";
+  return "jpg";
+}
+
+function getReturnEvidenceSourceLabel(orderNumbers = []) {
+  return safeStorageSegment(orderNumbers.join("-") || "return", "return");
+}
+
+async function copyCapturedReturnEvidencePhotos(orderNumbers = []) {
+  const selectedPhotos = getSelectedReturnEvidencePhotos();
+  if (!selectedPhotos.length) return [];
+
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderSegment = getReturnEvidenceSourceLabel(orderNumbers);
+  const copied = [];
+
+  for (let index = 0; index < selectedPhotos.length; index += 1) {
+    const photo = selectedPhotos[index];
+    const response = await fetch(photo.previewUrl);
+    if (!response.ok) throw new Error(`Could not download return photo ${index + 1} before saving.`);
+    const blob = await response.blob();
+    const extension = getReturnEvidenceFileExtension(photo, blob);
+    const originalName = safeStorageSegment(String(photo.path || "").split("/").pop(), `phone-photo-${index + 1}`);
+    const destinationPath = [
+      "returns",
+      dateFolder,
+      orderSegment,
+      `${Date.now()}-${crypto.randomUUID()}-${originalName}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(EBAY_RETURN_EVIDENCE_BUCKET)
+      .upload(destinationPath, blob, {
+        contentType: blob.type || photo.mime_type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (error) throw new Error(error.message || `Could not save return photo ${index + 1}.`);
+    copied.push({
+      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: photo.bucket,
+      source_path: photo.path,
+      capture_job_id: photo.capture_job_id || null,
+      sort_order: index,
+      label: photo.label || `Return photo ${index + 1}`,
+      mime_type: blob.type || photo.mime_type || null,
+      size_bytes: blob.size || photo.size_bytes || 0,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  return copied;
+}
+
+async function uploadReturnEvidenceFiles(files, orderNumbers = [], offset = 0) {
+  const orderSegment = getReturnEvidenceSourceLabel(orderNumbers);
+  const batchSegment = `${Date.now()}-${crypto.randomUUID()}`;
+  const uploaded = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const extension = getReturnEvidenceFileExtension(file, file);
+    const path = [
+      "returns",
+      orderSegment,
+      `${batchSegment}-${index + 1}.${extension}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EBAY_RETURN_EVIDENCE_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+    if (error) throw new Error(error.message || `Could not upload return evidence photo ${index + 1}.`);
+    uploaded.push({
+      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      path,
+      label: `Return evidence ${offset + index + 1}`,
+      original_name: file.name || "",
+      mime_type: file.type || "image/jpeg",
+      size_bytes: file.size || 0,
+      uploaded_at: new Date().toISOString(),
+    });
+  }
+
+  return uploaded;
+}
+
+async function persistReturnEvidencePhotos(files, orderNumbers = []) {
+  const captured = await copyCapturedReturnEvidencePhotos(orderNumbers);
+  const uploaded = await uploadReturnEvidenceFiles(files, orderNumbers, captured.length);
+  return [...captured, ...uploaded];
+}
+
+function renderReturnEvidencePhotos() {
+  const grid = $("return-photo-grid");
+  if (!grid) return;
+  const toolbar = document.querySelector(".return-photo-toolbar");
+  toolbar?.classList.toggle("hidden", !state.returnEvidencePhotos.length);
+  if (!state.returnEvidencePhotos.length) {
+    grid.innerHTML = `<div class="history-empty">No return photos added.</div>`;
+    updateReturnEvidencePhotoSelectionSummary();
+    return;
+  }
+
+  grid.innerHTML = state.returnEvidencePhotos.map((photo, index) => {
+    const key = getReturnEvidencePhotoKey(photo);
+    const selected = state.returnEvidencePhotoUploadKeys.has(key);
+    return `
+      <article class="return-photo-card ${selected ? "is-selected" : ""}">
+        <label class="return-photo-select">
+          <input
+            type="checkbox"
+            data-return-photo-select="${escapeHtml(key)}"
+            ${selected ? "checked" : ""}
+          />
+          <span>Upload</span>
+        </label>
+        <button type="button" data-return-photo-index="${index}" title="Open return photo">
+          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Return photo ${index + 1}`)}" />
+          <span>${escapeHtml(photo.label || `Return photo ${index + 1}`)}</span>
+        </button>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("[data-return-photo-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openReturnEvidencePhotoViewer(Number(button.dataset.returnPhotoIndex || 0));
+    });
+  });
+  grid.querySelectorAll("[data-return-photo-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      setReturnEvidencePhotoSelected(checkbox.dataset.returnPhotoSelect, checkbox.checked);
+    });
+  });
+  updateReturnEvidencePhotoSelectionSummary();
+}
+
+function updateReturnEvidencePhotoSelectionSummary() {
+  const summary = $("return-photo-selection-summary");
+  if (!summary) return;
+  const total = state.returnEvidencePhotos.length;
+  const selected = getSelectedReturnEvidencePhotos().length;
+  summary.textContent = total
+    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for this return.`
+    : "";
+}
+
+function openReturnEvidencePhotoViewer(index) {
+  const photo = state.returnEvidencePhotos[index];
+  if (!photo?.previewUrl) return;
+  openEvidencePhotoViewer(
+    photo.previewUrl,
+    photo.label || `Return photo ${index + 1}`,
+    `${photo.bucket}/${photo.path}`
+  );
+}
+
+function scrollReturnConfirmIntoView() {
+  const actions = $("confirm-return-intake")?.closest(".history-modal-actions");
+  if (!actions || $("return-intake-modal")?.classList.contains("hidden")) return;
+  actions.scrollIntoView({ behavior: "smooth", block: "end" });
+  setTimeout(() => $("confirm-return-intake")?.focus(), 350);
+}
+
+async function requestReturnEvidencePhoto() {
+  if (state.returnCaptureBusy) return;
+  try {
+    state.returnCaptureBusy = true;
+    $("request-return-photo")?.toggleAttribute("disabled", true);
+
+    if (!state.returnCaptureStations.length) {
+      await loadReturnCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedReturnCaptureStation();
+    if (!station) {
+      setReturnPhotoStatus("Choose a camera station before taking return photos.", "error");
+      $("return-capture-station")?.focus();
+      return;
+    }
+
+    const lines = getReturnModalLines();
+    const orderNumbers = [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))];
+    setReturnPhotoStatus(`Sending camera request to ${station.name || "selected station"}...`, "info");
+    const job = await createReturnCaptureJob(station.id);
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "ebay-return-intake",
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+        orderLineIds: [...state.returnSelectedLineIds],
+        orderNumbers,
+      },
+    }));
+
+    const completedJob = await pollReturnCaptureJob(job, station);
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || completedJob.failure_code || "Capture failed.");
+    }
+
+    let photoRows = await loadReturnCaptureJobPhotos(completedJob.id);
+    if (!photoRows.length && completedJob.storage_bucket && completedJob.storage_path) {
+      photoRows = [{
+        capture_job_id: completedJob.id,
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        mime_type: completedJob.mime_type || "image/jpeg",
+        file_size_bytes: completedJob.file_size_bytes || 0,
+        label: "Return photo",
+      }];
+    }
+    if (!photoRows.length) throw new Error("Camera completed, but no uploaded photos were returned.");
+
+    const photos = await returnCaptureRowsToEvidencePhotos(photoRows);
+    const existing = new Set(state.returnEvidencePhotos.map(getReturnEvidencePhotoKey));
+    photos.forEach((photo) => {
+      const key = getReturnEvidencePhotoKey(photo);
+      if (!existing.has(key)) {
+        state.returnEvidencePhotos.push(photo);
+        state.returnEvidencePhotoUploadKeys.add(key);
+      }
+    });
+    renderReturnEvidencePhotos();
+    setReturnPhotoStatus(`${photos.length} return photo${photos.length === 1 ? "" : "s"} added and selected for saving.`, "success");
+    scrollReturnConfirmIntoView();
+  } catch (error) {
+    console.error("Return evidence capture failed:", error);
+    setReturnPhotoStatus(error?.message || "Could not take return photo.", "error");
+  } finally {
+    state.returnCaptureBusy = false;
+    $("request-return-photo")?.toggleAttribute("disabled", false);
+  }
 }
 
 function renderReturnLineList() {
@@ -1854,6 +2368,8 @@ function openReturnIntakeModal(lineIds = []) {
   state.returnModalLineIds = uniqueIds;
   state.returnSelectedLineIds = new Set(uniqueIds);
   state.returnDestinationLocation = null;
+  state.returnEvidencePhotos = [];
+  state.returnEvidencePhotoUploadKeys.clear();
 
   const lines = getReturnModalLines();
   const orderNumbers = [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))];
@@ -1868,10 +2384,17 @@ function openReturnIntakeModal(lineIds = []) {
   $("return-error").textContent = "";
   $("return-location-results").innerHTML = "";
   setReturnIntakeStatus("Select returned lines, attach evidence photos, and choose the disposition.");
+  setReturnPhotoStatus("Choose a station, then take photos with the OG app.");
   renderReturnDestinationSummary();
+  renderReturnCaptureStations();
+  renderReturnEvidencePhotos();
   renderReturnEvidencePhotoList();
   renderReturnLineList();
   openModal("return-intake-modal");
+  loadReturnCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not preload return capture stations:", error);
+    setReturnPhotoStatus(error.message || "Could not load capture stations.", "error");
+  });
   setTimeout(() => $("return-tracking")?.focus(), 80);
 }
 
@@ -1879,41 +2402,10 @@ function closeReturnIntakeModal() {
   state.returnModalLineIds = [];
   state.returnSelectedLineIds = new Set();
   state.returnDestinationLocation = null;
+  state.returnEvidencePhotos = [];
+  state.returnEvidencePhotoUploadKeys.clear();
+  renderReturnEvidencePhotos();
   closeModal("return-intake-modal");
-}
-
-async function uploadReturnEvidencePhotos(files, orderNumbers = []) {
-  const orderSegment = safeStorageSegment(orderNumbers.join("-") || "return", "return");
-  const batchSegment = `${Date.now()}-${crypto.randomUUID()}`;
-  const uploaded = [];
-
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
-    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
-    const path = [
-      "returns",
-      orderSegment,
-      `${batchSegment}-${index + 1}.${extension}`,
-    ].join("/");
-    const { error } = await supabase.storage
-      .from(EBAY_RETURN_EVIDENCE_BUCKET)
-      .upload(path, file, {
-        contentType: file.type || "image/jpeg",
-        upsert: false,
-      });
-    if (error) throw new Error(error.message || `Could not upload return evidence photo ${index + 1}.`);
-    uploaded.push({
-      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
-      path,
-      label: `Return evidence ${index + 1}`,
-      original_name: file.name || "",
-      mime_type: file.type || "image/jpeg",
-      size_bytes: file.size || 0,
-      uploaded_at: new Date().toISOString(),
-    });
-  }
-
-  return uploaded;
 }
 
 function getReturnLineField(attribute, lineId) {
@@ -1926,12 +2418,13 @@ async function confirmReturnIntake() {
   const selectedLines = getReturnModalLines().filter((line) => state.returnSelectedLineIds.has(line.id));
   const errorEl = $("return-error");
   const files = [...($("return-evidence-photo")?.files || [])];
+  const selectedPhotos = getSelectedReturnEvidencePhotos();
 
   if (!selectedLines.length) {
     if (errorEl) errorEl.textContent = "Select at least one returned line.";
     return;
   }
-  if (!files.length) {
+  if (!files.length && !selectedPhotos.length) {
     if (errorEl) errorEl.textContent = "Attach at least one return evidence photo.";
     return;
   }
@@ -1962,7 +2455,7 @@ async function confirmReturnIntake() {
     setReturnIntakeStatus("Uploading return evidence photos...");
 
     const orderNumbers = [...new Set(selectedLines.map((line) => line.order?.order_number).filter(Boolean))];
-    const evidencePhotos = await uploadReturnEvidencePhotos(files, orderNumbers);
+    const evidencePhotos = await persistReturnEvidencePhotos(files, orderNumbers);
 
     setReturnIntakeStatus("Saving return and inventory audit...");
     const { data, error } = await supabase.rpc("receive_ebay_return", {
@@ -3146,6 +3639,13 @@ function setupListeners() {
   $("confirm-return-intake")?.addEventListener("click", confirmReturnIntake);
   $("find-return-destination")?.addEventListener("click", searchReturnDestinationLocation);
   $("return-evidence-photo")?.addEventListener("change", renderReturnEvidencePhotoList);
+  $("return-capture-station")?.addEventListener("change", (event) => {
+    setSelectedReturnCaptureStation(event.target.value);
+  });
+  $("refresh-return-stations")?.addEventListener("click", () => loadReturnCaptureStations());
+  $("request-return-photo")?.addEventListener("click", requestReturnEvidencePhoto);
+  $("select-all-return-photos")?.addEventListener("click", () => setAllReturnEvidencePhotosSelected(true));
+  $("deselect-all-return-photos")?.addEventListener("click", () => setAllReturnEvidencePhotosSelected(false));
   $("return-destination-scan")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();

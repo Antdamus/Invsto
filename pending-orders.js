@@ -4118,6 +4118,7 @@ function buildEbayPendingPriorityPayload() {
         buyerKey,
         buyerUsername: buyerUsername || getBuyerLabel(line),
         orderNumbers: new Set(),
+        lines: [],
         pendingLines: 0,
         pendingUnits: 0,
         nextShipBy: "",
@@ -4129,16 +4130,27 @@ function buildEbayPendingPriorityPayload() {
     const group = groups.get(buyerKey);
     const orderNumber = normalizeEbayOrderNumber(line.order?.order_number);
     if (orderNumber) group.orderNumbers.add(orderNumber);
+    const remainingQuantity = getRemainingLineQuantity(line) || 0;
     group.pendingLines += 1;
-    group.pendingUnits += getRemainingLineQuantity(line) || 0;
+    group.pendingUnits += remainingQuantity;
 
     const shipBy = line.order?.ship_by_date || "";
     const rank = getEbayPriorityRank(shipBy);
+    const urgency = getOrderUrgency(shipBy);
+    group.lines.push({
+      orderNumber,
+      itemNumber: line.item_number || "",
+      transactionId: line.transaction_id || "",
+      itemTitle: line.item_title || "",
+      remainingQuantity,
+      shipByDate: shipBy,
+      priorityRank: rank,
+      priorityLabel: urgency?.label || (shipBy ? "Upcoming" : "Pending"),
+    });
     if (
       rank < group.priorityRank
       || (rank === group.priorityRank && getShipTimestamp(shipBy) < getShipTimestamp(group.nextShipBy))
     ) {
-      const urgency = getOrderUrgency(shipBy);
       group.nextShipBy = shipBy;
       group.priorityRank = rank;
       group.priorityLabel = urgency?.label || (shipBy ? "Upcoming" : "Pending");
