@@ -152,6 +152,7 @@
               <option value="fulfilled">Shipped</option>
               <option value="cancelled">Canceled</option>
               <option value="admin_closeout">No-inventory completions</option>
+              <option value="returns">Returns</option>
               <option value="reverted">Reversals only</option>
             </select>
           </label>
@@ -221,6 +222,10 @@
           <div class="history-summary-card">
             <span>Canceled Lines</span>
             <strong id="summary-cancelled">0</strong>
+          </div>
+          <div class="history-summary-card">
+            <span>Returns</span>
+            <strong id="summary-returns">0</strong>
           </div>
           <div class="history-summary-card" data-admin-only="true">
             <span>Reversals</span>
@@ -302,6 +307,71 @@
         <button id="replace-history-label" type="button" class="primary-btn hidden">Replace Label</button>
         <button id="add-extra-history-label" type="button" class="primary-btn hidden" disabled>Add Extra Label</button>
         <button id="done-history-label" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="return-intake-modal" class="history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="return-intake-title">
+    <div class="history-modal-card return-intake-modal-card">
+      <button id="close-return-intake-modal" type="button" class="modal-close-btn" aria-label="Close">x</button>
+      <span class="eyebrow">Return Intake</span>
+      <h2 id="return-intake-title">Start return</h2>
+      <p id="return-intake-subtitle">Record what came back before anything is placed into sellable inventory.</p>
+
+      <div id="return-intake-status" class="history-label-status">
+        Select returned lines, attach evidence photos, and choose the disposition.
+      </div>
+
+      <div class="return-intake-grid">
+        <label class="modal-field">
+          Return reason
+          <select id="return-reason">
+            <option value="">Unknown / not listed</option>
+            <option value="buyer_changed_mind">Buyer changed mind</option>
+            <option value="not_as_described">Not as described</option>
+            <option value="damaged">Damaged</option>
+            <option value="wrong_item">Wrong item</option>
+            <option value="missing_parts">Missing parts</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Return tracking
+          <input id="return-tracking" type="text" placeholder="Scan or paste tracking number" />
+        </label>
+        <label class="modal-field">
+          eBay return ID
+          <input id="return-ebay-id" type="text" placeholder="Optional case/return id" />
+        </label>
+        <label class="modal-field">
+          Restock destination
+          <input id="return-destination-scan" type="text" placeholder="Scan tray/location for restock items" />
+        </label>
+      </div>
+
+      <div class="return-location-actions">
+        <button id="find-return-destination" type="button" class="secondary-btn">Find Location</button>
+        <div id="return-destination-summary" class="return-destination-summary">No restock destination selected.</div>
+      </div>
+      <div id="return-location-results" class="return-location-results"></div>
+
+      <label class="modal-field">
+        Evidence photos
+        <input id="return-evidence-photo" type="file" accept="image/*" capture="environment" multiple />
+      </label>
+      <div id="return-evidence-photo-list" class="history-extra-label-photo-list"></div>
+
+      <div id="return-line-list" class="return-line-list"></div>
+
+      <label class="modal-field">
+        Return note
+        <textarea id="return-note" rows="3" placeholder="Condition, packaging, refund notes, or anything unusual"></textarea>
+      </label>
+
+      <p id="return-error" class="history-error"></p>
+      <div class="history-modal-actions">
+        <button id="cancel-return-intake" type="button" class="secondary-btn">Cancel</button>
+        <button id="confirm-return-intake" type="button" class="primary-btn">Save Return</button>
       </div>
     </div>
   </div>

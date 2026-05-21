@@ -5,12 +5,19 @@ const state = {
   adminEvents: [],
   revertEvents: [],
   labelEvents: [],
+  returnCases: [],
+  returnEvents: [],
   relatedAdminEvents: [],
   relatedRevertEvents: [],
   relatedLabelEvents: [],
+  relatedReturnEvents: [],
   filteredLines: [],
   adminCloseoutLineIds: new Set(),
   selectedRevertLineIds: [],
+  returnModalLineIds: [],
+  returnSelectedLineIds: new Set(),
+  returnDestinationLocation: null,
+  returnLocations: [],
   awaitingLabelGroup: null,
   queuedHistoryLabelTransfers: [],
   pendingHistoryLabelReplacement: null,
@@ -27,6 +34,7 @@ const state = {
 let evidencePhotoViewerReturnFocus = null;
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const EXTRA_LABEL_EVIDENCE_BUCKET = "order-evidence-photos";
+const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 
@@ -293,10 +301,89 @@ function getEventGpsLabel(event) {
 }
 
 function getEventEvidencePhotos(event) {
-  const photos = event?.payload?.evidence_photos || event?.label_metadata?.evidence_photos;
+  const photos = event?.evidence_photos || event?.payload?.evidence_photos || event?.label_metadata?.evidence_photos;
   return Array.isArray(photos)
     ? photos.filter((photo) => photo?.bucket && photo?.path)
     : [];
+}
+
+function getReturnItemsForLine(lineId) {
+  if (!lineId) return [];
+  return state.returnCases
+    .flatMap((entry) => Array.isArray(entry.ebay_return_items) ? entry.ebay_return_items : [])
+    .filter((item) => item.order_line_id === lineId);
+}
+
+function getReturnCasesForLineIds(lineIds = []) {
+  const wanted = new Set(lineIds.filter(Boolean));
+  if (!wanted.size) return [];
+  return state.returnCases.filter((entry) =>
+    (Array.isArray(entry.ebay_return_items) ? entry.ebay_return_items : [])
+      .some((item) => wanted.has(item.order_line_id))
+  );
+}
+
+function getReturnEventsForLineIds(lineIds = []) {
+  const wanted = new Set(lineIds.filter(Boolean));
+  if (!wanted.size) return [];
+  return [...state.returnEvents, ...state.relatedReturnEvents]
+    .filter((event) => (event.order_line_ids || []).some((lineId) => wanted.has(lineId)))
+    .filter((event, index, array) => array.findIndex((entry) => entry.id === event.id) === index)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
+function getReturnStatusLabel(status = "") {
+  const key = String(status || "").toLowerCase();
+  if (key === "needs_review") return "Needs review";
+  if (key === "partially_received") return "Partially received";
+  if (key === "received") return "Received";
+  if (key === "closed") return "Return closed";
+  if (key === "cancelled") return "Return canceled";
+  if (key === "open") return "Return open";
+  return key ? key.replace(/_/g, " ") : "Return";
+}
+
+function getReturnDispositionLabel(value = "") {
+  const labels = {
+    restock: "Restocked",
+    quarantine: "Quarantined",
+    damaged: "Damaged",
+    wrong_item: "Wrong item",
+    refund_only: "Refund only",
+    missing: "Missing",
+    admin_review: "Needs review",
+  };
+  return labels[value] || String(value || "Return").replace(/_/g, " ");
+}
+
+function getReturnSearchTextForLine(line) {
+  const lineId = line?.id || "";
+  const items = getReturnItemsForLine(lineId);
+  const events = getReturnEventsForLineIds([lineId]);
+  const cases = getReturnCasesForLineIds([lineId]);
+  return [
+    ...items.flatMap((item) => [
+      item.condition_received,
+      item.disposition,
+      item.notes,
+      item.item_title,
+      item.item_number,
+    ]),
+    ...cases.flatMap((entry) => [
+      entry.status,
+      entry.return_reason,
+      entry.return_tracking_number,
+      entry.ebay_return_id,
+      entry.created_by_email,
+      entry.notes,
+    ]),
+    ...events.flatMap((event) => [
+      event.action,
+      event.notes,
+      event.signed_by_email,
+      ...(event.evidence_photos || []).map((photo) => `${photo.bucket}/${photo.path}`),
+    ]),
+  ].filter(Boolean).join(" ").toLowerCase();
 }
 
 async function signEventEvidencePhoto(photo, options = {}) {
@@ -595,12 +682,20 @@ async function loadOrderHistory() {
     .lte("created_at", toIso)
     .order("created_at", { ascending: false })
     .limit(300);
+  const returnEventsQuery = supabase
+    .from("ebay_return_events")
+    .select("*")
+    .gte("created_at", fromIso)
+    .lte("created_at", toIso)
+    .order("created_at", { ascending: false })
+    .limit(300);
 
-  const [linesResult, adminEventsResult, revertEventsResult, labelEventsResult] = await Promise.all([
+  const [linesResult, adminEventsResult, revertEventsResult, labelEventsResult, returnEventsResult] = await Promise.all([
     linesQuery,
     adminEventsQuery,
     revertEventsQuery,
     labelEventsQuery,
+    returnEventsQuery,
   ]);
 
   if (linesResult.error) {
@@ -621,14 +716,21 @@ async function loadOrderHistory() {
     console.warn("Failed to load eBay label audit events. Push the latest label audit migration if this is new:", labelEventsResult.error);
   }
 
+  if (returnEventsResult.error) {
+    console.warn("Failed to load eBay return events. Push the latest returns migration if this is new:", returnEventsResult.error);
+  }
+
   const closedLines = (linesResult.data || []).map(normalizeLine);
   const closedLineIds = closedLines.map((line) => line.id).filter(Boolean);
+  const closedOrderIds = [...new Set(closedLines.map((line) => line.order_id).filter(Boolean))];
   let relatedAdminEvents = [];
   let relatedRevertEvents = [];
   let relatedLabelEvents = [];
+  let relatedReturnEvents = [];
+  let returnCases = [];
 
   if (closedLineIds.length) {
-    const [relatedAdminResult, relatedRevertResult, relatedLabelResult] = await Promise.all([
+    const [relatedAdminResult, relatedRevertResult, relatedLabelResult, returnCasesResult, relatedReturnResult] = await Promise.all([
       supabase
         .from("ebay_order_admin_events")
         .select("*")
@@ -643,6 +745,19 @@ async function loadOrderHistory() {
         : Promise.resolve({ data: [], error: null }),
       supabase
         .from("ebay_order_label_events")
+        .select("*")
+        .overlaps("order_line_ids", closedLineIds)
+        .limit(500),
+      closedOrderIds.length
+        ? supabase
+          .from("ebay_return_cases")
+          .select("*, ebay_return_items(*)")
+          .in("order_id", closedOrderIds)
+          .order("opened_at", { ascending: false })
+          .limit(500)
+        : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("ebay_return_events")
         .select("*")
         .overlaps("order_line_ids", closedLineIds)
         .limit(500),
@@ -665,14 +780,29 @@ async function loadOrderHistory() {
     } else {
       relatedLabelEvents = relatedLabelResult.data || [];
     }
+
+    if (returnCasesResult.error) {
+      console.warn("Failed to load eBay return cases for visible order lines:", returnCasesResult.error);
+    } else {
+      returnCases = returnCasesResult.data || [];
+    }
+
+    if (relatedReturnResult.error) {
+      console.warn("Failed to load related eBay return events for visible order lines:", relatedReturnResult.error);
+    } else {
+      relatedReturnEvents = relatedReturnResult.data || [];
+    }
   }
 
   state.adminEvents = adminEventsResult.data || [];
   state.revertEvents = revertEventsResult.data || [];
   state.labelEvents = labelEventsResult.error ? [] : labelEventsResult.data || [];
+  state.returnEvents = returnEventsResult.error ? [] : returnEventsResult.data || [];
   state.relatedAdminEvents = relatedAdminEvents;
   state.relatedRevertEvents = relatedRevertEvents;
   state.relatedLabelEvents = relatedLabelEvents;
+  state.relatedReturnEvents = relatedReturnEvents;
+  state.returnCases = returnCases;
   state.adminCloseoutLineIds = new Set(
     [...state.adminEvents, ...state.relatedAdminEvents]
       .filter((event) => event.action === "fulfilled_no_inventory")
@@ -712,8 +842,14 @@ function applyFilters() {
     if (status === "fulfilled" && line.line_status !== "fulfilled") return false;
     if (status === "cancelled" && line.line_status !== "cancelled") return false;
     if (status === "admin_closeout" && !isAdminCloseoutLine(line)) return false;
+    if (status === "returns" && !getReturnItemsForLine(line.id).length) return false;
     if (worker && line.fulfilled_by_email !== worker) return false;
-    if (term && !line.searchText.includes(term) && !getLabelEventSearchTextForLine(line).includes(term)) return false;
+    if (
+      term
+      && !line.searchText.includes(term)
+      && !getLabelEventSearchTextForLine(line).includes(term)
+      && !getReturnSearchTextForLine(line).includes(term)
+    ) return false;
     return true;
   });
 
@@ -757,6 +893,7 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
   const closeouts = closeoutEvents.length || visibleLines.filter(isAdminCloseoutLine).length;
   const cancelled = visibleLines.filter((line) => line.line_status === "cancelled").length;
+  const returnCount = new Set(getReturnCasesForLineIds(visibleLines.map((line) => line.id)).map((entry) => entry.id)).size;
   const reverted = visibleEvents
     .filter((event) => event.category === "revert")
     .reduce((sum, event) => sum + Number(event.payload?.reverted_lines || event.order_line_ids?.length || 1), 0);
@@ -767,6 +904,7 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   $("summary-payout").textContent = formatMoney(payout);
   $("summary-admin-closeouts").textContent = String(closeouts);
   $("summary-cancelled").textContent = String(cancelled);
+  $("summary-returns").textContent = String(returnCount);
   $("summary-reversals").textContent = String(reverted);
 }
 
@@ -813,9 +951,11 @@ function getRelatedEventsForLineIds(lineIds = []) {
     ...state.relatedAdminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.relatedRevertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.relatedLabelEvents.map((event) => ({ ...event, category: "label" })),
+    ...state.relatedReturnEvents.map((event) => ({ ...event, category: "return" })),
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
+    ...state.returnEvents.map((event) => ({ ...event, category: "return" })),
   ]
     .filter((event) => getEventLineIds(event).some((lineId) => wanted.has(lineId)))
     .filter((event, index, array) => array.findIndex((entry) => entry.id === event.id && entry.category === event.category) === index)
@@ -825,12 +965,20 @@ function getRelatedEventsForLineIds(lineIds = []) {
 function getEventLabel(event) {
   if (event.category === "revert") return "Reverted";
   if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
+  if (event.category === "return") {
+    if (event.action === "restocked") return "Return restocked";
+    if (event.action === "item_inspected") return "Return inspected";
+    if (event.action === "return_created") return "Return started";
+    if (event.action === "closed") return "Return closed";
+    return "Return received";
+  }
   if (event.action === "fulfilled_no_inventory") return "No-inventory completion";
   if (event.action === "cancelled") return "Canceled";
   return event.action || "Event";
 }
 
 function getHistoryGroupStatus(group) {
+  if (getReturnCasesForLineIds((group.lines || []).map((line) => line.id)).length) return "Returned";
   if (group.events.some((event) => event.category === "revert")) return "Has reversal";
   if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
   if (group.events.some((event) => event.action === "fulfilled_no_inventory") || group.lines.some(isAdminCloseoutLine)) {
@@ -841,6 +989,7 @@ function getHistoryGroupStatus(group) {
 
 function getHistoryGroupStatusClass(group) {
   const label = getHistoryGroupStatus(group);
+  if (label === "Returned") return "is-returned";
   if (label === "Canceled") return "is-cancelled";
   if (label === "No-inventory completion" || label === "Has reversal") return "is-admin";
   return "";
@@ -1109,6 +1258,49 @@ function renderGroupLabelControl(group, orders = []) {
   `;
 }
 
+function renderGroupReturnControl(group) {
+  const lineIds = (group?.lines || []).map((line) => line.id).filter(Boolean);
+  if (!lineIds.length) return "";
+  const returnCases = getReturnCasesForLineIds(lineIds);
+  const latestCase = returnCases
+    .slice()
+    .sort((a, b) => new Date(b.opened_at || b.received_at || 0) - new Date(a.opened_at || a.received_at || 0))[0];
+  const returnItems = returnCases.flatMap((entry) => Array.isArray(entry.ebay_return_items) ? entry.ebay_return_items : []);
+  const restockedUnits = returnItems
+    .filter((item) => item.disposition === "restock")
+    .reduce((sum, item) => sum + Number(item.received_quantity || 0), 0);
+  const problemCount = returnItems.filter((item) => ["admin_review", "wrong_item", "damaged", "missing"].includes(item.disposition)).length;
+  const encodedLineIds = escapeHtml(lineIds.join(","));
+  const summary = latestCase
+    ? `${returnCases.length} return case${returnCases.length === 1 ? "" : "s"} - ${getReturnStatusLabel(latestCase.status)}${restockedUnits ? ` - ${restockedUnits} unit${restockedUnits === 1 ? "" : "s"} restocked` : ""}${problemCount ? ` - ${problemCount} flagged` : ""}`
+    : "No return recorded for this grouped completion.";
+
+  return `
+    <div class="history-order-return-strip">
+      <div class="history-order-return-control">
+        <div>
+          <span class="eyebrow">Returns</span>
+          <strong>${escapeHtml(latestCase ? getReturnStatusLabel(latestCase.status) : "Return intake")}</strong>
+          <small>${escapeHtml(summary)}</small>
+        </div>
+        <div>
+          <button type="button" class="secondary-btn history-return-btn" data-return-lines="${encodedLineIds}">${latestCase ? "Add Return Update" : "Start Return"}</button>
+        </div>
+      </div>
+      ${returnItems.length ? `
+        <div class="history-return-item-list">
+          ${returnItems.slice(0, 4).map((item) => `
+            <article>
+              <strong>${escapeHtml(item.item_title || "Returned item")}</strong>
+              <span>${escapeHtml(getReturnDispositionLabel(item.disposition))} - Qty ${Number(item.received_quantity || 0).toLocaleString()} - ${escapeHtml(formatDateTime(item.processed_at))}</span>
+            </article>
+          `).join("")}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderHistoryList(groups = getVisibleHistoryGroups()) {
   const list = $("history-list");
   if (!list) return;
@@ -1130,6 +1322,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const auditEvents = group.events.slice(0, 6);
     const groupOrders = getUniqueOrdersFromLines(group.lines);
     const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
+    const hasReturns = getReturnCasesForLineIds(lineIds).length > 0;
 
     const card = document.createElement("article");
     card.className = "history-order-card";
@@ -1150,6 +1343,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
             <span>Completed by: ${escapeHtml(workers.join(", ") || "Unknown")}</span>
           </div>
           ${hasAttachedLabel ? `<span class="history-label-pill">Label attached</span>` : ""}
+          ${hasReturns ? `<span class="history-return-pill">Return recorded</span>` : ""}
         </div>
         <div>
           <div class="history-money-row">
@@ -1160,6 +1354,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         </div>
       </div>
       ${renderGroupLabelControl(group, groupOrders)}
+      ${renderGroupReturnControl(group)}
       ${groupPhotos.length ? `
         <div class="history-evidence-strip">
           <div>
@@ -1220,6 +1415,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     card.querySelectorAll("[data-history-extra-label-open]").forEach((button) => {
       button.addEventListener("click", () => handleOpenHistoryExtraLabelButtonClick(button.dataset.historyExtraLabelOpen));
     });
+    card.querySelectorAll("[data-return-lines]").forEach((button) => {
+      button.addEventListener("click", () => openReturnIntakeModal(button.dataset.returnLines.split(",").filter(Boolean)));
+    });
     card.querySelectorAll("[data-revert-line]").forEach((button) => {
       button.addEventListener("click", () => openRevertModal([button.dataset.revertLine].filter(Boolean)));
     });
@@ -1273,6 +1471,7 @@ function getFilteredEvents() {
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
+    ...state.returnEvents.map((event) => ({ ...event, category: "return" })),
   ];
 
   return events.filter((event) => {
@@ -1280,6 +1479,7 @@ function getFilteredEvents() {
     if (status === "cancelled" && event.action !== "cancelled") return false;
     if (status === "admin_closeout" && event.category !== "admin") return false;
     if (status === "reverted" && event.category !== "revert") return false;
+    if (status === "returns" && event.category !== "return") return false;
 
     const eventLines = getEventLineIds(event).map((lineId) => lineById.get(lineId)).filter(Boolean);
     if (worker) {
@@ -1295,6 +1495,7 @@ function getFilteredEvents() {
         event.signed_by_email,
         event.label_file_path,
         event.shipment_id,
+        event.return_case_id,
         getLabelMetadataSearchText(event.label_metadata),
         getEventBuyerLabel(event, eventLines),
         ...eventLines.flatMap((line) => [
@@ -1317,6 +1518,7 @@ function getFilteredEvents() {
         ...(event.order_numbers || []),
         ...(event.order_ids || []),
         ...(event.order_line_ids || []),
+        ...(event.return_item_ids || []),
       ].filter(Boolean).join(" ").toLowerCase();
       if (!haystack.includes(term)) return false;
     }
@@ -1339,17 +1541,21 @@ function renderEventList() {
       ? "Order reverted"
       : event.category === "label"
         ? event.action === "extra_label" ? "Extra shipping label added" : event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached"
-        : event.action === "fulfilled_no_inventory"
+        : event.category === "return"
+          ? getEventLabel(event)
+          : event.action === "fulfilled_no_inventory"
           ? "Packed without inventory removal"
           : isAdminUser() ? "Canceled by admin" : "Canceled";
     const units = event.payload?.restored_units ? ` - restored ${Number(event.payload.restored_units).toLocaleString()} unit(s)` : "";
     const gps = getEventGpsLabel(event);
     const store = event.payload?.checkout_store_name || "";
     const evidenceCount = getEventEvidencePhotos(event).length;
-    const eventStatusClass = event.category === "revert" || event.category === "label"
+    const eventStatusClass = event.category === "return"
+      ? "is-returned"
+      : event.category === "revert" || event.category === "label"
       ? "is-admin"
       : event.action === "cancelled" ? "is-cancelled" : "";
-    const eventDetail = event.notes || event.label_metadata?.notes || event.label_file_path || "No note recorded.";
+    const eventDetail = event.notes || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
     return `
       <article class="event-card">
         <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>
@@ -1459,6 +1665,328 @@ async function confirmRevert() {
   } finally {
     state.busy = false;
     $("confirm-revert").disabled = false;
+  }
+}
+
+function setReturnIntakeStatus(message = "", type = "info") {
+  const el = $("return-intake-status");
+  if (!el) return;
+  el.textContent = message || "Select returned lines, attach evidence photos, and choose the disposition.";
+  el.classList.toggle("is-error", type === "error");
+  el.classList.toggle("is-success", type === "success");
+}
+
+function getReturnModalLines() {
+  const wanted = new Set(state.returnModalLineIds);
+  return state.lines.filter((line) => wanted.has(line.id));
+}
+
+function getLocationLabel(location) {
+  if (!location) return "";
+  const role = location.is_tray || location.location_role === "tray"
+    ? "Tray"
+    : location.parent_location_id ? "Container" : "Location";
+  return `${location.location_name || "Unnamed location"}${location.location_code ? ` (${location.location_code})` : ""} - ${role}`;
+}
+
+async function loadReturnLocations() {
+  if (state.returnLocations.length) return state.returnLocations;
+  const { data, error } = await supabase
+    .from("locations")
+    .select("id,location_name,location_code,type,active,is_tray,location_role,parent_location_id,store_id,tray_current_store_id")
+    .eq("active", true)
+    .order("location_name", { ascending: true })
+    .limit(1200);
+  if (error) throw new Error(error.message || "Could not load return locations.");
+  state.returnLocations = data || [];
+  return state.returnLocations;
+}
+
+function renderReturnDestinationSummary() {
+  const summary = $("return-destination-summary");
+  if (!summary) return;
+  summary.textContent = state.returnDestinationLocation
+    ? `Restock destination: ${getLocationLabel(state.returnDestinationLocation)}`
+    : "No restock destination selected.";
+  summary.classList.toggle("is-selected", Boolean(state.returnDestinationLocation));
+}
+
+function selectReturnDestinationLocation(location) {
+  state.returnDestinationLocation = location || null;
+  if ($("return-destination-scan") && location) {
+    $("return-destination-scan").value = location.location_code || location.location_name || "";
+  }
+  $("return-location-results").innerHTML = "";
+  renderReturnDestinationSummary();
+}
+
+async function searchReturnDestinationLocation() {
+  const term = String($("return-destination-scan")?.value || "").trim().toLowerCase();
+  const results = $("return-location-results");
+  if (!term) {
+    setReturnIntakeStatus("Scan or type a return destination location.", "error");
+    return;
+  }
+
+  try {
+    const locations = await loadReturnLocations();
+    const matches = locations.filter((location) =>
+      String(location.id || "").toLowerCase() === term
+      || String(location.location_code || "").toLowerCase() === term
+      || String(location.location_name || "").toLowerCase().includes(term)
+      || getLocationLabel(location).toLowerCase().includes(term)
+    ).slice(0, 12);
+
+    if (matches.length === 1) {
+      selectReturnDestinationLocation(matches[0]);
+      setReturnIntakeStatus("Restock destination selected.", "success");
+      return;
+    }
+
+    if (!matches.length) {
+      if (results) results.innerHTML = "";
+      setReturnIntakeStatus("No active location matched that scan.", "error");
+      return;
+    }
+
+    if (results) {
+      results.innerHTML = matches.map((location, index) => `
+        <button type="button" class="return-location-result" data-return-location-index="${index}">
+          <strong>${escapeHtml(location.location_name || "Unnamed location")}</strong>
+          <span>${escapeHtml(location.location_code || location.id)} - ${escapeHtml(getLocationLabel(location))}</span>
+        </button>
+      `).join("");
+      results.querySelectorAll("[data-return-location-index]").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectReturnDestinationLocation(matches[Number(button.dataset.returnLocationIndex)]);
+          setReturnIntakeStatus("Restock destination selected.", "success");
+        });
+      });
+    }
+    setReturnIntakeStatus(`${matches.length} locations match. Choose the restock destination.`, "info");
+  } catch (error) {
+    console.error("Return destination search failed:", error);
+    setReturnIntakeStatus(error.message || "Could not search locations.", "error");
+  }
+}
+
+function renderReturnEvidencePhotoList() {
+  const files = [...($("return-evidence-photo")?.files || [])];
+  const list = $("return-evidence-photo-list");
+  if (!list) return;
+  list.innerHTML = files.length
+    ? files.map((file) => `<span>${escapeHtml(file.name)}${file.size ? ` - ${escapeHtml(formatFileSize(file.size))}` : ""}</span>`).join("")
+    : `<span>Evidence photos required before saving a return</span>`;
+}
+
+function renderReturnLineList() {
+  const list = $("return-line-list");
+  if (!list) return;
+  const lines = getReturnModalLines();
+  if (!lines.length) {
+    list.innerHTML = `<div class="history-empty">No shipped lines are available for return intake.</div>`;
+    return;
+  }
+
+  list.innerHTML = lines.map((line) => {
+    const checked = state.returnSelectedLineIds.has(line.id);
+    const hasInventoryItem = Boolean(line.internal_item_id);
+    const priorReturns = getReturnItemsForLine(line.id);
+    const orderNumber = line.order?.order_number || "No order";
+    return `
+      <article class="return-line-card ${checked ? "is-selected" : ""}" data-return-line-card="${escapeHtml(line.id)}">
+        <label class="return-line-check">
+          <input type="checkbox" data-return-line-select="${escapeHtml(line.id)}" ${checked ? "checked" : ""} />
+          <span>
+            <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <small>${escapeHtml(orderNumber)} - Qty shipped ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()}${priorReturns.length ? ` - ${priorReturns.length} prior return record${priorReturns.length === 1 ? "" : "s"}` : ""}</small>
+          </span>
+        </label>
+        <div class="return-line-fields">
+          <label>
+            Qty received
+            <input type="number" min="0" max="${Number(line.fulfilled_quantity || line.quantity || 1)}" step="1" value="${Number(line.fulfilled_quantity || line.quantity || 1)}" data-return-qty="${escapeHtml(line.id)}" />
+          </label>
+          <label>
+            Condition
+            <select data-return-condition="${escapeHtml(line.id)}">
+              <option value="used_good">Good / sellable</option>
+              <option value="new">New / unopened</option>
+              <option value="damaged">Damaged</option>
+              <option value="missing_parts">Missing parts</option>
+              <option value="wrong_item">Wrong item</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label>
+            Disposition
+            <select data-return-disposition="${escapeHtml(line.id)}">
+              <option value="quarantine">Quarantine / hold</option>
+              ${hasInventoryItem ? `<option value="restock">Restock to selected location</option>` : ""}
+              <option value="damaged">Damaged / do not restock</option>
+              <option value="wrong_item">Wrong item</option>
+              <option value="refund_only">Refund only / no item</option>
+              <option value="missing">Missing from return package</option>
+              <option value="admin_review">Needs admin review</option>
+            </select>
+          </label>
+        </div>
+        <label class="return-line-note">
+          Item note
+          <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Optional note for this returned item" />
+        </label>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-return-line-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.returnSelectedLineIds.add(checkbox.dataset.returnLineSelect);
+      else state.returnSelectedLineIds.delete(checkbox.dataset.returnLineSelect);
+      renderReturnLineList();
+    });
+  });
+}
+
+function openReturnIntakeModal(lineIds = []) {
+  const uniqueIds = [...new Set(lineIds.filter(Boolean))];
+  if (!uniqueIds.length) return;
+  state.returnModalLineIds = uniqueIds;
+  state.returnSelectedLineIds = new Set(uniqueIds);
+  state.returnDestinationLocation = null;
+
+  const lines = getReturnModalLines();
+  const orderNumbers = [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))];
+  $("return-intake-title").textContent = orderNumbers.length === 1 ? `Return ${orderNumbers[0]}` : "Start grouped return";
+  $("return-intake-subtitle").textContent = `${lines.length} shipped line${lines.length === 1 ? "" : "s"} available. Restock only after photo proof and inspection.`;
+  $("return-reason").value = "";
+  $("return-tracking").value = "";
+  $("return-ebay-id").value = "";
+  $("return-destination-scan").value = "";
+  $("return-note").value = "";
+  $("return-evidence-photo").value = "";
+  $("return-error").textContent = "";
+  $("return-location-results").innerHTML = "";
+  setReturnIntakeStatus("Select returned lines, attach evidence photos, and choose the disposition.");
+  renderReturnDestinationSummary();
+  renderReturnEvidencePhotoList();
+  renderReturnLineList();
+  openModal("return-intake-modal");
+  setTimeout(() => $("return-tracking")?.focus(), 80);
+}
+
+function closeReturnIntakeModal() {
+  state.returnModalLineIds = [];
+  state.returnSelectedLineIds = new Set();
+  state.returnDestinationLocation = null;
+  closeModal("return-intake-modal");
+}
+
+async function uploadReturnEvidencePhotos(files, orderNumbers = []) {
+  const orderSegment = safeStorageSegment(orderNumbers.join("-") || "return", "return");
+  const batchSegment = `${Date.now()}-${crypto.randomUUID()}`;
+  const uploaded = [];
+
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const extension = String(file.name || "").split(".").pop()?.toLowerCase()?.replace(/[^a-z0-9]/g, "") || "jpg";
+    const path = [
+      "returns",
+      orderSegment,
+      `${batchSegment}-${index + 1}.${extension}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EBAY_RETURN_EVIDENCE_BUCKET)
+      .upload(path, file, {
+        contentType: file.type || "image/jpeg",
+        upsert: false,
+      });
+    if (error) throw new Error(error.message || `Could not upload return evidence photo ${index + 1}.`);
+    uploaded.push({
+      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      path,
+      label: `Return evidence ${index + 1}`,
+      original_name: file.name || "",
+      mime_type: file.type || "image/jpeg",
+      size_bytes: file.size || 0,
+      uploaded_at: new Date().toISOString(),
+    });
+  }
+
+  return uploaded;
+}
+
+function getReturnLineField(attribute, lineId) {
+  return [...document.querySelectorAll(`[${attribute}]`)]
+    .find((element) => element.getAttribute(attribute) === lineId) || null;
+}
+
+async function confirmReturnIntake() {
+  if (state.busy) return;
+  const selectedLines = getReturnModalLines().filter((line) => state.returnSelectedLineIds.has(line.id));
+  const errorEl = $("return-error");
+  const files = [...($("return-evidence-photo")?.files || [])];
+
+  if (!selectedLines.length) {
+    if (errorEl) errorEl.textContent = "Select at least one returned line.";
+    return;
+  }
+  if (!files.length) {
+    if (errorEl) errorEl.textContent = "Attach at least one return evidence photo.";
+    return;
+  }
+
+  const returnItems = selectedLines.map((line) => {
+    const disposition = getReturnLineField("data-return-disposition", line.id)?.value || "admin_review";
+    return {
+      order_line_id: line.id,
+      received_quantity: Number(getReturnLineField("data-return-qty", line.id)?.value || 0),
+      condition_received: getReturnLineField("data-return-condition", line.id)?.value || "unknown",
+      disposition,
+      destination_location_id: disposition === "restock" ? state.returnDestinationLocation?.id || null : null,
+      notes: getReturnLineField("data-return-line-note", line.id)?.value || "",
+    };
+  });
+
+  const needsRestockDestination = returnItems.some((item) => item.disposition === "restock");
+  if (needsRestockDestination && !state.returnDestinationLocation?.id) {
+    if (errorEl) errorEl.textContent = "Choose a restock destination before saving restocked items.";
+    $("return-destination-scan")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    $("confirm-return-intake").disabled = true;
+    if (errorEl) errorEl.textContent = "";
+    setReturnIntakeStatus("Uploading return evidence photos...");
+
+    const orderNumbers = [...new Set(selectedLines.map((line) => line.order?.order_number).filter(Boolean))];
+    const evidencePhotos = await uploadReturnEvidencePhotos(files, orderNumbers);
+
+    setReturnIntakeStatus("Saving return and inventory audit...");
+    const { data, error } = await supabase.rpc("receive_ebay_return", {
+      _return_items: returnItems,
+      _return_reason: $("return-reason")?.value || null,
+      _return_tracking_number: $("return-tracking")?.value || null,
+      _ebay_return_id: $("return-ebay-id")?.value || null,
+      _notes: $("return-note")?.value || null,
+      _evidence_photos: evidencePhotos,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+
+    const result = Array.isArray(data) ? data[0] || {} : data || {};
+    setReturnIntakeStatus(`Return saved. ${Number(result.restocked_units || 0).toLocaleString()} unit${Number(result.restocked_units || 0) === 1 ? "" : "s"} restocked.`, "success");
+    closeReturnIntakeModal();
+    await loadOrderHistory();
+  } catch (error) {
+    console.error("Return intake failed:", error);
+    if (errorEl) errorEl.textContent = error.message || "Could not save this return.";
+    setReturnIntakeStatus(error.message || "Could not save this return.", "error");
+  } finally {
+    state.busy = false;
+    $("confirm-return-intake").disabled = false;
   }
 }
 
@@ -2613,6 +3141,20 @@ function setupListeners() {
   $("revert-order-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "revert-order-modal") closeRevertModal();
   });
+  $("close-return-intake-modal")?.addEventListener("click", closeReturnIntakeModal);
+  $("cancel-return-intake")?.addEventListener("click", closeReturnIntakeModal);
+  $("confirm-return-intake")?.addEventListener("click", confirmReturnIntake);
+  $("find-return-destination")?.addEventListener("click", searchReturnDestinationLocation);
+  $("return-evidence-photo")?.addEventListener("change", renderReturnEvidencePhotoList);
+  $("return-destination-scan")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchReturnDestinationLocation();
+    }
+  });
+  $("return-intake-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "return-intake-modal") closeReturnIntakeModal();
+  });
   $("close-history-label-modal")?.addEventListener("click", closeHistoryLabelModal);
   $("done-history-label")?.addEventListener("click", closeHistoryLabelModal);
   $("replace-history-label")?.addEventListener("click", confirmHistoryLabelReplacement);
@@ -2659,6 +3201,16 @@ function setupListeners() {
       if (event.key === "Escape") {
         event.preventDefault();
         closeHistoryLabelModal();
+      }
+      return;
+    }
+    if (!$("return-intake-modal")?.classList.contains("hidden")) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeReturnIntakeModal();
+      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        confirmReturnIntake();
       }
       return;
     }
