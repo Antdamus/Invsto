@@ -11,7 +11,7 @@ const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
 const OPENAI_TIMEOUT_MS = 30000;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -154,6 +154,9 @@ type DryRunCounters = {
 type Input = {
   mode: Mode;
   limit: number;
+  classificationLimit: number;
+  replayLimit: number;
+  failedJobLimit: number;
   messageId: string | null;
   mailboxId: string | null;
   startDate: string | null;
@@ -263,6 +266,9 @@ async function parseInput(req: Request): Promise<Input> {
   const requestedMode = typeof body?.mode === "string" ? body.mode : "";
   const mode = SUPPORTED_MODES.includes(requestedMode as Mode) ? requestedMode as Mode : "enqueue_and_process";
   const limit = Math.min(Math.max(Number(body?.limit) || 25, 1), MAX_LIMIT);
+  const classificationLimit = Math.min(Math.max(Number(body?.classificationLimit) || 20, 1), MAX_LIMIT);
+  const replayLimit = Math.min(Math.max(Number(body?.replayLimit) || 20, 1), MAX_LIMIT);
+  const failedJobLimit = Math.min(Math.max(Number(body?.failedJobLimit) || 20, 1), MAX_LIMIT);
   const messageId = typeof body?.messageId === "string" && body.messageId.trim() ? body.messageId.trim() : null;
   const mailboxId = typeof body?.mailboxId === "string" && body.mailboxId.trim() ? body.mailboxId.trim() : null;
   const startDate = typeof body?.startDate === "string" && body.startDate.trim() ? body.startDate.trim() : null;
@@ -287,7 +293,21 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "replay_classification" && !messageId && !mailboxId && !classificationRunId) {
     throw new ClassifierError("replay_selector_required", { status: 400, phase: "input" });
   }
-  return { mode, limit, messageId, mailboxId, startDate, endDate, classificationRunId, reason, replaySource, idempotencyKey };
+  return {
+    mode,
+    limit,
+    classificationLimit,
+    replayLimit,
+    failedJobLimit,
+    messageId,
+    mailboxId,
+    startDate,
+    endDate,
+    classificationRunId,
+    reason,
+    replaySource,
+    idempotencyKey,
+  };
 }
 
 async function sha256Hex(value: string) {
@@ -1171,6 +1191,134 @@ function blankDryRunCounters(): DryRunCounters {
   };
 }
 
+async function countRows(supabase: ServiceClient, table: string, build: (query: any) => any) {
+  const query = build(supabase.from(table).select("id", { count: "exact", head: true }));
+  const { count, error } = await query;
+  if (error) throw new ClassifierError("admin_view_count_failed", { phase: `${table}_count` });
+  return count || 0;
+}
+
+function safeMetadata(value: unknown, depth = 0): unknown {
+  if (depth > 6) return "[redacted_depth_limit]";
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") {
+    if (/(bearer\s+|sk-[a-z0-9_-]{10,}|refresh[_-]?token|access[_-]?token)/i.test(value)) return "[redacted]";
+    return shortText(value, 1000);
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => safeMetadata(item, depth + 1));
+  if (typeof value !== "object") return null;
+
+  const sensitiveKeyPattern = /(token|secret|api[_-]?key|authorization|credential|password|encrypted)/i;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .slice(0, 80)
+      .map(([key, item]) => [
+        key,
+        sensitiveKeyPattern.test(key) ? "[redacted]" : safeMetadata(item, depth + 1),
+      ]),
+  );
+}
+
+async function adminClassificationView(supabase: ServiceClient, input: Input) {
+  const [
+    classificationsResult,
+    replayResult,
+    failedJobsResult,
+    queuedCount,
+    processingCount,
+    succeededCount,
+    failedCount,
+    validCount,
+    invalidCount,
+    reviewCount,
+    replayGeneratedCount,
+  ] = await Promise.all([
+    supabase
+      .from("email_message_classifications")
+      .select("id, message_id, category, confidence, summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
+      .eq("source", "ai")
+      .order("created_at", { ascending: false })
+      .limit(input.classificationLimit),
+    supabase
+      .from("email_operational_events")
+      .select("id, reason, idempotency_key, new_job_ids, payload, created_at")
+      .eq("event_type", "classification_replay")
+      .order("created_at", { ascending: false })
+      .limit(input.replayLimit),
+    supabase
+      .from("email_processing_jobs")
+      .select("id, message_id, status, attempt_count, last_error_code, last_error_message, metadata, updated_at")
+      .eq("job_type", "classify")
+      .eq("status", "failed")
+      .order("updated_at", { ascending: false })
+      .limit(input.failedJobLimit),
+    countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "queued")),
+    countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "running")),
+    countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "succeeded")),
+    countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "failed")),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "valid")),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "invalid")),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("requires_human_review", true)),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").like("input_version", "v1:classification_replay:%")),
+  ]);
+
+  if (classificationsResult.error) throw new ClassifierError("admin_view_classifications_failed", { phase: "admin_view_classifications" });
+  if (replayResult.error) throw new ClassifierError("admin_view_replay_failed", { phase: "admin_view_replay" });
+  if (failedJobsResult.error) throw new ClassifierError("admin_view_failed_jobs_failed", { phase: "admin_view_failed_jobs" });
+
+  const replayOperations = (replayResult.data || []).map((event: Record<string, any>) => ({
+    id: event.id,
+    reason: event.reason,
+    idempotency_key: event.idempotency_key,
+    created_job_ids: Array.isArray(event.new_job_ids) ? event.new_job_ids : [],
+    created_job_count: Array.isArray(event.new_job_ids) ? event.new_job_ids.length : 0,
+    jobs_enqueued: Number(event.payload?.jobs_enqueued || 0),
+    jobs_skipped_active: Number(event.payload?.jobs_skipped_active || 0),
+    created_at: event.created_at,
+  }));
+
+  return {
+    ok: true,
+    mode: "admin_view",
+    classifications: (classificationsResult.data || []).map((row: Record<string, any>) => ({
+      id: row.id,
+      message_id: row.message_id,
+      category: row.category,
+      confidence: row.confidence === null ? null : Number(row.confidence),
+      summary: row.summary,
+      recommended_action: row.recommended_action,
+      requires_human_review: row.requires_human_review,
+      safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
+      validation_status: row.validation_status,
+      created_at: row.created_at,
+    })),
+    replay_operations: replayOperations,
+    failed_jobs: (failedJobsResult.data || []).map((job: Record<string, any>) => ({
+      id: job.id,
+      message_id: job.message_id,
+      status: job.status,
+      attempt_count: job.attempt_count,
+      last_error_code: job.last_error_code,
+      last_error_message: shortText(job.last_error_message, 500),
+      metadata: safeMetadata(job.metadata || {}),
+      updated_at: job.updated_at,
+    })),
+    queue_summary: {
+      queued: queuedCount,
+      processing: processingCount,
+      succeeded: succeededCount,
+      failed: failedCount,
+    },
+    validation_diagnostics: {
+      valid_classifications: validCount,
+      invalid_classifications: invalidCount,
+      requires_human_review: reviewCount,
+      replay_generated_classifications: replayGeneratedCount,
+    },
+  };
+}
+
 async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
   if (input.classificationRunId) {
     const { data: rows, error } = await supabase
@@ -1404,6 +1552,11 @@ serve(async (req) => {
     const supabase = serviceClient();
     const admin = await requireAdmin(req, supabase);
     const input = await parseInput(req);
+
+    if (input.mode === "admin_view") {
+      return json(req, 200, await adminClassificationView(supabase, input));
+    }
+
     const promptVersionValue = promptVersion();
     const prompt = buildPrompt(promptVersionValue);
     const promptHash = await sha256Hex(stableStringify({
