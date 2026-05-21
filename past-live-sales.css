@@ -497,6 +497,13 @@ body.past-live-body {
   padding: 10px;
 }
 
+.bag-item.is-manual {
+  border-color: rgba(159, 122, 234, 0.36);
+  background:
+    linear-gradient(135deg, rgba(159, 122, 234, 0.16), rgba(231, 192, 114, 0.06)),
+    rgba(0, 0, 0, 0.2);
+}
+
 .item-thumb {
   width: 64px;
   height: 64px;
@@ -508,6 +515,12 @@ body.past-live-body {
   color: var(--past-muted);
   font-size: 0.7rem;
   font-weight: 900;
+}
+
+.bag-item.is-manual .item-thumb {
+  background: rgba(159, 122, 234, 0.18);
+  color: #eadcff;
+  border: 1px solid rgba(159, 122, 234, 0.26);
 }
 
 .item-thumb button {

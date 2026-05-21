@@ -33,6 +33,7 @@ const state = {
   editSourceRows: [],
   editSelectedSourceRow: null,
   ownerEditLot: null,
+  lastBagOwnerBySession: new Map(),
   pendingStartAuctionNumber: "",
   busy: false,
 };
@@ -159,9 +160,23 @@ function getSelectedBagOwnerId() {
   return $("bag-owner-select")?.value
     || $("label-bag-owner-select")?.value
     || state.currentLot?.owner_employee_id
+    || getRememberedBagOwnerId()
     || state.currentSession?.primary_seller_employee_id
     || state.employee?.id
     || null;
+}
+
+function getRememberedBagOwnerId(sessionId = state.currentSession?.id) {
+  const key = String(sessionId || "");
+  if (!key) return "";
+  return state.lastBagOwnerBySession.get(key) || "";
+}
+
+function rememberBagOwner(ownerEmployeeId, sessionId = state.currentSession?.id) {
+  const key = String(sessionId || "");
+  const ownerId = String(ownerEmployeeId || "");
+  if (!key || !ownerId) return;
+  state.lastBagOwnerBySession.set(key, ownerId);
 }
 
 function getSourceRole(source = {}) {
@@ -2231,6 +2246,7 @@ async function startSession() {
     if (error) throw error;
     state.currentSession = Array.isArray(data) ? data[0] : data;
     state.currentLot = null;
+    rememberBagOwner(primarySellerId, state.currentSession?.id);
     await loadSessions({ keepSelection: true });
     state.busy = false;
     await prepareNextBag();
@@ -2416,6 +2432,7 @@ async function createOrLoadLot(options = {}) {
     });
     if (error) throw error;
     state.currentLot = Array.isArray(data) ? data[0] : data;
+    rememberBagOwner(state.currentLot.owner_employee_id || ownerEmployeeId);
     clearScan();
     await loadLotItems();
     if ($("auction-number")) $("auction-number").value = state.currentLot.auction_number || auctionNumber;
@@ -2453,6 +2470,7 @@ async function updateCurrentLotOwner(ownerEmployeeId, options = {}) {
     });
     if (error) throw error;
     state.currentLot = Array.isArray(data) ? data[0] : data;
+    rememberBagOwner(state.currentLot.owner_employee_id || ownerEmployeeId);
     if (!options.silent) {
       setStatus(`Bag owner updated to ${getLotOwnerLabel() || "selected seller"}.`, "success");
     }
@@ -2514,6 +2532,7 @@ async function prepareNextBag() {
   const recoverableLot = await findRecoverableCurrentLot();
   if (recoverableLot) {
     state.currentLot = recoverableLot;
+    rememberBagOwner(recoverableLot.owner_employee_id);
     if ($("auction-number")) $("auction-number").value = recoverableLot.auction_number || "";
     if ($("label-free-text")) $("label-free-text").value = recoverableLot.auction_number || "";
     setFlowStep("scan");
@@ -2930,6 +2949,7 @@ async function reloadCurrentLot() {
     .eq("id", state.currentLot.id)
     .maybeSingle();
   if (!error && data) state.currentLot = data;
+  if (!error && data?.owner_employee_id) rememberBagOwner(data.owner_employee_id, data.session_id);
 }
 
 function clearScan() {
@@ -2944,6 +2964,15 @@ function clearScan() {
   renderSelectedItem();
   renderSourceRows();
   updateScanGate();
+}
+
+function resetManualLiveItemForm() {
+  const category = $("manual-live-item-category");
+  const quantity = $("manual-live-item-quantity");
+  const description = $("manual-live-item-description");
+  if (category) category.selectedIndex = 0;
+  if (quantity) quantity.value = "1";
+  if (description) description.value = "";
 }
 
 async function addManualLiveSaleItem() {
@@ -3041,7 +3070,7 @@ function renderSellerControls() {
   const coSellerIds = Array.isArray(state.currentSession?.co_seller_employee_ids)
     ? state.currentSession.co_seller_employee_ids
     : [...(coSellerSelect?.selectedOptions || [])].map((option) => option.value).filter(Boolean);
-  const ownerId = state.currentLot?.owner_employee_id || primaryId || state.employee?.id || "";
+  const ownerId = state.currentLot?.owner_employee_id || getRememberedBagOwnerId() || primaryId || state.employee?.id || "";
 
   populateEmployeeSelect(primarySelect, {
     selectedValue: primaryId,
@@ -3450,10 +3479,13 @@ async function finalizeCurrentBag() {
     const printed = await generateLiveLabel({ suppressStatus: true });
     if (!printed) return;
 
+    rememberBagOwner(selectedOwnerId || state.currentLot.owner_employee_id);
     saveLastAuctionNumber(state.currentLot.auction_number);
     state.currentLot = null;
     state.lotItems = [];
     clearScan();
+    resetManualLiveItemForm();
+    setLabelStatus("");
     renderAll();
     state.busy = false;
     await prepareNextBag();
@@ -3501,6 +3533,7 @@ function setupListeners() {
     const ownerId = event.target.value || "";
     if ($("bag-owner-select") && $("bag-owner-select") !== event.target) $("bag-owner-select").value = ownerId;
     if ($("label-bag-owner-select") && $("label-bag-owner-select") !== event.target) $("label-bag-owner-select").value = ownerId;
+    rememberBagOwner(ownerId);
     if (ownerId) updateCurrentLotOwner(ownerId);
   };
   $("bag-owner-select")?.addEventListener("change", handleBagOwnerChange);
