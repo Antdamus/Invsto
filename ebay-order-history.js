@@ -2986,12 +2986,67 @@ function applyReturnTransferPrefill(payload = {}, lines = []) {
   if (!isReturnsWorkbenchPage() && $("history-list")) applyFilters();
 }
 
+function isClosedReturnTask(task = null) {
+  return Boolean(task && ["resolved", "cancelled"].includes(task.status));
+}
+
+function getReturnTaskPayload(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  return {
+    ...(task.metadata || {}),
+    ...(returnCase.raw_payload || {}),
+  };
+}
+
+function findExistingReturnTaskForTransfer(payload = {}, lines = [], taskType = "") {
+  const info = getReturnTransferInfo(payload);
+  const returnId = normalizeReturnLookup(info.returnId || payload.metadata?.returnId);
+  const buyer = normalizeReturnLookup(info.buyerUsername || payload.metadata?.buyerUsername);
+  const itemNumber = normalizeReturnLookup(info.itemNumber || payload.metadata?.itemNumber);
+  const orderIds = new Set(lines.map((line) => line.order?.id || line.order_id).filter(Boolean));
+
+  return state.returnTasks.find((task) => {
+    if (taskType && task.task_type !== taskType) return false;
+    const returnCase = getReturnTaskCase(task);
+    const metadata = getReturnTaskPayload(task);
+    const taskReturnId = normalizeReturnLookup(returnCase.ebay_return_id || metadata.returnId || metadata.ebayReturnId);
+    if (returnId && taskReturnId && taskReturnId !== returnId) return false;
+
+    if (taskType === "return_intake") {
+      return Boolean(
+        returnId && taskReturnId === returnId
+        || orderIds.has(task.order_id)
+        || orderIds.has(returnCase.order_id)
+      );
+    }
+
+    if (taskType === "return_review") {
+      if (returnCase.case_type !== "unmatched_legacy" && metadata.caseType !== "unmatched_legacy") return false;
+      if (returnId && taskReturnId === returnId) return true;
+      const taskBuyer = normalizeReturnLookup(returnCase.buyer_username || metadata.buyerUsername);
+      const taskItem = normalizeReturnLookup(metadata.itemNumber || metadata.item_number);
+      return Boolean(itemNumber && buyer && taskItem === itemNumber && taskBuyer === buyer);
+    }
+
+    return Boolean(returnId && taskReturnId === returnId);
+  }) || null;
+}
+
 async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {}) {
   const info = getReturnTransferInfo(payload);
   const firstLine = lines[0];
   const order = firstLine?.order || {};
   if (!order.id) return null;
   const lineIds = lines.map((line) => line.id).filter(Boolean);
+  const existingTask = findExistingReturnTaskForTransfer(payload, lines, "return_intake");
+  if (isClosedReturnTask(existingTask)) {
+    return {
+      return_case_id: existingTask.return_case_id || getReturnTaskCase(existingTask).id || null,
+      task_id: existingTask.id,
+      duplicateResolved: true,
+      taskStatus: existingTask.status,
+    };
+  }
   const { data, error } = await supabase.rpc("open_ebay_return_case", {
     _order_id: order.id,
     _order_line_ids: lineIds,
@@ -3021,6 +3076,15 @@ async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {
 async function ensureUnmatchedReturnTaskForTransfer(payload = {}, options = {}) {
   const info = getReturnTransferInfo(payload);
   const metadata = payload.metadata || {};
+  const existingTask = findExistingReturnTaskForTransfer(payload, [], "return_review");
+  if (isClosedReturnTask(existingTask)) {
+    return {
+      return_case_id: existingTask.return_case_id || getReturnTaskCase(existingTask).id || null,
+      task_id: existingTask.id,
+      duplicateResolved: true,
+      taskStatus: existingTask.status,
+    };
+  }
   const rawPayload = {
     ...metadata,
     ...info,
@@ -4005,7 +4069,7 @@ async function openReturnIntakeForTransfer(payload = {}) {
   const lines = await findReturnTransferLines(payload);
   if (!lines.length) {
     const opened = await ensureUnmatchedReturnTaskForTransfer(payload);
-    if ($("return-task-status-filter")) $("return-task-status-filter").value = "pending";
+    if ($("return-task-status-filter")) $("return-task-status-filter").value = opened?.duplicateResolved ? "all" : "pending";
     if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
     if ($("return-task-search")) $("return-task-search").value = info.returnId || info.itemNumber || info.buyerUsername || "";
     renderReturnQueue();
@@ -4020,13 +4084,37 @@ async function openReturnIntakeForTransfer(payload = {}) {
       routedTo: "return_queue",
       returnCaseId: opened?.return_case_id || null,
       taskId: opened?.task_id || null,
-      message: "Created an unmatched eBay return review task because no fulfilled OG order history match was found.",
+      duplicateResolved: Boolean(opened?.duplicateResolved),
+      message: opened?.duplicateResolved
+        ? "This unmatched eBay return was already resolved in OG, so no duplicate task was opened."
+        : "Created an unmatched eBay return review task because no fulfilled OG order history match was found.",
     });
     return;
   }
 
   const lineIds = lines.map((line) => line.id).filter(Boolean);
   const opened = await ensureReturnTaskForTransfer(payload, lines);
+  if (opened?.duplicateResolved) {
+    if ($("return-task-status-filter")) $("return-task-status-filter").value = "all";
+    if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
+    if ($("return-task-search")) $("return-task-search").value = info.returnId || info.itemNumber || info.buyerUsername || "";
+    renderReturnQueue();
+    window.setTimeout(() => {
+      $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    postHistoryReturnTransferStatus({
+      transferId,
+      ok: true,
+      opened: true,
+      duplicateResolved: true,
+      returnCaseId: opened.return_case_id || null,
+      taskId: opened.task_id || null,
+      matchedLineIds: lineIds,
+      orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
+      message: "This eBay return was already resolved in OG, so no duplicate task was opened.",
+    });
+    return;
+  }
   openReturnIntakeModal(lineIds);
   applyReturnTransferPrefill(payload, lines);
   postHistoryReturnTransferStatus({
@@ -4061,7 +4149,10 @@ async function importReturnBatchTransfer(payload = {}) {
           buyerUsername: info.buyerUsername || "",
           returnCaseId: opened?.return_case_id || null,
           taskId: opened?.task_id || null,
-          reason: "Created a legacy/unmatched return review task because no matching fulfilled OG order line was found.",
+          duplicateResolved: Boolean(opened?.duplicateResolved),
+          reason: opened?.duplicateResolved
+            ? "Already resolved in OG; no duplicate review task was opened."
+            : "Created a legacy/unmatched return review task because no matching fulfilled OG order line was found.",
         });
         continue;
       }
@@ -4073,6 +4164,7 @@ async function importReturnBatchTransfer(payload = {}) {
         buyerUsername: info.buyerUsername || "",
         returnCaseId: opened?.return_case_id || null,
         taskId: opened?.task_id || null,
+        duplicateResolved: Boolean(opened?.duplicateResolved),
         matchedLineIds: lines.map((line) => line.id).filter(Boolean),
         orderNumbers: [...new Set(lines.map((line) => line.order?.order_number).filter(Boolean))],
       });
@@ -4090,7 +4182,11 @@ async function importReturnBatchTransfer(payload = {}) {
     console.warn("Could not refresh return task queue after importing eBay returns:", queueError);
   });
 
-  if ($("return-task-status-filter")) $("return-task-status-filter").value = "pending";
+  const processedReturnEntries = [...importedReturns, ...unmatchedReturns];
+  const onlyResolvedDuplicates = Boolean(
+    processedReturnEntries.length && processedReturnEntries.every((entry) => entry.duplicateResolved)
+  );
+  if ($("return-task-status-filter")) $("return-task-status-filter").value = onlyResolvedDuplicates ? "all" : "pending";
   if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
   if ($("return-task-search")) $("return-task-search").value = "";
   renderReturnQueue();
@@ -4101,16 +4197,27 @@ async function importReturnBatchTransfer(payload = {}) {
   const importedCount = importedReturns.length;
   const unmatchedCount = unmatchedReturns.length;
   const failedCount = failedReturns.length;
+  const duplicateResolvedCount = processedReturnEntries
+    .filter((entry) => entry.duplicateResolved).length;
+  const importedCreatedCount = importedReturns.filter((entry) => !entry.duplicateResolved).length;
+  const unmatchedCreatedCount = unmatchedReturns.filter((entry) => !entry.duplicateResolved).length;
   const processedCount = importedCount + unmatchedCount;
   const ok = processedCount > 0;
   const error = ok
     ? ""
     : failedReturns[0]?.error || "None of the eBay returns could be imported into the OG return queue.";
+  const createdMessage = [
+    importedCreatedCount ? `${importedCreatedCount} matched return${importedCreatedCount === 1 ? "" : "s"}` : "",
+    unmatchedCreatedCount ? `${unmatchedCreatedCount} legacy/unmatched review task${unmatchedCreatedCount === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" and ");
+  const duplicateMessage = duplicateResolvedCount
+    ? `${duplicateResolvedCount} already resolved duplicate${duplicateResolvedCount === 1 ? "" : "s"} ignored`
+    : "";
   const message = ok
     ? [
-      importedCount ? `${importedCount} matched return${importedCount === 1 ? "" : "s"}` : "",
-      unmatchedCount ? `${unmatchedCount} legacy/unmatched review task${unmatchedCount === 1 ? "" : "s"}` : "",
-    ].filter(Boolean).join(" and ") + " imported into the OG return queue."
+      createdMessage ? `${createdMessage} imported into the OG return queue` : "",
+      duplicateMessage,
+    ].filter(Boolean).join("; ") + "."
     : error;
 
   postHistoryReturnTransferStatus({
@@ -4119,11 +4226,13 @@ async function importReturnBatchTransfer(payload = {}) {
     opened: true,
     imported: processedCount,
     importedCount,
+    importedCreatedCount,
     unmatched: unmatchedCount,
     unmatchedCount,
-    unmatchedCreated: unmatchedCount,
+    unmatchedCreated: unmatchedCreatedCount,
     failed: failedCount,
     failedCount,
+    duplicateResolvedCount,
     importedReturns,
     unmatchedReturns,
     failedReturns,
@@ -4135,9 +4244,11 @@ async function importReturnBatchTransfer(payload = {}) {
     ok,
     processedCount,
     importedCount,
+    importedCreatedCount,
     unmatchedCount,
-    unmatchedCreated: unmatchedCount,
+    unmatchedCreated: unmatchedCreatedCount,
     failedCount,
+    duplicateResolvedCount,
     importedReturns,
     unmatchedReturns,
     failedReturns,
