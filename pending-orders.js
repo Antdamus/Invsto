@@ -618,8 +618,8 @@ function parseCsv(text) {
 function rowsFromEbayCsv(text) {
   const parsed = parseCsv(String(text || "").replace(/^\uFEFF/, ""));
   const headerIndex = parsed.findIndex((row) =>
-    row.some((cell) => String(cell).trim() === "Order Number")
-    && row.some((cell) => String(cell).trim() === "Item Title")
+    row.some((cell) => normalizeCsvHeader(cell) === "ordernumber")
+    && row.some((cell) => normalizeCsvHeader(cell) === "itemtitle")
   );
 
   if (headerIndex < 0) {
@@ -636,11 +636,26 @@ function rowsFromEbayCsv(text) {
   });
 }
 
+function normalizeCsvHeader(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function csvCell(row, ...names) {
   for (const name of names) {
     if (row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") {
       return String(row[name]).trim();
     }
+  }
+  const entries = Object.entries(row || {});
+  for (const name of names) {
+    const normalizedName = normalizeCsvHeader(name);
+    const match = entries.find(([header, value]) =>
+      normalizeCsvHeader(header) === normalizedName
+      && value !== undefined
+      && value !== null
+      && String(value).trim() !== ""
+    );
+    if (match) return String(match[1]).trim();
   }
   return "";
 }

@@ -338,28 +338,38 @@
     return cleanText(match?.[0] || "");
   }
 
+  function isDownloadReportText(value) {
+    const text = cleanText(value);
+    return /^(?:download\s+(?:orders?\s+)?report|download\s+csv|orders?\s+report)$/i.test(text)
+      || /\bdownload\b/i.test(text) && /\b(report|csv|orders?)\b/i.test(text);
+  }
+
   function getDownloadReportButton() {
     const scoped = [
       ...document.querySelectorAll(".downloadReport button, .downloadReport a, [id*='downloadReport' i] button, [id*='downloadReport' i] a, [data-testid*='download' i] button, [data-testid*='download' i] a"),
     ].find((control) => {
       const text = cleanText(control.textContent || control.getAttribute("aria-label"));
-      return isElementVisible(control) && /^Download report$/i.test(text);
+      return isElementVisible(control) && isDownloadReportText(text);
     });
     if (scoped) return scoped;
 
     return [...document.querySelectorAll("button, a")]
       .find((control) => {
         const text = cleanText(control.textContent || control.getAttribute("aria-label"));
-        return isElementVisible(control) && /^Download report$/i.test(text);
+        return isElementVisible(control) && isDownloadReportText(text);
       }) || null;
   }
 
   function isAwaitingShipmentOrdersPage() {
     const sample = getPageTextSample();
-    return /Manage orders awaiting shipment/i.test(sample)
-      && /Results:/i.test(sample)
-      && Boolean(getDownloadReportButton())
-      && (/orders-download-report/i.test(sample) || /Download report/i.test(sample));
+    const url = new URL(window.location.href);
+    const pathLooksRight = /\/sh\/ord\/?$/i.test(url.pathname);
+    const filterLooksRight = /AWAITING_SHIPMENT|awaiting[_\s-]*shipment/i.test(`${url.search} ${url.hash} ${sample}`);
+    const pageLooksRight = /awaiting shipment|ready to ship|manage orders/i.test(sample);
+    return pathLooksRight
+      && filterLooksRight
+      && pageLooksRight
+      && Boolean(getDownloadReportButton());
   }
 
   function getAwaitingReportMetadata() {
@@ -1748,8 +1758,7 @@
 
   function isLikelyEbayOrdersReportText(text) {
     return /(^|,|\n)\s*"?Order Number"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Sales Record Number"?\s*(,|\n)/i.test(text);
+      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text);
   }
 
   function isLikelyEbayOrdersReportBase64(base64) {
