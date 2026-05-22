@@ -15,6 +15,29 @@
   const MESSAGE_DETAIL_TIMEOUT_MS = 15000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
+  const CLASSIFICATION_CATEGORIES = [
+    "buyer_message",
+    "order_paid",
+    "shipping_label",
+    "shipping_issue",
+    "return_request",
+    "refund_request",
+    "cancellation_request",
+    "item_not_received",
+    "item_not_as_described",
+    "payment_issue",
+    "offer_or_negotiation",
+    "inventory_question",
+    "authenticity_or_condition_question",
+    "platform_notice",
+    "account_security",
+    "marketing_or_promotion",
+    "spam_or_noise",
+    "internal_or_other",
+  ];
+  const REVIEW_STATES = ["pending_review", "approved", "corrected", "dismissed"];
+  const OVERRIDE_PRIORITIES = ["low", "medium", "high", "critical"];
+  const OVERRIDE_URGENCIES = ["none", "later", "soon", "today", "immediate"];
   const CATEGORY_GROUPS = [
     { id: "all", label: "All", categories: [] },
     { id: "return_requests", label: "Return Requests", categories: ["return_request", "refund_request", "cancellation_request"] },
@@ -71,6 +94,8 @@
     messageDetailLoadingId: null,
     messageDetailErrorsById: {},
     expandedMessageIds: {},
+    reviewSavingId: null,
+    reviewErrorsById: {},
     updatedAt: null,
   };
 
@@ -335,6 +360,7 @@
         valid_classifications: Number(validationDiagnostics.valid_classifications || 0),
         invalid_classifications: Number(validationDiagnostics.invalid_classifications || 0),
         requires_human_review: Number(validationDiagnostics.requires_human_review || 0),
+        pending_human_review: Number(validationDiagnostics.pending_human_review || 0),
         replay_generated_classifications: Number(validationDiagnostics.replay_generated_classifications || 0),
       },
     };
@@ -422,6 +448,31 @@
     }
   }
 
+  async function saveClassificationReview(context, values) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Review save session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    return edgeFetch(CLASSIFY_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "save_review",
+        classificationId: values.classificationId,
+        reviewState: values.reviewState,
+        overrideCategory: values.overrideCategory || null,
+        overridePriority: values.overridePriority || null,
+        overrideUrgency: values.overrideUrgency || null,
+        operatorNotes: values.operatorNotes || "",
+      }),
+    });
+  }
+
   function humanizeValue(value) {
     return String(value || "")
       .replace(/_/g, " ")
@@ -452,11 +503,11 @@
   }
 
   function workflowPriority(classification) {
-    return String(classification?.priority_level || classification?.priority || "low").toLowerCase();
+    return String(classification?.operator_override_priority || classification?.effective_priority || classification?.priority_level || classification?.priority || "low").toLowerCase();
   }
 
   function workflowUrgency(classification) {
-    const urgency = String(classification?.urgency_level || classification?.urgency || "low").toLowerCase();
+    const urgency = String(classification?.operator_override_urgency || classification?.effective_urgency || classification?.urgency_level || classification?.urgency || "low").toLowerCase();
     if (urgency === "none" || urgency === "later" || urgency === "soon") return "low";
     return urgency;
   }
@@ -554,9 +605,14 @@
   }
 
   function hasHumanReviewSignal(classification) {
+    if (isReviewResolved(classification)) return false;
     return classification?.requires_human_review === true
       || hasSafetyFlags(classification)
       || hasLowConfidenceSignal(classification);
+  }
+
+  function isReviewResolved(classification) {
+    return ["approved", "corrected", "dismissed"].includes(String(classification?.classification_review_state || ""));
   }
 
   function isInvalidClassification(classification) {
@@ -592,7 +648,7 @@
 
     const group = CATEGORY_GROUPS.find((item) => item.id === groupId);
     if (!group) return true;
-    return group.categories.includes(String(classification?.category || ""));
+    return group.categories.includes(String(classification?.effective_category || classification?.category || ""));
   }
 
   function filteredClassifications(data, groupId, activeFilters = [], sortMode = "newest") {
@@ -648,6 +704,22 @@
 
   function renderBadge(value, variant = "default") {
     return `<span class="classification-badge is-${escapeHtml(variant)}">${escapeHtml(value)}</span>`;
+  }
+
+  function renderSelectOptions(values, selectedValue, emptyLabel = "No override") {
+    const selected = String(selectedValue || "");
+    return [
+      `<option value="">${escapeHtml(emptyLabel)}</option>`,
+      ...values.map((value) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(humanizeValue(value))}</option>`),
+    ].join("");
+  }
+
+  function reviewBadgeVariant(classification) {
+    const state = String(classification?.classification_review_state || "pending_review");
+    if (state === "approved") return "success";
+    if (state === "corrected") return "warning";
+    if (state === "dismissed") return "muted";
+    return "default";
   }
 
   function confidenceBadgeVariant(classification) {
@@ -761,7 +833,9 @@
       const receivedAt = getClassificationReceivedAt(classification);
       const dateLabel = receivedAt ? formatDateTime(receivedAt) : `Classified ${formatDateTime(classification.created_at)}`;
       const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
-      const categoryBadge = renderBadge(humanizeValue(classification.category || "Uncategorized"), "category");
+      const categoryBadge = renderBadge(humanizeValue(classification.effective_category || classification.category || "Uncategorized"), "category");
+      const overrideBadge = classification.has_operator_override === true ? renderBadge("Override", "warning") : "";
+      const reviewStateBadge = renderBadge(humanizeValue(classification.classification_review_state || "Pending Review"), reviewBadgeVariant(classification));
       const confidenceBadge = renderBadge(formatConfidence(classification.confidence), confidenceBadgeVariant(classification));
       const priorityBadge = renderBadge(`${humanizeValue(workflowPriority(classification))} Priority`, priorityBadgeVariant(classification));
       const urgencyBadge = renderBadge(humanizeValue(workflowUrgency(classification)), urgencyBadgeVariant(classification));
@@ -782,6 +856,7 @@
               ${categoryBadge}
               ${priorityBadge}
               ${urgencyBadge}
+              ${overrideBadge}
             </span>
             <span class="classification-compact-time">${escapeHtml(ageLabel)}</span>
           </button>
@@ -806,7 +881,8 @@
             <span>${escapeHtml(ageLabel)}</span>
           </span>
           <span class="classification-row-preview">${escapeHtml(getClassificationPreview(classification))}</span>
-          ${humanReview ? renderBadge("Human review", "warning") : ""}
+          ${humanReview ? renderBadge("Human review", "warning") : reviewStateBadge}
+          ${overrideBadge}
         </button>
       `;
     }).join("");
@@ -861,6 +937,102 @@
     `;
   }
 
+  function renderOperatorReviewSection(state, selected) {
+    const reviewState = String(selected.classification_review_state || "pending_review");
+    const saving = state.reviewSavingId === selected.id;
+    const error = state.reviewErrorsById[selected.id];
+    const effectiveCategory = selected.effective_category || selected.operator_override_category || selected.category || "";
+    const effectivePriority = selected.effective_priority || selected.operator_override_priority || selected.priority || "";
+    const effectiveUrgency = selected.effective_urgency || selected.operator_override_urgency || selected.urgency || "";
+
+    return `
+      <div class="classification-detail-section classification-review-section">
+        <div class="classification-section-title-row">
+          <h4>Operator Review</h4>
+          ${renderBadge(humanizeValue(reviewState), reviewBadgeVariant(selected))}
+        </div>
+        <div class="classification-compare-grid">
+          <div>
+            <span>AI Category</span>
+            <strong>${escapeHtml(humanizeValue(selected.category || "Uncategorized"))}</strong>
+          </div>
+          <div>
+            <span>Operator Override</span>
+            <strong>${escapeHtml(selected.operator_override_category ? humanizeValue(selected.operator_override_category) : "None")}</strong>
+          </div>
+          <div>
+            <span>Effective Category</span>
+            <strong>${escapeHtml(humanizeValue(effectiveCategory || "Uncategorized"))}</strong>
+          </div>
+          <div>
+            <span>AI Priority</span>
+            <strong>${escapeHtml(humanizeValue(selected.priority || "Unknown"))}</strong>
+          </div>
+          <div>
+            <span>Operator Override</span>
+            <strong>${escapeHtml(selected.operator_override_priority ? humanizeValue(selected.operator_override_priority) : "None")}</strong>
+          </div>
+          <div>
+            <span>Effective Priority</span>
+            <strong>${escapeHtml(humanizeValue(effectivePriority || "Unknown"))}</strong>
+          </div>
+          <div>
+            <span>AI Urgency</span>
+            <strong>${escapeHtml(humanizeValue(selected.urgency || "Unknown"))}</strong>
+          </div>
+          <div>
+            <span>Operator Override</span>
+            <strong>${escapeHtml(selected.operator_override_urgency ? humanizeValue(selected.operator_override_urgency) : "None")}</strong>
+          </div>
+          <div>
+            <span>Effective Urgency</span>
+            <strong>${escapeHtml(humanizeValue(effectiveUrgency || "Unknown"))}</strong>
+          </div>
+        </div>
+        <div class="classification-review-actions" aria-label="Review actions">
+          <button type="button" class="secondary-btn" data-review-state-button="approved">Approve Classification</button>
+          <button type="button" class="secondary-btn" data-review-state-button="corrected">Mark Corrected</button>
+          <button type="button" class="secondary-btn" data-review-state-button="dismissed">Dismiss Review</button>
+        </div>
+        <form class="classification-review-form" data-review-form data-classification-id="${escapeHtml(selected.id)}">
+          <label>
+            <span>Review State</span>
+            <select name="reviewState">
+              ${REVIEW_STATES.map((value) => `<option value="${escapeHtml(value)}"${value === reviewState ? " selected" : ""}>${escapeHtml(humanizeValue(value))}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Override Category</span>
+            <select name="overrideCategory">${renderSelectOptions(CLASSIFICATION_CATEGORIES, selected.operator_override_category)}</select>
+          </label>
+          <label>
+            <span>Override Priority</span>
+            <select name="overridePriority">${renderSelectOptions(OVERRIDE_PRIORITIES, selected.operator_override_priority)}</select>
+          </label>
+          <label>
+            <span>Override Urgency</span>
+            <select name="overrideUrgency">${renderSelectOptions(OVERRIDE_URGENCIES, selected.operator_override_urgency)}</select>
+          </label>
+          <label class="classification-review-notes">
+            <span>Operator Notes</span>
+            <textarea name="operatorNotes" rows="3" maxlength="2000">${escapeHtml(selected.operator_notes || "")}</textarea>
+          </label>
+          <div class="classification-effective-strip">
+            <span>Effective: ${escapeHtml(humanizeValue(effectiveCategory || "Uncategorized"))}</span>
+            <span>${escapeHtml(humanizeValue(effectivePriority || "Unknown"))} priority</span>
+            <span>${escapeHtml(humanizeValue(effectiveUrgency || "Unknown"))} urgency</span>
+          </div>
+          ${selected.reviewed_at ? `<p class="classification-review-meta">Reviewed ${escapeHtml(formatDateTime(selected.reviewed_at))}</p>` : ""}
+          ${error ? `<div class="classification-notice is-error">Could not save review: ${escapeHtml(error)}</div>` : ""}
+          <button type="button" class="primary-btn classification-review-save" data-review-save ${saving ? "disabled" : ""}>
+            <i data-lucide="${saving ? "loader-circle" : "save"}"></i>
+            ${saving ? "Saving Review" : "Save Review"}
+          </button>
+        </form>
+      </div>
+    `;
+  }
+
   function renderClassificationDetail(state, data) {
     if (!els.classificationDetail) return;
 
@@ -878,11 +1050,13 @@
     const humanReview = hasHumanReviewSignal(selected);
     const ageLabel = receivedAt ? formatEmailAge(receivedAt) : "Age unavailable";
     const reviewBadge = humanReview ? renderBadge("Human review", "warning") : renderBadge("No review flag", "muted");
-    const categoryBadge = renderBadge(humanizeValue(selected.category || "Uncategorized"), "category");
+    const categoryBadge = renderBadge(humanizeValue(selected.effective_category || selected.category || "Uncategorized"), "category");
     const confidenceBadge = renderBadge(formatConfidence(selected.confidence), confidenceBadgeVariant(selected));
     const validationBadge = renderBadge(humanizeValue(selected.validation_status || "Unknown"), statusBadgeVariant(selected.validation_status));
     const actionBadge = renderBadge(humanizeValue(selected.recommended_action || "Review only"), actionBadgeVariant(selected.recommended_action));
     const workflowBadges = renderWorkflowBadges(selected);
+    const reviewStateBadge = renderBadge(humanizeValue(selected.classification_review_state || "Pending Review"), reviewBadgeVariant(selected));
+    const overrideBadge = selected.has_operator_override === true ? renderBadge("Operator Override", "warning") : renderBadge("AI Effective", "muted");
     const refundRiskBadge = renderBadge(selected.refund_risk === true ? "Refund Risk" : "No Refund Risk", selected.refund_risk === true ? "danger" : "muted");
     const chargebackRiskBadge = renderBadge(selected.chargeback_risk === true ? "Chargeback Risk" : "No Chargeback Risk", selected.chargeback_risk === true ? "critical" : "muted");
     const customerRiskBadge = renderBadge(`Customer Risk: ${humanizeValue(workflowCustomerRisk(selected))}`, priorityBadgeVariant({ priority_level: workflowCustomerRisk(selected) }));
@@ -897,6 +1071,8 @@
           ${workflowBadges}
           ${confidenceBadge}
           ${reviewBadge}
+          ${reviewStateBadge}
+          ${overrideBadge}
           ${validationBadge}
         </div>
       </div>
@@ -926,12 +1102,14 @@
       <div class="classification-detail-section">
         <h4>AI Classification</h4>
         <div class="classification-pill-list">
-          ${categoryBadge}
+          ${renderBadge(humanizeValue(selected.category || "Uncategorized"), "category")}
           ${confidenceBadge}
           ${validationBadge}
         </div>
         <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
       </div>
+
+      ${renderOperatorReviewSection(state, selected)}
 
       <div class="classification-detail-section">
         <h4>Workflow Priority</h4>
@@ -1062,7 +1240,8 @@
         { label: "Failed", value: data.queue_summary.failed },
         { label: "Valid", value: data.validation_diagnostics.valid_classifications },
         { label: "Invalid", value: data.validation_diagnostics.invalid_classifications },
-        { label: "Review", value: data.validation_diagnostics.requires_human_review },
+        { label: "Open Review", value: data.validation_diagnostics.pending_human_review },
+        { label: "AI Review Flags", value: data.validation_diagnostics.requires_human_review },
         { label: "Replay Generated", value: data.validation_diagnostics.replay_generated_classifications },
       ].map((item) => `
         <div>
@@ -1156,6 +1335,63 @@
         },
       });
       console.error("[email-triage] message_detail fetch failed:", error);
+    }
+  }
+
+  async function saveSelectedReview(context, values) {
+    const classificationId = values.classificationId;
+    if (!classificationId) return;
+
+    setAdminClassificationState({
+      reviewSavingId: classificationId,
+      reviewErrorsById: {
+        ...adminClassificationState.reviewErrorsById,
+        [classificationId]: null,
+      },
+    });
+
+    try {
+      const result = await saveClassificationReview(context, values);
+      const data = adminClassificationState.data || normalizeAdminViewPayload({});
+      const classifications = (data.classifications || []).map((classification) => {
+        if (classification.id !== classificationId) return classification;
+        return {
+          ...classification,
+          classification_review_state: result.classification_review_state,
+          operator_override_category: result.operator_override_category,
+          operator_override_priority: result.operator_override_priority,
+          operator_override_urgency: result.operator_override_urgency,
+          operator_notes: result.operator_notes,
+          reviewed_by: result.reviewed_by,
+          reviewed_at: result.reviewed_at,
+          effective_category: result.effective_category,
+          effective_priority: result.effective_priority,
+          effective_urgency: result.effective_urgency,
+          has_operator_override: result.has_operator_override === true,
+        };
+      });
+
+      setAdminClassificationState({
+        reviewSavingId: null,
+        reviewErrorsById: {
+          ...adminClassificationState.reviewErrorsById,
+          [classificationId]: null,
+        },
+        data: {
+          ...data,
+          classifications,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "review_save_failed";
+      setAdminClassificationState({
+        reviewSavingId: null,
+        reviewErrorsById: {
+          ...adminClassificationState.reviewErrorsById,
+          [classificationId]: code,
+        },
+      });
+      console.error("[email-triage] review save failed:", error);
     }
   }
 
@@ -1344,6 +1580,36 @@
     });
 
     els.classificationDetail?.addEventListener("click", (event) => {
+      const reviewStateButton = event.target.closest("[data-review-state-button]");
+      if (reviewStateButton) {
+        const form = reviewStateButton.closest(".classification-review-section")?.querySelector("[data-review-form]");
+        const stateSelect = form?.querySelector("select[name='reviewState']");
+        const nextState = reviewStateButton.getAttribute("data-review-state-button") || "pending_review";
+        if (stateSelect) stateSelect.value = nextState;
+        if (nextState === "approved" || nextState === "dismissed") {
+          form?.querySelectorAll("select[name='overrideCategory'], select[name='overridePriority'], select[name='overrideUrgency']")
+            .forEach((select) => { select.value = ""; });
+        }
+        return;
+      }
+
+      const saveButton = event.target.closest("[data-review-save]");
+      if (saveButton) {
+        const form = saveButton.closest("[data-review-form]");
+        const classificationId = form?.getAttribute("data-classification-id");
+        if (!form || !classificationId) return;
+        const formData = new FormData(form);
+        saveSelectedReview(context, {
+          classificationId,
+          reviewState: String(formData.get("reviewState") || "pending_review"),
+          overrideCategory: String(formData.get("overrideCategory") || ""),
+          overridePriority: String(formData.get("overridePriority") || ""),
+          overrideUrgency: String(formData.get("overrideUrgency") || ""),
+          operatorNotes: String(formData.get("operatorNotes") || ""),
+        });
+        return;
+      }
+
       const button = event.target.closest("[data-message-detail-action]");
       if (!button) return;
       const messageId = button.getAttribute("data-message-id");

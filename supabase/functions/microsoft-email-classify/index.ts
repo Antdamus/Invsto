@@ -12,7 +12,7 @@ const MAX_LIMIT = 50;
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -35,6 +35,7 @@ const CATEGORIES = [
 ] as const;
 const PRIORITIES = ["low", "medium", "high", "critical"] as const;
 const URGENCIES = ["none", "later", "soon", "today", "immediate"] as const;
+const REVIEW_STATES = ["pending_review", "approved", "corrected", "dismissed"] as const;
 const PRIORITY_LEVELS = ["low", "medium", "high", "critical"] as const;
 const URGENCY_LEVELS = ["low", "today", "immediate"] as const;
 const RESPONSE_TIMINGS = ["no_response_needed", "within_72_hours", "within_24_hours", "immediate_attention"] as const;
@@ -190,6 +191,12 @@ type Input = {
   reason: string;
   replaySource: string;
   idempotencyKey: string | null;
+  classificationId: string | null;
+  reviewState: string | null;
+  overrideCategory: string | null;
+  overridePriority: string | null;
+  overrideUrgency: string | null;
+  operatorNotes: string | null;
 };
 
 class ClassifierError extends Error {
@@ -306,11 +313,33 @@ async function parseInput(req: Request): Promise<Input> {
   const idempotencyKey = typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()
     ? body.idempotencyKey.trim().slice(0, 200)
     : null;
+  const classificationId = typeof body?.classificationId === "string" && body.classificationId.trim()
+    ? body.classificationId.trim()
+    : null;
+  const reviewState = REVIEW_STATES.includes(body?.reviewState)
+    ? String(body.reviewState)
+    : null;
+  const overrideCategory = CATEGORIES.includes(body?.overrideCategory)
+    ? String(body.overrideCategory)
+    : null;
+  const overridePriority = PRIORITIES.includes(body?.overridePriority)
+    ? String(body.overridePriority)
+    : null;
+  const overrideUrgency = URGENCIES.includes(body?.overrideUrgency)
+    ? String(body.overrideUrgency)
+    : null;
+  const operatorNotes = typeof body?.operatorNotes === "string" ? shortText(body.operatorNotes, 2000) : null;
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
   if (mode === "message_detail" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "save_review" && !classificationId) {
+    throw new ClassifierError("classification_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "save_review" && !reviewState) {
+    throw new ClassifierError("review_state_required", { status: 400, phase: "input" });
   }
   if (mode === "dry_run" && !messageId && !mailboxId) {
     throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
@@ -335,6 +364,12 @@ async function parseInput(req: Request): Promise<Input> {
     reason,
     replaySource,
     idempotencyKey,
+    classificationId,
+    reviewState,
+    overrideCategory,
+    overridePriority,
+    overrideUrgency,
+    operatorNotes,
   };
 }
 
@@ -1361,6 +1396,121 @@ function safeMetadata(value: unknown, depth = 0): unknown {
   );
 }
 
+function reviewStateForRow(row: Record<string, any>) {
+  const state = String(row.classification_review_state || "pending_review");
+  return REVIEW_STATES.includes(state as typeof REVIEW_STATES[number]) ? state : "pending_review";
+}
+
+function effectiveClassification(row: Record<string, any>) {
+  return {
+    effective_category: row.operator_override_category || row.category,
+    effective_priority: row.operator_override_priority || row.priority,
+    effective_urgency: row.operator_override_urgency || row.urgency,
+    has_operator_override: Boolean(row.operator_override_category || row.operator_override_priority || row.operator_override_urgency),
+  };
+}
+
+function reviewSnapshot(row: Record<string, any>) {
+  return {
+    classification_review_state: reviewStateForRow(row),
+    operator_override_category: row.operator_override_category || null,
+    operator_override_priority: row.operator_override_priority || null,
+    operator_override_urgency: row.operator_override_urgency || null,
+    operator_notes: row.operator_notes || null,
+    reviewed_by: row.reviewed_by || null,
+    reviewed_at: row.reviewed_at || null,
+  };
+}
+
+async function saveClassificationReview(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+) {
+  if (!input.classificationId || !input.reviewState) {
+    throw new ClassifierError("invalid_review_input", { status: 400, phase: "review_input" });
+  }
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("email_message_classifications")
+    .select("id, message_id, source, category, priority, urgency, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
+    .eq("id", input.classificationId)
+    .eq("source", "ai")
+    .maybeSingle();
+
+  if (lookupError) throw new ClassifierError("review_classification_lookup_failed", { phase: "review_lookup" });
+  if (!existing?.id) throw new ClassifierError("classification_not_found", { status: 404, phase: "review_lookup" });
+
+  const hasOverride = Boolean(input.overrideCategory || input.overridePriority || input.overrideUrgency);
+  if (input.reviewState === "corrected" && !hasOverride) {
+    throw new ClassifierError("correction_requires_override", { status: 400, phase: "review_input" });
+  }
+
+  const nowIso = new Date().toISOString();
+  const previousState = reviewSnapshot(existing as Record<string, any>);
+  const reviewMetadata = {
+    original_ai: {
+      category: existing.category,
+      priority: existing.priority,
+      urgency: existing.urgency,
+    },
+    effective: {
+      category: input.overrideCategory || existing.category,
+      priority: input.overridePriority || existing.priority,
+      urgency: input.overrideUrgency || existing.urgency,
+    },
+    saved_via: "microsoft-email-classify.save_review",
+    saved_at: nowIso,
+  };
+
+  const { data: updated, error: updateError } = await supabase
+    .from("email_message_classifications")
+    .update({
+      classification_review_state: input.reviewState,
+      operator_override_category: input.overrideCategory,
+      operator_override_priority: input.overridePriority,
+      operator_override_urgency: input.overrideUrgency,
+      operator_notes: input.operatorNotes,
+      reviewed_by: admin.userId,
+      reviewed_at: nowIso,
+      review_metadata: reviewMetadata,
+    })
+    .eq("id", input.classificationId)
+    .eq("source", "ai")
+    .select("id, message_id, category, priority, urgency, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
+    .single();
+
+  if (updateError || !updated?.id) {
+    throw new ClassifierError("review_update_failed", { phase: "review_update", messageId: existing.message_id });
+  }
+
+  const eventType = input.reviewState === "approved" || input.reviewState === "corrected" || input.reviewState === "dismissed"
+    ? input.reviewState
+    : "review_saved";
+  const { error: auditError } = await supabase
+    .from("email_classification_review_events")
+    .insert({
+      classification_id: input.classificationId,
+      message_id: existing.message_id,
+      event_type: eventType,
+      previous_state: previousState,
+      new_state: reviewSnapshot(updated as Record<string, any>),
+      notes: input.operatorNotes,
+      created_by: admin.userId,
+      created_by_email: admin.email,
+    });
+  if (auditError) throw new ClassifierError("review_audit_insert_failed", { phase: "review_audit", messageId: existing.message_id });
+
+  return {
+    ok: true,
+    mode: "save_review",
+    classification_id: updated.id,
+    message_id: updated.message_id,
+    ...reviewSnapshot(updated as Record<string, any>),
+    ...effectiveClassification(updated as Record<string, any>),
+  };
+}
+
 async function adminClassificationView(supabase: ServiceClient, input: Input) {
   const [
     classificationsResult,
@@ -1373,11 +1523,12 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     validCount,
     invalidCount,
     reviewCount,
+    pendingReviewCount,
     replayGeneratedCount,
   ] = await Promise.all([
     supabase
       .from("email_message_classifications")
-      .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at")
+      .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
       .eq("source", "ai")
       .order("created_at", { ascending: false })
       .limit(input.classificationLimit),
@@ -1401,6 +1552,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "valid")),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "invalid")),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("requires_human_review", true)),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("requires_human_review", true).eq("classification_review_state", "pending_review")),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").like("input_version", "v1:classification_replay:%")),
   ]);
 
@@ -1454,6 +1606,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
         confidence: row.confidence === null ? null : Number(row.confidence),
         priority: row.priority,
         urgency: row.urgency,
+        ...effectiveClassification(row),
         priority_level: row.priority_level,
         urgency_level: row.urgency_level,
         response_timing: row.response_timing,
@@ -1470,6 +1623,13 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
         classification_run_id: row.classification_run_id,
         input_version: row.input_version,
         created_at: row.created_at,
+        classification_review_state: reviewStateForRow(row),
+        operator_override_category: row.operator_override_category || null,
+        operator_override_priority: row.operator_override_priority || null,
+        operator_override_urgency: row.operator_override_urgency || null,
+        operator_notes: row.operator_notes || null,
+        reviewed_by: row.reviewed_by || null,
+        reviewed_at: row.reviewed_at || null,
       };
     }),
     replay_operations: replayOperations,
@@ -1493,6 +1653,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
       valid_classifications: validCount,
       invalid_classifications: invalidCount,
       requires_human_review: reviewCount,
+      pending_human_review: pendingReviewCount,
       replay_generated_classifications: replayGeneratedCount,
     },
   };
@@ -1518,7 +1679,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       .maybeSingle(),
     supabase
       .from("email_message_classifications")
-      .select("id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at")
+      .select("id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
       .eq("message_id", input.messageId)
       .eq("source", "ai")
       .order("created_at", { ascending: false })
@@ -1570,6 +1731,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       confidence: classification.confidence === null ? null : Number(classification.confidence),
       priority: classification.priority,
       urgency: classification.urgency,
+      ...effectiveClassification(classification),
       priority_level: classification.priority_level,
       urgency_level: classification.urgency_level,
       response_timing: classification.response_timing,
@@ -1584,6 +1746,13 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       safety_flags: Array.isArray(classification.safety_flags) ? classification.safety_flags : [],
       validation_status: classification.validation_status,
       created_at: classification.created_at,
+      classification_review_state: reviewStateForRow(classification),
+      operator_override_category: classification.operator_override_category || null,
+      operator_override_priority: classification.operator_override_priority || null,
+      operator_override_urgency: classification.operator_override_urgency || null,
+      operator_notes: classification.operator_notes || null,
+      reviewed_by: classification.reviewed_by || null,
+      reviewed_at: classification.reviewed_at || null,
     } : null,
   };
 }
@@ -1828,6 +1997,10 @@ serve(async (req) => {
 
     if (input.mode === "message_detail") {
       return json(req, 200, await adminMessageDetail(supabase, input));
+    }
+
+    if (input.mode === "save_review") {
+      return json(req, 200, await saveClassificationReview(supabase, input, admin));
     }
 
     const promptVersionValue = promptVersion();

@@ -699,6 +699,95 @@
   margin-bottom: 10px;
 }
 
+.classification-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.classification-compare-grid div,
+.classification-review-form label,
+.classification-effective-strip {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  padding: 10px;
+}
+
+.classification-compare-grid span,
+.classification-review-form span,
+.classification-review-meta {
+  display: block;
+  color: rgba(242,243,245,.56);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.classification-compare-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: rgba(242,243,245,.94);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.classification-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.classification-review-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.classification-review-form select,
+.classification-review-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(7,7,8,.94);
+  color: rgba(242,243,245,.94);
+  font-weight: 800;
+  margin-top: 7px;
+  padding: 9px 10px;
+}
+
+.classification-review-form textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.classification-review-notes,
+.classification-effective-strip,
+.classification-review-save,
+.classification-review-meta,
+.classification-review-form .classification-notice {
+  grid-column: 1 / -1;
+}
+
+.classification-effective-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.classification-effective-strip span {
+  width: auto;
+  color: var(--gold-2);
+}
+
+.classification-review-meta {
+  margin: 0;
+}
+
 .classification-pill,
 .classification-badge {
   display: inline-flex;
@@ -975,6 +1064,11 @@
   }
 
   .classification-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .classification-compare-grid,
+  .classification-review-form {
     grid-template-columns: 1fr;
   }
 }
