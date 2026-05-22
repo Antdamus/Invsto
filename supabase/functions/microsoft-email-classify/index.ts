@@ -17,7 +17,7 @@ const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response", "regenerate_response", "admin_draft_view"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -278,6 +278,8 @@ type Input = {
   replaySource: string;
   idempotencyKey: string | null;
   classificationId: string | null;
+  draftId: string | null;
+  includeDraftBody: boolean;
   reviewState: string | null;
   overrideCategory: string | null;
   overridePriority: string | null;
@@ -402,6 +404,10 @@ async function parseInput(req: Request): Promise<Input> {
   const classificationId = typeof body?.classificationId === "string" && body.classificationId.trim()
     ? body.classificationId.trim()
     : null;
+  const draftId = typeof body?.draftId === "string" && body.draftId.trim()
+    ? body.draftId.trim()
+    : null;
+  const includeDraftBody = body?.includeDraftBody === true;
   const reviewState = REVIEW_STATES.includes(body?.reviewState)
     ? String(body.reviewState)
     : null;
@@ -430,6 +436,9 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "generate_response" && !messageId && !classificationId) {
     throw new ClassifierError("response_draft_selector_required", { status: 400, phase: "input" });
   }
+  if (mode === "regenerate_response" && !messageId && !classificationId && !draftId) {
+    throw new ClassifierError("response_draft_selector_required", { status: 400, phase: "input" });
+  }
   if (mode === "dry_run" && !messageId && !mailboxId) {
     throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
   }
@@ -454,6 +463,8 @@ async function parseInput(req: Request): Promise<Input> {
     replaySource,
     idempotencyKey,
     classificationId,
+    draftId,
+    includeDraftBody,
     reviewState,
     overrideCategory,
     overridePriority,
@@ -2177,6 +2188,27 @@ async function loadResponseDraftInput(
   input: Input,
   promptVersionValue: string,
 ): Promise<ResponseDraftInput> {
+  let messageId = input.messageId;
+  let classificationId = input.classificationId;
+
+  if (input.draftId) {
+    const { data: draft, error: draftError } = await supabase
+      .from("email_response_drafts")
+      .select("id, message_id, classification_id")
+      .eq("id", input.draftId)
+      .maybeSingle();
+    if (draftError) throw new ClassifierError("response_draft_lookup_failed", { phase: "response_draft_input" });
+    if (!draft?.id) throw new ClassifierError("response_draft_not_found", { status: 404, phase: "response_draft_input" });
+    if (messageId && draft.message_id !== messageId) {
+      throw new ClassifierError("response_draft_message_mismatch", { status: 400, phase: "response_draft_input" });
+    }
+    if (classificationId && draft.classification_id && draft.classification_id !== classificationId) {
+      throw new ClassifierError("response_draft_classification_mismatch", { status: 400, phase: "response_draft_input" });
+    }
+    messageId = String(draft.message_id);
+    classificationId = draft.classification_id ? String(draft.classification_id) : classificationId;
+  }
+
   let classificationQuery = supabase
     .from("email_message_classifications")
     .select("id, message_id, category, subcategory, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
@@ -2185,10 +2217,10 @@ async function loadResponseDraftInput(
     .order("created_at", { ascending: false })
     .limit(1);
 
-  if (input.classificationId) {
-    classificationQuery = classificationQuery.eq("id", input.classificationId);
-  } else if (input.messageId) {
-    classificationQuery = classificationQuery.eq("message_id", input.messageId).eq("is_current", true);
+  if (classificationId) {
+    classificationQuery = classificationQuery.eq("id", classificationId);
+  } else if (messageId) {
+    classificationQuery = classificationQuery.eq("message_id", messageId).eq("is_current", true);
   }
 
   const { data: classificationRows, error: classificationError } = await classificationQuery;
@@ -2197,7 +2229,7 @@ async function loadResponseDraftInput(
   if (!classification?.id) {
     throw new ClassifierError("valid_classification_required", { status: 400, phase: "response_draft_input" });
   }
-  if (input.messageId && classification.message_id !== input.messageId) {
+  if (messageId && classification.message_id !== messageId) {
     throw new ClassifierError("classification_message_mismatch", { status: 400, phase: "response_draft_input" });
   }
 
@@ -2278,11 +2310,23 @@ async function insertResponseDraft(
     safetyFlags: string[];
     draft?: Partial<ValidResponseDraft>;
     errorCode?: string;
+    operationMode?: "generate_response" | "regenerate_response";
+    selectorDraftId?: string | null;
   },
 ) {
   const nowIso = new Date().toISOString();
   const messageId = String(values.input.message.id || "");
   const classificationId = values.input.classification.id;
+
+  const { data: previousCurrentDrafts, error: previousCurrentError } = await supabase
+    .from("email_response_drafts")
+    .select("id, draft_version, validation_status, draft_status, created_at")
+    .eq("message_id", messageId)
+    .eq("is_current", true)
+    .order("draft_version", { ascending: false });
+  if (previousCurrentError) {
+    throw new ClassifierError("response_draft_previous_lookup_failed", { phase: "response_draft_write", messageId });
+  }
 
   const { error: supersedeError } = await supabase
     .from("email_response_drafts")
@@ -2323,6 +2367,14 @@ async function insertResponseDraft(
     tone: values.draft?.tone || null,
     response_strategy: values.draft?.response_strategy || null,
     error_code: values.errorCode || null,
+    operation: {
+      mode: values.operationMode || "generate_response",
+      regenerated_from_draft_id: values.selectorDraftId || null,
+      previous_current_draft_ids: (previousCurrentDrafts || []).map((draft: Record<string, any>) => draft.id),
+      previous_current_versions: (previousCurrentDrafts || []).map((draft: Record<string, any>) => Number(draft.draft_version)).filter(Number.isFinite),
+      superseded_at: previousCurrentDrafts?.length ? nowIso : null,
+      generated_at: nowIso,
+    },
   };
 
   const { data, error } = await supabase
@@ -2362,6 +2414,7 @@ async function generateResponseDraft(
   supabase: ServiceClient,
   input: Input,
   admin: { userId: string; email: string | null },
+  operationMode: "generate_response" | "regenerate_response" = "generate_response",
 ) {
   const promptVersionValue = responseDraftPromptVersion();
   const prompt = buildResponseDraftPrompt(promptVersionValue);
@@ -2399,10 +2452,12 @@ async function generateResponseDraft(
         validationErrors: [],
         safetyFlags: validation.value.safety_flags,
         draft: validation.value,
+        operationMode,
+        selectorDraftId: input.draftId,
       });
       return {
         ok: true,
-        mode: "generate_response",
+        mode: operationMode,
         draft_id: draftId,
         message_id: draftInput.message.id,
         classification_id: draftInput.classification.id,
@@ -2414,6 +2469,7 @@ async function generateResponseDraft(
         prompt_version: promptVersionValue,
         prompt_hash: promptHash,
         input_hash: inputHash,
+        regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
         generated_body_returned: false,
         outbound_send_enabled: false,
         outlook_mutation_performed: false,
@@ -2432,10 +2488,12 @@ async function generateResponseDraft(
       validationErrors: validation.validationErrors,
       safetyFlags: validation.safetyFlags,
       draft: validation.safeOutput,
+      operationMode,
+      selectorDraftId: input.draftId,
     });
     return {
       ok: true,
-      mode: "generate_response",
+      mode: operationMode,
       draft_id: draftId,
       message_id: draftInput.message.id,
       classification_id: draftInput.classification.id,
@@ -2448,6 +2506,7 @@ async function generateResponseDraft(
       prompt_version: promptVersionValue,
       prompt_hash: promptHash,
       input_hash: inputHash,
+      regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
       generated_body_returned: false,
       outbound_send_enabled: false,
       outlook_mutation_performed: false,
@@ -2468,10 +2527,12 @@ async function generateResponseDraft(
         ? ["requires_human_review", "malformed_json"]
         : ["requires_human_review"],
       errorCode: safe.code,
+      operationMode,
+      selectorDraftId: input.draftId,
     });
     return {
       ok: true,
-      mode: "generate_response",
+      mode: operationMode,
       draft_id: draftId,
       message_id: draftInput.message.id,
       classification_id: draftInput.classification.id,
@@ -2484,11 +2545,109 @@ async function generateResponseDraft(
       prompt_version: promptVersionValue,
       prompt_hash: promptHash,
       input_hash: inputHash,
+      regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
       generated_body_returned: false,
       outbound_send_enabled: false,
       outlook_mutation_performed: false,
     };
   }
+}
+
+const DRAFT_CONTENT_BLOCKING_FLAGS = new Set([
+  "unsupported_claim",
+  "unsafe_refund_promise",
+  "unsafe_compensation_promise",
+  "unsafe_legal_admission",
+  "unsafe_escalation_language",
+  "fabricated_order_detail",
+  "fabricated_shipping_update",
+  "fabricated_timeline",
+  "fabricated_tracking_information",
+  "fabricated_inventory_promise",
+  "category_mismatch",
+  "empty_draft",
+  "draft_too_long",
+  "malformed_json",
+]);
+
+function draftContentIsSafe(row: Record<string, any>) {
+  if (row.validation_status !== "valid") return false;
+  const flags = safeArray(row.safety_flags);
+  return !flags.some((flag) => DRAFT_CONTENT_BLOCKING_FLAGS.has(flag));
+}
+
+function safeDraftSummary(row: Record<string, any>, includeDraftBody: boolean) {
+  const canIncludeContent = includeDraftBody && draftContentIsSafe(row);
+  const contentOmittedReason = includeDraftBody
+    ? canIncludeContent ? null : "draft_content_not_safe_to_return"
+    : "draft_content_not_requested";
+
+  return {
+    id: row.id,
+    message_id: row.message_id,
+    classification_id: row.classification_id || null,
+    draft_version: row.draft_version,
+    draft_status: row.draft_status,
+    validation_status: row.validation_status,
+    validation_errors: Array.isArray(row.validation_errors) ? row.validation_errors : [],
+    safety_flags: safeArray(row.safety_flags),
+    requires_human_review: row.requires_human_review !== false,
+    created_at: row.created_at,
+    created_by: row.created_by || null,
+    approved_by: row.approved_by || null,
+    approved_at: row.approved_at || null,
+    rejected_by: row.rejected_by || null,
+    rejected_at: row.rejected_at || null,
+    operator_notes: row.operator_notes || null,
+    is_current: row.is_current === true,
+    superseded_at: row.superseded_at || null,
+    source: row.source,
+    draft_body_format: row.draft_body_format,
+    model_name: row.model_name || null,
+    model_version: row.model_version || null,
+    prompt_version: row.prompt_version || null,
+    prompt_hash: row.prompt_hash || null,
+    input_hash: row.input_hash || null,
+    metadata: safeMetadata(row.metadata || {}),
+    draft_subject: canIncludeContent ? shortText(row.draft_subject, MAX_DRAFT_SUBJECT_CHARS) || null : null,
+    draft_body_text: canIncludeContent ? safeBodyText(row.draft_body_text) : null,
+    draft_content_returned: canIncludeContent,
+    draft_content_omitted_reason: contentOmittedReason,
+  };
+}
+
+async function adminDraftView(supabase: ServiceClient, input: Input) {
+  let query = supabase
+    .from("email_response_drafts")
+    .select("id, message_id, classification_id, source, draft_status, draft_subject, draft_body_text, draft_body_format, model_name, model_version, prompt_version, prompt_hash, input_hash, processing_job_id, draft_version, is_current, superseded_at, validation_status, validation_errors, safety_flags, requires_human_review, created_by, approved_by, approved_at, rejected_by, rejected_at, operator_notes, metadata, created_at, updated_at");
+
+  if (input.draftId) {
+    query = query.eq("id", input.draftId);
+  } else {
+    if (input.messageId) query = query.eq("message_id", input.messageId);
+    if (input.classificationId) query = query.eq("classification_id", input.classificationId);
+  }
+
+  query = query
+    .order("created_at", { ascending: false })
+    .limit(input.draftId ? 1 : input.limit);
+
+  const { data, error } = await query;
+  if (error) throw new ClassifierError("admin_draft_view_failed", { phase: "admin_draft_view" });
+  if (input.draftId && !data?.length) {
+    throw new ClassifierError("response_draft_not_found", { status: 404, phase: "admin_draft_view" });
+  }
+
+  const drafts = (data || []).map((row: Record<string, any>) => safeDraftSummary(row, input.includeDraftBody));
+  return {
+    ok: true,
+    mode: "admin_draft_view",
+    drafts,
+    draft_count: drafts.length,
+    include_draft_body_requested: input.includeDraftBody,
+    outbound_send_enabled: false,
+    outlook_mutation_performed: false,
+  };
 }
 
 async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
@@ -2739,6 +2898,14 @@ serve(async (req) => {
 
     if (input.mode === "generate_response") {
       return json(req, 200, await generateResponseDraft(supabase, input, admin));
+    }
+
+    if (input.mode === "regenerate_response") {
+      return json(req, 200, await generateResponseDraft(supabase, input, admin, "regenerate_response"));
+    }
+
+    if (input.mode === "admin_draft_view") {
+      return json(req, 200, await adminDraftView(supabase, input));
     }
 
     const promptVersionValue = promptVersion();
