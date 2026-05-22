@@ -173,6 +173,21 @@
     </div>
   </div>
 
+  <div id="team-task-photo-viewer-modal" class="team-task-modal team-task-photo-viewer-modal hidden" role="dialog" aria-modal="true" aria-labelledby="team-task-photo-viewer-title">
+    <div class="team-task-modal-card team-task-photo-viewer-card">
+      <button id="close-team-task-photo-viewer" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Task Evidence</span>
+      <h2 id="team-task-photo-viewer-title">Task evidence photo</h2>
+      <div class="team-task-photo-viewer-frame">
+        <img id="team-task-photo-viewer-image" alt="Task evidence photo" />
+      </div>
+      <p id="team-task-photo-viewer-caption" class="team-task-photo-viewer-caption"></p>
+      <div class="team-task-modal-actions">
+        <button id="dismiss-team-task-photo-viewer" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>

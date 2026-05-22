@@ -213,7 +213,8 @@ body {
 }
 
 .team-task-meta,
-.team-task-photo-links {
+.team-task-photo-links,
+.team-task-event-photos {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -244,6 +245,52 @@ body {
   border-color: rgba(157, 242, 189, 0.28);
   color: var(--task-green);
   cursor: pointer;
+}
+
+.team-task-event-photos {
+  margin-top: 8px;
+}
+
+.team-task-event-photo {
+  width: 118px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(157, 242, 189, 0.24);
+  border-radius: 12px;
+  background: rgba(157, 242, 189, 0.06);
+  padding: 8px;
+  color: var(--task-text);
+  cursor: zoom-in;
+  text-align: left;
+}
+
+.team-task-event-photo img,
+.team-task-event-photo > span {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.team-task-event-photo img {
+  object-fit: cover;
+}
+
+.team-task-event-photo > span {
+  display: grid;
+  place-items: center;
+  color: var(--task-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+  padding: 6px;
+}
+
+.team-task-event-photo small {
+  color: var(--task-muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
 }
 
 .team-task-events {
@@ -414,6 +461,10 @@ body.modal-open {
   backdrop-filter: blur(14px);
 }
 
+.team-task-photo-viewer-modal {
+  z-index: 7000;
+}
+
 .team-task-modal-card {
   position: relative;
   width: min(920px, 100%);
@@ -421,6 +472,32 @@ body.modal-open {
   overflow: auto;
   padding: 24px;
   border-radius: 20px;
+}
+
+.team-task-photo-viewer-card {
+  width: min(1100px, 100%);
+}
+
+.team-task-photo-viewer-frame {
+  display: grid;
+  place-items: center;
+  min-height: min(68vh, 760px);
+  margin-top: 14px;
+  border: 1px solid var(--task-line);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.42);
+  overflow: hidden;
+}
+
+.team-task-photo-viewer-frame img {
+  max-width: 100%;
+  max-height: min(68vh, 760px);
+  object-fit: contain;
+}
+
+.team-task-photo-viewer-caption {
+  color: var(--task-muted);
+  overflow-wrap: anywhere;
 }
 
 .modal-close-btn {

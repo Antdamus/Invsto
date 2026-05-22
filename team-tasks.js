@@ -12,6 +12,7 @@ const state = {
   selectedCaptureStationId: "",
   captureBusy: false,
   taskScope: "mine",
+  photoViewerReturnFocus: null,
 };
 
 const TEAM_TASK_BUCKET = "team-task-evidence";
@@ -263,6 +264,7 @@ async function loadTasks() {
   }
 
   await loadEventsForTasks();
+  await hydrateEventPhotoUrls();
   renderTasks();
 
   if (requested) {
@@ -519,6 +521,24 @@ async function loadEventsForTasks() {
   }));
 }
 
+async function hydrateEventPhotoUrls() {
+  const photos = [];
+  state.eventsByTask.forEach((events) => {
+    events.forEach((event) => {
+      (Array.isArray(event.photo_attachments) ? event.photo_attachments : []).forEach((photo) => {
+        if (photo?.path || photo?.storage_path) photos.push(photo);
+      });
+    });
+  });
+
+  await Promise.all(photos.map(async (photo) => {
+    const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
+    const path = photo.path || photo.storage_path || "";
+    if (!bucket || !path || photo.signedUrl) return;
+    photo.signedUrl = await createTaskSignedImageUrl(bucket, path);
+  }));
+}
+
 function getTaskStatusLabel(value) {
   const labels = {
     open: "Open",
@@ -725,7 +745,19 @@ function renderTasks() {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskResolve, resolve: true }));
   });
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
-    button.addEventListener("click", () => openTaskPhoto(button.dataset.bucket, button.dataset.path));
+    button.addEventListener("click", () => {
+      if (button.dataset.url) {
+        openTaskPhotoViewer({
+          url: button.dataset.url,
+          label: button.dataset.label || "Task evidence photo",
+          bucket: button.dataset.bucket || TEAM_TASK_BUCKET,
+          path: button.dataset.path || "",
+          trigger: button,
+        });
+        return;
+      }
+      openTaskPhoto(button.dataset.bucket, button.dataset.path);
+    });
   });
 }
 
@@ -751,14 +783,27 @@ function renderTaskActions(task = {}, resolved = false) {
 function renderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
   const photoHtml = photos.length
-    ? `<div class="team-task-photo-links">${photos.map((photo, index) => `
+    ? `<div class="team-task-event-photos">${photos.map((photo, index) => {
+        const label = photo.label || `Photo ${index + 1}`;
+        const url = photo.signedUrl || photo.url || "";
+        const bucket = photo.bucket || photo.storage_bucket || TEAM_TASK_BUCKET;
+        const path = photo.path || photo.storage_path || "";
+        return `
         <button
           type="button"
+          class="team-task-event-photo"
           data-team-task-photo="1"
-          data-bucket="${escapeHtml(photo.bucket || TEAM_TASK_BUCKET)}"
-          data-path="${escapeHtml(photo.path || "")}"
-        >${escapeHtml(photo.label || `Photo ${index + 1}`)}</button>
-      `).join("")}</div>`
+          data-bucket="${escapeHtml(bucket)}"
+          data-path="${escapeHtml(path)}"
+          data-url="${escapeHtml(url)}"
+          data-label="${escapeHtml(label)}"
+          aria-label="Open ${escapeHtml(label)}"
+        >
+          ${url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(label)}" loading="lazy" />` : `<span>${escapeHtml(label)}</span>`}
+          <small>${escapeHtml(label)}</small>
+        </button>
+      `;
+      }).join("")}</div>`
     : "";
 
   return `
@@ -772,6 +817,37 @@ function renderTaskEvent(event = {}) {
       ${photoHtml}
     </article>
   `;
+}
+
+function openTaskPhotoViewer({ url = "", label = "", bucket = "", path = "", trigger = null } = {}) {
+  const modal = $("team-task-photo-viewer-modal");
+  const image = $("team-task-photo-viewer-image");
+  const title = $("team-task-photo-viewer-title");
+  const caption = $("team-task-photo-viewer-caption");
+  if (!modal || !image) return false;
+
+  state.photoViewerReturnFocus = trigger || document.activeElement;
+  image.src = url;
+  image.alt = label || "Task evidence photo";
+  if (title) title.textContent = label || "Task evidence photo";
+  if (caption) caption.textContent = [bucket, path].filter(Boolean).join(" / ");
+  modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  $("close-team-task-photo-viewer")?.focus();
+  return true;
+}
+
+function closeTaskPhotoViewer() {
+  const modal = $("team-task-photo-viewer-modal");
+  const image = $("team-task-photo-viewer-image");
+  modal?.classList.add("hidden");
+  if (image) image.removeAttribute("src");
+  if ($("team-task-modal")?.classList.contains("hidden")) {
+    document.body.classList.remove("modal-open");
+  }
+  const focusTarget = state.photoViewerReturnFocus;
+  state.photoViewerReturnFocus = null;
+  focusTarget?.focus?.();
 }
 
 function resetPhotos() {
@@ -1294,7 +1370,7 @@ async function openTaskPhoto(bucket, path) {
     url = data.signedUrl;
     state.signedUrls.set(key, url);
   }
-  window.open(url, "_blank", "noopener,noreferrer");
+  openTaskPhotoViewer({ url, label: path.split("/").pop() || "Task evidence photo", bucket: storageBucket, path });
 }
 
 function setupListeners() {
@@ -1316,11 +1392,21 @@ function setupListeners() {
     loadCaptureStations().catch((error) => setPhotoStatus(error?.message || "Could not refresh stations.", "error"));
   });
   $("request-team-task-photo")?.addEventListener("click", requestTaskPhoto);
+  $("close-team-task-photo-viewer")?.addEventListener("click", closeTaskPhotoViewer);
+  $("dismiss-team-task-photo-viewer")?.addEventListener("click", closeTaskPhotoViewer);
+  $("team-task-photo-viewer-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "team-task-photo-viewer-modal") closeTaskPhotoViewer();
+  });
   $("team-task-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "team-task-modal") closeModal();
   });
 
   document.addEventListener("keydown", (event) => {
+    if (!$("team-task-photo-viewer-modal")?.classList.contains("hidden") && event.key === "Escape") {
+      event.preventDefault();
+      closeTaskPhotoViewer();
+      return;
+    }
     if ($("team-task-modal")?.classList.contains("hidden")) return;
     if (event.key === "Escape") {
       event.preventDefault();
