@@ -61,7 +61,16 @@
               <span class="eyebrow">Active Tasks</span>
               <h2 id="team-task-list-title">My Assigned Tasks</h2>
             </div>
-            <span id="team-task-count" class="team-task-count">0 tasks</span>
+            <div class="team-task-board-tools">
+              <label id="team-task-scope-control" class="team-task-scope hidden">
+                View
+                <select id="team-task-scope">
+                  <option value="mine">My tasks</option>
+                  <option value="all">Everyone's tasks</option>
+                </select>
+              </label>
+              <span id="team-task-count" class="team-task-count">0 tasks</span>
+            </div>
           </div>
           <div id="team-task-list" class="team-task-list">
             <div class="empty-state">Loading tasks...</div>

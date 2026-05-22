@@ -11,6 +11,7 @@ const state = {
   captureStations: [],
   selectedCaptureStationId: "",
   captureBusy: false,
+  taskScope: "mine",
 };
 
 const TEAM_TASK_BUCKET = "team-task-evidence";
@@ -22,8 +23,24 @@ const CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
+const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
 const ACTIVE_TASK_STATUSES = ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"];
 const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
+const TASK_LINE_SELECT = `
+  id,
+  order_id,
+  item_number,
+  transaction_id,
+  item_title,
+  custom_label,
+  quantity,
+  sold_for,
+  total_price,
+  net_payout,
+  line_status,
+  notes,
+  raw_payload
+`;
 
 function $(id) {
   return document.getElementById(id);
@@ -65,6 +82,24 @@ function toDateTimeLocalValue(value) {
   return date.toISOString().slice(0, 16);
 }
 
+function unique(values = []) {
+  return [...new Set(values.filter((value) => value !== null && value !== undefined && value !== ""))];
+}
+
+function formatMoney(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount === 0) return "";
+  return amount.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  });
+}
+
+function normalizeLookup(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function setStatus(message = "", type = "info") {
   const el = $("team-task-status");
   if (!el) return;
@@ -88,6 +123,25 @@ function setPhotoStatus(message = "", type = "info") {
 
 function isAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
+}
+
+function isTeamWideTaskScope() {
+  return isAdminUser() && state.taskScope === "all";
+}
+
+function updateTaskScopeChrome() {
+  if (!isAdminUser()) state.taskScope = "mine";
+
+  const scopeControl = $("team-task-scope-control");
+  const scopeSelect = $("team-task-scope");
+  scopeControl?.classList.toggle("hidden", !isAdminUser());
+  if (scopeSelect) {
+    scopeSelect.value = isTeamWideTaskScope() ? "all" : "mine";
+    scopeSelect.disabled = !isAdminUser();
+  }
+
+  const mode = $("team-task-mode");
+  if (mode) mode.textContent = isTeamWideTaskScope() ? "Everyone's Tasks" : "My Tasks";
 }
 
 function getRequestedTaskId() {
@@ -141,8 +195,8 @@ async function loadCurrentUser() {
   }
 
   state.employee = employee;
-  const mode = $("team-task-mode");
-  if (mode) mode.textContent = isAdminUser() ? "All Tasks" : "My Tasks";
+  state.taskScope = "mine";
+  updateTaskScopeChrome();
   const greeting = $("team-task-greeting");
   if (greeting) greeting.textContent = `Tasks${employee.display_name ? ` - ${employee.display_name}` : ""}`;
   return true;
@@ -158,6 +212,16 @@ function renderAssigneeSelect() {
     select.appendChild(new Option(label, employee.user_id || ""));
   });
   select.value = state.assignees.some((employee) => employee.user_id === current) ? current : "";
+}
+
+function getTaskAssigneeLabel(task = {}) {
+  if (task.assigned_to_email) return task.assigned_to_email;
+  const assignee = state.assignees.find((employee) => employee.user_id === task.assigned_to_user_id);
+  if (assignee) return assignee.display_name || assignee.email || "Assigned team member";
+  if (task.assigned_to_user_id && task.assigned_to_user_id === state.user?.id) {
+    return state.employee?.display_name || state.user?.email || "You";
+  }
+  return "Unassigned";
 }
 
 async function loadAssignees() {
@@ -187,6 +251,7 @@ async function loadTasks() {
   }
 
   state.tasks = sortUnifiedTasks(tasks);
+  await enrichTasksWithDetails(state.tasks);
   const requested = getRequestedTaskId();
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const { data: requestedTask, error: requestedError } = await supabase
@@ -207,25 +272,20 @@ async function loadTasks() {
 }
 
 async function loadTeamTaskRecords() {
-  const rpcName = isAdminUser() ? "list_admin_team_tasks" : "list_my_team_tasks";
+  const rpcName = isTeamWideTaskScope() ? "list_admin_team_tasks" : "list_my_team_tasks";
   const { data, error } = await supabase.rpc(rpcName, { _limit: 80 });
   if (error) throw error;
   return (data || []).map(normalizeTeamTask);
 }
 
 async function loadOrderTaskRecords() {
-  const rpcName = isAdminUser() ? "list_admin_ebay_order_tasks" : "list_my_ebay_order_tasks";
-  const rpcResult = await supabase.rpc(rpcName, { _limit: 80 });
-  if (!rpcResult.error) return (rpcResult.data || []).map(normalizeOrderTask);
-
-  console.warn("Order task RPC failed, falling back to direct query:", rpcResult.error);
   let query = supabase
     .from("ebay_order_tasks")
-    .select("*, ebay_orders(order_number, buyer_username, ship_by_date)")
+    .select("id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout)")
     .in("status", ACTIVE_TASK_STATUSES)
     .order("created_at", { ascending: true })
     .limit(80);
-  if (!isAdminUser()) query = query.eq("assigned_to_user_id", state.user?.id);
+  if (!isTeamWideTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -233,19 +293,13 @@ async function loadOrderTaskRecords() {
 }
 
 async function loadReturnTaskRecords() {
-  if (!isAdminUser()) {
-    const rpcResult = await supabase.rpc("list_my_ebay_return_tasks", { _limit: 80 });
-    if (!rpcResult.error) return (rpcResult.data || []).map(normalizeReturnTask);
-    console.warn("Return task RPC failed, falling back to direct query:", rpcResult.error);
-  }
-
   let query = supabase
     .from("ebay_return_tasks")
-    .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
     .in("status", ACTIVE_RETURN_TASK_STATUSES)
     .order("created_at", { ascending: true })
     .limit(80);
-  if (!isAdminUser()) query = query.eq("assigned_to_user_id", state.user?.id);
+  if (!isTeamWideTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -272,6 +326,7 @@ function normalizeOrderTask(task = {}) {
     title: task.title || `Pending order ${orderNumber || ""}`.trim(),
     description: task.question || task.latest_note || "",
     latest_note: task.latest_note || task.question || "",
+    order,
     order_number: orderNumber,
     buyer_username: buyer,
     ship_by_date: task.ship_by_date || order.ship_by_date || "",
@@ -287,17 +342,149 @@ function normalizeReturnTask(task = {}) {
   const reason = task.return_reason || returnCase.return_reason || "";
   return {
     ...task,
+    order_id: task.order_id || returnCase.order_id || "",
     source: "return",
     sourceLabel: "Return",
     title: task.title || `Return ${returnId || orderNumber || ""}`.trim(),
     description: task.question || reason || "",
     latest_note: task.question || reason || "",
+    returnCase,
     ebay_return_id: returnId,
     order_number: orderNumber,
     buyer_username: buyer,
     return_reason: reason,
     actionHref: `ebay-returns.html?returnTaskId=${encodeURIComponent(task.id || "")}#return-work-queue`,
   };
+}
+
+function getTaskLineIds(task = {}) {
+  return Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+}
+
+function getReturnTaskPayload(task = {}) {
+  return {
+    ...(task.metadata && typeof task.metadata === "object" ? task.metadata : {}),
+    ...(task.returnCase?.raw_payload && typeof task.returnCase.raw_payload === "object" ? task.returnCase.raw_payload : {}),
+  };
+}
+
+function getReturnComplaintImageRecords(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  return [
+    ...(Array.isArray(metadata.complaintImages) ? metadata.complaintImages : []),
+    ...(Array.isArray(metadata.ebayComplaintImages) ? metadata.ebayComplaintImages : []),
+    ...(Array.isArray(detail.complaintImages) ? detail.complaintImages : []),
+  ].filter((image) => image && typeof image === "object");
+}
+
+async function createTaskSignedImageUrl(bucket, path) {
+  if (!bucket || !path) return "";
+  const key = `${bucket}/${path}`;
+  const cached = state.signedUrls.get(key);
+  if (cached) return cached;
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, TEAM_TASK_SIGNED_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) return "";
+  state.signedUrls.set(key, data.signedUrl);
+  return data.signedUrl;
+}
+
+async function hydrateTaskLines(tasks = []) {
+  const lineIds = new Set();
+  const orderIds = new Set();
+  tasks.forEach((task) => {
+    getTaskLineIds(task).forEach((id) => lineIds.add(id));
+    if ((task.source === "order" || task.source === "return") && task.order_id) orderIds.add(task.order_id);
+  });
+
+  const rowsById = new Map();
+  const addRows = (rows = []) => rows.forEach((row) => {
+    if (row?.id) rowsById.set(row.id, row);
+  });
+
+  if (lineIds.size) {
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select(TASK_LINE_SELECT)
+      .in("id", [...lineIds])
+      .limit(1000);
+    if (error) console.warn("Could not load task order lines by id:", error);
+    else addRows(data || []);
+  }
+
+  if (orderIds.size) {
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select(TASK_LINE_SELECT)
+      .in("order_id", [...orderIds])
+      .limit(1000);
+    if (error) console.warn("Could not load task order lines by order:", error);
+    else addRows(data || []);
+  }
+
+  tasks.forEach((task) => {
+    const ids = getTaskLineIds(task);
+    const lines = ids.length
+      ? ids.map((id) => rowsById.get(id)).filter(Boolean)
+      : [...rowsById.values()].filter((line) => line.order_id === task.order_id);
+    task.lineDetails = lines;
+  });
+}
+
+async function hydrateReturnComplaintImages(tasks = []) {
+  const returnTasks = tasks.filter((task) => task.source === "return");
+  for (const task of returnTasks) {
+    const metadata = getReturnTaskPayload(task);
+    const detail = metadata.returnDetails || {};
+    const directUrls = unique([
+      metadata.complaintImageUrl,
+      ...(Array.isArray(metadata.complaintImageUrls) ? metadata.complaintImageUrls : []),
+      ...(Array.isArray(detail.complaintImageUrls) ? detail.complaintImageUrls : []),
+    ]).filter((url) => !String(url).startsWith("blob:"));
+    const signedUrls = await Promise.all(getReturnComplaintImageRecords(task).slice(0, 8).map((record) => {
+      const bucket = record.bucket || record.storage_bucket || EBAY_RETURN_EVIDENCE_BUCKET;
+      const path = record.path || record.storage_path;
+      if (record.url && !String(record.url).startsWith("blob:")) return record.url;
+      return createTaskSignedImageUrl(bucket, path);
+    }));
+    task.complaintImageUrls = unique([...directUrls, ...signedUrls.filter(Boolean)]);
+  }
+}
+
+async function hydrateReturnMessages(tasks = []) {
+  const returnTasks = tasks.filter((task) => task.source === "return");
+  if (!returnTasks.length) return;
+  try {
+    const { data, error } = await supabase
+      .from("ebay_return_messages")
+      .select("id, return_case_id, order_number, ebay_return_id, buyer_username, direction, message_status, message_body, item_title, return_reason, request_amount, sent_at, logged_at, created_by_email")
+      .order("logged_at", { ascending: false })
+      .limit(1000);
+    if (error) throw error;
+
+    returnTasks.forEach((task) => {
+      const returnCase = task.returnCase || {};
+      const returnId = normalizeLookup(task.ebay_return_id || returnCase.ebay_return_id);
+      const orderNumber = normalizeLookup(task.order_number || returnCase.order_number);
+      task.returnMessages = (data || []).filter((message) => Boolean(
+        message.return_case_id && returnCase.id && message.return_case_id === returnCase.id
+        || returnId && normalizeLookup(message.ebay_return_id) === returnId
+        || orderNumber && normalizeLookup(message.order_number) === orderNumber
+      )).slice(0, 6);
+    });
+  } catch (error) {
+    console.warn("Could not load return message context:", error);
+  }
+}
+
+async function enrichTasksWithDetails(tasks = []) {
+  await hydrateTaskLines(tasks);
+  await Promise.all([
+    hydrateReturnComplaintImages(tasks),
+    hydrateReturnMessages(tasks),
+  ]);
 }
 
 async function loadEventsForTasks() {
@@ -347,13 +534,147 @@ function getTaskStatusLabel(value) {
   return labels[value] || String(value || "open").replace(/_/g, " ");
 }
 
+function renderTaskLines(task = {}) {
+  const lines = Array.isArray(task.lineDetails) ? task.lineDetails : [];
+  if (!lines.length) return "";
+  return `
+    <div class="team-task-lines">
+      ${lines.slice(0, 6).map((line) => `
+        <article class="team-task-line">
+          <strong>${escapeHtml(line.item_number ? `${line.item_number} - ${line.item_title || "Untitled item"}` : line.item_title || "Untitled item")}</strong>
+          <span>Qty ${escapeHtml(line.quantity || 1)}${line.line_status ? ` / ${escapeHtml(line.line_status)}` : ""}${formatMoney(line.total_price || line.sold_for) ? ` / ${escapeHtml(formatMoney(line.total_price || line.sold_for))}` : ""}</span>
+          ${line.custom_label ? `<small>${escapeHtml(line.custom_label)}</small>` : ""}
+          ${line.notes ? `<small>${escapeHtml(line.notes)}</small>` : ""}
+        </article>
+      `).join("")}
+      ${lines.length > 6 ? `<small class="team-task-more">+${escapeHtml(lines.length - 6)} more line${lines.length - 6 === 1 ? "" : "s"}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderOrderTaskContext(task = {}) {
+  const order = task.order || {};
+  const orderValue = formatMoney(order.total_price || task.total_price);
+  const payout = formatMoney(order.net_payout || task.net_payout);
+  return `
+    <section class="team-task-context">
+      <div class="team-task-context-head">
+        <span class="eyebrow">Order Context</span>
+        <strong>${escapeHtml(task.order_number || "Pending order")}${task.buyer_username ? ` - ${escapeHtml(task.buyer_username)}` : ""}</strong>
+      </div>
+      <div class="team-task-facts">
+        ${task.ship_by_date ? `<span><small>Ship by</small><b>${escapeHtml(formatDate(task.ship_by_date))}</b></span>` : ""}
+        ${order.sale_date ? `<span><small>Sold</small><b>${escapeHtml(formatDate(order.sale_date))}</b></span>` : ""}
+        ${orderValue ? `<span><small>Order value</small><b>${escapeHtml(orderValue)}</b></span>` : ""}
+        ${payout ? `<span><small>Payout</small><b>${escapeHtml(payout)}</b></span>` : ""}
+      </div>
+      ${renderTaskLines(task)}
+    </section>
+  `;
+}
+
+function getReturnComplaintDetails(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const returnFileIds = unique([
+    ...(Array.isArray(metadata.returnFileIds) ? metadata.returnFileIds : []),
+    ...(Array.isArray(detail.returnFileIds) ? detail.returnFileIds : []),
+  ]);
+  const blobUrls = unique([
+    ...(Array.isArray(metadata.complaintBlobUrls) ? metadata.complaintBlobUrls : []),
+    ...(Array.isArray(detail.complaintBlobUrls) ? detail.complaintBlobUrls : []),
+  ]);
+  return {
+    buyerComment: metadata.buyerComment || detail.buyerComment || "",
+    requestAmount: metadata.requestAmount || detail.requestAmount || "",
+    onHoldAmount: metadata.onHoldAmount || detail.onHoldAmount || "",
+    refundAmount: metadata.refundAmount || detail.refundAmount || "",
+    returnDueText: metadata.returnDueText || detail.returnDueText || "",
+    orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || "",
+    videoReceiptUrl: metadata.videoReceiptUrl || detail.videoReceiptUrl || "",
+    detailsUrl: metadata.detailsUrl || detail.detailsUrl || metadata.pageUrl || "",
+    itemImageUrl: metadata.itemImageUrl || detail.itemImageUrl || "",
+    itemNumber: metadata.itemNumber || metadata.item_number || detail.itemNumber || "",
+    itemTitle: metadata.itemTitle || metadata.item_title || detail.itemTitle || "",
+    datePurchased: metadata.datePurchased || detail.datePurchased || "",
+    returnFileIds,
+    blobUrls,
+    imageUrls: Array.isArray(task.complaintImageUrls) ? task.complaintImageUrls : [],
+  };
+}
+
+function renderReturnMessages(task = {}) {
+  const messages = Array.isArray(task.returnMessages) ? task.returnMessages : [];
+  if (!messages.length) return "";
+  return `
+    <div class="team-task-message-log">
+      <strong>Buyer / eBay message log</strong>
+      ${messages.map((message) => `
+        <article class="team-task-message is-${escapeHtml(message.direction || "outbound")}">
+          <span>${escapeHtml(message.direction === "inbound" ? "Buyer" : "OG / eBay reply")} - ${escapeHtml(formatDate(message.sent_at || message.logged_at))}</span>
+          <p>${escapeHtml(message.message_body || "")}</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderReturnTaskContext(task = {}) {
+  const returnCase = task.returnCase || {};
+  const detail = getReturnComplaintDetails(task);
+  const fallbackItem = [detail.itemNumber, detail.itemTitle].filter(Boolean).join(" - ");
+  const hasPhotoRefs = detail.imageUrls.length || detail.returnFileIds.length || detail.blobUrls.length;
+  return `
+    <section class="team-task-context return-task-context">
+      <div class="team-task-context-head">
+        <span class="eyebrow">Return Context</span>
+        <strong>${escapeHtml(returnCase.ebay_return_id || task.ebay_return_id || "Return")}${task.buyer_username ? ` - ${escapeHtml(task.buyer_username)}` : ""}</strong>
+      </div>
+      <div class="team-task-facts">
+        ${returnCase.return_reason || task.return_reason ? `<span><small>Reason</small><b>${escapeHtml(returnCase.return_reason || task.return_reason)}</b></span>` : ""}
+        ${detail.requestAmount ? `<span><small>Request amount</small><b>${escapeHtml(detail.requestAmount)}</b></span>` : ""}
+        ${detail.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(detail.onHoldAmount)}</b></span>` : ""}
+        ${detail.refundAmount ? `<span><small>Refund</small><b>${escapeHtml(detail.refundAmount)}</b></span>` : ""}
+        ${task.due_at ? `<span><small>Due</small><b>${escapeHtml(formatDate(task.due_at))}</b></span>` : ""}
+        ${detail.returnDueText ? `<span><small>eBay action</small><b>${escapeHtml(detail.returnDueText)}</b></span>` : ""}
+        ${detail.datePurchased ? `<span><small>Purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
+      </div>
+      ${fallbackItem && !task.lineDetails?.length ? `<p class="team-task-important"><strong>Item</strong><span>${escapeHtml(fallbackItem)}</span></p>` : ""}
+      ${renderTaskLines(task)}
+      ${detail.buyerComment ? `<p class="team-task-important"><strong>Buyer comment</strong><span>${escapeHtml(detail.buyerComment)}</span></p>` : ""}
+      <div class="team-task-context-links">
+        ${detail.detailsUrl ? `<a href="${escapeHtml(detail.detailsUrl)}" target="_blank" rel="noopener">Open eBay return</a>` : ""}
+        ${detail.orderDetailsUrl ? `<a href="${escapeHtml(detail.orderDetailsUrl)}" target="_blank" rel="noopener">Order details</a>` : ""}
+        ${detail.videoReceiptUrl ? `<a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener">Video receipt</a>` : ""}
+      </div>
+      ${detail.imageUrls.length ? `
+        <div class="team-task-complaint-images">
+          ${detail.imageUrls.slice(0, 6).map((url) => `
+            <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
+              <img src="${escapeHtml(url)}" alt="eBay return complaint image" loading="lazy" />
+            </a>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${!detail.imageUrls.length && hasPhotoRefs ? `<p class="team-task-photo-note">Buyer photo references were captured. Open the return task if the thumbnails are not available here.</p>` : ""}
+      ${renderReturnMessages(task)}
+    </section>
+  `;
+}
+
+function renderTaskContext(task = {}) {
+  if (task.source === "order") return renderOrderTaskContext(task);
+  if (task.source === "return") return renderReturnTaskContext(task);
+  return "";
+}
+
 function renderTasks() {
   const list = $("team-task-list");
   const count = $("team-task-count");
   const title = $("team-task-list-title");
   if (!list) return;
 
-  if (title) title.textContent = isAdminUser() ? "All Open Tasks" : "My Assigned Tasks";
+  if (title) title.textContent = isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks";
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
@@ -379,12 +700,13 @@ function renderTasks() {
           <span class="team-task-source">${escapeHtml(task.sourceLabel || "Task")}</span>
           <span>${escapeHtml(task.task_type || "general")}</span>
           <span>${escapeHtml(task.priority || "normal")}</span>
-          <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(task))}</span>
           <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
           ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
           ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
           ${task.source === "team" ? `<span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>` : ""}
         </div>
+        ${renderTaskContext(task)}
         <div class="team-task-events">
           ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
         </div>
@@ -978,6 +1300,11 @@ async function openTaskPhoto(bucket, path) {
 function setupListeners() {
   $("new-team-task")?.addEventListener("click", () => openTaskModal());
   $("refresh-team-tasks")?.addEventListener("click", loadTasks);
+  $("team-task-scope")?.addEventListener("change", async (event) => {
+    state.taskScope = event.target.value === "all" && isAdminUser() ? "all" : "mine";
+    updateTaskScopeChrome();
+    await loadTasks();
+  });
   $("close-team-task-modal")?.addEventListener("click", closeModal);
   $("cancel-team-task-modal")?.addEventListener("click", closeModal);
   $("submit-team-task")?.addEventListener("click", submitTask);
