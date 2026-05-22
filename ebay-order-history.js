@@ -985,6 +985,18 @@ function getReturnTaskSearchText(task = {}) {
     metadata.returnAction,
     metadata.refundText,
     metadata.unmatchedReason,
+    metadata.buyerComment,
+    metadata.videoReceiptUrl,
+    metadata.orderDetailsUrl,
+    metadata.requestAmount,
+    metadata.onHoldAmount,
+    metadata.returnDetails?.buyerComment,
+    metadata.returnDetails?.videoReceiptUrl,
+    metadata.returnDetails?.orderDetailsUrl,
+    metadata.returnDetails?.requestAmount,
+    metadata.returnDetails?.onHoldAmount,
+    ...(Array.isArray(metadata.returnFileIds) ? metadata.returnFileIds : []),
+    ...(Array.isArray(metadata.returnDetails?.returnFileIds) ? metadata.returnDetails.returnFileIds : []),
     ...(lines || []).flatMap((line) => [
       line.item_title,
       line.item_number,
@@ -1106,6 +1118,92 @@ function getReturnTaskLineSummary(task = {}) {
   return `${first.item_number || "No item #"} - ${first.item_title || "Returned item"}${extra}`;
 }
 
+function getReturnComplaintDetails(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const imageUrls = unique([
+    metadata.complaintImageUrl,
+    ...(Array.isArray(metadata.complaintImageUrls) ? metadata.complaintImageUrls : []),
+    ...(Array.isArray(detail.complaintImageUrls) ? detail.complaintImageUrls : []),
+  ]).filter((url) => !String(url).startsWith("blob:"));
+  const blobUrls = unique([
+    ...(Array.isArray(metadata.complaintBlobUrls) ? metadata.complaintBlobUrls : []),
+    ...(Array.isArray(detail.complaintBlobUrls) ? detail.complaintBlobUrls : []),
+  ]);
+  const returnFileIds = unique([
+    ...(Array.isArray(metadata.returnFileIds) ? metadata.returnFileIds : []),
+    ...(Array.isArray(detail.returnFileIds) ? detail.returnFileIds : []),
+  ]);
+  return {
+    buyerComment: metadata.buyerComment || detail.buyerComment || "",
+    requestAmount: metadata.requestAmount || detail.requestAmount || "",
+    onHoldAmount: metadata.onHoldAmount || detail.onHoldAmount || "",
+    orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || "",
+    videoReceiptUrl: metadata.videoReceiptUrl || detail.videoReceiptUrl || "",
+    detailsUrl: metadata.detailsUrl || detail.detailsUrl || getReturnTaskPayload(task).pageUrl || "",
+    itemImageUrl: metadata.itemImageUrl || detail.itemImageUrl || "",
+    datePurchased: metadata.datePurchased || detail.datePurchased || "",
+    returnFileIds,
+    imageUrls,
+    blobUrls,
+  };
+}
+
+function renderReturnComplaintDetails(task = {}) {
+  const detail = getReturnComplaintDetails(task);
+  const hasDetails = Boolean(
+    detail.buyerComment
+    || detail.requestAmount
+    || detail.onHoldAmount
+    || detail.orderDetailsUrl
+    || detail.videoReceiptUrl
+    || detail.returnFileIds.length
+    || detail.imageUrls.length
+    || detail.blobUrls.length
+  );
+  if (!hasDetails) return "";
+
+  const photoCount = detail.imageUrls.length || detail.returnFileIds.length || detail.blobUrls.length;
+  return `
+    <div class="return-complaint-details">
+      <div class="return-complaint-header">
+        <span class="eyebrow">eBay Complaint Detail</span>
+        <div>
+          ${detail.detailsUrl ? `<a href="${escapeHtml(detail.detailsUrl)}" target="_blank" rel="noopener">Open eBay return</a>` : ""}
+          ${detail.orderDetailsUrl ? `<a href="${escapeHtml(detail.orderDetailsUrl)}" target="_blank" rel="noopener">Order details</a>` : ""}
+          ${detail.videoReceiptUrl ? `<a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener">Video receipt</a>` : ""}
+        </div>
+      </div>
+      ${detail.buyerComment ? `
+        <p class="return-complaint-comment">
+          <strong>Buyer comment</strong>
+          <span>${escapeHtml(detail.buyerComment)}</span>
+        </p>
+      ` : ""}
+      <div class="return-complaint-grid">
+        ${detail.requestAmount ? `<span><small>Request amount</small><b>${escapeHtml(detail.requestAmount)}</b></span>` : ""}
+        ${detail.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(detail.onHoldAmount)}</b></span>` : ""}
+        ${detail.datePurchased ? `<span><small>Date purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
+        ${photoCount ? `<span><small>Buyer photos</small><b>${escapeHtml(`${photoCount} captured reference${photoCount === 1 ? "" : "s"}`)}</b></span>` : ""}
+      </div>
+      ${detail.imageUrls.length ? `
+        <div class="return-complaint-images">
+          ${detail.imageUrls.slice(0, 8).map((url) => `
+            <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
+              <img src="${escapeHtml(url)}" alt="eBay return complaint image" loading="lazy" />
+            </a>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${!detail.imageUrls.length && (detail.returnFileIds.length || detail.blobUrls.length) ? `
+        <p class="return-complaint-photo-note">
+          eBay exposed ${escapeHtml(String(photoCount))} buyer photo reference${photoCount === 1 ? "" : "s"}. Open the eBay return detail page to view the actual images.
+        </p>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderReturnQueue() {
   const list = $("return-task-list");
   const count = $("return-task-count");
@@ -1166,6 +1264,7 @@ function renderReturnQueue() {
               </span>
             </div>
             <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
+            ${renderReturnComplaintDetails(task)}
           </div>
           <div class="return-task-buttons">
             ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
@@ -2894,7 +2993,12 @@ function buildReturnTransferNote(info = {}) {
     info.returnAction ? `eBay action: ${info.returnAction}` : "",
     info.returnInitiated ? `Requested: ${info.returnInitiated}` : "",
     info.refundText ? `Refund: ${info.refundText}` : "",
+    info.requestAmount ? `Request amount: ${info.requestAmount}` : "",
+    info.onHoldAmount ? `On hold: ${info.onHoldAmount}` : "",
+    info.buyerComment ? `Buyer comment: ${info.buyerComment}` : "",
+    info.videoReceiptUrl ? `Video receipt: ${info.videoReceiptUrl}` : "",
     info.detailsUrl ? `Details: ${info.detailsUrl}` : "",
+    info.orderDetailsUrl ? `Order details: ${info.orderDetailsUrl}` : "",
     info.pageUrl ? `Captured from: ${info.pageUrl}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -3108,6 +3212,7 @@ function getReturnTaskRefundInfo(task = {}) {
 
 function buildReturnExportMetadataPatch(payload = {}) {
   const info = getReturnTransferInfo(payload);
+  const detail = info.returnDetails || {};
   const dueInfo = {
     date: parseReturnDateText(info.returnAction, info.returnInitiated),
   };
@@ -3117,6 +3222,16 @@ function buildReturnExportMetadataPatch(payload = {}) {
     returnDueAt: dueAt || null,
     returnDueText: info.returnAction || null,
     refundAmount: refundAmount || null,
+    buyerComment: info.buyerComment || detail.buyerComment || null,
+    requestAmount: info.requestAmount || detail.requestAmount || null,
+    onHoldAmount: info.onHoldAmount || detail.onHoldAmount || null,
+    orderDetailsUrl: info.orderDetailsUrl || detail.orderDetailsUrl || null,
+    videoReceiptUrl: info.videoReceiptUrl || detail.videoReceiptUrl || null,
+    itemImageUrl: info.itemImageUrl || detail.itemImageUrl || null,
+    datePurchased: info.datePurchased || detail.datePurchased || null,
+    returnFileIds: info.returnFileIds || detail.returnFileIds || [],
+    complaintBlobUrls: info.complaintBlobUrls || detail.complaintBlobUrls || [],
+    returnDetails: detail || null,
     exportMetadataUpdatedAt: new Date().toISOString(),
   };
 }
