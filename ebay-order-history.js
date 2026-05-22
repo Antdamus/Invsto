@@ -1050,6 +1050,20 @@ function renderReturnAssigneeFilter() {
   if ([...select.options].some((option) => option.value === current)) select.value = current;
 }
 
+function getReturnAssigneeLabel(userId = "") {
+  if (!userId) return "Unassigned";
+  const employee = state.returnAssignees.find((entry) => entry.user_id === userId);
+  return employee?.display_name || employee?.email || "selected worker";
+}
+
+function setReturnTaskSaveStatus(message = "", type = "info") {
+  const el = $("return-task-save-status");
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.toggle("is-success", type === "success");
+  el.classList.toggle("is-error", type === "error");
+}
+
 async function loadReturnAssignees() {
   const { data, error } = await supabase
     .from("employees")
@@ -1085,13 +1099,24 @@ async function loadReturnQueue() {
 
   try {
     if (!state.returnAssignees.length) await loadReturnAssignees();
+    const launchTaskId = new URLSearchParams(window.location.search).get("returnTaskId");
     const { data, error } = await supabase
       .from("ebay_return_tasks")
       .select("*, ebay_return_cases(*)")
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) throw error;
-    state.returnTasks = data || [];
+    let tasks = data || [];
+    if (launchTaskId && !tasks.some((task) => task.id === launchTaskId)) {
+      const { data: launchTask, error: launchError } = await supabase
+        .from("ebay_return_tasks")
+        .select("*, ebay_return_cases(*)")
+        .eq("id", launchTaskId)
+        .maybeSingle();
+      if (launchError) console.warn("Failed to load launched return task:", launchError);
+      if (launchTask) tasks = [launchTask, ...tasks.filter((task) => task.id !== launchTask.id)];
+    }
+    state.returnTasks = tasks;
     await hydrateReturnComplaintImageUrls(state.returnTasks);
     await loadReturnTaskLines(state.returnTasks);
     await loadReturnMessagesForTasks(state.returnTasks);
@@ -1430,40 +1455,86 @@ function openReturnTaskIntake(taskId) {
   setReturnIntakeStatus(`Opened return task for ${returnCase.order_number || "this order"}. Attach photos, inspect the item, then save.`, "success");
 }
 
-async function assignReturnTask(taskId) {
+async function assignReturnTask(taskId, button = null) {
   const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
   const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
   const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
   const note = document.querySelector(`[data-return-task-note="${CSS.escape(taskId)}"]`)?.value || "";
-  const { error } = await supabase.rpc("assign_ebay_return_task", {
-    _task_id: taskId,
-    _assigned_to_user_id: assignee || null,
-    _priority: priority,
-    _due_at: dueValue ? new Date(dueValue).toISOString() : null,
-    _notes: note || null,
-    _signed_by_email: state.user?.email || null,
-  });
-  if (error) throw error;
-  await loadReturnQueue();
+  const originalText = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving...";
+  }
+  setReturnTaskSaveStatus("Saving assignment...", "info");
+  try {
+    const { error } = await supabase.rpc("assign_ebay_return_task", {
+      _task_id: taskId,
+      _assigned_to_user_id: assignee || null,
+      _priority: priority,
+      _due_at: dueValue ? new Date(dueValue).toISOString() : null,
+      _notes: note || null,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    await loadReturnQueue();
+    const assigneeLabel = getReturnAssigneeLabel(assignee);
+    setReturnTaskSaveStatus(
+      assignee
+        ? `Assigned to ${assigneeLabel}. It will show on their worker dashboard.`
+        : "Task unassigned.",
+      "success"
+    );
+  } catch (error) {
+    setReturnTaskSaveStatus(error.message || "Could not save assignment.", "error");
+    throw error;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText || "Save Assignment";
+    }
+  }
 }
 
-async function createReturnQuestionTask(taskId) {
+async function createReturnQuestionTask(taskId, button = null) {
   const task = getReturnTaskById(taskId);
   if (!task) return;
   const question = document.querySelector(`[data-return-task-question="${CSS.escape(taskId)}"]`)?.value || "";
   const assignee = document.querySelector(`[data-return-task-assignee="${CSS.escape(taskId)}"]`)?.value || null;
   const priority = document.querySelector(`[data-return-task-priority="${CSS.escape(taskId)}"]`)?.value || "normal";
   const dueValue = document.querySelector(`[data-return-task-due="${CSS.escape(taskId)}"]`)?.value || "";
-  const { error } = await supabase.rpc("create_ebay_return_question_task", {
-    _return_case_id: task.return_case_id,
-    _question: question,
-    _assigned_to_user_id: assignee || null,
-    _priority: priority,
-    _due_at: dueValue ? new Date(dueValue).toISOString() : null,
-    _signed_by_email: state.user?.email || null,
-  });
-  if (error) throw error;
-  await loadReturnQueue();
+  const originalText = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Creating...";
+  }
+  setReturnTaskSaveStatus("Creating question task...", "info");
+  try {
+    const { error } = await supabase.rpc("create_ebay_return_question_task", {
+      _return_case_id: task.return_case_id,
+      _question: question,
+      _assigned_to_user_id: assignee || null,
+      _priority: priority,
+      _due_at: dueValue ? new Date(dueValue).toISOString() : null,
+      _signed_by_email: state.user?.email || null,
+    });
+    if (error) throw error;
+    await loadReturnQueue();
+    const assigneeLabel = getReturnAssigneeLabel(assignee);
+    setReturnTaskSaveStatus(
+      assignee
+        ? `Question assigned to ${assigneeLabel}. It will show on their worker dashboard.`
+        : "Question task created unassigned.",
+      "success"
+    );
+  } catch (error) {
+    setReturnTaskSaveStatus(error.message || "Could not create question task.", "error");
+    throw error;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText || "Assign Question";
+    }
+  }
 }
 
 async function updateReturnTaskStatus(taskId, status) {
@@ -1492,10 +1563,10 @@ function bindReturnQueueActions() {
     button.addEventListener("click", () => updateReturnTaskStatus(button.dataset.returnTaskResolve, "resolved").catch((error) => alert(error.message || "Could not resolve task.")));
   });
   document.querySelectorAll("[data-return-task-assign]").forEach((button) => {
-    button.addEventListener("click", () => assignReturnTask(button.dataset.returnTaskAssign).catch((error) => alert(error.message || "Could not assign task.")));
+    button.addEventListener("click", () => assignReturnTask(button.dataset.returnTaskAssign, button).catch((error) => alert(error.message || "Could not assign task.")));
   });
   document.querySelectorAll("[data-return-task-create-question]").forEach((button) => {
-    button.addEventListener("click", () => createReturnQuestionTask(button.dataset.returnTaskCreateQuestion).catch((error) => alert(error.message || "Could not create question task.")));
+    button.addEventListener("click", () => createReturnQuestionTask(button.dataset.returnTaskCreateQuestion, button).catch((error) => alert(error.message || "Could not create question task.")));
   });
 }
 

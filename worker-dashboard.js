@@ -321,6 +321,37 @@ function getWorkerReturnTaskLabel(task = {}) {
   return "Return";
 }
 
+function getWorkerReturnCase(task = {}) {
+  const embedded = Array.isArray(task.ebay_return_cases)
+    ? task.ebay_return_cases[0] || {}
+    : task.ebay_return_cases || {};
+  return {
+    order_number: task.order_number || embedded.order_number || "",
+    ebay_return_id: task.ebay_return_id || embedded.ebay_return_id || "",
+    buyer_username: task.buyer_username || embedded.buyer_username || "",
+    return_reason: task.return_reason || embedded.return_reason || "",
+  };
+}
+
+async function fetchWorkerReturnTasks(userId) {
+  const dashboardQuery = await window.supabase
+    .rpc("list_my_ebay_return_tasks", { _limit: 6 });
+
+  if (!dashboardQuery.error) return dashboardQuery.data || [];
+
+  console.warn("Worker return task RPC failed, falling back to direct query:", dashboardQuery.error);
+  const { data, error } = await window.supabase
+    .from("ebay_return_tasks")
+    .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .eq("assigned_to_user_id", userId)
+    .in("status", ["open", "assigned", "in_progress", "blocked"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) throw error;
+  return data || [];
+}
+
 async function loadWorkerReturnTasks(userId) {
   const container = $("worker-return-tasks-container");
   if (!container) return;
@@ -330,17 +361,12 @@ async function loadWorkerReturnTasks(userId) {
     return;
   }
 
-  const { data, error } = await window.supabase
-    .from("ebay_return_tasks")
-    .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
-    .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "blocked"])
-    .order("created_at", { ascending: true })
-    .limit(6);
-
-  if (error) {
+  let data = [];
+  try {
+    data = await fetchWorkerReturnTasks(userId);
+  } catch (error) {
     console.warn("Failed to load worker return tasks:", error);
-    container.innerHTML = `<div class="urgent-orders-empty">Could not load return tasks.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned return tasks.</div>`;
     return;
   }
 
@@ -350,7 +376,7 @@ async function loadWorkerReturnTasks(userId) {
   }
 
   container.innerHTML = data.map((task) => {
-    const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
+    const returnCase = getWorkerReturnCase(task);
     const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "blocked" ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">

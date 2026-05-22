@@ -242,6 +242,20 @@ textarea {
   justify-content: flex-end;
 }
 
+.return-task-save-status {
+  color: var(--history-muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.return-task-save-status.is-success {
+  color: var(--history-green);
+}
+
+.return-task-save-status.is-error {
+  color: #ffc5c5;
+}
+
 .return-queue-filters {
   display: grid;
   grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 0.9fr) minmax(260px, 1.4fr);
