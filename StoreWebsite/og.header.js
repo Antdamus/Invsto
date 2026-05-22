@@ -69,7 +69,6 @@
 
         <nav class="og-home-drawer-nav" aria-label="Homepage navigation">
           <a href="${base}/join.html">Join the VIP Community</a>
-          <a href="${base}/story.html">Brand Story</a>
           <a href="${base}/contact.html">Contact</a>
           <a href="https://www.ebay.com/ebaylive/sellers/lertro4xscs" target="_blank" rel="noopener noreferrer">Live Shows</a>
           <a href="${base}/access.html">Account</a>
@@ -130,7 +129,6 @@
     const hrefFavorites = `${base}/favorites.html`;
     const hrefJoin = `${base}/join.html`;
     const hrefProfile = `${base}/profile.html`;
-    const hrefStory = `${base}/story.html`;
     const hrefContact = `${base}/contact.html`;
     const hrefCart = isStoreCart ? "./cart.html" : `${base}/StoreCart/cart.html`;
 
@@ -176,7 +174,6 @@
                 ${contactIconSvg()}
                 <span class="sr-only">Contact</span>
               </a>
-              <a class="nav-link story-link" href="${hrefStory}">Story</a>
             </nav>
           </div>
 
@@ -250,8 +247,6 @@
               <span class="sr-only">Contact</span>
             </a>
           </div>
-
-          <a class="nav-drawer-link" href="${hrefStory}">Story</a>
         </nav>
       </aside>
     `;

@@ -42,7 +42,6 @@
         <nav class="og-footer-block" aria-label="Footer navigation">
           <p class="og-footer-heading">Explore</p>
           <div class="og-footer-link-grid">
-            <a class="og-footer-link" href="${base}/story.html">Story</a>
             <a class="og-footer-link" href="${base}/join.html">Join</a>
             <a class="og-footer-link" href="${base}/contact.html">Contact</a>
             <a class="og-footer-link" href="${base}/profile.html">Account</a>
