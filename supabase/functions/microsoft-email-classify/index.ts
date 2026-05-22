@@ -4,6 +4,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const CLASSIFIER_NAME = "og-email-triage-classifier";
 const CLASSIFIER_VERSION = "4b.4-v1";
 const TAXONOMY_VERSION = "step-4b.4-v1";
+const RESPONSE_DRAFT_GENERATOR_NAME = "og-email-triage-response-drafter";
+const RESPONSE_DRAFT_GENERATOR_VERSION = "4c.3-v1";
+const RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT = "step-4c.3-v1";
 const TRUNCATION_VERSION = "head-12000-tail-2000-v1";
 const LINK_CONTEXT_VERSION = "links-compact-v1";
 const HEAD_CHARS = 12000;
@@ -11,8 +14,10 @@ const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
+const MAX_DRAFT_BODY_CHARS = 5000;
+const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -65,6 +70,29 @@ const SAFETY_FLAGS = [
   "possible_spam",
   "hallucinated_entity_removed",
 ] as const;
+const RESPONSE_DRAFT_SAFETY_FLAGS = [
+  "requires_human_review",
+  "sensitive_category",
+  "payment_or_refund",
+  "account_security",
+  "chargeback_risk",
+  "legal_or_policy_risk",
+  "unsupported_claim",
+  "unsafe_refund_promise",
+  "unsafe_compensation_promise",
+  "unsafe_legal_admission",
+  "unsafe_escalation_language",
+  "fabricated_order_detail",
+  "fabricated_shipping_update",
+  "fabricated_timeline",
+  "fabricated_tracking_information",
+  "fabricated_inventory_promise",
+  "category_mismatch",
+  "empty_draft",
+  "draft_too_long",
+  "malformed_json",
+  "body_truncated",
+] as const;
 const SENSITIVE_REVIEW_CATEGORIES = new Set([
   "refund_request",
   "return_request",
@@ -73,6 +101,14 @@ const SENSITIVE_REVIEW_CATEGORIES = new Set([
   "item_not_as_described",
   "payment_issue",
   "account_security",
+]);
+const HIGH_CAUTION_DRAFT_CATEGORIES = new Set([
+  "refund_request",
+  "chargeback",
+  "item_not_received",
+  "item_not_as_described",
+  "account_security",
+  "payment_issue",
 ]);
 const REVIEW_SAFETY_FLAGS = new Set(["low_confidence", "account_security", "payment_or_refund"]);
 const REFUND_RISK_CATEGORIES = new Set([
@@ -156,6 +192,56 @@ type ValidClassification = {
   detected_entities: Record<string, string[]>;
   reasoning_summary: string;
   safety_flags: string[];
+};
+type ResponseDraftInput = {
+  message: ClassifierInput["message"];
+  participants: ClassifierInput["participants"];
+  deterministic_links: ClassifierInput["deterministic_links"];
+  body: ClassifierInput["body"];
+  classification: {
+    id: string;
+    category: string;
+    subcategory: string | null;
+    priority: string | null;
+    urgency: string | null;
+    priority_level: string | null;
+    urgency_level: string | null;
+    response_timing: string | null;
+    customer_risk: string | null;
+    refund_risk: boolean;
+    chargeback_risk: boolean;
+    response_needed: boolean | null;
+    recommended_action: string | null;
+    requires_human_review: boolean;
+    safety_flags: string[];
+    summary: string | null;
+    reasoning_summary: string | null;
+    validation_status: string | null;
+    classification_review_state: string;
+    operator_notes: string | null;
+    effective_category: string;
+    effective_priority: string | null;
+    effective_urgency: string | null;
+    has_operator_override: boolean;
+  };
+  draft_context: {
+    generator_name: string;
+    generator_version: string;
+    prompt_version: string;
+    taxonomy_version: string;
+    link_context_version: string;
+    safety_policy_version: string;
+  };
+};
+type ValidResponseDraft = {
+  category: string;
+  draft_subject: string;
+  draft_body_text: string;
+  tone: string;
+  response_strategy: string;
+  requires_human_review: boolean;
+  safety_flags: string[];
+  validation_status: "valid";
 };
 type ValidationMetadata = {
   hallucination_guard?: {
@@ -341,6 +427,9 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "save_review" && !reviewState) {
     throw new ClassifierError("review_state_required", { status: 400, phase: "input" });
   }
+  if (mode === "generate_response" && !messageId && !classificationId) {
+    throw new ClassifierError("response_draft_selector_required", { status: 400, phase: "input" });
+  }
   if (mode === "dry_run" && !messageId && !mailboxId) {
     throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
   }
@@ -424,6 +513,14 @@ function promptVersion() {
 
 function modelName() {
   return requiredEnv("OPENAI_EMAIL_CLASSIFIER_MODEL");
+}
+
+function responseDraftPromptVersion() {
+  return Deno.env.get("EMAIL_RESPONSE_DRAFT_PROMPT_VERSION")?.trim() || RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT;
+}
+
+function responseDraftModelName() {
+  return Deno.env.get("OPENAI_EMAIL_RESPONSE_DRAFT_MODEL")?.trim() || modelName();
 }
 
 function maxBodyChars() {
@@ -931,6 +1028,133 @@ async function callOpenAI(input: ClassifierInput, prompt: string, model: string)
   }
 }
 
+function buildResponseDraftPrompt(version: string) {
+  return `
+You are a response draft assistant for OG eBay operations.
+Return strict JSON only. Do not include markdown wrappers, prose outside JSON, or chain-of-thought.
+Generated drafts are internal suggestions only. They must always require human review. Never instruct the operator to send automatically.
+
+Use only the supplied stored email context, deterministic links, and effective classification. Do not invent order numbers, tracking numbers, delivery status, dates, inventory status, policies, refunds, or compensation.
+Do not promise refunds, returns, replacements, discounts, store credit, free items, expedited shipping, compensation, legal outcomes, or exact timelines.
+Do not admit legal fault, policy violations, negligence, counterfeit/authenticity conclusions, or liability.
+For refund_request, chargeback, item_not_received, item_not_as_described, account_security, and payment_issue, use cautious review-oriented wording and avoid commitments.
+
+Adapt by effective category:
+- return_request: empathetic return workflow, ask operator/buyer to follow verified platform process, no approval promise.
+- shipping_label: concise operational acknowledgement, no fabricated shipping update.
+- item_not_as_described: cautious escalation-aware response, acknowledge concern, request review/details, no admission.
+- refund_request: non-committal review-oriented wording, no refund promise.
+- item_not_received: acknowledge delivery concern, say the order/shipping details need review, no delivery guarantee.
+- payment_issue/account_security/chargeback: brief, careful, escalate for human review.
+
+Output fields:
+- category must equal classification.effective_category.
+- draft_subject must be concise and safe.
+- draft_body_text must be plain text, no HTML, no signature block, no markdown table.
+- tone must be a short label.
+- response_strategy must summarize the safe operator strategy in one sentence.
+- requires_human_review must be true.
+- validation_status must be "valid".
+- safety_flags must use allowed values only when applicable.
+
+Allowed category values: ${CATEGORIES.join(", ")}.
+Allowed safety_flags values: ${RESPONSE_DRAFT_SAFETY_FLAGS.join(", ")}.
+Prompt version: ${version}.
+`.trim();
+}
+
+function responseDraftJsonSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "category",
+      "draft_subject",
+      "draft_body_text",
+      "tone",
+      "response_strategy",
+      "requires_human_review",
+      "safety_flags",
+      "validation_status",
+    ],
+    properties: {
+      category: { type: "string", enum: CATEGORIES },
+      draft_subject: { type: "string", maxLength: MAX_DRAFT_SUBJECT_CHARS },
+      draft_body_text: { type: "string", maxLength: MAX_DRAFT_BODY_CHARS },
+      tone: { type: "string", maxLength: 80 },
+      response_strategy: { type: "string", maxLength: 300 },
+      requires_human_review: { type: "boolean" },
+      safety_flags: {
+        type: "array",
+        items: { type: "string", enum: RESPONSE_DRAFT_SAFETY_FLAGS },
+        maxItems: RESPONSE_DRAFT_SAFETY_FLAGS.length,
+      },
+      validation_status: { type: "string", enum: ["valid"] },
+    },
+  };
+}
+
+async function callOpenAIResponseDraft(input: ResponseDraftInput, prompt: string, model: string) {
+  const apiKey = requiredEnv("OPENAI_API_KEY");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        input: [
+          {
+            role: "system",
+            content: [{ type: "input_text", text: prompt }],
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: stableStringify(input) }],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "email_triage_response_draft",
+            strict: true,
+            schema: responseDraftJsonSchema(),
+          },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new ClassifierError("response_draft_openai_request_failed", {
+        phase: "response_draft_openai",
+        transient: TRANSIENT_OPENAI_STATUSES.has(response.status),
+      });
+    }
+
+    const payload = await response.json().catch(() => null);
+    const outputText = extractOutputText(payload);
+    if (!outputText) throw new ClassifierError("response_draft_openai_empty_output", { phase: "response_draft_openai_parse" });
+    return JSON.parse(outputText);
+  } catch (error) {
+    if (error instanceof ClassifierError) throw error;
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ClassifierError("response_draft_openai_timeout", { phase: "response_draft_openai", transient: true });
+    }
+    if (error instanceof SyntaxError) {
+      throw new ClassifierError("response_draft_malformed_json", { phase: "response_draft_validation" });
+    }
+    throw new ClassifierError("response_draft_openai_network_failure", { phase: "response_draft_openai", transient: true });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function insertClassification(
   supabase: ServiceClient,
   values: {
@@ -1410,6 +1634,197 @@ function effectiveClassification(row: Record<string, any>) {
   };
 }
 
+function safeArray(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => String(item || "")).filter(Boolean) : [];
+}
+
+function normalizedGrounding(input: ResponseDraftInput) {
+  return cleanWhitespace([
+    stableStringify(input.message),
+    stableStringify(input.participants),
+    stableStringify(input.deterministic_links),
+    stableStringify(input.classification),
+    input.body.text,
+  ].join(" ")).toLowerCase();
+}
+
+function containsAny(text: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function extractTrackingLikeTokens(text: string) {
+  const tokens = text.match(/\b[A-Z0-9][A-Z0-9 -]{7,34}[A-Z0-9]\b/gi) || [];
+  return uniqueStrings(tokens.map((token) => token.replace(/\s+/g, "").replace(/-/g, "")), 20)
+    .filter((token) => /\d/.test(token) && token.length >= 8);
+}
+
+function validateResponseDraft(
+  value: unknown,
+  input: ResponseDraftInput,
+): { ok: true; value: ValidResponseDraft; validationErrors: string[] } | { ok: false; safeOutput: Partial<ValidResponseDraft>; validationErrors: string[]; safetyFlags: string[] } {
+  const errors: string[] = [];
+  const safetyFlags = new Set<string>(["requires_human_review"]);
+  if (input.body.body_truncated) safetyFlags.add("body_truncated");
+  if (SENSITIVE_REVIEW_CATEGORIES.has(input.classification.effective_category) || HIGH_CAUTION_DRAFT_CATEGORIES.has(input.classification.effective_category)) {
+    safetyFlags.add("sensitive_category");
+  }
+  if (input.classification.refund_risk) safetyFlags.add("payment_or_refund");
+  if (input.classification.chargeback_risk) safetyFlags.add("chargeback_risk");
+  if (input.classification.effective_category === "account_security") safetyFlags.add("account_security");
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      ok: false,
+      safeOutput: {},
+      validationErrors: ["output_not_object", "malformed_json"],
+      safetyFlags: [...safetyFlags, "malformed_json"],
+    };
+  }
+
+  const row = value as Record<string, unknown>;
+  const category = String(row.category || "");
+  const draftSubject = shortText(row.draft_subject, MAX_DRAFT_SUBJECT_CHARS);
+  const draftBodyText = safeBodyText(row.draft_body_text).slice(0, MAX_DRAFT_BODY_CHARS);
+  const tone = shortText(row.tone, 80);
+  const responseStrategy = shortText(row.response_strategy, 300);
+  const requiresHumanReview = row.requires_human_review;
+  const validationStatus = String(row.validation_status || "");
+  const modelFlags = safeArray(row.safety_flags);
+
+  for (const field of ["category", "draft_subject", "draft_body_text", "tone", "response_strategy", "requires_human_review", "safety_flags", "validation_status"]) {
+    if (!(field in row)) errors.push(`missing_${field}`);
+  }
+  if (!CATEGORIES.includes(category as typeof CATEGORIES[number])) errors.push("invalid_category");
+  if (category !== input.classification.effective_category) {
+    errors.push("category_mismatch");
+    safetyFlags.add("category_mismatch");
+  }
+  if (!draftSubject) errors.push("empty_draft_subject");
+  if (!draftBodyText) {
+    errors.push("empty_draft_body");
+    safetyFlags.add("empty_draft");
+  }
+  if (String(row.draft_subject || "").length > MAX_DRAFT_SUBJECT_CHARS) errors.push("draft_subject_too_long");
+  if (String(row.draft_body_text || "").length > MAX_DRAFT_BODY_CHARS) {
+    errors.push("draft_body_too_long");
+    safetyFlags.add("draft_too_long");
+  }
+  if (!tone) errors.push("invalid_tone");
+  if (!responseStrategy) errors.push("invalid_response_strategy");
+  if (requiresHumanReview !== true) errors.push("human_review_required_must_be_true");
+  if (validationStatus !== "valid") errors.push("invalid_validation_status");
+  if (!Array.isArray(row.safety_flags)) errors.push("invalid_safety_flags");
+  for (const flag of modelFlags) {
+    if (!RESPONSE_DRAFT_SAFETY_FLAGS.includes(flag as typeof RESPONSE_DRAFT_SAFETY_FLAGS[number])) errors.push("invalid_safety_flag");
+    else safetyFlags.add(flag);
+  }
+
+  const combined = cleanWhitespace(`${draftSubject} ${draftBodyText}`).toLowerCase();
+  const grounding = normalizedGrounding(input);
+  const highCaution = HIGH_CAUTION_DRAFT_CATEGORIES.has(input.classification.effective_category) ||
+    input.classification.refund_risk ||
+    input.classification.chargeback_risk;
+
+  if (containsAny(combined, [
+    /\b(i|we|our team|og)\s+(will|can|shall|have)\s+(refund|refunded|issue a refund|send a refund|process a refund)\b/i,
+    /\brefund\s+(has been|is approved|is guaranteed|will be issued|will be processed)\b/i,
+    /\byou(?:'|’)ll\s+be\s+refunded\b/i,
+  ])) {
+    errors.push("unsafe_refund_promise");
+    safetyFlags.add("unsafe_refund_promise");
+    safetyFlags.add("payment_or_refund");
+  }
+  if (containsAny(combined, [
+    /\b(i|we)\s+(will|can|shall)\s+(compensate|reimburse|credit|discount|replace)\b/i,
+    /\b(store credit|free replacement|partial refund|full refund|discount)\s+(is|will be|has been)\b/i,
+  ])) {
+    errors.push("unsafe_compensation_promise");
+    safetyFlags.add("unsafe_compensation_promise");
+  }
+  if (containsAny(combined, [
+    /\b(we|i|our team|og)\s+(are|were|am|was)\s+(at fault|liable|responsible|negligent|wrong)\b/i,
+    /\b(we|i|our team|og)\s+(violated|broke)\b/i,
+    /\bthis was our mistake\b/i,
+  ])) {
+    errors.push("unsafe_legal_admission");
+    safetyFlags.add("unsafe_legal_admission");
+    safetyFlags.add("legal_or_policy_risk");
+  }
+  if (containsAny(combined, [
+    /\b(chargeback|legal action|lawsuit|attorney|lawyer|police report)\b/i,
+    /\b(escalate this against|report you|take action against)\b/i,
+  ])) {
+    if (!input.classification.chargeback_risk && input.classification.effective_category !== "account_security") {
+      errors.push("unsafe_escalation_language");
+      safetyFlags.add("unsafe_escalation_language");
+    }
+  }
+  if (containsAny(combined, [
+    /\b(shipped|in transit|out for delivery|delivered|delivery attempted|label created|carrier has|tracking shows)\b/i,
+  ]) && !containsAny(grounding, [
+    /\b(shipped|in transit|out for delivery|delivered|delivery attempted|label created|tracking|carrier)\b/i,
+  ])) {
+    errors.push("fabricated_shipping_update");
+    safetyFlags.add("fabricated_shipping_update");
+  }
+  if (containsAny(combined, [
+    /\b(will arrive|arrives|delivery is expected|delivered by|ship by|ships by|within \d+\s+(business\s+)?days?|today|tomorrow)\b/i,
+  ]) && !containsAny(grounding, [
+    /\b(will arrive|arrives|delivery is expected|delivered by|ship by|ships by|within \d+\s+(business\s+)?days?|today|tomorrow)\b/i,
+  ])) {
+    errors.push("fabricated_timeline");
+    safetyFlags.add("fabricated_timeline");
+  }
+  if (containsAny(combined, [
+    /\b(in stock|available now|reserved for you|we have another|replacement is available|inventory is available)\b/i,
+  ]) && !containsAny(grounding, [
+    /\b(in stock|available|inventory|replacement)\b/i,
+  ])) {
+    errors.push("fabricated_inventory_promise");
+    safetyFlags.add("fabricated_inventory_promise");
+  }
+
+  const draftTokens = extractTrackingLikeTokens(`${draftSubject} ${draftBodyText}`);
+  for (const token of draftTokens) {
+    if (!entityIsGrounded(token, grounding)) {
+      errors.push("fabricated_tracking_information");
+      safetyFlags.add("fabricated_tracking_information");
+      break;
+    }
+  }
+
+  if (containsAny(combined, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i]) && !containsAny(grounding, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i])) {
+    errors.push("fabricated_order_detail");
+    safetyFlags.add("fabricated_order_detail");
+  }
+  if (highCaution && containsAny(combined, [/\b(done|approved|guaranteed|definitely|certainly|no problem)\b/i])) {
+    errors.push("unsupported_claim");
+    safetyFlags.add("unsupported_claim");
+  }
+
+  const normalizedFlags = [...safetyFlags].filter((flag) => RESPONSE_DRAFT_SAFETY_FLAGS.includes(flag as typeof RESPONSE_DRAFT_SAFETY_FLAGS[number]));
+  const safeOutput = {
+    category,
+    draft_subject: draftSubject,
+    draft_body_text: draftBodyText,
+    tone,
+    response_strategy: responseStrategy,
+    requires_human_review: true,
+    safety_flags: normalizedFlags,
+    validation_status: "valid" as const,
+  };
+
+  if (errors.length) {
+    return {
+      ok: false,
+      safeOutput,
+      validationErrors: [...new Set(errors)].slice(0, 40),
+      safetyFlags: normalizedFlags,
+    };
+  }
+  return { ok: true, value: safeOutput, validationErrors: [] };
+}
+
 function reviewSnapshot(row: Record<string, any>) {
   return {
     classification_review_state: reviewStateForRow(row),
@@ -1757,6 +2172,325 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
   };
 }
 
+async function loadResponseDraftInput(
+  supabase: ServiceClient,
+  input: Input,
+  promptVersionValue: string,
+): Promise<ResponseDraftInput> {
+  let classificationQuery = supabase
+    .from("email_message_classifications")
+    .select("id, message_id, category, subcategory, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
+    .eq("source", "ai")
+    .eq("validation_status", "valid")
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (input.classificationId) {
+    classificationQuery = classificationQuery.eq("id", input.classificationId);
+  } else if (input.messageId) {
+    classificationQuery = classificationQuery.eq("message_id", input.messageId).eq("is_current", true);
+  }
+
+  const { data: classificationRows, error: classificationError } = await classificationQuery;
+  if (classificationError) throw new ClassifierError("response_draft_classification_lookup_failed", { phase: "response_draft_input" });
+  const classification = Array.isArray(classificationRows) ? classificationRows[0] as Record<string, any> | undefined : undefined;
+  if (!classification?.id) {
+    throw new ClassifierError("valid_classification_required", { status: 400, phase: "response_draft_input" });
+  }
+  if (input.messageId && classification.message_id !== input.messageId) {
+    throw new ClassifierError("classification_message_mismatch", { status: 400, phase: "response_draft_input" });
+  }
+
+  const classifierInput = await loadClassifierInput(supabase, String(classification.message_id), promptVersionValue);
+  const effective = effectiveClassification(classification);
+  const classificationState = {
+    id: String(classification.id),
+    category: String(classification.category || ""),
+    subcategory: classification.subcategory || null,
+    priority: classification.priority || null,
+    urgency: classification.urgency || null,
+    priority_level: classification.priority_level || null,
+    urgency_level: classification.urgency_level || null,
+    response_timing: classification.response_timing || null,
+    customer_risk: classification.customer_risk || null,
+    refund_risk: classification.refund_risk === true,
+    chargeback_risk: classification.chargeback_risk === true,
+    response_needed: classification.response_needed === null ? null : classification.response_needed === true,
+    recommended_action: classification.recommended_action || null,
+    requires_human_review: classification.requires_human_review !== false,
+    safety_flags: safeArray(classification.safety_flags),
+    summary: classification.summary || null,
+    reasoning_summary: classification.reasoning_summary || null,
+    validation_status: classification.validation_status || null,
+    classification_review_state: reviewStateForRow(classification),
+    operator_notes: classification.operator_notes || null,
+    effective_category: String(effective.effective_category || classification.category || ""),
+    effective_priority: effective.effective_priority || null,
+    effective_urgency: effective.effective_urgency || null,
+    has_operator_override: effective.has_operator_override,
+  };
+
+  if (!CATEGORIES.includes(classificationState.effective_category as typeof CATEGORIES[number])) {
+    throw new ClassifierError("invalid_effective_category", { status: 400, phase: "response_draft_input" });
+  }
+
+  return {
+    message: classifierInput.message,
+    participants: classifierInput.participants,
+    deterministic_links: classifierInput.deterministic_links,
+    body: classifierInput.body,
+    classification: classificationState,
+    draft_context: {
+      generator_name: RESPONSE_DRAFT_GENERATOR_NAME,
+      generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
+      prompt_version: promptVersionValue,
+      taxonomy_version: TAXONOMY_VERSION,
+      link_context_version: LINK_CONTEXT_VERSION,
+      safety_policy_version: "response-draft-safety-v1",
+    },
+  };
+}
+
+async function nextDraftVersion(supabase: ServiceClient, messageId: string) {
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .select("draft_version")
+    .eq("message_id", messageId)
+    .order("draft_version", { ascending: false })
+    .limit(1);
+  if (error) throw new ClassifierError("response_draft_version_lookup_failed", { phase: "response_draft_write", messageId });
+  const latest = Array.isArray(data) && data[0]?.draft_version ? Number(data[0].draft_version) : 0;
+  return latest + 1;
+}
+
+async function insertResponseDraft(
+  supabase: ServiceClient,
+  values: {
+    input: ResponseDraftInput;
+    actorId: string;
+    promptHash: string;
+    inputHash: string;
+    promptVersion: string;
+    model: string;
+    draftVersion: number;
+    validationStatus: "valid" | "invalid" | "error";
+    validationErrors: string[];
+    safetyFlags: string[];
+    draft?: Partial<ValidResponseDraft>;
+    errorCode?: string;
+  },
+) {
+  const nowIso = new Date().toISOString();
+  const messageId = String(values.input.message.id || "");
+  const classificationId = values.input.classification.id;
+
+  const { error: supersedeError } = await supabase
+    .from("email_response_drafts")
+    .update({ is_current: false, superseded_at: nowIso })
+    .eq("message_id", messageId)
+    .eq("is_current", true);
+  if (supersedeError) {
+    throw new ClassifierError("response_draft_supersede_failed", { phase: "response_draft_write", messageId });
+  }
+
+  const normalizedSafetyFlags = uniqueStrings(values.safetyFlags, RESPONSE_DRAFT_SAFETY_FLAGS.length)
+    .filter((flag) => RESPONSE_DRAFT_SAFETY_FLAGS.includes(flag as typeof RESPONSE_DRAFT_SAFETY_FLAGS[number]));
+  const metadata = {
+    generator_name: RESPONSE_DRAFT_GENERATOR_NAME,
+    generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
+    taxonomy_version: TAXONOMY_VERSION,
+    link_context_version: LINK_CONTEXT_VERSION,
+    safety_policy_version: values.input.draft_context.safety_policy_version,
+    effective_classification: {
+      category: values.input.classification.effective_category,
+      priority: values.input.classification.effective_priority,
+      urgency: values.input.classification.effective_urgency,
+      has_operator_override: values.input.classification.has_operator_override,
+      classification_review_state: values.input.classification.classification_review_state,
+      refund_risk: values.input.classification.refund_risk,
+      chargeback_risk: values.input.classification.chargeback_risk,
+      customer_risk: values.input.classification.customer_risk,
+      response_timing: values.input.classification.response_timing,
+      recommended_action: values.input.classification.recommended_action,
+    },
+    body_meta: {
+      body_source: values.input.body.source,
+      body_truncated: values.input.body.body_truncated,
+      body_chars_original: values.input.body.body_chars_original,
+      body_chars_sent: values.input.body.body_chars_sent,
+      truncation_strategy: values.input.body.truncation_strategy,
+    },
+    tone: values.draft?.tone || null,
+    response_strategy: values.draft?.response_strategy || null,
+    error_code: values.errorCode || null,
+  };
+
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .insert({
+      message_id: messageId,
+      classification_id: classificationId,
+      source: "ai",
+      draft_status: "generated",
+      draft_subject: values.draft?.draft_subject || null,
+      draft_body_text: values.draft?.draft_body_text || null,
+      draft_body_format: "plain_text",
+      model_name: values.model,
+      model_version: null,
+      prompt_version: values.promptVersion,
+      prompt_hash: values.promptHash,
+      input_hash: values.inputHash,
+      draft_version: values.draftVersion,
+      is_current: true,
+      superseded_at: null,
+      validation_status: values.validationStatus,
+      validation_errors: values.validationErrors,
+      safety_flags: normalizedSafetyFlags,
+      requires_human_review: true,
+      created_by: values.actorId,
+      metadata,
+    })
+    .select("id")
+    .single();
+  if (error || !data?.id) {
+    throw new ClassifierError("response_draft_insert_failed", { phase: "response_draft_write", messageId });
+  }
+  return String(data.id);
+}
+
+async function generateResponseDraft(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+) {
+  const promptVersionValue = responseDraftPromptVersion();
+  const prompt = buildResponseDraftPrompt(promptVersionValue);
+  const promptHash = await sha256Hex(stableStringify({
+    prompt,
+    generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
+    taxonomy_version: TAXONOMY_VERSION,
+    safety_flags: RESPONSE_DRAFT_SAFETY_FLAGS,
+    schema: responseDraftJsonSchema(),
+  }));
+  const model = responseDraftModelName();
+  const draftInput = await loadResponseDraftInput(supabase, input, promptVersionValue);
+  const inputHash = await sha256Hex(stableStringify({
+    generator_name: RESPONSE_DRAFT_GENERATOR_NAME,
+    generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
+    taxonomy_version: TAXONOMY_VERSION,
+    prompt_hash: promptHash,
+    input: draftInput,
+  }));
+  const draftVersion = await nextDraftVersion(supabase, String(draftInput.message.id));
+
+  try {
+    const aiOutput = await callOpenAIResponseDraft(draftInput, prompt, model);
+    const validation = validateResponseDraft(aiOutput, draftInput);
+    if (validation.ok) {
+      const draftId = await insertResponseDraft(supabase, {
+        input: draftInput,
+        actorId: admin.userId,
+        promptHash,
+        inputHash,
+        promptVersion: promptVersionValue,
+        model,
+        draftVersion,
+        validationStatus: "valid",
+        validationErrors: [],
+        safetyFlags: validation.value.safety_flags,
+        draft: validation.value,
+      });
+      return {
+        ok: true,
+        mode: "generate_response",
+        draft_id: draftId,
+        message_id: draftInput.message.id,
+        classification_id: draftInput.classification.id,
+        draft_version: draftVersion,
+        validation_status: "valid",
+        safety_flags: validation.value.safety_flags,
+        requires_human_review: true,
+        model_name: model,
+        prompt_version: promptVersionValue,
+        prompt_hash: promptHash,
+        input_hash: inputHash,
+        generated_body_returned: false,
+        outbound_send_enabled: false,
+        outlook_mutation_performed: false,
+      };
+    }
+
+    const draftId = await insertResponseDraft(supabase, {
+      input: draftInput,
+      actorId: admin.userId,
+      promptHash,
+      inputHash,
+      promptVersion: promptVersionValue,
+      model,
+      draftVersion,
+      validationStatus: "invalid",
+      validationErrors: validation.validationErrors,
+      safetyFlags: validation.safetyFlags,
+      draft: validation.safeOutput,
+    });
+    return {
+      ok: true,
+      mode: "generate_response",
+      draft_id: draftId,
+      message_id: draftInput.message.id,
+      classification_id: draftInput.classification.id,
+      draft_version: draftVersion,
+      validation_status: "invalid",
+      validation_errors: validation.validationErrors,
+      safety_flags: validation.safetyFlags,
+      requires_human_review: true,
+      model_name: model,
+      prompt_version: promptVersionValue,
+      prompt_hash: promptHash,
+      input_hash: inputHash,
+      generated_body_returned: false,
+      outbound_send_enabled: false,
+      outlook_mutation_performed: false,
+    };
+  } catch (error) {
+    const safe = safeError(error);
+    const draftId = await insertResponseDraft(supabase, {
+      input: draftInput,
+      actorId: admin.userId,
+      promptHash,
+      inputHash,
+      promptVersion: promptVersionValue,
+      model,
+      draftVersion,
+      validationStatus: safe.code === "response_draft_malformed_json" ? "invalid" : "error",
+      validationErrors: [safe.code],
+      safetyFlags: safe.code === "response_draft_malformed_json"
+        ? ["requires_human_review", "malformed_json"]
+        : ["requires_human_review"],
+      errorCode: safe.code,
+    });
+    return {
+      ok: true,
+      mode: "generate_response",
+      draft_id: draftId,
+      message_id: draftInput.message.id,
+      classification_id: draftInput.classification.id,
+      draft_version: draftVersion,
+      validation_status: safe.code === "response_draft_malformed_json" ? "invalid" : "error",
+      validation_errors: [safe.code],
+      safety_flags: safe.code === "response_draft_malformed_json" ? ["requires_human_review", "malformed_json"] : ["requires_human_review"],
+      requires_human_review: true,
+      model_name: model,
+      prompt_version: promptVersionValue,
+      prompt_hash: promptHash,
+      input_hash: inputHash,
+      generated_body_returned: false,
+      outbound_send_enabled: false,
+      outlook_mutation_performed: false,
+    };
+  }
+}
+
 async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
   if (input.classificationRunId) {
     const { data: rows, error } = await supabase
@@ -2001,6 +2735,10 @@ serve(async (req) => {
 
     if (input.mode === "save_review") {
       return json(req, 200, await saveClassificationReview(supabase, input, admin));
+    }
+
+    if (input.mode === "generate_response") {
+      return json(req, 200, await generateResponseDraft(supabase, input, admin));
     }
 
     const promptVersionValue = promptVersion();
