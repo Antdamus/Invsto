@@ -4456,6 +4456,27 @@ function postHistoryReturnTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function getCleanupStoragePaths(result = {}) {
+  return [...new Set(
+    (Array.isArray(result.complaint_storage_paths) ? result.complaint_storage_paths : [])
+      .map((path) => String(path || "").trim())
+      .filter((path) => path && path.startsWith("returns/ebay-complaints/"))
+  )];
+}
+
+async function removeReturnImportStorageObjects(paths = []) {
+  if (!paths.length) return 0;
+  let removed = 0;
+  const storage = supabase.storage.from(EBAY_RETURN_EVIDENCE_BUCKET);
+  for (let index = 0; index < paths.length; index += 100) {
+    const batch = paths.slice(index, index + 100);
+    const { error } = await storage.remove(batch);
+    if (error) throw error;
+    removed += batch.length;
+  }
+  return removed;
+}
+
 async function clearReturnImportTestData() {
   if (!isAdminUser()) {
     alert("Only admins can clear return import test data.");
@@ -4475,9 +4496,13 @@ async function clearReturnImportTestData() {
     const caseCount = Number(preview.return_cases || 0);
     const taskCount = Number(preview.return_tasks || 0);
     const storageCount = Number(preview.complaint_storage_objects || 0);
+    const storagePaths = getCleanupStoragePaths(preview);
     if (!caseCount && !taskCount && !storageCount) {
       alert("No eBay return import test data was found to clear.");
       return;
+    }
+    if (storageCount && !storagePaths.length) {
+      throw new Error("Push the latest return cleanup migration first, then try clearing return imports again.");
     }
 
     const confirmed = window.confirm(
@@ -4493,6 +4518,7 @@ async function clearReturnImportTestData() {
     );
     if (!confirmed) return;
 
+    const removedStorageCount = await removeReturnImportStorageObjects(storagePaths);
     const { data, error } = await supabase.rpc("admin_clear_ebay_return_import_test_data", {
       _dry_run: false,
     });
@@ -4511,7 +4537,7 @@ async function clearReturnImportTestData() {
       importedReturns: [],
       unmatchedReturns: [],
       failedReturns: [],
-      message: `Cleared ${Number(result.return_cases || 0).toLocaleString()} return import case${Number(result.return_cases || 0) === 1 ? "" : "s"}, ${Number(result.return_tasks || 0).toLocaleString()} task${Number(result.return_tasks || 0) === 1 ? "" : "s"}, and ${Number(result.complaint_storage_objects || 0).toLocaleString()} imported complaint photo${Number(result.complaint_storage_objects || 0) === 1 ? "" : "s"}.`,
+      message: `Cleared ${Number(result.return_cases || caseCount || 0).toLocaleString()} return import case${Number(result.return_cases || caseCount || 0) === 1 ? "" : "s"}, ${Number(result.return_tasks || taskCount || 0).toLocaleString()} task${Number(result.return_tasks || taskCount || 0) === 1 ? "" : "s"}, and ${removedStorageCount.toLocaleString()} imported complaint photo${removedStorageCount === 1 ? "" : "s"}.`,
     });
     await loadReturnQueue();
   } catch (error) {
