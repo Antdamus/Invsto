@@ -109,7 +109,15 @@ create policy "email_classification_review_events_admin_select"
 on public.email_classification_review_events
 for select
 to authenticated
-using (public.is_admin_user());
+using (
+  exists (
+    select 1
+    from public.employees e
+    where e.user_id = auth.uid()
+      and e.active = true
+      and e.role = 'admin'
+  )
+);
 
 create index if not exists email_message_classifications_review_state_idx
   on public.email_message_classifications(classification_review_state, reviewed_at desc, created_at desc);
