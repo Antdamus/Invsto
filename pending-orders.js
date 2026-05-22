@@ -1488,6 +1488,7 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
       </div>
@@ -1508,6 +1509,7 @@ function renderOrders() {
 
     const lineList = card.querySelector(".buyer-line-list");
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
+    const taskButton = card.querySelector("[data-buyer-task-key]");
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
@@ -1517,6 +1519,13 @@ function renderOrders() {
       groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
       groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
     }
+    taskButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
+      if (!nextLine) return;
+      selectOrderLine(nextLine.id);
+      setTimeout(() => openOrderTaskModal(), 80);
+    });
 
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
@@ -1627,6 +1636,7 @@ function renderSelectedOrder() {
   $("selected-order-title").textContent = order.order_number || "eBay order";
   $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
+  $("assign-order-task")?.toggleAttribute("disabled", !line?.order_id);
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
   $("complete-no-inventory")?.toggleAttribute("disabled", !isNoInventoryCompletionLine(line));
   $("money-grid")?.classList.toggle("hidden", !isAdminUser());
@@ -5473,6 +5483,7 @@ function setupListeners() {
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
+  $("assign-order-task")?.addEventListener("click", () => openOrderTaskModal());
   $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal());
   $("submit-order-task")?.addEventListener("click", submitOrderTask);
   $("cancel-order-task")?.addEventListener("click", closeOrderTaskModal);
