@@ -919,6 +919,121 @@ textarea:focus {
   border-color: rgba(125, 240, 178, 0.2);
 }
 
+.order-task-panel {
+  border-color: rgba(139, 190, 255, 0.22);
+}
+
+.order-task-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.order-task-card,
+.order-task-event {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid rgba(139, 190, 255, 0.18);
+  border-radius: 16px;
+  background: rgba(139, 190, 255, 0.055);
+  padding: 13px;
+}
+
+.order-task-card.is-urgent {
+  border-color: rgba(255, 123, 123, 0.34);
+  background: rgba(255, 123, 123, 0.08);
+}
+
+.order-task-card.is-resolved {
+  border-color: rgba(125, 240, 178, 0.24);
+  background: rgba(125, 240, 178, 0.06);
+}
+
+.order-task-card-head,
+.order-task-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.order-task-card-head strong,
+.order-task-event-head strong {
+  overflow-wrap: anywhere;
+}
+
+.order-task-card-head span,
+.order-task-event-head span,
+.order-task-meta,
+.order-task-event small {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.order-task-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-task-meta span,
+.order-task-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(227, 189, 119, 0.24);
+  border-radius: 999px;
+  background: rgba(227, 189, 119, 0.07);
+  color: var(--gold-strong);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.order-task-events {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.order-task-photo-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-task-photo-strip button {
+  min-height: 34px;
+  border: 1px solid rgba(125, 240, 178, 0.26);
+  border-radius: 999px;
+  background: rgba(125, 240, 178, 0.08);
+  color: #a8f7c7;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.order-task-context {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.order-task-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.order-task-modal-card {
+  width: min(920px, 100%);
+}
+
 .ebay-label-details {
   display: grid;
   gap: 10px;
@@ -1855,6 +1970,10 @@ body.modal-open {
   .no-inventory-camera-row {
     grid-template-columns: 1fr;
   }
+
+  .order-task-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1878,7 +1997,9 @@ body.modal-open {
 
   .bag-lookup-head,
   .bag-match-head,
-  .live-lot-head {
+  .live-lot-head,
+  .order-task-card-head,
+  .order-task-event-head {
     flex-direction: column;
   }
 

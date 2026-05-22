@@ -387,6 +387,53 @@ function getReturnTaskDashboardLabel(task = {}) {
   return "Return";
 }
 
+function getOrderTaskDashboardLabel(task = {}) {
+  if (task.task_type === "admin_review") return "Admin";
+  if (task.task_type === "worker_follow_up") return "Worker";
+  if (task.task_type === "special_order") return "Special";
+  return "Order";
+}
+
+async function loadAdminOrderTasks() {
+  const container = document.getElementById("admin-order-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading order tasks...</div>`;
+
+  const { data, error } = await supabase.rpc("list_admin_ebay_order_tasks", { _limit: 6 });
+
+  if (error) {
+    console.warn("Failed to load order coordination tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load order tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open order coordination tasks need attention.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_admin" ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.buyer_username || "eBay buyer")}</strong>
+            <span>${escapeHtml(task.order_number || "Pending order")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getOrderTaskDashboardLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.question || task.title || "Order needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          <span>Ship by ${escapeHtml(task.ship_by_date ? formatShipBy(task.ship_by_date) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 async function loadAdminReturnTasks() {
   const container = document.getElementById("admin-return-tasks-container");
   if (!container) return;
@@ -772,6 +819,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupNavigation();
   await loadUrgentOrders();
   await loadStoreTransferAlerts();
+  await loadAdminOrderTasks();
   await loadAdminReturnTasks();
 
   const items = await loadInventoryData();
