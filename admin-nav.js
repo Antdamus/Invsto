@@ -13,7 +13,9 @@
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
     { href: "past-live-sales.html", label: "Past Live Sales", mark: "PL" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
+    { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
+    { href: "ebay-returns.html", label: "Returns", mark: "R" },
     { href: "timeclock.html", label: "Timesheet", mark: "T" },
   ];
 
@@ -26,7 +28,9 @@
     { href: "store-transfers.html", label: "Store Transfers", mark: "ST" },
     { href: "live-sales.html", label: "Live Sales", mark: "LS" },
     { href: "pending-orders.html", label: "Pending Orders", mark: "PO" },
+    { href: "team-tasks.html", label: "Tasks", mark: "TS" },
     { href: "ebay-order-history.html", label: "Order History", mark: "OH" },
+    { href: "ebay-returns.html", label: "Returns", mark: "R" },
     { href: "locations.html", label: "Locations", mark: "L" },
     { href: "dashboard.html", label: "Admin Dashboard", mark: "AD" },
   ];

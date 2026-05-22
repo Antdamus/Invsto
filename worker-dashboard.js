@@ -314,6 +314,218 @@ async function loadWorkerStoreTransferAlerts() {
   `).join("");
 }
 
+function getWorkerReturnTaskLabel(task = {}) {
+  if (task.task_type === "return_intake") return "Intake";
+  if (task.task_type === "return_review") return "Review";
+  if (task.task_type === "question") return "Question";
+  return "Return";
+}
+
+function getWorkerReturnCase(task = {}) {
+  const embedded = Array.isArray(task.ebay_return_cases)
+    ? task.ebay_return_cases[0] || {}
+    : task.ebay_return_cases || {};
+  return {
+    order_number: task.order_number || embedded.order_number || "",
+    ebay_return_id: task.ebay_return_id || embedded.ebay_return_id || "",
+    buyer_username: task.buyer_username || embedded.buyer_username || "",
+    return_reason: task.return_reason || embedded.return_reason || "",
+  };
+}
+
+async function fetchWorkerReturnTasks(userId) {
+  const dashboardQuery = await window.supabase
+    .rpc("list_my_ebay_return_tasks", { _limit: 6 });
+
+  if (!dashboardQuery.error) return dashboardQuery.data || [];
+
+  console.warn("Worker return task RPC failed, falling back to direct query:", dashboardQuery.error);
+  const { data, error } = await window.supabase
+    .from("ebay_return_tasks")
+    .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .eq("assigned_to_user_id", userId)
+    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function loadWorkerReturnTasks(userId) {
+  const container = $("worker-return-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading return tasks...</div>`;
+  if (!userId) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned return tasks.</div>`;
+    return;
+  }
+
+  let data = [];
+  try {
+    data = await fetchWorkerReturnTasks(userId);
+  } catch (error) {
+    console.warn("Failed to load worker return tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned return tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No return tasks are currently assigned to you.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const returnCase = getWorkerReturnCase(task);
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>
+            <span>${escapeHtml(returnCase.order_number || returnCase.ebay_return_id || "Return case")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getWorkerReturnTaskLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.question || task.title || returnCase.return_reason || "Return needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(task.status.replace(/_/g, " "))} / ${escapeHtml(task.priority)}</span>
+          <span>Due ${escapeHtml(task.due_at ? fmtDate(task.due_at) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
+function getWorkerOrderTaskLabel(task = {}) {
+  if (task.task_type === "admin_review") return "Admin";
+  if (task.task_type === "worker_follow_up") return "Worker";
+  if (task.task_type === "special_order") return "Special";
+  return "Order";
+}
+
+async function fetchWorkerOrderTasks(userId) {
+  const dashboardQuery = await window.supabase.rpc("list_my_ebay_order_tasks", { _limit: 6 });
+  if (!dashboardQuery.error) return dashboardQuery.data || [];
+
+  console.warn("Worker order task RPC failed, falling back to direct query:", dashboardQuery.error);
+  const { data, error } = await window.supabase
+    .from("ebay_order_tasks")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, ebay_orders(order_number, buyer_username, ship_by_date)")
+    .eq("assigned_to_user_id", userId)
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) throw error;
+  return data || [];
+}
+
+function getWorkerOrderTaskOrder(task = {}) {
+  const order = task.ebay_orders || {};
+  return Array.isArray(order) ? order[0] || {} : order;
+}
+
+async function loadWorkerOrderTasks(userId) {
+  const container = $("worker-order-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading order tasks...</div>`;
+  if (!userId) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned order tasks.</div>`;
+    return;
+  }
+
+  let data = [];
+  try {
+    data = await fetchWorkerOrderTasks(userId);
+  } catch (error) {
+    console.warn("Failed to load worker order tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned order tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No order tasks are currently assigned to you.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const order = getWorkerOrderTaskOrder(task);
+    const orderNumber = task.order_number || order.order_number || "Pending order";
+    const buyer = task.buyer_username || order.buyer_username || "eBay buyer";
+    const shipBy = task.ship_by_date || order.ship_by_date || "";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_worker"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(buyer)}</strong>
+            <span>${escapeHtml(orderNumber)}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getWorkerOrderTaskLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.question || task.title || "Order needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Ship by ${escapeHtml(shipBy ? formatShipBy(shipBy) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
+function getWorkerTeamTaskLabel(task = {}) {
+  if (task.task_type === "inventory") return "Inventory";
+  if (task.task_type === "shipping") return "Shipping";
+  if (task.task_type === "customer_service") return "Customer";
+  if (task.task_type === "maintenance") return "Maintenance";
+  if (task.task_type === "admin_review") return "Admin";
+  return "Team";
+}
+
+async function loadWorkerTeamTasks(userId) {
+  const container = $("worker-team-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading team tasks...</div>`;
+  if (!userId) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned team tasks.</div>`;
+    return;
+  }
+
+  const { data, error } = await window.supabase.rpc("list_my_team_tasks", { _limit: 6 });
+  if (error) {
+    console.warn("Failed to load worker team tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned team tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No independent team tasks are currently assigned to you.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_worker"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.title || "Team task")}</strong>
+            <span>${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getWorkerTeamTaskLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.description || "Task needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Due ${escapeHtml(task.due_at ? fmtDate(task.due_at) : "not set")}</span>
+          <span>Created: ${escapeHtml(task.created_by_email || "logged-in user")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** ---------- UI helpers ---------- */
 function setSoftError(msg) {
   const el = $("soft-error");
@@ -887,6 +1099,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     await enforceContractorAgreementGate(window.supabase);
     await loadWorkerUrgentOrders();
     await loadWorkerStoreTransferAlerts();
+    await loadWorkerOrderTasks(userId);
+    await loadWorkerTeamTasks(userId);
+    await loadWorkerReturnTasks(userId);
 
     // 2) Break cap
     state.breakCapMin = await fetchBreakCapMinutes();
@@ -965,6 +1180,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     state.timers.refresh = setInterval(async () => {
       try {
         await refreshCurrentView(state);
+        await loadWorkerOrderTasks(userId);
+        await loadWorkerTeamTasks(userId);
+        await loadWorkerReturnTasks(userId);
 
         const curKey = monthKey(startOfMonthLocal(new Date()));
         const selKey = monthKey(state.selectedMonthStart);

@@ -277,6 +277,7 @@
           </div>
 
           <div id="fulfillment-workflow" class="hidden">
+            <button id="close-mobile-order-detail" type="button" class="secondary-btn mobile-detail-close">Back to Orders</button>
             <section class="order-detail-card">
               <div class="detail-head">
                 <div>
@@ -286,6 +287,8 @@
                 </div>
                 <div class="detail-actions">
                   <span id="selected-order-status" class="status-badge">Pending</span>
+                  <button id="assign-order-task" type="button" class="secondary-btn task-action-btn">Assign Task</button>
+                  <button id="cancel-pending-order" type="button" class="secondary-btn danger-btn">Mark Order Canceled</button>
                   <button id="complete-no-inventory" type="button" class="secondary-btn caution-btn">Complete Without Inventory</button>
                 </div>
               </div>
@@ -311,6 +314,22 @@
               <div id="ebay-label-details" class="ebay-label-details"></div>
               <div class="fulfill-actions">
                 <button id="preview-ebay-label" type="button" class="secondary-btn hidden">Preview Label</button>
+              </div>
+            </section>
+
+            <section id="order-task-panel" class="scan-card order-task-panel">
+              <div class="step-head">
+                <span>Task</span>
+                <div>
+                  <h3>Order Coordination</h3>
+                  <p id="order-task-summary">Assign questions or special handling notes to admins or workers.</p>
+                </div>
+              </div>
+              <div id="order-task-list" class="order-task-list">
+                <div class="empty-state">No coordination tasks for this order.</div>
+              </div>
+              <div class="fulfill-actions">
+                <button id="open-order-task-modal" type="button" class="secondary-btn task-action-btn">Assign Task to This Order</button>
               </div>
             </section>
 
@@ -516,6 +535,157 @@
       <p id="no-inventory-photo-viewer-caption"></p>
       <div class="modal-actions">
         <button id="dismiss-no-inventory-photo-viewer" type="button" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="worker-cancel-order-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="worker-cancel-order-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card">
+      <button id="close-worker-cancel-order" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Canceled on eBay</span>
+      <h2 id="worker-cancel-order-title">Mark order canceled?</h2>
+      <p id="worker-cancel-order-subtitle">This removes the selected pending order line(s) from the packing queue without removing stock.</p>
+      <div class="no-inventory-toolbar">
+        <span id="worker-cancel-order-count" class="count-pill">0 selected</span>
+        <div>
+          <button id="select-all-worker-cancel-order" type="button" class="secondary-btn">Select All</button>
+          <button id="deselect-all-worker-cancel-order" type="button" class="secondary-btn">Deselect All</button>
+        </div>
+      </div>
+      <div id="worker-cancel-order-list" class="bundle-review-list"></div>
+      <section class="no-inventory-evidence" aria-label="Canceled order evidence photos">
+        <div>
+          <span class="eyebrow">Optional Photos</span>
+          <h3>Cancellation Evidence</h3>
+          <p>Attach photos when the cancellation needs proof or extra context. These photos are saved with the signed audit trail.</p>
+        </div>
+        <div class="no-inventory-camera-row">
+          <label>
+            Camera Station
+            <select id="worker-cancel-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="no-inventory-camera-actions">
+            <button id="refresh-worker-cancel-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-worker-cancel-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+            <label class="secondary-btn folder-photo-picker">
+              Add Photos From Folder
+              <input id="worker-cancel-evidence-file" type="file" accept="image/*" multiple />
+            </label>
+          </div>
+        </div>
+        <p id="worker-cancel-photo-status" class="fulfill-status"></p>
+        <div class="worker-cancel-photo-toolbar no-inventory-photo-toolbar hidden" aria-label="Cancellation evidence photo upload selection">
+          <span id="worker-cancel-photo-selection-summary"></span>
+          <div>
+            <button id="select-all-worker-cancel-photos" type="button" class="secondary-btn">Select All Photos</button>
+            <button id="deselect-all-worker-cancel-photos" type="button" class="secondary-btn">Deselect Photos</button>
+          </div>
+        </div>
+        <div id="worker-cancel-photo-grid" class="no-inventory-photo-grid">
+          <div class="empty-state">No cancellation photos added.</div>
+        </div>
+      </section>
+      <label class="modal-field">
+        Required Note
+        <textarea id="worker-cancel-order-note" rows="3" placeholder="Example: Buyer canceled on eBay / order refunded."></textarea>
+      </label>
+      <label class="modal-field">
+        Password Signature
+        <input id="worker-cancel-order-password" type="password" autocomplete="current-password" placeholder="Sign this cancellation" />
+      </label>
+      <p id="worker-cancel-order-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-worker-cancel-order" type="button" class="secondary-btn">Exit</button>
+        <button id="confirm-worker-cancel-order" type="button" class="primary-btn danger-primary-btn">Sign and Mark Canceled</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="order-task-modal" class="packing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="order-task-modal-title">
+    <div class="packing-modal-card bundle-review-card no-inventory-card order-task-modal-card">
+      <button id="close-order-task-modal" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Order Coordination</span>
+      <h2 id="order-task-modal-title">Create order task</h2>
+      <p id="order-task-modal-subtitle">Send a question, instruction, or special handling request to an admin or worker.</p>
+      <div id="order-task-context" class="order-task-context"></div>
+      <div class="order-task-form-grid">
+        <label class="modal-field">
+          Assign To
+          <select id="order-task-assignee">
+            <option value="">Loading team...</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Priority
+          <select id="order-task-priority">
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label id="order-task-status-field" class="modal-field hidden">
+          Status
+          <select id="order-task-status">
+            <option value="">Keep current status</option>
+            <option value="in_progress">In progress</option>
+            <option value="deferred">Deferred / waiting until date</option>
+            <option value="blocked">Blocked / needs help</option>
+            <option value="waiting_on_admin">Waiting on admin</option>
+            <option value="waiting_on_worker">Waiting on worker</option>
+            <option value="resolved">Resolved</option>
+            <option value="cancelled">Cancel task</option>
+          </select>
+        </label>
+        <label class="modal-field">
+          Next Action / Due
+          <input id="order-task-due-at" type="datetime-local" />
+        </label>
+      </div>
+      <label class="modal-field">
+        Note / Question
+        <textarea id="order-task-note" rows="4" placeholder="Write exactly what needs review, a decision, or special coordination."></textarea>
+      </label>
+      <section class="no-inventory-evidence" aria-label="Order task photos">
+        <div>
+          <span class="eyebrow">Optional Photos</span>
+          <h3>Task Evidence</h3>
+          <p>Attach photos when the question needs visual context. They stay in the task trail.</p>
+        </div>
+        <div class="no-inventory-camera-row">
+          <label>
+            Camera Station
+            <select id="order-task-capture-station">
+              <option value="">Loading stations...</option>
+            </select>
+          </label>
+          <div class="no-inventory-camera-actions">
+            <button id="refresh-order-task-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-order-task-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+            <label class="secondary-btn folder-photo-picker">
+              Add Photos From Folder
+              <input id="order-task-photo-file" type="file" accept="image/*" multiple />
+            </label>
+          </div>
+        </div>
+        <p id="order-task-photo-status" class="fulfill-status"></p>
+        <div class="order-task-photo-toolbar no-inventory-photo-toolbar hidden" aria-label="Order task photo upload selection">
+          <span id="order-task-photo-selection-summary"></span>
+          <div>
+            <button id="select-all-order-task-photos" type="button" class="secondary-btn">Select All Photos</button>
+            <button id="deselect-all-order-task-photos" type="button" class="secondary-btn">Deselect Photos</button>
+          </div>
+        </div>
+        <div id="order-task-photo-grid" class="no-inventory-photo-grid">
+          <div class="empty-state">No task photos added.</div>
+        </div>
+      </section>
+      <p id="order-task-error" class="fulfill-status is-error"></p>
+      <div class="modal-actions">
+        <button id="cancel-order-task" type="button" class="secondary-btn">Exit</button>
+        <button id="submit-order-task" type="button" class="primary-btn">Send Task</button>
       </div>
     </div>
   </div>

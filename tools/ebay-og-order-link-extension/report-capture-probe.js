@@ -28,8 +28,7 @@
 
   function isLikelyEbayOrdersReportText(text) {
     return /(^|,|\n)\s*"?Order Number"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Sales Record Number"?\s*(,|\n)/i.test(text);
+      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text);
   }
 
   function filenameFromUrl(url = "") {

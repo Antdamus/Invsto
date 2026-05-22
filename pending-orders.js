@@ -34,11 +34,27 @@ const state = {
   noInventoryEvidencePhotos: [],
   noInventoryEvidencePhotoUploadKeys: new Set(),
   noInventoryCaptureBusy: false,
+  workerCancelCandidates: [],
+  workerCancelLineIds: new Set(),
+  workerCancelEvidencePhotos: [],
+  workerCancelEvidencePhotoUploadKeys: new Set(),
+  workerCancelCaptureBusy: false,
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
+  ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
+  orderTaskAssignees: [],
+  selectedOrderTasks: [],
+  selectedOrderTaskEvents: new Map(),
+  activeOrderTaskId: "",
+  orderTaskMode: "create",
+  orderTaskPhotos: [],
+  orderTaskPhotoUploadKeys: new Set(),
+  orderTaskCaptureBusy: false,
+  orderTaskSignedUrls: new Map(),
+  launchOrderTaskId: "",
   busy: false,
 };
 
@@ -92,6 +108,20 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function toDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function localDateTimeToIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function formatFileSize(bytes) {
@@ -229,8 +259,10 @@ function closeModal(id) {
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
+    || !$("worker-cancel-order-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
     || !$("ebay-completed-conflicts-modal")?.classList.contains("hidden")
+    || !$("order-task-modal")?.classList.contains("hidden")
     || !$("admin-order-closeout-modal")?.classList.contains("hidden")
   ) return;
   document.body.classList.remove("modal-open");
@@ -618,8 +650,8 @@ function parseCsv(text) {
 function rowsFromEbayCsv(text) {
   const parsed = parseCsv(String(text || "").replace(/^\uFEFF/, ""));
   const headerIndex = parsed.findIndex((row) =>
-    row.some((cell) => String(cell).trim() === "Order Number")
-    && row.some((cell) => String(cell).trim() === "Item Title")
+    row.some((cell) => normalizeCsvHeader(cell) === "ordernumber")
+    && row.some((cell) => normalizeCsvHeader(cell) === "itemtitle")
   );
 
   if (headerIndex < 0) {
@@ -636,11 +668,26 @@ function rowsFromEbayCsv(text) {
   });
 }
 
+function normalizeCsvHeader(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function csvCell(row, ...names) {
   for (const name of names) {
     if (row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") {
       return String(row[name]).trim();
     }
+  }
+  const entries = Object.entries(row || {});
+  for (const name of names) {
+    const normalizedName = normalizeCsvHeader(name);
+    const match = entries.find(([header, value]) =>
+      normalizeCsvHeader(header) === normalizedName
+      && value !== undefined
+      && value !== null
+      && String(value).trim() !== ""
+    );
+    if (match) return String(match[1]).trim();
   }
   return "";
 }
@@ -836,6 +883,11 @@ function getRequestedEbayOrderSnapshot() {
     ...snapshot,
     orderNumber,
   };
+}
+
+function getRequestedOrderTaskId() {
+  const value = String(new URLSearchParams(window.location.search).get("orderTaskId") || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : "";
 }
 
 function formatEbaySnapshotSummary(snapshot) {
@@ -1325,6 +1377,11 @@ function getNoInventoryCandidateLines(line = state.selectedLine) {
   return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
 }
 
+function getCancelableOrderLines(line = state.selectedLine) {
+  if (!line?.order_id) return [];
+  return state.orders.filter((entry) => entry.order_id === line.order_id && isOpenOrderLine(entry));
+}
+
 function isAdminCloseoutSelectable(line) {
   return isAdminUser()
     && isOpenOrderLine(line);
@@ -1446,6 +1503,7 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
       </div>
@@ -1466,6 +1524,7 @@ function renderOrders() {
 
     const lineList = card.querySelector(".buyer-line-list");
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
+    const taskButton = card.querySelector("[data-buyer-task-key]");
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
@@ -1475,6 +1534,13 @@ function renderOrders() {
       groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
       groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
     }
+    taskButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
+      if (!nextLine) return;
+      selectOrderLine(nextLine.id);
+      setTimeout(() => openOrderTaskModal(), 80);
+    });
 
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
@@ -1544,10 +1610,13 @@ function selectOrderLine(lineId) {
 
   $("selected-order-empty")?.classList.add("hidden");
   $("fulfillment-workflow")?.classList.remove("hidden");
+  openMobileOrderDetail();
   renderOrders();
   renderLiveLotOrderMatches();
   renderSelectedOrder();
   renderBuyerBundlePanel();
+  renderOrderTaskPanel();
+  loadSelectedOrderTasks();
   resetFulfillmentInputs();
   renderSelectionSummary();
   renderItemResults([]);
@@ -1562,6 +1631,46 @@ function selectOrderLine(lineId) {
     return;
   }
   setTimeout(() => (state.selectedLiveLot ? $("fulfill-order") : $("item-scan"))?.focus(), 80);
+}
+
+function isMobilePendingOrderLayout() {
+  return window.matchMedia?.("(max-width: 640px)")?.matches || false;
+}
+
+function openMobileOrderDetail() {
+  if (isMobilePendingOrderLayout()) {
+    document.body.classList.add("pending-mobile-sheet-open");
+  }
+}
+
+function closeMobileOrderDetail() {
+  if (!isMobilePendingOrderLayout()) return;
+  clearSelection();
+}
+
+function syncMobileOrderDetailMode() {
+  if (isMobilePendingOrderLayout() && state.selectedLine && !$("fulfillment-workflow")?.classList.contains("hidden")) {
+    document.body.classList.add("pending-mobile-sheet-open");
+  } else {
+    document.body.classList.remove("pending-mobile-sheet-open");
+  }
+}
+
+function returnToOrdersAfterMobileModalClose(options = {}) {
+  if (!isMobilePendingOrderLayout() || options.suppressMobileReturn) return;
+  window.setTimeout(() => {
+    const modalIds = [
+      "item-confirm-modal",
+      "bundle-review-modal",
+      "worker-no-inventory-modal",
+      "worker-cancel-order-modal",
+      "order-task-modal",
+      "admin-order-closeout-modal",
+      "no-inventory-photo-viewer-modal",
+    ];
+    const anyModalOpen = modalIds.some((id) => !$(`${id}`)?.classList.contains("hidden"));
+    if (!anyModalOpen) clearSelection();
+  }, 0);
 }
 
 function resetFulfillmentInputs() {
@@ -1583,6 +1692,9 @@ function renderSelectedOrder() {
   $("selected-order-title").textContent = order.order_number || "eBay order";
   $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
+  $("assign-order-task")?.toggleAttribute("disabled", !line?.order_id);
+  $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
+  $("complete-no-inventory")?.toggleAttribute("disabled", !isNoInventoryCompletionLine(line));
   $("money-grid")?.classList.toggle("hidden", !isAdminUser());
   $("detail-sold-for").textContent = formatMoney(line.sold_for);
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
@@ -1660,6 +1772,695 @@ function renderEbayLabelPanel() {
     modalDetails.innerHTML = detailsHtml;
     modalPreviewButton?.classList.toggle("hidden", !label.path);
     modalPreviewButton?.toggleAttribute("disabled", !label.path);
+  }
+}
+
+function getOrderTaskStatusLabel(status = "") {
+  const labels = {
+    open: "Open",
+    assigned: "Assigned",
+    in_progress: "In progress",
+    deferred: "Deferred",
+    blocked: "Blocked",
+    waiting_on_admin: "Waiting on admin",
+    waiting_on_worker: "Waiting on worker",
+    resolved: "Resolved",
+    cancelled: "Cancelled",
+  };
+  return labels[status] || String(status || "open").replace(/_/g, " ");
+}
+
+function getOrderTaskLineIdsForSelectedOrder() {
+  const line = state.selectedLine;
+  if (!line?.order_id) return [];
+  const ids = state.orders
+    .filter((entry) => entry.order_id === line.order_id)
+    .map((entry) => entry.id)
+    .filter(Boolean);
+  return ids.length ? [...new Set(ids)] : [line.id].filter(Boolean);
+}
+
+function isActiveOrderTask(task = {}) {
+  return !["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
+}
+
+function getOrderTaskAssigneeLabel(task = {}) {
+  return task.assigned_to_email || "Unassigned";
+}
+
+function getOrderTaskPhotoKey(photo) {
+  return getNoInventoryEvidencePhotoKey(photo);
+}
+
+function getSelectedOrderTaskPhotos() {
+  return state.orderTaskPhotos.filter((photo) => (
+    state.orderTaskPhotoUploadKeys.has(getOrderTaskPhotoKey(photo))
+  ));
+}
+
+function setOrderTaskPhotoStatus(message = "", type = "info") {
+  const el = $("order-task-photo-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+}
+
+function setOrderTaskError(message = "") {
+  const el = $("order-task-error");
+  if (el) el.textContent = message || "";
+}
+
+function renderOrderTaskAssigneeSelect() {
+  const select = $("order-task-assignee");
+  if (!select) return;
+  const currentValue = select.value || "";
+  select.replaceChildren(new Option("Leave unassigned", ""));
+  state.orderTaskAssignees.forEach((employee) => {
+    const label = `${employee.display_name || employee.email || "Team member"} - ${employee.role || "employee"}`;
+    select.appendChild(new Option(label, employee.user_id || ""));
+  });
+  select.value = state.orderTaskAssignees.some((employee) => employee.user_id === currentValue)
+    ? currentValue
+    : "";
+}
+
+async function loadOrderTaskAssignees() {
+  if (state.orderTaskAssignees.length) {
+    renderOrderTaskAssigneeSelect();
+    return state.orderTaskAssignees;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("list_ebay_order_task_assignees");
+    if (error) throw error;
+    state.orderTaskAssignees = Array.isArray(data) ? data : [];
+  } catch (rpcError) {
+    console.warn("Could not load order task assignees through RPC:", rpcError);
+    try {
+      const { data, error } = await supabase
+        .from("employees")
+        .select("id, user_id, display_name, email, role")
+        .eq("active", true)
+        .order("display_name", { ascending: true });
+      if (error) throw error;
+      state.orderTaskAssignees = Array.isArray(data) ? data : [];
+    } catch (fallbackError) {
+      console.warn("Could not load employee assignee list:", fallbackError);
+      state.orderTaskAssignees = state.employee
+        ? [{
+          id: state.employee.id,
+          user_id: state.user?.id || "",
+          display_name: state.employee.display_name || state.user?.email || "Current user",
+          email: state.user?.email || "",
+          role: state.employee.role || "employee",
+        }]
+        : [];
+    }
+  }
+
+  renderOrderTaskAssigneeSelect();
+  return state.orderTaskAssignees;
+}
+
+async function loadSelectedOrderTasks() {
+  const line = state.selectedLine;
+  if (!line?.order_id) {
+    state.selectedOrderTasks = [];
+    state.selectedOrderTaskEvents = new Map();
+    renderOrderTaskPanel();
+    return;
+  }
+
+  try {
+    const { data: tasks, error } = await supabase
+      .from("ebay_order_tasks")
+      .select("*")
+      .eq("order_id", line.order_id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    state.selectedOrderTasks = tasks || [];
+
+    const taskIds = state.selectedOrderTasks.map((task) => task.id).filter(Boolean);
+    if (!taskIds.length) {
+      state.selectedOrderTaskEvents = new Map();
+      renderOrderTaskPanel();
+      return;
+    }
+
+    const { data: events, error: eventError } = await supabase
+      .from("ebay_order_task_events")
+      .select("*")
+      .in("task_id", taskIds)
+      .order("created_at", { ascending: true });
+
+    if (eventError) throw eventError;
+    const byTask = new Map();
+    (events || []).forEach((event) => {
+      const list = byTask.get(event.task_id) || [];
+      list.push(event);
+      byTask.set(event.task_id, list);
+    });
+    state.selectedOrderTaskEvents = byTask;
+    renderOrderTaskPanel();
+  } catch (error) {
+    console.warn("Could not load order coordination tasks:", error);
+    state.selectedOrderTasks = [];
+    state.selectedOrderTaskEvents = new Map();
+    renderOrderTaskPanel({ error: error?.message || "Could not load coordination tasks." });
+  }
+}
+
+function renderOrderTaskPanel(options = {}) {
+  const list = $("order-task-list");
+  const summary = $("order-task-summary");
+  const button = $("open-order-task-modal");
+  if (!list) return;
+
+  button?.toggleAttribute("disabled", !state.selectedLine);
+
+  if (!state.selectedLine) {
+    list.innerHTML = `<div class="empty-state">Select an order to see coordination tasks.</div>`;
+    if (summary) summary.textContent = "Assign questions or special handling notes to admins or workers.";
+    return;
+  }
+
+  if (options.error) {
+    list.innerHTML = `<div class="empty-state">${escapeHtml(options.error)}</div>`;
+    if (summary) summary.textContent = "Coordination tasks could not be loaded.";
+    return;
+  }
+
+  const activeCount = state.selectedOrderTasks.filter(isActiveOrderTask).length;
+  if (summary) {
+    summary.textContent = activeCount
+      ? `${activeCount} active coordination task${activeCount === 1 ? "" : "s"} for this order.`
+      : "No active coordination task is waiting on this order.";
+  }
+
+  if (!state.selectedOrderTasks.length) {
+    list.innerHTML = `<div class="empty-state">No coordination tasks for this order.</div>`;
+    return;
+  }
+
+  list.innerHTML = state.selectedOrderTasks.map((task) => {
+    const events = state.selectedOrderTaskEvents.get(task.id) || [];
+    const isUrgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
+    const isResolved = !isActiveOrderTask(task);
+    const eventHtml = events.length
+      ? `<div class="order-task-events">${events.map((event) => renderOrderTaskEvent(event)).join("")}</div>`
+      : `<div class="empty-state">No task trail yet.</div>`;
+    return `
+      <article class="order-task-card ${isUrgent ? "is-urgent" : ""} ${isResolved ? "is-resolved" : ""}">
+        <div class="order-task-card-head">
+          <div>
+            <strong>${escapeHtml(task.title || "Order task")}</strong>
+            <span>${escapeHtml(task.question || task.latest_note || "No note")}</span>
+          </div>
+          <span class="order-task-chip">${escapeHtml(getOrderTaskStatusLabel(task.status))}</span>
+        </div>
+        <div class="order-task-meta">
+          <span>${escapeHtml(task.priority || "normal")}</span>
+          <span>Assigned: ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>
+          <span>Next: ${escapeHtml(formatDate(task.due_at))}</span>
+          <span>Created ${escapeHtml(formatDate(task.created_at))}</span>
+        </div>
+        ${eventHtml}
+        <div class="fulfill-actions">
+          ${isResolved ? "" : `<button type="button" class="secondary-btn" data-order-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
+          <button type="button" class="secondary-btn" data-order-task-reply="${escapeHtml(task.id)}">${isResolved ? "Add Note" : "Reply / Reassign"}</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-order-task-reply]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => openOrderTaskModal({ taskId: buttonEl.dataset.orderTaskReply }));
+  });
+  list.querySelectorAll("[data-order-task-progress]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => openOrderTaskModal({ taskId: buttonEl.dataset.orderTaskProgress, progress: true }));
+  });
+  list.querySelectorAll("[data-order-task-photo]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => {
+      openOrderTaskPhoto(buttonEl.dataset.bucket, buttonEl.dataset.path);
+    });
+  });
+}
+
+function renderOrderTaskEvent(event = {}) {
+  const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
+  const photoHtml = photos.length
+    ? `<div class="order-task-photo-strip">${photos.map((photo, index) => `
+        <button
+          type="button"
+          data-order-task-photo="1"
+          data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+          data-path="${escapeHtml(photo.path || "")}"
+        >${escapeHtml(photo.label || `Photo ${index + 1}`)}</button>
+      `).join("")}</div>`
+    : "";
+
+  return `
+    <article class="order-task-event">
+      <div class="order-task-event-head">
+        <strong>${escapeHtml(String(event.action || "commented").replace(/_/g, " "))}</strong>
+        <span>${escapeHtml(formatDate(event.created_at))}</span>
+      </div>
+      ${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}
+      <small>Signed by ${escapeHtml(event.signed_by_email || "logged-in user")} - ${escapeHtml(getOrderTaskStatusLabel(event.new_status || event.old_status || ""))}</small>
+      ${photoHtml}
+    </article>
+  `;
+}
+
+async function openOrderTaskPhoto(bucket, path) {
+  if (!path) return setStatus("That task photo is missing a storage path.", "error");
+  const storageBucket = bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+  const key = `${storageBucket}/${path}`;
+  let url = state.orderTaskSignedUrls.get(key);
+  if (!url) {
+    const { data, error } = await supabase.storage
+      .from(storageBucket)
+      .createSignedUrl(path, NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS);
+    if (error || !data?.signedUrl) {
+      console.warn("Could not sign order task photo:", error);
+      return setStatus("Could not open that task photo.", "error");
+    }
+    url = data.signedUrl;
+    state.orderTaskSignedUrls.set(key, url);
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function resetOrderTaskPhotos() {
+  state.orderTaskPhotos.forEach((photo) => {
+    if (photo.previewUrl && String(photo.previewUrl).startsWith("blob:")) {
+      URL.revokeObjectURL(photo.previewUrl);
+    }
+  });
+  state.orderTaskPhotos = [];
+  state.orderTaskPhotoUploadKeys.clear();
+  renderOrderTaskPhotos();
+}
+
+function renderOrderTaskPhotos() {
+  const grid = $("order-task-photo-grid");
+  if (!grid) return;
+  const toolbar = document.querySelector(".order-task-photo-toolbar");
+  toolbar?.classList.toggle("hidden", !state.orderTaskPhotos.length);
+
+  if (!state.orderTaskPhotos.length) {
+    grid.innerHTML = `<div class="empty-state">No task photos added.</div>`;
+    updateOrderTaskPhotoSelectionSummary();
+    return;
+  }
+
+  grid.innerHTML = state.orderTaskPhotos.map((photo, index) => {
+    const key = getOrderTaskPhotoKey(photo);
+    const selected = state.orderTaskPhotoUploadKeys.has(key);
+    return `
+      <article class="no-inventory-photo-card ${selected ? "is-selected" : ""}">
+        <label class="no-inventory-photo-select">
+          <input
+            type="checkbox"
+            data-order-task-photo-select="${escapeHtml(key)}"
+            ${selected ? "checked" : ""}
+          />
+          <span>Upload</span>
+        </label>
+        <button type="button" data-order-task-photo-index="${index}" title="Open task photo">
+          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Task photo ${index + 1}`)}" />
+          <span>${escapeHtml(photo.label || `Task photo ${index + 1}`)}</span>
+        </button>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("[data-order-task-photo-index]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => {
+      openOrderTaskLocalPhotoViewer(Number(buttonEl.dataset.orderTaskPhotoIndex || 0));
+    });
+  });
+  grid.querySelectorAll("[data-order-task-photo-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.orderTaskPhotoUploadKeys.add(checkbox.dataset.orderTaskPhotoSelect);
+      else state.orderTaskPhotoUploadKeys.delete(checkbox.dataset.orderTaskPhotoSelect);
+      renderOrderTaskPhotos();
+    });
+  });
+  updateOrderTaskPhotoSelectionSummary();
+}
+
+function updateOrderTaskPhotoSelectionSummary() {
+  const summary = $("order-task-photo-selection-summary");
+  if (!summary) return;
+  const total = state.orderTaskPhotos.length;
+  const selected = getSelectedOrderTaskPhotos().length;
+  summary.textContent = total
+    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for upload.`
+    : "";
+}
+
+function setAllOrderTaskPhotosSelected(selected) {
+  state.orderTaskPhotoUploadKeys.clear();
+  if (selected) {
+    state.orderTaskPhotos.forEach((photo) => {
+      state.orderTaskPhotoUploadKeys.add(getOrderTaskPhotoKey(photo));
+    });
+  }
+  renderOrderTaskPhotos();
+}
+
+function openOrderTaskLocalPhotoViewer(index) {
+  const photo = state.orderTaskPhotos[index];
+  if (!photo?.previewUrl) return;
+  const image = $("no-inventory-photo-viewer-image");
+  const caption = $("no-inventory-photo-viewer-caption");
+  if (image) {
+    image.src = photo.previewUrl;
+    image.alt = photo.label || `Task photo ${index + 1}`;
+  }
+  if (caption) {
+    caption.textContent = `${photo.label || `Task photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
+  }
+  openModal("no-inventory-photo-viewer-modal");
+  setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
+}
+
+function handleOrderTaskPhotoFiles(event) {
+  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  if (!files.length) {
+    setOrderTaskPhotoStatus("Choose image files to attach.", "error");
+    return;
+  }
+  files.forEach((file, index) => {
+    const localId = `local:${crypto.randomUUID()}`;
+    const photo = {
+      localId,
+      file,
+      bucket: "",
+      path: file.name || `task-photo-${index + 1}`,
+      previewUrl: URL.createObjectURL(file),
+      thumbnailUrl: "",
+      label: file.name || `Task photo ${index + 1}`,
+      mime_type: file.type || "image/jpeg",
+      created_at: new Date().toISOString(),
+    };
+    photo.thumbnailUrl = photo.previewUrl;
+    state.orderTaskPhotos.push(photo);
+    state.orderTaskPhotoUploadKeys.add(localId);
+  });
+  renderOrderTaskPhotos();
+  setOrderTaskPhotoStatus(`${files.length} task photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
+  if (event.target) event.target.value = "";
+}
+
+async function persistOrderTaskPhotos(lineIds = []) {
+  const selectedPhotos = getSelectedOrderTaskPhotos();
+  if (!selectedPhotos.length) return [];
+
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderLabel = getNoInventoryEvidenceSourceLabel();
+  const selectedSuffix = lineIds.length === 1
+    ? safeNoInventoryEvidenceSegment(lineIds[0], "line")
+    : `${lineIds.length || 1}-lines`;
+  const savedPhotos = [];
+
+  for (let index = 0; index < selectedPhotos.length; index += 1) {
+    const photo = selectedPhotos[index];
+    const blob = await getEvidencePhotoBlob(photo, index);
+    const extension = getNoInventoryEvidenceFileExtension(photo, blob);
+    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `task-photo-${index + 1}`);
+    const destinationPath = [
+      "pending-order-tasks",
+      dateFolder,
+      orderLabel,
+      `${Date.now()}-${crypto.randomUUID()}-${selectedSuffix}-${originalName}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(destinationPath, blob, {
+        contentType: blob.type || photo.mime_type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (error) throw new Error(error.message || `Could not save task photo ${index + 1}.`);
+
+    savedPhotos.push({
+      bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: photo.bucket || null,
+      source_path: photo.path || null,
+      capture_job_id: photo.capture_job_id || null,
+      sort_order: index,
+      label: photo.label || `Task photo ${index + 1}`,
+      mime_type: blob.type || photo.mime_type || null,
+      size_bytes: blob.size || photo.size_bytes || 0,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  return savedPhotos;
+}
+
+async function requestOrderTaskPhoto() {
+  if (state.orderTaskCaptureBusy) return;
+  try {
+    state.orderTaskCaptureBusy = true;
+    $("request-order-task-photo")?.toggleAttribute("disabled", true);
+
+    if (!state.noInventoryCaptureStations.length) {
+      await loadNoInventoryCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedNoInventoryCaptureStation();
+    if (!station) {
+      setOrderTaskPhotoStatus("Choose a camera station before taking task photos.", "error");
+      $("order-task-capture-station")?.focus();
+      return;
+    }
+
+    setOrderTaskPhotoStatus(`Sending camera request to ${station.name || "selected station"}...`, "info");
+    const job = await createNoInventoryCaptureJob(station.id);
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "pending-order-task",
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+        orderLineIds: getOrderTaskLineIdsForSelectedOrder(),
+        taskId: state.orderTaskMode === "reply" ? state.activeOrderTaskId : "",
+      },
+    }));
+
+    const completedJob = await pollNoInventoryCaptureJob(job, station, { statusSetter: setOrderTaskPhotoStatus });
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || "Camera capture failed.");
+    }
+
+    let photoRows = await loadNoInventoryCaptureJobPhotos(completedJob.id);
+    if (!photoRows.length && completedJob.storage_bucket && completedJob.storage_path) {
+      photoRows = [{
+        id: completedJob.id,
+        capture_job_id: completedJob.id,
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        mime_type: completedJob.mime_type || "image/jpeg",
+        label: "Task photo",
+        created_at: completedJob.capture_completed_at || completedJob.upload_completed_at || new Date().toISOString(),
+      }];
+    }
+    if (!photoRows.length) throw new Error("Camera finished but no photos were attached.");
+
+    const photos = await noInventoryCaptureRowsToEvidencePhotos(photoRows);
+    const existing = new Set(state.orderTaskPhotos.map((photo) => `${photo.bucket}:${photo.path}`));
+    photos.forEach((photo) => {
+      const key = getOrderTaskPhotoKey(photo);
+      if (!existing.has(`${photo.bucket}:${photo.path}`)) {
+        state.orderTaskPhotos.push(photo);
+        state.orderTaskPhotoUploadKeys.add(key);
+      }
+    });
+    renderOrderTaskPhotos();
+    setOrderTaskPhotoStatus(`${photos.length} task photo${photos.length === 1 ? "" : "s"} added and selected.`, "info");
+  } catch (error) {
+    console.error("Order task photo capture failed:", error);
+    setOrderTaskPhotoStatus(error?.message || "Could not take task photo.", "error");
+  } finally {
+    state.orderTaskCaptureBusy = false;
+    $("request-order-task-photo")?.toggleAttribute("disabled", false);
+  }
+}
+
+function closeOrderTaskModal(options = {}) {
+  resetOrderTaskPhotos();
+  setOrderTaskError("");
+  setOrderTaskPhotoStatus("");
+  state.activeOrderTaskId = "";
+  state.orderTaskMode = "create";
+  closeModal("order-task-modal");
+  returnToOrdersAfterMobileModalClose(options);
+  setTimeout(() => $("open-order-task-modal")?.focus(), 80);
+}
+
+async function openOrderTaskModal(options = {}) {
+  const line = state.selectedLine;
+  if (!line) {
+    setStatus("Select an eBay order first.", "error");
+    return;
+  }
+
+  const taskId = options.taskId || "";
+  const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) : null;
+  state.activeOrderTaskId = task?.id || "";
+  state.orderTaskMode = task ? "reply" : "create";
+  resetOrderTaskPhotos();
+  setOrderTaskError("");
+  setOrderTaskPhotoStatus("");
+
+  $("order-task-modal-title").textContent = task
+    ? options.progress ? "Progress / delay update" : "Reply to order task"
+    : "Create order task";
+  $("order-task-modal-subtitle").textContent = task
+    ? options.progress
+      ? "Explain what happened, what is blocking completion, and when this should be checked again."
+      : "Add the next instruction, assign it to the next person, or resolve it."
+    : "Send a question, instruction, or special handling request to an admin or worker.";
+  $("submit-order-task").textContent = task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
+  $("order-task-status-field")?.classList.toggle("hidden", !task);
+  $("order-task-note").value = "";
+  $("order-task-note").placeholder = options.progress
+    ? "Why could this not be completed today? What are we waiting for, and what should happen next?"
+    : "Write exactly what needs review, a decision, or special coordination.";
+  $("order-task-priority").value = task?.priority || "normal";
+  $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
+  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
+  $("order-task-context").innerHTML = `
+    <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
+    <span>${escapeHtml(line.item_title || "Untitled item")}</span>
+    ${task ? `<span>Current: ${escapeHtml(getOrderTaskStatusLabel(task.status))} / assigned to ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>` : ""}
+  `;
+
+  await loadOrderTaskAssignees();
+  const assignee = $("order-task-assignee");
+  if (assignee) {
+    const defaultAdmin = state.orderTaskAssignees.find((employee) => String(employee.role || "").toLowerCase() === "admin");
+    assignee.value = task?.assigned_to_user_id || (!task && !isAdminUser() ? defaultAdmin?.user_id || "" : "");
+  }
+
+  openModal("order-task-modal");
+  setTimeout(() => $("order-task-note")?.focus(), 80);
+  loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not load order task camera stations:", error);
+    setOrderTaskPhotoStatus(error?.message || "Could not load capture stations.", "error");
+  });
+}
+
+async function submitOrderTask() {
+  const line = state.selectedLine;
+  if (!line?.order_id) return setOrderTaskError("Select an eBay order first.");
+  const note = String($("order-task-note")?.value || "").trim();
+  if (!note) return setOrderTaskError("Write a note or question before sending this task.");
+
+  const button = $("submit-order-task");
+  button?.toggleAttribute("disabled", true);
+  setOrderTaskError("");
+  setOrderTaskPhotoStatus("Saving task...", "info");
+
+  try {
+    const lineIds = getOrderTaskLineIdsForSelectedOrder();
+    const photos = await persistOrderTaskPhotos(lineIds);
+    const assigneeUserId = $("order-task-assignee")?.value || null;
+    const priority = $("order-task-priority")?.value || "normal";
+    const signedByEmail = state.user?.email || state.employee?.display_name || "";
+
+    if (state.orderTaskMode === "reply" && state.activeOrderTaskId) {
+      const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
+        _task_id: state.activeOrderTaskId,
+        _note: note,
+        _assigned_to_user_id: assigneeUserId,
+        _status: $("order-task-status")?.value || null,
+        _priority: priority,
+        _photo_attachments: photos,
+        _signed_by_email: signedByEmail,
+        _due_at: localDateTimeToIso($("order-task-due-at")?.value || ""),
+      });
+      if (error) throw error;
+      setStatus("Order task update saved.", "success");
+    } else {
+      const { error } = await supabase.rpc("create_ebay_order_coordination_task", {
+        _order_id: line.order_id,
+        _order_line_ids: lineIds,
+        _assigned_to_user_id: assigneeUserId,
+        _priority: priority,
+        _question: note,
+        _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || line.order?.ship_by_date || null,
+        _photo_attachments: photos,
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus("Order task created and assigned.", "success");
+    }
+
+    closeOrderTaskModal();
+    await loadSelectedOrderTasks();
+  } catch (error) {
+    console.error("Could not save order task:", error);
+    setOrderTaskError(error?.message || "Could not save this order task.");
+    setOrderTaskPhotoStatus("", "info");
+  } finally {
+    button?.toggleAttribute("disabled", false);
+  }
+}
+
+async function openRequestedOrderTask() {
+  if (!state.launchOrderTaskId) return false;
+
+  try {
+    const { data: task, error } = await supabase
+      .from("ebay_order_tasks")
+      .select("id, order_id, order_line_ids")
+      .eq("id", state.launchOrderTaskId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!task) {
+      setStatus("That order coordination task could not be found.", "error");
+      return false;
+    }
+
+    const matchesTask = (line) => (
+      line.order_id === task.order_id
+      || (Array.isArray(task.order_line_ids) && task.order_line_ids.includes(line.id))
+    );
+    let line = state.orders.find(matchesTask);
+
+    if (!line) {
+      const filter = $("order-status-filter");
+      if (filter && filter.value !== "all") {
+        filter.value = "all";
+        await loadOrders();
+        line = state.orders.find(matchesTask);
+      }
+    }
+
+    if (!line) {
+      setStatus("The task loaded, but its order line is not visible in the current queue.", "error");
+      return false;
+    }
+
+    selectOrderLine(line.id);
+    state.activeOrderTaskId = task.id;
+    await loadSelectedOrderTasks();
+    $("order-task-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setStatus("Opened the coordination task for this order.", "info");
+    return true;
+  } catch (error) {
+    console.warn("Could not open requested order task:", error);
+    setStatus(error?.message || "Could not open that order task.", "error");
+    return false;
   }
 }
 
@@ -1752,9 +2553,10 @@ async function openItemConfirmModal(item) {
   }
 }
 
-function closeItemConfirmModal() {
+function closeItemConfirmModal(options = {}) {
   state.pendingItemCandidate = null;
   closeModal("item-confirm-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("item-scan")?.focus(), 80);
 }
 
@@ -2345,6 +3147,7 @@ function clearOrderLineSelectionForBagLookup() {
   state.stockRows = [];
   state.activeBuyerKey = "";
   state.stagedFulfillments.clear();
+  document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   if ($("item-scan")) $("item-scan").value = "";
@@ -2551,14 +3354,16 @@ function getActiveStagedFulfillments() {
   );
 }
 
-function closeBundleReviewModal() {
+function closeBundleReviewModal(options = {}) {
   closeModal("bundle-review-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("fulfill-order")?.focus(), 80);
 }
 
-function closeAdminOrderCloseoutModal() {
+function closeAdminOrderCloseoutModal(options = {}) {
   state.adminCloseoutAction = "";
   closeModal("admin-order-closeout-modal");
+  returnToOrdersAfterMobileModalClose(options);
 }
 
 function describeGeolocationError(error) {
@@ -2617,24 +3422,32 @@ function getPreferredNoInventoryCaptureStationHints() {
 }
 
 function renderNoInventoryCaptureStations() {
-  const select = $("no-inventory-capture-station");
-  if (!select) return;
+  const selects = [
+    $("no-inventory-capture-station"),
+    $("worker-cancel-capture-station"),
+    $("order-task-capture-station"),
+  ].filter(Boolean);
+  if (!selects.length) return;
   const stations = state.noInventoryCaptureStations;
 
   if (!stations.length) {
-    select.innerHTML = '<option value="">No active stations</option>';
-    select.disabled = true;
+    selects.forEach((select) => {
+      select.innerHTML = '<option value="">No active stations</option>';
+      select.disabled = true;
+    });
     return;
   }
 
-  select.replaceChildren(new Option("Choose station", ""));
-  stations.forEach((station) => {
-    select.appendChild(new Option(station.name || station.id, station.id));
+  selects.forEach((select) => {
+    select.replaceChildren(new Option("Choose station", ""));
+    stations.forEach((station) => {
+      select.appendChild(new Option(station.name || station.id, station.id));
+    });
+    select.value = stations.some((station) => station.id === state.selectedNoInventoryCaptureStationId)
+      ? state.selectedNoInventoryCaptureStationId
+      : "";
+    select.disabled = false;
   });
-  select.value = stations.some((station) => station.id === state.selectedNoInventoryCaptureStationId)
-    ? state.selectedNoInventoryCaptureStationId
-    : "";
-  select.disabled = false;
 }
 
 function setSelectedNoInventoryCaptureStation(stationId = "") {
@@ -2644,6 +3457,14 @@ function setSelectedNoInventoryCaptureStation(stationId = "") {
   const select = $("no-inventory-capture-station");
   if (select && select.value !== state.selectedNoInventoryCaptureStationId) {
     select.value = state.selectedNoInventoryCaptureStationId;
+  }
+  const cancelSelect = $("worker-cancel-capture-station");
+  if (cancelSelect && cancelSelect.value !== state.selectedNoInventoryCaptureStationId) {
+    cancelSelect.value = state.selectedNoInventoryCaptureStationId;
+  }
+  const taskSelect = $("order-task-capture-station");
+  if (taskSelect && taskSelect.value !== state.selectedNoInventoryCaptureStationId) {
+    taskSelect.value = state.selectedNoInventoryCaptureStationId;
   }
 
   try {
@@ -2728,9 +3549,10 @@ async function getNoInventoryCaptureJobPhotoCount(jobId) {
   return count || 0;
 }
 
-async function pollNoInventoryCaptureJob(job, station = {}) {
+async function pollNoInventoryCaptureJob(job, station = {}, options = {}) {
   const jobId = job?.id || job;
   const stationName = station.name || "";
+  const statusSetter = options.statusSetter || setNoInventoryPhotoStatus;
   const startedAt = Date.now();
   let lastPhotoCount = 0;
   let lastPhotoChangeAt = startedAt;
@@ -2762,7 +3584,7 @@ async function pollNoInventoryCaptureJob(job, station = {}) {
         : data.status === "uploading"
           ? `Camera is uploading${stationName ? ` on ${stationName}` : ""}...`
           : `Capture status: ${data.status || "waiting"}`;
-    setNoInventoryPhotoStatus(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
+    statusSetter(photoCount > 0 ? `${label} ${photoCount} photo${photoCount === 1 ? "" : "s"} received...` : label, "info");
     await delayNoInventoryCapture(NO_INVENTORY_CAPTURE_POLL_INTERVAL_MS);
   }
 
@@ -2823,7 +3645,7 @@ async function noInventoryCaptureRowsToEvidencePhotos(rows) {
 }
 
 function getNoInventoryEvidencePhotoKey(photo) {
-  return `${photo?.bucket || ""}:${photo?.path || ""}`;
+  return photo?.localId || `${photo?.bucket || ""}:${photo?.path || ""}`;
 }
 
 function getSelectedNoInventoryEvidencePhotos() {
@@ -2851,6 +3673,13 @@ function setAllNoInventoryEvidencePhotosSelected(selected) {
 
 function setNoInventoryPhotoStatus(message = "", type = "info") {
   const el = $("no-inventory-photo-status");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle("is-error", type === "error");
+}
+
+function setWorkerCancelPhotoStatus(message = "", type = "info") {
+  const el = $("worker-cancel-photo-status");
   if (!el) return;
   el.textContent = message;
   el.classList.toggle("is-error", type === "error");
@@ -2885,6 +3714,15 @@ function getNoInventoryEvidenceSourceLabel() {
   );
 }
 
+async function getEvidencePhotoBlob(photo, index = 0) {
+  if ((typeof File !== "undefined" && photo?.file instanceof File) || (typeof Blob !== "undefined" && photo?.file instanceof Blob)) return photo.file;
+  const response = await fetch(photo.previewUrl);
+  if (!response.ok) {
+    throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
+  }
+  return response.blob();
+}
+
 async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
   const selectedPhotos = getSelectedNoInventoryEvidencePhotos();
   if (!selectedPhotos.length) return [];
@@ -2898,12 +3736,7 @@ async function persistNoInventoryEvidencePhotos(selectedLineIds = []) {
 
   for (let index = 0; index < selectedPhotos.length; index += 1) {
     const photo = selectedPhotos[index];
-    const response = await fetch(photo.previewUrl);
-    if (!response.ok) {
-      throw new Error(`Could not download evidence photo ${index + 1} before saving.`);
-    }
-
-    const blob = await response.blob();
+    const blob = await getEvidencePhotoBlob(photo, index);
     const extension = getNoInventoryEvidenceFileExtension(photo, blob);
     const originalName = safeNoInventoryEvidenceSegment(photo.path.split("/").pop(), `photo-${index + 1}`);
     const destinationPath = [
@@ -3023,6 +3856,241 @@ function closeNoInventoryEvidencePhotoViewer() {
   setTimeout(() => $("request-no-inventory-photo")?.focus(), 80);
 }
 
+function getSelectedWorkerCancelEvidencePhotos() {
+  return state.workerCancelEvidencePhotos.filter((photo) => (
+    state.workerCancelEvidencePhotoUploadKeys.has(getNoInventoryEvidencePhotoKey(photo))
+  ));
+}
+
+function updateWorkerCancelEvidencePhotoSelectionSummary() {
+  const summary = $("worker-cancel-photo-selection-summary");
+  if (!summary) return;
+  const total = state.workerCancelEvidencePhotos.length;
+  const selected = getSelectedWorkerCancelEvidencePhotos().length;
+  summary.textContent = total
+    ? `${selected} of ${total} photo${total === 1 ? "" : "s"} selected for upload.`
+    : "";
+}
+
+function renderWorkerCancelEvidencePhotos() {
+  const grid = $("worker-cancel-photo-grid");
+  if (!grid) return;
+  const toolbar = document.querySelector(".worker-cancel-photo-toolbar");
+  toolbar?.classList.toggle("hidden", !state.workerCancelEvidencePhotos.length);
+  if (!state.workerCancelEvidencePhotos.length) {
+    grid.innerHTML = `<div class="empty-state">No cancellation photos added.</div>`;
+    updateWorkerCancelEvidencePhotoSelectionSummary();
+    return;
+  }
+
+  grid.innerHTML = state.workerCancelEvidencePhotos.map((photo, index) => {
+    const key = getNoInventoryEvidencePhotoKey(photo);
+    const selected = state.workerCancelEvidencePhotoUploadKeys.has(key);
+    return `
+      <article class="no-inventory-photo-card ${selected ? "is-selected" : ""}">
+        <label class="no-inventory-photo-select">
+          <input
+            type="checkbox"
+            data-worker-cancel-photo-select="${escapeHtml(key)}"
+            ${selected ? "checked" : ""}
+          />
+          <span>Upload</span>
+        </label>
+        <button type="button" data-worker-cancel-photo-index="${index}" title="Open cancellation photo">
+          <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}" />
+          <span>${escapeHtml(photo.label || `Cancellation photo ${index + 1}`)}</span>
+        </button>
+      </article>
+    `;
+  }).join("");
+
+  grid.querySelectorAll("[data-worker-cancel-photo-index]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openWorkerCancelEvidencePhotoViewer(Number(button.dataset.workerCancelPhotoIndex || 0));
+    });
+  });
+  grid.querySelectorAll("[data-worker-cancel-photo-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.workerCancelEvidencePhotoUploadKeys.add(checkbox.dataset.workerCancelPhotoSelect);
+      else state.workerCancelEvidencePhotoUploadKeys.delete(checkbox.dataset.workerCancelPhotoSelect);
+      renderWorkerCancelEvidencePhotos();
+    });
+  });
+  updateWorkerCancelEvidencePhotoSelectionSummary();
+}
+
+function setAllWorkerCancelEvidencePhotosSelected(selected) {
+  state.workerCancelEvidencePhotoUploadKeys.clear();
+  if (selected) {
+    state.workerCancelEvidencePhotos.forEach((photo) => {
+      state.workerCancelEvidencePhotoUploadKeys.add(getNoInventoryEvidencePhotoKey(photo));
+    });
+  }
+  renderWorkerCancelEvidencePhotos();
+}
+
+function openWorkerCancelEvidencePhotoViewer(index) {
+  const photo = state.workerCancelEvidencePhotos[index];
+  if (!photo?.previewUrl) return;
+  const image = $("no-inventory-photo-viewer-image");
+  const caption = $("no-inventory-photo-viewer-caption");
+  if (image) {
+    image.src = photo.previewUrl;
+    image.alt = photo.label || `Cancellation photo ${index + 1}`;
+  }
+  if (caption) {
+    caption.textContent = `${photo.label || `Cancellation photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
+  }
+  openModal("no-inventory-photo-viewer-modal");
+  setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
+}
+
+function handleWorkerCancelEvidenceFiles(event) {
+  const files = [...(event.target?.files || [])].filter((file) => /^image\//i.test(file.type || ""));
+  if (!files.length) {
+    setWorkerCancelPhotoStatus("Choose image files to attach.", "error");
+    return;
+  }
+  files.forEach((file, index) => {
+    const localId = `local:${crypto.randomUUID()}`;
+    const photo = {
+      localId,
+      file,
+      bucket: "",
+      path: file.name || `folder-photo-${index + 1}`,
+      previewUrl: URL.createObjectURL(file),
+      thumbnailUrl: "",
+      label: file.name || `Folder photo ${index + 1}`,
+      mime_type: file.type || "image/jpeg",
+      created_at: new Date().toISOString(),
+    };
+    photo.thumbnailUrl = photo.previewUrl;
+    state.workerCancelEvidencePhotos.push(photo);
+    state.workerCancelEvidencePhotoUploadKeys.add(localId);
+  });
+  renderWorkerCancelEvidencePhotos();
+  setWorkerCancelPhotoStatus(`${files.length} folder photo${files.length === 1 ? "" : "s"} added and selected.`, "info");
+  if (event.target) event.target.value = "";
+}
+
+async function persistWorkerCancelEvidencePhotos(selectedLineIds = []) {
+  const selectedPhotos = getSelectedWorkerCancelEvidencePhotos();
+  if (!selectedPhotos.length) return [];
+
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderLabel = getNoInventoryEvidenceSourceLabel();
+  const selectedSuffix = selectedLineIds.length === 1
+    ? safeNoInventoryEvidenceSegment(selectedLineIds[0], "line")
+    : `${selectedLineIds.length}-lines`;
+  const savedPhotos = [];
+
+  for (let index = 0; index < selectedPhotos.length; index += 1) {
+    const photo = selectedPhotos[index];
+    const blob = await getEvidencePhotoBlob(photo, index);
+    const extension = getNoInventoryEvidenceFileExtension(photo, blob);
+    const originalName = safeNoInventoryEvidenceSegment(String(photo.path || photo.label || "").split("/").pop(), `cancel-photo-${index + 1}`);
+    const destinationPath = [
+      "pending-order-cancellations",
+      dateFolder,
+      orderLabel,
+      `${Date.now()}-${crypto.randomUUID()}-${selectedSuffix}-${originalName}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(NO_INVENTORY_EVIDENCE_BUCKET)
+      .upload(destinationPath, blob, {
+        contentType: blob.type || photo.mime_type || "image/jpeg",
+        upsert: false,
+      });
+
+    if (error) throw new Error(error.message || `Could not save cancellation photo ${index + 1}.`);
+
+    savedPhotos.push({
+      bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+      path: destinationPath,
+      source_bucket: photo.bucket || null,
+      source_path: photo.path || null,
+      capture_job_id: photo.capture_job_id || null,
+      sort_order: index,
+      label: photo.label || `Cancellation photo ${index + 1}`,
+      mime_type: blob.type || photo.mime_type || null,
+      size_bytes: blob.size || photo.size_bytes || 0,
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  return savedPhotos;
+}
+
+async function requestWorkerCancelEvidencePhoto() {
+  if (state.workerCancelCaptureBusy) return;
+  try {
+    state.workerCancelCaptureBusy = true;
+    $("request-worker-cancel-photo")?.toggleAttribute("disabled", true);
+
+    if (!state.noInventoryCaptureStations.length) {
+      await loadNoInventoryCaptureStations({ silent: true });
+    }
+
+    const station = getSelectedNoInventoryCaptureStation();
+    if (!station) {
+      setWorkerCancelPhotoStatus("Choose a camera station before taking cancellation photos.", "error");
+      $("worker-cancel-capture-station")?.focus();
+      return;
+    }
+
+    setWorkerCancelPhotoStatus(`Sending camera request to ${station.name || "selected station"}...`, "info");
+    const job = await createNoInventoryCaptureJob(station.id);
+
+    window.dispatchEvent(new CustomEvent("assisted:iphone-capture-requested", {
+      detail: {
+        source: "pending-order-cancelled",
+        stationId: station.id,
+        stationName: station.name || "",
+        jobId: job.id,
+        orderLineIds: [...state.workerCancelLineIds],
+      },
+    }));
+
+    const completedJob = await pollNoInventoryCaptureJob(job, station, { statusSetter: setWorkerCancelPhotoStatus });
+    if (completedJob.status === "failed") {
+      throw new Error(completedJob.failure_message || "Camera capture failed.");
+    }
+
+    let photoRows = await loadNoInventoryCaptureJobPhotos(completedJob.id);
+    if (!photoRows.length && completedJob.storage_bucket && completedJob.storage_path) {
+      photoRows = [{
+        id: completedJob.id,
+        capture_job_id: completedJob.id,
+        storage_bucket: completedJob.storage_bucket,
+        storage_path: completedJob.storage_path,
+        mime_type: completedJob.mime_type || "image/jpeg",
+        label: "Cancellation photo",
+        created_at: completedJob.capture_completed_at || completedJob.upload_completed_at || new Date().toISOString(),
+      }];
+    }
+    if (!photoRows.length) throw new Error("Camera finished but no photos were attached.");
+
+    const photos = await noInventoryCaptureRowsToEvidencePhotos(photoRows);
+    const existing = new Set(state.workerCancelEvidencePhotos.map((photo) => `${photo.bucket}:${photo.path}`));
+    photos.forEach((photo) => {
+      const key = getNoInventoryEvidencePhotoKey(photo);
+      if (!existing.has(`${photo.bucket}:${photo.path}`)) {
+        state.workerCancelEvidencePhotos.push(photo);
+        state.workerCancelEvidencePhotoUploadKeys.add(key);
+      }
+    });
+    renderWorkerCancelEvidencePhotos();
+    setWorkerCancelPhotoStatus(`${photos.length} cancellation photo${photos.length === 1 ? "" : "s"} added and selected.`, "info");
+  } catch (error) {
+    console.error("Cancellation evidence photo capture failed:", error);
+    setWorkerCancelPhotoStatus(error?.message || "Could not take cancellation photo.", "error");
+  } finally {
+    state.workerCancelCaptureBusy = false;
+    $("request-worker-cancel-photo")?.toggleAttribute("disabled", false);
+  }
+}
+
 async function requestNoInventoryEvidencePhoto() {
   if (state.noInventoryCaptureBusy) return;
   try {
@@ -3098,13 +4166,17 @@ function setWorkerNoInventoryGpsStatus(message, tone = "warn") {
   el.classList.toggle("is-warn", tone !== "good");
 }
 
-function closeWorkerNoInventoryModal() {
+function closeWorkerNoInventoryModal(options = {}) {
+  if (!options.suppressEbayReturn) {
+    postEbayLabelExitReturnToQueue();
+  }
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = [];
   state.workerNoInventoryLineIds.clear();
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   closeModal("worker-no-inventory-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("complete-no-inventory")?.focus(), 80);
 }
 
@@ -3294,7 +4366,8 @@ async function confirmWorkerNoInventoryCompletion() {
     if (error) throw error;
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
-    closeWorkerNoInventoryModal();
+    state.ebayLabelReturnContext = null;
+    closeWorkerNoInventoryModal({ suppressEbayReturn: true, suppressMobileReturn: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
@@ -3313,6 +4386,213 @@ async function confirmWorkerNoInventoryCompletion() {
   } catch (error) {
     console.error("Worker no-inventory completion failed:", error);
     if (errorEl) errorEl.textContent = error.message || "Could not complete this order without inventory.";
+  } finally {
+    state.busy = false;
+    if (confirmButton) confirmButton.disabled = false;
+  }
+}
+
+function updateWorkerCancelOrderSelectionSummary() {
+  const count = [...state.workerCancelLineIds].filter((lineId) =>
+    state.workerCancelCandidates.some((line) => line.id === lineId)
+  ).length;
+  const countEl = $("worker-cancel-order-count");
+  if (countEl) countEl.textContent = `${count} selected`;
+  $("confirm-worker-cancel-order")?.toggleAttribute("disabled", count === 0);
+}
+
+function setWorkerCancelOrderLineSelection(lineId, checked) {
+  if (checked) state.workerCancelLineIds.add(lineId);
+  else state.workerCancelLineIds.delete(lineId);
+  renderWorkerCancelOrderList();
+}
+
+function setAllWorkerCancelOrderLines(checked) {
+  state.workerCancelLineIds = new Set(checked ? state.workerCancelCandidates.map((line) => line.id) : []);
+  renderWorkerCancelOrderList();
+}
+
+function renderWorkerCancelOrderList() {
+  const list = $("worker-cancel-order-list");
+  if (!list) return;
+  if (!state.workerCancelCandidates.length) {
+    list.innerHTML = `<div class="empty-state">No open lines are available to cancel for this order.</div>`;
+    updateWorkerCancelOrderSelectionSummary();
+    return;
+  }
+
+  list.innerHTML = state.workerCancelCandidates.map((line) => {
+    const order = line.order || {};
+    const selected = state.workerCancelLineIds.has(line.id);
+    return `
+      <article class="bundle-review-item no-inventory-line ${selected ? "is-selected" : ""}" data-worker-cancel-card="${escapeHtml(line.id)}">
+        <label class="no-inventory-check" aria-label="Select canceled line">
+          <input type="checkbox" data-worker-cancel-line="${escapeHtml(line.id)}" ${selected ? "checked" : ""} />
+        </label>
+        <div class="bundle-review-copy">
+          <div class="no-inventory-line-head">
+            <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <span>${escapeHtml(order.order_number || "No order")}</span>
+          </div>
+          <span>${escapeHtml(order.buyer_username || "No buyer")} - ${escapeHtml(line.item_number || "No item #")}</span>
+          <small>Qty ${Number(getRemainingLineQuantity(line) || line.quantity || 1).toLocaleString()} - ${escapeHtml(line.line_status || "pending")}</small>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-worker-cancel-line]").forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", (event) => {
+      setWorkerCancelOrderLineSelection(event.currentTarget.dataset.workerCancelLine, event.currentTarget.checked);
+    });
+  });
+  list.querySelectorAll("[data-worker-cancel-card]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const lineId = card.dataset.workerCancelCard;
+      setWorkerCancelOrderLineSelection(lineId, !state.workerCancelLineIds.has(lineId));
+    });
+  });
+  updateWorkerCancelOrderSelectionSummary();
+}
+
+function closeWorkerCancelOrderModal(options = {}) {
+  state.workerCancelEvidencePhotos.forEach((photo) => {
+    if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+  });
+  state.workerCancelCandidates = [];
+  state.workerCancelLineIds = new Set();
+  state.workerCancelEvidencePhotos = [];
+  state.workerCancelEvidencePhotoUploadKeys.clear();
+  $("worker-cancel-order-note").value = "";
+  $("worker-cancel-order-password").value = "";
+  $("worker-cancel-order-error").textContent = "";
+  setWorkerCancelPhotoStatus("");
+  renderWorkerCancelEvidencePhotos();
+  closeModal("worker-cancel-order-modal");
+  returnToOrdersAfterMobileModalClose(options);
+}
+
+function openWorkerCancelOrderModal() {
+  const line = state.selectedLine;
+  if (!line) {
+    setStatus("Select an eBay order first.", "error");
+    return;
+  }
+  if (!isOpenOrderLine(line)) {
+    setStatus("This eBay line is already closed.", "error");
+    return;
+  }
+
+  const candidates = getCancelableOrderLines(line);
+  if (!candidates.length) {
+    setStatus("No open lines are available to cancel for this order.", "error");
+    return;
+  }
+
+  const order = line.order || {};
+  state.workerCancelCandidates = candidates;
+  state.workerCancelLineIds = new Set(candidates.map((entry) => entry.id));
+  state.workerCancelEvidencePhotos.forEach((photo) => {
+    if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+  });
+  state.workerCancelEvidencePhotos = [];
+  state.workerCancelEvidencePhotoUploadKeys.clear();
+  $("worker-cancel-order-title").textContent = `Mark ${order.order_number || "this order"} canceled?`;
+  $("worker-cancel-order-subtitle").textContent =
+    `This closes ${candidates.length} open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
+  $("worker-cancel-order-note").value = "";
+  $("worker-cancel-order-password").value = "";
+  $("worker-cancel-order-error").textContent = "";
+  setWorkerCancelPhotoStatus("");
+  renderWorkerCancelOrderList();
+  renderWorkerCancelEvidencePhotos();
+  openModal("worker-cancel-order-modal");
+  setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
+
+  loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not load cancellation capture stations:", error);
+    setWorkerCancelPhotoStatus(error?.message || "Could not load capture stations.", "error");
+  });
+}
+
+async function confirmWorkerCancelOrder() {
+  if (state.busy) return;
+  const errorEl = $("worker-cancel-order-error");
+  const confirmButton = $("confirm-worker-cancel-order");
+  const note = String($("worker-cancel-order-note")?.value || "").trim();
+  const password = String($("worker-cancel-order-password")?.value || "").trim();
+  const validCandidateIds = new Set(state.workerCancelCandidates.map((line) => line.id));
+  const selectedLineIds = [...state.workerCancelLineIds].filter((lineId) => validCandidateIds.has(lineId));
+
+  if (!selectedLineIds.length) {
+    if (errorEl) errorEl.textContent = "Select at least one pending order line to cancel.";
+    return;
+  }
+  if (!note) {
+    if (errorEl) errorEl.textContent = "A note is required.";
+    $("worker-cancel-order-note")?.focus();
+    return;
+  }
+  if (!password) {
+    if (errorEl) errorEl.textContent = "Password signature is required.";
+    $("worker-cancel-order-password")?.focus();
+    return;
+  }
+
+  try {
+    state.busy = true;
+    if (errorEl) errorEl.textContent = "";
+    if (confirmButton) confirmButton.disabled = true;
+    const currentBuyerKey = state.activeBuyerKey;
+    const cancelledOrderNumbers = [...new Set(selectedLineIds
+      .map((lineId) => state.orders.find((entry) => entry.id === lineId)?.order?.order_number)
+      .map(normalizeEbayOrderNumber)
+      .filter(Boolean))];
+
+    const valid = await verifyCurrentUserPassword(password);
+    if (!valid) throw new Error("Incorrect password. Please try again.");
+
+    const selectedPhotoCount = getSelectedWorkerCancelEvidencePhotos().length;
+    setWorkerCancelPhotoStatus(
+      selectedPhotoCount
+        ? "Saving selected cancellation photos into the order evidence repository..."
+        : state.workerCancelEvidencePhotos.length
+          ? "No cancellation photos selected for upload; signing cancellation without photo proof."
+          : "",
+      "info"
+    );
+    const savedEvidencePhotos = await persistWorkerCancelEvidencePhotos(selectedLineIds);
+
+    const { data, error } = await supabase.rpc("cancel_ebay_order_lines", {
+      _order_line_ids: selectedLineIds,
+      _notes: note,
+      _signed_by_email: state.user.email,
+      _checkout_store_id: state.checkoutStoreId || null,
+      _evidence_photos: savedEvidencePhotos,
+    });
+    if (error) throw error;
+
+    selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
+    closeWorkerCancelOrderModal({ suppressMobileReturn: true });
+    setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked canceled. The signed audit trail was recorded.`, "info");
+    await loadOrders();
+    postEbayPendingQueueChanged({
+      action: "worker_cancelled_order",
+      orderNumbers: cancelledOrderNumbers,
+      lineCount: selectedLineIds.length,
+      updatedLines: data?.[0]?.updated_lines || selectedLineIds.length,
+    });
+
+    const nextBuyerLine = getNextPackableLine(currentBuyerKey);
+    if (nextBuyerLine) {
+      selectOrderLine(nextBuyerLine.id);
+      return;
+    }
+    clearSelection();
+  } catch (error) {
+    console.error("Worker order cancellation failed:", error);
+    if (errorEl) errorEl.textContent = error.message || "Could not mark this order canceled.";
   } finally {
     state.busy = false;
     if (confirmButton) confirmButton.disabled = false;
@@ -3380,7 +4660,7 @@ function openAdminOrderCloseoutModal(action) {
   setTimeout(() => $("admin-order-closeout-note")?.focus(), 80);
 }
 
-async function verifyAdminPassword(password) {
+async function verifyCurrentUserPassword(password) {
   if (!state.user?.email || !password) return false;
   const { error } = await supabase.auth.signInWithPassword({
     email: state.user.email,
@@ -3420,7 +4700,7 @@ async function confirmAdminOrderCloseout() {
       .map(normalizeEbayOrderNumber)
       .filter(Boolean))];
 
-    const valid = await verifyAdminPassword(password);
+    const valid = await verifyCurrentUserPassword(password);
     if (!valid) throw new Error("Incorrect password. Please try again.");
 
     const { data, error } = await supabase.rpc("admin_close_ebay_order_lines", {
@@ -3431,7 +4711,7 @@ async function confirmAdminOrderCloseout() {
     });
     if (error) throw error;
 
-    closeAdminOrderCloseoutModal();
+    closeAdminOrderCloseoutModal({ suppressMobileReturn: true });
     clearAdminOrderSelection();
     setImportStatus(`Closed ${data?.[0]?.updated_lines || lines.length} order line(s).`, "success");
     await loadOrders();
@@ -3646,6 +4926,10 @@ function clearSelection() {
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
   closeModal("worker-no-inventory-modal");
+  closeModal("worker-cancel-order-modal");
+  closeModal("order-task-modal");
+  closeModal("admin-order-closeout-modal");
+  document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   renderOrders();
@@ -3727,6 +5011,34 @@ function postEbayPendingQueueChanged(payload = {}) {
       orderNumbers,
     },
   }, window.location.origin);
+}
+
+function postEbayLabelExitReturnToQueue(reason = "pending-label-session-exit") {
+  const context = state.ebayLabelReturnContext;
+  if (!context) return false;
+  const orderNumbers = [...new Set([
+    context.orderNumber,
+    ...(Array.isArray(context.orderNumbers) ? context.orderNumbers : []),
+  ].map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (context.transferId) {
+    postEbayLabelTransferStatus({
+      transferId: context.transferId,
+      ok: true,
+      canceled: true,
+      returnToAwaiting: true,
+      reason,
+      orderNumber: orderNumbers[0] || "",
+      orderNumbers,
+      message: "OG label session was closed. Returning to eBay awaiting shipments.",
+    });
+  } else {
+    postEbayPendingQueueChanged({
+      action: reason,
+      orderNumbers,
+    });
+  }
+  state.ebayLabelReturnContext = null;
+  return true;
 }
 
 function createLabelRouteError(route, message) {
@@ -3945,6 +5257,11 @@ async function attachEbayLabelToOrder(transferPayload) {
   const primaryOrderNumber = selectedOrderNumber && targetOrderNumbers.includes(selectedOrderNumber)
     ? selectedOrderNumber
     : targetOrderNumbers[0];
+  state.ebayLabelReturnContext = {
+    transferId: transferPayload.transferId || "",
+    orderNumber: primaryOrderNumber,
+    orderNumbers: targetOrderNumbers,
+  };
   await openPendingNoInventorySessionForLabel(primaryOrderNumber);
   const trackingText = getLabelTrackingDisplay(labelMetadata);
   const trackingClause = trackingText ? ` Tracker: ${trackingText}.` : " Tracker was not captured.";
@@ -4103,6 +5420,7 @@ function buildEbayPendingPriorityPayload() {
         buyerKey,
         buyerUsername: buyerUsername || getBuyerLabel(line),
         orderNumbers: new Set(),
+        lines: [],
         pendingLines: 0,
         pendingUnits: 0,
         nextShipBy: "",
@@ -4114,16 +5432,27 @@ function buildEbayPendingPriorityPayload() {
     const group = groups.get(buyerKey);
     const orderNumber = normalizeEbayOrderNumber(line.order?.order_number);
     if (orderNumber) group.orderNumbers.add(orderNumber);
+    const remainingQuantity = getRemainingLineQuantity(line) || 0;
     group.pendingLines += 1;
-    group.pendingUnits += getRemainingLineQuantity(line) || 0;
+    group.pendingUnits += remainingQuantity;
 
     const shipBy = line.order?.ship_by_date || "";
     const rank = getEbayPriorityRank(shipBy);
+    const urgency = getOrderUrgency(shipBy);
+    group.lines.push({
+      orderNumber,
+      itemNumber: line.item_number || "",
+      transactionId: line.transaction_id || "",
+      itemTitle: line.item_title || "",
+      remainingQuantity,
+      shipByDate: shipBy,
+      priorityRank: rank,
+      priorityLabel: urgency?.label || (shipBy ? "Upcoming" : "Pending"),
+    });
     if (
       rank < group.priorityRank
       || (rank === group.priorityRank && getShipTimestamp(shipBy) < getShipTimestamp(group.nextShipBy))
     ) {
-      const urgency = getOrderUrgency(shipBy);
       group.nextShipBy = shipBy;
       group.priorityRank = rank;
       group.priorityLabel = urgency?.label || (shipBy ? "Upcoming" : "Pending");
@@ -4198,6 +5527,8 @@ function setupListeners() {
     clearOrderSearch({ apply: false });
     await loadOrders();
   });
+  $("close-mobile-order-detail")?.addEventListener("click", closeMobileOrderDetail);
+  window.addEventListener("resize", syncMobileOrderDetailMode);
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -4240,11 +5571,29 @@ function setupListeners() {
   });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
+  $("cancel-pending-order")?.addEventListener("click", openWorkerCancelOrderModal);
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
+  $("assign-order-task")?.addEventListener("click", () => openOrderTaskModal());
+  $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal());
+  $("submit-order-task")?.addEventListener("click", submitOrderTask);
+  $("cancel-order-task")?.addEventListener("click", closeOrderTaskModal);
+  $("close-order-task-modal")?.addEventListener("click", closeOrderTaskModal);
+  $("order-task-capture-station")?.addEventListener("change", (event) => {
+    setSelectedNoInventoryCaptureStation(event.target.value);
+  });
+  $("refresh-order-task-stations")?.addEventListener("click", () => {
+    loadNoInventoryCaptureStations().then(() => {
+      setOrderTaskPhotoStatus("Camera stations refreshed.", "info");
+    }).catch((error) => setOrderTaskPhotoStatus(error?.message || "Could not refresh stations.", "error"));
+  });
+  $("request-order-task-photo")?.addEventListener("click", requestOrderTaskPhoto);
+  $("order-task-photo-file")?.addEventListener("change", handleOrderTaskPhotoFiles);
+  $("select-all-order-task-photos")?.addEventListener("click", () => setAllOrderTaskPhotosSelected(true));
+  $("deselect-all-order-task-photos")?.addEventListener("click", () => setAllOrderTaskPhotosSelected(false));
   $("confirm-item-choice")?.addEventListener("click", confirmItemCandidate);
   $("cancel-item-confirm")?.addEventListener("click", closeItemConfirmModal);
   $("close-item-confirm")?.addEventListener("click", closeItemConfirmModal);
@@ -4254,6 +5603,23 @@ function setupListeners() {
   $("confirm-worker-no-inventory")?.addEventListener("click", confirmWorkerNoInventoryCompletion);
   $("cancel-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
+  $("confirm-worker-cancel-order")?.addEventListener("click", confirmWorkerCancelOrder);
+  $("cancel-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
+  $("close-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
+  $("select-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(true));
+  $("deselect-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(false));
+  $("worker-cancel-capture-station")?.addEventListener("change", (event) => {
+    setSelectedNoInventoryCaptureStation(event.target.value);
+  });
+  $("refresh-worker-cancel-stations")?.addEventListener("click", () => {
+    loadNoInventoryCaptureStations().then(() => {
+      setWorkerCancelPhotoStatus("Camera stations refreshed.", "info");
+    }).catch((error) => setWorkerCancelPhotoStatus(error?.message || "Could not refresh stations.", "error"));
+  });
+  $("request-worker-cancel-photo")?.addEventListener("click", requestWorkerCancelEvidencePhoto);
+  $("worker-cancel-evidence-file")?.addEventListener("change", handleWorkerCancelEvidenceFiles);
+  $("select-all-worker-cancel-photos")?.addEventListener("click", () => setAllWorkerCancelEvidencePhotosSelected(true));
+  $("deselect-all-worker-cancel-photos")?.addEventListener("click", () => setAllWorkerCancelEvidencePhotosSelected(false));
   $("select-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(true));
   $("deselect-all-worker-no-inventory")?.addEventListener("click", () => setAllWorkerNoInventoryLines(false));
   $("no-inventory-capture-station")?.addEventListener("change", (event) => {
@@ -4330,6 +5696,14 @@ function setupListeners() {
     if (event.target.id === "worker-no-inventory-modal") closeWorkerNoInventoryModal();
   });
 
+  $("worker-cancel-order-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "worker-cancel-order-modal") closeWorkerCancelOrderModal();
+  });
+
+  $("order-task-modal")?.addEventListener("click", (event) => {
+    if (event.target.id === "order-task-modal") closeOrderTaskModal();
+  });
+
   $("no-inventory-photo-viewer-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "no-inventory-photo-viewer-modal") closeNoInventoryEvidencePhotoViewer();
   });
@@ -4348,6 +5722,13 @@ function setupListeners() {
     if (event.key === "Enter") {
       event.preventDefault();
       confirmAdminOrderCloseout();
+    }
+  });
+
+  $("worker-cancel-order-password")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmWorkerCancelOrder();
     }
   });
 
@@ -4379,6 +5760,17 @@ function setupListeners() {
       return;
     }
 
+    if (!$("order-task-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitOrderTask();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeOrderTaskModal();
+      }
+      return;
+    }
+
     if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
       const target = event.target;
       const targetTag = target?.tagName?.toLowerCase();
@@ -4391,6 +5783,17 @@ function setupListeners() {
       } else if (event.key === "Escape") {
         event.preventDefault();
         closeWorkerNoInventoryModal();
+      }
+      return;
+    }
+
+    if (!$("worker-cancel-order-modal")?.classList.contains("hidden")) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        confirmWorkerCancelOrder();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeWorkerCancelOrderModal();
       }
       return;
     }
@@ -4427,8 +5830,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupImportVisibility();
   setupListeners();
   await loadCheckoutStores();
+  state.launchOrderTaskId = getRequestedOrderTaskId();
+  loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
   clearOrderSearch({ apply: false });
   await loadOrders();
-  applyEbayLaunchOrderSelection();
+  const openedTask = await openRequestedOrderTask();
+  if (!openedTask) applyEbayLaunchOrderSelection();
   if (window.lucide) window.lucide.createIcons();
 });

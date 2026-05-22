@@ -380,6 +380,155 @@ async function loadStoreTransferAlerts() {
   }).join("");
 }
 
+function getReturnTaskDashboardLabel(task = {}) {
+  if (task.task_type === "return_intake") return "Intake";
+  if (task.task_type === "return_review") return "Review";
+  if (task.task_type === "question") return "Question";
+  return "Return";
+}
+
+function getOrderTaskDashboardLabel(task = {}) {
+  if (task.task_type === "admin_review") return "Admin";
+  if (task.task_type === "worker_follow_up") return "Worker";
+  if (task.task_type === "special_order") return "Special";
+  return "Order";
+}
+
+async function loadAdminOrderTasks() {
+  const container = document.getElementById("admin-order-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading order tasks...</div>`;
+
+  const { data, error } = await supabase.rpc("list_admin_ebay_order_tasks", { _limit: 6 });
+
+  if (error) {
+    console.warn("Failed to load order coordination tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load order tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open order coordination tasks need attention.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_admin"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.buyer_username || "eBay buyer")}</strong>
+            <span>${escapeHtml(task.order_number || "Pending order")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getOrderTaskDashboardLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.question || task.title || "Order needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          <span>Ship by ${escapeHtml(task.ship_by_date ? formatShipBy(task.ship_by_date) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
+function getTeamTaskDashboardLabel(task = {}) {
+  if (task.task_type === "inventory") return "Inventory";
+  if (task.task_type === "shipping") return "Shipping";
+  if (task.task_type === "customer_service") return "Customer";
+  if (task.task_type === "maintenance") return "Maintenance";
+  if (task.task_type === "admin_review") return "Admin";
+  return "Team";
+}
+
+async function loadAdminTeamTasks() {
+  const container = document.getElementById("admin-team-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading team tasks...</div>`;
+
+  const { data, error } = await supabase.rpc("list_admin_team_tasks", { _limit: 6 });
+
+  if (error) {
+    console.warn("Failed to load team tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load team tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open independent team tasks need attention.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_admin"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.title || "Team task")}</strong>
+            <span>${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getTeamTaskDashboardLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.description || "Task needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Due ${escapeHtml(task.due_at ? formatDateTime(task.due_at) : "not set")}</span>
+          <span>Created: ${escapeHtml(task.created_by_email || "logged-in user")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
+async function loadAdminReturnTasks() {
+  const container = document.getElementById("admin-return-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading return tasks...</div>`;
+
+  const { data, error } = await supabase
+    .from("ebay_return_tasks")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
+    .order("created_at", { ascending: true })
+    .limit(6);
+
+  if (error) {
+    console.warn("Failed to load return tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load return tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open return tasks need attention.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>
+            <span>${escapeHtml(returnCase.order_number || returnCase.ebay_return_id || "Return case")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getReturnTaskDashboardLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.question || task.title || returnCase.return_reason || "Return needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(task.status.replace(/_/g, " "))} / ${escapeHtml(task.priority)}</span>
+          <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          <span>Due ${escapeHtml(task.due_at ? formatDateTime(task.due_at) : "not set")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** =================== Data Loading =================== */
 async function loadInventoryData() {
   const { data: itemTypes, error: itemTypeError } = await supabase
@@ -719,6 +868,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupNavigation();
   await loadUrgentOrders();
   await loadStoreTransferAlerts();
+  await loadAdminOrderTasks();
+  await loadAdminTeamTasks();
+  await loadAdminReturnTasks();
 
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);

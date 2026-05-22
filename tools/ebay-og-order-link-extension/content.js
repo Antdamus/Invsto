@@ -12,6 +12,14 @@
   const SEND_LABEL_ID = "og-ebay-send-label";
   const SEND_BULK_LABELS_ID = "og-ebay-send-bulk-labels";
   const SEND_AWAITING_REPORT_ID = "og-ebay-send-awaiting-report";
+  const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
+  const SEND_RETURN_BATCH_ID = "og-ebay-send-return-batch";
+  const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
+  const RETURN_MESSAGE_SEND_ID = "og-ebay-send-return-message";
+  const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
+  const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
+  const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
+  const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
@@ -25,6 +33,8 @@
   const LABEL_PROBE_READY_TIMEOUT_MS = 5000;
   const REPORT_STATUS_TIMEOUT_MS = 120000;
   const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
+  const RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS = 9000;
+  const RETURN_DETAIL_BATCH_CONCURRENCY = 5;
   let currentBoxReminderKey = "";
   let dismissedBoxReminderKey = "";
   let shownBoxReminderKey = "";
@@ -32,10 +42,20 @@
   let ogPriorityAutoAttemptKey = "";
   let ogPriorityReapplyTimer = null;
   let ogPriorityLastRowSignature = "";
+  const ogLocallyClosedAwaitingOrders = new Set();
   let ogBuyerSelectionHandlersAttached = false;
   let ogBuyerSelectionInProgress = false;
   let ogBuyerSelectionRefreshTimer = null;
   let ogPartialSelectionWarningTimer = null;
+  let ogReturnEntriesCache = null;
+  let ogReturnEntriesSignature = "";
+  let ogAutoVideoReceiptStarted = false;
+  let ogReturnBatchExportInProgress = false;
+  let ogReturnBatchStatusHoldUntil = 0;
+  let ogReturnMessageAutoSendHooked = false;
+  let ogReturnMessageLastLogKey = "";
+  let ogReturnMessageLastLogAt = 0;
+  const ogReturnDetailCaptureCache = new Map();
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -102,6 +122,15 @@
 
   function cleanText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function getText(selector, root = document) {
@@ -338,28 +367,46 @@
     return cleanText(match?.[0] || "");
   }
 
+  function isDownloadReportText(value) {
+    const text = cleanText(value);
+    return /^(?:download\s+(?:orders?\s+)?report|download\s+csv|orders?\s+report)$/i.test(text)
+      || /\bdownload\b/i.test(text) && /\b(report|csv|orders?)\b/i.test(text);
+  }
+
   function getDownloadReportButton() {
     const scoped = [
       ...document.querySelectorAll(".downloadReport button, .downloadReport a, [id*='downloadReport' i] button, [id*='downloadReport' i] a, [data-testid*='download' i] button, [data-testid*='download' i] a"),
     ].find((control) => {
       const text = cleanText(control.textContent || control.getAttribute("aria-label"));
-      return isElementVisible(control) && /^Download report$/i.test(text);
+      return isElementVisible(control) && isDownloadReportText(text);
     });
     if (scoped) return scoped;
 
     return [...document.querySelectorAll("button, a")]
       .find((control) => {
         const text = cleanText(control.textContent || control.getAttribute("aria-label"));
-        return isElementVisible(control) && /^Download report$/i.test(text);
+        return isElementVisible(control) && isDownloadReportText(text);
       }) || null;
   }
 
   function isAwaitingShipmentOrdersPage() {
     const sample = getPageTextSample();
-    return /Manage orders awaiting shipment/i.test(sample)
-      && /Results:/i.test(sample)
-      && Boolean(getDownloadReportButton())
-      && (/orders-download-report/i.test(sample) || /Download report/i.test(sample));
+    const url = new URL(window.location.href);
+    const pathLooksRight = /\/sh\/ord\/?$/i.test(url.pathname);
+    const filterLooksRight = /AWAITING_SHIPMENT|awaiting[_\s-]*shipment/i.test(`${url.search} ${url.hash} ${sample}`);
+    const pageLooksRight = /awaiting shipment|ready to ship|manage orders/i.test(sample);
+    return pathLooksRight
+      && filterLooksRight
+      && pageLooksRight
+      && Boolean(getDownloadReportButton());
+  }
+
+  function isEbayReturnsPage() {
+    const url = new URL(window.location.href);
+    const sample = getPageTextSample();
+    const pageMarkers = `${url.pathname} ${url.search} ${url.hash} ${sample}`;
+    return /currentpage_SHOrderReturn|pageTopLevelModId"?\s*:\s*"app-mod-returns-wrapper"|app-mod-returns-wrapper|page"?\s*:\s*\{[^}]*id"?\s*:\s*"RETURNS"|Manage returns|Table of returns/i.test(pageMarkers)
+      && /returns?|returnId|Return ID|return requested|return shipped|return delivered|waiting for buyer to ship|issue refund/i.test(pageMarkers);
   }
 
   function getAwaitingReportMetadata() {
@@ -372,9 +419,380 @@
     };
   }
 
-  function getEbayAwaitingShipmentRows() {
+  function normalizeReturnReasonText(value) {
+    return cleanText(String(value || "").replace(/^reason:\s*/i, ""));
+  }
+
+  function decodeReturnText(value) {
+    const text = String(value || "");
+    if (!/[&<>]/.test(text)) return cleanText(text);
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = text;
+    return cleanText(textarea.value || text);
+  }
+
+  function textSpansToText(value) {
+    if (!value) return "";
+    if (typeof value === "string") return cleanText(value);
+    if (Array.isArray(value)) return cleanText(value.map(textSpansToText).join(" "));
+    if (typeof value === "object") {
+      if (Array.isArray(value.textSpans)) return textSpansToText(value.textSpans);
+      if (Object.prototype.hasOwnProperty.call(value, "text")) return cleanText(value.text);
+    }
+    return "";
+  }
+
+  function escapeRegex(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function decodeJsonishText(value) {
+    const text = String(value || "");
+    if (!text) return "";
+    const unescaped = text
+      .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\//g, "/");
+    return decodeReturnText(unescaped);
+  }
+
+  function readJsonValueByLabel(rawText = "", label = "") {
+    const escaped = escapeRegex(label);
+    const patterns = [
+      new RegExp(`"accessibilityText"\\s*:\\s*"${escaped}"[\\s\\S]{0,1800}?"values"\\s*:\\s*\\[[\\s\\S]{0,1800}?"text"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i"),
+      new RegExp(`"accessibilityText"\\s*:\\s*"${escaped}"[\\s\\S]{0,1800}?"value"\\s*:\\s*\\{[\\s\\S]{0,1800}?"text"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i"),
+    ];
+    for (const pattern of patterns) {
+      const match = rawText.match(pattern);
+      if (match?.[1]) return decodeJsonishText(match[1]);
+    }
+    return "";
+  }
+
+  function cleanElementText(element) {
+    if (!element) return "";
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll(".clipped, button, svg, script, style").forEach((node) => node.remove());
+    return cleanText(clone.textContent || "");
+  }
+
+  function readDetailPageValue(doc, label = "") {
+    const expected = cleanText(label).toLowerCase();
+    if (!doc || !expected) return "";
+    for (const row of doc.querySelectorAll("dl, .rtn-summary-detail-info, .rtn-item-order-info")) {
+      const labelText = cleanElementText(row.querySelector("dt, .rtn-item-date, #label0")).toLowerCase();
+      if (!labelText || labelText !== expected) continue;
+      const valueText = cleanElementText(row.querySelector("dd, .rtn-item-info, #value0, #rtn-item-detail-info"));
+      if (valueText) return valueText;
+    }
+    return "";
+  }
+
+  function getActionUrl(value) {
+    if (!value || typeof value !== "object") return "";
+    if (typeof value.URL === "string") return value.URL;
+    if (value.action && typeof value.action === "object") return getActionUrl(value.action);
+    return "";
+  }
+
+  function getReturnDetailsUrl(member = {}) {
+    const direct = getActionUrl(member.returnDetails)
+      || getActionUrl(member.lineActions?.model?.defaultAction)
+      || getActionUrl(member.lineActions?.model?.actionValues?.[0]);
+    if (direct) return direct;
+    const returnId = cleanText(member.returnId || "");
+    return returnId ? `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${encodeURIComponent(returnId)}` : "";
+  }
+
+  function getReturnTransactionId(member = {}) {
+    const urls = [
+      getActionUrl(member.buyerDetails?.buyerid),
+      ...(Array.isArray(member.lineActions?.model?.actionValues)
+        ? member.lineActions.model.actionValues.map(getActionUrl)
+        : []),
+    ];
+    for (const url of urls) {
+      try {
+        const parsed = new URL(url, window.location.origin);
+        const transId = parsed.searchParams.get("transId");
+        if (transId) return transId;
+      } catch (_) {}
+    }
+    return "";
+  }
+
+  function normalizeReturnMember(member = {}) {
+    const listing = member.lineItems?.[0]?.listing || {};
+    const returnId = cleanText(member.returnId || textSpansToText(member.returnDetails));
+    const itemNumber = cleanText(listing.listingId || "");
+    if (!returnId || !itemNumber) return null;
+    const detailsUrl = getReturnDetailsUrl(member);
+    const returnReason = normalizeReturnReasonText(textSpansToText(member.returnReason));
+    return {
+      source: "ebay-returns-page",
+      returnId,
+      itemNumber,
+      transactionId: getReturnTransactionId(member),
+      itemTitle: textSpansToText(listing.title) || cleanText(listing.image?.title || ""),
+      quantity: Number(listing.quantity?.value || textSpansToText(listing.quantity).match(/\d+/)?.[0] || 1),
+      buyerUsername: textSpansToText(member.buyerDetails?.buyerid),
+      returnStatus: textSpansToText(member.returnStatus),
+      returnAction: textSpansToText(member.returnAction),
+      returnReason,
+      returnInitiated: textSpansToText(member.returnInitiated).replace(/^requested:\s*/i, ""),
+      refundText: textSpansToText(member.refundDetails),
+      detailsUrl,
+      itemUrl: getActionUrl(listing.title),
+      imageUrl: listing.image?.URL || "",
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+      capturedAt: new Date().toISOString(),
+      rawReturn: {
+        returnId,
+        buyerDetails: member.buyerDetails || null,
+        returnStatus: member.returnStatus || null,
+        returnAction: member.returnAction || null,
+        returnReason: member.returnReason || null,
+        returnInitiated: member.returnInitiated || null,
+        refundDetails: member.refundDetails || null,
+        lineItems: member.lineItems || null,
+        lineActions: member.lineActions || null,
+      },
+    };
+  }
+
+  function collectReturnMembersFromJson(value, results = [], seen = new WeakSet(), limit = { count: 0 }) {
+    if (!value || typeof value !== "object" || seen.has(value) || limit.count > 25000) return results;
+    seen.add(value);
+    limit.count += 1;
+
+    const normalized = value.returnId && Array.isArray(value.lineItems) ? normalizeReturnMember(value) : null;
+    if (normalized) results.push(normalized);
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => collectReturnMembersFromJson(entry, results, seen, limit));
+      return results;
+    }
+
+    Object.values(value).forEach((entry) => collectReturnMembersFromJson(entry, results, seen, limit));
+    return results;
+  }
+
+  function readLastRegexMatch(text, regex) {
+    let found = "";
+    for (const match of text.matchAll(regex)) {
+      if (match?.[1]) found = decodeReturnText(match[1]);
+    }
+    return found;
+  }
+
+  function readFirstRegexMatch(text, regex) {
+    const match = text.match(regex);
+    return decodeReturnText(match?.[1] || "");
+  }
+
+  function extractReturnMembersFromText(rawText = "") {
+    const text = rawText.replace(/&quot;/g, '"').replace(/&#34;/g, '"');
+    const results = [];
+    for (const match of text.matchAll(/"returnId"\s*:\s*"([^"]+)"/g)) {
+      const returnId = decodeReturnText(match[1]);
+      const before = text.slice(Math.max(0, match.index - 7000), match.index);
+      const after = text.slice(match.index, match.index + 12000);
+      const itemNumber = readLastRegexMatch(before, /"listingId"\s*:\s*"([^"]+)"/g);
+      if (!returnId || !itemNumber) continue;
+      const buyerUsername = readFirstRegexMatch(after, /"buyerid"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/);
+      const returnDetailsUrl = readFirstRegexMatch(after, /"URL"\s*:\s*"(https:\/\/www\.ebay\.com\/rtn\/Return\/ReturnsDetail\?returnId=[^"]+)"/);
+      const reportBuyerUrl = readFirstRegexMatch(after, /"URL"\s*:\s*"(http:\/\/spd\.ebay\.com\/RBASellerHub[^"]+)"/);
+      let transactionId = "";
+      try {
+        transactionId = new URL(reportBuyerUrl).searchParams.get("transId") || "";
+      } catch (_) {}
+      results.push({
+        source: "ebay-returns-page",
+        returnId,
+        itemNumber,
+        transactionId,
+        itemTitle: readLastRegexMatch(before, /"title"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/g),
+        quantity: Number(readLastRegexMatch(before, /"quantity"\s*:\s*\{(?:"textSpans".*?)?"value"\s*:\s*(\d+)/gs) || 1),
+        buyerUsername,
+        returnStatus: readFirstRegexMatch(after, /"returnStatus"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        returnAction: readFirstRegexMatch(after, /"returnAction"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        returnReason: normalizeReturnReasonText(readFirstRegexMatch(after, /"returnReason"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/)),
+        returnInitiated: readFirstRegexMatch(after, /"returnInitiated"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/).replace(/^requested:\s*/i, ""),
+        refundText: readFirstRegexMatch(after, /"refundDetails"\s*:\s*\{"textSpans"\s*:\s*\[\{"text"\s*:\s*"([^"]+)"/),
+        detailsUrl: returnDetailsUrl || `https://www.ebay.com/rtn/Return/ReturnsDetail?returnId=${encodeURIComponent(returnId)}`,
+        itemUrl: readLastRegexMatch(before, /"URL"\s*:\s*"(https:\/\/www\.ebay\.com\/itm\/[^"]+)"/g),
+        imageUrl: readLastRegexMatch(before, /"image"\s*:\s*\{.*?"URL"\s*:\s*"([^"]+)"/gs),
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt: new Date().toISOString(),
+        rawReturn: {
+          returnId,
+          itemNumber,
+          transactionId,
+          buyerUsername,
+        },
+      });
+    }
+    return results;
+  }
+
+  function getEbayReturnJsonTextCandidates() {
+    const scripts = [...document.scripts]
+      .map((script) => script.textContent || "")
+      .filter((text) => text.includes('"returnId"') || text.includes("Return ID:"));
+    return [...scripts, document.documentElement?.innerHTML || ""].filter(Boolean);
+  }
+
+  function getEbayReturnEntries() {
+    if (!isEbayReturnsPage()) return [];
+    const signature = `${window.location.href}|${document.scripts.length}|${document.body?.innerText?.length || 0}`;
+    if (ogReturnEntriesCache && ogReturnEntriesSignature === signature) return ogReturnEntriesCache;
+    const entries = [];
+    getEbayReturnJsonTextCandidates().forEach((text) => {
+      const beforeCount = entries.length;
+      try {
+        const parsed = JSON.parse(text);
+        entries.push(...collectReturnMembersFromJson(parsed));
+        if (entries.length === beforeCount) entries.push(...extractReturnMembersFromText(text));
+      } catch (_) {
+        entries.push(...extractReturnMembersFromText(text));
+      }
+    });
+    const byReturnId = new Map();
+    entries.forEach((entry) => {
+      if (!entry?.returnId || !entry?.itemNumber) return;
+      const existing = byReturnId.get(entry.returnId);
+      byReturnId.set(entry.returnId, {
+        ...(existing || {}),
+        ...entry,
+        rawReturn: entry.rawReturn || existing?.rawReturn || null,
+      });
+    });
+    ogReturnEntriesSignature = signature;
+    ogReturnEntriesCache = [...byReturnId.values()].sort((a, b) => String(a.returnId).localeCompare(String(b.returnId), undefined, { numeric: true }));
+    return ogReturnEntriesCache;
+  }
+
+  function findReturnAnchor(returnInfo = {}) {
+    const returnId = String(returnInfo.returnId || "");
+    if (!returnId) return null;
+    return [...document.querySelectorAll("a[href]")]
+      .find((anchor) => {
+        const href = anchor.getAttribute("href") || anchor.href || "";
+        return href.includes(`returnId=${returnId}`) || cleanText(anchor.textContent) === returnId;
+      }) || null;
+  }
+
+  function findReturnItemLinkElement(returnInfo = {}) {
+    const itemNumber = String(returnInfo.itemNumber || "").trim();
+    const itemTitle = cleanText(returnInfo.itemTitle || "");
+    return [...document.querySelectorAll('a[href*="/itm/"], a[href*="itm/"]')]
+      .find((anchor) => {
+        const href = anchor.getAttribute("href") || anchor.href || "";
+        const text = cleanText(anchor.textContent || "");
+        return Boolean(
+          itemNumber && href.includes(itemNumber)
+          || itemTitle && (text === itemTitle || text.includes(itemTitle) || itemTitle.includes(text))
+        );
+      }) || null;
+  }
+
+  function getReturnItemUrl(returnInfo = {}) {
+    const visibleLink = findReturnItemLinkElement(returnInfo);
+    return normalizeEbayNavigationUrl(visibleLink?.getAttribute("href") || returnInfo.itemUrl || "");
+  }
+
+  function getReturnDetailBlobUrlsFromHtml(html = "") {
+    return unique([...String(html || "").matchAll(/blob:https:\/\/www\.ebay\.com\/[a-z0-9-]+/gi)].map((match) => match[0]));
+  }
+
+  function getReturnDetailFileIdsFromHtml(html = "") {
+    return unique([...String(html || "").matchAll(/"returnFileId"\s*:\s*"([^"]+)"/gi)].map((match) => decodeJsonishText(match[1])));
+  }
+
+  function extractReturnDetailsFromHtml(html = "", detailsUrl = "") {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(String(html || ""), "text/html");
+    const primaryText = cleanElementText(doc.querySelector("#primaryText, .primaryText"))
+      || readFirstRegexMatch(html, /"mainContent"\s*:\s*\{[\s\S]{0,900}?"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
+    const orderDetailsUrl = findOrderDetailsUrlInText(html, detailsUrl)
+      || normalizeEbayNavigationUrl(doc.querySelector('a[href*="/mesh/ord/details"]')?.getAttribute("href") || "", detailsUrl);
+    const returnId = readDetailPageValue(doc, "Return ID")
+      || readFirstRegexMatch(html, /"returnId"\s*:\s*"([^"]+)"/)
+      || readFirstRegexMatch(html, /returnId=([0-9]+)/);
+    const itemUrl = normalizeEbayNavigationUrl(
+      doc.querySelector('a[href*="ViewItem"], a[href*="/itm/"]')?.getAttribute("href")
+        || readFirstRegexMatch(html, /"URL"\s*:\s*"(https:\/\/cgi\.ebay\.com\/ws\/eBayISAPI\.dll\?ViewItem[^"]+)"/)
+        || "",
+      detailsUrl
+    );
+    const itemImageUrl = normalizeEbayNavigationUrl(
+      doc.querySelector("#rtn-item-img, .rtn-item-img-horizontal")?.getAttribute("src")
+        || readFirstRegexMatch(html, /"itemImage"\s*:\s*\{[\s\S]{0,250}?"URL"\s*:\s*"([^"]+)"/)
+        || "",
+      detailsUrl
+    );
+    const itemTitle = cleanElementText(doc.querySelector("#rtn-item-text, #rtn-item-title, .rtn-item-module-title, .rtn-item-title-horizontal"))
+      || readFirstRegexMatch(html, /"itemTitle"\s*:\s*\{[\s\S]{0,350}?"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
+    const buyerComment = readJsonValueByLabel(html, "Comments")
+      || readDetailPageValue(doc, "Comments");
+    const returnReason = readJsonValueByLabel(html, "Return Reason")
+      || readDetailPageValue(doc, "Return Reason");
+    const requestAmount = readJsonValueByLabel(html, "Request amount")
+      || readDetailPageValue(doc, "Request amount");
+    const onHoldAmount = readJsonValueByLabel(html, "On hold amount")
+      || readDetailPageValue(doc, "On hold amount");
+    const buyerUsername = readJsonValueByLabel(html, "Buyer")
+      || readDetailPageValue(doc, "Buyer");
+    const datePurchased = readJsonValueByLabel(html, "Date purchased")
+      || readDetailPageValue(doc, "Date purchased");
+    const orderNumber = normalizeOrderNumber(orderDetailsUrl)
+      || normalizeOrderNumber(readJsonValueByLabel(html, "Order"))
+      || normalizeOrderNumber(readDetailPageValue(doc, "Order"));
+    const returnFileIds = getReturnDetailFileIdsFromHtml(html);
+    const complaintBlobUrls = getReturnDetailBlobUrlsFromHtml(html);
+
+    return {
+      source: "ebay-return-detail-page",
+      detailsUrl,
+      capturedAt: new Date().toISOString(),
+      primaryText,
+      returnId,
+      orderNumber,
+      orderDetailsUrl,
+      itemUrl,
+      itemTitle,
+      itemImageUrl,
+      buyerUsername,
+      returnReason,
+      buyerComment,
+      requestAmount,
+      onHoldAmount,
+      datePurchased,
+      returnFileIds,
+      complaintBlobUrls,
+      hasComplaintFiles: Boolean(returnFileIds.length || complaintBlobUrls.length),
+    };
+  }
+
+  function getRawEbayAwaitingShipmentRows() {
     return [...document.querySelectorAll('tr.order-info[id^="orderid_"][id$="__order-info"], tr.order-info.order-border')]
       .filter((row) => row.querySelector('input[data-testid="order-checkbox"], input[data-ordernumber], input[data-buyer-id]'));
+  }
+
+  function isOgLocallyClosedAwaitingRow(row) {
+    const orderNumber = getRowOrderNumber(row);
+    return row?.dataset?.ogClosedInOg === "true"
+      || Boolean(orderNumber && ogLocallyClosedAwaitingOrders.has(orderNumber));
+  }
+
+  function getEbayAwaitingShipmentRows(options = {}) {
+    return getRawEbayAwaitingShipmentRows()
+      .filter((row) => options.includeOgClosed || !isOgLocallyClosedAwaitingRow(row));
   }
 
   function getRowCheckbox(row) {
@@ -491,6 +909,93 @@
       return [...document.querySelectorAll("tr.my-note-row[ordernumber]")]
         .find((noteRow) => noteRow.getAttribute("ordernumber") === orderNumber) || null;
     }
+  }
+
+  function setRelatedAwaitingRowsClosed(row, closed = true) {
+    const orderNumber = getRowOrderNumber(row);
+    const rows = [row, getAssociatedNoteRow(row)].filter(Boolean);
+    rows.forEach((entry) => {
+      entry.classList.toggle("og-ebay-closed-in-og", closed);
+      entry.dataset.ogClosedInOg = closed ? "true" : "";
+      if (!closed) entry.removeAttribute("data-og-closed-in-og");
+    });
+    if (closed && orderNumber) ogLocallyClosedAwaitingOrders.add(orderNumber);
+    if (!closed && orderNumber) ogLocallyClosedAwaitingOrders.delete(orderNumber);
+  }
+
+  function syncLocallyClosedAwaitingRows() {
+    if (!ogLocallyClosedAwaitingOrders.size) return;
+    getRawEbayAwaitingShipmentRows().forEach((row) => {
+      const orderNumber = getRowOrderNumber(row);
+      if (orderNumber && ogLocallyClosedAwaitingOrders.has(orderNumber)) {
+        setRelatedAwaitingRowsClosed(row, true);
+      }
+    });
+  }
+
+  function shouldHideRowsForPendingQueueChange(payload = {}) {
+    const action = String(payload.action || "").toLowerCase();
+    return [
+      "no_inventory_completion",
+      "inventory_fulfillment",
+      "live_lot_fulfillment",
+      "admin_cancelled",
+      "admin_fulfilled_no_inventory",
+      "admin_archived",
+      "admin_closeout",
+    ].includes(action);
+  }
+
+  function getPendingOrderNumbersFromPriorityPayload(payload = {}) {
+    const pending = new Set();
+    (Array.isArray(payload.priorities) ? payload.priorities : []).forEach((entry) => {
+      (Array.isArray(entry.orderNumbers) ? entry.orderNumbers : [])
+        .map(normalizeOrderNumber)
+        .filter(Boolean)
+        .forEach((orderNumber) => pending.add(orderNumber));
+    });
+    return pending;
+  }
+
+  function hideClosedAwaitingRowsFromOg(payload = {}, priorityPayload = null) {
+    if (!shouldHideRowsForPendingQueueChange(payload)) {
+      return { hiddenRows: 0, orderNumbers: [], stillPendingOrderNumbers: [] };
+    }
+
+    const orderNumbers = unique([
+      payload.orderNumber,
+      ...(Array.isArray(payload.orderNumbers) ? payload.orderNumbers : []),
+    ].map(normalizeOrderNumber));
+    if (!orderNumbers.length) return { hiddenRows: 0, orderNumbers: [], stillPendingOrderNumbers: [] };
+
+    const pendingOrderNumbers = priorityPayload ? getPendingOrderNumbersFromPriorityPayload(priorityPayload) : null;
+    const stillPendingOrderNumbers = pendingOrderNumbers
+      ? orderNumbers.filter((orderNumber) => pendingOrderNumbers.has(orderNumber))
+      : [];
+    const closed = new Set(pendingOrderNumbers
+      ? orderNumbers.filter((orderNumber) => !pendingOrderNumbers.has(orderNumber))
+      : orderNumbers);
+    let hiddenRows = 0;
+    getEbayAwaitingShipmentRows({ includeOgClosed: true }).forEach((row) => {
+      const orderNumber = getRowOrderNumber(row);
+      if (!closed.has(orderNumber) || isOgLocallyClosedAwaitingRow(row)) return;
+      const checkbox = getRowCheckbox(row);
+      if (checkbox?.checked) {
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setRelatedAwaitingRowsClosed(row, true);
+      hiddenRows += 1;
+    });
+
+    if (hiddenRows) {
+      ogPriorityLastRowSignature = "";
+      renderUrgentCoverageWarning(null);
+      updateBulkActionsShortcut();
+      refreshBuyerGroupSelectButtons();
+    }
+
+    return { hiddenRows, orderNumbers, stillPendingOrderNumbers };
   }
 
   function normalizeBuyerKey(value) {
@@ -677,6 +1182,36 @@
     return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
   }
 
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function waitForBulkActionsReady({ expectedSelectedCount = 0, timeoutMs = 5000 } = {}) {
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < timeoutMs) {
+      const selectedCount = getSelectedOrdersCount();
+      const checkedCount = getSelectedAwaitingOrderCheckboxes().length;
+      const effectiveCount = Math.max(selectedCount, checkedCount);
+      if (
+        effectiveCount >= Math.max(Number(expectedSelectedCount || 0), 1)
+        && Boolean(getBulkActionsToolbar())
+        && Boolean(getBulkShippingDropdownButton())
+      ) {
+        return true;
+      }
+      await delay(120);
+    }
+    return isAnyOrderSelected();
+  }
+
+  async function focusEbayBulkActionsWhenReady({ expectedSelectedCount = 0, onlyIfSelected = false } = {}) {
+    if (onlyIfSelected && !getSelectedAwaitingOrderCheckboxes().length && getSelectedOrdersCount() < 1) return false;
+    const ready = await waitForBulkActionsReady({ expectedSelectedCount });
+    updateBulkActionsShortcut();
+    if (!ready && onlyIfSelected) return false;
+    return scrollEbayBulkActionsIntoView();
+  }
+
   async function toggleBuyerGroupSelection(buyerKey) {
     if (ogBuyerSelectionInProgress) return;
     const firstRow = getBuyerGroupRows(buyerKey)[0];
@@ -700,6 +1235,14 @@
         setCheckboxChecked(checkboxes[index], shouldSelect);
         if (index % 4 === 3) await waitForBrowserPaint();
       }
+      if (shouldSelect) {
+        buttons.forEach((button) => {
+          button.textContent = "Opening actions...";
+        });
+        await focusEbayBulkActionsWhenReady({
+          expectedSelectedCount: getSelectedAwaitingOrderCheckboxes().length || checkboxes.length,
+        });
+      }
     } finally {
       ogBuyerSelectionInProgress = false;
       buttons.forEach((button) => {
@@ -711,7 +1254,6 @@
         refreshBuyerGroupSelectButtons(buyerKey);
         updateBulkActionsShortcut();
       }, 250);
-      if (shouldSelect) window.setTimeout(() => scrollEbayBulkActionsIntoView(), 180);
     }
   }
 
@@ -852,6 +1394,64 @@
     });
   }
 
+  function normalizePriorityLines(entry = {}) {
+    const lines = Array.isArray(entry.lines) ? entry.lines : [];
+    if (lines.length) {
+      return lines.map((line, index) => ({
+        orderNumber: normalizeOrderNumber(line.orderNumber),
+        itemNumber: cleanText(line.itemNumber || line.item_number || ""),
+        transactionId: cleanText(line.transactionId || line.transaction_id || ""),
+        itemTitle: cleanText(line.itemTitle || line.item_title || ""),
+        remainingQuantity: Number(line.remainingQuantity || line.remaining_quantity || 0) || 0,
+        shipByDate: line.shipByDate || line.ship_by_date || entry.nextShipBy || "",
+        priorityLabel: cleanText(line.priorityLabel || entry.priorityLabel || ""),
+        index,
+      }));
+    }
+    return (Array.isArray(entry.orderNumbers) ? entry.orderNumbers : [])
+      .map(normalizeOrderNumber)
+      .filter(Boolean)
+      .map((orderNumber, index) => ({
+        orderNumber,
+        itemNumber: "",
+        transactionId: "",
+        itemTitle: "",
+        remainingQuantity: 0,
+        shipByDate: entry.nextShipBy || "",
+        priorityLabel: cleanText(entry.priorityLabel || ""),
+        index,
+      }));
+  }
+
+  function getHiddenPriorityLines(entry = {}, group = null) {
+    const lines = normalizePriorityLines(entry);
+    if (!group?.rows?.length) return lines;
+
+    const visibleCountsByOrder = new Map();
+    group.rows.forEach((info) => {
+      const orderNumber = normalizeOrderNumber(info.orderNumber);
+      if (!orderNumber) return;
+      visibleCountsByOrder.set(orderNumber, (visibleCountsByOrder.get(orderNumber) || 0) + 1);
+    });
+
+    const hidden = [];
+    lines.forEach((line) => {
+      const orderNumber = normalizeOrderNumber(line.orderNumber);
+      const visibleCount = orderNumber ? Number(visibleCountsByOrder.get(orderNumber) || 0) : 0;
+      if (visibleCount > 0) {
+        visibleCountsByOrder.set(orderNumber, visibleCount - 1);
+        return;
+      }
+      hidden.push(line);
+    });
+    return hidden;
+  }
+
+  function getPriorityEntryLineCount(entry = {}) {
+    const lines = normalizePriorityLines(entry);
+    return lines.length || Number(entry.pendingLines || 0) || 0;
+  }
+
   function decorateBuyerGroup(row, groupInfo) {
     clearOldOgBadges(row);
     row.classList.add("og-ebay-buyer-group-row");
@@ -958,8 +1558,12 @@
 
   function summarizeUrgentCoverage(payload, groups) {
     const groupByBuyer = new Map(groups.map((group) => [normalizeBuyerKey(group.buyerKey || group.buyerUsername), group]));
+    const priorityByBuyer = new Map((Array.isArray(payload?.priorities) ? payload.priorities : [])
+      .map((entry) => [normalizeBuyerKey(entry.buyerKey || entry.buyerUsername), entry])
+      .filter(([buyerKey]) => Boolean(buyerKey)));
     const urgentPriorities = (Array.isArray(payload?.priorities) ? payload.priorities : [])
       .filter((entry) => Number(entry?.priorityRank) <= 1);
+    const hiddenDetailsByBuyer = new Map();
 
     let missingBuyerCount = 0;
     let partialBuyerCount = 0;
@@ -968,12 +1572,41 @@
     let visiblePartialBuyerCount = 0;
     let visiblePartialHiddenLineCount = 0;
 
+    const addHiddenDetail = (entry = {}, group = null, hiddenCount = 0, reason = "") => {
+      const buyerKey = normalizeBuyerKey(entry.buyerKey || entry.buyerUsername || group?.buyerKey || group?.buyerUsername);
+      if (!buyerKey || hiddenDetailsByBuyer.has(buyerKey)) return;
+      const hiddenLines = getHiddenPriorityLines(entry, group);
+      hiddenDetailsByBuyer.set(buyerKey, {
+        buyerKey,
+        buyerUsername: entry.buyerUsername || group?.buyerUsername || buyerKey,
+        priorityLabel: entry.priorityLabel || "",
+        priorityRank: Number(entry.priorityRank ?? group?.priorityRank ?? 99),
+        hiddenLineCount: Math.max(Number(hiddenCount || 0), hiddenLines.length || 0),
+        pendingLines: Math.max(getPriorityEntryLineCount(entry), Number(entry.pendingLines || 0), Number(group?.pendingLines || 0)),
+        visibleLines: Number(group?.rows?.length || 0),
+        orderNumbers: unique([
+          ...(Array.isArray(entry.orderNumbers) ? entry.orderNumbers : []),
+          ...[...(group?.orderNumbers || [])],
+        ].map(normalizeOrderNumber)),
+        reason,
+        hiddenLines,
+      });
+    };
+
     groups.forEach((group) => {
       const visibleLines = group?.rows?.length || 0;
       const pendingLines = Math.max(Number(group?.pendingLines || 0), visibleLines);
       if (visibleLines && pendingLines > visibleLines) {
         visiblePartialBuyerCount += 1;
         visiblePartialHiddenLineCount += pendingLines - visibleLines;
+        const buyerKey = normalizeBuyerKey(group.buyerKey || group.buyerUsername);
+        addHiddenDetail(priorityByBuyer.get(buyerKey) || {
+          buyerKey,
+          buyerUsername: group.buyerUsername || buyerKey,
+          pendingLines,
+          orderNumbers: [...(group.orderNumbers || [])],
+          priorityRank: group.priorityRank,
+        }, group, pendingLines - visibleLines, "visible-partial");
       }
     });
 
@@ -987,9 +1620,11 @@
       if (!visibleLines) {
         missingBuyerCount += 1;
         hiddenLineCount += pendingLines;
+        addHiddenDetail(entry, null, pendingLines, "missing");
       } else if (pendingLines > visibleLines) {
         partialBuyerCount += 1;
         hiddenLineCount += pendingLines - visibleLines;
+        addHiddenDetail(entry, group, pendingLines - visibleLines, "urgent-partial");
       }
     });
 
@@ -1002,7 +1637,79 @@
       visibleUrgentLineCount,
       visiblePartialBuyerCount,
       visiblePartialHiddenLineCount,
+      hiddenDetails: [...hiddenDetailsByBuyer.values()]
+        .sort((a, b) =>
+          a.priorityRank - b.priorityRank
+          || b.hiddenLineCount - a.hiddenLineCount
+          || String(a.buyerUsername || "").localeCompare(String(b.buyerUsername || ""), undefined, { sensitivity: "base" })
+        ),
     };
+  }
+
+  function getHiddenLineSummary(line = {}) {
+    const parts = [];
+    if (line.itemNumber) parts.push(`#${line.itemNumber}`);
+    else if (line.transactionId) parts.push(`Transaction ${line.transactionId}`);
+    else if (line.orderNumber) parts.push(`Order ${line.orderNumber}`);
+    if (line.itemTitle) parts.push(line.itemTitle);
+    if (line.remainingQuantity) parts.push(`Qty ${line.remainingQuantity}`);
+    return parts.join(" - ") || "Pending OG line";
+  }
+
+  function buildHiddenCoverageDetails(details = []) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "og-ebay-hidden-coverage-details";
+
+    if (!details.length) {
+      const empty = document.createElement("p");
+      empty.className = "og-ebay-hidden-empty";
+      empty.textContent = "Open or refresh OG Pending Orders to load buyer/item details for the hidden lines.";
+      wrapper.appendChild(empty);
+      return wrapper;
+    }
+
+    const shownDetails = details.slice(0, 12);
+    shownDetails.forEach((detail) => {
+      const article = document.createElement("article");
+      const title = document.createElement("strong");
+      const count = Number(detail.hiddenLineCount || detail.hiddenLines?.length || 0);
+      const visible = Number(detail.visibleLines || 0);
+      const pending = Number(detail.pendingLines || 0);
+      title.textContent = `${detail.buyerUsername || detail.buyerKey || "Unknown buyer"} - ${count || "Some"} hidden line${count === 1 ? "" : "s"}`;
+      article.appendChild(title);
+
+      const meta = document.createElement("span");
+      meta.textContent = [
+        detail.priorityLabel || "",
+        pending ? `${pending} OG pending` : "",
+        visible ? `${visible} visible here` : "not visible here",
+      ].filter(Boolean).join(" - ");
+      article.appendChild(meta);
+
+      const list = document.createElement("ul");
+      (detail.hiddenLines || []).slice(0, 6).forEach((line) => {
+        const item = document.createElement("li");
+        item.textContent = getHiddenLineSummary(line);
+        list.appendChild(item);
+      });
+      const unlisted = Math.max(0, count - (detail.hiddenLines || []).slice(0, 6).length);
+      if (unlisted > 0) {
+        const more = document.createElement("li");
+        more.textContent = `${unlisted} more hidden line${unlisted === 1 ? "" : "s"} for this buyer`;
+        list.appendChild(more);
+      }
+      article.appendChild(list);
+      wrapper.appendChild(article);
+    });
+
+    if (details.length > shownDetails.length) {
+      const more = document.createElement("p");
+      more.className = "og-ebay-hidden-empty";
+      more.textContent = `${details.length - shownDetails.length} more buyer${details.length - shownDetails.length === 1 ? "" : "s"} hidden. Open OG Pending Orders for the full queue.`;
+      wrapper.appendChild(more);
+    }
+
+    return wrapper;
   }
 
   function renderUrgentCoverageWarning(coverage) {
@@ -1032,9 +1739,37 @@
     if (missingBuyers) pieces.push(`${missingBuyers.toLocaleString()} buyer${missingBuyers === 1 ? "" : "s"} not shown`);
     if (partialBuyers) pieces.push(`${partialBuyers.toLocaleString()} buyer${partialBuyers === 1 ? "" : "s"} only partly shown`);
     if (visiblePartialBuyers) {
-      pieces.push(`${visiblePartialBuyers.toLocaleString()} visible buyer group${visiblePartialBuyers === 1 ? "" : "s"} incomplete (${visiblePartialHiddenLines.toLocaleString()} hidden line${visiblePartialHiddenLines === 1 ? "" : "s"})`);
+        pieces.push(`${visiblePartialBuyers.toLocaleString()} visible buyer group${visiblePartialBuyers === 1 ? "" : "s"} incomplete (${visiblePartialHiddenLines.toLocaleString()} hidden line${visiblePartialHiddenLines === 1 ? "" : "s"})`);
     }
-    warning.textContent = `Safety check: ${pieces.join(" - ")}. Do not ship partial buyer groups until all lines are visible together.`;
+    const wasExpanded = warning.dataset.ogExpanded === "true";
+    warning.textContent = "";
+
+    const summary = document.createElement("div");
+    summary.className = "og-ebay-coverage-summary";
+    summary.textContent = `Safety check: ${pieces.join(" - ")}. Do not ship partial buyer groups until all lines are visible together.`;
+    warning.appendChild(summary);
+
+    const actions = document.createElement("div");
+    actions.className = "og-ebay-coverage-actions";
+    const detailsButton = document.createElement("button");
+    detailsButton.type = "button";
+    detailsButton.className = "og-ebay-coverage-details-toggle";
+    detailsButton.textContent = wasExpanded ? "Hide hidden lines" : "Show hidden lines";
+    actions.appendChild(detailsButton);
+    warning.appendChild(actions);
+
+    const details = buildHiddenCoverageDetails(coverage.hiddenDetails || []);
+    details.hidden = !wasExpanded;
+    warning.appendChild(details);
+
+    detailsButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const expanded = warning.dataset.ogExpanded !== "true";
+      warning.dataset.ogExpanded = expanded ? "true" : "false";
+      details.hidden = !expanded;
+      detailsButton.textContent = expanded ? "Hide hidden lines" : "Show hidden lines";
+    });
   }
 
   function clearOgPriorityBadges(root = document) {
@@ -1101,6 +1836,18 @@
     return response;
   }
 
+  async function getOrganizerPriorityPayload(messagePayload = {}) {
+    const prefetched = messagePayload?.priorityPayload;
+    if (prefetched?.ok && Array.isArray(prefetched.priorities)) {
+      ogPendingPriorityCache = prefetched;
+      return prefetched;
+    }
+    if (prefetched?.error) {
+      console.warn("[OG eBay Priority] Prefetch failed, requesting live priorities:", prefetched.error);
+    }
+    return requestOgPendingPriorities();
+  }
+
   function updatePriorityButtonStatus(text, tone = "") {
     const button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
     if (!button) return;
@@ -1108,25 +1855,29 @@
     button.dataset.statusTone = tone;
   }
 
+  function updatePriorityButtonStatusFromResult(result = {}, payload = {}) {
+    const urgentBuyers = Number(payload.urgentBuyerCount || 0);
+    if (Number(result.hiddenUrgentLines || 0) > 0) {
+      updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
+    } else if (Number(result.hiddenPartialLines || 0) > 0) {
+      updatePriorityButtonStatus(`${Number(result.visiblePartialBuyers || 0).toLocaleString()} partial buyer group${Number(result.visiblePartialBuyers || 0) === 1 ? "" : "s"}`, "error");
+    } else if (result.matched > 0) {
+      updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
+    } else if (result.ebayMatched > 0) {
+      updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
+    } else if (urgentBuyers > 0) {
+      updatePriorityButtonStatus(`${urgentBuyers} urgent OG buyer${urgentBuyers === 1 ? "" : "s"} not matched here`, "success");
+    } else {
+      updatePriorityButtonStatus("No overdue/today OG buyers", "success");
+    }
+  }
+
   async function prioritizeEbayRowsFromOg({ silent = false } = {}) {
     try {
       if (!silent) updatePriorityButtonStatus("Loading OG priorities...");
       const payload = await requestOgPendingPriorities();
       const result = applyOgPendingPriorities(payload);
-      const urgentBuyers = Number(payload.urgentBuyerCount || 0);
-      if (Number(result.hiddenUrgentLines || 0) > 0) {
-        updatePriorityButtonStatus(`${Number(result.hiddenUrgentLines).toLocaleString()} urgent OG line${Number(result.hiddenUrgentLines) === 1 ? "" : "s"} not visible`, "error");
-      } else if (Number(result.hiddenPartialLines || 0) > 0) {
-        updatePriorityButtonStatus(`${Number(result.visiblePartialBuyers || 0).toLocaleString()} partial buyer group${Number(result.visiblePartialBuyers || 0) === 1 ? "" : "s"}`, "error");
-      } else if (result.matched > 0) {
-        updatePriorityButtonStatus(`OG sorted ${result.matched} visible row${result.matched === 1 ? "" : "s"}`, "success");
-      } else if (result.ebayMatched > 0) {
-        updatePriorityButtonStatus(`eBay sorted ${result.ebayMatched} urgent row${result.ebayMatched === 1 ? "" : "s"}`, "success");
-      } else if (urgentBuyers > 0) {
-        updatePriorityButtonStatus(`${urgentBuyers} urgent OG buyer${urgentBuyers === 1 ? "" : "s"} not matched here`, "success");
-      } else {
-        updatePriorityButtonStatus("No overdue/today OG buyers", "success");
-      }
+      updatePriorityButtonStatusFromResult(result, payload);
       return result;
     } catch (error) {
       if (!silent) {
@@ -1610,6 +2361,109 @@
     return btoa(binary);
   }
 
+  function getCssUrl(value = "") {
+    const match = String(value || "").match(/url\((["']?)(.*?)\1\)/i);
+    return match?.[2] || "";
+  }
+
+  function isVisibleElement(element) {
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && style.opacity !== "0"
+      && Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+  }
+
+  function getReturnComplaintImageUrl(element) {
+    if (!element) return "";
+    if (element.matches?.("img[src]")) return element.getAttribute("src") || element.src || "";
+    return getCssUrl(element.style?.backgroundImage || element.getAttribute?.("style") || "");
+  }
+
+  function getReturnComplaintImageCandidates() {
+    const selectors = [
+      "#preview-list .file-holder",
+      ".preview-list .file-holder",
+      "#preview-list img[src^='blob:']",
+      ".preview-list img[src^='blob:']",
+      "[style*='blob:https://www.ebay.com/']",
+    ];
+    const all = unique(selectors.flatMap((selector) => [...document.querySelectorAll(selector)]))
+      .map((element, index) => ({
+        element,
+        index,
+        url: getReturnComplaintImageUrl(element),
+        fileId: element.closest?.("[data-file-id]")?.getAttribute("data-file-id") || "",
+        visible: isVisibleElement(element),
+      }))
+      .filter((entry) => /^blob:https:\/\/www\.ebay\.com\//i.test(entry.url));
+    const visible = all.filter((entry) => entry.visible);
+    const source = visible.length ? visible : all;
+    const byUrl = new Map();
+    source.forEach((entry) => {
+      if (!byUrl.has(entry.url)) byUrl.set(entry.url, entry);
+    });
+    return [...byUrl.values()];
+  }
+
+  async function waitForReturnComplaintImageCandidates(timeoutMs = RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const candidates = getReturnComplaintImageCandidates();
+      if (candidates.length) return candidates;
+      await delay(250);
+    }
+    return getReturnComplaintImageCandidates();
+  }
+
+  async function captureReturnComplaintImages(detail = {}) {
+    const candidates = await waitForReturnComplaintImageCandidates();
+    const returnFileIds = Array.isArray(detail.returnFileIds) ? detail.returnFileIds : [];
+    const captured = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      try {
+        const response = await fetch(candidate.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (!/^image\//i.test(blob.type || "")) continue;
+        const buffer = await blob.arrayBuffer();
+        captured.push({
+          source: "ebay-return-detail-blob",
+          returnFileId: returnFileIds[index] || candidate.fileId || "",
+          fileId: candidate.fileId || "",
+          index,
+          mimeType: blob.type || "image/jpeg",
+          size: blob.size || buffer.byteLength || 0,
+          base64: arrayBufferToBase64(buffer),
+          capturedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not capture buyer complaint image:", error);
+      }
+    }
+    return captured;
+  }
+
+  async function captureCurrentReturnDetailForOg(payload = {}) {
+    const detailsUrl = window.location.href;
+    const html = document.documentElement?.outerHTML || "";
+    const detail = extractReturnDetailsFromHtml(html, detailsUrl);
+    const complaintImages = await captureReturnComplaintImages(detail);
+    return {
+      ok: true,
+      details: {
+        ...detail,
+        returnId: detail.returnId || payload.returnId || "",
+        complaintImages,
+        complaintImageCount: complaintImages.length,
+      },
+      complaintImages,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   function injectLabelCaptureProbe() {
     return new Promise((resolve, reject) => {
       const existing = document.getElementById("og-ebay-label-capture-probe");
@@ -1748,8 +2602,7 @@
 
   function isLikelyEbayOrdersReportText(text) {
     return /(^|,|\n)\s*"?Order Number"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text)
-      && /(^|,|\n)\s*"?Sales Record Number"?\s*(,|\n)/i.test(text);
+      && /(^|,|\n)\s*"?Item Title"?\s*(,|\n)/i.test(text);
   }
 
   function isLikelyEbayOrdersReportBase64(base64) {
@@ -1929,7 +2782,7 @@
     try {
       const captured = await Promise.any([pageCapturePromise, downloadCapturePromise]);
       if (captured.kind === "download") {
-        setLabelButtonStatus(captured.result.opened ? "Opened OG to attach" : "Attached to OG", "success");
+        setLabelButtonStatus(captured.result.canceled ? "Returned to queue" : captured.result.opened ? "Opened OG to attach" : "Attached to OG", "success");
         window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
         return;
       }
@@ -1951,7 +2804,7 @@
         },
       });
       if (!response?.ok) throw new Error(response?.error || "Could not hand the label to OG.");
-      setLabelButtonStatus(response.opened ? "Opened OG to attach" : "Attached to OG", "success");
+      setLabelButtonStatus(response.canceled ? "Returned to queue" : response.opened ? "Opened OG to attach" : "Attached to OG", "success");
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 3500);
     } catch (error) {
       console.error("[OG eBay Label] Capture failed:", error);
@@ -1959,6 +2812,146 @@
       setLabelButtonStatus("Capture failed", "error");
       window.alert(`${getErrorMessage(error)}\n\nThe extension now also watches Chrome/Edge downloads. If a PDF still downloads normally but does not attach, send me the console lines that start with [OG eBay Label].`);
       window.setTimeout(() => setLabelButtonStatus("Send Label to OG"), 5000);
+    }
+  }
+
+  function setReturnButtonStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone;
+    if (button.id === SEND_RETURN_BATCH_ID && text === "Export Visible Returns to OG") {
+      ogReturnBatchStatusHoldUntil = 0;
+    }
+    button.disabled = /opening|sending|matching|reading|exporting/i.test(text);
+  }
+
+  function buildReturnTransferPayload(returnInfo = {}) {
+    const capturedAt = new Date().toISOString();
+    return {
+      return: {
+        ...returnInfo,
+        capturedAt,
+        pageUrl: window.location.href,
+        pageTitle: document.title || returnInfo.pageTitle || "",
+      },
+      metadata: {
+        source: "ebay-returns-page",
+        returnId: returnInfo.returnId || "",
+        buyerUsername: returnInfo.buyerUsername || "",
+        itemNumber: returnInfo.itemNumber || "",
+        transactionId: returnInfo.transactionId || "",
+        orderNumber: returnInfo.orderNumber || "",
+        orderDetailsUrl: returnInfo.orderDetailsUrl || returnInfo.returnDetails?.orderDetailsUrl || "",
+        videoReceiptUrl: returnInfo.videoReceiptUrl || returnInfo.returnDetails?.videoReceiptUrl || "",
+        requestAmount: returnInfo.requestAmount || returnInfo.returnDetails?.requestAmount || "",
+        onHoldAmount: returnInfo.onHoldAmount || returnInfo.returnDetails?.onHoldAmount || "",
+        buyerComment: returnInfo.buyerComment || returnInfo.returnDetails?.buyerComment || "",
+        returnFileIds: returnInfo.returnFileIds || returnInfo.returnDetails?.returnFileIds || [],
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt,
+      },
+    };
+  }
+
+  function buildReturnBatchTransferPayload(returns = []) {
+    const capturedAt = new Date().toISOString();
+    return {
+      returns: returns.map((returnInfo) => ({
+        ...returnInfo,
+        capturedAt,
+        pageUrl: window.location.href,
+        pageTitle: document.title || returnInfo.pageTitle || "",
+      })),
+      metadata: {
+        source: "ebay-returns-page-batch",
+        returnCount: returns.length,
+        pageUrl: window.location.href,
+        pageTitle: document.title || "",
+        capturedAt,
+      },
+    };
+  }
+
+  async function sendReturnToOg(returnInfo, button = null) {
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      setReturnButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    try {
+      setReturnButtonStatus(button, "Reading details...");
+      const enrichedReturn = await enrichReturnInfoForImport(returnInfo);
+      const payload = buildReturnTransferPayload(enrichedReturn);
+      setReturnButtonStatus(button, "Opening OG...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_RETURN",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not open the OG return workflow.");
+      setReturnButtonStatus(button, response.opened ? "Opened in OG" : "Sent to OG", "success");
+      window.setTimeout(() => setReturnButtonStatus(button, "Open Return in OG"), 3500);
+    } catch (error) {
+      console.error("[OG eBay Return] Transfer failed:", error);
+      setReturnButtonStatus(button, "Send failed", "error");
+      window.alert(error?.message || "Could not send this eBay return to OG.");
+      window.setTimeout(() => setReturnButtonStatus(button, "Open Return in OG"), 5000);
+    }
+  }
+
+  async function sendReturnBatchToOg(returns = [], button = null) {
+    if (ogReturnBatchExportInProgress) return;
+    ogReturnBatchExportInProgress = true;
+    try {
+      assertExtensionContextActive();
+    } catch (error) {
+      ogReturnBatchExportInProgress = false;
+      setReturnButtonStatus(button, "Refresh page", "error");
+      window.alert(error.message);
+      return;
+    }
+
+    try {
+      const visibleReturns = Array.isArray(returns) && returns.length ? returns : getEbayReturnEntries();
+      if (!visibleReturns.length) throw new Error("No visible eBay returns were found on this page yet.");
+      console.log("[OG eBay Return] Exporting visible returns", visibleReturns.length, visibleReturns);
+      setReturnButtonStatus(button, "Reading details...");
+      const enrichedReturns = await enrichReturnsForImport(visibleReturns, button);
+      const payload = buildReturnBatchTransferPayload(enrichedReturns);
+      setReturnButtonStatus(button, "Sending returns...");
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_SEND_RETURN_BATCH",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "Could not export the eBay returns to OG.");
+      const matched = Number(response.importedCreatedCount ?? response.importedCount ?? 0);
+      const unmatched = Number(response.unmatchedCreated ?? response.unmatchedCount ?? response.unmatched ?? 0);
+      const failed = Number(response.failed || response.failedCount || 0);
+      const duplicates = Number(response.duplicateResolvedCount || 0);
+      const parts = [
+        matched ? `${matched} matched` : "",
+        unmatched ? `${unmatched} missing OG match` : "",
+        failed ? `${failed} rejected` : "",
+        duplicates ? `${duplicates} duplicate` : "",
+      ].filter(Boolean);
+      ogReturnBatchStatusHoldUntil = Date.now() + 4000;
+      setReturnButtonStatus(button, parts.length ? parts.join(", ") : "Sent to OG", failed ? "error" : "success");
+      window.setTimeout(() => {
+        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, "Export Visible Returns to OG");
+      }, 4000);
+    } catch (error) {
+      console.error("[OG eBay Return] Batch transfer failed:", error);
+      ogReturnBatchStatusHoldUntil = Date.now() + 5000;
+      setReturnButtonStatus(button, "Export failed", "error");
+      window.alert(error?.message || "Could not export these eBay returns to OG.");
+      window.setTimeout(() => {
+        if (!ogReturnBatchExportInProgress) setReturnButtonStatus(button, "Export Visible Returns to OG");
+      }, 5000);
+    } finally {
+      ogReturnBatchExportInProgress = false;
     }
   }
 
@@ -1990,7 +2983,7 @@
       });
       if (!response?.ok) throw new Error(response?.error || "Could not hand the bulk label to OG.");
 
-      setBulkLabelButtonStatus(response.opened ? "Opened OG to attach" : "Sent to OG", "success");
+      setBulkLabelButtonStatus(response.canceled ? "Returned to queue" : response.opened ? "Opened OG to attach" : "Sent to OG", "success");
       window.setTimeout(() => setBulkLabelButtonStatus("Send Bulk Labels to OG"), 3500);
     } catch (error) {
       console.error("[OG eBay Label] Failed to send bulk label to OG:", error);
@@ -2189,6 +3182,641 @@
     window.open(buildOgUrl(appUrl, clean, orderSnapshot), "_blank", "noopener,noreferrer");
   }
 
+  function decodeHtmlEntities(value) {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = String(value || "");
+    return textarea.value;
+  }
+
+  function normalizeEbayNavigationUrl(value, baseUrl = window.location.href) {
+    const cleaned = decodeHtmlEntities(value)
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\\//g, "/")
+      .split(/["'<>\s]/)[0];
+    if (!cleaned) return "";
+    try {
+      return new URL(cleaned, baseUrl).toString();
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function findVideoReceiptUrlInText(text, baseUrl = window.location.href) {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/i,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/i,
+    ];
+    for (const pattern of patterns) {
+      const match = body.match(pattern);
+      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
+      if (url && /\/ebaylive\/events\//i.test(url)) return url;
+    }
+    return "";
+  }
+
+  function findOrderDetailsUrlInText(text, baseUrl = window.location.href) {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/mesh\/ord\/details\?[^"'<>\s\\]+/i,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/mesh\\\/ord\\\/details\?[^"'<>\s]+/i,
+    ];
+    for (const pattern of patterns) {
+      const match = body.match(pattern);
+      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
+      if (url && /\/mesh\/ord\/details/i.test(url)) return url;
+    }
+    return "";
+  }
+
+  function getElementSearchText(element) {
+    if (!element) return "";
+    return cleanText([
+      element.textContent,
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title"),
+      element.getAttribute?.("data-action-id"),
+      element.getAttribute?.("href"),
+    ].filter(Boolean).join(" "));
+  }
+
+  function findVideoReceiptLinkElement() {
+    return document.querySelector('[data-action-id="VIDEO_RECEIPT"] a[href]')
+      || document.querySelector('a[href*="/ebaylive/events/"][href*="playback=true"]')
+      || [...document.querySelectorAll('a[href]')].find((link) => /video\s+receipt/i.test(getElementSearchText(link)));
+  }
+
+  function findVideoReceiptUrl() {
+    const fromLink = normalizeEbayNavigationUrl(findVideoReceiptLinkElement()?.getAttribute("href") || "");
+    if (fromLink) return fromLink;
+    return findVideoReceiptUrlInText(document.documentElement?.innerHTML || "");
+  }
+
+  function isEbayOrderDetailsPage() {
+    return /\/mesh\/ord\/details/i.test(window.location.pathname);
+  }
+
+  function findOrderDetailsLinkElement() {
+    return [...document.querySelectorAll('a[href*="/mesh/ord/details"], a[href*="orderid="], a[href*="orderId="]')]
+      .find((link) => /view\s+order\s+details/i.test(getElementSearchText(link)) || /\/mesh\/ord\/details/i.test(link.href || ""));
+  }
+
+  function findOrderDetailsUrl() {
+    const fromLink = normalizeEbayNavigationUrl(findOrderDetailsLinkElement()?.getAttribute("href") || "");
+    if (fromLink && /\/mesh\/ord\/details/i.test(fromLink)) return fromLink;
+    return findOrderDetailsUrlInText(document.documentElement?.innerHTML || "");
+  }
+
+  function findMoreActionsButton() {
+    return [...document.querySelectorAll('button, [role="button"]')]
+      .find((button) => /more\s+actions/i.test(getElementSearchText(button)));
+  }
+
+  function setVideoReceiptStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    if (tone) button.dataset.statusTone = tone;
+    else delete button.dataset.statusTone;
+  }
+
+  async function openVideoReceiptFromDetails(button = null) {
+    setVideoReceiptStatus(button, "Finding receipt...");
+    let receiptUrl = findVideoReceiptUrl();
+    if (!receiptUrl) {
+      const moreActionsButton = findMoreActionsButton();
+      moreActionsButton?.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      receiptUrl = findVideoReceiptUrl();
+    }
+
+    if (!receiptUrl) {
+      setVideoReceiptStatus(button, "Receipt not found", "error");
+      window.alert("I could not find the eBay video receipt on this order details page. Open More actions once, then try again.");
+      return false;
+    }
+
+    window.open(receiptUrl, "_blank", "noopener,noreferrer");
+    setVideoReceiptStatus(button, "Opened video receipt", "success");
+    window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+    return true;
+  }
+
+  async function openVideoReceiptFromItemPage(orderDetailsUrl, button = null) {
+    let receiptWindow = null;
+    try {
+      receiptWindow = window.open("about:blank", "_blank");
+      receiptWindow?.document?.write("<title>Opening eBay video receipt...</title><p>Finding eBay video receipt...</p>");
+    } catch (_) {}
+
+    setVideoReceiptStatus(button, "Finding receipt...");
+    try {
+      const response = await fetch(orderDetailsUrl, { credentials: "include" });
+      if (!response.ok) throw new Error(`Order details returned HTTP ${response.status}`);
+      const html = await response.text();
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      if (receiptUrl) {
+        if (receiptWindow) receiptWindow.location.href = receiptUrl;
+        else window.open(receiptUrl, "_blank", "noopener,noreferrer");
+        setVideoReceiptStatus(button, "Opened video receipt", "success");
+        window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+        return true;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not prefetch video receipt:", error);
+    }
+
+    if (receiptWindow) receiptWindow.location.href = orderDetailsUrl;
+    else window.open(orderDetailsUrl, "_blank", "noopener,noreferrer");
+    setVideoReceiptStatus(button, "Opened order details", "success");
+    window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+    return false;
+  }
+
+  async function fetchEbayHtml(url) {
+    const response = await fetch(url, { credentials: "include", cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
+    return response.text();
+  }
+
+  function returnDetailHasPhotoReferences(detail = {}) {
+    return Boolean(
+      detail?.hasComplaintFiles
+      || (Array.isArray(detail?.returnFileIds) && detail.returnFileIds.length)
+      || (Array.isArray(detail?.complaintBlobUrls) && detail.complaintBlobUrls.length)
+    );
+  }
+
+  function cloneReturnDetail(detail = null) {
+    if (!detail || typeof detail !== "object") return detail;
+    try {
+      return JSON.parse(JSON.stringify(detail));
+    } catch (_) {
+      return { ...detail };
+    }
+  }
+
+  function getReturnDetailCacheKey(detailsUrl = "", returnInfo = {}) {
+    return [
+      normalizeEbayNavigationUrl(detailsUrl || ""),
+      returnInfo.returnId || "",
+      returnInfo.itemNumber || "",
+    ].filter(Boolean).join("|");
+  }
+
+  async function captureLiveReturnDetailPage(detailsUrl, returnInfo = {}) {
+    if (!detailsUrl) return null;
+    assertExtensionContextActive();
+    const cacheKey = getReturnDetailCacheKey(detailsUrl, returnInfo);
+    if (cacheKey && ogReturnDetailCaptureCache.has(cacheKey)) {
+      return {
+        ok: true,
+        details: cloneReturnDetail(ogReturnDetailCaptureCache.get(cacheKey)),
+        cached: true,
+      };
+    }
+    const response = await chrome.runtime.sendMessage({
+      type: "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE",
+      payload: {
+        detailsUrl,
+        returnId: returnInfo.returnId || "",
+        itemNumber: returnInfo.itemNumber || "",
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not capture the live eBay return detail page.");
+    if (cacheKey && response.details) ogReturnDetailCaptureCache.set(cacheKey, cloneReturnDetail(response.details));
+    return response;
+  }
+
+  async function enrichReturnInfoForImport(returnInfo = {}) {
+    const enriched = { ...returnInfo };
+    let detail = returnInfo.returnDetails || null;
+    const detailsUrl = normalizeEbayNavigationUrl(returnInfo.detailsUrl || detail?.detailsUrl || "");
+
+    if (!detail && detailsUrl) {
+      try {
+        const html = await fetchEbayHtml(detailsUrl);
+        detail = extractReturnDetailsFromHtml(html, detailsUrl);
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not read return detail page:", error);
+        detail = {
+          source: "ebay-return-detail-page",
+          detailsUrl,
+          capturedAt: new Date().toISOString(),
+          error: error?.message || String(error || ""),
+        };
+      }
+    }
+
+    if (detailsUrl && returnDetailHasPhotoReferences(detail)) {
+      try {
+        const liveCapture = await captureLiveReturnDetailPage(detailsUrl, returnInfo);
+        if (liveCapture?.details) {
+          detail = {
+            ...(detail || {}),
+            ...liveCapture.details,
+            returnFileIds: unique([
+              ...((detail && Array.isArray(detail.returnFileIds)) ? detail.returnFileIds : []),
+              ...(Array.isArray(liveCapture.details.returnFileIds) ? liveCapture.details.returnFileIds : []),
+            ]),
+            complaintBlobUrls: unique([
+              ...((detail && Array.isArray(detail.complaintBlobUrls)) ? detail.complaintBlobUrls : []),
+              ...(Array.isArray(liveCapture.details.complaintBlobUrls) ? liveCapture.details.complaintBlobUrls : []),
+            ]),
+            complaintImages: Array.isArray(liveCapture.complaintImages) ? liveCapture.complaintImages : [],
+            complaintImageCount: Array.isArray(liveCapture.complaintImages) ? liveCapture.complaintImages.length : 0,
+          };
+        }
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not capture buyer complaint photos:", error);
+      }
+    }
+
+    if (detail) {
+      Object.assign(enriched, {
+        returnDetails: detail,
+        returnReason: returnInfo.returnReason || detail.returnReason || "",
+        buyerUsername: returnInfo.buyerUsername || detail.buyerUsername || "",
+        buyerComment: returnInfo.buyerComment || detail.buyerComment || "",
+        refundText: returnInfo.refundText || detail.requestAmount || "",
+        requestAmount: returnInfo.requestAmount || detail.requestAmount || "",
+        onHoldAmount: returnInfo.onHoldAmount || detail.onHoldAmount || "",
+        datePurchased: returnInfo.datePurchased || detail.datePurchased || "",
+        itemTitle: returnInfo.itemTitle || detail.itemTitle || "",
+        itemUrl: returnInfo.itemUrl || detail.itemUrl || "",
+        itemImageUrl: returnInfo.itemImageUrl || detail.itemImageUrl || "",
+        orderNumber: returnInfo.orderNumber || detail.orderNumber || "",
+        orderDetailsUrl: returnInfo.orderDetailsUrl || detail.orderDetailsUrl || "",
+        returnFileIds: unique([...(returnInfo.returnFileIds || []), ...(detail.returnFileIds || [])]),
+        complaintBlobUrls: unique([...(returnInfo.complaintBlobUrls || []), ...(detail.complaintBlobUrls || [])]),
+        complaintImages: [
+          ...(Array.isArray(returnInfo.complaintImages) ? returnInfo.complaintImages : []),
+          ...(Array.isArray(detail.complaintImages) ? detail.complaintImages : []),
+        ],
+      });
+    }
+
+    const orderDetailsUrl = enriched.orderDetailsUrl || detail?.orderDetailsUrl || "";
+    if (orderDetailsUrl && !enriched.videoReceiptUrl) {
+      try {
+        const orderHtml = await fetchEbayHtml(orderDetailsUrl);
+        enriched.videoReceiptUrl = findVideoReceiptUrlInText(orderHtml, orderDetailsUrl);
+        if (enriched.returnDetails) {
+          enriched.returnDetails.videoReceiptUrl = enriched.videoReceiptUrl || "";
+        }
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not read video receipt URL:", error);
+      }
+    }
+
+    return enriched;
+  }
+
+  async function enrichReturnsForImport(returns = [], button = null) {
+    const total = returns.length;
+    const enriched = new Array(total);
+    let nextIndex = 0;
+    let completed = 0;
+    const concurrency = Math.min(RETURN_DETAIL_BATCH_CONCURRENCY, Math.max(1, total));
+
+    async function worker() {
+      while (nextIndex < total) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (button) setReturnButtonStatus(button, `Reading details ${completed + 1}-${Math.min(completed + concurrency, total)}/${total}...`);
+        try {
+          enriched[index] = await enrichReturnInfoForImport(returns[index]);
+        } catch (error) {
+          console.warn("[OG eBay Return] Could not enrich return details:", error);
+          enriched[index] = returns[index];
+        } finally {
+          completed += 1;
+          if (button) setReturnButtonStatus(button, `Reading details ${completed}/${total}...`);
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, worker));
+    return enriched;
+  }
+
+  function shouldAutoOpenVideoReceiptFromItemPage() {
+    try {
+      return new URL(window.location.href).searchParams.get(VIDEO_RECEIPT_AUTO_PARAM) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function buildVideoReceiptAutoItemUrl(itemUrl) {
+    try {
+      const url = new URL(itemUrl, window.location.href);
+      url.searchParams.set(VIDEO_RECEIPT_AUTO_PARAM, "1");
+      return url.toString();
+    } catch (_) {
+      return itemUrl || "";
+    }
+  }
+
+  async function navigateCurrentItemPageToVideoReceipt(orderDetailsUrl, button = null) {
+    setVideoReceiptStatus(button, "Opening receipt...");
+    try {
+      const html = await fetchEbayHtml(orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      if (receiptUrl) {
+        window.location.assign(receiptUrl);
+        return true;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Auto-open could not resolve receipt:", error);
+    }
+
+    window.location.assign(orderDetailsUrl);
+    return false;
+  }
+
+  function maybeAutoOpenVideoReceiptFromItemPage(orderDetailsUrl, button = null) {
+    if (ogAutoVideoReceiptStarted || !shouldAutoOpenVideoReceiptFromItemPage() || !orderDetailsUrl) return;
+    ogAutoVideoReceiptStarted = true;
+    navigateCurrentItemPageToVideoReceipt(orderDetailsUrl, button);
+  }
+
+  async function openVideoReceiptViaReturnItemPage(returnInfo = {}, button = null) {
+    const resetLabel = button?.dataset?.ogVideoDefaultLabel || "Video Receipt";
+    const itemUrl = getReturnItemUrl(returnInfo);
+    if (itemUrl) {
+      setVideoReceiptStatus(button, "Opening item...");
+      window.open(buildVideoReceiptAutoItemUrl(itemUrl), "_blank", "noopener,noreferrer");
+      window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+      return true;
+    }
+
+    return openVideoReceiptFromReturn(returnInfo, button);
+  }
+
+  async function openVideoReceiptFromReturn(returnInfo = {}, button = null) {
+    const resetLabel = button?.dataset?.ogVideoDefaultLabel || "Video Receipt";
+    let receiptWindow = null;
+    try {
+      receiptWindow = window.open("about:blank", "_blank");
+      receiptWindow?.document?.write("<title>Opening eBay video receipt...</title><p>Finding eBay video receipt...</p>");
+    } catch (_) {}
+
+    setVideoReceiptStatus(button, "Finding receipt...");
+    let orderDetailsUrl = "";
+    let fallbackUrl = returnInfo.itemUrl || returnInfo.detailsUrl || "";
+
+    try {
+      for (const url of unique([returnInfo.itemUrl, returnInfo.detailsUrl]).filter(Boolean)) {
+        const html = await fetchEbayHtml(url);
+        const directReceiptUrl = findVideoReceiptUrlInText(html, url);
+        if (directReceiptUrl) {
+          if (receiptWindow) receiptWindow.location.href = directReceiptUrl;
+          else window.open(directReceiptUrl, "_blank", "noopener,noreferrer");
+          setVideoReceiptStatus(button, "Opened receipt", "success");
+          window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+          return true;
+        }
+        orderDetailsUrl = orderDetailsUrl || findOrderDetailsUrlInText(html, url);
+        if (orderDetailsUrl) break;
+      }
+
+      if (orderDetailsUrl) {
+        const detailsHtml = await fetchEbayHtml(orderDetailsUrl);
+        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl);
+        if (receiptUrl) {
+          if (receiptWindow) receiptWindow.location.href = receiptUrl;
+          else window.open(receiptUrl, "_blank", "noopener,noreferrer");
+          setVideoReceiptStatus(button, "Opened receipt", "success");
+          window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+          return true;
+        }
+        fallbackUrl = orderDetailsUrl;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not resolve return video receipt:", error);
+    }
+
+    if (fallbackUrl) {
+      if (receiptWindow) receiptWindow.location.href = fallbackUrl;
+      else window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+      setVideoReceiptStatus(button, "Opened fallback", "success");
+      window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+      return false;
+    }
+
+    receiptWindow?.close?.();
+    setVideoReceiptStatus(button, "Receipt not found", "error");
+    return false;
+  }
+
+  function isReturnMessagePage() {
+    return /\/rtn\/sendMessage/i.test(window.location.pathname)
+      || Boolean(document.getElementById("commontextarea") && document.getElementById("sendMessage"));
+  }
+
+  function getReturnMessageTextarea() {
+    return document.getElementById("commontextarea")
+      || document.querySelector('textarea[name="rtn-textarea"]')
+      || document.querySelector("textarea");
+  }
+
+  function getReturnMessageSendButton() {
+    return document.getElementById("sendMessage")
+      || [...document.querySelectorAll("button")]
+        .find((button) => /^send$/i.test(cleanText(button.textContent || button.getAttribute("data-orig") || "")));
+  }
+
+  function getVisibleNodeText(element) {
+    if (!element) return "";
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll(".clipped, [aria-hidden='true']").forEach((node) => node.remove());
+    return cleanText(clone.textContent || clone.innerText || "");
+  }
+
+  function readReturnMessageLabelValue(label) {
+    const expected = cleanText(label).toLowerCase();
+    if (!expected) return "";
+    for (const row of document.querySelectorAll("dl, .trui-label-value--vertical")) {
+      const labelText = cleanText(row.querySelector("dt")?.textContent || "").toLowerCase();
+      if (!labelText || !labelText.includes(expected)) continue;
+      const value = getVisibleNodeText(row.querySelector("dd"));
+      if (value) return value;
+    }
+    return "";
+  }
+
+  function extractReturnMessageContext() {
+    const params = new URLSearchParams(window.location.search);
+    const orderHref = document.querySelector('a[href*="/mesh/ord/details?orderid="]')?.getAttribute("href") || "";
+    const orderFromHref = (() => {
+      try {
+        return normalizeOrderNumber(new URL(orderHref, window.location.href).searchParams.get("orderid") || "");
+      } catch (_) {
+        return "";
+      }
+    })();
+    const itemTitle = cleanText(document.getElementById("rtn-item-text")?.textContent || "");
+    return {
+      source: "ebay_return_message_page",
+      direction: "outbound",
+      messageStatus: "sent_from_ebay_page_unverified",
+      returnId: cleanText(params.get("returnId") || readReturnMessageLabelValue("Return ID")),
+      orderNumber: orderFromHref || normalizeOrderNumber(readReturnMessageLabelValue("Order")),
+      buyerUsername: readReturnMessageLabelValue("Buyer"),
+      itemTitle,
+      requestAmount: readReturnMessageLabelValue("Request amount"),
+      onHoldAmount: readReturnMessageLabelValue("On hold amount"),
+      returnReason: readReturnMessageLabelValue("Return Reason"),
+      datePurchased: readReturnMessageLabelValue("Date purchased"),
+      pageUrl: window.location.href,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
+  function buildReturnMessagePayload() {
+    const textarea = getReturnMessageTextarea();
+    const messageBody = cleanText(textarea?.value || "");
+    const metadata = extractReturnMessageContext();
+    return {
+      source: "ebay-return-message-page",
+      message: {
+        ...metadata,
+        messageBody,
+        sentAt: new Date().toISOString(),
+      },
+      metadata,
+    };
+  }
+
+  function getReturnMessageLogKey(payload = {}) {
+    const message = payload.message || {};
+    return [
+      message.returnId || "",
+      message.orderNumber || "",
+      message.messageBody || "",
+    ].join("|");
+  }
+
+  async function logReturnMessageToOg(options = {}) {
+    const payload = buildReturnMessagePayload();
+    const message = payload.message || {};
+    const button = options.button || document.getElementById(RETURN_MESSAGE_SEND_ID);
+    if (!message.messageBody) {
+      if (!options.silent) window.alert("Type the buyer message before logging it to OG.");
+      return { ok: false, error: "Message body is empty." };
+    }
+    if (!message.returnId && !message.orderNumber) {
+      if (!options.silent) window.alert("I could not find the eBay return ID or order number on this message page.");
+      return { ok: false, error: "Missing return/order context." };
+    }
+
+    const logKey = getReturnMessageLogKey(payload);
+    const now = Date.now();
+    if (logKey === ogReturnMessageLastLogKey && now - ogReturnMessageLastLogAt < 30000) {
+      return { ok: true, duplicateSkipped: true };
+    }
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Logging to OG...";
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_LOG_RETURN_MESSAGE",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG did not confirm the message log.");
+      ogReturnMessageLastLogKey = logKey;
+      ogReturnMessageLastLogAt = Date.now();
+      if (button) {
+        button.textContent = response.opened ? "Logged - OG Opened" : "Logged to OG";
+        window.setTimeout(() => {
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = "Send + Log to OG";
+          }
+        }, 1800);
+      }
+      return response;
+    } catch (error) {
+      console.warn("[OG eBay Return Message] Could not log message:", error);
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Log Failed";
+        button.dataset.statusTone = "error";
+        window.setTimeout(() => {
+          if (button.isConnected) {
+            button.textContent = "Send + Log to OG";
+            button.dataset.statusTone = "";
+          }
+        }, 2200);
+      }
+      if (!options.silent) window.alert(error.message || "Could not log this eBay message to OG.");
+      return { ok: false, error: error.message || String(error) };
+    }
+  }
+
+  async function sendReturnMessageWithOgLog(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const ebaySendButton = getReturnMessageSendButton();
+    const response = await logReturnMessageToOg({ button: event.currentTarget });
+    if (!response?.ok) return;
+    if (!ebaySendButton || ebaySendButton.disabled) {
+      window.alert("The eBay Send button is not ready yet. Check the message text and try again.");
+      return;
+    }
+    ebaySendButton.dataset.ogSkipNextAutoLog = "1";
+    ebaySendButton.click();
+  }
+
+  function attachOriginalReturnMessageSendLogger() {
+    const ebaySendButton = getReturnMessageSendButton();
+    if (!ebaySendButton || ebaySendButton.dataset.ogReturnMessageHooked === "true") return;
+    ebaySendButton.dataset.ogReturnMessageHooked = "true";
+    ebaySendButton.addEventListener("click", () => {
+      if (ebaySendButton.dataset.ogSkipNextAutoLog === "1") {
+        ebaySendButton.dataset.ogSkipNextAutoLog = "";
+        return;
+      }
+      logReturnMessageToOg({ silent: true }).catch(() => null);
+    });
+  }
+
+  function injectReturnMessageLoggerButton() {
+    const existing = document.getElementById(RETURN_MESSAGE_SEND_ID);
+    if (!isReturnMessagePage()) {
+      existing?.remove();
+      ogReturnMessageAutoSendHooked = false;
+      return;
+    }
+
+    const ebaySendButton = getReturnMessageSendButton();
+    const textarea = getReturnMessageTextarea();
+    if (!ebaySendButton || !textarea) return;
+
+    attachOriginalReturnMessageSendLogger();
+
+    let button = existing;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = RETURN_MESSAGE_SEND_ID;
+      button.textContent = "Send + Log to OG";
+      button.title = "Log this outbound eBay return message in OG, then click eBay Send.";
+      button.addEventListener("click", sendReturnMessageWithOgLog);
+      ebaySendButton.insertAdjacentElement("afterend", button);
+    }
+    button.disabled = false;
+    if (!ogReturnMessageAutoSendHooked) {
+      ogReturnMessageAutoSendHooked = true;
+      textarea.addEventListener("input", () => {
+        if (button.textContent !== "Send + Log to OG") button.textContent = "Send + Log to OG";
+      });
+    }
+  }
+
   function ensureStyles() {
     if (document.getElementById("og-ebay-order-link-styles")) return;
     const style = document.createElement("style");
@@ -2208,6 +3836,72 @@
 
       .${BUTTON_CLASS}:hover {
         background: #dcebff;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS} {
+        margin-left: 8px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 12px Arial, sans-serif;
+        line-height: 1;
+        padding: 6px 10px;
+        white-space: nowrap;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}:hover {
+        background: #d4f8df;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-floating="true"] {
+        position: fixed;
+        right: 18px;
+        bottom: 72px;
+        z-index: 2147483647;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
+        font-size: 14px;
+        padding: 12px 16px;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID} {
+        margin-left: 12px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 14px Arial, sans-serif;
+        min-height: 42px;
+        padding: 10px 16px;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}:disabled {
+        cursor: wait;
+        opacity: .72;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
       }
 
       #${FLOATING_ID},
@@ -2304,7 +3998,9 @@
         right: 18px;
         bottom: 288px;
         z-index: 2147483647;
-        max-width: min(460px, calc(100vw - 36px));
+        max-width: min(520px, calc(100vw - 36px));
+        max-height: min(68vh, 720px);
+        overflow: auto;
         border: 2px solid #b42318;
         border-radius: 18px;
         background: #fff0ed;
@@ -2312,6 +4008,76 @@
         box-shadow: 0 14px 34px rgba(0, 0, 0, .24);
         font: 900 13px/1.35 Arial, sans-serif;
         padding: 12px 14px;
+      }
+
+      .og-ebay-coverage-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 8px;
+      }
+
+      .og-ebay-coverage-details-toggle {
+        appearance: none;
+        border: 1px solid #b42318;
+        border-radius: 999px;
+        background: #fff;
+        color: #7a130c;
+        cursor: pointer;
+        font: 900 12px/1 Arial, sans-serif;
+        padding: 7px 10px;
+      }
+
+      .og-ebay-coverage-details-toggle:hover {
+        background: #ffe1dc;
+      }
+
+      .og-ebay-hidden-coverage-details {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .og-ebay-hidden-coverage-details[hidden] {
+        display: none !important;
+      }
+
+      .og-ebay-hidden-coverage-details article {
+        display: grid;
+        gap: 4px;
+        padding: 9px 10px;
+        border: 1px solid rgba(180, 35, 24, .28);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, .76);
+      }
+
+      .og-ebay-hidden-coverage-details strong,
+      .og-ebay-hidden-coverage-details span,
+      .og-ebay-hidden-coverage-details li,
+      .og-ebay-hidden-empty {
+        overflow-wrap: anywhere;
+      }
+
+      .og-ebay-hidden-coverage-details span {
+        color: #9f1f14;
+        font: 800 12px/1.3 Arial, sans-serif;
+      }
+
+      .og-ebay-hidden-coverage-details ul {
+        display: grid;
+        gap: 3px;
+        margin: 2px 0 0;
+        padding-left: 18px;
+      }
+
+      .og-ebay-hidden-coverage-details li {
+        color: #57100b;
+        font: 800 12px/1.35 Arial, sans-serif;
+      }
+
+      .og-ebay-hidden-empty {
+        margin: 0;
+        color: #9f1f14;
+        font: 800 12px/1.35 Arial, sans-serif;
       }
 
       .og-ebay-actions-highlight {
@@ -2335,6 +4101,10 @@
       .og-ebay-buyer-group-row {
         position: relative;
         transition: background-color 160ms ease, box-shadow 160ms ease;
+      }
+
+      .og-ebay-closed-in-og {
+        display: none !important;
       }
 
       .og-ebay-buyer-group-a {
@@ -2501,9 +4271,54 @@
         background: #d4f8df;
       }
 
+      .${SEND_RETURN_BUTTON_CLASS} {
+        margin-left: 8px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 12px Arial, sans-serif;
+        padding: 7px 10px;
+      }
+
+      .${SEND_RETURN_BUTTON_CLASS}:hover {
+        background: #d4f8df;
+      }
+
+      #${SEND_RETURN_BATCH_ID} {
+        width: 100%;
+        margin: 0;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
+        cursor: pointer;
+        font: 900 13px Arial, sans-serif;
+        padding: 9px 12px;
+        text-align: center;
+      }
+
+      #${SEND_RETURN_BATCH_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${SEND_RETURN_PANEL_ID} {
+        position: fixed;
+        right: 16px;
+        bottom: 154px;
+        z-index: 2147483646;
+        width: min(300px, calc(100vw - 32px));
+        color: #0f2a1b;
+        font-family: Arial, sans-serif;
+      }
+
       #${SEND_LABEL_ID}[data-status-tone="error"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="error"],
-      #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"] {
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="error"],
+      #${SEND_RETURN_BATCH_ID}[data-status-tone="error"],
+      .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="error"] {
         border-color: #b42318;
         background: #fff0ed;
         color: #9f1f14;
@@ -2511,7 +4326,9 @@
 
       #${SEND_LABEL_ID}[data-status-tone="success"],
       #${SEND_BULK_LABELS_ID}[data-status-tone="success"],
-      #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"] {
+      #${SEND_AWAITING_REPORT_ID}[data-status-tone="success"],
+      #${SEND_RETURN_BATCH_ID}[data-status-tone="success"],
+      .${SEND_RETURN_BUTTON_CLASS}[data-status-tone="success"] {
         border-color: #116b36;
         background: #d8f8e2;
         color: #0a5b2b;
@@ -2607,6 +4424,98 @@
 
       link.insertAdjacentElement("afterend", button);
     });
+  }
+
+  function injectItemVideoReceiptShortcut() {
+    let button = document.getElementById(VIDEO_RECEIPT_ITEM_ID);
+    const orderDetailsUrl = !isEbayOrderDetailsPage() && /\/itm\//i.test(window.location.pathname)
+      ? findOrderDetailsUrl()
+      : "";
+
+    if (!orderDetailsUrl) {
+      button?.remove();
+      return;
+    }
+
+    const orderDetailsLink = findOrderDetailsLinkElement();
+    const parent = orderDetailsLink?.parentElement;
+    if (!parent) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_ITEM_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.textContent = "Open Video Receipt";
+      button.title = "Fetch this eBay order details page and open the eBay Live video receipt";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentUrl = findOrderDetailsUrl();
+        if (!currentUrl) {
+          setVideoReceiptStatus(button, "Order details missing", "error");
+          return;
+        }
+        openVideoReceiptFromItemPage(currentUrl, button);
+      });
+    }
+
+    if (!parent.contains(button)) {
+      const openOgButton = parent.querySelector(`.${BUTTON_CLASS}`);
+      (openOgButton || orderDetailsLink).insertAdjacentElement("afterend", button);
+    }
+
+    maybeAutoOpenVideoReceiptFromItemPage(orderDetailsUrl, button);
+  }
+
+  function injectOrderDetailsVideoReceiptShortcut() {
+    let button = document.getElementById(VIDEO_RECEIPT_DETAILS_ID);
+
+    if (!isEbayOrderDetailsPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!findVideoReceiptUrl() && !findMoreActionsButton()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_DETAILS_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.textContent = "Open Video Receipt";
+      button.title = "Open the eBay Live video receipt for this order";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openVideoReceiptFromDetails(button);
+      });
+    }
+
+    const moreActionsButton = findMoreActionsButton();
+    const inlineContainer = moreActionsButton?.closest(".actions, .line-actions, .more-actions")?.parentElement
+      || moreActionsButton?.parentElement
+      || findVideoReceiptLinkElement()?.closest(".actions, .line-actions, .more-actions")?.parentElement;
+
+    if (inlineContainer && isElementVisible(inlineContainer)) {
+      delete button.dataset.ogFloating;
+      if (!inlineContainer.contains(button)) inlineContainer.appendChild(button);
+      return;
+    }
+
+    button.dataset.ogFloating = "true";
+    if (!button.parentElement) document.body.appendChild(button);
+  }
+
+  function injectVideoReceiptShortcuts() {
+    injectItemVideoReceiptShortcut();
+    injectOrderDetailsVideoReceiptShortcut();
   }
 
   function injectFloatingButton() {
@@ -2734,6 +4643,127 @@
     }
   }
 
+  function createReturnSendButton(returnInfo) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = SEND_RETURN_BUTTON_CLASS;
+    button.dataset.ogReturnId = returnInfo.returnId;
+    button.textContent = "Open Return in OG";
+    button.title = `Open eBay return ${returnInfo.returnId} in OG Returns`;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      sendReturnToOg(returnInfo, button);
+    });
+    return button;
+  }
+
+  function createReturnVideoReceiptButton(returnInfo) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+    button.dataset.ogReturnId = returnInfo.returnId;
+    button.dataset.ogVideoDefaultLabel = "Video Receipt";
+    button.textContent = "Video Receipt";
+    button.title = "Open the eBay Live video receipt tied to this returned item";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openVideoReceiptViaReturnItemPage(returnInfo, button);
+    });
+    return button;
+  }
+
+  function ensureReturnBatchExportButton(panel, returns = [], options = {}) {
+    if (!panel) return null;
+    let button = panel.querySelector(`#${SEND_RETURN_BATCH_ID}`);
+    if (!button) {
+      panel.textContent = "";
+      button = document.createElement("button");
+      button.id = SEND_RETURN_BATCH_ID;
+      button.type = "button";
+      button.title = "Export the visible eBay returns on this page to OG Return Work Queue";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendReturnBatchToOg(getEbayReturnEntries(), event.currentTarget);
+      });
+      panel.appendChild(button);
+    }
+
+    button.dataset.ogReturnCount = String(returns.length || 0);
+    button.title = options.title || "Export the visible eBay returns on this page to OG Return Work Queue";
+
+    const preserveCurrentStatus = ogReturnBatchExportInProgress || Date.now() < ogReturnBatchStatusHoldUntil;
+    if (!preserveCurrentStatus) {
+      setReturnButtonStatus(button, options.label || "Export Visible Returns to OG", options.tone || "");
+      button.disabled = Boolean(options.disabled);
+    }
+
+    return button;
+  }
+
+  function injectReturnPageButtons() {
+    const looksLikeReturnsPage = isEbayReturnsPage();
+    const returns = getEbayReturnEntries();
+    let panel = document.getElementById(SEND_RETURN_PANEL_ID);
+    document.querySelectorAll(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
+      const returnId = button.dataset.ogReturnId || "";
+      if (!returns.some((entry) => entry.returnId === returnId)) button.remove();
+    });
+    document.querySelectorAll(`.${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
+      const returnId = button.dataset.ogReturnId || "";
+      if (!returns.some((entry) => entry.returnId === returnId)) button.remove();
+    });
+
+    if (!returns.length) {
+      if (looksLikeReturnsPage) {
+        if (!panel) {
+          panel = document.createElement("aside");
+          panel.id = SEND_RETURN_PANEL_ID;
+          document.body.appendChild(panel);
+        }
+        ensureReturnBatchExportButton(panel, returns, {
+          label: "Finding eBay returns...",
+          tone: "error",
+          disabled: true,
+          title: "The extension has not found visible eBay return rows on this page yet.",
+        });
+      } else {
+        panel?.remove();
+      }
+      return;
+    }
+
+    returns.forEach((returnInfo) => {
+      const anchor = findReturnAnchor(returnInfo);
+      const parent = anchor?.parentElement;
+      if (!parent) return;
+      let insertionTarget = anchor;
+      if (!parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) {
+        const button = createReturnSendButton(returnInfo);
+        button.dataset.ogReturnRowButton = "true";
+        anchor.insertAdjacentElement("afterend", button);
+        insertionTarget = button;
+      } else {
+        insertionTarget = parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`) || anchor;
+      }
+      if (!parent.querySelector(`.${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) {
+        const receiptButton = createReturnVideoReceiptButton(returnInfo);
+        receiptButton.dataset.ogReturnRowButton = "true";
+        insertionTarget.insertAdjacentElement("afterend", receiptButton);
+      }
+    });
+
+    if (!panel) {
+      panel = document.createElement("aside");
+      panel.id = SEND_RETURN_PANEL_ID;
+      document.body.appendChild(panel);
+    }
+
+    ensureReturnBatchExportButton(panel, returns);
+  }
+
   function injectPrioritizeDueOrdersButton() {
     let button = document.getElementById(PRIORITIZE_DUE_ORDERS_ID);
 
@@ -2823,12 +4853,16 @@
   function injectOgControls() {
     ensureStyles();
     attachBuyerGroupSelectionHandlers();
+    syncLocallyClosedAwaitingRows();
     injectRowButtons();
+    injectVideoReceiptShortcuts();
     injectFloatingButton();
     injectSingleOrderButton();
     injectSendLabelButton();
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
+    injectReturnPageButtons();
+    injectReturnMessageLoggerButton();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();
     maybeShowBoxReminder();
@@ -2846,6 +4880,13 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
+      captureCurrentReturnDetailForOg(message.payload || {})
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message?.type !== "OG_EBAY_REORGANIZE_AWAITING_QUEUE") return false;
 
     (async () => {
@@ -2855,11 +4896,26 @@
       }
 
       injectOgControls();
-      updatePriorityButtonStatus("Refreshing OG priorities...");
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
-      const result = await prioritizeEbayRowsFromOg({ silent: false });
+      updatePriorityButtonStatus(message.payload?.priorityPayload?.ok ? "Sorting with OG priorities..." : "Refreshing OG priorities...");
+      await new Promise((resolve) => window.setTimeout(resolve, message.payload?.fastRefresh ? 40 : 160));
+      const priorityPayload = await getOrganizerPriorityPayload(message.payload || {});
+      const hidden = hideClosedAwaitingRowsFromOg(message.payload || {}, priorityPayload);
+      const result = applyOgPendingPriorities(priorityPayload);
+      updatePriorityButtonStatusFromResult(result, priorityPayload);
+      if (hidden.hiddenRows && result?.ok) {
+        updatePriorityButtonStatus(
+          `Hid ${hidden.hiddenRows} completed order${hidden.hiddenRows === 1 ? "" : "s"}; sorted ${Number(result.visibleRows || 0).toLocaleString()} visible row${Number(result.visibleRows || 0) === 1 ? "" : "s"}`,
+          "success"
+        );
+      } else if (hidden.stillPendingOrderNumbers?.length && result?.ok) {
+        updatePriorityButtonStatus(
+          `Order still has OG pending work; sorted ${Number(result.visibleRows || 0).toLocaleString()} visible row${Number(result.visibleRows || 0) === 1 ? "" : "s"}`,
+          "success"
+        );
+      }
       updateBulkActionsShortcut();
-      sendResponse({ ok: Boolean(result?.ok), result });
+      await focusEbayBulkActionsWhenReady({ onlyIfSelected: true });
+      sendResponse({ ok: Boolean(result?.ok), result, hidden });
     })().catch((error) => {
       console.warn("[OG eBay Priority] Refresh after queue change failed:", error);
       updatePriorityButtonStatus("Refresh needs OG Pending Orders", "error");
