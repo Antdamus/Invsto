@@ -434,6 +434,55 @@ async function loadAdminOrderTasks() {
   }).join("");
 }
 
+function getTeamTaskDashboardLabel(task = {}) {
+  if (task.task_type === "inventory") return "Inventory";
+  if (task.task_type === "shipping") return "Shipping";
+  if (task.task_type === "customer_service") return "Customer";
+  if (task.task_type === "maintenance") return "Maintenance";
+  if (task.task_type === "admin_review") return "Admin";
+  return "Team";
+}
+
+async function loadAdminTeamTasks() {
+  const container = document.getElementById("admin-team-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading team tasks...</div>`;
+
+  const { data, error } = await supabase.rpc("list_admin_team_tasks", { _limit: 6 });
+
+  if (error) {
+    console.warn("Failed to load team tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load team tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No open independent team tasks need attention.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_admin" ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.title || "Team task")}</strong>
+            <span>${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getTeamTaskDashboardLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.description || "Task needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Due ${escapeHtml(task.due_at ? formatDateTime(task.due_at) : "not set")}</span>
+          <span>Created: ${escapeHtml(task.created_by_email || "logged-in user")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 async function loadAdminReturnTasks() {
   const container = document.getElementById("admin-return-tasks-container");
   if (!container) return;
@@ -820,6 +869,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadUrgentOrders();
   await loadStoreTransferAlerts();
   await loadAdminOrderTasks();
+  await loadAdminTeamTasks();
   await loadAdminReturnTasks();
 
   const items = await loadInventoryData();

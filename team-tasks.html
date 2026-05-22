@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - Team Tasks</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="team-tasks.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body data-page="team-tasks">
+  <div class="page">
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <div class="logo">OG</div>
+        <nav class="nav-links"></nav>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="header">
+        <div class="header-inner">
+          <div class="greeting">
+            <strong id="team-task-greeting">Team Tasks</strong>
+            <div class="sub">Independent admin and worker assignments with notes, photos, and completion trail</div>
+          </div>
+          <div class="header-pills">
+            <div class="pill">Scope: <b>Internal</b></div>
+            <div class="pill">Mode: <b id="team-task-mode">Tasks</b></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content team-task-page">
+        <section class="team-task-hero">
+          <div>
+            <span class="eyebrow">Independent Work Queue</span>
+            <h1>Team Tasks</h1>
+            <p>Create work that is not tied to a specific order, assign it, document the answer, and mark it resolved when finished.</p>
+          </div>
+          <div class="team-task-actions">
+            <button id="new-team-task" type="button" class="primary-btn">
+              <i data-lucide="plus"></i>
+              New Task
+            </button>
+            <button id="refresh-team-tasks" type="button" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh
+            </button>
+          </div>
+        </section>
+
+        <p id="team-task-status" class="team-task-status" aria-live="polite"></p>
+
+        <section class="team-task-board">
+          <div class="team-task-board-head">
+            <div>
+              <span class="eyebrow">Active Tasks</span>
+              <h2 id="team-task-list-title">Assigned and Created Tasks</h2>
+            </div>
+            <span id="team-task-count" class="team-task-count">0 tasks</span>
+          </div>
+          <div id="team-task-list" class="team-task-list">
+            <div class="empty-state">Loading team tasks...</div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="team-task-modal" class="team-task-modal hidden" role="dialog" aria-modal="true" aria-labelledby="team-task-modal-title">
+    <div class="team-task-modal-card">
+      <button id="close-team-task-modal" class="modal-close-btn" type="button" aria-label="Close">x</button>
+      <span class="eyebrow">Task Trail</span>
+      <h2 id="team-task-modal-title">Create team task</h2>
+      <p id="team-task-modal-subtitle">Assign a task and save the instructions in the audit trail.</p>
+
+      <label id="team-task-title-field" class="team-task-field">
+        Title
+        <input id="team-task-title-input" type="text" placeholder="Short task title" autocomplete="off" />
+      </label>
+
+      <div class="team-task-form-grid">
+        <label class="team-task-field">
+          Assign To
+          <select id="team-task-assignee"></select>
+        </label>
+        <label class="team-task-field">
+          Category
+          <select id="team-task-type">
+            <option value="general">General</option>
+            <option value="inventory">Inventory</option>
+            <option value="shipping">Shipping</option>
+            <option value="customer_service">Customer Service</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="admin_review">Admin Review</option>
+          </select>
+        </label>
+        <label class="team-task-field">
+          Priority
+          <select id="team-task-priority">
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label class="team-task-field">
+          Due
+          <input id="team-task-due-at" type="datetime-local" />
+        </label>
+        <label id="team-task-status-field" class="team-task-field hidden">
+          Status
+          <select id="team-task-status-input">
+            <option value="">Keep current status</option>
+            <option value="in_progress">In progress</option>
+            <option value="waiting_on_admin">Waiting on admin</option>
+            <option value="waiting_on_worker">Waiting on worker</option>
+            <option value="resolved">Resolved</option>
+            <option value="cancelled">Cancel task</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="team-task-field">
+        Note
+        <textarea id="team-task-note" rows="4" placeholder="Write the instructions, answer, or completion note."></textarea>
+      </label>
+
+      <section class="team-task-photos">
+        <div class="team-task-photo-head">
+          <div>
+            <span class="eyebrow">Optional Photos</span>
+            <h3>Evidence</h3>
+          </div>
+          <div class="team-task-photo-actions">
+            <select id="team-task-capture-station" aria-label="Camera station">
+              <option value="">Loading stations...</option>
+            </select>
+            <button id="refresh-team-task-stations" type="button" class="secondary-btn">Refresh Stations</button>
+            <button id="request-team-task-photo" type="button" class="secondary-btn">Take Photo With OG App</button>
+            <label class="secondary-btn team-task-file-picker">
+              Add Photos
+              <input id="team-task-photo-file" type="file" accept="image/*" multiple />
+            </label>
+          </div>
+        </div>
+        <p id="team-task-photo-status" class="team-task-status"></p>
+        <div id="team-task-photo-grid" class="team-task-photo-grid">
+          <div class="empty-state">No task photos added.</div>
+        </div>
+      </section>
+
+      <p id="team-task-modal-error" class="team-task-status is-error"></p>
+      <div class="team-task-modal-actions">
+        <button id="cancel-team-task-modal" type="button" class="secondary-btn">Exit</button>
+        <button id="submit-team-task" type="button" class="primary-btn">Save Task</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="admin-nav.js"></script>
+  <script src="team-tasks.js"></script>
+</body>
+</html>

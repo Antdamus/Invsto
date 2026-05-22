@@ -474,6 +474,58 @@ async function loadWorkerOrderTasks(userId) {
   }).join("");
 }
 
+function getWorkerTeamTaskLabel(task = {}) {
+  if (task.task_type === "inventory") return "Inventory";
+  if (task.task_type === "shipping") return "Shipping";
+  if (task.task_type === "customer_service") return "Customer";
+  if (task.task_type === "maintenance") return "Maintenance";
+  if (task.task_type === "admin_review") return "Admin";
+  return "Team";
+}
+
+async function loadWorkerTeamTasks(userId) {
+  const container = $("worker-team-tasks-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading team tasks...</div>`;
+  if (!userId) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned team tasks.</div>`;
+    return;
+  }
+
+  const { data, error } = await window.supabase.rpc("list_my_team_tasks", { _limit: 6 });
+  if (error) {
+    console.warn("Failed to load worker team tasks:", error);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned team tasks.</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No independent team tasks are currently assigned to you.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map((task) => {
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_worker" ? "is-overdue" : "is-soon";
+    return `
+      <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
+        <div class="urgent-order-top">
+          <div>
+            <strong>${escapeHtml(task.title || "Team task")}</strong>
+            <span>${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
+          </div>
+          <span class="urgent-order-badge">${escapeHtml(getWorkerTeamTaskLabel(task))}</span>
+        </div>
+        <small>${escapeHtml(task.latest_note || task.description || "Task needs attention")}</small>
+        <div class="urgent-order-meta">
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          <span>Due ${escapeHtml(task.due_at ? fmtDate(task.due_at) : "not set")}</span>
+          <span>Created: ${escapeHtml(task.created_by_email || "logged-in user")}</span>
+        </div>
+      </a>
+    `;
+  }).join("");
+}
+
 /** ---------- UI helpers ---------- */
 function setSoftError(msg) {
   const el = $("soft-error");
@@ -1048,6 +1100,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadWorkerUrgentOrders();
     await loadWorkerStoreTransferAlerts();
     await loadWorkerOrderTasks(userId);
+    await loadWorkerTeamTasks(userId);
     await loadWorkerReturnTasks(userId);
 
     // 2) Break cap
@@ -1128,6 +1181,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       try {
         await refreshCurrentView(state);
         await loadWorkerOrderTasks(userId);
+        await loadWorkerTeamTasks(userId);
         await loadWorkerReturnTasks(userId);
 
         const curKey = monthKey(startOfMonthLocal(new Date()));
