@@ -305,6 +305,54 @@
     });
   }
 
+  async function sendMessageToTabWithRetry(tabId, message, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts || 12));
+    const initialDelayMs = Number(options.initialDelayMs ?? 500);
+    const retryDelayMs = Number(options.retryDelayMs ?? 500);
+    let lastError = null;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const delay = attempt ? retryDelayMs : initialDelayMs;
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, message);
+        if (response) return response;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new Error(lastError?.message || "The eBay detail page did not answer the extension capture request.");
+  }
+
+  async function captureReturnDetailPage(payload = {}) {
+    const detailsUrl = normalizeUrl(payload.detailsUrl);
+    if (!detailsUrl || !/(^|\.)ebay\.com$/i.test(detailsUrl.hostname)) {
+      throw new Error("The return detail URL is not an eBay page.");
+    }
+
+    const tab = await chrome.tabs.create({
+      url: detailsUrl.toString(),
+      active: false,
+    });
+
+    try {
+      await waitForTabComplete(tab.id, 30000);
+      const response = await sendMessageToTabWithRetry(tab.id, {
+        type: "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE",
+        payload,
+      }, {
+        attempts: 14,
+        initialDelayMs: 900,
+        retryDelayMs: 650,
+      });
+      if (!response?.ok) throw new Error(response?.error || "The eBay detail page did not return complaint photos.");
+      return response;
+    } finally {
+      if (tab?.id) chrome.tabs.remove(tab.id).catch(() => null);
+    }
+  }
+
   async function askAwaitingTabToOrganize(tabId, payload = {}, options = {}) {
     const message = {
       type: "OG_EBAY_REORGANIZE_AWAITING_QUEUE",
@@ -1046,6 +1094,13 @@
 
     if (message.type === "OG_EBAY_SEND_RETURN" || message.type === "OG_EBAY_SEND_RETURN_BATCH") {
       relayReturnToApp(message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
+      captureReturnDetailPage(message.payload || {})
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;

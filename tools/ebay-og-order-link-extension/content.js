@@ -32,6 +32,7 @@
   const LABEL_PROBE_READY_TIMEOUT_MS = 5000;
   const REPORT_STATUS_TIMEOUT_MS = 120000;
   const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
+  const RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS = 9000;
   let currentBoxReminderKey = "";
   let dismissedBoxReminderKey = "";
   let shownBoxReminderKey = "";
@@ -2354,6 +2355,109 @@
     return btoa(binary);
   }
 
+  function getCssUrl(value = "") {
+    const match = String(value || "").match(/url\((["']?)(.*?)\1\)/i);
+    return match?.[2] || "";
+  }
+
+  function isVisibleElement(element) {
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && style.opacity !== "0"
+      && Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+  }
+
+  function getReturnComplaintImageUrl(element) {
+    if (!element) return "";
+    if (element.matches?.("img[src]")) return element.getAttribute("src") || element.src || "";
+    return getCssUrl(element.style?.backgroundImage || element.getAttribute?.("style") || "");
+  }
+
+  function getReturnComplaintImageCandidates() {
+    const selectors = [
+      "#preview-list .file-holder",
+      ".preview-list .file-holder",
+      "#preview-list img[src^='blob:']",
+      ".preview-list img[src^='blob:']",
+      "[style*='blob:https://www.ebay.com/']",
+    ];
+    const all = unique(selectors.flatMap((selector) => [...document.querySelectorAll(selector)]))
+      .map((element, index) => ({
+        element,
+        index,
+        url: getReturnComplaintImageUrl(element),
+        fileId: element.closest?.("[data-file-id]")?.getAttribute("data-file-id") || "",
+        visible: isVisibleElement(element),
+      }))
+      .filter((entry) => /^blob:https:\/\/www\.ebay\.com\//i.test(entry.url));
+    const visible = all.filter((entry) => entry.visible);
+    const source = visible.length ? visible : all;
+    const byUrl = new Map();
+    source.forEach((entry) => {
+      if (!byUrl.has(entry.url)) byUrl.set(entry.url, entry);
+    });
+    return [...byUrl.values()];
+  }
+
+  async function waitForReturnComplaintImageCandidates(timeoutMs = RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const candidates = getReturnComplaintImageCandidates();
+      if (candidates.length) return candidates;
+      await delay(250);
+    }
+    return getReturnComplaintImageCandidates();
+  }
+
+  async function captureReturnComplaintImages(detail = {}) {
+    const candidates = await waitForReturnComplaintImageCandidates();
+    const returnFileIds = Array.isArray(detail.returnFileIds) ? detail.returnFileIds : [];
+    const captured = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      try {
+        const response = await fetch(candidate.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (!/^image\//i.test(blob.type || "")) continue;
+        const buffer = await blob.arrayBuffer();
+        captured.push({
+          source: "ebay-return-detail-blob",
+          returnFileId: returnFileIds[index] || candidate.fileId || "",
+          fileId: candidate.fileId || "",
+          index,
+          mimeType: blob.type || "image/jpeg",
+          size: blob.size || buffer.byteLength || 0,
+          base64: arrayBufferToBase64(buffer),
+          capturedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not capture buyer complaint image:", error);
+      }
+    }
+    return captured;
+  }
+
+  async function captureCurrentReturnDetailForOg(payload = {}) {
+    const detailsUrl = window.location.href;
+    const html = document.documentElement?.outerHTML || "";
+    const detail = extractReturnDetailsFromHtml(html, detailsUrl);
+    const complaintImages = await captureReturnComplaintImages(detail);
+    return {
+      ok: true,
+      details: {
+        ...detail,
+        returnId: detail.returnId || payload.returnId || "",
+        complaintImages,
+        complaintImageCount: complaintImages.length,
+      },
+      complaintImages,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   function injectLabelCaptureProbe() {
     return new Promise((resolve, reject) => {
       const existing = document.getElementById("og-ebay-label-capture-probe");
@@ -3228,23 +3332,70 @@
     return response.text();
   }
 
+  function returnDetailHasPhotoReferences(detail = {}) {
+    return Boolean(
+      detail?.hasComplaintFiles
+      || (Array.isArray(detail?.returnFileIds) && detail.returnFileIds.length)
+      || (Array.isArray(detail?.complaintBlobUrls) && detail.complaintBlobUrls.length)
+    );
+  }
+
+  async function captureLiveReturnDetailPage(detailsUrl, returnInfo = {}) {
+    if (!detailsUrl) return null;
+    assertExtensionContextActive();
+    const response = await chrome.runtime.sendMessage({
+      type: "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE",
+      payload: {
+        detailsUrl,
+        returnId: returnInfo.returnId || "",
+        itemNumber: returnInfo.itemNumber || "",
+      },
+    });
+    if (!response?.ok) throw new Error(response?.error || "Could not capture the live eBay return detail page.");
+    return response;
+  }
+
   async function enrichReturnInfoForImport(returnInfo = {}) {
     const enriched = { ...returnInfo };
     let detail = returnInfo.returnDetails || null;
+    const detailsUrl = normalizeEbayNavigationUrl(returnInfo.detailsUrl || detail?.detailsUrl || "");
 
-    if (!detail && returnInfo.detailsUrl) {
+    if (!detail && detailsUrl) {
       try {
-        const detailsUrl = normalizeEbayNavigationUrl(returnInfo.detailsUrl);
         const html = await fetchEbayHtml(detailsUrl);
         detail = extractReturnDetailsFromHtml(html, detailsUrl);
       } catch (error) {
         console.warn("[OG eBay Return] Could not read return detail page:", error);
         detail = {
           source: "ebay-return-detail-page",
-          detailsUrl: returnInfo.detailsUrl,
+          detailsUrl,
           capturedAt: new Date().toISOString(),
           error: error?.message || String(error || ""),
         };
+      }
+    }
+
+    if (detailsUrl && returnDetailHasPhotoReferences(detail)) {
+      try {
+        const liveCapture = await captureLiveReturnDetailPage(detailsUrl, returnInfo);
+        if (liveCapture?.details) {
+          detail = {
+            ...(detail || {}),
+            ...liveCapture.details,
+            returnFileIds: unique([
+              ...((detail && Array.isArray(detail.returnFileIds)) ? detail.returnFileIds : []),
+              ...(Array.isArray(liveCapture.details.returnFileIds) ? liveCapture.details.returnFileIds : []),
+            ]),
+            complaintBlobUrls: unique([
+              ...((detail && Array.isArray(detail.complaintBlobUrls)) ? detail.complaintBlobUrls : []),
+              ...(Array.isArray(liveCapture.details.complaintBlobUrls) ? liveCapture.details.complaintBlobUrls : []),
+            ]),
+            complaintImages: Array.isArray(liveCapture.complaintImages) ? liveCapture.complaintImages : [],
+            complaintImageCount: Array.isArray(liveCapture.complaintImages) ? liveCapture.complaintImages.length : 0,
+          };
+        }
+      } catch (error) {
+        console.warn("[OG eBay Return] Could not capture buyer complaint photos:", error);
       }
     }
 
@@ -3265,6 +3416,10 @@
         orderDetailsUrl: returnInfo.orderDetailsUrl || detail.orderDetailsUrl || "",
         returnFileIds: unique([...(returnInfo.returnFileIds || []), ...(detail.returnFileIds || [])]),
         complaintBlobUrls: unique([...(returnInfo.complaintBlobUrls || []), ...(detail.complaintBlobUrls || [])]),
+        complaintImages: [
+          ...(Array.isArray(returnInfo.complaintImages) ? returnInfo.complaintImages : []),
+          ...(Array.isArray(detail.complaintImages) ? detail.complaintImages : []),
+        ],
       });
     }
 
@@ -4438,6 +4593,13 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
+      captureCurrentReturnDetailForOg(message.payload || {})
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message?.type !== "OG_EBAY_REORGANIZE_AWAITING_QUEUE") return false;
 
     (async () => {

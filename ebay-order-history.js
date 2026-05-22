@@ -1088,6 +1088,7 @@ async function loadReturnQueue() {
       .limit(500);
     if (error) throw error;
     state.returnTasks = data || [];
+    await hydrateReturnComplaintImageUrls(state.returnTasks);
     await loadReturnTaskLines(state.returnTasks);
     renderReturnQueue();
     applyReturnTaskLaunchSelection();
@@ -1122,6 +1123,7 @@ function getReturnComplaintDetails(task = {}) {
   const metadata = getReturnTaskPayload(task);
   const detail = metadata.returnDetails || {};
   const imageUrls = unique([
+    ...(Array.isArray(task.complaintImageUrls) ? task.complaintImageUrls : []),
     metadata.complaintImageUrl,
     ...(Array.isArray(metadata.complaintImageUrls) ? metadata.complaintImageUrls : []),
     ...(Array.isArray(detail.complaintImageUrls) ? detail.complaintImageUrls : []),
@@ -1147,6 +1149,31 @@ function getReturnComplaintDetails(task = {}) {
     imageUrls,
     blobUrls,
   };
+}
+
+function getReturnComplaintImageRecordsFromPayload(metadata = {}) {
+  const detail = metadata.returnDetails || {};
+  return [
+    ...(Array.isArray(metadata.complaintImages) ? metadata.complaintImages : []),
+    ...(Array.isArray(metadata.ebayComplaintImages) ? metadata.ebayComplaintImages : []),
+    ...(Array.isArray(detail.complaintImages) ? detail.complaintImages : []),
+  ].filter((image) => image && typeof image === "object");
+}
+
+async function hydrateReturnComplaintImageUrls(tasks = []) {
+  for (const task of tasks || []) {
+    const records = getReturnComplaintImageRecordsFromPayload(getReturnTaskPayload(task));
+    const urls = await Promise.all(records.map(async (record) => {
+      if (record.url && !String(record.url).startsWith("blob:")) {
+        return record.url;
+      }
+      const bucket = record.bucket || record.storage_bucket;
+      const path = record.path || record.storage_path;
+      if (!bucket || !path) return "";
+      return createReturnSignedImageUrl(bucket, path);
+    }));
+    task.complaintImageUrls = unique(urls.filter(Boolean));
+  }
 }
 
 function renderReturnComplaintDetails(task = {}) {
@@ -3210,9 +3237,106 @@ function getReturnTaskRefundInfo(task = {}) {
   };
 }
 
-function buildReturnExportMetadataPatch(payload = {}) {
+function sanitizeReturnComplaintImageRecord(image = {}) {
+  const copy = { ...(image || {}) };
+  delete copy.base64;
+  delete copy.dataUrl;
+  delete copy.blobUrl;
+  delete copy.url;
+  return copy;
+}
+
+function sanitizeReturnTransferForStorage(value) {
+  if (Array.isArray(value)) return value.map(sanitizeReturnTransferForStorage);
+  if (!value || typeof value !== "object") return value;
+  const output = {};
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key === "base64" || key === "dataUrl") return;
+    if (key === "complaintImages" || key === "ebayComplaintImages") {
+      output[key] = Array.isArray(entry) ? entry.map(sanitizeReturnComplaintImageRecord) : [];
+      return;
+    }
+    output[key] = sanitizeReturnTransferForStorage(entry);
+  });
+  return output;
+}
+
+function getReturnTransferComplaintImages(payload = {}) {
   const info = getReturnTransferInfo(payload);
   const detail = info.returnDetails || {};
+  const images = [
+    ...(Array.isArray(info.complaintImages) ? info.complaintImages : []),
+    ...(Array.isArray(detail.complaintImages) ? detail.complaintImages : []),
+  ].filter((image) => image?.base64);
+  const byKey = new Map();
+  images.forEach((image, index) => {
+    const key = image.returnFileId || image.fileId || `${image.mimeType || ""}:${image.size || ""}:${index}`;
+    if (!byKey.has(key)) byKey.set(key, image);
+  });
+  return [...byKey.values()];
+}
+
+function getReturnComplaintImageExtension(image = {}, blob = null) {
+  const value = `${image.filename || ""} ${image.mimeType || image.mime_type || ""} ${blob?.type || ""}`.toLowerCase();
+  if (value.includes("png")) return "png";
+  if (value.includes("webp")) return "webp";
+  if (value.includes("gif")) return "gif";
+  if (value.includes("heic")) return "heic";
+  if (value.includes("heif")) return "heif";
+  return "jpg";
+}
+
+async function uploadEbayComplaintImagesFromTransfer(payload = {}) {
+  const images = getReturnTransferComplaintImages(payload);
+  if (!images.length) return [];
+  const info = getReturnTransferInfo(payload);
+  const returnSegment = safeStorageSegment(info.returnId || info.itemNumber || info.buyerUsername || "return", "return");
+  const uploaded = [];
+
+  for (let index = 0; index < images.length; index += 1) {
+    const image = images[index];
+    const blob = base64ToBlob(image.base64, image.mimeType || image.mime_type || "image/jpeg");
+    const extension = getReturnComplaintImageExtension(image, blob);
+    const imageSegment = safeStorageSegment(image.returnFileId || image.fileId || `photo-${index + 1}`, `photo-${index + 1}`);
+    const path = [
+      "returns",
+      "ebay-complaints",
+      returnSegment,
+      `${imageSegment}.${extension}`,
+    ].join("/");
+
+    const { error } = await supabase.storage
+      .from(EBAY_RETURN_EVIDENCE_BUCKET)
+      .upload(path, blob, {
+        contentType: blob.type || image.mimeType || "image/jpeg",
+        upsert: false,
+      });
+    if (error && !/already exists|duplicate|exists/i.test(error.message || "")) {
+      throw new Error(error.message || `Could not save eBay complaint photo ${index + 1}.`);
+    }
+    uploaded.push({
+      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      path,
+      source: "ebay_buyer_complaint",
+      returnFileId: image.returnFileId || null,
+      fileId: image.fileId || null,
+      sortOrder: index,
+      label: `Buyer complaint photo ${index + 1}`,
+      mime_type: blob.type || image.mimeType || "image/jpeg",
+      size_bytes: blob.size || image.size || 0,
+      uploaded_at: new Date().toISOString(),
+    });
+  }
+
+  return uploaded;
+}
+
+function buildReturnExportMetadataPatch(payload = {}, options = {}) {
+  const info = getReturnTransferInfo(payload);
+  const detail = sanitizeReturnTransferForStorage(info.returnDetails || {});
+  const uploadedComplaintImages = Array.isArray(options.complaintImages) ? options.complaintImages : [];
+  const capturedComplaintImages = getReturnTransferComplaintImages(payload).map(sanitizeReturnComplaintImageRecord);
+  const complaintImages = uploadedComplaintImages.length ? uploadedComplaintImages : capturedComplaintImages;
   const dueInfo = {
     date: parseReturnDateText(info.returnAction, info.returnInitiated),
   };
@@ -3231,14 +3355,26 @@ function buildReturnExportMetadataPatch(payload = {}) {
     datePurchased: info.datePurchased || detail.datePurchased || null,
     returnFileIds: info.returnFileIds || detail.returnFileIds || [],
     complaintBlobUrls: info.complaintBlobUrls || detail.complaintBlobUrls || [],
-    returnDetails: detail || null,
+    complaintImages,
+    complaintImageCount: complaintImages.length || Number(detail.complaintImageCount || 0) || null,
+    returnDetails: {
+      ...(detail || {}),
+      complaintImages,
+      complaintImageCount: complaintImages.length || Number(detail.complaintImageCount || 0) || null,
+    },
     exportMetadataUpdatedAt: new Date().toISOString(),
   };
 }
 
 async function enrichReturnTaskFromTransfer(taskId, payload = {}) {
   if (!taskId) return null;
-  const patch = buildReturnExportMetadataPatch(payload);
+  let complaintImages = [];
+  try {
+    complaintImages = await uploadEbayComplaintImagesFromTransfer(payload);
+  } catch (error) {
+    console.warn("Could not upload eBay complaint photos:", error);
+  }
+  const patch = buildReturnExportMetadataPatch(payload, { complaintImages });
   const dueAt = patch.returnDueAt || null;
   const hasPatch = Object.values(patch).some((value) => value !== null && value !== "");
   if (!hasPatch && !dueAt) return null;
@@ -3290,6 +3426,7 @@ function findExistingReturnTaskForTransfer(payload = {}, lines = [], taskType = 
 
 async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {}) {
   const info = getReturnTransferInfo(payload);
+  const storedInfo = sanitizeReturnTransferForStorage(info);
   const firstLine = lines[0];
   const order = firstLine?.order || {};
   if (!order.id) return null;
@@ -3312,7 +3449,7 @@ async function ensureReturnTaskForTransfer(payload = {}, lines = [], options = {
     _return_reason: info.returnReason || null,
     _notes: buildReturnTransferNote(info) || null,
     _raw_payload: {
-      ...(info || {}),
+      ...(storedInfo || {}),
       transferId: payload.transferId || null,
       matchedLineIds: lineIds,
       matchedOrderNumber: order.order_number || null,
@@ -3346,9 +3483,11 @@ async function ensureUnmatchedReturnTaskForTransfer(payload = {}, options = {}) 
       taskStatus: existingTask.status,
     };
   }
+  const storedInfo = sanitizeReturnTransferForStorage(info);
+  const storedMetadata = sanitizeReturnTransferForStorage(metadata);
   const rawPayload = {
-    ...metadata,
-    ...info,
+    ...storedMetadata,
+    ...storedInfo,
     transferId: payload.transferId || null,
     matchedLineIds: [],
     unmatchedReason: "No matching fulfilled OG order line was found.",
