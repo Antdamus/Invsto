@@ -13,6 +13,8 @@
   };
   const ADMIN_VIEW_TIMEOUT_MS = 15000;
   const MESSAGE_DETAIL_TIMEOUT_MS = 15000;
+  const DRAFT_VIEW_TIMEOUT_MS = 15000;
+  const DRAFT_GENERATION_TIMEOUT_MS = 45000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
   const CLASSIFICATION_CATEGORIES = [
@@ -96,6 +98,11 @@
     expandedMessageIds: {},
     reviewSavingId: null,
     reviewErrorsById: {},
+    draftsByMessageId: {},
+    draftLoadingMessageId: null,
+    draftErrorsByMessageId: {},
+    draftActionMessageId: null,
+    draftActionErrorsByMessageId: {},
     updatedAt: null,
   };
 
@@ -448,6 +455,81 @@
     }
   }
 
+  async function fetchDraftView(context, values) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Draft view session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), DRAFT_VIEW_TIMEOUT_MS);
+
+    try {
+      return await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: "admin_draft_view",
+          messageId: values.messageId,
+          classificationId: values.classificationId,
+          includeDraftBody: true,
+          limit: 20,
+        }),
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function requestResponseDraft(context, values) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Draft generation session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), DRAFT_GENERATION_TIMEOUT_MS);
+
+    try {
+      return await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: values.mode,
+          messageId: values.messageId,
+          classificationId: values.classificationId,
+          draftId: values.draftId || undefined,
+        }),
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   async function saveClassificationReview(context, values) {
     const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
     if (sessionError) console.error("Review save session refresh failed:", sessionError);
@@ -733,6 +815,8 @@
     const status = String(value || "").toLowerCase();
     if (status === "valid") return "success";
     if (status === "invalid") return "danger";
+    if (status === "warning") return "warning";
+    if (status === "error") return "danger";
     return "muted";
   }
 
@@ -1033,6 +1117,135 @@
     `;
   }
 
+  function currentDraftFromPayload(payload) {
+    const drafts = Array.isArray(payload?.drafts) ? payload.drafts : [];
+    return drafts.find((draft) => draft.is_current === true) || drafts[0] || null;
+  }
+
+  function renderDraftMetaGrid(draft) {
+    const metadata = draft?.metadata && typeof draft.metadata === "object" ? draft.metadata : {};
+    return `
+      <dl class="classification-detail-grid draft-detail-grid">
+        <div>
+          <dt>Version</dt>
+          <dd>v${escapeHtml(draft.draft_version || "--")}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>${renderBadge(humanizeValue(draft.draft_status || "Unknown"), statusBadgeVariant(draft.draft_status))}</dd>
+        </div>
+        <div>
+          <dt>Validation</dt>
+          <dd>${renderBadge(humanizeValue(draft.validation_status || "Unknown"), statusBadgeVariant(draft.validation_status))}</dd>
+        </div>
+        <div>
+          <dt>Human Review</dt>
+          <dd>${renderBadge(draft.requires_human_review === false ? "Not required" : "Required", draft.requires_human_review === false ? "muted" : "warning")}</dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>${escapeHtml(formatDateTime(draft.created_at))}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>${escapeHtml([draft.model_name, draft.model_version].filter(Boolean).join(" ") || "Unavailable")}</dd>
+        </div>
+        <div>
+          <dt>Prompt</dt>
+          <dd>${escapeHtml(draft.prompt_version || metadata.prompt_version || "Unavailable")}</dd>
+        </div>
+        <div>
+          <dt>Content</dt>
+          <dd>${renderBadge(draft.draft_content_returned ? "Returned" : humanizeValue(draft.draft_content_omitted_reason || "Omitted"), draft.draft_content_returned ? "success" : "warning")}</dd>
+        </div>
+      </dl>
+    `;
+  }
+
+  function renderDraftHistory(drafts = []) {
+    if (!drafts.length) return `<div class="classification-empty draft-empty">No draft history yet.</div>`;
+
+    return `
+      <div class="draft-history-list" aria-label="Draft history">
+        ${drafts.map((draft) => `
+          <div class="draft-history-row">
+            <strong>v${escapeHtml(draft.draft_version || "--")}</strong>
+            <span>${draft.is_current ? "Current" : "Non-current"}</span>
+            ${renderBadge(humanizeValue(draft.draft_status || "Unknown"), statusBadgeVariant(draft.draft_status))}
+            ${renderBadge(humanizeValue(draft.validation_status || "Unknown"), statusBadgeVariant(draft.validation_status))}
+            <time>${escapeHtml(formatDateTime(draft.created_at))}</time>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function renderResponseDraftSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const payload = messageId ? state.draftsByMessageId[messageId] : null;
+    const drafts = Array.isArray(payload?.drafts) ? payload.drafts : [];
+    const currentDraft = currentDraftFromPayload(payload);
+    const isLoading = state.draftLoadingMessageId === messageId;
+    const isActing = state.draftActionMessageId === messageId;
+    const error = messageId ? state.draftErrorsByMessageId[messageId] : null;
+    const actionError = messageId ? state.draftActionErrorsByMessageId[messageId] : null;
+    const actionMode = currentDraft ? "regenerate_response" : "generate_response";
+    const actionLabel = currentDraft ? "Regenerate Draft" : "Generate Draft";
+
+    return `
+      <div class="classification-detail-section response-draft-section">
+        <div class="classification-section-title-row">
+          <h4>AI Response Draft</h4>
+          ${currentDraft ? renderBadge(`v${currentDraft.draft_version || "--"}`, "category") : renderBadge("No draft", "muted")}
+        </div>
+        <div class="classification-notice is-warning draft-safety-notice">
+          Draft requires human review. Not sent. No Outlook mutation.
+        </div>
+        ${error ? `<div class="classification-notice is-error">Could not load draft view: ${escapeHtml(error)}</div>` : ""}
+        ${actionError ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(actionError)}</div>` : ""}
+        <div class="draft-actions">
+          <button type="button" class="${currentDraft ? "secondary-btn" : "primary-btn"}" data-draft-action="${escapeHtml(actionMode)}" data-message-id="${escapeHtml(messageId)}" data-classification-id="${escapeHtml(selected.id)}" data-draft-id="${escapeHtml(currentDraft?.id || "")}" ${isLoading || isActing || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isActing ? "loader-circle" : currentDraft ? "refresh-cw" : "wand-sparkles"}"></i>
+            ${escapeHtml(isActing ? (currentDraft ? "Regenerating Draft" : "Generating Draft") : actionLabel)}
+          </button>
+          <button type="button" class="secondary-btn" data-draft-action="refresh" data-message-id="${escapeHtml(messageId)}" data-classification-id="${escapeHtml(selected.id)}" ${isLoading || isActing || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+            ${escapeHtml(isLoading ? "Loading Drafts" : "Refresh Drafts")}
+          </button>
+        </div>
+        ${isLoading && !payload ? `<div class="classification-empty draft-empty">Loading draft history.</div>` : ""}
+        ${currentDraft ? `
+          ${renderDraftMetaGrid(currentDraft)}
+          <div class="draft-safety-flags">
+            <span>Safety Flags</span>
+            <div class="classification-pill-list">${renderPillList(currentDraft.safety_flags, "No safety flags")}</div>
+          </div>
+          ${Array.isArray(currentDraft.validation_errors) && currentDraft.validation_errors.length ? `
+            <div class="draft-safety-flags">
+              <span>Validation Errors</span>
+              <div class="classification-pill-list">${renderPillList(currentDraft.validation_errors, "No validation errors")}</div>
+            </div>
+          ` : ""}
+          <div class="draft-content">
+            <span>Draft Subject</span>
+            <strong>${escapeHtml(currentDraft.draft_subject || "Draft subject unavailable.")}</strong>
+          </div>
+          <div class="draft-content">
+            <span>Draft Body</span>
+            <pre class="draft-body-text">${escapeHtml(currentDraft.draft_body_text || "Draft body is not available for this validation state.")}</pre>
+          </div>
+        ` : (!isLoading ? `<div class="classification-empty draft-empty">No response draft exists for this selected email yet.</div>` : "")}
+        <div class="draft-history">
+          <div class="classification-section-title-row">
+            <h4>Draft History</h4>
+            ${renderBadge(`${drafts.length} ${drafts.length === 1 ? "version" : "versions"}`, "muted")}
+          </div>
+          ${renderDraftHistory(drafts)}
+        </div>
+      </div>
+    `;
+  }
+
   function renderClassificationDetail(state, data) {
     if (!els.classificationDetail) return;
 
@@ -1110,6 +1323,8 @@
       </div>
 
       ${renderOperatorReviewSection(state, selected)}
+
+      ${renderResponseDraftSection(state, selected)}
 
       <div class="classification-detail-section">
         <h4>Workflow Priority</h4>
@@ -1335,6 +1550,104 @@
         },
       });
       console.error("[email-triage] message_detail fetch failed:", error);
+    }
+  }
+
+  async function loadDraftView(context, selected, options = {}) {
+    const messageId = selected?.message_id || "";
+    const classificationId = selected?.id || selected?.classification_id || "";
+    if (!messageId || !classificationId) return;
+    if (!options.force && adminClassificationState.draftsByMessageId[messageId]) return;
+
+    setAdminClassificationState({
+      draftLoadingMessageId: messageId,
+      draftErrorsByMessageId: {
+        ...adminClassificationState.draftErrorsByMessageId,
+        [messageId]: null,
+      },
+    });
+
+    try {
+      const payload = await fetchDraftView(context, { messageId, classificationId });
+      setAdminClassificationState({
+        draftLoadingMessageId: null,
+        draftsByMessageId: {
+          ...adminClassificationState.draftsByMessageId,
+          [messageId]: payload,
+        },
+        draftErrorsByMessageId: {
+          ...adminClassificationState.draftErrorsByMessageId,
+          [messageId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "draft_view_failed";
+      setAdminClassificationState({
+        draftLoadingMessageId: null,
+        draftErrorsByMessageId: {
+          ...adminClassificationState.draftErrorsByMessageId,
+          [messageId]: code,
+        },
+      });
+      console.error("[email-triage] admin_draft_view fetch failed:", error);
+    }
+  }
+
+  function selectedClassificationById(classificationId) {
+    const data = adminClassificationState.data || normalizeAdminViewPayload({});
+    return (data.classifications || []).find((classification) => classification.id === classificationId) || null;
+  }
+
+  function selectedClassificationForDraft(messageId, classificationId) {
+    const byClassification = classificationId ? selectedClassificationById(classificationId) : null;
+    if (byClassification) return byClassification;
+    const data = adminClassificationState.data || normalizeAdminViewPayload({});
+    return (data.classifications || []).find((classification) => classification.message_id === messageId) || null;
+  }
+
+  async function loadSelectedDraftView(context, options = {}) {
+    const selected = selectedClassificationById(adminClassificationState.selectedClassificationId);
+    if (!selected) return;
+    await loadDraftView(context, selected, options);
+  }
+
+  async function runDraftAction(context, values) {
+    const selected = selectedClassificationForDraft(values.messageId, values.classificationId);
+    if (!selected?.message_id || !selected?.id) return;
+
+    setAdminClassificationState({
+      draftActionMessageId: selected.message_id,
+      draftActionErrorsByMessageId: {
+        ...adminClassificationState.draftActionErrorsByMessageId,
+        [selected.message_id]: null,
+      },
+    });
+
+    try {
+      await requestResponseDraft(context, {
+        mode: values.mode,
+        messageId: selected.message_id,
+        classificationId: selected.id,
+        draftId: values.draftId || null,
+      });
+      setAdminClassificationState({
+        draftActionMessageId: null,
+        draftActionErrorsByMessageId: {
+          ...adminClassificationState.draftActionErrorsByMessageId,
+          [selected.message_id]: null,
+        },
+      });
+      await loadDraftView(context, selected, { force: true });
+    } catch (error) {
+      const code = error.code || error.message || "draft_action_failed";
+      setAdminClassificationState({
+        draftActionMessageId: null,
+        draftActionErrorsByMessageId: {
+          ...adminClassificationState.draftActionErrorsByMessageId,
+          [selected.message_id]: code,
+        },
+      });
+      console.error("[email-triage] response draft action failed:", error);
     }
   }
 
@@ -1568,18 +1881,44 @@
         selectedCategory,
         selectedClassificationId: firstMatch?.id || null,
       });
+      if (firstMatch) loadDraftView(context, firstMatch);
     });
 
     els.classificationList?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-classification-id]");
       if (!button) return;
+      const classificationId = button.getAttribute("data-classification-id");
 
       setAdminClassificationState({
-        selectedClassificationId: button.getAttribute("data-classification-id"),
+        selectedClassificationId: classificationId,
       });
+      const selected = selectedClassificationById(classificationId);
+      if (selected) loadDraftView(context, selected);
     });
 
     els.classificationDetail?.addEventListener("click", (event) => {
+      const draftButton = event.target.closest("[data-draft-action]");
+      if (draftButton) {
+        const action = draftButton.getAttribute("data-draft-action");
+        const messageId = draftButton.getAttribute("data-message-id");
+        const classificationId = draftButton.getAttribute("data-classification-id");
+        const draftId = draftButton.getAttribute("data-draft-id");
+        const selected = selectedClassificationForDraft(messageId, classificationId);
+        if (action === "refresh") {
+          if (selected) loadDraftView(context, selected, { force: true });
+          return;
+        }
+        if (action === "generate_response" || action === "regenerate_response") {
+          runDraftAction(context, {
+            mode: action,
+            messageId,
+            classificationId,
+            draftId,
+          });
+          return;
+        }
+      }
+
       const reviewStateButton = event.target.closest("[data-review-state-button]");
       if (reviewStateButton) {
         const form = reviewStateButton.closest(".classification-review-section")?.querySelector("[data-review-form]");
@@ -1649,6 +1988,7 @@
         sortMode,
         selectedClassificationId: firstMatch?.id || null,
       });
+      if (firstMatch) loadDraftView(context, firstMatch);
     });
 
     els.classificationFiltersToggle?.addEventListener("click", () => {
@@ -1684,6 +2024,7 @@
           activeFilters,
           selectedClassificationId: firstMatch?.id || null,
         });
+        if (firstMatch) loadDraftView(context, firstMatch);
       });
     });
   }
@@ -1699,7 +2040,8 @@
     bindClassificationInboxEvents(context);
 
     handleOutlookQueryNotice();
-    loadAdminClassificationData(context);
+    await loadAdminClassificationData(context);
+    loadSelectedDraftView(context);
 
     setLoading(true);
     setStatus("Checking", "Checking persisted Outlook connection", "Loading mailbox status from the Supabase Edge Function.");

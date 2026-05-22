@@ -847,6 +847,120 @@
   margin-top: 12px;
 }
 
+.response-draft-section {
+  border-color: rgba(214,178,94,.16);
+}
+
+.draft-safety-notice {
+  margin-top: 0;
+}
+
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.draft-detail-grid dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.draft-safety-flags {
+  margin-top: 12px;
+}
+
+.draft-safety-flags > span,
+.draft-content > span {
+  display: block;
+  margin-bottom: 7px;
+  color: rgba(242,243,245,.56);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.draft-content {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.draft-content strong {
+  display: block;
+  color: rgba(242,243,245,.94);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.draft-body-text {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(0,0,0,.2);
+  color: rgba(242,243,245,.88);
+  font: 0.88rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  margin: 0;
+  padding: 12px;
+}
+
+.draft-history {
+  border-top: 1px solid rgba(255,255,255,.08);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.draft-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.draft-history-row {
+  display: grid;
+  grid-template-columns: auto minmax(78px, .7fr) auto auto minmax(128px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  padding: 9px 10px;
+}
+
+.draft-history-row strong {
+  color: var(--gold-2);
+  font-size: .86rem;
+}
+
+.draft-history-row span,
+.draft-history-row time {
+  color: rgba(242,243,245,.62);
+  font-size: .78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.draft-history-row time {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.draft-empty {
+  border: 1px dashed rgba(255,255,255,.12);
+  border-radius: 8px;
+  margin-top: 10px;
+  padding: 14px;
+}
+
 .classification-email-body {
   max-height: 440px;
   overflow: auto;
@@ -1065,6 +1179,20 @@
 
   .classification-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .draft-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .draft-history-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .draft-history-row time {
+    text-align: left;
   }
 
   .classification-compare-grid,
