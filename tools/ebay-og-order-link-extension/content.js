@@ -15,6 +15,10 @@
   const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
   const SEND_RETURN_BATCH_ID = "og-ebay-send-return-batch";
   const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
+  const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
+  const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
+  const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
+  const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
   const BULK_ACTIONS_SHORTCUT_ID = "og-ebay-bulk-actions-shortcut";
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
@@ -42,6 +46,7 @@
   let ogPartialSelectionWarningTimer = null;
   let ogReturnEntriesCache = null;
   let ogReturnEntriesSignature = "";
+  let ogAutoVideoReceiptStarted = false;
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -622,6 +627,25 @@
         const href = anchor.getAttribute("href") || anchor.href || "";
         return href.includes(`returnId=${returnId}`) || cleanText(anchor.textContent) === returnId;
       }) || null;
+  }
+
+  function findReturnItemLinkElement(returnInfo = {}) {
+    const itemNumber = String(returnInfo.itemNumber || "").trim();
+    const itemTitle = cleanText(returnInfo.itemTitle || "");
+    return [...document.querySelectorAll('a[href*="/itm/"], a[href*="itm/"]')]
+      .find((anchor) => {
+        const href = anchor.getAttribute("href") || anchor.href || "";
+        const text = cleanText(anchor.textContent || "");
+        return Boolean(
+          itemNumber && href.includes(itemNumber)
+          || itemTitle && (text === itemTitle || text.includes(itemTitle) || itemTitle.includes(text))
+        );
+      }) || null;
+  }
+
+  function getReturnItemUrl(returnInfo = {}) {
+    const visibleLink = findReturnItemLinkElement(returnInfo);
+    return normalizeEbayNavigationUrl(visibleLink?.getAttribute("href") || returnInfo.itemUrl || "");
   }
 
   function getRawEbayAwaitingShipmentRows() {
@@ -2898,6 +2922,272 @@
     window.open(buildOgUrl(appUrl, clean, orderSnapshot), "_blank", "noopener,noreferrer");
   }
 
+  function decodeHtmlEntities(value) {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = String(value || "");
+    return textarea.value;
+  }
+
+  function normalizeEbayNavigationUrl(value, baseUrl = window.location.href) {
+    const cleaned = decodeHtmlEntities(value)
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\\//g, "/")
+      .split(/["'<>\s]/)[0];
+    if (!cleaned) return "";
+    try {
+      return new URL(cleaned, baseUrl).toString();
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function findVideoReceiptUrlInText(text, baseUrl = window.location.href) {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/i,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/i,
+    ];
+    for (const pattern of patterns) {
+      const match = body.match(pattern);
+      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
+      if (url && /\/ebaylive\/events\//i.test(url)) return url;
+    }
+    return "";
+  }
+
+  function findOrderDetailsUrlInText(text, baseUrl = window.location.href) {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/mesh\/ord\/details\?[^"'<>\s\\]+/i,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/mesh\\\/ord\\\/details\?[^"'<>\s]+/i,
+    ];
+    for (const pattern of patterns) {
+      const match = body.match(pattern);
+      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
+      if (url && /\/mesh\/ord\/details/i.test(url)) return url;
+    }
+    return "";
+  }
+
+  function getElementSearchText(element) {
+    if (!element) return "";
+    return cleanText([
+      element.textContent,
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title"),
+      element.getAttribute?.("data-action-id"),
+      element.getAttribute?.("href"),
+    ].filter(Boolean).join(" "));
+  }
+
+  function findVideoReceiptLinkElement() {
+    return document.querySelector('[data-action-id="VIDEO_RECEIPT"] a[href]')
+      || document.querySelector('a[href*="/ebaylive/events/"][href*="playback=true"]')
+      || [...document.querySelectorAll('a[href]')].find((link) => /video\s+receipt/i.test(getElementSearchText(link)));
+  }
+
+  function findVideoReceiptUrl() {
+    const fromLink = normalizeEbayNavigationUrl(findVideoReceiptLinkElement()?.getAttribute("href") || "");
+    if (fromLink) return fromLink;
+    return findVideoReceiptUrlInText(document.documentElement?.innerHTML || "");
+  }
+
+  function isEbayOrderDetailsPage() {
+    return /\/mesh\/ord\/details/i.test(window.location.pathname);
+  }
+
+  function findOrderDetailsLinkElement() {
+    return [...document.querySelectorAll('a[href*="/mesh/ord/details"], a[href*="orderid="], a[href*="orderId="]')]
+      .find((link) => /view\s+order\s+details/i.test(getElementSearchText(link)) || /\/mesh\/ord\/details/i.test(link.href || ""));
+  }
+
+  function findOrderDetailsUrl() {
+    const fromLink = normalizeEbayNavigationUrl(findOrderDetailsLinkElement()?.getAttribute("href") || "");
+    if (fromLink && /\/mesh\/ord\/details/i.test(fromLink)) return fromLink;
+    return findOrderDetailsUrlInText(document.documentElement?.innerHTML || "");
+  }
+
+  function findMoreActionsButton() {
+    return [...document.querySelectorAll('button, [role="button"]')]
+      .find((button) => /more\s+actions/i.test(getElementSearchText(button)));
+  }
+
+  function setVideoReceiptStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    if (tone) button.dataset.statusTone = tone;
+    else delete button.dataset.statusTone;
+  }
+
+  async function openVideoReceiptFromDetails(button = null) {
+    setVideoReceiptStatus(button, "Finding receipt...");
+    let receiptUrl = findVideoReceiptUrl();
+    if (!receiptUrl) {
+      const moreActionsButton = findMoreActionsButton();
+      moreActionsButton?.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      receiptUrl = findVideoReceiptUrl();
+    }
+
+    if (!receiptUrl) {
+      setVideoReceiptStatus(button, "Receipt not found", "error");
+      window.alert("I could not find the eBay video receipt on this order details page. Open More actions once, then try again.");
+      return false;
+    }
+
+    window.open(receiptUrl, "_blank", "noopener,noreferrer");
+    setVideoReceiptStatus(button, "Opened video receipt", "success");
+    window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+    return true;
+  }
+
+  async function openVideoReceiptFromItemPage(orderDetailsUrl, button = null) {
+    let receiptWindow = null;
+    try {
+      receiptWindow = window.open("about:blank", "_blank");
+      receiptWindow?.document?.write("<title>Opening eBay video receipt...</title><p>Finding eBay video receipt...</p>");
+    } catch (_) {}
+
+    setVideoReceiptStatus(button, "Finding receipt...");
+    try {
+      const response = await fetch(orderDetailsUrl, { credentials: "include" });
+      if (!response.ok) throw new Error(`Order details returned HTTP ${response.status}`);
+      const html = await response.text();
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      if (receiptUrl) {
+        if (receiptWindow) receiptWindow.location.href = receiptUrl;
+        else window.open(receiptUrl, "_blank", "noopener,noreferrer");
+        setVideoReceiptStatus(button, "Opened video receipt", "success");
+        window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+        return true;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not prefetch video receipt:", error);
+    }
+
+    if (receiptWindow) receiptWindow.location.href = orderDetailsUrl;
+    else window.open(orderDetailsUrl, "_blank", "noopener,noreferrer");
+    setVideoReceiptStatus(button, "Opened order details", "success");
+    window.setTimeout(() => setVideoReceiptStatus(button, "Open Video Receipt"), 1800);
+    return false;
+  }
+
+  async function fetchEbayHtml(url) {
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
+    return response.text();
+  }
+
+  function shouldAutoOpenVideoReceiptFromItemPage() {
+    try {
+      return new URL(window.location.href).searchParams.get(VIDEO_RECEIPT_AUTO_PARAM) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function buildVideoReceiptAutoItemUrl(itemUrl) {
+    try {
+      const url = new URL(itemUrl, window.location.href);
+      url.searchParams.set(VIDEO_RECEIPT_AUTO_PARAM, "1");
+      return url.toString();
+    } catch (_) {
+      return itemUrl || "";
+    }
+  }
+
+  async function navigateCurrentItemPageToVideoReceipt(orderDetailsUrl, button = null) {
+    setVideoReceiptStatus(button, "Opening receipt...");
+    try {
+      const html = await fetchEbayHtml(orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      if (receiptUrl) {
+        window.location.assign(receiptUrl);
+        return true;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Auto-open could not resolve receipt:", error);
+    }
+
+    window.location.assign(orderDetailsUrl);
+    return false;
+  }
+
+  function maybeAutoOpenVideoReceiptFromItemPage(orderDetailsUrl, button = null) {
+    if (ogAutoVideoReceiptStarted || !shouldAutoOpenVideoReceiptFromItemPage() || !orderDetailsUrl) return;
+    ogAutoVideoReceiptStarted = true;
+    navigateCurrentItemPageToVideoReceipt(orderDetailsUrl, button);
+  }
+
+  async function openVideoReceiptViaReturnItemPage(returnInfo = {}, button = null) {
+    const resetLabel = button?.dataset?.ogVideoDefaultLabel || "Video Receipt";
+    const itemUrl = getReturnItemUrl(returnInfo);
+    if (itemUrl) {
+      setVideoReceiptStatus(button, "Opening item...");
+      window.open(buildVideoReceiptAutoItemUrl(itemUrl), "_blank", "noopener,noreferrer");
+      window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+      return true;
+    }
+
+    return openVideoReceiptFromReturn(returnInfo, button);
+  }
+
+  async function openVideoReceiptFromReturn(returnInfo = {}, button = null) {
+    const resetLabel = button?.dataset?.ogVideoDefaultLabel || "Video Receipt";
+    let receiptWindow = null;
+    try {
+      receiptWindow = window.open("about:blank", "_blank");
+      receiptWindow?.document?.write("<title>Opening eBay video receipt...</title><p>Finding eBay video receipt...</p>");
+    } catch (_) {}
+
+    setVideoReceiptStatus(button, "Finding receipt...");
+    let orderDetailsUrl = "";
+    let fallbackUrl = returnInfo.itemUrl || returnInfo.detailsUrl || "";
+
+    try {
+      for (const url of unique([returnInfo.itemUrl, returnInfo.detailsUrl]).filter(Boolean)) {
+        const html = await fetchEbayHtml(url);
+        const directReceiptUrl = findVideoReceiptUrlInText(html, url);
+        if (directReceiptUrl) {
+          if (receiptWindow) receiptWindow.location.href = directReceiptUrl;
+          else window.open(directReceiptUrl, "_blank", "noopener,noreferrer");
+          setVideoReceiptStatus(button, "Opened receipt", "success");
+          window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+          return true;
+        }
+        orderDetailsUrl = orderDetailsUrl || findOrderDetailsUrlInText(html, url);
+        if (orderDetailsUrl) break;
+      }
+
+      if (orderDetailsUrl) {
+        const detailsHtml = await fetchEbayHtml(orderDetailsUrl);
+        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl);
+        if (receiptUrl) {
+          if (receiptWindow) receiptWindow.location.href = receiptUrl;
+          else window.open(receiptUrl, "_blank", "noopener,noreferrer");
+          setVideoReceiptStatus(button, "Opened receipt", "success");
+          window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+          return true;
+        }
+        fallbackUrl = orderDetailsUrl;
+      }
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not resolve return video receipt:", error);
+    }
+
+    if (fallbackUrl) {
+      if (receiptWindow) receiptWindow.location.href = fallbackUrl;
+      else window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+      setVideoReceiptStatus(button, "Opened fallback", "success");
+      window.setTimeout(() => setVideoReceiptStatus(button, resetLabel), 1800);
+      return false;
+    }
+
+    receiptWindow?.close?.();
+    setVideoReceiptStatus(button, "Receipt not found", "error");
+    return false;
+  }
+
   function ensureStyles() {
     if (document.getElementById("og-ebay-order-link-styles")) return;
     const style = document.createElement("style");
@@ -2917,6 +3207,45 @@
 
       .${BUTTON_CLASS}:hover {
         background: #dcebff;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS} {
+        margin-left: 8px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 12px Arial, sans-serif;
+        line-height: 1;
+        padding: 6px 10px;
+        white-space: nowrap;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}:hover {
+        background: #d4f8df;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
+      }
+
+      .${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-floating="true"] {
+        position: fixed;
+        right: 18px;
+        bottom: 72px;
+        z-index: 2147483647;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
+        font-size: 14px;
+        padding: 12px 16px;
       }
 
       #${FLOATING_ID},
@@ -3468,6 +3797,98 @@
     });
   }
 
+  function injectItemVideoReceiptShortcut() {
+    let button = document.getElementById(VIDEO_RECEIPT_ITEM_ID);
+    const orderDetailsUrl = !isEbayOrderDetailsPage() && /\/itm\//i.test(window.location.pathname)
+      ? findOrderDetailsUrl()
+      : "";
+
+    if (!orderDetailsUrl) {
+      button?.remove();
+      return;
+    }
+
+    const orderDetailsLink = findOrderDetailsLinkElement();
+    const parent = orderDetailsLink?.parentElement;
+    if (!parent) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_ITEM_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.textContent = "Open Video Receipt";
+      button.title = "Fetch this eBay order details page and open the eBay Live video receipt";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentUrl = findOrderDetailsUrl();
+        if (!currentUrl) {
+          setVideoReceiptStatus(button, "Order details missing", "error");
+          return;
+        }
+        openVideoReceiptFromItemPage(currentUrl, button);
+      });
+    }
+
+    if (!parent.contains(button)) {
+      const openOgButton = parent.querySelector(`.${BUTTON_CLASS}`);
+      (openOgButton || orderDetailsLink).insertAdjacentElement("afterend", button);
+    }
+
+    maybeAutoOpenVideoReceiptFromItemPage(orderDetailsUrl, button);
+  }
+
+  function injectOrderDetailsVideoReceiptShortcut() {
+    let button = document.getElementById(VIDEO_RECEIPT_DETAILS_ID);
+
+    if (!isEbayOrderDetailsPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!findVideoReceiptUrl() && !findMoreActionsButton()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_DETAILS_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.textContent = "Open Video Receipt";
+      button.title = "Open the eBay Live video receipt for this order";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openVideoReceiptFromDetails(button);
+      });
+    }
+
+    const moreActionsButton = findMoreActionsButton();
+    const inlineContainer = moreActionsButton?.closest(".actions, .line-actions, .more-actions")?.parentElement
+      || moreActionsButton?.parentElement
+      || findVideoReceiptLinkElement()?.closest(".actions, .line-actions, .more-actions")?.parentElement;
+
+    if (inlineContainer && isElementVisible(inlineContainer)) {
+      delete button.dataset.ogFloating;
+      if (!inlineContainer.contains(button)) inlineContainer.appendChild(button);
+      return;
+    }
+
+    button.dataset.ogFloating = "true";
+    if (!button.parentElement) document.body.appendChild(button);
+  }
+
+  function injectVideoReceiptShortcuts() {
+    injectItemVideoReceiptShortcut();
+    injectOrderDetailsVideoReceiptShortcut();
+  }
+
   function injectFloatingButton() {
     const orderNumbers = uniqueOrderNumbers();
     let button = document.getElementById(FLOATING_ID);
@@ -3608,11 +4029,31 @@
     return button;
   }
 
+  function createReturnVideoReceiptButton(returnInfo) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+    button.dataset.ogReturnId = returnInfo.returnId;
+    button.dataset.ogVideoDefaultLabel = "Video Receipt";
+    button.textContent = "Video Receipt";
+    button.title = "Open the eBay Live video receipt tied to this returned item";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openVideoReceiptViaReturnItemPage(returnInfo, button);
+    });
+    return button;
+  }
+
   function injectReturnPageButtons() {
     const looksLikeReturnsPage = isEbayReturnsPage();
     const returns = getEbayReturnEntries();
     let panel = document.getElementById(SEND_RETURN_PANEL_ID);
     document.querySelectorAll(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
+      const returnId = button.dataset.ogReturnId || "";
+      if (!returns.some((entry) => entry.returnId === returnId)) button.remove();
+    });
+    document.querySelectorAll(`.${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-return-row-button="true"]`).forEach((button) => {
       const returnId = button.dataset.ogReturnId || "";
       if (!returns.some((entry) => entry.returnId === returnId)) button.remove();
     });
@@ -3638,10 +4079,21 @@
     returns.forEach((returnInfo) => {
       const anchor = findReturnAnchor(returnInfo);
       const parent = anchor?.parentElement;
-      if (!parent || parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) return;
-      const button = createReturnSendButton(returnInfo);
-      button.dataset.ogReturnRowButton = "true";
-      anchor.insertAdjacentElement("afterend", button);
+      if (!parent) return;
+      let insertionTarget = anchor;
+      if (!parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) {
+        const button = createReturnSendButton(returnInfo);
+        button.dataset.ogReturnRowButton = "true";
+        anchor.insertAdjacentElement("afterend", button);
+        insertionTarget = button;
+      } else {
+        insertionTarget = parent.querySelector(`.${SEND_RETURN_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`) || anchor;
+      }
+      if (!parent.querySelector(`.${VIDEO_RECEIPT_BUTTON_CLASS}[data-og-return-id="${returnInfo.returnId}"]`)) {
+        const receiptButton = createReturnVideoReceiptButton(returnInfo);
+        receiptButton.dataset.ogReturnRowButton = "true";
+        insertionTarget.insertAdjacentElement("afterend", receiptButton);
+      }
     });
 
     if (!panel) {
@@ -3672,6 +4124,7 @@
       const row = panel.querySelector(`[data-og-return-panel-row="${returnInfo.returnId}"]`);
       if (!row || row.querySelector(`.${SEND_RETURN_BUTTON_CLASS}`)) return;
       row.appendChild(createReturnSendButton(returnInfo));
+      row.appendChild(createReturnVideoReceiptButton(returnInfo));
     });
   }
 
@@ -3766,6 +4219,7 @@
     attachBuyerGroupSelectionHandlers();
     syncLocallyClosedAwaitingRows();
     injectRowButtons();
+    injectVideoReceiptShortcuts();
     injectFloatingButton();
     injectSingleOrderButton();
     injectSendLabelButton();
