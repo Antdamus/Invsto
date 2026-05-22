@@ -77,6 +77,7 @@ const stockMediaState = {
   stagedImages: [],
   selectedPaths: new Set(),
   busy: false,
+  backgroundCutoutCache: new Map(),
   latestCaptureJob: null,
   captureStations: [],
   selectedCaptureStationId: "",
@@ -4288,25 +4289,50 @@ async function createStockSourceBlobForBackgroundRemoval(image) {
   }
 }
 
+function getStockBackgroundCutoutCacheKey(image) {
+  const bucket = String(image?.storageBucket || STOCK_PHOTO_BUCKET).trim() || STOCK_PHOTO_BUCKET;
+  const path = String(image?.path || "").trim();
+  if (!path) return "";
+  return `${bucket}:${path}:side-${STOCK_BACKGROUND_MAX_SOURCE_SIDE}`;
+}
+
+function rememberStockBackgroundCutout(cacheKey, cutoutBlob) {
+  if (!cacheKey || !cutoutBlob) return;
+  stockMediaState.backgroundCutoutCache.set(cacheKey, cutoutBlob);
+  while (stockMediaState.backgroundCutoutCache.size > 8) {
+    const firstKey = stockMediaState.backgroundCutoutCache.keys().next().value;
+    if (!firstKey) break;
+    stockMediaState.backgroundCutoutCache.delete(firstKey);
+  }
+}
+
 async function createStockBackgroundPayload(image, background, options = {}) {
   options.onProgress?.(10, "Preparing image...");
-  const sourceBlob = await createStockSourceBlobForBackgroundRemoval(image);
-  options.onProgress?.(18, "Loading background remover...");
-  const removeBackground = await loadStockBackgroundRemoval();
-  options.onProgress?.(25, "Removing background...");
-  const cutoutBlob = await removeBackground(sourceBlob, {
-    model: "isnet_fp16",
-    output: {
-      format: "image/png",
-      quality: 0.95,
-      type: "foreground",
-    },
-    progress: (key, current, total) => {
-      if (!total) return;
-      const percent = 25 + Math.round((current / total) * 45);
-      options.onProgress?.(percent, "Removing background...");
-    },
-  });
+  const cacheKey = getStockBackgroundCutoutCacheKey(image);
+  let cutoutBlob = cacheKey ? stockMediaState.backgroundCutoutCache.get(cacheKey) : null;
+
+  if (cutoutBlob) {
+    options.onProgress?.(55, "Using prepared cutout...");
+  } else {
+    const sourceBlob = await createStockSourceBlobForBackgroundRemoval(image);
+    options.onProgress?.(18, "Loading background remover...");
+    const removeBackground = await loadStockBackgroundRemoval();
+    options.onProgress?.(25, "Removing background...");
+    cutoutBlob = await removeBackground(sourceBlob, {
+      model: "isnet_fp16",
+      output: {
+        format: "image/png",
+        quality: 0.95,
+        type: "foreground",
+      },
+      progress: (key, current, total) => {
+        if (!total) return;
+        const percent = 25 + Math.round((current / total) * 45);
+        options.onProgress?.(percent, "Removing background...");
+      },
+    });
+    rememberStockBackgroundCutout(cacheKey, cutoutBlob);
+  }
 
   const cutoutUrl = URL.createObjectURL(cutoutBlob);
   try {
