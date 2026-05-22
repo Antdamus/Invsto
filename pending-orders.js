@@ -1595,6 +1595,7 @@ function selectOrderLine(lineId) {
 
   $("selected-order-empty")?.classList.add("hidden");
   $("fulfillment-workflow")?.classList.remove("hidden");
+  openMobileOrderDetail();
   renderOrders();
   renderLiveLotOrderMatches();
   renderSelectedOrder();
@@ -1615,6 +1616,29 @@ function selectOrderLine(lineId) {
     return;
   }
   setTimeout(() => (state.selectedLiveLot ? $("fulfill-order") : $("item-scan"))?.focus(), 80);
+}
+
+function isMobilePendingOrderLayout() {
+  return window.matchMedia?.("(max-width: 640px)")?.matches || false;
+}
+
+function openMobileOrderDetail() {
+  if (isMobilePendingOrderLayout()) {
+    document.body.classList.add("pending-mobile-sheet-open");
+  }
+}
+
+function closeMobileOrderDetail() {
+  if (!isMobilePendingOrderLayout()) return;
+  clearSelection();
+}
+
+function syncMobileOrderDetailMode() {
+  if (isMobilePendingOrderLayout() && state.selectedLine && !$("fulfillment-workflow")?.classList.contains("hidden")) {
+    document.body.classList.add("pending-mobile-sheet-open");
+  } else {
+    document.body.classList.remove("pending-mobile-sheet-open");
+  }
 }
 
 function resetFulfillmentInputs() {
@@ -3064,6 +3088,7 @@ function clearOrderLineSelectionForBagLookup() {
   state.stockRows = [];
   state.activeBuyerKey = "";
   state.stagedFulfillments.clear();
+  document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   if ($("item-scan")) $("item-scan").value = "";
@@ -4838,6 +4863,7 @@ function clearSelection() {
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
   closeModal("worker-no-inventory-modal");
+  document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
   renderOrders();
@@ -5435,6 +5461,8 @@ function setupListeners() {
     clearOrderSearch({ apply: false });
     await loadOrders();
   });
+  $("close-mobile-order-detail")?.addEventListener("click", closeMobileOrderDetail);
+  window.addEventListener("resize", syncMobileOrderDetailMode);
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];

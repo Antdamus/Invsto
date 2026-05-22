@@ -1435,6 +1435,10 @@ body.modal-open {
   overflow: hidden;
 }
 
+.mobile-detail-close {
+  display: none;
+}
+
 .packing-modal {
   position: fixed;
   inset: 0;
@@ -2009,7 +2013,7 @@ body.modal-open {
 
 @media (max-width: 640px) {
   .pending-main {
-    padding: 16px;
+    padding: 14px;
   }
 
   .pending-header,
@@ -2020,6 +2024,43 @@ body.modal-open {
   .order-task-card-head,
   .order-task-event-head {
     flex-direction: column;
+  }
+
+  .filter-row {
+    align-items: stretch;
+    gap: 8px;
+    margin: 10px 0;
+  }
+
+  .filter-row input,
+  .filter-row select {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 0.95rem;
+  }
+
+  .pending-header {
+    margin-bottom: 12px;
+  }
+
+  .pending-header h1 {
+    font-size: 1.85rem;
+  }
+
+  .pending-header p {
+    font-size: 0.95rem;
+  }
+
+  .orders-panel,
+  .fulfillment-panel,
+  .import-panel,
+  .admin-order-actions,
+  .checkout-store-panel,
+  .bag-lookup-panel {
+    border-radius: 18px;
+    padding: 14px;
   }
 
   .money-grid,
@@ -2043,6 +2084,88 @@ body.modal-open {
 
   .buyer-card-task-btn {
     width: 100%;
+  }
+
+  .mobile-detail-close {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: inline-flex;
+    width: 100%;
+    min-height: 42px;
+    margin-bottom: 10px;
+    border-color: rgba(248, 242, 233, 0.22);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+  }
+
+  body.pending-mobile-sheet-open {
+    overflow: hidden;
+  }
+
+  body.pending-mobile-sheet-open::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 4700;
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(8px);
+  }
+
+  body.pending-mobile-sheet-open #fulfillment-workflow {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4800;
+    display: grid;
+    gap: 10px;
+    max-height: min(92dvh, 920px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 12px;
+    border: 1px solid rgba(239, 215, 177, 0.2);
+    border-bottom: 0;
+    border-radius: 24px 24px 0 0;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025)),
+      #111012;
+    box-shadow: 0 -28px 80px rgba(0, 0, 0, 0.72);
+  }
+
+  body.pending-mobile-sheet-open #fulfillment-workflow::before {
+    content: "";
+    width: 46px;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(248, 242, 233, 0.28);
+    justify-self: center;
+    margin-bottom: 2px;
+  }
+
+  body.pending-mobile-sheet-open .fulfillment-panel {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body.pending-mobile-sheet-open .order-detail-card,
+  body.pending-mobile-sheet-open .scan-card,
+  body.pending-mobile-sheet-open .sign-card,
+  body.pending-mobile-sheet-open .selection-summary {
+    border-radius: 16px;
+    padding: 14px;
+  }
+
+  body.pending-mobile-sheet-open .order-detail-card h2 {
+    font-size: 1.35rem;
+    overflow-wrap: anywhere;
+  }
+
+  body.pending-mobile-sheet-open .order-detail-card p,
+  body.pending-mobile-sheet-open .scan-card p {
+    font-size: 0.92rem;
   }
 
   .order-task-panel .fulfill-actions,
