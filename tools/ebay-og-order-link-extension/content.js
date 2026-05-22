@@ -15,6 +15,7 @@
   const SEND_RETURN_PANEL_ID = "og-ebay-return-panel";
   const SEND_RETURN_BATCH_ID = "og-ebay-send-return-batch";
   const SEND_RETURN_BUTTON_CLASS = "og-ebay-send-return";
+  const RETURN_MESSAGE_SEND_ID = "og-ebay-send-return-message";
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
@@ -51,6 +52,9 @@
   let ogAutoVideoReceiptStarted = false;
   let ogReturnBatchExportInProgress = false;
   let ogReturnBatchStatusHoldUntil = 0;
+  let ogReturnMessageAutoSendHooked = false;
+  let ogReturnMessageLastLogKey = "";
+  let ogReturnMessageLastLogAt = 0;
   const ogReturnDetailCaptureCache = new Map();
 
   function normalizeOrderNumber(value) {
@@ -3605,6 +3609,214 @@
     return false;
   }
 
+  function isReturnMessagePage() {
+    return /\/rtn\/sendMessage/i.test(window.location.pathname)
+      || Boolean(document.getElementById("commontextarea") && document.getElementById("sendMessage"));
+  }
+
+  function getReturnMessageTextarea() {
+    return document.getElementById("commontextarea")
+      || document.querySelector('textarea[name="rtn-textarea"]')
+      || document.querySelector("textarea");
+  }
+
+  function getReturnMessageSendButton() {
+    return document.getElementById("sendMessage")
+      || [...document.querySelectorAll("button")]
+        .find((button) => /^send$/i.test(cleanText(button.textContent || button.getAttribute("data-orig") || "")));
+  }
+
+  function getVisibleNodeText(element) {
+    if (!element) return "";
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll(".clipped, [aria-hidden='true']").forEach((node) => node.remove());
+    return cleanText(clone.textContent || clone.innerText || "");
+  }
+
+  function readReturnMessageLabelValue(label) {
+    const expected = cleanText(label).toLowerCase();
+    if (!expected) return "";
+    for (const row of document.querySelectorAll("dl, .trui-label-value--vertical")) {
+      const labelText = cleanText(row.querySelector("dt")?.textContent || "").toLowerCase();
+      if (!labelText || !labelText.includes(expected)) continue;
+      const value = getVisibleNodeText(row.querySelector("dd"));
+      if (value) return value;
+    }
+    return "";
+  }
+
+  function extractReturnMessageContext() {
+    const params = new URLSearchParams(window.location.search);
+    const orderHref = document.querySelector('a[href*="/mesh/ord/details?orderid="]')?.getAttribute("href") || "";
+    const orderFromHref = (() => {
+      try {
+        return normalizeOrderNumber(new URL(orderHref, window.location.href).searchParams.get("orderid") || "");
+      } catch (_) {
+        return "";
+      }
+    })();
+    const itemTitle = cleanText(document.getElementById("rtn-item-text")?.textContent || "");
+    return {
+      source: "ebay_return_message_page",
+      direction: "outbound",
+      messageStatus: "sent_from_ebay_page_unverified",
+      returnId: cleanText(params.get("returnId") || readReturnMessageLabelValue("Return ID")),
+      orderNumber: orderFromHref || normalizeOrderNumber(readReturnMessageLabelValue("Order")),
+      buyerUsername: readReturnMessageLabelValue("Buyer"),
+      itemTitle,
+      requestAmount: readReturnMessageLabelValue("Request amount"),
+      onHoldAmount: readReturnMessageLabelValue("On hold amount"),
+      returnReason: readReturnMessageLabelValue("Return Reason"),
+      datePurchased: readReturnMessageLabelValue("Date purchased"),
+      pageUrl: window.location.href,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
+  function buildReturnMessagePayload() {
+    const textarea = getReturnMessageTextarea();
+    const messageBody = cleanText(textarea?.value || "");
+    const metadata = extractReturnMessageContext();
+    return {
+      source: "ebay-return-message-page",
+      message: {
+        ...metadata,
+        messageBody,
+        sentAt: new Date().toISOString(),
+      },
+      metadata,
+    };
+  }
+
+  function getReturnMessageLogKey(payload = {}) {
+    const message = payload.message || {};
+    return [
+      message.returnId || "",
+      message.orderNumber || "",
+      message.messageBody || "",
+    ].join("|");
+  }
+
+  async function logReturnMessageToOg(options = {}) {
+    const payload = buildReturnMessagePayload();
+    const message = payload.message || {};
+    const button = options.button || document.getElementById(RETURN_MESSAGE_SEND_ID);
+    if (!message.messageBody) {
+      if (!options.silent) window.alert("Type the buyer message before logging it to OG.");
+      return { ok: false, error: "Message body is empty." };
+    }
+    if (!message.returnId && !message.orderNumber) {
+      if (!options.silent) window.alert("I could not find the eBay return ID or order number on this message page.");
+      return { ok: false, error: "Missing return/order context." };
+    }
+
+    const logKey = getReturnMessageLogKey(payload);
+    const now = Date.now();
+    if (logKey === ogReturnMessageLastLogKey && now - ogReturnMessageLastLogAt < 30000) {
+      return { ok: true, duplicateSkipped: true };
+    }
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Logging to OG...";
+    }
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_LOG_RETURN_MESSAGE",
+        payload,
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG did not confirm the message log.");
+      ogReturnMessageLastLogKey = logKey;
+      ogReturnMessageLastLogAt = Date.now();
+      if (button) {
+        button.textContent = response.opened ? "Logged - OG Opened" : "Logged to OG";
+        window.setTimeout(() => {
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = "Send + Log to OG";
+          }
+        }, 1800);
+      }
+      return response;
+    } catch (error) {
+      console.warn("[OG eBay Return Message] Could not log message:", error);
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Log Failed";
+        button.dataset.statusTone = "error";
+        window.setTimeout(() => {
+          if (button.isConnected) {
+            button.textContent = "Send + Log to OG";
+            button.dataset.statusTone = "";
+          }
+        }, 2200);
+      }
+      if (!options.silent) window.alert(error.message || "Could not log this eBay message to OG.");
+      return { ok: false, error: error.message || String(error) };
+    }
+  }
+
+  async function sendReturnMessageWithOgLog(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const ebaySendButton = getReturnMessageSendButton();
+    const response = await logReturnMessageToOg({ button: event.currentTarget });
+    if (!response?.ok) return;
+    if (!ebaySendButton || ebaySendButton.disabled) {
+      window.alert("The eBay Send button is not ready yet. Check the message text and try again.");
+      return;
+    }
+    ebaySendButton.dataset.ogSkipNextAutoLog = "1";
+    ebaySendButton.click();
+  }
+
+  function attachOriginalReturnMessageSendLogger() {
+    const ebaySendButton = getReturnMessageSendButton();
+    if (!ebaySendButton || ebaySendButton.dataset.ogReturnMessageHooked === "true") return;
+    ebaySendButton.dataset.ogReturnMessageHooked = "true";
+    ebaySendButton.addEventListener("click", () => {
+      if (ebaySendButton.dataset.ogSkipNextAutoLog === "1") {
+        ebaySendButton.dataset.ogSkipNextAutoLog = "";
+        return;
+      }
+      logReturnMessageToOg({ silent: true }).catch(() => null);
+    });
+  }
+
+  function injectReturnMessageLoggerButton() {
+    const existing = document.getElementById(RETURN_MESSAGE_SEND_ID);
+    if (!isReturnMessagePage()) {
+      existing?.remove();
+      ogReturnMessageAutoSendHooked = false;
+      return;
+    }
+
+    const ebaySendButton = getReturnMessageSendButton();
+    const textarea = getReturnMessageTextarea();
+    if (!ebaySendButton || !textarea) return;
+
+    attachOriginalReturnMessageSendLogger();
+
+    let button = existing;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = RETURN_MESSAGE_SEND_ID;
+      button.textContent = "Send + Log to OG";
+      button.title = "Log this outbound eBay return message in OG, then click eBay Send.";
+      button.addEventListener("click", sendReturnMessageWithOgLog);
+      ebaySendButton.insertAdjacentElement("afterend", button);
+    }
+    button.disabled = false;
+    if (!ogReturnMessageAutoSendHooked) {
+      ogReturnMessageAutoSendHooked = true;
+      textarea.addEventListener("input", () => {
+        if (button.textContent !== "Send + Log to OG") button.textContent = "Send + Log to OG";
+      });
+    }
+  }
+
   function ensureStyles() {
     if (document.getElementById("og-ebay-order-link-styles")) return;
     const style = document.createElement("style");
@@ -3663,6 +3875,33 @@
         box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
         font-size: 14px;
         padding: 12px 16px;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID} {
+        margin-left: 12px;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        cursor: pointer;
+        font: 800 14px Arial, sans-serif;
+        min-height: 42px;
+        padding: 10px 16px;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}:disabled {
+        cursor: wait;
+        opacity: .72;
+      }
+
+      #${RETURN_MESSAGE_SEND_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
       }
 
       #${FLOATING_ID},
@@ -4623,6 +4862,7 @@
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
     injectReturnPageButtons();
+    injectReturnMessageLoggerButton();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();
     maybeShowBoxReminder();

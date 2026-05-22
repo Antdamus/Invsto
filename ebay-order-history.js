@@ -8,6 +8,7 @@ const state = {
   returnCases: [],
   returnEvents: [],
   returnTasks: [],
+  returnMessages: [],
   returnTaskLines: new Map(),
   returnAssignees: [],
   returnTaskLaunchApplied: false,
@@ -29,7 +30,9 @@ const state = {
   returnCaptureBusy: false,
   activeReturnTransfer: null,
   queuedHistoryReturnTransfers: [],
+  queuedHistoryReturnMessageTransfers: [],
   handledReturnTransferIds: new Set(),
+  handledReturnMessageTransferIds: new Set(),
   processingReturnTransferIds: new Set(),
   lastReturnImportSummary: null,
   awaitingLabelGroup: null,
@@ -870,6 +873,7 @@ async function loadOrderHistory() {
   applyHistoryLabelLaunchSelection();
   drainQueuedHistoryLabelTransfers();
   drainQueuedHistoryReturnTransfers();
+  drainQueuedHistoryReturnMessageTransfers();
 }
 
 function renderWorkerOptions() {
@@ -1090,6 +1094,7 @@ async function loadReturnQueue() {
     state.returnTasks = data || [];
     await hydrateReturnComplaintImageUrls(state.returnTasks);
     await loadReturnTaskLines(state.returnTasks);
+    await loadReturnMessagesForTasks(state.returnTasks);
     renderReturnQueue();
     applyReturnTaskLaunchSelection();
   } catch (error) {
@@ -1176,6 +1181,72 @@ async function hydrateReturnComplaintImageUrls(tasks = []) {
   }
 }
 
+async function loadReturnMessagesForTasks(tasks = []) {
+  const cases = tasks.map(getReturnTaskCase).filter((entry) => entry?.id || entry?.ebay_return_id || entry?.order_number);
+  if (!cases.length) {
+    state.returnMessages = [];
+    return;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("ebay_return_messages")
+      .select("*")
+      .order("logged_at", { ascending: false })
+      .limit(1000);
+    if (error) throw error;
+
+    const caseIds = new Set(cases.map((entry) => entry.id).filter(Boolean));
+    const returnIds = new Set(cases.map((entry) => normalizeReturnLookup(entry.ebay_return_id)).filter(Boolean));
+    const orderNumbers = new Set(cases.map((entry) => normalizeReturnLookup(entry.order_number)).filter(Boolean));
+    state.returnMessages = (data || []).filter((message) => {
+      return Boolean(
+        message.return_case_id && caseIds.has(message.return_case_id)
+        || message.ebay_return_id && returnIds.has(normalizeReturnLookup(message.ebay_return_id))
+        || message.order_number && orderNumbers.has(normalizeReturnLookup(message.order_number))
+      );
+    });
+  } catch (error) {
+    state.returnMessages = [];
+    console.warn("Could not load eBay return message logs:", error);
+  }
+}
+
+function getReturnMessagesForTask(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const returnId = normalizeReturnLookup(returnCase.ebay_return_id || metadata.returnId || metadata.ebayReturnId);
+  const orderNumber = normalizeReturnLookup(returnCase.order_number || metadata.orderNumber || metadata.order_number);
+  return (state.returnMessages || [])
+    .filter((message) => Boolean(
+      message.return_case_id && returnCase.id && message.return_case_id === returnCase.id
+      || returnId && normalizeReturnLookup(message.ebay_return_id) === returnId
+      || orderNumber && normalizeReturnLookup(message.order_number) === orderNumber
+    ))
+    .sort((a, b) => new Date(a.logged_at || a.created_at || 0) - new Date(b.logged_at || b.created_at || 0));
+}
+
+function renderReturnMessageLog(task = {}) {
+  const messages = getReturnMessagesForTask(task);
+  if (!messages.length) return "";
+  return `
+    <div class="return-message-log">
+      <div class="return-complaint-header">
+        <span class="eyebrow">Buyer Message Log</span>
+      </div>
+      ${messages.slice(-6).map((message) => `
+        <article class="return-message-entry is-${escapeHtml(message.direction || "outbound")}">
+          <div>
+            <strong>${escapeHtml(message.direction === "inbound" ? "Buyer" : "OG / eBay reply")}</strong>
+            <time>${escapeHtml(formatDateTime(message.sent_at || message.logged_at))}</time>
+          </div>
+          <p>${escapeHtml(message.message_body || "")}</p>
+          <small>${escapeHtml(message.message_status === "sent_from_ebay_page_unverified" ? "Logged from eBay send-message page" : message.message_status || "Logged")}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderReturnComplaintDetails(task = {}) {
   const detail = getReturnComplaintDetails(task);
   const hasDetails = Boolean(
@@ -1249,9 +1320,7 @@ function renderReturnQueue() {
     const canWorkTask = isAdminUser() || task.assigned_to_user_id === state.user?.id || task.created_by === state.user?.id;
     const lineIds = getReturnTaskLineIds(task);
     const dueInfo = getReturnTaskDueInfo(task);
-    const refundInfo = getReturnTaskRefundInfo(task);
     const requestedLabel = getReturnTaskRequestedLabel(task);
-    const dueText = dueInfo.date ? formatDateOnly(dueInfo.date) : dueInfo.label;
     const orderLabel = returnCase.order_number || (
       returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
     );
@@ -1265,7 +1334,6 @@ function renderReturnQueue() {
             <div class="return-task-meta">
               <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
               <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
-              <span>Resolve by: ${escapeHtml(dueText)}</span>
               <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
             </div>
             <div class="return-task-meta">
@@ -1274,11 +1342,6 @@ function renderReturnQueue() {
               <span>${escapeHtml(returnCase.buyer_username || "No buyer")}</span>
             </div>
             <div class="return-task-facts">
-              <span>
-                <small>Return value</small>
-                <b>${escapeHtml(refundInfo.label)}</b>
-                <em>${escapeHtml(refundInfo.detail)}</em>
-              </span>
               <span>
                 <small>eBay deadline</small>
                 <b>${escapeHtml(dueInfo.label)}</b>
@@ -1292,6 +1355,7 @@ function renderReturnQueue() {
             </div>
             <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
             ${renderReturnComplaintDetails(task)}
+            ${renderReturnMessageLog(task)}
           </div>
           <div class="return-task-buttons">
             ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
@@ -3222,21 +3286,6 @@ function getReturnTaskRequestedLabel(task = {}) {
   return requested || formatDateOnly(getReturnTaskCase(task).opened_at);
 }
 
-function getReturnTaskRefundInfo(task = {}) {
-  const metadata = getReturnTaskPayload(task);
-  const lines = getReturnTaskLines(task);
-  const refundText = metadata.refundText || metadata.refund_text || "";
-  const refundAmount = Number(metadata.refundAmount || metadata.refund_amount || parseMoney(refundText) || 0);
-  const lineTotal = lines.reduce((sum, line) => sum + Number(line.total_price || line.sold_for || 0), 0);
-  return {
-    refundText,
-    refundAmount,
-    lineTotal,
-    label: refundText || (refundAmount ? formatMoney(refundAmount) : lineTotal ? formatMoney(lineTotal) : "No value captured"),
-    detail: lineTotal ? `OG line total ${formatMoney(lineTotal)}` : "No matched OG order value",
-  };
-}
-
 function sanitizeReturnComplaintImageRecord(image = {}) {
   const copy = { ...(image || {}) };
   delete copy.base64;
@@ -4456,6 +4505,107 @@ function postHistoryReturnTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function postHistoryReturnMessageTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_RETURN_MESSAGE_LOG_STATUS",
+    payload: {
+      ...payload,
+      tabId: null,
+    },
+  }, window.location.origin);
+}
+
+function queueHistoryReturnMessageTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.queuedHistoryReturnMessageTransfers.some((entry) => entry?.transferId === transferId)) return;
+  state.queuedHistoryReturnMessageTransfers.push(payload);
+}
+
+function drainQueuedHistoryReturnMessageTransfers() {
+  if (!state.historyLoaded || !state.queuedHistoryReturnMessageTransfers.length) return;
+  const queued = state.queuedHistoryReturnMessageTransfers.splice(0);
+  queued.forEach((payload) => handleHistoryReturnMessageTransfer(payload));
+}
+
+async function recordEbayReturnMessageLog(payload = {}) {
+  const message = payload.message || payload.metadata || {};
+  const transferId = payload.transferId || "";
+  const messageBody = String(message.messageBody || message.message || "").trim();
+  if (!messageBody) throw new Error("The eBay buyer message was empty.");
+
+  const rpcPayload = {
+    ...message,
+    messageBody,
+    transferId,
+    source: payload.source || message.source || "ebay_return_message_page",
+    pageUrl: message.pageUrl || payload.pageUrl || "",
+  };
+  const { data, error } = await supabase.rpc("record_ebay_return_message_log", {
+    _payload: rpcPayload,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  return data || null;
+}
+
+async function handleHistoryReturnMessageTransfer(payload = {}) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledReturnMessageTransferIds.has(transferId)) {
+    postHistoryReturnMessageTransferStatus({
+      transferId,
+      ok: true,
+      message: "Return message was already logged in OG.",
+    });
+    return;
+  }
+
+  if (!state.historyLoaded) {
+    queueHistoryReturnMessageTransfer(payload);
+    return;
+  }
+
+  postHistoryReturnMessageTransferStatus({
+    transferId,
+    phase: "started",
+    message: "OG Returns is logging the eBay buyer message.",
+  });
+
+  try {
+    const recorded = await recordEbayReturnMessageLog(payload);
+    if (transferId) state.handledReturnMessageTransferIds.add(transferId);
+    await loadReturnQueue().catch((queueError) => {
+      console.warn("Could not refresh return queue after message log:", queueError);
+    });
+    const message = payload.message || {};
+    if ($("return-task-search") && (message.returnId || message.orderNumber || message.buyerUsername)) {
+      $("return-task-search").value = message.returnId || message.orderNumber || message.buyerUsername || "";
+      renderReturnQueue();
+    }
+    window.setTimeout(() => {
+      $("return-work-queue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    postHistoryReturnMessageTransferStatus({
+      transferId,
+      ok: true,
+      opened: true,
+      returnMessageId: recorded?.id || null,
+      returnCaseId: recorded?.return_case_id || null,
+      orderNumber: recorded?.order_number || message.orderNumber || "",
+      ebayReturnId: recorded?.ebay_return_id || message.returnId || "",
+      message: "Logged eBay buyer message in OG.",
+    });
+  } catch (error) {
+    const message = error.message || "Could not log the eBay buyer message in OG.";
+    console.error("eBay return message log failed:", error);
+    postHistoryReturnMessageTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+    alert(message);
+  }
+}
+
 function getCleanupStoragePaths(result = {}) {
   return [...new Set(
     (Array.isArray(result.complaint_storage_paths) ? result.complaint_storage_paths : [])
@@ -4988,6 +5138,10 @@ function setupHistoryLabelReceiver() {
     }
     if (event.data?.type === "OG_EBAY_RETURN_TRANSFER") {
       handleHistoryReturnTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_RETURN_MESSAGE_LOG") {
+      handleHistoryReturnMessageTransfer(event.data.payload);
     }
   });
 }
@@ -5404,6 +5558,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     state.historyLoaded = true;
     await loadReturnQueue();
     drainQueuedHistoryReturnTransfers();
+    drainQueuedHistoryReturnMessageTransfers();
   } else {
     await loadOrderHistory();
     if ($("return-task-list")) await loadReturnQueue();

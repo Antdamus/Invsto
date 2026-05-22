@@ -340,7 +340,13 @@ textarea {
   padding: 5px 9px;
 }
 
-.return-task-facts,
+.return-task-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .return-import-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -480,6 +486,49 @@ textarea {
   color: var(--history-muted);
   font-size: 0.84rem;
   font-weight: 800;
+}
+
+.return-message-log {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.return-message-entry {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(125, 240, 178, 0.16);
+  border-radius: 14px;
+  background: rgba(125, 240, 178, 0.055);
+}
+
+.return-message-entry div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.return-message-entry strong,
+.return-message-entry time {
+  color: var(--history-text);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.return-message-entry p {
+  margin: 0;
+  color: rgba(248, 242, 233, 0.9);
+  white-space: pre-wrap;
+}
+
+.return-message-entry small {
+  margin: 0;
+  color: var(--history-muted);
+  font-size: 0.75rem;
 }
 
 .return-import-summary.is-error {
