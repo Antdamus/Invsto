@@ -22,6 +22,8 @@ const CAPTURE_POLL_TIMEOUT_MS = 60 * 60 * 1000;
 const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
+const ACTIVE_TASK_STATUSES = ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"];
+const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
 
 function $(id) {
   return document.getElementById(id);
@@ -93,6 +95,32 @@ function getRequestedTaskId() {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : "";
 }
 
+function getUnifiedTaskKey(task = {}) {
+  return `${task.source || "team"}:${task.id || ""}`;
+}
+
+function getEmbeddedOne(value) {
+  return Array.isArray(value) ? value[0] || {} : value || {};
+}
+
+function priorityRank(priority = "") {
+  if (priority === "urgent") return 0;
+  if (priority === "high") return 1;
+  if (priority === "normal") return 2;
+  return 3;
+}
+
+function sortUnifiedTasks(tasks = []) {
+  return [...tasks].sort((a, b) => {
+    const priorityDelta = priorityRank(a.priority) - priorityRank(b.priority);
+    if (priorityDelta) return priorityDelta;
+    const aDue = a.due_at ? new Date(a.due_at).getTime() : Number.POSITIVE_INFINITY;
+    const bDue = b.due_at ? new Date(b.due_at).getTime() : Number.POSITIVE_INFINITY;
+    if (aDue !== bDue) return aDue - bDue;
+    return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+  });
+}
+
 async function loadCurrentUser() {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError || !sessionData?.session) {
@@ -114,9 +142,9 @@ async function loadCurrentUser() {
 
   state.employee = employee;
   const mode = $("team-task-mode");
-  if (mode) mode.textContent = isAdminUser() ? "Admin Tasks" : "My Tasks";
+  if (mode) mode.textContent = isAdminUser() ? "All Tasks" : "My Tasks";
   const greeting = $("team-task-greeting");
-  if (greeting) greeting.textContent = `Team Tasks${employee.display_name ? ` - ${employee.display_name}` : ""}`;
+  if (greeting) greeting.textContent = `Tasks${employee.display_name ? ` - ${employee.display_name}` : ""}`;
   return true;
 }
 
@@ -141,18 +169,24 @@ async function loadAssignees() {
 
 async function loadTasks() {
   const list = $("team-task-list");
-  if (list) list.innerHTML = `<div class="empty-state">Loading team tasks...</div>`;
+  if (list) list.innerHTML = `<div class="empty-state">Loading tasks...</div>`;
   setStatus("");
 
-  const rpcName = isAdminUser() ? "list_admin_team_tasks" : "list_my_team_tasks";
-  const { data, error } = await supabase.rpc(rpcName, { _limit: 50 });
-  if (error) {
-    console.warn("Could not load team tasks:", error);
-    if (list) list.innerHTML = `<div class="empty-state">Could not load team tasks. Make sure the latest migration is pushed.</div>`;
+  const results = await Promise.allSettled([
+    loadTeamTaskRecords(),
+    loadOrderTaskRecords(),
+    loadReturnTaskRecords(),
+  ]);
+  const tasks = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  const failures = results.filter((result) => result.status === "rejected");
+
+  failures.forEach((failure) => console.warn("Could not load one task source:", failure.reason));
+  if (!tasks.length && failures.length === results.length) {
+    if (list) list.innerHTML = `<div class="empty-state">Could not load tasks. Make sure the latest task migrations are pushed.</div>`;
     return;
   }
 
-  state.tasks = data || [];
+  state.tasks = sortUnifiedTasks(tasks);
   const requested = getRequestedTaskId();
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const { data: requestedTask, error: requestedError } = await supabase
@@ -160,7 +194,7 @@ async function loadTasks() {
       .select("*")
       .eq("id", requested)
       .maybeSingle();
-    if (!requestedError && requestedTask) state.tasks.unshift(requestedTask);
+    if (!requestedError && requestedTask) state.tasks.unshift(normalizeTeamTask(requestedTask));
   }
 
   await loadEventsForTasks();
@@ -172,27 +206,130 @@ async function loadTasks() {
   }
 }
 
-async function loadEventsForTasks() {
-  state.eventsByTask = new Map();
-  const ids = state.tasks.map((task) => task.id).filter(Boolean);
-  if (!ids.length) return;
+async function loadTeamTaskRecords() {
+  const rpcName = isAdminUser() ? "list_admin_team_tasks" : "list_my_team_tasks";
+  const { data, error } = await supabase.rpc(rpcName, { _limit: 80 });
+  if (error) throw error;
+  return (data || []).map(normalizeTeamTask);
+}
 
-  const { data, error } = await supabase
-    .from("team_task_events")
-    .select("*")
-    .in("task_id", ids)
-    .order("created_at", { ascending: true });
+async function loadOrderTaskRecords() {
+  const rpcName = isAdminUser() ? "list_admin_ebay_order_tasks" : "list_my_ebay_order_tasks";
+  const rpcResult = await supabase.rpc(rpcName, { _limit: 80 });
+  if (!rpcResult.error) return (rpcResult.data || []).map(normalizeOrderTask);
 
-  if (error) {
-    console.warn("Could not load team task events:", error);
-    return;
+  console.warn("Order task RPC failed, falling back to direct query:", rpcResult.error);
+  let query = supabase
+    .from("ebay_order_tasks")
+    .select("*, ebay_orders(order_number, buyer_username, ship_by_date)")
+    .in("status", ACTIVE_TASK_STATUSES)
+    .order("created_at", { ascending: true })
+    .limit(80);
+  if (!isAdminUser()) query = query.eq("assigned_to_user_id", state.user?.id);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(normalizeOrderTask);
+}
+
+async function loadReturnTaskRecords() {
+  if (!isAdminUser()) {
+    const rpcResult = await supabase.rpc("list_my_ebay_return_tasks", { _limit: 80 });
+    if (!rpcResult.error) return (rpcResult.data || []).map(normalizeReturnTask);
+    console.warn("Return task RPC failed, falling back to direct query:", rpcResult.error);
   }
 
-  (data || []).forEach((event) => {
-    const list = state.eventsByTask.get(event.task_id) || [];
-    list.push(event);
-    state.eventsByTask.set(event.task_id, list);
-  });
+  let query = supabase
+    .from("ebay_return_tasks")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .in("status", ACTIVE_RETURN_TASK_STATUSES)
+    .order("created_at", { ascending: true })
+    .limit(80);
+  if (!isAdminUser()) query = query.eq("assigned_to_user_id", state.user?.id);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(normalizeReturnTask);
+}
+
+function normalizeTeamTask(task = {}) {
+  return {
+    ...task,
+    source: "team",
+    sourceLabel: "Independent",
+    actionHref: `team-tasks.html?taskId=${encodeURIComponent(task.id || "")}`,
+  };
+}
+
+function normalizeOrderTask(task = {}) {
+  const order = getEmbeddedOne(task.ebay_orders);
+  const orderNumber = task.order_number || order.order_number || "";
+  const buyer = task.buyer_username || order.buyer_username || "";
+  return {
+    ...task,
+    source: "order",
+    sourceLabel: "Pending Order",
+    title: task.title || `Pending order ${orderNumber || ""}`.trim(),
+    description: task.question || task.latest_note || "",
+    latest_note: task.latest_note || task.question || "",
+    order_number: orderNumber,
+    buyer_username: buyer,
+    ship_by_date: task.ship_by_date || order.ship_by_date || "",
+    actionHref: `pending-orders.html?orderTaskId=${encodeURIComponent(task.id || "")}#order-task-panel`,
+  };
+}
+
+function normalizeReturnTask(task = {}) {
+  const returnCase = getEmbeddedOne(task.ebay_return_cases);
+  const returnId = task.ebay_return_id || returnCase.ebay_return_id || "";
+  const orderNumber = task.order_number || returnCase.order_number || "";
+  const buyer = task.buyer_username || returnCase.buyer_username || "";
+  const reason = task.return_reason || returnCase.return_reason || "";
+  return {
+    ...task,
+    source: "return",
+    sourceLabel: "Return",
+    title: task.title || `Return ${returnId || orderNumber || ""}`.trim(),
+    description: task.question || reason || "",
+    latest_note: task.question || reason || "",
+    ebay_return_id: returnId,
+    order_number: orderNumber,
+    buyer_username: buyer,
+    return_reason: reason,
+    actionHref: `ebay-returns.html?returnTaskId=${encodeURIComponent(task.id || "")}#return-work-queue`,
+  };
+}
+
+async function loadEventsForTasks() {
+  state.eventsByTask = new Map();
+  const sources = [
+    { source: "team", table: "team_task_events" },
+    { source: "order", table: "ebay_order_task_events" },
+    { source: "return", table: "ebay_return_task_events" },
+  ];
+
+  await Promise.all(sources.map(async ({ source, table }) => {
+    const ids = state.tasks.filter((task) => task.source === source).map((task) => task.id).filter(Boolean);
+    if (!ids.length) return;
+
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .in("task_id", ids)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.warn(`Could not load ${source} task events:`, error);
+      return;
+    }
+
+    (data || []).forEach((event) => {
+      const key = `${source}:${event.task_id}`;
+      const list = state.eventsByTask.get(key) || [];
+      list.push(event);
+      state.eventsByTask.set(key, list);
+    });
+  }));
 }
 
 function getTaskStatusLabel(value) {
@@ -216,16 +353,16 @@ function renderTasks() {
   const title = $("team-task-list-title");
   if (!list) return;
 
-  if (title) title.textContent = isAdminUser() ? "All Open Team Tasks" : "Assigned and Created Tasks";
+  if (title) title.textContent = isAdminUser() ? "All Open Tasks" : "My Assigned Tasks";
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
-    list.innerHTML = `<div class="empty-state">No active team tasks right now.</div>`;
+    list.innerHTML = `<div class="empty-state">No active tasks right now.</div>`;
     return;
   }
 
   list.innerHTML = state.tasks.map((task) => {
-    const events = state.eventsByTask.get(task.id) || [];
+    const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
     const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
       || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
     const resolved = ["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
@@ -239,20 +376,19 @@ function renderTasks() {
           <span class="team-task-chip">${escapeHtml(getTaskStatusLabel(task.status))}</span>
         </div>
         <div class="team-task-meta">
+          <span class="team-task-source">${escapeHtml(task.sourceLabel || "Task")}</span>
           <span>${escapeHtml(task.task_type || "general")}</span>
           <span>${escapeHtml(task.priority || "normal")}</span>
           <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
           <span>Due ${escapeHtml(formatDate(task.due_at))}</span>
-          <span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>
+          ${task.order_number ? `<span>Order ${escapeHtml(task.order_number)}</span>` : ""}
+          ${task.buyer_username ? `<span>${escapeHtml(task.buyer_username)}</span>` : ""}
+          ${task.source === "team" ? `<span>Created by ${escapeHtml(task.created_by_email || "logged-in user")}</span>` : ""}
         </div>
         <div class="team-task-events">
           ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
         </div>
-        <div class="team-task-actions">
-          ${resolved ? "" : `<button type="button" class="secondary-btn" data-team-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
-          <button type="button" class="secondary-btn" data-team-task-reply="${escapeHtml(task.id)}">Reply / Reassign</button>
-          ${resolved ? "" : `<button type="button" class="primary-btn" data-team-task-resolve="${escapeHtml(task.id)}">Mark Completed</button>`}
-        </div>
+        ${renderTaskActions(task, resolved)}
       </article>
     `;
   }).join("");
@@ -269,6 +405,25 @@ function renderTasks() {
   list.querySelectorAll("[data-team-task-photo]").forEach((button) => {
     button.addEventListener("click", () => openTaskPhoto(button.dataset.bucket, button.dataset.path));
   });
+}
+
+function renderTaskActions(task = {}, resolved = false) {
+  if (task.source !== "team") {
+    const label = task.source === "order" ? "Open Pending Order Task" : "Open Return Task";
+    return `
+      <div class="team-task-actions">
+        <a class="secondary-btn" href="${escapeHtml(task.actionHref || "#")}">${escapeHtml(label)}</a>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="team-task-actions">
+      ${resolved ? "" : `<button type="button" class="secondary-btn" data-team-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
+      <button type="button" class="secondary-btn" data-team-task-reply="${escapeHtml(task.id)}">Reply / Reassign</button>
+      ${resolved ? "" : `<button type="button" class="primary-btn" data-team-task-resolve="${escapeHtml(task.id)}">Mark Completed</button>`}
+    </div>
+  `;
 }
 
 function renderTaskEvent(event = {}) {
@@ -709,7 +864,7 @@ function closeModal() {
 
 async function openTaskModal(options = {}) {
   const taskId = options.taskId || "";
-  const task = taskId ? state.tasks.find((entry) => entry.id === taskId) : null;
+  const task = taskId ? state.tasks.find((entry) => entry.source === "team" && entry.id === taskId) : null;
   state.mode = task ? "reply" : "create";
   state.activeTaskId = task?.id || "";
   resetPhotos();

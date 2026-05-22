@@ -203,6 +203,16 @@ body {
   font-weight: 900;
 }
 
+.team-task-meta .team-task-source {
+  border-color: rgba(157, 242, 189, 0.28);
+  background: rgba(157, 242, 189, 0.08);
+  color: var(--task-green);
+}
+
+.team-task-actions a {
+  text-decoration: none;
+}
+
 .team-task-photo-links button {
   border-color: rgba(157, 242, 189, 0.28);
   color: var(--task-green);

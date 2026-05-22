@@ -413,7 +413,7 @@ async function loadAdminOrderTasks() {
   }
 
   container.innerHTML = data.map((task) => {
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_admin" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_admin"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
         <div class="urgent-order-top">
@@ -462,7 +462,7 @@ async function loadAdminTeamTasks() {
   }
 
   container.innerHTML = data.map((task) => {
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_admin" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_admin"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
         <div class="urgent-order-top">
@@ -491,7 +491,7 @@ async function loadAdminReturnTasks() {
   const { data, error } = await supabase
     .from("ebay_return_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
-    .in("status", ["open", "assigned", "in_progress", "blocked"])
+    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -508,7 +508,7 @@ async function loadAdminReturnTasks() {
 
   container.innerHTML = data.map((task) => {
     const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "blocked" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
         <div class="urgent-order-top">

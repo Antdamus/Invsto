@@ -1840,7 +1840,7 @@ body.modal-open {
 }
 
 .evidence-photo-viewer-modal {
-  z-index: 5600;
+  z-index: 7000;
 }
 
 .evidence-photo-viewer-card {
