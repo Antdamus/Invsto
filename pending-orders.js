@@ -245,6 +245,7 @@ function closeModal(id) {
     !$("item-confirm-modal")?.classList.contains("hidden")
     || !$("bundle-review-modal")?.classList.contains("hidden")
     || !$("worker-no-inventory-modal")?.classList.contains("hidden")
+    || !$("worker-cancel-order-modal")?.classList.contains("hidden")
     || !$("no-inventory-photo-viewer-modal")?.classList.contains("hidden")
     || !$("ebay-completed-conflicts-modal")?.classList.contains("hidden")
     || !$("order-task-modal")?.classList.contains("hidden")
@@ -1641,6 +1642,23 @@ function syncMobileOrderDetailMode() {
   }
 }
 
+function returnToOrdersAfterMobileModalClose(options = {}) {
+  if (!isMobilePendingOrderLayout() || options.suppressMobileReturn) return;
+  window.setTimeout(() => {
+    const modalIds = [
+      "item-confirm-modal",
+      "bundle-review-modal",
+      "worker-no-inventory-modal",
+      "worker-cancel-order-modal",
+      "order-task-modal",
+      "admin-order-closeout-modal",
+      "no-inventory-photo-viewer-modal",
+    ];
+    const anyModalOpen = modalIds.some((id) => !$(`${id}`)?.classList.contains("hidden"));
+    if (!anyModalOpen) clearSelection();
+  }, 0);
+}
+
 function resetFulfillmentInputs() {
   const line = state.selectedLine;
   const remaining = getRemainingLineQuantity(line) || Number(line?.quantity || 1) || 1;
@@ -2246,13 +2264,14 @@ async function requestOrderTaskPhoto() {
   }
 }
 
-function closeOrderTaskModal() {
+function closeOrderTaskModal(options = {}) {
   resetOrderTaskPhotos();
   setOrderTaskError("");
   setOrderTaskPhotoStatus("");
   state.activeOrderTaskId = "";
   state.orderTaskMode = "create";
   closeModal("order-task-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("open-order-task-modal")?.focus(), 80);
 }
 
@@ -2495,9 +2514,10 @@ async function openItemConfirmModal(item) {
   }
 }
 
-function closeItemConfirmModal() {
+function closeItemConfirmModal(options = {}) {
   state.pendingItemCandidate = null;
   closeModal("item-confirm-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("item-scan")?.focus(), 80);
 }
 
@@ -3295,14 +3315,16 @@ function getActiveStagedFulfillments() {
   );
 }
 
-function closeBundleReviewModal() {
+function closeBundleReviewModal(options = {}) {
   closeModal("bundle-review-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("fulfill-order")?.focus(), 80);
 }
 
-function closeAdminOrderCloseoutModal() {
+function closeAdminOrderCloseoutModal(options = {}) {
   state.adminCloseoutAction = "";
   closeModal("admin-order-closeout-modal");
+  returnToOrdersAfterMobileModalClose(options);
 }
 
 function describeGeolocationError(error) {
@@ -4115,6 +4137,7 @@ function closeWorkerNoInventoryModal(options = {}) {
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   closeModal("worker-no-inventory-modal");
+  returnToOrdersAfterMobileModalClose(options);
   setTimeout(() => $("complete-no-inventory")?.focus(), 80);
 }
 
@@ -4305,7 +4328,7 @@ async function confirmWorkerNoInventoryCompletion() {
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
     state.ebayLabelReturnContext = null;
-    closeWorkerNoInventoryModal({ suppressEbayReturn: true });
+    closeWorkerNoInventoryModal({ suppressEbayReturn: true, suppressMobileReturn: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) completed without inventory removal. The audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
@@ -4394,7 +4417,7 @@ function renderWorkerCancelOrderList() {
   updateWorkerCancelOrderSelectionSummary();
 }
 
-function closeWorkerCancelOrderModal() {
+function closeWorkerCancelOrderModal(options = {}) {
   state.workerCancelEvidencePhotos.forEach((photo) => {
     if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
   });
@@ -4408,6 +4431,7 @@ function closeWorkerCancelOrderModal() {
   setWorkerCancelPhotoStatus("");
   renderWorkerCancelEvidencePhotos();
   closeModal("worker-cancel-order-modal");
+  returnToOrdersAfterMobileModalClose(options);
 }
 
 function openWorkerCancelOrderModal() {
@@ -4511,7 +4535,7 @@ async function confirmWorkerCancelOrder() {
     if (error) throw error;
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
-    closeWorkerCancelOrderModal();
+    closeWorkerCancelOrderModal({ suppressMobileReturn: true });
     setStatus(`${data?.[0]?.updated_lines || selectedLineIds.length} line(s) marked canceled. The signed audit trail was recorded.`, "info");
     await loadOrders();
     postEbayPendingQueueChanged({
@@ -4648,7 +4672,7 @@ async function confirmAdminOrderCloseout() {
     });
     if (error) throw error;
 
-    closeAdminOrderCloseoutModal();
+    closeAdminOrderCloseoutModal({ suppressMobileReturn: true });
     clearAdminOrderSelection();
     setImportStatus(`Closed ${data?.[0]?.updated_lines || lines.length} order line(s).`, "success");
     await loadOrders();
@@ -4863,6 +4887,9 @@ function clearSelection() {
   closeModal("item-confirm-modal");
   closeModal("bundle-review-modal");
   closeModal("worker-no-inventory-modal");
+  closeModal("worker-cancel-order-modal");
+  closeModal("order-task-modal");
+  closeModal("admin-order-closeout-modal");
   document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");

@@ -1442,7 +1442,7 @@ body.modal-open {
 .packing-modal {
   position: fixed;
   inset: 0;
-  z-index: 5000;
+  z-index: 6000;
   display: grid;
   place-items: center;
   padding: 22px;
