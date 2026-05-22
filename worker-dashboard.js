@@ -344,7 +344,7 @@ async function fetchWorkerReturnTasks(userId) {
     .from("ebay_return_tasks")
     .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "blocked"])
+    .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -377,7 +377,7 @@ async function loadWorkerReturnTasks(userId) {
 
   container.innerHTML = data.map((task) => {
     const returnCase = getWorkerReturnCase(task);
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "blocked" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
         <div class="urgent-order-top">
@@ -413,7 +413,7 @@ async function fetchWorkerOrderTasks(userId) {
     .from("ebay_order_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, ebay_orders(order_number, buyer_username, ship_by_date)")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker"])
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -454,7 +454,7 @@ async function loadWorkerOrderTasks(userId) {
     const orderNumber = task.order_number || order.order_number || "Pending order";
     const buyer = task.buyer_username || order.buyer_username || "eBay buyer";
     const shipBy = task.ship_by_date || order.ship_by_date || "";
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_worker" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_worker"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
         <div class="urgent-order-top">
@@ -505,7 +505,7 @@ async function loadWorkerTeamTasks(userId) {
   }
 
   container.innerHTML = data.map((task) => {
-    const urgentClass = task.priority === "urgent" || task.priority === "high" || task.status === "waiting_on_worker" ? "is-overdue" : "is-soon";
+    const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_worker"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
         <div class="urgent-order-top">

@@ -55,6 +55,14 @@ function formatDate(value) {
   });
 }
 
+function toDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
 function setStatus(message = "", type = "info") {
   const el = $("team-task-status");
   if (!el) return;
@@ -188,7 +196,18 @@ async function loadEventsForTasks() {
 }
 
 function getTaskStatusLabel(value) {
-  return String(value || "open").replace(/_/g, " ");
+  const labels = {
+    open: "Open",
+    assigned: "Assigned",
+    in_progress: "In progress",
+    deferred: "Deferred",
+    blocked: "Blocked",
+    waiting_on_admin: "Waiting on admin",
+    waiting_on_worker: "Waiting on worker",
+    resolved: "Resolved",
+    cancelled: "Cancelled",
+  };
+  return labels[value] || String(value || "open").replace(/_/g, " ");
 }
 
 function renderTasks() {
@@ -207,7 +226,8 @@ function renderTasks() {
 
   list.innerHTML = state.tasks.map((task) => {
     const events = state.eventsByTask.get(task.id) || [];
-    const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
+    const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
+      || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
     const resolved = ["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
     return `
       <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""}" data-team-task-card="${escapeHtml(task.id)}">
@@ -229,6 +249,7 @@ function renderTasks() {
           ${events.length ? events.map(renderTaskEvent).join("") : `<div class="empty-state">No task trail yet.</div>`}
         </div>
         <div class="team-task-actions">
+          ${resolved ? "" : `<button type="button" class="secondary-btn" data-team-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
           <button type="button" class="secondary-btn" data-team-task-reply="${escapeHtml(task.id)}">Reply / Reassign</button>
           ${resolved ? "" : `<button type="button" class="primary-btn" data-team-task-resolve="${escapeHtml(task.id)}">Mark Completed</button>`}
         </div>
@@ -238,6 +259,9 @@ function renderTasks() {
 
   list.querySelectorAll("[data-team-task-reply]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskReply }));
+  });
+  list.querySelectorAll("[data-team-task-progress]").forEach((button) => {
+    button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskProgress, progress: true }));
   });
   list.querySelectorAll("[data-team-task-resolve]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskResolve, resolve: true }));
@@ -692,20 +716,27 @@ async function openTaskModal(options = {}) {
   setModalError("");
   setPhotoStatus("");
 
-  $("team-task-modal-title").textContent = task ? "Reply to team task" : "Create team task";
+  $("team-task-modal-title").textContent = task
+    ? options.progress ? "Progress / delay update" : "Reply to team task"
+    : "Create team task";
   $("team-task-modal-subtitle").textContent = task
-    ? "Add the next note, reassign the work, or mark it completed."
+    ? options.progress
+      ? "Explain what happened, what is blocking completion, and when this should be checked again."
+      : "Add the next note, reassign the work, or mark it completed."
     : "Assign independent work and keep the documentation in one place.";
   $("team-task-title-field")?.classList.toggle("hidden", Boolean(task));
   $("team-task-status-field")?.classList.toggle("hidden", !task);
-  $("submit-team-task").textContent = task ? "Save Update" : "Save Task";
+  $("submit-team-task").textContent = task ? options.progress ? "Save Progress" : "Save Update" : "Save Task";
 
   $("team-task-title-input").value = "";
   $("team-task-note").value = "";
+  $("team-task-note").placeholder = options.progress
+    ? "Why could this not be completed today? What are we waiting for, and what should happen next?"
+    : "Write the instructions, answer, or completion note.";
   $("team-task-type").value = task?.task_type || "general";
   $("team-task-priority").value = task?.priority || "normal";
-  $("team-task-due-at").value = "";
-  $("team-task-status-input").value = options.resolve ? "resolved" : "";
+  $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
+  $("team-task-status-input").value = options.resolve ? "resolved" : options.progress ? "deferred" : "";
   renderAssigneeSelect();
   $("team-task-assignee").value = task?.assigned_to_user_id || "";
 
@@ -743,6 +774,7 @@ async function submitTask() {
         _priority: $("team-task-priority")?.value || null,
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
+        _due_at: localDateTimeToIso($("team-task-due-at")?.value || ""),
       });
       if (error) throw error;
       setStatus("Team task updated.", "success");

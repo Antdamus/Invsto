@@ -631,11 +631,17 @@
           <select id="order-task-status">
             <option value="">Keep current status</option>
             <option value="in_progress">In progress</option>
+            <option value="deferred">Deferred / waiting until date</option>
+            <option value="blocked">Blocked / needs help</option>
             <option value="waiting_on_admin">Waiting on admin</option>
             <option value="waiting_on_worker">Waiting on worker</option>
             <option value="resolved">Resolved</option>
             <option value="cancelled">Cancel task</option>
           </select>
+        </label>
+        <label class="modal-field">
+          Next Action / Due
+          <input id="order-task-due-at" type="datetime-local" />
         </label>
       </div>
       <label class="modal-field">

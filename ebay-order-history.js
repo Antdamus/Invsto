@@ -925,6 +925,7 @@ function getReturnTaskStatusLabel(status = "") {
     assigned: "Assigned",
     in_progress: "In progress",
     blocked: "Blocked",
+    deferred: "Deferred",
     resolved: "Resolved",
     cancelled: "Cancelled",
   };
@@ -1015,7 +1016,7 @@ function getFilteredReturnTasks() {
   const statusFilter = $("return-task-status-filter")?.value || "pending";
   const assigneeFilter = $("return-task-assignee-filter")?.value || "";
   const term = String($("return-task-search")?.value || "").trim().toLowerCase();
-  const pendingStatuses = new Set(["open", "assigned", "in_progress", "blocked"]);
+  const pendingStatuses = new Set(["open", "assigned", "in_progress", "blocked", "deferred"]);
   return state.returnTasks.filter((task) => {
     if (statusFilter === "pending" && !pendingStatuses.has(task.status)) return false;
     if (statusFilter === "mine" && task.assigned_to_user_id !== state.user?.id) return false;
@@ -1385,6 +1386,7 @@ function renderReturnQueue() {
           <div class="return-task-buttons">
             ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
+            ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
           </div>
         </div>
@@ -1552,12 +1554,45 @@ async function updateReturnTaskStatus(taskId, status) {
   await loadReturnQueue();
 }
 
+async function updateReturnTaskProgress(taskId) {
+  const note = window.prompt("Why could this return task not be completed yet? What should happen next?", "");
+  if (note === null) return;
+  if (!String(note || "").trim()) {
+    setReturnTaskSaveStatus("Write a progress note before saving the delay.", "error");
+    return;
+  }
+  const dueValue = window.prompt("Next follow-up date/time, optional. Use format YYYY-MM-DD HH:MM.", "");
+  if (dueValue === null) return;
+  let dueAt = null;
+  if (String(dueValue || "").trim()) {
+    const dueDate = new Date(String(dueValue).replace(" ", "T"));
+    if (Number.isNaN(dueDate.getTime())) {
+      setReturnTaskSaveStatus("Progress note not saved: the follow-up date was not valid.", "error");
+      return;
+    }
+    dueAt = dueDate.toISOString();
+  }
+  const { error } = await supabase.rpc("update_ebay_return_task_status", {
+    _task_id: taskId,
+    _status: dueAt ? "deferred" : "blocked",
+    _resolution_notes: note || null,
+    _signed_by_email: state.user?.email || null,
+    _due_at: dueAt,
+  });
+  if (error) throw error;
+  await loadReturnQueue();
+  setReturnTaskSaveStatus("Return task progress saved.", "success");
+}
+
 function bindReturnQueueActions() {
   document.querySelectorAll("[data-return-task-open]").forEach((button) => {
     button.addEventListener("click", () => openReturnTaskIntake(button.dataset.returnTaskOpen));
   });
   document.querySelectorAll("[data-return-task-start]").forEach((button) => {
     button.addEventListener("click", () => updateReturnTaskStatus(button.dataset.returnTaskStart, "in_progress").catch((error) => alert(error.message || "Could not start task.")));
+  });
+  document.querySelectorAll("[data-return-task-progress]").forEach((button) => {
+    button.addEventListener("click", () => updateReturnTaskProgress(button.dataset.returnTaskProgress).catch((error) => alert(error.message || "Could not save progress.")));
   });
   document.querySelectorAll("[data-return-task-resolve]").forEach((button) => {
     button.addEventListener("click", () => updateReturnTaskStatus(button.dataset.returnTaskResolve, "resolved").catch((error) => alert(error.message || "Could not resolve task.")));

@@ -110,6 +110,20 @@ function formatDate(value) {
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function toDateTimeLocalValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function localDateTimeToIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
   if (!Number.isFinite(size) || size <= 0) return "";
@@ -1762,7 +1776,18 @@ function renderEbayLabelPanel() {
 }
 
 function getOrderTaskStatusLabel(status = "") {
-  return String(status || "open").replace(/_/g, " ");
+  const labels = {
+    open: "Open",
+    assigned: "Assigned",
+    in_progress: "In progress",
+    deferred: "Deferred",
+    blocked: "Blocked",
+    waiting_on_admin: "Waiting on admin",
+    waiting_on_worker: "Waiting on worker",
+    resolved: "Resolved",
+    cancelled: "Cancelled",
+  };
+  return labels[status] || String(status || "open").replace(/_/g, " ");
 }
 
 function getOrderTaskLineIdsForSelectedOrder() {
@@ -1957,10 +1982,12 @@ function renderOrderTaskPanel(options = {}) {
         <div class="order-task-meta">
           <span>${escapeHtml(task.priority || "normal")}</span>
           <span>Assigned: ${escapeHtml(getOrderTaskAssigneeLabel(task))}</span>
+          <span>Next: ${escapeHtml(formatDate(task.due_at))}</span>
           <span>Created ${escapeHtml(formatDate(task.created_at))}</span>
         </div>
         ${eventHtml}
         <div class="fulfill-actions">
+          ${isResolved ? "" : `<button type="button" class="secondary-btn" data-order-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
           <button type="button" class="secondary-btn" data-order-task-reply="${escapeHtml(task.id)}">${isResolved ? "Add Note" : "Reply / Reassign"}</button>
         </div>
       </article>
@@ -1969,6 +1996,9 @@ function renderOrderTaskPanel(options = {}) {
 
   list.querySelectorAll("[data-order-task-reply]").forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => openOrderTaskModal({ taskId: buttonEl.dataset.orderTaskReply }));
+  });
+  list.querySelectorAll("[data-order-task-progress]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", () => openOrderTaskModal({ taskId: buttonEl.dataset.orderTaskProgress, progress: true }));
   });
   list.querySelectorAll("[data-order-task-photo]").forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => {
@@ -2290,15 +2320,23 @@ async function openOrderTaskModal(options = {}) {
   setOrderTaskError("");
   setOrderTaskPhotoStatus("");
 
-  $("order-task-modal-title").textContent = task ? "Reply to order task" : "Create order task";
+  $("order-task-modal-title").textContent = task
+    ? options.progress ? "Progress / delay update" : "Reply to order task"
+    : "Create order task";
   $("order-task-modal-subtitle").textContent = task
-    ? "Add the next instruction, assign it to the next person, or resolve it."
+    ? options.progress
+      ? "Explain what happened, what is blocking completion, and when this should be checked again."
+      : "Add the next instruction, assign it to the next person, or resolve it."
     : "Send a question, instruction, or special handling request to an admin or worker.";
-  $("submit-order-task").textContent = task ? "Send Update" : "Send Task";
+  $("submit-order-task").textContent = task ? options.progress ? "Save Progress" : "Send Update" : "Send Task";
   $("order-task-status-field")?.classList.toggle("hidden", !task);
   $("order-task-note").value = "";
+  $("order-task-note").placeholder = options.progress
+    ? "Why could this not be completed today? What are we waiting for, and what should happen next?"
+    : "Write exactly what needs review, a decision, or special coordination.";
   $("order-task-priority").value = task?.priority || "normal";
-  $("order-task-status").value = "";
+  $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
+  $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
   $("order-task-context").innerHTML = `
     <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
     <span>${escapeHtml(line.item_title || "Untitled item")}</span>
@@ -2347,6 +2385,7 @@ async function submitOrderTask() {
         _priority: priority,
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
+        _due_at: localDateTimeToIso($("order-task-due-at")?.value || ""),
       });
       if (error) throw error;
       setStatus("Order task update saved.", "success");
@@ -2357,7 +2396,7 @@ async function submitOrderTask() {
         _assigned_to_user_id: assigneeUserId,
         _priority: priority,
         _question: note,
-        _due_at: line.order?.ship_by_date || null,
+        _due_at: localDateTimeToIso($("order-task-due-at")?.value || "") || line.order?.ship_by_date || null,
         _photo_attachments: photos,
         _signed_by_email: signedByEmail,
       });
