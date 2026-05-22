@@ -337,14 +337,13 @@
     });
 
     try {
-      await waitForTabComplete(tab.id, 30000);
       const response = await sendMessageToTabWithRetry(tab.id, {
         type: "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE",
         payload,
       }, {
-        attempts: 14,
-        initialDelayMs: 900,
-        retryDelayMs: 650,
+        attempts: 30,
+        initialDelayMs: 250,
+        retryDelayMs: 450,
       });
       if (!response?.ok) throw new Error(response?.error || "The eBay detail page did not return complaint photos.");
       return response;

@@ -33,6 +33,7 @@
   const REPORT_STATUS_TIMEOUT_MS = 120000;
   const REPORT_PROBE_READY_TIMEOUT_MS = 5000;
   const RETURN_DETAIL_PHOTO_CAPTURE_TIMEOUT_MS = 9000;
+  const RETURN_DETAIL_BATCH_CONCURRENCY = 5;
   let currentBoxReminderKey = "";
   let dismissedBoxReminderKey = "";
   let shownBoxReminderKey = "";
@@ -50,6 +51,7 @@
   let ogAutoVideoReceiptStarted = false;
   let ogReturnBatchExportInProgress = false;
   let ogReturnBatchStatusHoldUntil = 0;
+  const ogReturnDetailCaptureCache = new Map();
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -3340,9 +3342,34 @@
     );
   }
 
+  function cloneReturnDetail(detail = null) {
+    if (!detail || typeof detail !== "object") return detail;
+    try {
+      return JSON.parse(JSON.stringify(detail));
+    } catch (_) {
+      return { ...detail };
+    }
+  }
+
+  function getReturnDetailCacheKey(detailsUrl = "", returnInfo = {}) {
+    return [
+      normalizeEbayNavigationUrl(detailsUrl || ""),
+      returnInfo.returnId || "",
+      returnInfo.itemNumber || "",
+    ].filter(Boolean).join("|");
+  }
+
   async function captureLiveReturnDetailPage(detailsUrl, returnInfo = {}) {
     if (!detailsUrl) return null;
     assertExtensionContextActive();
+    const cacheKey = getReturnDetailCacheKey(detailsUrl, returnInfo);
+    if (cacheKey && ogReturnDetailCaptureCache.has(cacheKey)) {
+      return {
+        ok: true,
+        details: cloneReturnDetail(ogReturnDetailCaptureCache.get(cacheKey)),
+        cached: true,
+      };
+    }
     const response = await chrome.runtime.sendMessage({
       type: "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE",
       payload: {
@@ -3352,6 +3379,7 @@
       },
     });
     if (!response?.ok) throw new Error(response?.error || "Could not capture the live eBay return detail page.");
+    if (cacheKey && response.details) ogReturnDetailCaptureCache.set(cacheKey, cloneReturnDetail(response.details));
     return response;
   }
 
@@ -3440,11 +3468,30 @@
   }
 
   async function enrichReturnsForImport(returns = [], button = null) {
-    const enriched = [];
-    for (let index = 0; index < returns.length; index += 1) {
-      if (button) setReturnButtonStatus(button, `Reading details ${index + 1}/${returns.length}...`);
-      enriched.push(await enrichReturnInfoForImport(returns[index]));
+    const total = returns.length;
+    const enriched = new Array(total);
+    let nextIndex = 0;
+    let completed = 0;
+    const concurrency = Math.min(RETURN_DETAIL_BATCH_CONCURRENCY, Math.max(1, total));
+
+    async function worker() {
+      while (nextIndex < total) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (button) setReturnButtonStatus(button, `Reading details ${completed + 1}-${Math.min(completed + concurrency, total)}/${total}...`);
+        try {
+          enriched[index] = await enrichReturnInfoForImport(returns[index]);
+        } catch (error) {
+          console.warn("[OG eBay Return] Could not enrich return details:", error);
+          enriched[index] = returns[index];
+        } finally {
+          completed += 1;
+          if (button) setReturnButtonStatus(button, `Reading details ${completed}/${total}...`);
+        }
+      }
     }
+
+    await Promise.all(Array.from({ length: concurrency }, worker));
     return enriched;
   }
 

@@ -4456,6 +4456,72 @@ function postHistoryReturnTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+async function clearReturnImportTestData() {
+  if (!isAdminUser()) {
+    alert("Only admins can clear return import test data.");
+    return;
+  }
+
+  const button = $("clear-return-test-imports");
+  if (button?.disabled) return;
+  if (button) button.disabled = true;
+
+  try {
+    const { data: previewData, error: previewError } = await supabase.rpc("admin_clear_ebay_return_import_test_data", {
+      _dry_run: true,
+    });
+    if (previewError) throw previewError;
+    const preview = Array.isArray(previewData) ? previewData[0] || {} : previewData || {};
+    const caseCount = Number(preview.return_cases || 0);
+    const taskCount = Number(preview.return_tasks || 0);
+    const storageCount = Number(preview.complaint_storage_objects || 0);
+    if (!caseCount && !taskCount && !storageCount) {
+      alert("No eBay return import test data was found to clear.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      [
+        "Clear current eBay return import test data?",
+        "",
+        `Return cases: ${caseCount.toLocaleString()}`,
+        `Return tasks: ${taskCount.toLocaleString()}`,
+        `Imported complaint photos: ${storageCount.toLocaleString()}`,
+        "",
+        "This will not delete eBay order history, shipping labels, inventory, or saved return intake records.",
+      ].join("\n")
+    );
+    if (!confirmed) return;
+
+    const { data, error } = await supabase.rpc("admin_clear_ebay_return_import_test_data", {
+      _dry_run: false,
+    });
+    if (error) throw error;
+    const result = Array.isArray(data) ? data[0] || {} : data || {};
+    setLastReturnImportSummary({
+      ok: true,
+      requestedCount: 0,
+      processedCount: 0,
+      importedCount: 0,
+      importedCreatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedCreated: 0,
+      failedCount: 0,
+      duplicateResolvedCount: 0,
+      importedReturns: [],
+      unmatchedReturns: [],
+      failedReturns: [],
+      message: `Cleared ${Number(result.return_cases || 0).toLocaleString()} return import case${Number(result.return_cases || 0) === 1 ? "" : "s"}, ${Number(result.return_tasks || 0).toLocaleString()} task${Number(result.return_tasks || 0) === 1 ? "" : "s"}, and ${Number(result.complaint_storage_objects || 0).toLocaleString()} imported complaint photo${Number(result.complaint_storage_objects || 0) === 1 ? "" : "s"}.`,
+    });
+    await loadReturnQueue();
+  } catch (error) {
+    console.error("Could not clear eBay return import test data:", error);
+    alert(error?.message || "Could not clear return import test data. Push the latest return cleanup migration first.");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
   const panel = $("return-import-summary");
   const count = $("return-import-count");
@@ -5179,6 +5245,7 @@ function setupListeners() {
   $("refresh-return-queue")?.addEventListener("click", loadReturnQueue);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
+  $("clear-return-test-imports")?.addEventListener("click", clearReturnImportTestData);
   $("start-label-backfill")?.addEventListener("click", startLabelTrackingBackfill);
   $("done-label-backfill")?.addEventListener("click", closeLabelBackfillModal);
   $("close-label-backfill-modal")?.addEventListener("click", closeLabelBackfillModal);

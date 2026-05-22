@@ -61,6 +61,11 @@ textarea {
   background: rgba(255, 255, 255, 0.055);
 }
 
+.danger-btn {
+  border-color: rgba(255, 143, 143, 0.32);
+  color: #ffd5d5;
+}
+
 .primary-btn:disabled,
 .secondary-btn:disabled {
   cursor: not-allowed;
