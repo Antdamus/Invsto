@@ -1248,6 +1248,17 @@
   margin: 8px 0 9px;
 }
 
+.draft-review-form {
+  display: grid;
+  gap: 9px;
+  margin-top: 9px;
+}
+
+.draft-field {
+  display: grid;
+  gap: 5px;
+}
+
 .draft-detail-grid dd {
   display: flex;
   flex-wrap: wrap;
@@ -1259,7 +1270,8 @@
 }
 
 .draft-safety-flags > span,
-.draft-content > span {
+.draft-content > span,
+.draft-field > span {
   display: block;
   margin-bottom: 5px;
   color: rgba(242,243,245,.56);
@@ -1283,6 +1295,41 @@
   color: rgba(242,243,245,.94);
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.draft-field input,
+.draft-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 7px;
+  background: rgba(0,0,0,.16);
+  color: rgba(242,243,245,.92);
+  font: inherit;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.draft-field textarea[name="draftBodyText"] {
+  min-height: 220px;
+  font: 0.84rem/1.48 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.draft-field input:focus,
+.draft-field textarea:focus {
+  border-color: rgba(214,178,94,.4);
+  box-shadow: 0 0 0 3px rgba(214,178,94,.08);
+  outline: 0;
+}
+
+.draft-field input:disabled,
+.draft-field textarea:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.draft-review-actions {
+  margin-top: 0;
 }
 
 .draft-body-text {
@@ -1379,6 +1426,12 @@
   border-color: rgba(255,99,132,.28);
   background: rgba(255,99,132,.08);
   color: #ff9ab0;
+}
+
+.classification-notice.is-success {
+  border-color: rgba(85,239,196,.24);
+  background: rgba(85,239,196,.08);
+  color: #55efc4;
 }
 
 .classification-empty {

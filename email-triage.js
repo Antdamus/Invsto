@@ -15,6 +15,7 @@
   const MESSAGE_DETAIL_TIMEOUT_MS = 15000;
   const DRAFT_VIEW_TIMEOUT_MS = 15000;
   const DRAFT_GENERATION_TIMEOUT_MS = 45000;
+  const DRAFT_REVIEW_TIMEOUT_MS = 15000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
@@ -120,6 +121,7 @@
     draftErrorsByMessageId: {},
     draftActionMessageId: null,
     draftActionErrorsByMessageId: {},
+    draftActionMessagesByMessageId: {},
     updatedAt: null,
   };
 
@@ -657,6 +659,46 @@
     }
   }
 
+  async function requestDraftReviewAction(context, values) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Draft review session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), DRAFT_REVIEW_TIMEOUT_MS);
+
+    try {
+      return await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: values.mode,
+          messageId: values.messageId,
+          classificationId: values.classificationId,
+          draftId: values.draftId,
+          draftSubject: values.draftSubject,
+          draftBodyText: values.draftBodyText,
+          operatorNotes: values.operatorNotes || "",
+        }),
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
   async function saveClassificationReview(context, values) {
     const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
     if (sessionError) console.error("Review save session refresh failed:", sessionError);
@@ -944,6 +986,10 @@
     if (status === "invalid") return "danger";
     if (status === "warning") return "warning";
     if (status === "error") return "danger";
+    if (status === "approved") return "success";
+    if (status === "rejected") return "danger";
+    if (status === "reviewing") return "warning";
+    if (status === "generated") return "default";
     return "muted";
   }
 
@@ -1339,8 +1385,11 @@
     const isActing = state.draftActionMessageId === messageId;
     const error = messageId ? state.draftErrorsByMessageId[messageId] : null;
     const actionError = messageId ? state.draftActionErrorsByMessageId[messageId] : null;
+    const actionMessage = messageId ? state.draftActionMessagesByMessageId[messageId] : null;
     const actionMode = currentDraft ? "regenerate_response" : "generate_response";
     const actionLabel = currentDraft ? "Regenerate Draft" : "Generate Draft";
+    const canEditDraft = currentDraft?.draft_content_returned === true;
+    const reviewDisabled = isLoading || isActing || !currentDraft?.id || !canEditDraft;
 
     return `
       <details class="classification-detail-section response-draft-section detail-disclosure core-disclosure" open>
@@ -1350,10 +1399,11 @@
           <i data-lucide="chevron-down"></i>
         </summary>
         <div class="classification-notice is-warning draft-safety-notice">
-          Draft requires human review. Not sent. No Outlook mutation.
+          Draft requires human review. Approved does not send email. Rejected does not delete draft. No Outlook mutation.
         </div>
         ${error ? `<div class="classification-notice is-error">Could not load draft view: ${escapeHtml(error)}</div>` : ""}
         ${actionError ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(actionError)}</div>` : ""}
+        ${actionMessage ? `<div class="classification-notice is-success">${escapeHtml(actionMessage)}</div>` : ""}
         <div class="draft-actions">
           <button type="button" class="${currentDraft ? "secondary-btn" : "primary-btn"}" data-draft-action="${escapeHtml(actionMode)}" data-message-id="${escapeHtml(messageId)}" data-classification-id="${escapeHtml(selected.id)}" data-draft-id="${escapeHtml(currentDraft?.id || "")}" ${isLoading || isActing || !messageId ? "disabled" : ""}>
             <i data-lucide="${isActing ? "loader-circle" : currentDraft ? "refresh-cw" : "wand-sparkles"}"></i>
@@ -1366,14 +1416,38 @@
         </div>
         ${isLoading && !payload ? `<div class="classification-empty draft-empty">Loading draft history.</div>` : ""}
         ${currentDraft ? `
-          <div class="draft-content">
-            <span>Draft Subject</span>
-            <strong>${escapeHtml(currentDraft.draft_subject || "Draft subject unavailable.")}</strong>
-          </div>
-          <div class="draft-content">
-            <span>Draft Body</span>
-            <pre class="draft-body-text">${escapeHtml(currentDraft.draft_body_text || "Draft body is not available for this validation state.")}</pre>
-          </div>
+          <form class="draft-review-form" data-draft-review-form>
+            <input type="hidden" name="messageId" value="${escapeHtml(messageId)}" />
+            <input type="hidden" name="classificationId" value="${escapeHtml(selected.id)}" />
+            <input type="hidden" name="draftId" value="${escapeHtml(currentDraft.id)}" />
+            <label class="draft-field">
+              <span>Draft Subject</span>
+              <input name="draftSubject" type="text" maxlength="180" value="${escapeHtml(currentDraft.draft_subject || "")}" ${reviewDisabled ? "disabled" : ""} />
+            </label>
+            <label class="draft-field">
+              <span>Draft Body</span>
+              <textarea name="draftBodyText" rows="10" maxlength="5000" ${reviewDisabled ? "disabled" : ""}>${escapeHtml(currentDraft.draft_body_text || "")}</textarea>
+            </label>
+            <label class="draft-field">
+              <span>Operator Notes</span>
+              <textarea name="operatorNotes" rows="3" maxlength="2000" ${isLoading || isActing || !currentDraft?.id ? "disabled" : ""}>${escapeHtml(currentDraft.operator_notes || "")}</textarea>
+            </label>
+            ${!canEditDraft ? `<div class="classification-notice is-warning">Draft content is not editable because validation or safety checks blocked returning the body.</div>` : ""}
+            <div class="draft-actions draft-review-actions">
+              <button type="button" class="secondary-btn" data-draft-review-action="save_draft_review" ${reviewDisabled ? "disabled" : ""}>
+                <i data-lucide="${isActing ? "loader-circle" : "save"}"></i>
+                ${escapeHtml(isActing ? "Saving" : "Save Draft Edits")}
+              </button>
+              <button type="button" class="primary-btn" data-draft-review-action="approve_draft" ${reviewDisabled ? "disabled" : ""}>
+                <i data-lucide="${isActing ? "loader-circle" : "check-circle"}"></i>
+                ${escapeHtml(isActing ? "Approving" : "Approve Draft")}
+              </button>
+              <button type="button" class="danger-btn" data-draft-review-action="reject_draft" ${isLoading || isActing || !currentDraft?.id ? "disabled" : ""}>
+                <i data-lucide="${isActing ? "loader-circle" : "x-circle"}"></i>
+                ${escapeHtml(isActing ? "Rejecting" : "Reject Draft")}
+              </button>
+            </div>
+          </form>
           ${renderAdvancedDisclosure(
             "Workflow / Draft Metadata",
             renderBadge(`v${currentDraft.draft_version || "--"}`, "muted"),
@@ -1780,6 +1854,10 @@
         ...adminClassificationState.draftActionErrorsByMessageId,
         [selected.message_id]: null,
       },
+      draftActionMessagesByMessageId: {
+        ...adminClassificationState.draftActionMessagesByMessageId,
+        [selected.message_id]: null,
+      },
     });
 
     try {
@@ -1807,6 +1885,62 @@
         },
       });
       console.error("[email-triage] response draft action failed:", error);
+    }
+  }
+
+  async function runDraftReviewAction(context, values) {
+    const selected = selectedClassificationForDraft(values.messageId, values.classificationId);
+    if (!selected?.message_id || !selected?.id || !values.draftId) return;
+
+    setAdminClassificationState({
+      draftActionMessageId: selected.message_id,
+      draftActionErrorsByMessageId: {
+        ...adminClassificationState.draftActionErrorsByMessageId,
+        [selected.message_id]: null,
+      },
+      draftActionMessagesByMessageId: {
+        ...adminClassificationState.draftActionMessagesByMessageId,
+        [selected.message_id]: null,
+      },
+    });
+
+    try {
+      const result = await requestDraftReviewAction(context, {
+        mode: values.mode,
+        messageId: selected.message_id,
+        classificationId: selected.id,
+        draftId: values.draftId,
+        draftSubject: values.draftSubject,
+        draftBodyText: values.draftBodyText,
+        operatorNotes: values.operatorNotes,
+      });
+      const labels = {
+        save_draft_review: "Draft edits saved as a reviewed version. Nothing was sent.",
+        approve_draft: "Draft approved as ready. Nothing was sent.",
+        reject_draft: "Draft rejected and preserved in history.",
+      };
+      setAdminClassificationState({
+        draftActionMessageId: null,
+        draftActionErrorsByMessageId: {
+          ...adminClassificationState.draftActionErrorsByMessageId,
+          [selected.message_id]: null,
+        },
+        draftActionMessagesByMessageId: {
+          ...adminClassificationState.draftActionMessagesByMessageId,
+          [selected.message_id]: labels[result.mode] || "Draft review saved.",
+        },
+      });
+      await loadDraftView(context, selected, { force: true });
+    } catch (error) {
+      const code = error.code || error.message || "draft_review_failed";
+      setAdminClassificationState({
+        draftActionMessageId: null,
+        draftActionErrorsByMessageId: {
+          ...adminClassificationState.draftActionErrorsByMessageId,
+          [selected.message_id]: code,
+        },
+      });
+      console.error("[email-triage] draft review action failed:", error);
     }
   }
 
@@ -2108,6 +2242,23 @@
         return;
       }
 
+      const draftReviewButton = event.target.closest("[data-draft-review-action]");
+      if (draftReviewButton) {
+        const form = draftReviewButton.closest("[data-draft-review-form]");
+        const formData = new FormData(form);
+        const action = draftReviewButton.getAttribute("data-draft-review-action");
+        runDraftReviewAction(context, {
+          mode: action,
+          messageId: String(formData.get("messageId") || ""),
+          classificationId: String(formData.get("classificationId") || ""),
+          draftId: String(formData.get("draftId") || ""),
+          draftSubject: String(formData.get("draftSubject") || ""),
+          draftBodyText: String(formData.get("draftBodyText") || ""),
+          operatorNotes: String(formData.get("operatorNotes") || ""),
+        });
+        return;
+      }
+
       const draftButton = event.target.closest("[data-draft-action]");
       if (draftButton) {
         const action = draftButton.getAttribute("data-draft-action");
@@ -2183,6 +2334,12 @@
         return;
       }
       loadMessageDetail(context, messageId);
+    });
+
+    els.classificationDetail?.addEventListener("submit", (event) => {
+      if (event.target.closest("[data-draft-review-form]")) {
+        event.preventDefault();
+      }
     });
 
     els.classificationSort?.addEventListener("change", (event) => {

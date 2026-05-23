@@ -17,7 +17,7 @@ const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response", "regenerate_response", "admin_draft_view"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -285,6 +285,8 @@ type Input = {
   overridePriority: string | null;
   overrideUrgency: string | null;
   operatorNotes: string | null;
+  draftSubject: string | null;
+  draftBodyText: string | null;
 };
 
 class ClassifierError extends Error {
@@ -421,6 +423,12 @@ async function parseInput(req: Request): Promise<Input> {
     ? String(body.overrideUrgency)
     : null;
   const operatorNotes = typeof body?.operatorNotes === "string" ? shortText(body.operatorNotes, 2000) : null;
+  const draftSubject = typeof body?.draftSubject === "string"
+    ? shortText(body.draftSubject, MAX_DRAFT_SUBJECT_CHARS)
+    : null;
+  const draftBodyText = typeof body?.draftBodyText === "string"
+    ? safeBodyText(body.draftBodyText).slice(0, MAX_DRAFT_BODY_CHARS)
+    : null;
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
@@ -438,6 +446,15 @@ async function parseInput(req: Request): Promise<Input> {
   }
   if (mode === "regenerate_response" && !messageId && !classificationId && !draftId) {
     throw new ClassifierError("response_draft_selector_required", { status: 400, phase: "input" });
+  }
+  if ((mode === "save_draft_review" || mode === "approve_draft" || mode === "reject_draft") && !draftId) {
+    throw new ClassifierError("draft_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "save_draft_review" && !draftSubject) {
+    throw new ClassifierError("draft_subject_required", { status: 400, phase: "input" });
+  }
+  if (mode === "save_draft_review" && !draftBodyText) {
+    throw new ClassifierError("draft_body_required", { status: 400, phase: "input" });
   }
   if (mode === "dry_run" && !messageId && !mailboxId) {
     throw new ClassifierError("dry_run_selector_required", { status: 400, phase: "input" });
@@ -470,6 +487,8 @@ async function parseInput(req: Request): Promise<Input> {
     overridePriority,
     overrideUrgency,
     operatorNotes,
+    draftSubject,
+    draftBodyText,
   };
 }
 
@@ -2553,6 +2572,208 @@ async function generateResponseDraft(
   }
 }
 
+async function loadDraftForOperatorWorkflow(supabase: ServiceClient, input: Input) {
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .select("id, message_id, classification_id, source, draft_status, draft_subject, draft_body_text, draft_body_format, model_name, model_version, prompt_version, prompt_hash, input_hash, processing_job_id, draft_version, is_current, superseded_at, validation_status, validation_errors, safety_flags, requires_human_review, created_by, approved_by, approved_at, rejected_by, rejected_at, operator_notes, metadata, created_at, updated_at")
+    .eq("id", input.draftId)
+    .maybeSingle();
+  if (error) throw new ClassifierError("response_draft_lookup_failed", { phase: "draft_review" });
+  if (!data?.id) throw new ClassifierError("response_draft_not_found", { status: 404, phase: "draft_review" });
+  if (input.messageId && data.message_id !== input.messageId) {
+    throw new ClassifierError("response_draft_message_mismatch", { status: 400, phase: "draft_review" });
+  }
+  if (input.classificationId && data.classification_id && data.classification_id !== input.classificationId) {
+    throw new ClassifierError("response_draft_classification_mismatch", { status: 400, phase: "draft_review" });
+  }
+  if (data.is_current !== true) {
+    throw new ClassifierError("current_response_draft_required", { status: 400, phase: "draft_review" });
+  }
+  return data as Record<string, any>;
+}
+
+async function saveDraftReview(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+) {
+  const sourceDraft = await loadDraftForOperatorWorkflow(supabase, input);
+  const nowIso = new Date().toISOString();
+  const messageId = String(sourceDraft.message_id);
+  const draftVersion = await nextDraftVersion(supabase, messageId);
+  const priorMetadata = sourceDraft.metadata && typeof sourceDraft.metadata === "object" ? sourceDraft.metadata : {};
+  const metadata = {
+    ...priorMetadata,
+    operator_review: {
+      mode: "save_draft_review",
+      reviewed_from_draft_id: sourceDraft.id,
+      reviewed_from_version: sourceDraft.draft_version,
+      reviewed_from_source: sourceDraft.source,
+      reviewed_by: admin.userId,
+      reviewed_at: nowIso,
+      original_ai_draft_id: priorMetadata?.operator_review?.original_ai_draft_id || (sourceDraft.source === "ai" ? sourceDraft.id : null),
+      original_ai_version: priorMetadata?.operator_review?.original_ai_version || (sourceDraft.source === "ai" ? sourceDraft.draft_version : null),
+    },
+  };
+
+  const { data: previousCurrentDrafts, error: previousCurrentError } = await supabase
+    .from("email_response_drafts")
+    .select("id, draft_version")
+    .eq("message_id", messageId)
+    .eq("is_current", true)
+    .order("draft_version", { ascending: false });
+  if (previousCurrentError) {
+    throw new ClassifierError("response_draft_previous_lookup_failed", { phase: "draft_review", messageId });
+  }
+
+  const { error: supersedeError } = await supabase
+    .from("email_response_drafts")
+    .update({ is_current: false, superseded_at: nowIso })
+    .eq("message_id", messageId)
+    .eq("is_current", true);
+  if (supersedeError) {
+    throw new ClassifierError("response_draft_supersede_failed", { phase: "draft_review", messageId });
+  }
+
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .insert({
+      message_id: messageId,
+      classification_id: sourceDraft.classification_id || null,
+      source: "human",
+      draft_status: "reviewing",
+      draft_subject: input.draftSubject,
+      draft_body_text: input.draftBodyText,
+      draft_body_format: sourceDraft.draft_body_format || "plain_text",
+      model_name: sourceDraft.model_name || null,
+      model_version: sourceDraft.model_version || null,
+      prompt_version: sourceDraft.prompt_version || null,
+      prompt_hash: sourceDraft.prompt_hash || null,
+      input_hash: sourceDraft.input_hash || null,
+      processing_job_id: sourceDraft.processing_job_id || null,
+      draft_version: draftVersion,
+      is_current: true,
+      superseded_at: null,
+      validation_status: sourceDraft.validation_status || "not_validated",
+      validation_errors: Array.isArray(sourceDraft.validation_errors) ? sourceDraft.validation_errors : [],
+      safety_flags: safeArray(sourceDraft.safety_flags),
+      requires_human_review: true,
+      created_by: admin.userId,
+      operator_notes: input.operatorNotes || null,
+      metadata: {
+        ...metadata,
+        operation: {
+          mode: "save_draft_review",
+          previous_current_draft_ids: (previousCurrentDrafts || []).map((draft: Record<string, any>) => draft.id),
+          previous_current_versions: (previousCurrentDrafts || []).map((draft: Record<string, any>) => Number(draft.draft_version)).filter(Number.isFinite),
+          superseded_at: previousCurrentDrafts?.length ? nowIso : null,
+        },
+      },
+    })
+    .select("id, message_id, classification_id, source, draft_status, draft_subject, draft_body_text, draft_body_format, draft_version, is_current, validation_status, validation_errors, safety_flags, requires_human_review, approved_by, approved_at, rejected_by, rejected_at, operator_notes, metadata, created_at, updated_at")
+    .single();
+  if (error || !data?.id) {
+    throw new ClassifierError("response_draft_review_insert_failed", { phase: "draft_review", messageId });
+  }
+
+  return {
+    ok: true,
+    mode: "save_draft_review",
+    draft: safeDraftSummary(data, true),
+    draft_id: data.id,
+    message_id: messageId,
+    classification_id: sourceDraft.classification_id || null,
+    draft_version: draftVersion,
+    draft_status: "reviewing",
+    reviewed_from_draft_id: sourceDraft.id,
+    outbound_send_enabled: false,
+    outlook_mutation_performed: false,
+  };
+}
+
+async function transitionDraftReviewStatus(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+  nextStatus: "approved" | "rejected",
+) {
+  const draft = await loadDraftForOperatorWorkflow(supabase, input);
+  const submittedSubject = input.draftSubject ?? draft.draft_subject ?? "";
+  const submittedBodyText = input.draftBodyText ?? draft.draft_body_text ?? "";
+  if (
+    nextStatus === "approved" &&
+    input.draftSubject !== null &&
+    input.draftBodyText !== null &&
+    (submittedSubject !== (draft.draft_subject || "") || submittedBodyText !== (draft.draft_body_text || ""))
+  ) {
+    const saved = await saveDraftReview(supabase, input, admin);
+    return await transitionDraftReviewStatus(supabase, {
+      ...input,
+      draftId: saved.draft_id,
+      draftSubject: null,
+      draftBodyText: null,
+    }, admin, nextStatus);
+  }
+
+  const nowIso = new Date().toISOString();
+  const metadata = {
+    ...(draft.metadata && typeof draft.metadata === "object" ? draft.metadata : {}),
+    operator_review_status: {
+      mode: nextStatus === "approved" ? "approve_draft" : "reject_draft",
+      previous_status: draft.draft_status,
+      reviewed_by: admin.userId,
+      reviewed_at: nowIso,
+    },
+  };
+  const patch = nextStatus === "approved"
+    ? {
+      draft_status: "approved",
+      approved_by: admin.userId,
+      approved_at: nowIso,
+      rejected_by: null,
+      rejected_at: null,
+      operator_notes: input.operatorNotes ?? draft.operator_notes ?? null,
+      metadata,
+    }
+    : {
+      draft_status: "rejected",
+      rejected_by: admin.userId,
+      rejected_at: nowIso,
+      approved_by: null,
+      approved_at: null,
+      operator_notes: input.operatorNotes ?? draft.operator_notes ?? null,
+      metadata,
+    };
+
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .update(patch)
+    .eq("id", draft.id)
+    .eq("is_current", true)
+    .select("id, message_id, classification_id, source, draft_status, draft_subject, draft_body_text, draft_body_format, draft_version, is_current, validation_status, validation_errors, safety_flags, requires_human_review, approved_by, approved_at, rejected_by, rejected_at, operator_notes, metadata, created_at, updated_at")
+    .single();
+  if (error || !data?.id) {
+    throw new ClassifierError("response_draft_status_update_failed", { phase: "draft_review", messageId: draft.message_id });
+  }
+
+  return {
+    ok: true,
+    mode: nextStatus === "approved" ? "approve_draft" : "reject_draft",
+    draft: safeDraftSummary(data, true),
+    draft_id: data.id,
+    message_id: data.message_id,
+    classification_id: data.classification_id || null,
+    draft_version: data.draft_version,
+    draft_status: data.draft_status,
+    approved_by: data.approved_by || null,
+    approved_at: data.approved_at || null,
+    rejected_by: data.rejected_by || null,
+    rejected_at: data.rejected_at || null,
+    outbound_send_enabled: false,
+    outlook_mutation_performed: false,
+  };
+}
+
 const DRAFT_CONTENT_BLOCKING_FLAGS = new Set([
   "unsupported_claim",
   "unsafe_refund_promise",
@@ -2906,6 +3127,18 @@ serve(async (req) => {
 
     if (input.mode === "admin_draft_view") {
       return json(req, 200, await adminDraftView(supabase, input));
+    }
+
+    if (input.mode === "save_draft_review") {
+      return json(req, 200, await saveDraftReview(supabase, input, admin));
+    }
+
+    if (input.mode === "approve_draft") {
+      return json(req, 200, await transitionDraftReviewStatus(supabase, input, admin, "approved"));
+    }
+
+    if (input.mode === "reject_draft") {
+      return json(req, 200, await transitionDraftReviewStatus(supabase, input, admin, "rejected"));
     }
 
     const promptVersionValue = promptVersion();
