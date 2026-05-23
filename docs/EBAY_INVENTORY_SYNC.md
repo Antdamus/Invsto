@@ -26,6 +26,18 @@ Publishing is blocked for an item until it has title, description, SKU, price, s
 
 Admins can mark test items directly from the Stock page: select the cards, then use `Exclude eBay` in the bulk toolbar. Excluded cards show an `eBay sync off` badge and are skipped by both automatic sync and the older eBay export.
 
+Store categories stay free-form. eBay categories are tracked separately in `ebay_category_id`, and admins can set them from the Stock page with `eBay Category` in the bulk toolbar. The current fine-jewelry category presets are:
+
+- `261988` Fine Jewelry > Bracelets & Charms
+- `261989` Fine Jewelry > Brooches & Pins
+- `261990` Fine Jewelry > Earrings
+- `261992` Fine Jewelry > Jewelry Sets
+- `261993` Fine Jewelry > Necklaces & Pendants
+- `261995` Fine Jewelry > Toe Rings
+- `261994` Fine Jewelry > Rings
+
+If an item only falls back to the default category instead of matching a rule or an explicit `ebay_category_id`, the sync will still prepare inventory, but publishing is blocked until a real eBay category is assigned.
+
 ## Required Supabase secrets
 
 Set these on the deployed Supabase project:

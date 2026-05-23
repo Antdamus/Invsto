@@ -236,6 +236,10 @@
       <button id="bulk-ebay-include" title="Allow selected items in automatic eBay sync">
         <i data-lucide="cloud-upload" class="icon"></i> Include eBay
       </button>
+
+      <button id="bulk-ebay-category" title="Set the eBay category for selected items">
+        <i data-lucide="list-tree" class="icon"></i> eBay Category
+      </button>
     
       <div id="bulk-category-container" class="custom-dropdown">
         <button id="bulk-category-toggle" type="button" class="dropdown-toggle" title="categories to add">
@@ -824,6 +828,21 @@
       <span class="stock-description-eyebrow">Full description</span>
       <h2 id="stock-description-modal-title">Item Description</h2>
       <p id="stock-description-modal-text"></p>
+    </div>
+  </div>
+
+  <div id="ebay-category-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ebay-category-modal-title">
+    <div class="modal-content ebay-category-modal-content">
+      <button type="button" id="close-ebay-category-modal" class="stock-modal-close" title="Close">&times;</button>
+      <h2 id="ebay-category-modal-title">Set eBay Category</h2>
+      <p class="modal-subtext">Store categories can stay as they are. This field controls the eBay category code used when syncing or publishing.</p>
+      <label for="ebay-category-select">eBay category</label>
+      <select id="ebay-category-select"></select>
+      <p id="ebay-category-selection-summary" class="ebay-category-selection-summary"></p>
+      <div class="modal-actions ebay-category-actions">
+        <button type="button" id="cancel-ebay-category" class="stock-secondary-btn">Cancel</button>
+        <button type="button" id="save-ebay-category" class="stock-primary-btn">Save Category</button>
+      </div>
     </div>
   </div>
 

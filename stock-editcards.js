@@ -17,7 +17,7 @@ window.editCardModule = (function () {
         }
         return canViewSensitiveStockFields()
             ? "*"
-            : "id, title, description, weight, stone_type, item_length, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, added_by, added_by_email";
+            : "id, title, description, weight, stone_type, item_length, sale_price, barcode, qr_code, photo_url, created_at, dymo_label_url, photos, qr_type, categories, stock, stock_batch_size_update, ebay_sync_enabled, ebay_category_id, added_by, added_by_email";
     }
 
     function setEditFieldVisible(fieldId, visible) {

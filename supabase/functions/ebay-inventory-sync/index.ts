@@ -45,6 +45,7 @@ type PreparedItem = {
   quantity: number;
   imageUrls: string[];
   categoryId: string;
+  categorySource: "override" | "rule" | "default";
   inventoryPayload: JsonRecord;
   offerPayload: JsonRecord | null;
   hash: string;
@@ -128,6 +129,16 @@ function firstText(value: unknown): string | null {
   return text || null;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function textMatchesTerm(text: string, term: unknown): boolean {
+  const pattern = escapeRegExp(String(term || "").trim()).replace(/\s+/g, "\\s+");
+  if (!pattern) return false;
+  return new RegExp(`\\b${pattern}\\b`, "i").test(text);
+}
+
 function normalizePhotoPath(value: string): string {
   return value.split("?")[0].replace(/^\/+/, "");
 }
@@ -150,9 +161,9 @@ function collectPhotoPaths(item: ItemRow): string[] {
   ].filter(Boolean).slice(0, 12);
 }
 
-function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
+function chooseCategory(item: ItemRow, settings: SyncSettings): { categoryId: string; source: "override" | "rule" | "default" } {
   const override = String(item.ebay_category_id || "").trim();
-  if (override) return override;
+  if (override) return { categoryId: override, source: "override" };
 
   const haystack = [
     item.title,
@@ -162,12 +173,12 @@ function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
 
   for (const rule of settings.category_rules || []) {
     const terms = Array.isArray(rule.match) ? rule.match : [];
-    if (rule.categoryId && terms.some((term) => haystack.includes(String(term).toLowerCase()))) {
-      return rule.categoryId;
+    if (rule.categoryId && terms.some((term) => textMatchesTerm(haystack, term))) {
+      return { categoryId: rule.categoryId, source: "rule" };
     }
   }
 
-  return settings.default_category_id;
+  return { categoryId: settings.default_category_id, source: "default" };
 }
 
 function itemSearchText(item: ItemRow): string {
@@ -296,14 +307,14 @@ function buildAspects(item: ItemRow, categoryId: string): Record<string, string[
   return aspects;
 }
 
-function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: number, imageUrls: string[], categoryId: string, aspects: Record<string, string[]>): string[] {
+function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: number, imageUrls: string[], categoryId: string, categorySource: PreparedItem["categorySource"], aspects: Record<string, string[]>): string[] {
   const reasons: string[] = [];
   if (!String(item.title || "").trim()) reasons.push("missing title");
   if (!String(item.description || "").trim()) reasons.push("missing description");
   if (!String(item.barcode || "").trim()) reasons.push("missing SKU/barcode");
   if (price <= 0) reasons.push("missing sale price");
   if (quantity <= 0) reasons.push("quantity is 0");
-  if (!categoryId) reasons.push("missing eBay category");
+  if (!categoryId || categorySource === "default") reasons.push("missing eBay category");
   if (!imageUrls.length) reasons.push("missing public eBay image");
 
   for (const aspectName of ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"]) {
@@ -465,14 +476,18 @@ async function prepareItem(
   const imageUrls = await ensurePublicImageUrls(supabase, item, { copyMissing: options.copyMissingPhotos });
   if (!imageUrls.length) warnings.push("No public eBay image URLs were found.");
 
-  const categoryId = chooseCategoryId(item, settings);
+  const categoryChoice = chooseCategory(item, settings);
+  const categoryId = categoryChoice.categoryId;
+  if (categoryChoice.source === "default") {
+    warnings.push("No matching eBay category rule or item override was found; set an eBay category before publishing.");
+  }
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
   const rawCondition = item.ebay_condition || settings.default_condition;
   const condition = normalizeEbayCondition(rawCondition);
   if (condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
   const aspects = buildAspects(item, categoryId);
-  const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageUrls, categoryId, aspects);
+  const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageUrls, categoryId, categoryChoice.source, aspects);
 
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
@@ -516,7 +531,7 @@ async function prepareItem(
   } : null;
 
   const hash = await sha256({ inventoryPayload, offerPayload });
-  return { item, sku, quantity, imageUrls, categoryId, inventoryPayload, offerPayload, hash, warnings, blockingReasons };
+  return { item, sku, quantity, imageUrls, categoryId, categorySource: categoryChoice.source, inventoryPayload, offerPayload, hash, warnings, blockingReasons };
 }
 
 async function loadSettings(supabase: any): Promise<SyncSettings> {
@@ -642,6 +657,7 @@ Deno.serve(async (req) => {
             title: item.title,
             quantity: next.quantity,
             categoryId: next.categoryId,
+            categorySource: next.categorySource,
             price: toMoney(item.sale_price),
             imageCount: next.imageUrls.length,
             status: next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only",
@@ -734,6 +750,8 @@ Deno.serve(async (req) => {
             itemTypeId: entry.item.id,
             sku: entry.sku,
             status,
+            categoryId: entry.categoryId,
+            categorySource: entry.categorySource,
             offerId: offerId || null,
             listingId: listingId || null,
             published: Boolean((publishResponse as any).listingId),
@@ -760,6 +778,7 @@ Deno.serve(async (req) => {
             sku: entry.sku,
             title: entry.item.title,
             categoryId: entry.categoryId,
+            categorySource: entry.categorySource,
             imageCount: entry.imageUrls.length,
             status: "error",
             error: message,

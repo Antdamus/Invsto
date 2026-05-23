@@ -43,6 +43,16 @@ const STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM = {
   resize: "cover",
   quality: 55,
 };
+const EBAY_CATEGORY_OPTIONS = [
+  { id: "261988", label: "Fine Jewelry > Bracelets & Charms", terms: ["bracelet", "bangle", "tennis"] },
+  { id: "261989", label: "Fine Jewelry > Brooches & Pins", terms: ["brooch", "pin"] },
+  { id: "261990", label: "Fine Jewelry > Earrings", terms: ["earring", "earrings", "stud", "hoop"] },
+  { id: "261992", label: "Fine Jewelry > Jewelry Sets", terms: ["jewelry set", "set"] },
+  { id: "261993", label: "Fine Jewelry > Necklaces & Pendants", terms: ["necklace", "pendant", "chain", "charm"] },
+  { id: "261995", label: "Fine Jewelry > Toe Rings", terms: ["toe ring"] },
+  { id: "261994", label: "Fine Jewelry > Rings", terms: ["ring"] },
+];
+window.EBAY_CATEGORY_OPTIONS = EBAY_CATEGORY_OPTIONS;
 const stockHistoryState = {
   itemId: null,
   events: [],
@@ -68,6 +78,7 @@ const STOCK_WORKER_ITEM_SELECT = [
   "stock",
   "stock_batch_size_update",
   "ebay_sync_enabled",
+  "ebay_category_id",
   "added_by",
   "added_by_email",
 ].join(", ");
@@ -177,6 +188,36 @@ function escapeStockHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function getEbayCategoryOptionById(categoryId) {
+  const normalized = String(categoryId || "").trim();
+  return EBAY_CATEGORY_OPTIONS.find((option) => option.id === normalized) || null;
+}
+
+function escapeStockRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesEbayCategoryTerm(text, term) {
+  const pattern = escapeStockRegExp(term).replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${pattern}\\b`, "i").test(text);
+}
+
+function inferEbayCategoryOption(item) {
+  const text = [
+    item?.title || "",
+    item?.description || "",
+    ...(Array.isArray(item?.categories) ? item.categories : []),
+  ].join(" ").toLowerCase();
+
+  return EBAY_CATEGORY_OPTIONS.find((option) => (
+    option.terms.some((term) => matchesEbayCategoryTerm(text, term))
+  )) || null;
+}
+
+function getEffectiveEbayCategoryOption(item) {
+  return getEbayCategoryOptionById(item?.ebay_category_id) || inferEbayCategoryOption(item);
 }
 
 function formatStockMoney(value) {
@@ -456,10 +497,16 @@ function buildLocationChips(item) {
       const showSensitive = canViewSensitiveStockData();
       const isDeleted = isStockItemDeleted(item);
       const isEbaySyncOff = item.ebay_sync_enabled === false;
+      const ebayCategoryOption = getEffectiveEbayCategoryOption(item);
       const descriptionText = String(item.description || "").trim() || "No description recorded.";
       const hasFullDescription = Boolean(String(item.description || "").trim());
       const ebaySyncBadge = isEbaySyncOff
         ? `<span class="ebay-sync-badge" title="This item is excluded from automatic eBay sync"><i data-lucide="cloud-off"></i> eBay sync off</span>`
+        : "";
+      const ebayCategoryBadge = !isEbaySyncOff
+        ? (ebayCategoryOption
+          ? `<span class="ebay-category-badge" title="eBay category used by sync"><i data-lucide="list-tree"></i> ${escapeStockHtml(ebayCategoryOption.label)}</span>`
+          : `<span class="ebay-category-badge ebay-category-badge--missing" title="Pick an eBay category before publishing"><i data-lucide="alert-triangle"></i> Needs eBay category</span>`)
         : "";
       const stockLabel = `
         <button type="button" class="stock-count ${stockClass}" data-tooltip="${escapeStockHtml(tooltip)}" data-id="${item.id}">
@@ -493,7 +540,10 @@ function buildLocationChips(item) {
             <h2>${escapeStockHtml(item.title || "Untitled item")}</h2>
             ${stockLabel}
           </div>
-          ${ebaySyncBadge}
+          <div class="ebay-card-badges">
+            ${ebaySyncBadge}
+            ${ebayCategoryBadge}
+          </div>
           <div class="stock-description-wrap">
             <p class="stock-description">${escapeStockHtml(descriptionText)}</p>
             ${hasFullDescription ? `<button type="button" class="stock-description-read-btn" data-id="${item.id}" aria-label="Read full description for ${escapeStockHtml(item.title || "this item")}">Read full description</button>` : ""}
@@ -2231,6 +2281,90 @@ function buildLocationChips(item) {
     }
   }
 
+  function populateEbayCategorySelect(selectedCategoryId = "") {
+    const select = document.getElementById("ebay-category-select");
+    if (!select) return;
+
+    select.innerHTML = [
+      `<option value="">Choose an eBay category...</option>`,
+      ...EBAY_CATEGORY_OPTIONS.map((option) => (
+        `<option value="${escapeStockHtml(option.id)}">${escapeStockHtml(option.label)} (${escapeStockHtml(option.id)})</option>`
+      )),
+    ].join("");
+    select.value = selectedCategoryId || "";
+  }
+
+  function closeEbayCategoryModal() {
+    document.getElementById("ebay-category-modal")?.classList.add("hidden");
+    document.getElementById("ebay-category-modal")?.classList.remove("show");
+    document.body.classList.remove("modal-open");
+  }
+
+  function openEbayCategoryModal() {
+    if (!canViewSensitiveStockData()) {
+      showToast("Only admins can set eBay categories.");
+      return;
+    }
+
+    const ids = Array.from(selectedItems);
+    if (!ids.length) return;
+
+    const selectedRows = allItems.filter((item) => selectedItems.has(item.id));
+    const explicitCategoryIds = [...new Set(selectedRows.map((item) => String(item.ebay_category_id || "").trim()).filter(Boolean))];
+    populateEbayCategorySelect(explicitCategoryIds.length === 1 ? explicitCategoryIds[0] : "");
+
+    const summary = document.getElementById("ebay-category-selection-summary");
+    if (summary) {
+      const inferredCount = selectedRows.filter((item) => !item.ebay_category_id && inferEbayCategoryOption(item)).length;
+      const missingCount = selectedRows.filter((item) => !getEffectiveEbayCategoryOption(item)).length;
+      summary.textContent = `${ids.length} selected. ${inferredCount} can be inferred from title/category text. ${missingCount} need a category before publishing.`;
+    }
+
+    document.getElementById("ebay-category-modal")?.classList.remove("hidden");
+    document.getElementById("ebay-category-modal")?.classList.add("show");
+    document.body.classList.add("modal-open");
+  }
+
+  async function saveSelectedEbayCategory() {
+    const ids = Array.from(selectedItems);
+    const categoryId = String(document.getElementById("ebay-category-select")?.value || "").trim();
+    const categoryOption = getEbayCategoryOptionById(categoryId);
+
+    if (!ids.length) return;
+    if (!categoryOption) {
+      showToast("Choose a valid eBay category first.");
+      return;
+    }
+
+    showLoading();
+    try {
+      const { error } = await supabase
+        .from("item_types")
+        .update({ ebay_category_id: categoryId })
+        .in("id", ids);
+
+      if (error) throw error;
+
+      const idSet = new Set(ids.map(String));
+      allItems = allItems.map((item) => (
+        idSet.has(String(item.id))
+          ? { ...item, ebay_category_id: categoryId }
+          : item
+      ));
+
+      await bumpInventoryVersion(ids);
+      closeEbayCategoryModal();
+      clearSelectionAndRefresh();
+      updateFilterChips(getActiveFilters());
+      showToast(`${ids.length} item${ids.length === 1 ? "" : "s"} set to ${categoryOption.label}.`);
+    } catch (error) {
+      console.error("eBay category update failed:", error);
+      showToast(error?.message || "Could not update eBay category.");
+    } finally {
+      hideLoading();
+    }
+  }
+
   //function to count how many items have been selected
   function updateBulkToolbar() {
     const toolbar = document.getElementById("bulk-toolbar");
@@ -2239,6 +2373,7 @@ function buildLocationChips(item) {
     const restoreBtn = document.getElementById("bulk-restore");
     const ebayExcludeBtn = document.getElementById("bulk-ebay-exclude");
     const ebayIncludeBtn = document.getElementById("bulk-ebay-include");
+    const ebayCategoryBtn = document.getElementById("bulk-ebay-category");
     const selectedCount = selectedItems.size;
     const canManageEbaySync = canViewSensitiveStockData() && !showDeletedItems;
 
@@ -2249,6 +2384,7 @@ function buildLocationChips(item) {
     if (restoreBtn) restoreBtn.classList.toggle("hidden", !showDeletedItems || !canViewSensitiveStockData());
     if (ebayExcludeBtn) ebayExcludeBtn.classList.toggle("hidden", !canManageEbaySync);
     if (ebayIncludeBtn) ebayIncludeBtn.classList.toggle("hidden", !canManageEbaySync);
+    if (ebayCategoryBtn) ebayCategoryBtn.classList.toggle("hidden", !canManageEbaySync);
   } 
 
   //function activated upon selecting checkbox
@@ -2516,6 +2652,17 @@ function buildLocationChips(item) {
 
     document.getElementById("bulk-ebay-include")?.addEventListener("click", async () => {
       await setSelectedEbaySyncEnabled(true);
+    });
+
+    document.getElementById("bulk-ebay-category")?.addEventListener("click", () => {
+      openEbayCategoryModal();
+    });
+
+    document.getElementById("close-ebay-category-modal")?.addEventListener("click", closeEbayCategoryModal);
+    document.getElementById("cancel-ebay-category")?.addEventListener("click", closeEbayCategoryModal);
+    document.getElementById("save-ebay-category")?.addEventListener("click", saveSelectedEbayCategory);
+    document.getElementById("ebay-category-modal")?.addEventListener("click", (event) => {
+      if (event.target?.id === "ebay-category-modal") closeEbayCategoryModal();
     });
 
     document.getElementById("bulk-export")?.addEventListener("click", () => {
