@@ -49,17 +49,31 @@
       </header>
 
       <main class="content email-triage-content">
-        <section class="email-triage-hero">
-          <div>
-            <span class="eyebrow">Microsoft Graph</span>
-            <h1>Connect Outlook Mailbox</h1>
-            <p>Sign in with Microsoft to prove the OAuth callback, server-side token exchange, and latest mailbox read.</p>
+        <section class="mailbox-toolbar" aria-label="Mailbox controls">
+          <div class="mailbox-toolbar-status">
+            <span id="mailbox-connection-dot" class="mailbox-connection-dot" aria-hidden="true"></span>
+            <div>
+              <div class="mailbox-toolbar-title">Email Triage <strong id="mailbox-toolbar-state">checking</strong></div>
+              <div class="mailbox-toolbar-meta">
+                <span id="mailbox-toolbar-email">Mailbox unavailable</span>
+                <span id="mailbox-toolbar-checked">Last checked: --</span>
+              </div>
+            </div>
           </div>
           <div class="email-triage-actions">
             <button type="button" id="refresh-messages" class="secondary-btn hidden">
               <i data-lucide="refresh-cw"></i>
               Refresh
             </button>
+            <button type="button" id="admin-diagnostics-toggle" class="secondary-btn admin-diagnostics-toggle" aria-expanded="false" aria-controls="admin-diagnostics-drawer">
+              <i data-lucide="settings"></i>
+              Admin
+            </button>
+          </div>
+        </section>
+
+        <section id="admin-diagnostics-drawer" class="admin-diagnostics-drawer hidden" aria-label="Admin diagnostics">
+          <div class="admin-diagnostics-actions">
             <button type="button" id="connect-outlook" class="primary-btn">
               <i data-lucide="mail-plus"></i>
               Connect Outlook Mailbox
@@ -69,29 +83,67 @@
               Disconnect Outlook
             </button>
           </div>
-        </section>
 
-        <section id="email-status-panel" class="email-status-panel" aria-live="polite">
-          <span id="email-status-kicker">Not connected</span>
-          <strong id="email-status-title">Outlook connection required</strong>
-          <p id="email-status-detail">Connect the OG mailbox to display the latest 10 messages.</p>
-          <dl id="email-status-meta" class="email-status-meta hidden"></dl>
+          <details class="triage-disclosure mailbox-details">
+            <summary>
+              <span>Mailbox Details</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <section id="email-status-panel" class="email-status-panel" aria-live="polite">
+              <span id="email-status-kicker">Not connected</span>
+              <strong id="email-status-title">Outlook connection required</strong>
+              <p id="email-status-detail">Connect the OG mailbox to display the latest 10 messages.</p>
+              <dl id="email-status-meta" class="email-status-meta hidden"></dl>
+            </section>
+          </details>
+
+          <details class="triage-disclosure system-metrics">
+            <summary>
+              <span>System Metrics</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <div id="classification-admin-summary" class="classification-admin-summary"></div>
+          </details>
+
+          <details id="email-messages-section" class="triage-disclosure email-messages-section hidden">
+            <summary>
+              <span>Raw Outlook Preview</span>
+              <span id="message-count-pill" class="email-count-pill">0 messages</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <section aria-label="Latest Outlook emails">
+              <div class="section-head">
+                <div>
+                  <h3 class="section-title">Latest Outlook Emails</h3>
+                  <div class="section-sub">Sanitized message previews returned by Microsoft Graph</div>
+                </div>
+              </div>
+
+              <div class="email-table-wrap">
+                <table class="email-table">
+                  <thead>
+                    <tr>
+                      <th>Sender</th>
+                      <th>Subject</th>
+                      <th>Received</th>
+                      <th>Preview</th>
+                    </tr>
+                  </thead>
+                  <tbody id="email-messages-body">
+                    <tr>
+                      <td colspan="4">No messages loaded.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </details>
         </section>
 
         <section id="classification-admin-debug" class="classification-admin-debug hidden" aria-live="polite">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Classification Inbox</h3>
-              <div id="classification-admin-status" class="section-sub">Waiting for admin session.</div>
-            </div>
-            <button type="button" id="refresh-classification-admin" class="secondary-btn">
-              <i data-lucide="refresh-cw"></i>
-              Refresh Data
-            </button>
-          </div>
-          <div id="classification-admin-summary" class="classification-admin-summary"></div>
           <div class="classification-admin-controls" aria-label="Classification filters, sorting, and density">
             <div class="classification-toolbar">
+              <div id="classification-admin-status" class="workspace-status">Waiting for admin session.</div>
               <label class="classification-sort-control" for="classification-sort">
                 <span>Sort</span>
                 <select id="classification-sort">
@@ -125,6 +177,20 @@
                   </label>
                 </div>
               </fieldset>
+              <div class="workspace-actions">
+                <button type="button" id="toggle-category-panel" class="secondary-btn panel-toggle-btn" aria-pressed="false">
+                  <i data-lucide="panel-left-close"></i>
+                  Categories
+                </button>
+                <button type="button" id="toggle-detail-panel" class="secondary-btn panel-toggle-btn" aria-pressed="false">
+                  <i data-lucide="panel-right-close"></i>
+                  Details
+                </button>
+                <button type="button" id="refresh-classification-admin" class="secondary-btn">
+                  <i data-lucide="refresh-cw"></i>
+                  Refresh Data
+                </button>
+              </div>
             </div>
             <div id="classification-filter-panel" class="classification-filter-panel" hidden>
               <div class="classification-filter-toggles" aria-label="Human review filters">
@@ -143,46 +209,22 @@
               </div>
             </div>
           </div>
-          <div class="classification-inbox-shell">
+          <div id="classification-inbox-shell" class="classification-inbox-shell">
             <aside class="classification-category-sidebar" aria-label="Classification categories">
               <div id="classification-category-list" class="classification-category-list"></div>
             </aside>
+
+            <button type="button" class="panel-resize-handle category-resize-handle" data-panel-resize="category" aria-label="Resize category panel"></button>
 
             <div class="classification-list-panel" aria-label="Classified emails">
               <div id="classification-list" class="classification-list"></div>
             </div>
 
+            <button type="button" class="panel-resize-handle detail-resize-handle" data-panel-resize="detail" aria-label="Resize detail panel"></button>
+
             <aside class="classification-detail-panel" aria-label="Selected email classification">
               <div id="classification-detail" class="classification-detail"></div>
             </aside>
-          </div>
-        </section>
-
-        <section id="email-messages-section" class="email-messages-section hidden" aria-label="Latest Outlook emails">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Latest Outlook Emails</h3>
-              <div class="section-sub">Sanitized message previews returned by Microsoft Graph</div>
-            </div>
-            <span id="message-count-pill" class="email-count-pill">0 messages</span>
-          </div>
-
-          <div class="email-table-wrap">
-            <table class="email-table">
-              <thead>
-                <tr>
-                  <th>Sender</th>
-                  <th>Subject</th>
-                  <th>Received</th>
-                  <th>Preview</th>
-                </tr>
-              </thead>
-              <tbody id="email-messages-body">
-                <tr>
-                  <td colspan="4">No messages loaded.</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </section>
       </main>

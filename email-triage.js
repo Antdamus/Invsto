@@ -17,6 +17,11 @@
   const DRAFT_GENERATION_TIMEOUT_MS = 45000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
+  const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
+  const PANEL_WIDTH_LIMITS = {
+    category: { min: 150, max: 340, fallback: 220 },
+    detail: { min: 300, max: 680, fallback: 420 },
+  };
   const CLASSIFICATION_CATEGORIES = [
     "buyer_message",
     "order_paid",
@@ -54,7 +59,15 @@
     connect: document.getElementById("connect-outlook"),
     refresh: document.getElementById("refresh-messages"),
     disconnect: document.getElementById("disconnect-outlook"),
+    adminDiagnosticsToggle: document.getElementById("admin-diagnostics-toggle"),
+    adminDiagnosticsDrawer: document.getElementById("admin-diagnostics-drawer"),
+    mailboxConnectionDot: document.getElementById("mailbox-connection-dot"),
+    mailboxToolbarState: document.getElementById("mailbox-toolbar-state"),
+    mailboxToolbarEmail: document.getElementById("mailbox-toolbar-email"),
+    mailboxToolbarChecked: document.getElementById("mailbox-toolbar-checked"),
     refreshClassificationAdmin: document.getElementById("refresh-classification-admin"),
+    toggleCategoryPanel: document.getElementById("toggle-category-panel"),
+    toggleDetailPanel: document.getElementById("toggle-detail-panel"),
     statusPanel: document.getElementById("email-status-panel"),
     statusKicker: document.getElementById("email-status-kicker"),
     statusTitle: document.getElementById("email-status-title"),
@@ -72,6 +85,8 @@
     classificationFilterPanel: document.getElementById("classification-filter-panel"),
     classificationFilterToggles: document.querySelectorAll("[data-classification-filter]"),
     classificationDensityInputs: document.querySelectorAll("input[name='classification-density']"),
+    classificationInboxShell: document.getElementById("classification-inbox-shell"),
+    panelResizeHandles: document.querySelectorAll("[data-panel-resize]"),
     classificationCategoryList: document.getElementById("classification-category-list"),
     classificationList: document.getElementById("classification-list"),
     classificationDetail: document.getElementById("classification-detail"),
@@ -88,6 +103,8 @@
     data: normalizeAdminViewPayload({}),
     selectedCategory: "all",
     selectedClassificationId: null,
+    categoryPanelCollapsed: false,
+    detailPanelCollapsed: false,
     activeFilters: [],
     filtersExpanded: false,
     sortMode: "newest",
@@ -121,6 +138,87 @@
     } catch (error) {
       // Ignore storage failures; density still works for the current session.
     }
+  }
+
+  function clampNumber(value, min, max) {
+    return Math.min(Math.max(Number(value) || 0, min), max);
+  }
+
+  function getStoredPanelWidths() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(PANEL_WIDTHS_STORAGE_KEY) || "{}");
+      return {
+        category: clampNumber(parsed.category, PANEL_WIDTH_LIMITS.category.min, PANEL_WIDTH_LIMITS.category.max) || PANEL_WIDTH_LIMITS.category.fallback,
+        detail: clampNumber(parsed.detail, PANEL_WIDTH_LIMITS.detail.min, PANEL_WIDTH_LIMITS.detail.max) || PANEL_WIDTH_LIMITS.detail.fallback,
+      };
+    } catch (error) {
+      return {
+        category: PANEL_WIDTH_LIMITS.category.fallback,
+        detail: PANEL_WIDTH_LIMITS.detail.fallback,
+      };
+    }
+  }
+
+  function storePanelWidths(widths) {
+    try {
+      window.localStorage?.setItem(PANEL_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+    } catch (error) {
+      // Panel resizing is still useful for the current session if storage is unavailable.
+    }
+  }
+
+  function applyPanelWidths(widths = getStoredPanelWidths()) {
+    if (!els.classificationInboxShell) return;
+    const categoryWidth = clampNumber(widths.category, PANEL_WIDTH_LIMITS.category.min, PANEL_WIDTH_LIMITS.category.max);
+    const detailWidth = clampNumber(widths.detail, PANEL_WIDTH_LIMITS.detail.min, PANEL_WIDTH_LIMITS.detail.max);
+    els.classificationInboxShell.style.setProperty("--category-panel-width", `${categoryWidth}px`);
+    els.classificationInboxShell.style.setProperty("--detail-panel-width", `${detailWidth}px`);
+  }
+
+  function bindPanelResizeEvents() {
+    if (!els.classificationInboxShell || !els.panelResizeHandles?.length) return;
+    applyPanelWidths();
+
+    els.panelResizeHandles.forEach((handle) => {
+      handle.addEventListener("pointerdown", (event) => {
+        const panel = handle.getAttribute("data-panel-resize");
+        if (!panel || window.matchMedia("(max-width: 760px)").matches) return;
+        const shellRect = els.classificationInboxShell.getBoundingClientRect();
+        const startX = event.clientX;
+        const startWidths = getStoredPanelWidths();
+        handle.setPointerCapture?.(event.pointerId);
+        document.body.classList.add("is-resizing-email-panels");
+        els.classificationInboxShell.classList.add("is-resizing");
+
+        const move = (moveEvent) => {
+          const delta = moveEvent.clientX - startX;
+          const next = { ...startWidths };
+          if (panel === "category") {
+            next.category = clampNumber(startWidths.category + delta, PANEL_WIDTH_LIMITS.category.min, PANEL_WIDTH_LIMITS.category.max);
+          } else if (panel === "detail") {
+            next.detail = clampNumber(startWidths.detail - delta, PANEL_WIDTH_LIMITS.detail.min, Math.min(PANEL_WIDTH_LIMITS.detail.max, shellRect.width - 460));
+          }
+          applyPanelWidths(next);
+        };
+
+        const finish = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", finish);
+          document.removeEventListener("pointercancel", finish);
+          document.body.classList.remove("is-resizing-email-panels");
+          els.classificationInboxShell.classList.remove("is-resizing");
+          const styles = window.getComputedStyle(els.classificationInboxShell);
+          storePanelWidths({
+            category: parseFloat(styles.getPropertyValue("--category-panel-width")) || startWidths.category,
+            detail: parseFloat(styles.getPropertyValue("--detail-panel-width")) || startWidths.detail,
+          });
+        };
+
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", finish, { once: true });
+        document.addEventListener("pointercancel", finish, { once: true });
+      });
+    });
   }
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -178,6 +276,22 @@
     return `${days} ${days === 1 ? "day" : "days"} old`;
   }
 
+  function formatCompactEmailAge(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "--";
+    const diffMs = Math.max(0, Date.now() - date.getTime());
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) return "now";
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo`;
+    return `${Math.floor(months / 12)}y`;
+  }
+
   function safeErrorMessage(code) {
     const messages = {
       mailbox_not_connected: "No persisted Outlook mailbox is connected yet.",
@@ -209,6 +323,19 @@
     if (els.statusPanel) {
       els.statusPanel.classList.toggle("is-success", state === "success");
       els.statusPanel.classList.toggle("is-error", state === "error");
+    }
+  }
+
+  function setMailboxSummary(values = {}) {
+    const state = values.state || "checking";
+    const email = values.email || "Mailbox unavailable";
+    const lastChecked = values.lastChecked ? formatDateTime(values.lastChecked) : "--";
+    if (els.mailboxToolbarState) els.mailboxToolbarState.textContent = state;
+    if (els.mailboxToolbarEmail) els.mailboxToolbarEmail.textContent = email;
+    if (els.mailboxToolbarChecked) els.mailboxToolbarChecked.textContent = `Last checked: ${lastChecked}`;
+    if (els.mailboxConnectionDot) {
+      els.mailboxConnectionDot.classList.toggle("is-connected", values.status === "connected");
+      els.mailboxConnectionDot.classList.toggle("is-attention", values.status === "attention");
     }
   }
 
@@ -861,13 +988,28 @@
     return "muted";
   }
 
-  function renderWorkflowBadges(classification, options = {}) {
-    const prefix = options.prefix || "";
-    return [
-      renderBadge(`${prefix}${humanizeValue(workflowPriority(classification))} Priority`, priorityBadgeVariant(classification)),
-      renderBadge(`${prefix}${humanizeValue(workflowUrgency(classification))}`, urgencyBadgeVariant(classification)),
-      renderBadge(`${prefix}${timingBadgeLabel(classification)}`, timingBadgeVariant(classification)),
-    ].join("");
+  function renderWorkflowMetaText(classification, ageLabel = "", options = {}) {
+    const items = [
+      options.includeCategory ? humanizeValue(classification.effective_category || classification.category || "Uncategorized") : "",
+      `${humanizeValue(workflowPriority(classification))} Priority`,
+      humanizeValue(workflowUrgency(classification)),
+      timingBadgeLabel(classification),
+      ageLabel,
+    ].filter(Boolean);
+    const riskItems = [
+      classification.chargeback_risk === true ? "Chargeback Risk" : "",
+      classification.refund_risk === true ? "Refund Risk" : "",
+    ].filter(Boolean);
+    const reviewText = humanizeValue(classification.classification_review_state || "Pending Review");
+    const overrideText = classification.has_operator_override === true ? "Override" : "";
+    return `
+      <span class="classification-secondary-meta">
+        ${items.map((item, index) => `<span${options.includeCategory && index === 0 ? ' class="is-category-text"' : ""}>${escapeHtml(item)}</span>`).join("")}
+        ${riskItems.map((item) => `<span class="is-risk">${escapeHtml(item)}</span>`).join("")}
+        <span>${escapeHtml(reviewText)}</span>
+        ${overrideText ? `<span>${escapeHtml(overrideText)}</span>` : ""}
+      </span>
+    `;
   }
 
   function filterToggleLabel(activeCount) {
@@ -916,18 +1058,9 @@
       const humanReview = hasHumanReviewSignal(classification);
       const receivedAt = getClassificationReceivedAt(classification);
       const dateLabel = receivedAt ? formatDateTime(receivedAt) : `Classified ${formatDateTime(classification.created_at)}`;
-      const ageLabel = receivedAt ? formatEmailAge(receivedAt) : formatEmailAge(classification.created_at);
-      const categoryBadge = renderBadge(humanizeValue(classification.effective_category || classification.category || "Uncategorized"), "category");
-      const overrideBadge = classification.has_operator_override === true ? renderBadge("Override", "warning") : "";
-      const reviewStateBadge = renderBadge(humanizeValue(classification.classification_review_state || "Pending Review"), reviewBadgeVariant(classification));
-      const confidenceBadge = renderBadge(formatConfidence(classification.confidence), confidenceBadgeVariant(classification));
-      const priorityBadge = renderBadge(`${humanizeValue(workflowPriority(classification))} Priority`, priorityBadgeVariant(classification));
-      const urgencyBadge = renderBadge(humanizeValue(workflowUrgency(classification)), urgencyBadgeVariant(classification));
-      const workflowBadges = renderWorkflowBadges(classification);
-      const riskBadges = [
-        classification.chargeback_risk === true ? renderBadge("Chargeback Risk", "critical") : "",
-        classification.refund_risk === true ? renderBadge("Refund Risk", "danger") : "",
-      ].join("");
+      const ageLabel = receivedAt ? formatCompactEmailAge(receivedAt) : formatCompactEmailAge(classification.created_at);
+      const rowMeta = renderWorkflowMetaText(classification, ageLabel, { includeCategory: true });
+      const compactRowMeta = renderWorkflowMetaText(classification, "", { includeCategory: true });
 
       if (compactMode) {
         return `
@@ -937,10 +1070,7 @@
               <span>${escapeHtml(getClassificationSender(classification))}</span>
             </span>
             <span class="classification-compact-badges">
-              ${categoryBadge}
-              ${priorityBadge}
-              ${urgencyBadge}
-              ${overrideBadge}
+              ${compactRowMeta}
             </span>
             <span class="classification-compact-time">${escapeHtml(ageLabel)}</span>
           </button>
@@ -951,22 +1081,18 @@
         <button type="button" class="classification-row${selected ? " is-selected" : ""}" data-classification-id="${escapeHtml(classification.id)}">
           <span class="classification-row-top">
             <strong>${escapeHtml(getClassificationTitle(classification))}</strong>
-            ${confidenceBadge}
           </span>
           <span class="classification-row-meta">
-            ${categoryBadge}
-            <span class="classification-workflow-badges">${workflowBadges}${riskBadges}</span>
+            ${rowMeta}
           </span>
           <span class="classification-row-meta">
             <span>${escapeHtml(dateLabel)}</span>
           </span>
           <span class="classification-row-meta">
             <span>${escapeHtml(getClassificationSender(classification))}</span>
-            <span>${escapeHtml(ageLabel)}</span>
           </span>
           <span class="classification-row-preview">${escapeHtml(getClassificationPreview(classification))}</span>
-          ${humanReview ? renderBadge("Human review", "warning") : reviewStateBadge}
-          ${overrideBadge}
+          ${humanReview ? `<span class="classification-row-alert">Human review</span>` : ""}
         </button>
       `;
     }).join("");
@@ -986,11 +1112,11 @@
 
     if (detail && isExpanded) {
       return `
-        <div class="classification-detail-section email-body-section">
-          <div class="classification-section-title-row">
-            <h4>Email Body</h4>
-            ${renderBadge(bodySource, "muted")}
-          </div>
+        <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+          <summary>
+            <span>Email Body</span>
+            <i data-lucide="chevron-down"></i>
+          </summary>
           ${detail.body_truncated ? `
             <div class="classification-notice is-warning">
               Body is capped for admin viewing. Showing ${escapeHtml(chars)}.
@@ -1001,23 +1127,23 @@
             <i data-lucide="chevron-up"></i>
             Collapse Email
           </button>
-        </div>
+        </details>
       `;
     }
 
     return `
-      <div class="classification-detail-section email-body-section">
-        <div class="classification-section-title-row">
-          <h4>Email Body</h4>
-          ${renderBadge(bodySource, "muted")}
-        </div>
+      <details class="classification-detail-section email-body-section detail-disclosure core-disclosure" open>
+        <summary>
+          <span>Email Body</span>
+          <i data-lucide="chevron-down"></i>
+        </summary>
         <p>${escapeHtml(selected.message_body_preview || "No body preview available.")}</p>
         ${error ? `<div class="classification-notice is-error">Could not load full email text: ${escapeHtml(error)}</div>` : ""}
         <button type="button" class="secondary-btn classification-body-action" data-message-detail-action="${detail ? "expand" : "load"}" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
           <i data-lucide="${isLoading ? "loader-circle" : detail ? "chevron-down" : "file-text"}"></i>
           ${isLoading ? "Loading Email" : "View Full Email"}
         </button>
-      </div>
+      </details>
     `;
   }
 
@@ -1030,11 +1156,11 @@
     const effectiveUrgency = selected.effective_urgency || selected.operator_override_urgency || selected.urgency || "";
 
     return `
-      <div class="classification-detail-section classification-review-section">
-        <div class="classification-section-title-row">
-          <h4>Operator Review</h4>
-          ${renderBadge(humanizeValue(reviewState), reviewBadgeVariant(selected))}
-        </div>
+      <details class="classification-detail-section classification-review-section detail-disclosure">
+        <summary>
+          <span>Operator Review Details</span>
+          <i data-lucide="chevron-down"></i>
+        </summary>
         <div class="classification-compare-grid">
           <div>
             <span>AI Category</span>
@@ -1113,7 +1239,7 @@
             ${saving ? "Saving Review" : "Save Review"}
           </button>
         </form>
-      </div>
+      </details>
     `;
   }
 
@@ -1180,6 +1306,30 @@
     `;
   }
 
+  function renderAdvancedDisclosure(title, badgeHtml, bodyHtml) {
+    return `
+      <details class="classification-detail-section detail-disclosure">
+        <summary>
+          <span>${escapeHtml(title)}</span>
+          <i data-lucide="chevron-down"></i>
+        </summary>
+        ${bodyHtml}
+      </details>
+    `;
+  }
+
+  function renderCoreDisclosure(title, badgeHtml, bodyHtml, className = "") {
+    return `
+      <details class="classification-detail-section detail-disclosure core-disclosure ${escapeHtml(className)}" open>
+        <summary>
+          <span>${escapeHtml(title)}</span>
+          <i data-lucide="chevron-down"></i>
+        </summary>
+        ${bodyHtml}
+      </details>
+    `;
+  }
+
   function renderResponseDraftSection(state, selected) {
     const messageId = selected?.message_id || "";
     const payload = messageId ? state.draftsByMessageId[messageId] : null;
@@ -1193,11 +1343,12 @@
     const actionLabel = currentDraft ? "Regenerate Draft" : "Generate Draft";
 
     return `
-      <div class="classification-detail-section response-draft-section">
-        <div class="classification-section-title-row">
-          <h4>AI Response Draft</h4>
-          ${currentDraft ? renderBadge(`v${currentDraft.draft_version || "--"}`, "category") : renderBadge("No draft", "muted")}
-        </div>
+      <details class="classification-detail-section response-draft-section detail-disclosure core-disclosure" open>
+        <summary>
+          <span>AI Response Draft</span>
+          ${currentDraft ? `<span class="draft-version-subtle">v${escapeHtml(currentDraft.draft_version || "--")}</span>` : ""}
+          <i data-lucide="chevron-down"></i>
+        </summary>
         <div class="classification-notice is-warning draft-safety-notice">
           Draft requires human review. Not sent. No Outlook mutation.
         </div>
@@ -1215,17 +1366,6 @@
         </div>
         ${isLoading && !payload ? `<div class="classification-empty draft-empty">Loading draft history.</div>` : ""}
         ${currentDraft ? `
-          ${renderDraftMetaGrid(currentDraft)}
-          <div class="draft-safety-flags">
-            <span>Safety Flags</span>
-            <div class="classification-pill-list">${renderPillList(currentDraft.safety_flags, "No safety flags")}</div>
-          </div>
-          ${Array.isArray(currentDraft.validation_errors) && currentDraft.validation_errors.length ? `
-            <div class="draft-safety-flags">
-              <span>Validation Errors</span>
-              <div class="classification-pill-list">${renderPillList(currentDraft.validation_errors, "No validation errors")}</div>
-            </div>
-          ` : ""}
           <div class="draft-content">
             <span>Draft Subject</span>
             <strong>${escapeHtml(currentDraft.draft_subject || "Draft subject unavailable.")}</strong>
@@ -1234,15 +1374,30 @@
             <span>Draft Body</span>
             <pre class="draft-body-text">${escapeHtml(currentDraft.draft_body_text || "Draft body is not available for this validation state.")}</pre>
           </div>
+          ${renderAdvancedDisclosure(
+            "Workflow / Draft Metadata",
+            renderBadge(`v${currentDraft.draft_version || "--"}`, "muted"),
+            `
+              ${renderDraftMetaGrid(currentDraft)}
+              <div class="draft-safety-flags">
+                <span>Safety Flags</span>
+                <div class="classification-pill-list">${renderPillList(currentDraft.safety_flags, "No safety flags")}</div>
+              </div>
+              ${Array.isArray(currentDraft.validation_errors) && currentDraft.validation_errors.length ? `
+                <div class="draft-safety-flags">
+                  <span>Validation Errors</span>
+                  <div class="classification-pill-list">${renderPillList(currentDraft.validation_errors, "No validation errors")}</div>
+                </div>
+              ` : ""}
+            `,
+          )}
         ` : (!isLoading ? `<div class="classification-empty draft-empty">No response draft exists for this selected email yet.</div>` : "")}
-        <div class="draft-history">
-          <div class="classification-section-title-row">
-            <h4>Draft History</h4>
-            ${renderBadge(`${drafts.length} ${drafts.length === 1 ? "version" : "versions"}`, "muted")}
-          </div>
-          ${renderDraftHistory(drafts)}
-        </div>
-      </div>
+        ${renderAdvancedDisclosure(
+          "Draft History",
+          renderBadge(`${drafts.length} ${drafts.length === 1 ? "version" : "versions"}`, "muted"),
+          renderDraftHistory(drafts),
+        )}
+      </details>
     `;
   }
 
@@ -1261,14 +1416,11 @@
 
     const receivedAt = getClassificationReceivedAt(selected);
     const humanReview = hasHumanReviewSignal(selected);
-    const ageLabel = receivedAt ? formatEmailAge(receivedAt) : "Age unavailable";
+    const ageLabel = receivedAt ? formatCompactEmailAge(receivedAt) : "--";
     const reviewBadge = humanReview ? renderBadge("Human review", "warning") : renderBadge("No review flag", "muted");
-    const categoryBadge = renderBadge(humanizeValue(selected.effective_category || selected.category || "Uncategorized"), "category");
     const confidenceBadge = renderBadge(formatConfidence(selected.confidence), confidenceBadgeVariant(selected));
     const validationBadge = renderBadge(humanizeValue(selected.validation_status || "Unknown"), statusBadgeVariant(selected.validation_status));
     const actionBadge = renderBadge(humanizeValue(selected.recommended_action || "Review only"), actionBadgeVariant(selected.recommended_action));
-    const workflowBadges = renderWorkflowBadges(selected);
-    const reviewStateBadge = renderBadge(humanizeValue(selected.classification_review_state || "Pending Review"), reviewBadgeVariant(selected));
     const overrideBadge = selected.has_operator_override === true ? renderBadge("Operator Override", "warning") : renderBadge("AI Effective", "muted");
     const refundRiskBadge = renderBadge(selected.refund_risk === true ? "Refund Risk" : "No Refund Risk", selected.refund_risk === true ? "danger" : "muted");
     const chargebackRiskBadge = renderBadge(selected.chargeback_risk === true ? "Chargeback Risk" : "No Chargeback Risk", selected.chargeback_risk === true ? "critical" : "muted");
@@ -1276,110 +1428,103 @@
 
     els.classificationDetail.innerHTML = `
       <div class="classification-detail-head">
-        <span class="eyebrow">${humanReview ? "Human Review" : "Classification"}</span>
+        <span class="eyebrow">${humanReview ? "Human Review" : "Selected Email"}</span>
         <h3>${escapeHtml(getClassificationTitle(selected))}</h3>
-        <div>${escapeHtml(getClassificationSender(selected))}</div>
-        <div class="classification-head-badges">
-          ${categoryBadge}
-          ${workflowBadges}
-          ${confidenceBadge}
-          ${reviewBadge}
-          ${reviewStateBadge}
-          ${overrideBadge}
-          ${validationBadge}
+        <div class="selected-email-meta">
+          <span>${escapeHtml(getClassificationSender(selected))}</span>
+          <span>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Received unavailable")}</span>
+          <span>${escapeHtml(ageLabel)}</span>
+        </div>
+        <div class="classification-head-meta">
+          ${renderWorkflowMetaText(selected, "", { includeCategory: true })}
         </div>
       </div>
 
-      <div class="classification-detail-section">
-        <h4>Message</h4>
-        <dl class="classification-detail-grid">
-          <div>
-            <dt>Sender</dt>
-            <dd>${escapeHtml(getClassificationSender(selected))}</dd>
-          </div>
-          <div>
-            <dt>Received</dt>
-            <dd>${escapeHtml(receivedAt ? formatDateTime(receivedAt) : "Unavailable")}</dd>
-          </div>
-          <div>
-            <dt>Email Age</dt>
-            <dd>${escapeHtml(ageLabel)}</dd>
-          </div>
-          <div>
-            <dt>Classified</dt>
-            <dd>${escapeHtml(formatDateTime(selected.created_at))}</dd>
-          </div>
-        </dl>
+      <div class="detail-panel-actions" aria-label="Detail section controls">
+        <button type="button" class="secondary-btn" data-detail-sections-action="expand">
+          <i data-lucide="chevrons-down"></i>
+          Expand All
+        </button>
+        <button type="button" class="secondary-btn" data-detail-sections-action="collapse">
+          <i data-lucide="chevrons-up"></i>
+          Collapse All
+        </button>
       </div>
 
-      <div class="classification-detail-section">
-        <h4>AI Classification</h4>
-        <div class="classification-pill-list">
-          ${renderBadge(humanizeValue(selected.category || "Uncategorized"), "category")}
-          ${confidenceBadge}
-          ${validationBadge}
-        </div>
-        <p>${escapeHtml(selected.summary || "No AI summary available.")}</p>
-      </div>
-
-      ${renderOperatorReviewSection(state, selected)}
-
-      ${renderResponseDraftSection(state, selected)}
-
-      <div class="classification-detail-section">
-        <h4>Workflow Priority</h4>
-        <dl class="classification-detail-grid classification-workflow-grid">
-          <div>
-            <dt>Priority</dt>
-            <dd>${renderBadge(humanizeValue(workflowPriority(selected)), priorityBadgeVariant(selected))}</dd>
-          </div>
-          <div>
-            <dt>Urgency</dt>
-            <dd>${renderBadge(humanizeValue(workflowUrgency(selected)), urgencyBadgeVariant(selected))}</dd>
-          </div>
-          <div>
-            <dt>Response Timing</dt>
-            <dd>${renderBadge(timingBadgeLabel(selected), timingBadgeVariant(selected))}</dd>
-          </div>
-          <div>
-            <dt>Customer Risk</dt>
-            <dd>${customerRiskBadge}</dd>
-          </div>
-          <div>
-            <dt>Refund Risk</dt>
-            <dd>${refundRiskBadge}</dd>
-          </div>
-          <div>
-            <dt>Chargeback Risk</dt>
-            <dd>${chargebackRiskBadge}</dd>
-          </div>
-        </dl>
-      </div>
-
-      <div class="classification-detail-section">
-        <h4>Recommended Action</h4>
-        <div class="classification-pill-list">
-          ${actionBadge}
-          ${renderBadge(selected.response_needed === true ? "Response needed" : "No response needed", selected.response_needed === true ? "warning" : "muted")}
-        </div>
-        <p>${escapeHtml(selected.reasoning_summary || "No reasoning summary available.")}</p>
-      </div>
-
-      <div class="classification-detail-section">
-        <h4>Safety / Review</h4>
-        <div class="classification-pill-list">
-          ${reviewBadge}
-          ${renderPillList(selected.safety_flags, "No safety flags")}
-        </div>
-        <p>${humanReview ? "Required or recommended based on review flags, safety flags, or confidence." : "No human-review signal returned."}</p>
-      </div>
+      ${renderCoreDisclosure(
+        "AI Summary",
+        actionBadge,
+        `<p>${escapeHtml(selected.summary || "No AI summary available.")}</p>`,
+        "ai-summary-section",
+      )}
 
       ${renderEmailBodySection(state, selected)}
 
-      <div class="classification-detail-section">
-        <h4>Message Reference</h4>
-        <p class="classification-mono">${escapeHtml(selected.message_id || "Unavailable")}</p>
-      </div>
+      ${renderResponseDraftSection(state, selected)}
+
+      ${renderAdvancedDisclosure(
+        "AI Classification Details",
+        confidenceBadge,
+        `
+          <div class="classification-pill-list">
+            ${renderBadge(humanizeValue(selected.category || "Uncategorized"), "category")}
+            ${confidenceBadge}
+            ${validationBadge}
+            ${actionBadge}
+            ${renderBadge(selected.response_needed === true ? "Response needed" : "No response needed", selected.response_needed === true ? "warning" : "muted")}
+          </div>
+          <p>${escapeHtml(selected.reasoning_summary || "No reasoning summary available.")}</p>
+        `,
+      )}
+
+      ${renderOperatorReviewSection(state, selected)}
+
+      ${renderAdvancedDisclosure(
+        "Workflow / Draft Metadata",
+        overrideBadge,
+        `
+          <dl class="classification-detail-grid classification-workflow-grid">
+            <div>
+              <dt>Response Timing</dt>
+              <dd>${renderBadge(timingBadgeLabel(selected), timingBadgeVariant(selected))}</dd>
+            </div>
+            <div>
+              <dt>Customer Risk</dt>
+              <dd>${customerRiskBadge}</dd>
+            </div>
+            <div>
+              <dt>Classified</dt>
+              <dd>${escapeHtml(formatDateTime(selected.created_at))}</dd>
+            </div>
+            <div>
+              <dt>Message Reference</dt>
+              <dd class="classification-mono">${escapeHtml(selected.message_id || "Unavailable")}</dd>
+            </div>
+            <div>
+              <dt>Classification Run</dt>
+              <dd class="classification-mono">${escapeHtml(selected.classification_run_id || "Unavailable")}</dd>
+            </div>
+            <div>
+              <dt>Input Version</dt>
+              <dd class="classification-mono">${escapeHtml(selected.input_version || "Unavailable")}</dd>
+            </div>
+          </dl>
+        `,
+      )}
+
+      ${renderAdvancedDisclosure(
+        "Safety / Validation Details",
+        validationBadge,
+        `
+          <div class="classification-pill-list">
+            ${reviewBadge}
+            ${refundRiskBadge}
+            ${chargebackRiskBadge}
+            ${renderPillList(selected.safety_flags, "No safety flags")}
+          </div>
+          <p>${humanReview ? "Required or recommended based on review flags, safety flags, or confidence." : "No human-review signal returned."}</p>
+        `,
+      )}
     `;
 
     if (window.lucide?.createIcons) window.lucide.createIcons();
@@ -1446,6 +1591,20 @@
       input.checked = input.value === state.densityMode;
     });
     els.classificationList?.classList.toggle("is-compact-density", state.densityMode === "compact");
+    if (els.classificationInboxShell) {
+      els.classificationInboxShell.classList.toggle("is-category-collapsed", state.categoryPanelCollapsed === true);
+      els.classificationInboxShell.classList.toggle("is-detail-collapsed", state.detailPanelCollapsed === true);
+    }
+    if (els.toggleCategoryPanel) {
+      const collapsed = state.categoryPanelCollapsed === true;
+      els.toggleCategoryPanel.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      els.toggleCategoryPanel.innerHTML = `<i data-lucide="${collapsed ? "panel-left-open" : "panel-left-close"}"></i> Categories`;
+    }
+    if (els.toggleDetailPanel) {
+      const collapsed = state.detailPanelCollapsed === true;
+      els.toggleDetailPanel.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      els.toggleDetailPanel.innerHTML = `<i data-lucide="${collapsed ? "panel-right-open" : "panel-right-close"}"></i> Details`;
+    }
 
     if (els.classificationAdminSummary) {
       els.classificationAdminSummary.innerHTML = [
@@ -1719,6 +1878,13 @@
     const lastChecked = connection?.last_successful_check_at || connection?.updated_at || "";
     const lastError = connection?.last_error_code || "none";
 
+    setMailboxSummary({
+      state: status === "error" || status === "reconnect_required" ? "needs attention" : "connected",
+      status: status === "error" || status === "reconnect_required" ? "attention" : "connected",
+      email,
+      lastChecked,
+    });
+
     setStatusMeta([
       { label: "Connected mailbox", value: email },
       { label: "Display name", value: displayName },
@@ -1750,6 +1916,12 @@
 
   function renderDisconnectedStatus() {
     setButtonMode("disconnected");
+    setMailboxSummary({
+      state: "not connected",
+      status: "disconnected",
+      email: "Connect Outlook mailbox",
+      lastChecked: "",
+    });
     setStatusMeta([]);
     els.messagesSection?.classList.add("hidden");
     renderMessages([]);
@@ -1780,6 +1952,12 @@
 
   async function loadMessages(context) {
     setLoading(true);
+    setMailboxSummary({
+      state: "checking",
+      status: "attention",
+      email: els.mailboxToolbarEmail?.textContent || "Mailbox unavailable",
+      lastChecked: new Date().toISOString(),
+    });
     setStatus("Checking", "Reading latest Outlook emails", "Calling Microsoft Graph through the Supabase Edge Function.");
 
     try {
@@ -1788,12 +1966,24 @@
       renderMessages(messages);
       els.messagesSection?.classList.remove("hidden");
       setButtonMode("connected");
+      setMailboxSummary({
+        state: "connected",
+        status: "connected",
+        email: els.mailboxToolbarEmail?.textContent || "Connected mailbox",
+        lastChecked: new Date().toISOString(),
+      });
       setStatus("Connected", "Outlook mailbox connected", `Loaded ${messages.length} sanitized message previews.`, "success");
     } catch (error) {
       const code = error.code || error.message;
       renderMessages([]);
       els.messagesSection?.classList.add("hidden");
       setButtonMode(code === "mailbox_not_connected" ? "disconnected" : "attention");
+      setMailboxSummary({
+        state: code === "mailbox_not_connected" ? "not connected" : "needs attention",
+        status: code === "mailbox_not_connected" ? "disconnected" : "attention",
+        email: els.mailboxToolbarEmail?.textContent || "Mailbox unavailable",
+        lastChecked: new Date().toISOString(),
+      });
       setStatus("Mailbox needs attention", "Could not load Outlook emails", safeErrorMessage(code), "error");
     } finally {
       setLoading(false);
@@ -1802,6 +1992,12 @@
 
   async function connectOutlook(context) {
     setLoading(true);
+    setMailboxSummary({
+      state: "connecting",
+      status: "attention",
+      email: els.mailboxToolbarEmail?.textContent || "Microsoft sign-in",
+      lastChecked: new Date().toISOString(),
+    });
     setStatus("Redirecting", "Opening Microsoft login", "You will return here after Microsoft authorizes mailbox read access.");
 
     try {
@@ -1823,6 +2019,12 @@
     if (!confirmed) return;
 
     setLoading(true);
+    setMailboxSummary({
+      state: "disconnecting",
+      status: "attention",
+      email: els.mailboxToolbarEmail?.textContent || "Connected mailbox",
+      lastChecked: new Date().toISOString(),
+    });
     setStatus("Disconnecting", "Disconnecting Outlook mailbox", "Removing the persisted mailbox secret from the server.");
 
     try {
@@ -1897,6 +2099,15 @@
     });
 
     els.classificationDetail?.addEventListener("click", (event) => {
+      const detailSectionsButton = event.target.closest("[data-detail-sections-action]");
+      if (detailSectionsButton) {
+        const shouldOpen = detailSectionsButton.getAttribute("data-detail-sections-action") === "expand";
+        els.classificationDetail
+          ?.querySelectorAll("details.detail-disclosure")
+          .forEach((section) => { section.open = shouldOpen; });
+        return;
+      }
+
       const draftButton = event.target.closest("[data-draft-action]");
       if (draftButton) {
         const action = draftButton.getAttribute("data-draft-action");
@@ -2036,7 +2247,23 @@
     els.connect?.addEventListener("click", () => connectOutlook(context));
     els.refresh?.addEventListener("click", () => loadMessages(context));
     els.disconnect?.addEventListener("click", () => disconnectOutlook(context));
+    els.adminDiagnosticsToggle?.addEventListener("click", () => {
+      const expanded = els.adminDiagnosticsToggle.getAttribute("aria-expanded") === "true";
+      els.adminDiagnosticsToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+      els.adminDiagnosticsDrawer?.classList.toggle("hidden", expanded);
+    });
+    bindPanelResizeEvents();
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
+    els.toggleCategoryPanel?.addEventListener("click", () => {
+      setAdminClassificationState({
+        categoryPanelCollapsed: !adminClassificationState.categoryPanelCollapsed,
+      });
+    });
+    els.toggleDetailPanel?.addEventListener("click", () => {
+      setAdminClassificationState({
+        detailPanelCollapsed: !adminClassificationState.detailPanelCollapsed,
+      });
+    });
     bindClassificationInboxEvents(context);
 
     handleOutlookQueryNotice();
@@ -2044,6 +2271,12 @@
     loadSelectedDraftView(context);
 
     setLoading(true);
+    setMailboxSummary({
+      state: "checking",
+      status: "attention",
+      email: "Mailbox unavailable",
+      lastChecked: new Date().toISOString(),
+    });
     setStatus("Checking", "Checking persisted Outlook connection", "Loading mailbox status from the Supabase Edge Function.");
     try {
       const payload = await loadMailboxStatus(context);
@@ -2058,6 +2291,12 @@
     } catch (error) {
       setButtonMode("attention");
       setStatusMeta([]);
+      setMailboxSummary({
+        state: "needs attention",
+        status: "attention",
+        email: "Mailbox status unavailable",
+        lastChecked: new Date().toISOString(),
+      });
       setStatus("Mailbox needs attention", "Could not load mailbox status", safeErrorMessage(error.code || error.message), "error");
       setLoading(false);
     }
