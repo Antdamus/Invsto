@@ -26,6 +26,7 @@
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
   const URGENT_COVERAGE_WARNING_ID = "og-ebay-urgent-coverage-warning";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
+  const BULK_LABEL_DEBUG_VERSION = "bulk-selection-v4";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
   const REPORT_EVENT_TYPE = "OG_EBAY_AWAITING_REPORT_CAPTURED";
@@ -57,6 +58,15 @@
   let ogReturnMessageLastLogKey = "";
   let ogReturnMessageLastLogAt = 0;
   const ogReturnDetailCaptureCache = new Map();
+  const ogBulkLabelManualSelection = new Set();
+  let ogBulkLabelManualSelectionTouched = false;
+  let ogBulkLabelObserverStarted = false;
+  let ogBulkLabelRefreshTimer = null;
+  let ogBulkLabelLastInteractedOrderNumber = "";
+  let ogBulkLabelLastIntentAt = 0;
+  let ogBulkLabelLastIntentOrderNumber = "";
+  let ogBulkLabelLastDebugSignature = "";
+  const ogBulkLabelHandledRows = new WeakSet();
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -133,10 +143,40 @@
     return [...new Set(getOrderLinks().map((entry) => entry.orderNumber))];
   }
 
+  function isBulkLabelPageContext() {
+    const text = cleanText([
+      document.title,
+      document.body?.innerText,
+      document.body?.textContent,
+      window.location.href,
+    ].filter(Boolean).join(" "));
+    return Boolean(
+      document.querySelector("#bulk-labels-app, .bulk-labels, [data-testid='order-filters-card'], [data-testid='bulk-payment-button-review-purchase']")
+      || /\/ship\/bulk\b/i.test(window.location.pathname)
+      || /\bGet labels in bulk\b/i.test(text)
+      || /\b(?:Edit|Remove)\s*\(\d+\)/i.test(text)
+    );
+  }
+
   function getBulkLabelOrderRows() {
-    if (!document.querySelector("#bulk-labels-app, .bulk-labels")) return [];
-    return [...document.querySelectorAll(".orders-list__item")]
-      .filter((row) => normalizeOrderNumber(row.textContent || ""));
+    if (!isBulkLabelPageContext()) return [];
+
+    const rows = [
+      ...document.querySelectorAll(".orders-list__item"),
+      ...[...document.querySelectorAll('a[data-testid^="unique-order-id-link-"], a[href*="/vod/FetchOrderDetails"], a[href*="orderId="], a[href*="orderid="]')]
+        .map((link) =>
+          link.closest(".orders-list__item")
+          || link.closest("[class*='orders-list__item']")
+          || link.closest("[role='listitem']")
+          || link.closest("tr")
+          || link.parentElement?.parentElement?.parentElement?.parentElement)
+        .filter(Boolean),
+    ];
+
+    return [...new Set(rows)]
+      .filter((row) =>
+        normalizeOrderNumber(row.textContent || row.getAttribute?.("aria-label") || "")
+        || row.querySelector?.('a[href*="/vod/FetchOrderDetails"], a[href*="orderId="], a[href*="orderid="]'));
   }
 
   function getBulkLabelRowCheckbox(row) {
@@ -150,15 +190,12 @@
     const checkbox = getBulkLabelRowCheckbox(row);
     if (!checkbox) return false;
     const wrapper = checkbox.closest(".checkbox, .orders-list__item__for-edit");
-    const rowText = cleanText(row?.textContent || "");
     return Boolean(
       checkbox.checked
       || checkbox.matches?.(":checked")
-      || checkbox.defaultChecked
-      || checkbox.hasAttribute("checked")
       || checkbox.getAttribute("aria-checked") === "true"
+      || wrapper?.getAttribute?.("aria-checked") === "true"
       || wrapper?.classList.contains("checkbox--checked")
-      || /^\s*✓/.test(rowText)
     );
   }
 
@@ -179,15 +216,121 @@
       .filter(Boolean))];
   }
 
+  function reconcileBulkLabelManualSelection(allOrderNumbers = []) {
+    const visible = new Set(allOrderNumbers.length
+      ? allOrderNumbers
+      : getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean));
+    [...ogBulkLabelManualSelection].forEach((orderNumber) => {
+      if (!visible.has(orderNumber)) ogBulkLabelManualSelection.delete(orderNumber);
+    });
+  }
+
+  function getBulkLabelManualSelectedOrderNumbers(allOrderNumbers = []) {
+    reconcileBulkLabelManualSelection(allOrderNumbers);
+    const visible = new Set(allOrderNumbers.length
+      ? allOrderNumbers
+      : getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean));
+    return [...ogBulkLabelManualSelection].filter((orderNumber) => visible.has(orderNumber));
+  }
+
+  function getActiveBulkLabelOrderNumber(allOrderNumbers = []) {
+    const activeRow = document.activeElement?.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(activeRow);
+    if (!orderNumber) return "";
+    return !allOrderNumbers.length || allOrderNumbers.includes(orderNumber) ? orderNumber : "";
+  }
+
+  function recordBulkLabelCheckboxIntent(event) {
+    const row = event.target?.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(row);
+    if (!orderNumber) return;
+    const now = Date.now();
+    if (ogBulkLabelLastIntentOrderNumber === orderNumber && now - ogBulkLabelLastIntentAt < 220) return;
+    ogBulkLabelLastIntentOrderNumber = orderNumber;
+    ogBulkLabelLastIntentAt = now;
+    ogBulkLabelLastInteractedOrderNumber = orderNumber;
+
+    const beforeCount = getBulkLabelSelectionCountFromControls();
+    window.setTimeout(() => {
+      const afterCount = getBulkLabelSelectionCountFromControls();
+      ogBulkLabelManualSelectionTouched = true;
+      if (afterCount === 0) {
+        ogBulkLabelManualSelection.clear();
+      } else if (afterCount === 1 && (beforeCount !== afterCount || !ogBulkLabelManualSelection.has(orderNumber))) {
+        ogBulkLabelManualSelection.clear();
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (afterCount > beforeCount) {
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (afterCount < beforeCount) {
+        ogBulkLabelManualSelection.delete(orderNumber);
+      } else if (isBulkLabelRowChecked(row)) {
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (ogBulkLabelManualSelection.has(orderNumber)) {
+        ogBulkLabelManualSelection.delete(orderNumber);
+      } else {
+        ogBulkLabelManualSelection.add(orderNumber);
+      }
+      reconcileBulkLabelManualSelection();
+      if (afterCount > 0 && ogBulkLabelManualSelection.size > afterCount) {
+        const keep = new Set(ogBulkLabelLastInteractedOrderNumber ? [ogBulkLabelLastInteractedOrderNumber] : []);
+        [...ogBulkLabelManualSelection].forEach((selectedOrderNumber) => {
+          if (ogBulkLabelManualSelection.size <= afterCount) return;
+          if (!keep.has(selectedOrderNumber)) ogBulkLabelManualSelection.delete(selectedOrderNumber);
+        });
+      }
+      scheduleInject();
+      window.setTimeout(scheduleInject, 200);
+    }, 120);
+  }
+
+  function attachBulkLabelRowSelectionHandlers() {
+    getBulkLabelOrderRows().forEach((row) => {
+      if (ogBulkLabelHandledRows.has(row)) return;
+      ogBulkLabelHandledRows.add(row);
+      const record = (event) => recordBulkLabelCheckboxIntent(event);
+      row.querySelectorAll('.orders-list__item__for-edit, .orders-list__item__for-edit input[type="checkbox"], .checkbox').forEach((element) => {
+        element.addEventListener("pointerdown", record, true);
+        element.addEventListener("mousedown", record, true);
+        element.addEventListener("click", record, true);
+        element.addEventListener("keydown", (event) => {
+          if (event.key === " " || event.key === "Enter") record(event);
+        }, true);
+      });
+    });
+  }
+
   function getBulkLabelSelectionCountFromControls() {
-    const text = cleanText(document.querySelector("#bulk-labels-app, .bulk-labels")?.innerText || document.body?.innerText || "");
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const controls = [...root.querySelectorAll?.("button, [role='button']") || []];
+    const directCount = controls
+      .map((element) => cleanText(`${element.innerText || element.textContent || ""} ${element.getAttribute?.("aria-label") || ""}`))
+      .map((text) => text.match(/^(?:Edit|Remove)\s*\((\d+)\)/i))
+      .find(Boolean);
+    if (directCount) {
+      const count = Number(directCount[1] || 0);
+      if (Number.isFinite(count) && count > 0) return count;
+    }
+    const controlText = controls
+      .map((element) => cleanText(`${element.innerText || element.textContent || ""} ${element.getAttribute?.("aria-label") || ""}`))
+      .join(" ");
+    const text = [
+      controlText,
+      root?.innerText,
+      root?.textContent,
+      document.documentElement?.innerHTML,
+    ].map(cleanText).join(" ");
     const match = text.match(/\b(?:Edit|Remove)\s*\((\d+)\)/i);
     const count = Number(match?.[1] || 0);
     return Number.isFinite(count) && count > 0 ? count : 0;
   }
 
   function getBulkLabelTotalCountFromControls() {
-    const text = cleanText(document.querySelector("#bulk-labels-app, .bulk-labels")?.innerText || document.body?.innerText || "");
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const text = [
+      root?.innerText,
+      root?.textContent,
+      document.documentElement?.innerHTML,
+    ].map(cleanText).join(" ");
     const badgeMatch = text.match(/\bCombine orders per buyer\s*(\d+)\b/i);
     const badgeCount = Number(badgeMatch?.[1] || 0);
     const rowCount = getBulkLabelOrderRows().length;
@@ -200,30 +343,76 @@
     const selectedOrderNumbers = getSelectedBulkLabelOrderNumbers();
     const allOrderNumbers = [...new Set(rows.map(getBulkLabelRowOrderNumber).filter(Boolean))];
     const controlSelectedCount = getBulkLabelSelectionCountFromControls();
-    const hasExplicitSelection = controlSelectedCount > 0 || selectedOrderNumbers.length > 0;
+    const manualSelectedOrderNumbers = getBulkLabelManualSelectedOrderNumbers(allOrderNumbers);
+    const activeOrderNumber = getActiveBulkLabelOrderNumber(allOrderNumbers);
+    const detectedSelectedOrderNumbers = (() => {
+      if (controlSelectedCount > 0 && selectedOrderNumbers.length === controlSelectedCount) return selectedOrderNumbers;
+      if (controlSelectedCount > 0 && manualSelectedOrderNumbers.length === controlSelectedCount) return manualSelectedOrderNumbers;
+      if (controlSelectedCount === 1 && activeOrderNumber) return [activeOrderNumber];
+      if (controlSelectedCount === 1 && ogBulkLabelLastInteractedOrderNumber && allOrderNumbers.includes(ogBulkLabelLastInteractedOrderNumber)) {
+        return [ogBulkLabelLastInteractedOrderNumber];
+      }
+      if (controlSelectedCount > 0) return [];
+      return ogBulkLabelManualSelectionTouched && manualSelectedOrderNumbers.length
+        ? manualSelectedOrderNumbers
+        : selectedOrderNumbers;
+    })();
+    const hasExplicitSelection = controlSelectedCount > 0 || detectedSelectedOrderNumbers.length > 0;
     const selectedCount = hasExplicitSelection
-      ? (controlSelectedCount || selectedOrderNumbers.length)
+      ? (controlSelectedCount || detectedSelectedOrderNumbers.length)
       : allOrderNumbers.length;
     const totalCount = Math.max(getBulkLabelTotalCountFromControls(), allOrderNumbers.length, selectedCount);
     const effectiveSelectedOrderNumbers = hasExplicitSelection
-      ? (selectedOrderNumbers.length ? selectedOrderNumbers.slice(0, selectedCount) : allOrderNumbers.slice(0, selectedCount))
+      ? (detectedSelectedOrderNumbers.length ? detectedSelectedOrderNumbers.slice(0, selectedCount) : allOrderNumbers.slice(0, selectedCount))
       : allOrderNumbers;
     return {
       source: "ebay-bulk-label-selection",
+      debugVersion: BULK_LABEL_DEBUG_VERSION,
       selectedCount,
       totalCount,
       selectedOrderNumbers: effectiveSelectedOrderNumbers,
+      checkedOrderNumbers: selectedOrderNumbers,
+      trackedOrderNumbers: manualSelectedOrderNumbers,
       allOrderNumbers,
+      toolbarSelectedCount: controlSelectedCount,
+      lastInteractedOrderNumber: ogBulkLabelLastInteractedOrderNumber,
+      activeOrderNumber,
     };
   }
 
   function getEffectiveBulkLabelOrderNumbers() {
-    const selected = getBulkLabelSelectionMeta()?.selectedOrderNumbers || getSelectedBulkLabelOrderNumbers();
+    const meta = getBulkLabelSelectionMeta();
+    if (meta) {
+      if (meta.selectedOrderNumbers.length) return meta.selectedOrderNumbers;
+      return meta.selectedCount > 0 && meta.selectedCount < meta.totalCount
+        ? []
+        : [...new Set(getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean))];
+    }
+    const selected = getSelectedBulkLabelOrderNumbers();
     return selected.length ? selected : [...new Set(getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean))];
   }
 
   function getEffectiveFloatingOrderNumbers() {
-    return getBulkLabelOrderRows().length ? getEffectiveBulkLabelOrderNumbers() : uniqueOrderNumbers();
+    return isBulkLabelPageContext() ? getEffectiveBulkLabelOrderNumbers() : uniqueOrderNumbers();
+  }
+
+  function getBulkLabelDebugSnapshot() {
+    const rows = getBulkLabelOrderRows();
+    const meta = getBulkLabelSelectionMeta();
+    return {
+      version: BULK_LABEL_DEBUG_VERSION,
+      isBulkLabelPage: Boolean(rows.length),
+      toolbarSelectedCount: getBulkLabelSelectionCountFromControls(),
+      visibleOrderNumbers: rows.map(getBulkLabelRowOrderNumber).filter(Boolean),
+      checkboxSelectedOrderNumbers: getSelectedBulkLabelOrderNumbers(),
+      trackedOrderNumbers: getBulkLabelManualSelectedOrderNumbers(),
+      activeOrderNumber: getActiveBulkLabelOrderNumber(),
+      effectiveOrderNumbers: getEffectiveBulkLabelOrderNumbers(),
+      lastInteractedOrderNumber: ogBulkLabelLastInteractedOrderNumber,
+      buttonText: document.getElementById(FLOATING_ID)?.textContent || "",
+      buttonDataset: { ...(document.getElementById(FLOATING_ID)?.dataset || {}) },
+      meta,
+    };
   }
 
   function cleanText(value) {
@@ -4770,7 +4959,7 @@
     const displayCount = bulkSelectionMeta?.selectedCount || orderNumbers.length;
     let button = document.getElementById(FLOATING_ID);
 
-    if (isAwaitingShipmentOrdersPage() || !orderNumbers.length) {
+    if (isAwaitingShipmentOrdersPage() || (!orderNumbers.length && !bulkSelectionMeta?.selectedCount)) {
       button?.remove();
       return;
     }
@@ -4784,12 +4973,35 @@
     }
 
     button.textContent = `Open ${displayCount} in OG`;
+    button.dataset.ogBulkDebugVersion = BULK_LABEL_DEBUG_VERSION;
+    button.dataset.ogBulkSelectedCount = String(displayCount || 0);
+    button.dataset.ogBulkSelectedOrderIds = bulkSelectionMeta?.selectedOrderNumbers?.join(",") || orderNumbers.join(",");
+    button.dataset.ogBulkVisibleOrderIds = bulkSelectionMeta?.allOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkToolbarSelectedCount = String(bulkSelectionMeta?.toolbarSelectedCount || 0);
+    button.dataset.ogBulkCheckboxSelectedOrderIds = bulkSelectionMeta?.checkedOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkTrackedOrderIds = bulkSelectionMeta?.trackedOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkLastInteractedOrderId = bulkSelectionMeta?.lastInteractedOrderNumber || "";
+    button.dataset.ogBulkActiveOrderId = bulkSelectionMeta?.activeOrderNumber || "";
+    button.disabled = Boolean(bulkSelectionMeta?.selectedCount && !orderNumbers.length);
+    const debugSignature = [
+      button.textContent,
+      button.dataset.ogBulkToolbarSelectedCount,
+      button.dataset.ogBulkSelectedOrderIds,
+      button.dataset.ogBulkCheckboxSelectedOrderIds,
+      button.dataset.ogBulkTrackedOrderIds,
+      button.dataset.ogBulkLastInteractedOrderId,
+      button.dataset.ogBulkActiveOrderId,
+    ].join("|");
+    if (debugSignature !== ogBulkLabelLastDebugSignature) {
+      ogBulkLabelLastDebugSignature = debugSignature;
+      console.info("[OG eBay] Orange button bulk-label state", getBulkLabelDebugSnapshot());
+    }
     const selectedTitle = bulkSelectionMeta?.selectedOrderNumbers?.length
       ? ` Selected: ${bulkSelectionMeta.selectedOrderNumbers.join(", ")}`
       : "";
     button.title = bulkSelectionMeta?.selectedCount && bulkSelectionMeta.selectedCount < bulkSelectionMeta.totalCount
-      ? `Open only the selected eBay bulk label rows in OG Pending Orders.${selectedTitle}`
-      : "Open all visible eBay label orders in OG Pending Orders";
+      ? `Open only the selected eBay bulk label rows in OG Pending Orders.${selectedTitle} [${BULK_LABEL_DEBUG_VERSION}; toolbar=${button.dataset.ogBulkToolbarSelectedCount}; checkbox=${button.dataset.ogBulkCheckboxSelectedOrderIds || "none"}; tracked=${button.dataset.ogBulkTrackedOrderIds || "none"}; last=${button.dataset.ogBulkLastInteractedOrderId || "none"}; active=${button.dataset.ogBulkActiveOrderId || "none"}]`
+      : `Open all visible eBay label orders in OG Pending Orders [${BULK_LABEL_DEBUG_VERSION}; visible=${button.dataset.ogBulkVisibleOrderIds || "none"}]`;
   }
 
   function injectSingleOrderButton() {
@@ -5105,7 +5317,14 @@
 
   function injectOgControls() {
     ensureStyles();
+    window.__ogEbayBulkDebug = getBulkLabelDebugSnapshot;
+    window.__ogEbayRefreshOrangeButton = () => {
+      injectFloatingButton();
+      return getBulkLabelDebugSnapshot();
+    };
     attachBuyerGroupSelectionHandlers();
+    startBulkLabelSelectionWatcher();
+    attachBulkLabelRowSelectionHandlers();
     syncLocallyClosedAwaitingRows();
     injectRowButtons();
     injectVideoReceiptShortcuts();
@@ -5132,16 +5351,47 @@
     }, 250);
   }
 
+  function startBulkLabelSelectionWatcher() {
+    if (ogBulkLabelObserverStarted || !isBulkLabelPageContext()) return;
+    ogBulkLabelObserverStarted = true;
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const observer = new MutationObserver(() => scheduleInject());
+    observer.observe(root, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributeFilter: ["checked", "aria-checked", "class", "disabled"],
+    });
+    ogBulkLabelRefreshTimer = window.setInterval(() => {
+      if (!isBulkLabelPageContext()) {
+        window.clearInterval(ogBulkLabelRefreshTimer);
+        ogBulkLabelRefreshTimer = null;
+        ogBulkLabelObserverStarted = false;
+        return;
+      }
+      scheduleInject();
+    }, 700);
+  }
+
   document.addEventListener("change", (event) => {
-    if (!event.target?.matches?.("#bulk-labels-app input[type='checkbox'], .bulk-labels input[type='checkbox']")) return;
+    if (!isBulkLabelPageContext() || !event.target?.matches?.("input[type='checkbox']")) return;
+    const row = event.target.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(row);
+    if (orderNumber) {
+      ogBulkLabelManualSelectionTouched = true;
+      if (event.target.checked || event.target.matches?.(":checked")) ogBulkLabelManualSelection.add(orderNumber);
+      else ogBulkLabelManualSelection.delete(orderNumber);
+    }
     scheduleInject();
   }, true);
   document.addEventListener("input", (event) => {
-    if (!event.target?.matches?.("#bulk-labels-app input[type='checkbox'], .bulk-labels input[type='checkbox']")) return;
+    if (!isBulkLabelPageContext() || !event.target?.matches?.("input[type='checkbox']")) return;
     scheduleInject();
   }, true);
   document.addEventListener("click", (event) => {
-    if (!event.target?.closest?.("#bulk-labels-app .checkbox, .bulk-labels .checkbox, #bulk-labels-app .orders-list__item__for-edit, .bulk-labels .orders-list__item__for-edit")) return;
+    if (!isBulkLabelPageContext() || !event.target?.closest?.(".checkbox, .orders-list__item__for-edit, [class*='orders-list__item'] input[type='checkbox']")) return;
+    recordBulkLabelCheckboxIntent(event);
     window.setTimeout(scheduleInject, 50);
   }, true);
 
