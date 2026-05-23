@@ -6,7 +6,7 @@ const CLASSIFIER_VERSION = "4b.4-v1";
 const TAXONOMY_VERSION = "step-4b.4-v1";
 const RESPONSE_DRAFT_GENERATOR_NAME = "og-email-triage-response-drafter";
 const RESPONSE_DRAFT_GENERATOR_VERSION = "4d.7-v1";
-const RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT = "step-4d.6-v1";
+const RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT = "step-4d.7f-v1";
 const TRUNCATION_VERSION = "head-12000-tail-2000-v1";
 const LINK_CONTEXT_VERSION = "links-compact-v1";
 const VERIFIED_ORDER_CONTEXT_VERSION = "verified-ebay-order-context-v1";
@@ -235,6 +235,26 @@ type ResponseDraftInput = {
     link_context_version: string;
     verified_order_context_version: string;
     safety_policy_version: string;
+  };
+  buyer_stated_claims: {
+    extraction_version: string;
+    claims: Array<{
+      claim_type: string;
+      label: string;
+      source: string;
+      framing_required: string;
+    }>;
+    allowed_framing: string[];
+    forbidden_conversion: string[];
+  };
+  verified_facts: {
+    source: string;
+    categories_with_verified_data: string[];
+    buyer_facing_context_level: string;
+  };
+  unknown_facts: {
+    source: string;
+    facts: string[];
   };
   verified_order_context: {
     context_version: string;
@@ -1126,19 +1146,23 @@ Drafting style:
 - Do not return one dense paragraph. Do not omit the greeting or signature.
 
 VERIFIED FACTS:
+- verified_facts summarizes which buyer-facing DB/order fact categories are available. Exact facts still live under verified_order_context.known.
 - Use only the supplied stored email context, deterministic links, effective classification, and verified_order_context.
 - You may state a DB fact only when the exact fact is present under verified_order_context.known.
 - If verified_order_context.known contains an order field, shipping field, return field, task field, or order line title, you may mention only that exact fact in conservative language.
 - Do not upgrade suggested, weak, partial, inferred, or classification-only context into a confirmed customer-facing fact.
 - If verified_order_context.summary.buyer_facing_context_level is "generic", do not mention specific order numbers, item identities, tracking, return status, refund status, replacement status, or timeline.
 
-BUYER-STATED INFORMATION:
-- Personalize the reply from the buyer's email subject, sender display name if safe, message preview/body, classification summary, and stated issue.
-- You may acknowledge what the buyer stated, mentioned, described, asked, or is concerned about, even when order context is generic or a weak match is treated as unverified.
+BUYER-STATED CLAIMS:
+- Prefer buyer_stated_claims.claims for personalization. These claims are runtime-only buyer-reported context, not stored verified facts.
+- You may acknowledge what the buyer stated, mentioned, described, asked, reported, or is concerned about, even when order context is generic or a weak match is treated as unverified.
 - Use buyer-stated language as an acknowledgement, not as verified fact. Prefer "You mentioned...", "You stated...", "We understand your concern about...", or "We are reviewing the details provided in your message."
 - Do not say the buyer-stated issue is true, confirmed, approved, resolved, caused by OG, or reflected in database/order status unless verified_order_context.known supports that exact fact.
+- Good buyer-stated framing: "You mentioned that the bracelet is not staying latched" or "Based on your message, you are requesting a return."
+- Bad unverified conversion: "The bracelet is defective", "The item arrived damaged", "Your return is approved", "Your refund was processed."
 
-UNKNOWN FACTS:
+UNKNOWN / UNVERIFIED:
+- unknown_facts and verified_order_context.unknown list missing or unverified facts.
 - Treat every entry in verified_order_context.unknown as explicitly missing or unverified.
 - When information is unknown, acknowledge uncertainty and use neutral operational language.
 - If order details are missing or weak, say "We are reviewing the order details" or "We are reviewing the order associated with your message."
@@ -1788,6 +1812,17 @@ function extractTrackingLikeTokens(text: string) {
     .filter((token) => /\d/.test(token) && token.length >= 8);
 }
 
+function hasBuyerStatedProblemFraming(text: string, productType: string) {
+  const product = `${productType}s?`;
+  const problem = "(?:defective|broken|damaged|fake|counterfeit|not authentic|missing|not staying latched|not staying closed|does(?: not|n't) stay (?:latched|closed)|won(?:'|’)t stay (?:latched|closed)|will not stay (?:latched|closed))";
+  const framedPatterns = [
+    new RegExp(`\\byou\\s+(?:mentioned|stated|indicated|described|reported|said)\\s+(?:that\\s+)?(?:the|your)\\s+${product}\\s+(?:is|are|was|were|may be|might be|seems?\\s+to\\s+be)?\\s*${problem}\\b`, "i"),
+    new RegExp(`\\bbased\\s+on\\s+your\\s+message,?\\s+(?:the|your)?\\s*${product}\\s+(?:is|are|was|were|may be|might be|seems?\\s+to\\s+be)?\\s*${problem}\\b`, "i"),
+    new RegExp(`\\byou\\s+(?:mentioned|stated|indicated|described|reported|said)\\s+(?:an?\\s+)?(?:issue|concern|problem)\\s+with\\s+(?:the|your)\\s+${product}\\b`, "i"),
+  ];
+  return containsAny(text, framedPatterns);
+}
+
 type ValidationErrorExplanation = {
   error_code: string;
   operator_label: string;
@@ -1906,6 +1941,83 @@ function fallbackConcernType(input: ResponseDraftInput) {
   return "general";
 }
 
+function extractBuyerStatedClaimsFromInput(
+  classifierInput: ClassifierInput,
+  classification: ResponseDraftInput["classification"],
+): ResponseDraftInput["buyer_stated_claims"] {
+  const sourceParts = [
+    classifierInput.message.subject,
+    classifierInput.message.body_preview,
+    classifierInput.body.text,
+    classification.summary,
+    classification.reasoning_summary,
+  ].map((part) => cleanWhitespace(part)).filter(Boolean);
+  const text = sourceParts.join(" ");
+  const normalized = text.toLowerCase();
+  const claims: ResponseDraftInput["buyer_stated_claims"]["claims"] = [];
+
+  const addClaim = (claim_type: string, label: string, source: string) => {
+    if (claims.some((claim) => claim.claim_type === claim_type && claim.label === label)) return;
+    claims.push({
+      claim_type,
+      label: shortText(label, 120),
+      source,
+      framing_required: "Frame as buyer-stated, buyer-mentioned, buyer-reported, or based on the buyer's message; do not present as verified fact.",
+    });
+  };
+
+  if (/\b(cancel|cancellation|cancelled|canceled)\b/i.test(normalized)) {
+    addClaim("cancellation_request", "cancellation request or cancellation concern", "subject_or_body");
+  }
+  if (/\b(return|returning|send it back|send this back)\b/i.test(normalized)) {
+    addClaim("return_request", "return request", "subject_or_body");
+  }
+  if (/\b(refund|money back|reimburse)\b/i.test(normalized)) {
+    addClaim("refund_request", "refund request or refund concern", "subject_or_body");
+  }
+  if (/\b(not as described|wrong item|does not match|isn't as described|is not as described)\b/i.test(normalized)) {
+    addClaim("item_not_as_described", "item not as described concern", "subject_or_body");
+  }
+  if (/\b(damaged|broken|defective|cracked|scratched|missing stone|stone missing)\b/i.test(normalized)) {
+    addClaim("item_condition_complaint", "item condition concern", "subject_or_body");
+  }
+  if (/\b(latch|latched|clasp|stay(?:ing)? closed|won't stay|will not stay|doesn't stay|does not stay)\b/i.test(normalized)) {
+    const product = /\bbracelet\b/i.test(normalized) ? "bracelet" : "item";
+    addClaim("item_function_complaint", `${product} is not staying latched or closed`, "subject_or_body");
+  }
+  if (/\b(not received|never received|hasn't arrived|has not arrived|didn't arrive|did not arrive|where is my package|missing package)\b/i.test(normalized)) {
+    addClaim("item_not_received", "item not received or package arrival concern", "subject_or_body");
+  }
+
+  if (!claims.length && classification.effective_category && classification.effective_category !== "internal_or_other") {
+    const label = String(classification.effective_category).replace(/_/g, " ");
+    addClaim("classification_stated_issue", `${label} concern`, "classification");
+  }
+
+  return {
+    extraction_version: "buyer-stated-claims-v1",
+    claims: claims.slice(0, 5),
+    allowed_framing: ["You mentioned", "Based on your message", "You indicated", "You described", "You reported"],
+    forbidden_conversion: [
+      "Do not convert buyer-stated claims into verified product defects, delivery states, refund states, return approvals, replacements, or order status.",
+      "Do not say a condition complaint is true unless verified_order_context.known supports that exact fact.",
+    ],
+  };
+}
+
+function primaryBuyerClaimLabel(input: ResponseDraftInput, claimTypes: string[]) {
+  const claims = Array.isArray(input.buyer_stated_claims?.claims) ? input.buyer_stated_claims.claims : [];
+  return claims.find((claim) => claimTypes.includes(String(claim.claim_type)))?.label || null;
+}
+
+function buyerStatedOpening(input: ResponseDraftInput, fallbackLabel: string, claimTypes: string[]) {
+  const label = (primaryBuyerClaimLabel(input, claimTypes) || fallbackLabel).replace(/^(?:a|an)\s+/i, "");
+  if (/^(?:bracelet|clasp|latch)\b/i.test(label)) {
+    return `You mentioned that the ${label.replace(/^(?:the|your)\s+/i, "")}, and we are reviewing the details provided in your message.`;
+  }
+  return `You mentioned a ${label}, and we are reviewing the details provided in your message.`;
+}
+
 function buildSafeFallbackDraft(input: ResponseDraftInput, primarySafetyFlags: string[]): ValidResponseDraft {
   const concernType = fallbackConcernType(input);
   const greeting = safeBuyerGreeting(input);
@@ -1916,7 +2028,9 @@ function buildSafeFallbackDraft(input: ResponseDraftInput, primarySafetyFlags: s
 
 Thank you for reaching out about your return or refund concern.
 
-We are reviewing the details provided in your message along with the available information before confirming any next steps.
+${buyerStatedOpening(input, "a return or refund concern", ["return_request", "refund_request"])}
+
+We are reviewing the available information before confirming any next steps.
 
 We appreciate your patience while this is reviewed.
 
@@ -1929,7 +2043,7 @@ OG Jewelers`,
 
 Thank you for reaching out about your shipment concern.
 
-We understand your concern about the shipment status and are reviewing the details provided in your message along with the available information.
+${buyerStatedOpening(input, "a shipment concern", ["item_not_received"])}
 
 We appreciate your patience and will follow up once the relevant details are confirmed.
 
@@ -1942,7 +2056,7 @@ OG Jewelers`,
 
 Thank you for reaching out about your item concern.
 
-We understand that you reported an issue with the item and are reviewing the details provided in your message before confirming any next steps.
+${buyerStatedOpening(input, "an issue with the item", ["item_function_complaint", "item_condition_complaint", "item_not_as_described"])}
 
 We appreciate your patience while this is reviewed.
 
@@ -1955,7 +2069,7 @@ OG Jewelers`,
 
 Thank you for reaching out about your cancellation concern.
 
-We understand your concern regarding the cancellation notice or request described in your message and are reviewing the available information.
+${buyerStatedOpening(input, "a cancellation notice or request", ["cancellation_request"])}
 
 We appreciate your patience while we confirm the relevant details.
 
@@ -2204,7 +2318,7 @@ function validateResponseDraft(
     if (buyerStatedProduct && !verifiedProduct && containsAny(combined, [
       new RegExp(`\\b(the|your)\\s+${productType}s?\\s+(is|are|was|were)\\s+(defective|broken|damaged|fake|counterfeit|not authentic|missing)\\b`, "i"),
       new RegExp(`\\b${productType}s?\\s+(is|are|was|were)\\s+(defective|broken|damaged|fake|counterfeit|not authentic|missing)\\b`, "i"),
-    ])) {
+    ]) && !hasBuyerStatedProblemFraming(combined, productType)) {
       errors.push("unsupported_claim");
       safetyFlags.add("unsupported_claim");
       break;
@@ -3548,6 +3662,16 @@ async function loadResponseDraftInput(
       link_context_version: LINK_CONTEXT_VERSION,
       verified_order_context_version: VERIFIED_ORDER_CONTEXT_VERSION,
       safety_policy_version: "response-draft-safety-v1",
+    },
+    buyer_stated_claims: extractBuyerStatedClaimsFromInput(classifierInput, classificationState),
+    verified_facts: {
+      source: "verified_order_context.known",
+      categories_with_verified_data: verifiedOrderContext.summary.injected_categories,
+      buyer_facing_context_level: verifiedOrderContext.summary.buyer_facing_context_level || "verified",
+    },
+    unknown_facts: {
+      source: "verified_order_context.unknown",
+      facts: verifiedOrderContext.unknown,
     },
     verified_order_context: verifiedOrderContext,
   };

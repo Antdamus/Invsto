@@ -19,6 +19,7 @@ Do not hardcode tokens. The script never prints the token and does not save it.
 - `EMAIL_TRIAGE_FUNCTION_NAME`: Edge Function name. Defaults to `microsoft-email-classify`.
 - `EMAIL_TRIAGE_REQUEST_TIMEOUT_MS`: Request timeout. Defaults to `30000`.
 - `EMAIL_TRIAGE_RUN_MUTATING_CHECKS=true`: Enables optional mutating checks, equivalent to `--generate`.
+- `EMAIL_TRIAGE_ITEM_NOT_AS_DESCRIBED_MESSAGE_ID`: Optional known message ID for the item-not-as-described personalization regression.
 
 ## Run Read-Only Checks
 
@@ -72,6 +73,10 @@ Checks message `4effe1f7-2f82-4a86-b8c4-94e986267986`. The current draft must be
 Checks message `514a6c14-2cf6-4233-8fef-95798437ff62`. This was the historical polluted message. The current draft must be valid, pollution must be false, best usable draft must exist, invalid/bodyless current draft diagnostics must be false, and `admin_draft_view` must return the draft body.
 
 Duplicate classifications for this message are a warning, not a failure.
+
+`buyer-stated personalization`
+
+For known message drafts with returned body text, checks that the response safely references buyer-described issues or requests and does not convert them into unverified defect, refund, tracking, shipping, or delivery assertions. Set `EMAIL_TRIAGE_ITEM_NOT_AS_DESCRIBED_MESSAGE_ID` to include a live item-not-as-described example.
 
 `selector contract`
 

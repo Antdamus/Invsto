@@ -10,14 +10,31 @@ const KNOWN_MESSAGES = [
     label: "weak cancellation",
     expectedDraft: true,
     duplicateClassificationsAreWarning: false,
+    personalization: {
+      requiredAny: [/you (mentioned|stated|indicated|described|reported)|based on your message|cancellation (notice|request|concern)/i],
+      forbiddenAny: [/\b(the item|your item|bracelet)\s+(is|was|are|were)\s+(defective|broken|damaged)\b/i],
+    },
   },
   {
     id: "514a6c14-2cf6-4233-8fef-95798437ff62",
     label: "return request",
     expectedDraft: true,
     duplicateClassificationsAreWarning: true,
+    personalization: {
+      requiredAny: [/you (mentioned|stated|indicated|described|reported)|based on your message|return (request|concern)|refund concern/i],
+      forbiddenAny: [/\brefund\s+(has been|is|was)\s+(approved|processed|issued|completed|guaranteed)\b/i, /\breturn\s+(has been|is|was)\s+(approved|accepted|authorized)\b/i, /\btracking\s+(number|shows|says|indicates)\b/i, /\b(shipped|in transit|out for delivery|delivered)\b/i],
+    },
   },
-];
+].concat(String(process.env.EMAIL_TRIAGE_ITEM_NOT_AS_DESCRIBED_MESSAGE_ID || "").trim() ? [{
+  id: String(process.env.EMAIL_TRIAGE_ITEM_NOT_AS_DESCRIBED_MESSAGE_ID).trim(),
+  label: "item not as described",
+  expectedDraft: true,
+  duplicateClassificationsAreWarning: true,
+  personalization: {
+    requiredAny: [/you (mentioned|stated|indicated|described|reported)|based on your message|not as described|item (condition|concern|issue)/i],
+    forbiddenAny: [/\b(the item|your item|bracelet)\s+(is|was|are|were)\s+(defective|broken|damaged|fake|counterfeit|not authentic)\b/i, /\brefund\s+(has been|is|was)\s+(approved|processed|issued|completed|guaranteed)\b/i, /\b(shipped|in transit|out for delivery|delivered)\b/i],
+  },
+}] : []);
 
 function parseArgs(argv) {
   const options = {
@@ -309,6 +326,7 @@ function validateDraftView(results, message, payload) {
 
   if (currentDraft.draft_content_returned === true && bodyPresent(currentDraft.draft_body_text)) {
     pass(results, `${message.label} admin_draft_view returns body`);
+    validatePersonalizedDraftBody(results, message, currentDraft.draft_body_text);
   } else {
     fail(results, `${message.label} admin_draft_view body missing`, {
       message_id: message.id,
@@ -316,6 +334,32 @@ function validateDraftView(results, message, payload) {
       draft_content_returned: currentDraft.draft_content_returned,
       draft_content_omitted_reason: currentDraft.draft_content_omitted_reason || null,
     });
+  }
+}
+
+function validatePersonalizedDraftBody(results, message, body) {
+  const rules = message.personalization;
+  if (!rules) return;
+  const text = String(body || "");
+  if (!text.trim()) return;
+
+  if (rules.requiredAny?.some((pattern) => pattern.test(text))) {
+    pass(results, `${message.label} buyer-stated issue safely referenced`);
+  } else {
+    fail(results, `${message.label} buyer-stated issue not safely referenced`, {
+      message_id: message.id,
+      expected: "safe buyer-stated framing such as You mentioned, Based on your message, or the relevant request/concern label",
+    });
+  }
+
+  const forbidden = (rules.forbiddenAny || []).find((pattern) => pattern.test(text));
+  if (forbidden) {
+    fail(results, `${message.label} unverified factual over-assertion`, {
+      message_id: message.id,
+      forbidden_pattern: String(forbidden),
+    });
+  } else {
+    pass(results, `${message.label} no unverified defect/refund/delivery assertion`);
   }
 }
 
