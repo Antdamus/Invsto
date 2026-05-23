@@ -48,11 +48,11 @@ type PreparedItem = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-const EBAY_CLIENT_ID = Deno.env.get("EBAY_CLIENT_ID") ?? Deno.env.get("EBAY_APP_ID") ?? "";
-const EBAY_CLIENT_SECRET = Deno.env.get("EBAY_CLIENT_SECRET") ?? Deno.env.get("EBAY_CERT_ID") ?? "";
-const EBAY_REFRESH_TOKEN = Deno.env.get("EBAY_REFRESH_TOKEN") ?? "";
-const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").toLowerCase();
-const EBAY_SCOPE = Deno.env.get("EBAY_SCOPE") ?? "https://api.ebay.com/oauth/api_scope/sell.inventory";
+const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? Deno.env.get("EBAY_APP_ID") ?? "").trim();
+const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? Deno.env.get("EBAY_CERT_ID") ?? "").trim();
+const EBAY_REFRESH_TOKEN = (Deno.env.get("EBAY_REFRESH_TOKEN") ?? "").trim();
+const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
+const EBAY_SCOPE = (Deno.env.get("EBAY_SCOPE") ?? "https://api.ebay.com/oauth/api_scope/sell.inventory").trim();
 const EBAY_SYNC_ALLOW_PUBLISH = (Deno.env.get("EBAY_SYNC_ALLOW_PUBLISH") ?? "false").toLowerCase() === "true";
 const SOURCE_PHOTO_BUCKET = Deno.env.get("EBAY_SOURCE_PHOTO_BUCKET") ?? "photos";
 const PUBLIC_EBAY_PHOTO_BUCKET = Deno.env.get("EBAY_PUBLIC_PHOTO_BUCKET") ?? "public-ebay-photos";

@@ -497,3 +497,18 @@ entrypoint = "./functions/sync-ebay-feedback/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/process-inventory-image/index.ts"
+
+[functions.ebay-inventory-sync]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/ebay-inventory-sync/index.ts"
+
+[functions.ebay-account-deletion]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-account-deletion/index.ts"
+
+[functions.ebay-oauth-callback]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-oauth-callback/index.ts"
