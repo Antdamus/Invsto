@@ -64,6 +64,8 @@ const EBAY_SCOPE = (Deno.env.get("EBAY_SCOPE") ?? "https://api.ebay.com/oauth/ap
 const EBAY_SYNC_ALLOW_PUBLISH = (Deno.env.get("EBAY_SYNC_ALLOW_PUBLISH") ?? "false").toLowerCase() === "true";
 const SOURCE_PHOTO_BUCKET = Deno.env.get("EBAY_SOURCE_PHOTO_BUCKET") ?? "photos";
 const PUBLIC_EBAY_PHOTO_BUCKET = Deno.env.get("EBAY_PUBLIC_PHOTO_BUCKET") ?? "public-ebay-photos";
+const MAX_SYNC_LIMIT = 1000;
+const SUPABASE_IN_CHUNK_SIZE = 100;
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 
@@ -565,12 +567,7 @@ async function loadItems(supabase: any, itemIds: string[], limit: number): Promi
   const ids = rows.map((row) => row.id);
   if (!ids.length) return [];
 
-  const { data: stockRows, error: stockError } = await supabase
-    .from("item_stock_locations")
-    .select("item_id,quantity")
-    .in("item_id", ids);
-
-  if (stockError) throw new Error(`Could not load stock quantities: ${stockError.message}`);
+  const stockRows = await loadRowsByItemIds(supabase, "item_stock_locations", ids, "item_id,quantity");
 
   const quantityByItem = new Map<string, number>();
   for (const row of stockRows || []) {
@@ -595,6 +592,48 @@ function cleanWarnings(warnings: unknown): string[] {
   return Array.isArray(warnings)
     ? warnings.map((entry) => String(entry || "").trim()).filter(Boolean)
     : [];
+}
+
+function chunkArray<T>(entries: T[], size = SUPABASE_IN_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < entries.length; index += size) {
+    chunks.push(entries.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function loadRowsByItemIds(supabase: any, table: string, itemIds: string[], columns = "*"): Promise<any[]> {
+  if (!itemIds.length) return [];
+  const rows: any[] = [];
+
+  for (const chunk of chunkArray(itemIds)) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in("item_id", chunk);
+
+    if (error) throw new Error(`Could not load ${table}: ${error.message}`);
+    rows.push(...(data || []));
+  }
+
+  return rows;
+}
+
+async function loadEbayLinks(supabase: any, itemIds: string[]): Promise<any[]> {
+  if (!itemIds.length) return [];
+  const rows: any[] = [];
+
+  for (const chunk of chunkArray(itemIds)) {
+    const { data, error } = await supabase
+      .from("ebay_inventory_links")
+      .select("*")
+      .in("item_type_id", chunk);
+
+    if (error) throw new Error(`Could not load eBay links: ${error.message}`);
+    rows.push(...(data || []));
+  }
+
+  return rows;
 }
 
 async function recordEbayLinkState(supabase: any, payload: {
@@ -663,7 +702,7 @@ Deno.serve(async (req) => {
     const dryRun = body.dryRun !== false;
     const publishRequested = body.publish === true;
     const itemIds = Array.isArray(body.itemIds) ? body.itemIds.map(String).filter(Boolean) : [];
-    const limit = Math.min(Math.max(Number(body.limit || 25), 1), 100);
+    const limit = Math.min(Math.max(Number(body.limit || 25), 1), MAX_SYNC_LIMIT);
     const mode = dryRun ? "dry_run" : publishRequested ? "publish" : "sync";
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -701,13 +740,8 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const items = await loadItems(supabase, itemIds, limit);
-    const linksResult = await supabase
-      .from("ebay_inventory_links")
-      .select("*")
-      .in("item_type_id", items.map((item) => item.id));
-    if (linksResult.error) throw new Error(`Could not load eBay links: ${linksResult.error.message}`);
-
-    const linkByItem = new Map<string, any>((linksResult.data || []).map((link: any) => [link.item_type_id, link]));
+    const links = await loadEbayLinks(supabase, items.map((item) => item.id));
+    const linkByItem = new Map<string, any>(links.map((link: any) => [link.item_type_id, link]));
     const prepared: PreparedItem[] = [];
     const results: JsonRecord[] = [];
     let skipped = 0;
