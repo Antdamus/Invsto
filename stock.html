@@ -116,6 +116,10 @@
         <button type="button" id="open-store-transfer" class="storage-transfer-top-btn" title="Move stock from one store to another">
           Store Transfer
         </button>
+
+        <button type="button" id="open-ebay-sync-console" class="storage-transfer-top-btn" title="Run eBay sync and review item-level results">
+          eBay Sync
+        </button>
         
         <div id="filter-summary-wrapper">
           <div id="filter-summary" class="inline-filter-summary"></div>
@@ -200,6 +204,17 @@
               </button>
               <div id="qr-dropdown-menu" class="dropdown-menu"></div>
             </div>
+
+            <select name="ebayStatus" id="ebay-status-filter" class="stock-ebay-status-filter hidden-sensitive-filter" title="Filter by eBay sync state">
+              <option value="">All eBay states</option>
+              <option value="needs_fix">Needs Fix</option>
+              <option value="ready">Ready to Publish</option>
+              <option value="published">Published</option>
+              <option value="synced">Synced Offer</option>
+              <option value="out_of_stock">Out of Stock</option>
+              <option value="sync_off">Sync Off</option>
+              <option value="never_checked">Never Checked</option>
+            </select>
           </div>
         </div>
       </form>
@@ -842,6 +857,62 @@
       <div class="modal-actions ebay-category-actions">
         <button type="button" id="cancel-ebay-category" class="stock-secondary-btn">Cancel</button>
         <button type="button" id="save-ebay-category" class="stock-primary-btn">Save Category</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ebay-sync-console-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ebay-sync-console-title">
+    <div class="modal-content ebay-sync-console-content">
+      <button type="button" id="close-ebay-sync-console" class="stock-modal-close" title="Close">&times;</button>
+      <div class="ebay-sync-console-header">
+        <span class="ebay-sync-console-kicker">eBay pipeline</span>
+        <h2 id="ebay-sync-console-title">Sync Console</h2>
+        <p>Run inventory checks, sync offers, publish controlled batches, and review the exact items that need attention.</p>
+      </div>
+
+      <div class="ebay-sync-console-grid">
+        <section class="ebay-sync-console-panel">
+          <h3>Run Controls</h3>
+          <label for="ebay-sync-scope">Scope</label>
+          <select id="ebay-sync-scope">
+            <option value="selected">Selected items</option>
+            <option value="filtered">Current filtered view</option>
+            <option value="backend_limit">Next limit from backend</option>
+          </select>
+
+          <label for="ebay-sync-limit">Limit</label>
+          <input id="ebay-sync-limit" type="number" min="1" max="250" step="1" value="50" />
+
+          <div id="ebay-sync-scope-summary" class="ebay-sync-scope-summary">Choose a run mode.</div>
+
+          <div class="ebay-sync-console-actions">
+            <button type="button" id="ebay-sync-dry-run" class="stock-secondary-btn">Dry Run</button>
+            <button type="button" id="ebay-sync-run" class="stock-primary-btn">Sync</button>
+            <button type="button" id="ebay-sync-publish" class="stock-primary-btn ebay-sync-publish-btn">Publish Ready</button>
+          </div>
+        </section>
+
+        <section class="ebay-sync-console-panel ebay-sync-console-panel-wide">
+          <div class="ebay-sync-report-head">
+            <div>
+              <h3>Report</h3>
+              <p id="ebay-sync-report-summary">No sync run yet.</p>
+            </div>
+            <div class="ebay-sync-report-actions">
+              <button type="button" id="ebay-sync-select-problems" class="stock-secondary-btn" disabled>Select Problems</button>
+              <button type="button" id="ebay-sync-download-report" class="stock-secondary-btn" disabled>Download JSON</button>
+            </div>
+          </div>
+
+          <div id="ebay-sync-result-table" class="ebay-sync-result-table">
+            <div class="ebay-sync-empty">Run a dry check first, then sync or publish when the report looks clean.</div>
+          </div>
+
+          <details class="ebay-sync-debug">
+            <summary>Debug console</summary>
+            <pre id="ebay-sync-debug-output">No request sent yet.</pre>
+          </details>
+        </section>
       </div>
     </div>
   </div>

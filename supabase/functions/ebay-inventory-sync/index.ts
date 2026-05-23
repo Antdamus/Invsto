@@ -580,6 +580,73 @@ async function loadItems(supabase: any, itemIds: string[], limit: number): Promi
   return rows.map((item) => ({ ...item, quantity: quantityByItem.get(item.id) || 0 }));
 }
 
+function linkStatusForResult(status: unknown): string {
+  const value = String(status || "").trim();
+  if (value === "error") return "error";
+  if (value === "out_of_stock") return "out_of_stock";
+  if (value === "skipped") return "skipped";
+  if (value === "inventory_only") return "pending";
+  if (value === "ready") return "pending";
+  if (value === "synced") return "synced";
+  return "pending";
+}
+
+function cleanWarnings(warnings: unknown): string[] {
+  return Array.isArray(warnings)
+    ? warnings.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+}
+
+async function recordEbayLinkState(supabase: any, payload: {
+  itemTypeId: string;
+  sku: string | null;
+  runId: string | null;
+  mode: string;
+  status: string;
+  publishReady?: boolean | null;
+  warnings?: string[];
+  error?: string | null;
+  categoryId?: string | null;
+  categorySource?: string | null;
+  imageCount?: number | null;
+  quantity?: number | null;
+  price?: string | number | null;
+  offerId?: string | null;
+  listingId?: string | null;
+  syncedAt?: string | null;
+  inventoryHash?: string | null;
+  lastPayload?: JsonRecord | null;
+  lastResponse?: JsonRecord | null;
+}) {
+  const sku = String(payload.sku || "").trim();
+  if (!payload.itemTypeId || !sku) return;
+
+  await supabase.from("ebay_inventory_links").upsert({
+    item_type_id: payload.itemTypeId,
+    sku,
+    offer_id: payload.offerId || null,
+    listing_id: payload.listingId || null,
+    status: linkStatusForResult(payload.status),
+    last_inventory_hash: payload.inventoryHash || undefined,
+    last_synced_at: payload.syncedAt || undefined,
+    last_error: payload.error || null,
+    last_payload: payload.lastPayload || undefined,
+    last_response: payload.lastResponse || undefined,
+    publish_ready: payload.publishReady ?? null,
+    last_warnings: cleanWarnings(payload.warnings),
+    last_status_detail: payload.status,
+    last_category_id: payload.categoryId || null,
+    last_category_source: payload.categorySource || null,
+    last_image_count: Number.isFinite(Number(payload.imageCount)) ? Number(payload.imageCount) : null,
+    last_quantity: Number.isFinite(Number(payload.quantity)) ? Number(payload.quantity) : null,
+    last_price: payload.price === null || payload.price === undefined ? null : toMoney(payload.price),
+    last_checked_at: new Date().toISOString(),
+    last_run_id: payload.runId || null,
+    last_sync_mode: payload.mode,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "item_type_id" });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "method_not_allowed" });
@@ -652,6 +719,23 @@ Deno.serve(async (req) => {
         const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun });
         prepared.push(next);
         if (dryRun) {
+          const status = next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only";
+          const warnings = [...next.warnings, ...next.blockingReasons.map((reason) => `Publish readiness: ${reason}.`)];
+          const publishReady = next.blockingReasons.length === 0;
+          await recordEbayLinkState(supabase, {
+            itemTypeId: item.id,
+            sku: next.sku,
+            runId,
+            mode,
+            status,
+            publishReady,
+            warnings,
+            categoryId: next.categoryId,
+            categorySource: next.categorySource,
+            imageCount: next.imageUrls.length,
+            quantity: next.quantity,
+            price: toMoney(item.sale_price),
+          });
           results.push({
             itemTypeId: item.id,
             sku: next.sku,
@@ -661,19 +745,32 @@ Deno.serve(async (req) => {
             categorySource: next.categorySource,
             price: toMoney(item.sale_price),
             imageCount: next.imageUrls.length,
-            status: next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only",
-            publishReady: next.blockingReasons.length === 0,
-            warnings: [...next.warnings, ...next.blockingReasons.map((reason) => `Publish readiness: ${reason}.`)],
+            status,
+            publishReady,
+            warnings,
           });
         }
       } catch (error) {
         errors++;
+        const message = error instanceof Error ? error.message : "Unknown preparation error";
+        await recordEbayLinkState(supabase, {
+          itemTypeId: item.id,
+          sku: item.barcode,
+          runId,
+          mode,
+          status: "error",
+          publishReady: false,
+          warnings: [message],
+          error: message,
+          quantity: item.quantity,
+          price: toMoney(item.sale_price),
+        });
         results.push({
           itemTypeId: item.id,
           sku: item.barcode,
           title: item.title,
           status: "error",
-          error: error instanceof Error ? error.message : "Unknown preparation error",
+          error: message,
         });
       }
     }
@@ -743,6 +840,17 @@ Deno.serve(async (req) => {
               offer: offerResponse,
               publish: publishResponse,
             },
+            publish_ready: entry.blockingReasons.length === 0,
+            last_warnings: entry.blockingReasons,
+            last_status_detail: status,
+            last_category_id: entry.categoryId,
+            last_category_source: entry.categorySource,
+            last_image_count: entry.imageUrls.length,
+            last_quantity: entry.quantity,
+            last_price: toMoney(entry.item.sale_price),
+            last_checked_at: new Date().toISOString(),
+            last_run_id: runId,
+            last_sync_mode: mode,
             updated_at: new Date().toISOString(),
           }, { onConflict: "item_type_id" });
 
@@ -772,6 +880,17 @@ Deno.serve(async (req) => {
               inventory: entry.inventoryPayload,
               offer: entry.offerPayload,
             },
+            publish_ready: false,
+            last_warnings: [message],
+            last_status_detail: "error",
+            last_category_id: entry.categoryId,
+            last_category_source: entry.categorySource,
+            last_image_count: entry.imageUrls.length,
+            last_quantity: entry.quantity,
+            last_price: toMoney(entry.item.sale_price),
+            last_checked_at: new Date().toISOString(),
+            last_run_id: runId,
+            last_sync_mode: mode,
             updated_at: new Date().toISOString(),
           }, { onConflict: "item_type_id" });
           results.push({
