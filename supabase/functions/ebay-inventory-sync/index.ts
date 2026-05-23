@@ -151,12 +151,107 @@ function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
   return settings.default_category_id;
 }
 
-function buildAspects(item: ItemRow): Record<string, string[]> {
+function itemSearchText(item: ItemRow): string {
+  return [
+    item.title,
+    item.description || "",
+    ...(Array.isArray(item.categories) ? item.categories : []),
+  ].join(" ").toLowerCase();
+}
+
+function inferJewelryType(item: ItemRow, categoryId: string): string {
+  const text = itemSearchText(item);
+  if (text.includes("bracelet") || categoryId === "261988") return "Bracelet";
+  if (text.includes("necklace")) return "Necklace";
+  if (text.includes("pendant") || text.includes("charm") || categoryId === "261993") return "Pendant";
+  if (text.includes("ring")) return "Ring";
+  if (text.includes("earring")) return "Earrings";
+  if (text.includes("chain")) return "Chain";
+  return "Jewelry";
+}
+
+function inferJewelryStyle(item: ItemRow, categoryId: string): string {
+  const text = itemSearchText(item);
+  if (text.includes("tennis") || categoryId === "261988") return "Tennis";
+  if (text.includes("halo")) return "Halo";
+  if (text.includes("heart")) return "Heart";
+  if (text.includes("cross")) return "Cross";
+  if (text.includes("pendant") || categoryId === "261993") return "Pendant";
+  return inferJewelryType(item, categoryId);
+}
+
+function inferMetal(item: ItemRow): string | null {
+  const text = itemSearchText(item);
+  if (text.includes("sterling silver") || text.includes("925") || text.includes("fine silver")) return "Fine Silver";
+  if (text.includes("white gold")) return "White Gold";
+  if (text.includes("yellow gold") || text.includes(" gold ")) return "Yellow Gold";
+  if (text.includes("rose gold")) return "Rose Gold";
+  return null;
+}
+
+function inferMetalPurity(item: ItemRow): string | null {
+  const text = itemSearchText(item);
+  if (text.includes("925") || text.includes("sterling silver") || text.includes("fine silver")) return "925";
+  if (text.includes("14k")) return "14k";
+  if (text.includes("10k")) return "10k";
+  if (text.includes("18k")) return "18k";
+  return null;
+}
+
+function inferMainStone(item: ItemRow): string | null {
+  const text = itemSearchText(item);
+  if (item.stone_type) return String(item.stone_type);
+  if (text.includes("simulated diamond") || text.includes("cz") || text.includes("cubic zirconia")) return "Simulated Diamond";
+  if (text.includes("sapphire")) return "Sapphire";
+  if (text.includes("diamond")) return "Diamond";
+  if (text.includes("ruby")) return "Ruby";
+  if (text.includes("emerald")) return "Emerald";
+  return null;
+}
+
+function inferMainStoneColor(item: ItemRow): string | null {
+  const text = itemSearchText(item);
+  if (text.includes("pink")) return "Pink";
+  if (text.includes("purple")) return "Purple";
+  if (text.includes("blue")) return "Blue";
+  if (text.includes("green")) return "Green";
+  if (text.includes("red")) return "Red";
+  if (text.includes("black")) return "Black";
+  if (text.includes("white") || text.includes("clear")) return "White";
+  return null;
+}
+
+function inferColor(item: ItemRow): string | null {
+  const text = itemSearchText(item);
+  if (text.includes("gold")) return "Gold";
+  if (text.includes("silver") || text.includes("925")) return "Silver";
+  if (text.includes("pink")) return "Pink";
+  if (text.includes("purple")) return "Purple";
+  if (text.includes("blue")) return "Blue";
+  return null;
+}
+
+function buildAspects(item: ItemRow, categoryId: string): Record<string, string[]> {
   const aspects: Record<string, string[]> = {
     Brand: ["Unbranded"],
+    Type: [inferJewelryType(item, categoryId)],
+    Style: [inferJewelryStyle(item, categoryId)],
   };
 
-  if (item.stone_type) aspects["Main Stone"] = [String(item.stone_type)];
+  const metal = inferMetal(item);
+  if (metal) aspects["Metal"] = [metal];
+
+  const metalPurity = inferMetalPurity(item);
+  if (metalPurity) aspects["Metal Purity"] = [metalPurity];
+
+  aspects["Main Stone"] = [inferMainStone(item) || "Unknown"];
+
+  const mainStoneColor = inferMainStoneColor(item);
+  if (mainStoneColor) aspects["Main Stone Color"] = [mainStoneColor];
+
+  const color = inferColor(item);
+  if (color) aspects["Color"] = [color];
+
   if (item.weight) aspects["Item Weight"] = [`${item.weight} g`];
   if (item.item_length) aspects["Item Length"] = [String(item.item_length)];
 
@@ -294,7 +389,7 @@ async function prepareItem(
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
     description: item.description || item.title || sku,
-    aspects: buildAspects(item),
+    aspects: buildAspects(item, categoryId),
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
 
@@ -405,6 +500,20 @@ Deno.serve(async (req) => {
 
     if (!dryRun && !settings.enabled) {
       return jsonResponse(409, { ok: false, error: "ebay_sync_disabled", detail: "Set ebay_inventory_settings.enabled=true before pushing to eBay." });
+    }
+    if (publishRequested && (!settings.payment_policy_id || !settings.return_policy_id || !settings.fulfillment_policy_id)) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "ebay_publish_policies_missing",
+        detail: "Set payment_policy_id, return_policy_id, and fulfillment_policy_id in ebay_inventory_settings before publishing live eBay listings.",
+      });
+    }
+    if (publishRequested && !publishAllowed) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "ebay_publish_disabled",
+        detail: "Publishing requires ebay_inventory_settings.publish_enabled=true and EBAY_SYNC_ALLOW_PUBLISH=true.",
+      });
     }
 
     const { data: run, error: runError } = await supabase
@@ -538,7 +647,15 @@ Deno.serve(async (req) => {
             },
             updated_at: new Date().toISOString(),
           }, { onConflict: "item_type_id" });
-          results.push({ itemTypeId: entry.item.id, sku: entry.sku, status: "error", error: message });
+          results.push({
+            itemTypeId: entry.item.id,
+            sku: entry.sku,
+            title: entry.item.title,
+            categoryId: entry.categoryId,
+            imageCount: entry.imageUrls.length,
+            status: "error",
+            error: message,
+          });
         }
       }
     }

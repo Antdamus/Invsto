@@ -500,7 +500,7 @@ entrypoint = "./functions/process-inventory-image/index.ts"
 
 [functions.ebay-inventory-sync]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 entrypoint = "./functions/ebay-inventory-sync/index.ts"
 
 [functions.ebay-account-deletion]
@@ -512,3 +512,8 @@ entrypoint = "./functions/ebay-account-deletion/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-oauth-callback/index.ts"
+
+[functions.ebay-publishing-setup]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-publishing-setup/index.ts"

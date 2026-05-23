@@ -2,8 +2,11 @@ const EBAY_CLIENT_ID = (Deno.env.get("EBAY_CLIENT_ID") ?? "").trim();
 const EBAY_CLIENT_SECRET = (Deno.env.get("EBAY_CLIENT_SECRET") ?? "").trim();
 const EBAY_OAUTH_RUNAME = (Deno.env.get("EBAY_OAUTH_RUNAME") ?? "").trim();
 const EBAY_ENV = (Deno.env.get("EBAY_ENV") ?? "production").trim().toLowerCase();
+const EBAY_OAUTH_SCOPES = (Deno.env.get("EBAY_OAUTH_SCOPES") ??
+  "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly").trim();
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+const EBAY_AUTH_BASE = EBAY_ENV === "sandbox" ? "https://auth.sandbox.ebay.com" : "https://auth.ebay.com";
 
 function html(body: string, status = 200) {
   return new Response(`<!doctype html>
@@ -92,10 +95,15 @@ Deno.serve(async (req) => {
 
   const code = url.searchParams.get("code");
   if (!code) {
+    const consentUrl = EBAY_CLIENT_ID && EBAY_OAUTH_RUNAME
+      ? `${EBAY_AUTH_BASE}/oauth2/authorize?client_id=${encodeURIComponent(EBAY_CLIENT_ID)}&response_type=code&redirect_uri=${encodeURIComponent(EBAY_OAUTH_RUNAME)}&scope=${encodeURIComponent(EBAY_OAUTH_SCOPES)}&prompt=login`
+      : "";
+
     return html(`<h1>OG Jewelers eBay OAuth Callback</h1>
       <p>This endpoint receives eBay OAuth authorization codes.</p>
       <p>Use this as the eBay Auth accepted URL:</p>
-      <code>https://byhytmarmigalvawkedi.functions.supabase.co/ebay-oauth-callback</code>`);
+      <code>https://byhytmarmigalvawkedi.functions.supabase.co/ebay-oauth-callback</code>
+      ${consentUrl ? `<p>Use this link to reconnect eBay with inventory and account policy read access:</p><p><a href="${escapeHtml(consentUrl)}">Connect eBay OAuth</a></p><code>${escapeHtml(consentUrl)}</code>` : ""}`);
   }
 
   try {

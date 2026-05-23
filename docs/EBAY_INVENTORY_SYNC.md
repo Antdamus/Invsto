@@ -21,12 +21,14 @@ EBAY_CLIENT_SECRET=...
 EBAY_REFRESH_TOKEN=...
 EBAY_ENV=production
 EBAY_SCOPE=https://api.ebay.com/oauth/api_scope/sell.inventory
+EBAY_ACCOUNT_SCOPE=https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.inventory
+EBAY_OAUTH_SCOPES=https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly
 EBAY_SYNC_ALLOW_PUBLISH=false
 EBAY_SOURCE_PHOTO_BUCKET=photos
 EBAY_PUBLIC_PHOTO_BUCKET=public-ebay-photos
 ```
 
-Use a refresh token created with the authorization-code user consent flow. Inventory writes require the `sell.inventory` scope.
+Use a refresh token created with the authorization-code user consent flow. Inventory writes require the `sell.inventory` scope. The publishing setup helper also needs `sell.account.readonly` so it can list business policy IDs.
 
 ## Required settings row
 
@@ -47,6 +49,34 @@ where id = 'default';
 ```
 
 Keep `publish_enabled = false` until dry runs and unpublished offer creation look correct.
+
+## Publishing setup helper
+
+Deploy the helper:
+
+```bash
+supabase functions deploy ebay-publishing-setup
+```
+
+List eBay business policies and inventory locations:
+
+```bash
+curl -X POST "$SUPABASE_FUNCTIONS_URL/ebay-publishing-setup" \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{"action":"list"}'
+```
+
+Save selected policy IDs to `ebay_inventory_settings`:
+
+```bash
+curl -X POST "$SUPABASE_FUNCTIONS_URL/ebay-publishing-setup" \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{"action":"save","paymentPolicyId":"...","returnPolicyId":"...","fulfillmentPolicyId":"...","publishEnabled":false}'
+```
 
 ## Invoke
 
