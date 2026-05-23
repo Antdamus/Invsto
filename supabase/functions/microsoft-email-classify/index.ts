@@ -88,6 +88,7 @@ const RESPONSE_DRAFT_SAFETY_FLAGS = [
   "fabricated_timeline",
   "fabricated_tracking_information",
   "fabricated_inventory_promise",
+  "fallback_safe_draft",
   "category_mismatch",
   "empty_draft",
   "draft_too_long",
@@ -247,6 +248,8 @@ type ResponseDraftInput = {
     do_not_claim: string[];
     summary: {
       verified_context_used: boolean;
+      weak_match_treated_as_unverified?: boolean;
+      buyer_facing_context_level?: string;
       injected_categories: string[];
       order_context_existed: boolean;
       return_context_existed: boolean;
@@ -1106,12 +1109,15 @@ Drafting style:
 - Prefer short review-oriented replies over confident explanations when facts are missing.
 - Acknowledge the buyer's concern without confirming facts that are not verified.
 - Avoid emotional language, overconfidence, fabricated certainty, refund promises, shipping promises, inventory promises, and exact timelines.
+- Format every draft as a professional email: greeting, blank line, short opening paragraph, blank line, short body paragraph, blank line, closing paragraph, blank line, "Thank you," and "OG Jewelers".
+- Do not return one dense paragraph. Do not omit the greeting or signature.
 
 VERIFIED FACTS:
 - Use only the supplied stored email context, deterministic links, effective classification, and verified_order_context.
 - You may state a DB fact only when the exact fact is present under verified_order_context.known.
 - If verified_order_context.known contains an order field, shipping field, return field, task field, or order line title, you may mention only that exact fact in conservative language.
 - Do not upgrade suggested, weak, partial, inferred, or classification-only context into a confirmed customer-facing fact.
+- If verified_order_context.summary.buyer_facing_context_level is "generic", do not mention specific order numbers, item identities, tracking, return status, refund status, replacement status, or timeline.
 
 UNKNOWN FACTS:
 - Treat every entry in verified_order_context.unknown as explicitly missing or unverified.
@@ -1761,6 +1767,236 @@ function extractTrackingLikeTokens(text: string) {
     .filter((token) => /\d/.test(token) && token.length >= 8);
 }
 
+type ValidationErrorExplanation = {
+  error_code: string;
+  operator_label: string;
+  reason: string;
+  safe_alternative: string;
+};
+
+const VALIDATION_ERROR_EXPLANATIONS: Record<string, Omit<ValidationErrorExplanation, "error_code">> = {
+  fabricated_tracking_information: {
+    operator_label: "Tracking information could not be verified",
+    reason: "The draft referenced tracking or delivery details, but verified context does not include a matching tracking number or delivery status.",
+    safe_alternative: "We are reviewing the shipment details associated with your order.",
+  },
+  fabricated_order_detail: {
+    operator_label: "Order detail could not be verified",
+    reason: "The draft referenced a specific order or item identifier that was not present in verified database context.",
+    safe_alternative: "We are reviewing the order details associated with your message.",
+  },
+  unsupported_refund_state_claim: {
+    operator_label: "Refund status could not be verified",
+    reason: "The draft stated or implied a refund or return state, but verified context does not confirm that status.",
+    safe_alternative: "We are reviewing the available return or refund information before confirming next steps.",
+  },
+  fabricated_inventory_promise: {
+    operator_label: "Inventory or replacement availability could not be verified",
+    reason: "The draft referenced inventory, availability, or replacement options that were not confirmed by verified context.",
+    safe_alternative: "We are checking the information available for this order before confirming replacement options.",
+  },
+  fabricated_timeline: {
+    operator_label: "Timeline could not be verified",
+    reason: "The draft included a specific timeline or expected date that was not confirmed by verified context.",
+    safe_alternative: "We will follow up once we confirm the relevant order details.",
+  },
+  fabricated_item_type: {
+    operator_label: "Item type could not be verified",
+    reason: "The draft named a specific item type that was not confirmed by verified order line context.",
+    safe_alternative: "We are reviewing the item associated with your order.",
+  },
+  unsupported_return_approval: {
+    operator_label: "Return approval could not be verified",
+    reason: "The draft stated or implied that a return was approved, accepted, or authorized without verified return context confirming that status.",
+    safe_alternative: "We are reviewing the available return information before confirming next steps.",
+  },
+  unsupported_return_approval_claim: {
+    operator_label: "Return approval could not be verified",
+    reason: "The draft stated or implied that a return was approved, accepted, or authorized without verified return context confirming that status.",
+    safe_alternative: "We are reviewing the available return information before confirming next steps.",
+  },
+  fabricated_shipping_update: {
+    operator_label: "Shipping status could not be verified",
+    reason: "The draft referenced shipment movement or label status that was not confirmed by verified shipping context.",
+    safe_alternative: "We are reviewing the order and shipping information available to us.",
+  },
+};
+
+const UNSUPPORTED_CLAIM_FALLBACK_ERRORS = new Set([
+  "fabricated_tracking_information",
+  "fabricated_order_detail",
+  "unsupported_refund_state_claim",
+  "fabricated_inventory_promise",
+  "fabricated_timeline",
+  "fabricated_item_type",
+  "unsupported_return_approval",
+  "unsupported_return_approval_claim",
+  "fabricated_shipping_update",
+  "unsupported_claim",
+]);
+
+function validationErrorExplanations(errors: string[]): ValidationErrorExplanation[] {
+  return uniqueStrings(errors, 40).map((errorCode) => {
+    const explanation = VALIDATION_ERROR_EXPLANATIONS[errorCode] || {
+      operator_label: humanizeCode(errorCode),
+      reason: "The draft made a claim that could not be verified from the available context.",
+      safe_alternative: "We are reviewing the information available for this order.",
+    };
+    return { error_code: errorCode, ...explanation };
+  });
+}
+
+function shouldGenerateFallbackDraft(errors: string[]) {
+  return errors.some((errorCode) => UNSUPPORTED_CLAIM_FALLBACK_ERRORS.has(errorCode));
+}
+
+function humanizeCode(code: string) {
+  return String(code || "Unsupported claim")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function fallbackConcernType(input: ResponseDraftInput) {
+  const category = input.classification.effective_category;
+  const text = `${input.body.text} ${input.classification.summary || ""} ${input.classification.reasoning_summary || ""}`.toLowerCase();
+  if (category === "cancellation_request" || /\b(cancel|cancellation)\b/i.test(text)) return "cancellation";
+  if (category === "refund_request" || category === "return_request" || /\b(refund|return|money back)\b/i.test(text)) return "refund";
+  if (category === "item_not_received" || category === "shipping_label" || /\b(package|shipment|shipping|tracking|delivered|delivery|arrive)\b/i.test(text)) return "shipping";
+  if (category === "item_not_as_described" || /\b(wrong item|not as described|damaged|defective|item)\b/i.test(text)) return "item";
+  return "general";
+}
+
+function safeBuyerGreeting(input: ResponseDraftInput) {
+  const orderBuyer = input.verified_order_context.known.order
+    .map((order) => shortText(order.buyer_username, 80))
+    .find(Boolean);
+  const returnBuyer = input.verified_order_context.known.return_case
+    .map((returnCase) => shortText(returnCase.buyer_username, 80))
+    .find(Boolean);
+  const buyer = String(orderBuyer || returnBuyer || "").trim();
+  if (!buyer || /[@<>{}\n\r]/.test(buyer) || buyer.length > 80) return "Hi,";
+  return `Hi ${buyer},`;
+}
+
+function fallbackSafetyFlagsFromPrimary(primarySafetyFlags: string[]) {
+  const nonBlockingFlags = primarySafetyFlags.filter((flag) => !DRAFT_CONTENT_BLOCKING_FLAGS.has(flag));
+  return uniqueStrings([...nonBlockingFlags, "requires_human_review", "fallback_safe_draft"], RESPONSE_DRAFT_SAFETY_FLAGS.length)
+    .filter((flag) => RESPONSE_DRAFT_SAFETY_FLAGS.includes(flag as typeof RESPONSE_DRAFT_SAFETY_FLAGS[number]));
+}
+
+function buildSafeFallbackDraft(input: ResponseDraftInput, primarySafetyFlags: string[]): ValidResponseDraft {
+  const concernType = fallbackConcernType(input);
+  const greeting = safeBuyerGreeting(input);
+  const bodyByConcern: Record<string, string> = {
+    shipping: `${greeting}
+
+Thank you for reaching out regarding your shipment concern.
+
+We understand your concern regarding the shipment status and are actively reviewing the available shipping and order details associated with your message.
+
+We appreciate your patience and will follow up once we confirm the next appropriate step.
+
+Thank you,
+OG Jewelers`,
+    refund: `${greeting}
+
+Thank you for contacting us regarding your return or refund concern.
+
+We are currently reviewing the available order and return information associated with your message so we can better assist you.
+
+We appreciate your patience and will follow up once the information is confirmed.
+
+Thank you,
+OG Jewelers`,
+    item: `${greeting}
+
+Thank you for reaching out regarding your item concern.
+
+We understand your concern and are actively reviewing the available order details so we can determine the next appropriate step.
+
+We appreciate your patience and will follow up once we confirm the relevant information.
+
+Thank you,
+OG Jewelers`,
+    cancellation: `${greeting}
+
+Thank you for contacting us regarding the order cancellation concern.
+
+We are currently reviewing the available order information associated with your message and will follow up once we confirm the relevant details.
+
+Thank you,
+OG Jewelers`,
+    general: `${greeting}
+
+Thank you for reaching out.
+
+We are actively reviewing the available order details associated with your message so we can better assist you.
+
+We appreciate your patience and will follow up once we confirm the relevant information.
+
+Thank you,
+OG Jewelers`,
+  };
+  return {
+    category: input.classification.effective_category,
+    draft_subject: concernType === "shipping"
+      ? "Regarding your shipment"
+      : concernType === "refund"
+        ? "Regarding your return or refund"
+        : concernType === "cancellation"
+          ? "Regarding your cancellation request"
+          : "Regarding your order",
+    draft_body_text: bodyByConcern[concernType] || bodyByConcern.general,
+    tone: "conservative",
+    response_strategy: "Acknowledge the buyer's concern without confirming unverified facts, then route for human review.",
+    requires_human_review: true,
+    safety_flags: fallbackSafetyFlagsFromPrimary(primarySafetyFlags),
+    validation_status: "valid",
+  };
+}
+
+function normalizeProfessionalEmailBody(body: string, input: ResponseDraftInput) {
+  const cleaned = safeBodyText(body).replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const signature = "Thank you,\nOG Jewelers";
+  const withoutSignature = cleaned
+    .replace(/(?:\n\s*)?thank you,\s*\n\s*og jewelers\s*$/i, "")
+    .replace(/(?:\n\s*)?thanks,\s*\n\s*og jewelers\s*$/i, "")
+    .trim();
+  const hasGreeting = /^hi(?:\s+[^,\n]{1,80})?,/i.test(withoutSignature);
+  const greeting = hasGreeting ? "" : `${safeBuyerGreeting(input)}\n\n`;
+  const bodyWithGreeting = `${greeting}${withoutSignature || "Thank you for reaching out.\n\nWe are reviewing the available details associated with your message so we can better assist you."}`.trim();
+
+  if (withoutSignature.includes("\n\n")) {
+    return `${bodyWithGreeting}\n\n${signature}`.replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  const bodyWithoutGreeting = hasGreeting
+    ? withoutSignature.replace(/^hi(?:\s+[^,\n]{1,80})?,\s*/i, "").trim()
+    : withoutSignature;
+  const sentences = bodyWithoutGreeting.match(/[^.!?]+[.!?]+(?:\s+|$)/g)?.map((sentence) => sentence.trim()).filter(Boolean) || [bodyWithoutGreeting];
+  if (sentences.length <= 2) return `${bodyWithGreeting}\n\n${signature}`.trim();
+  const greetingLine = hasGreeting ? withoutSignature.match(/^hi(?:\s+[^,\n]{1,80})?,/i)?.[0] || safeBuyerGreeting(input) : safeBuyerGreeting(input);
+  const opening = sentences.shift() || "";
+  const closing = sentences.length > 1 ? sentences.pop() || "" : "";
+  const middle = sentences.join(" ");
+  return [
+    greetingLine,
+    opening,
+    middle,
+    closing,
+    signature,
+  ].filter(Boolean).join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function normalizeProfessionalEmailDraft(value: unknown, input: ResponseDraftInput) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  return {
+    ...row,
+    draft_body_text: normalizeProfessionalEmailBody(String(row.draft_body_text || ""), input),
+  };
+}
+
 function validateResponseDraft(
   value: unknown,
   input: ResponseDraftInput,
@@ -1904,7 +2140,7 @@ function validateResponseDraft(
     /\b(return|return case)\s+(has been|is|was)\s+(approved|accepted|authorized)\b/i,
     /\bwe\s+(approved|accepted|authorized)\s+(your\s+)?return\b/i,
   ]) && !containsAny(verifiedGrounding, [/\b(approved|accepted|authorized)\b/i])) {
-    errors.push("unsupported_return_approval_claim");
+    errors.push("unsupported_return_approval");
     safetyFlags.add("unsupported_claim");
   }
   if (containsAny(combined, [
@@ -2350,16 +2586,71 @@ function taskOperationalSummary(task: Record<string, unknown>) {
   };
 }
 
+function isStrongBuyerFacingMatchMethod(methodValue: unknown) {
+  const method = String(methodValue || "").toLowerCase();
+  if (!method) return false;
+  if (/(title|internal_label|buyer_username|buyer_email|email_only|username_only)/i.test(method)) return false;
+  return /(exact|order_number|item_number.*transaction|transaction.*item_number|return_id|tracking|label_id|tracking_number|sales_record)/i.test(method);
+}
+
+function isWeakBuyerFacingMatch(link: Record<string, any>) {
+  const method = String(link.match_method || link.metadata?.matched_by || "").toLowerCase();
+  if (String(link.status || "").toLowerCase() !== "confirmed" && Number(link.confidence || 0) < 0.85) return true;
+  return /(title|internal_label|buyer_username|buyer_email|email_only|username_only)/i.test(method) ||
+    link.metadata?.buyer_username_only === true ||
+    link.metadata?.internal_label_only === true;
+}
+
+function isBuyerFacingVerifiedMatch(link: Record<string, any>) {
+  const status = String(link.status || "").toLowerCase();
+  const confidence = Number(link.confidence || 0);
+  if (status === "confirmed") return !isWeakBuyerFacingMatch(link);
+  return confidence >= 0.85 && isStrongBuyerFacingMatchMethod(link.match_method || link.metadata?.matched_by);
+}
+
+function buyerFacingVerifiedLinkScope(adminContext: Record<string, any>) {
+  const links = Array.isArray(adminContext.match_summary) ? adminContext.match_summary : [];
+  const verifiedLinks = links.filter(isBuyerFacingVerifiedMatch);
+  const weakLinks = links.filter((link: Record<string, any>) => !isBuyerFacingVerifiedMatch(link));
+  return {
+    verifiedLinks,
+    weakLinks,
+    weak_match_treated_as_unverified: weakLinks.length > 0,
+    buyer_facing_context_level: verifiedLinks.length ? "verified" : "generic",
+    orderIds: new Set(uniqueIds(verifiedLinks.map((link: Record<string, any>) => link.ebay_order_id))),
+    orderLineIds: new Set(uniqueIds(verifiedLinks.map((link: Record<string, any>) => link.ebay_order_line_id))),
+    itemIds: new Set(uniqueIds(verifiedLinks.map((link: Record<string, any>) => link.item_id))),
+    returnCaseIds: new Set(uniqueIds(verifiedLinks.map((link: Record<string, any>) => link.metadata_return_case_id || link.metadata?.return_case_id))),
+  };
+}
+
 function buildVerifiedOrderContext(adminContext: Record<string, any>) {
+  const buyerFacingScope = buyerFacingVerifiedLinkScope(adminContext);
   const known = adminContext.known && typeof adminContext.known === "object" ? adminContext.known : {};
-  const orders = Array.isArray(known.order) ? known.order : [];
-  const lines = Array.isArray(known.order_lines) ? known.order_lines : [];
-  const shippingRows = Array.isArray(known.shipping) ? known.shipping : [];
-  const returnCases = Array.isArray(known.return_case) ? known.return_case : [];
-  const tasks = Array.isArray(known.tasks) ? known.tasks : [];
+  const orders = (Array.isArray(known.order) ? known.order : [])
+    .filter((order: Record<string, any>) => buyerFacingScope.orderIds.has(String(order.id)));
+  const lines = (Array.isArray(known.order_lines) ? known.order_lines : [])
+    .filter((line: Record<string, any>) =>
+      buyerFacingScope.orderLineIds.has(String(line.id)) ||
+      buyerFacingScope.orderIds.has(String(line.order_id)) ||
+      buyerFacingScope.itemIds.has(String(line.internal_item?.id || line.internal_item_id || ""))
+    );
+  const shippingRows = (Array.isArray(known.shipping) ? known.shipping : [])
+    .filter((shipping: Record<string, any>) => buyerFacingScope.orderIds.has(String(shipping.order_id)));
+  const returnCases = (Array.isArray(known.return_case) ? known.return_case : [])
+    .filter((returnCase: Record<string, any>) =>
+      buyerFacingScope.returnCaseIds.has(String(returnCase.id)) ||
+      buyerFacingScope.orderIds.has(String(returnCase.order_id))
+    );
+  const tasks = (Array.isArray(known.tasks) ? known.tasks : [])
+    .filter((task: Record<string, any>) =>
+      buyerFacingScope.orderIds.has(String(task.order_id)) ||
+      buyerFacingScope.returnCaseIds.has(String(task.return_case_id))
+    );
 
   const safeOrders = orders.map((order: Record<string, any>) => ({
     order_number: order.order_number || null,
+    buyer_username: order.buyer_username || null,
     sale_date: order.sale_date || null,
     paid_on_date: order.paid_on_date || null,
     ship_by_date: order.ship_by_date || null,
@@ -2381,6 +2672,7 @@ function buildVerifiedOrderContext(adminContext: Record<string, any>) {
   }));
   const safeReturns = returnCases.map((returnCase: Record<string, any>) => ({
     ebay_return_id: returnCase.ebay_return_id || null,
+    buyer_username: returnCase.buyer_username || null,
     return_reason: shortText(returnCase.return_reason, 240) || null,
     status: returnCase.status || null,
     opened_at: returnCase.opened_at || null,
@@ -2401,6 +2693,9 @@ function buildVerifiedOrderContext(adminContext: Record<string, any>) {
   ].filter(Boolean);
 
   const unknown = new Set<string>(Array.isArray(adminContext.unknown) ? adminContext.unknown : []);
+  if (buyerFacingScope.weak_match_treated_as_unverified) {
+    unknown.add("weak or suggested match treated as unverified for buyer-facing draft");
+  }
   if (!safeOrders.length) unknown.add("verified order context not found");
   if (!safeLines.length) unknown.add("verified order line context not found");
   if (!shippingContextExisted) unknown.add("verified tracking/shipping context not found");
@@ -2424,6 +2719,8 @@ function buildVerifiedOrderContext(adminContext: Record<string, any>) {
     ],
     summary: {
       verified_context_used: true,
+      weak_match_treated_as_unverified: buyerFacingScope.weak_match_treated_as_unverified,
+      buyer_facing_context_level: buyerFacingScope.buyer_facing_context_level,
       injected_categories: injectedCategories,
       order_context_existed: safeOrders.length > 0,
       return_context_existed: safeReturns.length > 0,
@@ -2743,12 +3040,12 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
       ebay_order_line_id: link.ebay_order_line_id || null,
       item_id: link.item_id || null,
       sale_id: link.sale_id || null,
+      metadata_return_case_id: link.metadata?.return_case_id || null,
       has_ebay_order: Boolean(link.ebay_order_id),
       has_ebay_order_line: Boolean(link.ebay_order_line_id),
       has_inventory_item: Boolean(link.item_id),
       has_sale: Boolean(link.sale_id),
       evidence: linkEvidence(link),
-      metadata_return_case_id: link.metadata?.return_case_id || null,
       created_at: link.created_at || null,
     })),
   };
@@ -2809,7 +3106,7 @@ function itemTitleForMatch(line: Record<string, any> | null, returnCase: Record<
 async function latestValidationForMessage(supabase: ServiceClient, messageId: string) {
   const { data: draftRows, error: draftError } = await supabase
     .from("email_response_drafts")
-    .select("id, validation_status, validation_errors, safety_flags, requires_human_review, draft_status, created_at")
+    .select("id, validation_status, validation_errors, safety_flags, requires_human_review, draft_status, metadata, created_at")
     .eq("message_id", messageId)
     .eq("is_current", true)
     .order("created_at", { ascending: false })
@@ -2818,6 +3115,7 @@ async function latestValidationForMessage(supabase: ServiceClient, messageId: st
 
   const draft = Array.isArray(draftRows) ? draftRows[0] as Record<string, any> | undefined : undefined;
   if (draft?.id) {
+    const metadata = safeMetadata(draft.metadata || {}) as Record<string, any>;
     return {
       validation_status: draft.validation_status || "not_validated",
       validation_errors: Array.isArray(draft.validation_errors) ? draft.validation_errors : [],
@@ -2826,6 +3124,17 @@ async function latestValidationForMessage(supabase: ServiceClient, messageId: st
       source: "current_response_draft",
       draft_id: draft.id,
       draft_status: draft.draft_status || null,
+      fallback_used: metadata.fallback_used === true,
+      fallback_reason: metadata.fallback_reason || null,
+      fallback_type: metadata.fallback_type || null,
+      fallback_body_saved: metadata.fallback_body_saved === true,
+      weak_match_treated_as_unverified: metadata.weak_match_treated_as_unverified === true,
+      buyer_facing_context_level: metadata.buyer_facing_context_level || null,
+      email_format: metadata.email_format || null,
+      primary_validation_status: metadata.primary_validation_status || null,
+      primary_validation_errors: Array.isArray(metadata.primary_validation_errors) ? metadata.primary_validation_errors : [],
+      primary_validation_error_explanations: Array.isArray(metadata.primary_validation_error_explanations) ? metadata.primary_validation_error_explanations : [],
+      validation_error_explanations: Array.isArray(metadata.validation_error_explanations) ? metadata.validation_error_explanations : [],
     };
   }
 
@@ -3103,6 +3412,7 @@ async function insertResponseDraft(
     errorCode?: string;
     operationMode?: "generate_response" | "regenerate_response";
     selectorDraftId?: string | null;
+    metadataOverrides?: Record<string, unknown>;
   },
 ) {
   const nowIso = new Date().toISOString();
@@ -3137,6 +3447,9 @@ async function insertResponseDraft(
     link_context_version: LINK_CONTEXT_VERSION,
     verified_order_context_version: VERIFIED_ORDER_CONTEXT_VERSION,
     verified_context: values.input.verified_order_context.summary,
+    weak_match_treated_as_unverified: values.input.verified_order_context.summary.weak_match_treated_as_unverified === true,
+    buyer_facing_context_level: values.input.verified_order_context.summary.buyer_facing_context_level || "verified",
+    email_format: "professional_spaced",
     safety_policy_version: values.input.draft_context.safety_policy_version,
     effective_classification: {
       category: values.input.classification.effective_category,
@@ -3168,6 +3481,7 @@ async function insertResponseDraft(
       superseded_at: previousCurrentDrafts?.length ? nowIso : null,
       generated_at: nowIso,
     },
+    ...(values.metadataOverrides || {}),
   };
 
   const { data, error } = await supabase
@@ -3228,10 +3542,77 @@ async function generateResponseDraft(
     input: draftInput,
   }));
   const draftVersion = await nextDraftVersion(supabase, String(draftInput.message.id));
+  const buyerFacingContextLevel = String(draftInput.verified_order_context.summary.buyer_facing_context_level || "verified");
+  const weakMatchTreatedAsUnverified = draftInput.verified_order_context.summary.weak_match_treated_as_unverified === true;
+  const shouldUseGenericFallback = weakMatchTreatedAsUnverified || buyerFacingContextLevel === "generic";
+  const draftBuyerFacingContextLevel = shouldUseGenericFallback ? "generic" : buyerFacingContextLevel;
+
+  if (shouldUseGenericFallback) {
+    const fallbackDraft = buildSafeFallbackDraft(draftInput, ["requires_human_review"]);
+    const fallbackValidation = validateResponseDraft(fallbackDraft, draftInput);
+    if (fallbackValidation.ok) {
+      const fallbackReason = weakMatchTreatedAsUnverified ? "weak_match_treated_as_unverified" : "missing_buyer_facing_verified_context";
+      const draftId = await insertResponseDraft(supabase, {
+        input: draftInput,
+        actorId: admin.userId,
+        promptHash,
+        inputHash,
+        promptVersion: promptVersionValue,
+        model,
+        draftVersion,
+        validationStatus: "valid",
+        validationErrors: [],
+        safetyFlags: fallbackValidation.value.safety_flags,
+        draft: fallbackValidation.value,
+        operationMode,
+        selectorDraftId: input.draftId,
+        metadataOverrides: {
+          fallback_used: true,
+          fallback_reason: fallbackReason,
+          fallback_type: "conservative_safe_generic",
+          fallback_body_saved: true,
+          weak_match_treated_as_unverified: weakMatchTreatedAsUnverified,
+          buyer_facing_context_level: draftBuyerFacingContextLevel,
+          email_format: "professional_spaced",
+        },
+      });
+      return {
+        ok: true,
+        mode: operationMode,
+        draft_id: draftId,
+        message_id: draftInput.message.id,
+        classification_id: draftInput.classification.id,
+        draft_version: draftVersion,
+        validation_status: "valid",
+        validation_errors: [],
+        safety_flags: fallbackValidation.value.safety_flags,
+        requires_human_review: true,
+        fallback_used: true,
+        fallback_reason: fallbackReason,
+        fallback_type: "conservative_safe_generic",
+        fallback_body_saved: true,
+        weak_match_treated_as_unverified: weakMatchTreatedAsUnverified,
+        buyer_facing_context_level: draftBuyerFacingContextLevel,
+        email_format: "professional_spaced",
+        draft_subject: fallbackValidation.value.draft_subject,
+        draft_body_text: fallbackValidation.value.draft_body_text,
+        model_name: model,
+        prompt_version: promptVersionValue,
+        prompt_hash: promptHash,
+        input_hash: inputHash,
+        verified_context: draftInput.verified_order_context.summary,
+        regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
+        generated_body_returned: true,
+        outbound_send_enabled: false,
+        outlook_mutation_performed: false,
+      };
+    }
+  }
 
   try {
     const aiOutput = await callOpenAIResponseDraft(draftInput, prompt, model);
-    const validation = validateResponseDraft(aiOutput, draftInput);
+    const formattedAiOutput = normalizeProfessionalEmailDraft(aiOutput, draftInput);
+    const validation = validateResponseDraft(formattedAiOutput, draftInput);
     if (validation.ok) {
       const draftId = await insertResponseDraft(supabase, {
         input: draftInput,
@@ -3270,6 +3651,73 @@ async function generateResponseDraft(
       };
     }
 
+    const primaryValidationErrors = validation.validationErrors;
+    const primaryValidationExplanations = validationErrorExplanations(primaryValidationErrors);
+    if (shouldGenerateFallbackDraft(primaryValidationErrors)) {
+      const fallbackDraft = buildSafeFallbackDraft(draftInput, validation.safetyFlags);
+      const fallbackValidation = validateResponseDraft(fallbackDraft, draftInput);
+      if (fallbackValidation.ok) {
+        const draftId = await insertResponseDraft(supabase, {
+          input: draftInput,
+          actorId: admin.userId,
+          promptHash,
+          inputHash,
+          promptVersion: promptVersionValue,
+          model,
+          draftVersion,
+          validationStatus: "valid",
+          validationErrors: [],
+          safetyFlags: fallbackValidation.value.safety_flags,
+          draft: fallbackValidation.value,
+          operationMode,
+          selectorDraftId: input.draftId,
+          metadataOverrides: {
+            fallback_used: true,
+            fallback_reason: "primary_draft_failed_validation",
+            fallback_type: "conservative_safe_generic",
+            primary_validation_status: "invalid",
+            primary_validation_errors: primaryValidationErrors,
+            primary_validation_error_explanations: primaryValidationExplanations,
+            original_draft_blocked: true,
+            fallback_body_saved: true,
+          },
+        });
+        return {
+          ok: true,
+          mode: operationMode,
+          draft_id: draftId,
+          message_id: draftInput.message.id,
+          classification_id: draftInput.classification.id,
+          draft_version: draftVersion,
+          validation_status: "valid",
+          validation_errors: [],
+          safety_flags: fallbackValidation.value.safety_flags,
+          requires_human_review: true,
+          fallback_used: true,
+          fallback_reason: "primary_draft_failed_validation",
+          fallback_type: "conservative_safe_generic",
+          fallback_body_saved: true,
+          weak_match_treated_as_unverified: weakMatchTreatedAsUnverified,
+          buyer_facing_context_level: draftBuyerFacingContextLevel,
+          email_format: "professional_spaced",
+          primary_validation_status: "invalid",
+          primary_validation_errors: primaryValidationErrors,
+          primary_validation_error_explanations: primaryValidationExplanations,
+          draft_subject: fallbackValidation.value.draft_subject,
+          draft_body_text: fallbackValidation.value.draft_body_text,
+          model_name: model,
+          prompt_version: promptVersionValue,
+          prompt_hash: promptHash,
+          input_hash: inputHash,
+          verified_context: draftInput.verified_order_context.summary,
+          regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
+          generated_body_returned: true,
+          outbound_send_enabled: false,
+          outlook_mutation_performed: false,
+        };
+      }
+    }
+
     const draftId = await insertResponseDraft(supabase, {
       input: draftInput,
       actorId: admin.userId,
@@ -3279,11 +3727,15 @@ async function generateResponseDraft(
       model,
       draftVersion,
       validationStatus: "invalid",
-      validationErrors: validation.validationErrors,
+      validationErrors: primaryValidationErrors,
       safetyFlags: validation.safetyFlags,
       draft: validation.safeOutput,
       operationMode,
       selectorDraftId: input.draftId,
+      metadataOverrides: {
+        validation_error_explanations: primaryValidationExplanations,
+        original_draft_blocked: true,
+      },
     });
     return {
       ok: true,
@@ -3293,7 +3745,8 @@ async function generateResponseDraft(
       classification_id: draftInput.classification.id,
       draft_version: draftVersion,
       validation_status: "invalid",
-      validation_errors: validation.validationErrors,
+      validation_errors: primaryValidationErrors,
+      validation_error_explanations: primaryValidationExplanations,
       safety_flags: validation.safetyFlags,
       requires_human_review: true,
       model_name: model,
@@ -3568,14 +4021,16 @@ const DRAFT_CONTENT_BLOCKING_FLAGS = new Set([
   "malformed_json",
 ]);
 
-function draftContentIsSafe(row: Record<string, any>) {
+function draftContentIsSafe(row: Record<string, any>, metadata: Record<string, any> = {}) {
   if (row.validation_status !== "valid") return false;
+  if (metadata.fallback_used === true && metadata.fallback_body_saved === true) return true;
   const flags = safeArray(row.safety_flags);
   return !flags.some((flag) => DRAFT_CONTENT_BLOCKING_FLAGS.has(flag));
 }
 
 function safeDraftSummary(row: Record<string, any>, includeDraftBody: boolean) {
-  const canIncludeContent = includeDraftBody && draftContentIsSafe(row);
+  const metadata = safeMetadata(row.metadata || {}) as Record<string, any>;
+  const canIncludeContent = includeDraftBody && draftContentIsSafe(row, metadata);
   const contentOmittedReason = includeDraftBody
     ? canIncludeContent ? null : "draft_content_not_safe_to_return"
     : "draft_content_not_requested";
@@ -3606,7 +4061,18 @@ function safeDraftSummary(row: Record<string, any>, includeDraftBody: boolean) {
     prompt_version: row.prompt_version || null,
     prompt_hash: row.prompt_hash || null,
     input_hash: row.input_hash || null,
-    metadata: safeMetadata(row.metadata || {}),
+    metadata,
+    fallback_used: metadata.fallback_used === true,
+    fallback_reason: metadata.fallback_reason || null,
+    fallback_type: metadata.fallback_type || null,
+    fallback_body_saved: metadata.fallback_body_saved === true,
+    weak_match_treated_as_unverified: metadata.weak_match_treated_as_unverified === true,
+    buyer_facing_context_level: metadata.buyer_facing_context_level || null,
+    email_format: metadata.email_format || null,
+    primary_validation_status: metadata.primary_validation_status || null,
+    primary_validation_errors: Array.isArray(metadata.primary_validation_errors) ? metadata.primary_validation_errors : [],
+    primary_validation_error_explanations: Array.isArray(metadata.primary_validation_error_explanations) ? metadata.primary_validation_error_explanations : [],
+    validation_error_explanations: Array.isArray(metadata.validation_error_explanations) ? metadata.validation_error_explanations : [],
     draft_subject: canIncludeContent ? shortText(row.draft_subject, MAX_DRAFT_SUBJECT_CHARS) || null : null,
     draft_body_text: canIncludeContent ? safeBodyText(row.draft_body_text) : null,
     draft_content_returned: canIncludeContent,
@@ -3623,7 +4089,7 @@ async function adminDraftView(supabase: ServiceClient, input: Input) {
     query = query.eq("id", input.draftId);
   } else {
     if (input.messageId) query = query.eq("message_id", input.messageId);
-    if (input.classificationId) query = query.eq("classification_id", input.classificationId);
+    else if (input.classificationId) query = query.eq("classification_id", input.classificationId);
   }
 
   query = query

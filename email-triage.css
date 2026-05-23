@@ -1327,6 +1327,20 @@
   font-weight: 900;
 }
 
+.matched-context-block p,
+.matched-context-block > span {
+  display: block;
+  margin: 5px 0 0;
+  color: rgba(242,243,245,.68);
+  font-size: .78rem;
+  font-weight: 750;
+  line-height: 1.38;
+}
+
+.matched-context-fallback {
+  border-color: rgba(214,178,94,.18);
+}
+
 .matched-context-actions {
   margin-top: 7px;
 }
@@ -1348,6 +1362,56 @@
 
 .draft-safety-notice {
   margin-top: 0;
+}
+
+.draft-fallback-notice {
+  display: grid;
+  gap: 6px;
+}
+
+.draft-fallback-notice strong,
+.draft-fallback-notice span {
+  display: block;
+}
+
+.draft-fallback-blocked > span {
+  color: rgba(242,243,245,.7);
+  font-size: .74rem;
+  font-weight: 900;
+}
+
+.validation-explanation-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.validation-explanation-row {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(0,0,0,.12);
+  padding: 7px 8px;
+}
+
+.validation-explanation-row strong {
+  display: block;
+  color: rgba(242,243,245,.88);
+  font-size: .78rem;
+  font-weight: 900;
+}
+
+.validation-explanation-row p,
+.validation-explanation-row span {
+  display: block;
+  margin: 4px 0 0;
+  color: rgba(242,243,245,.68);
+  font-size: .76rem;
+  font-weight: 720;
+  line-height: 1.38;
+}
+
+.validation-explanation-row span {
+  color: rgba(214,178,94,.86);
 }
 
 .draft-actions {

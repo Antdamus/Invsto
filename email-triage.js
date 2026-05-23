@@ -611,7 +611,7 @@
         body: JSON.stringify({
           mode: "admin_draft_view",
           messageId: values.messageId,
-          classificationId: values.classificationId,
+          classificationId: values.classificationId || undefined,
           includeDraftBody: true,
           limit: 20,
         }),
@@ -1356,6 +1356,36 @@
     return drafts.find((draft) => draft.is_current === true) || drafts[0] || null;
   }
 
+  function validationExplanationsForDraft(draft) {
+    if (!draft || typeof draft !== "object") return [];
+    if (Array.isArray(draft.primary_validation_error_explanations) && draft.primary_validation_error_explanations.length) {
+      return draft.primary_validation_error_explanations;
+    }
+    if (Array.isArray(draft.validation_error_explanations) && draft.validation_error_explanations.length) {
+      return draft.validation_error_explanations;
+    }
+    const metadata = draft.metadata && typeof draft.metadata === "object" ? draft.metadata : {};
+    if (Array.isArray(metadata.primary_validation_error_explanations)) return metadata.primary_validation_error_explanations;
+    if (Array.isArray(metadata.validation_error_explanations)) return metadata.validation_error_explanations;
+    return [];
+  }
+
+  function renderValidationExplanations(explanations = []) {
+    const list = Array.isArray(explanations) ? explanations.filter(Boolean) : [];
+    if (!list.length) return "";
+    return `
+      <div class="validation-explanation-list">
+        ${list.slice(0, 6).map((item) => `
+          <div class="validation-explanation-row">
+            <strong>${escapeHtml(item.operator_label || humanizeValue(item.error_code || "Validation issue"))}</strong>
+            <p>${escapeHtml(item.reason || "The original draft included a claim that could not be verified.")}</p>
+            ${item.safe_alternative ? `<span>${escapeHtml(item.safe_alternative)}</span>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function renderDraftMetaGrid(draft) {
     const metadata = draft?.metadata && typeof draft.metadata === "object" ? draft.metadata : {};
     return `
@@ -1450,8 +1480,16 @@
     const actionMessage = messageId ? state.draftActionMessagesByMessageId[messageId] : null;
     const actionMode = currentDraft ? "regenerate_response" : "generate_response";
     const actionLabel = currentDraft ? "Regenerate Draft" : "Generate Draft";
-    const canEditDraft = currentDraft?.draft_content_returned === true;
+    const fallbackUsed = currentDraft?.fallback_used === true || currentDraft?.metadata?.fallback_used === true;
+    const fallbackBodySaved = currentDraft?.fallback_body_saved === true || currentDraft?.metadata?.fallback_body_saved === true;
+    const weakMatchTreatedAsUnverified = currentDraft?.weak_match_treated_as_unverified === true || currentDraft?.metadata?.weak_match_treated_as_unverified === true;
+    const fallbackContentReturned = fallbackUsed && fallbackBodySaved && String(currentDraft?.draft_body_text || "").trim();
+    const canEditDraft = currentDraft?.draft_content_returned === true || Boolean(fallbackContentReturned);
     const reviewDisabled = isLoading || isActing || !currentDraft?.id || !canEditDraft;
+    const primaryValidationErrors = Array.isArray(currentDraft?.primary_validation_errors) && currentDraft.primary_validation_errors.length
+      ? currentDraft.primary_validation_errors
+      : Array.isArray(currentDraft?.metadata?.primary_validation_errors) ? currentDraft.metadata.primary_validation_errors : [];
+    const validationExplanations = validationExplanationsForDraft(currentDraft);
 
     return `
       <details class="classification-detail-section response-draft-section detail-disclosure core-disclosure" open>
@@ -1466,6 +1504,19 @@
         ${error ? `<div class="classification-notice is-error">Could not load draft view: ${escapeHtml(error)}</div>` : ""}
         ${actionError ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(actionError)}</div>` : ""}
         ${actionMessage ? `<div class="classification-notice is-success">${escapeHtml(actionMessage)}</div>` : ""}
+        ${fallbackUsed ? `
+          <div class="classification-notice is-warning draft-fallback-notice">
+            <strong>Safe fallback draft generated.</strong>
+            <span>${primaryValidationErrors.length ? "Original AI draft was blocked." : weakMatchTreatedAsUnverified ? "Weak match context was treated as unverified for buyer-facing content." : "Specific buyer-facing context was not verified."} This fallback is conservative, editable, and still requires human review.</span>
+            ${primaryValidationErrors.length ? `
+              <div class="draft-fallback-blocked">
+                <span>Original draft blocked because:</span>
+                ${renderCompactList(primaryValidationErrors, "No original validation failures")}
+              </div>
+            ` : ""}
+            ${renderValidationExplanations(validationExplanations)}
+          </div>
+        ` : ""}
         <div class="draft-actions">
           <button type="button" class="${currentDraft ? "secondary-btn" : "primary-btn"}" data-draft-action="${escapeHtml(actionMode)}" data-message-id="${escapeHtml(messageId)}" data-classification-id="${escapeHtml(selected.id)}" data-draft-id="${escapeHtml(currentDraft?.id || "")}" ${isLoading || isActing || !messageId ? "disabled" : ""}>
             <i data-lucide="${isActing ? "loader-circle" : currentDraft ? "refresh-cw" : "wand-sparkles"}"></i>
@@ -1494,7 +1545,7 @@
               <span>Operator Notes</span>
               <textarea name="operatorNotes" rows="3" maxlength="2000" ${isLoading || isActing || !currentDraft?.id ? "disabled" : ""}>${escapeHtml(currentDraft.operator_notes || "")}</textarea>
             </label>
-            ${!canEditDraft ? `<div class="classification-notice is-warning">Draft content is not editable because validation or safety checks blocked returning the body.</div>` : ""}
+            ${!canEditDraft && !fallbackUsed ? `<div class="classification-notice is-warning">Draft content is not editable because validation or safety checks blocked returning the body.</div>` : ""}
             <div class="draft-actions draft-review-actions">
               <button type="button" class="secondary-btn" data-draft-review-action="save_draft_review" ${reviewDisabled ? "disabled" : ""}>
                 <i data-lucide="${isActing ? "loader-circle" : "save"}"></i>
@@ -1525,6 +1576,13 @@
                   <div class="classification-pill-list">${renderPillList(currentDraft.validation_errors, "No validation errors")}</div>
                 </div>
               ` : ""}
+              ${fallbackUsed && primaryValidationErrors.length ? `
+                <div class="draft-safety-flags">
+                  <span>Original Validation Errors</span>
+                  <div class="classification-pill-list">${renderPillList(primaryValidationErrors, "No original validation errors")}</div>
+                </div>
+              ` : ""}
+              ${renderValidationExplanations(validationExplanations)}
             `,
           )}
         ` : (!isLoading ? `<div class="classification-empty draft-empty">No response draft exists for this selected email yet.</div>` : "")}
@@ -1623,6 +1681,11 @@
     const matches = Array.isArray(payload?.matches) ? payload.matches : [];
     const validation = payload?.validation || {};
     const validationErrors = Array.isArray(validation.validation_errors) ? validation.validation_errors : [];
+    const primaryValidationErrors = Array.isArray(validation.primary_validation_errors) ? validation.primary_validation_errors : [];
+    const weakMatchTreatedAsUnverified = validation.weak_match_treated_as_unverified === true;
+    const validationExplanations = Array.isArray(validation.primary_validation_error_explanations) && validation.primary_validation_error_explanations.length
+      ? validation.primary_validation_error_explanations
+      : Array.isArray(validation.validation_error_explanations) ? validation.validation_error_explanations : [];
     const safetyFlags = Array.isArray(validation.safety_flags) ? validation.safety_flags : [];
     const unknown = Array.isArray(payload?.unknown) ? payload.unknown : [];
     const doNotClaim = Array.isArray(payload?.do_not_claim) ? payload.do_not_claim : [];
@@ -1645,10 +1708,22 @@
         ${isLoading && !payload ? `<div class="classification-empty matched-context-empty">Loading matched order context.</div>` : ""}
         ${payload && !matches.length ? `<div class="classification-empty matched-context-empty">No deterministic links exist for this email yet.</div>` : ""}
         ${matches.map((match) => renderMatchRow(match, selected, state)).join("")}
+        ${validation.fallback_used === true ? `
+          <div class="matched-context-block matched-context-fallback">
+            <strong>Safe fallback draft generated</strong>
+            <p>${primaryValidationErrors.length ? "Original AI draft was blocked." : weakMatchTreatedAsUnverified ? "Weak match context was treated as unverified for buyer-facing content." : "Specific buyer-facing context was not verified."} The fallback remains editable and requires human review.</p>
+            ${primaryValidationErrors.length ? `
+              <span>Original draft blocked because:</span>
+              ${renderCompactList(primaryValidationErrors, "No original validation failures")}
+            ` : ""}
+            ${renderValidationExplanations(validationExplanations)}
+          </div>
+        ` : ""}
         ${validationErrors.length ? `
           <div class="matched-context-block">
             <strong>Draft blocked by validation:</strong>
             ${renderCompactList(validationErrors, "No validation failures")}
+            ${renderValidationExplanations(validationExplanations)}
           </div>
         ` : ""}
         ${safetyFlags.length ? `
@@ -2120,6 +2195,7 @@
         },
       });
       await loadDraftView(context, selected, { force: true });
+      await loadMatchContext(context, selected, { force: true });
     } catch (error) {
       const code = error.code || error.message || "draft_action_failed";
       setAdminClassificationState({
