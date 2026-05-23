@@ -81,6 +81,18 @@
   }
 
   function getOrderLinks() {
+    const bulkRows = getBulkLabelOrderRows();
+    if (bulkRows.length) {
+      return bulkRows
+        .map((row) => {
+          const orderNumber = getBulkLabelRowOrderNumber(row);
+          const link = row.querySelector('a[data-testid^="unique-order-id-link-"], a[href*="orderId="], a[href*="orderid="], a[href*="/FetchOrderDetails"]')
+            || row.querySelector("a[href], [role='link']");
+          return { link, orderNumber };
+        })
+        .filter((entry) => entry.link && entry.orderNumber);
+    }
+
     const awaitingRows = typeof getEbayAwaitingShipmentRows === "function" ? getEbayAwaitingShipmentRows() : [];
     if (awaitingRows.length) {
       return awaitingRows
@@ -119,6 +131,99 @@
 
   function uniqueOrderNumbers() {
     return [...new Set(getOrderLinks().map((entry) => entry.orderNumber))];
+  }
+
+  function getBulkLabelOrderRows() {
+    if (!document.querySelector("#bulk-labels-app, .bulk-labels")) return [];
+    return [...document.querySelectorAll(".orders-list__item")]
+      .filter((row) => normalizeOrderNumber(row.textContent || ""));
+  }
+
+  function getBulkLabelRowCheckbox(row) {
+    return row?.querySelector?.('.orders-list__item__for-edit input[type="checkbox"]')
+      || row?.querySelector?.('input[aria-label*="select this row" i][type="checkbox"]')
+      || row?.querySelector?.('input[type="checkbox"]')
+      || null;
+  }
+
+  function isBulkLabelRowChecked(row) {
+    const checkbox = getBulkLabelRowCheckbox(row);
+    if (!checkbox) return false;
+    const wrapper = checkbox.closest(".checkbox, .orders-list__item__for-edit");
+    const rowText = cleanText(row?.textContent || "");
+    return Boolean(
+      checkbox.checked
+      || checkbox.matches?.(":checked")
+      || checkbox.defaultChecked
+      || checkbox.hasAttribute("checked")
+      || checkbox.getAttribute("aria-checked") === "true"
+      || wrapper?.classList.contains("checkbox--checked")
+      || /^\s*✓/.test(rowText)
+    );
+  }
+
+  function getBulkLabelRowOrderNumber(row) {
+    const link = row?.querySelector?.('a[data-testid^="unique-order-id-link-"], a[href*="orderId="], a[href*="orderid="], a[href*="/FetchOrderDetails"]');
+    return normalizeOrderNumber([
+      link?.textContent,
+      link?.getAttribute?.("href"),
+      link?.getAttribute?.("aria-label"),
+      row?.textContent,
+    ].filter(Boolean).join(" "));
+  }
+
+  function getSelectedBulkLabelOrderNumbers() {
+    return [...new Set(getBulkLabelOrderRows()
+      .filter(isBulkLabelRowChecked)
+      .map(getBulkLabelRowOrderNumber)
+      .filter(Boolean))];
+  }
+
+  function getBulkLabelSelectionCountFromControls() {
+    const text = cleanText(document.querySelector("#bulk-labels-app, .bulk-labels")?.innerText || document.body?.innerText || "");
+    const match = text.match(/\b(?:Edit|Remove)\s*\((\d+)\)/i);
+    const count = Number(match?.[1] || 0);
+    return Number.isFinite(count) && count > 0 ? count : 0;
+  }
+
+  function getBulkLabelTotalCountFromControls() {
+    const text = cleanText(document.querySelector("#bulk-labels-app, .bulk-labels")?.innerText || document.body?.innerText || "");
+    const badgeMatch = text.match(/\bCombine orders per buyer\s*(\d+)\b/i);
+    const badgeCount = Number(badgeMatch?.[1] || 0);
+    const rowCount = getBulkLabelOrderRows().length;
+    return Math.max(Number.isFinite(badgeCount) ? badgeCount : 0, rowCount);
+  }
+
+  function getBulkLabelSelectionMeta() {
+    const rows = getBulkLabelOrderRows();
+    if (!rows.length) return null;
+    const selectedOrderNumbers = getSelectedBulkLabelOrderNumbers();
+    const allOrderNumbers = [...new Set(rows.map(getBulkLabelRowOrderNumber).filter(Boolean))];
+    const controlSelectedCount = getBulkLabelSelectionCountFromControls();
+    const hasExplicitSelection = controlSelectedCount > 0 || selectedOrderNumbers.length > 0;
+    const selectedCount = hasExplicitSelection
+      ? (controlSelectedCount || selectedOrderNumbers.length)
+      : allOrderNumbers.length;
+    const totalCount = Math.max(getBulkLabelTotalCountFromControls(), allOrderNumbers.length, selectedCount);
+    const effectiveSelectedOrderNumbers = hasExplicitSelection
+      ? (selectedOrderNumbers.length ? selectedOrderNumbers.slice(0, selectedCount) : allOrderNumbers.slice(0, selectedCount))
+      : allOrderNumbers;
+    return {
+      source: "ebay-bulk-label-selection",
+      selectedCount,
+      totalCount,
+      selectedOrderNumbers: effectiveSelectedOrderNumbers,
+      allOrderNumbers,
+    };
+  }
+
+  function getEffectiveBulkLabelOrderNumbers() {
+    const selected = getBulkLabelSelectionMeta()?.selectedOrderNumbers || getSelectedBulkLabelOrderNumbers();
+    return selected.length ? selected : [...new Set(getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean))];
+  }
+
+  function getEffectiveFloatingOrderNumbers() {
+    return getBulkLabelOrderRows().length ? getEffectiveBulkLabelOrderNumbers() : uniqueOrderNumbers();
   }
 
   function cleanText(value) {
@@ -3147,7 +3252,7 @@
     return normalized;
   }
 
-  function buildOgUrl(appUrl, orderNumbers, orderSnapshot = null) {
+  function buildOgUrl(appUrl, orderNumbers, orderSnapshot = null, selectionMeta = null) {
     const url = new URL(appUrl);
     const unique = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     url.searchParams.set("source", "ebay");
@@ -3168,10 +3273,22 @@
       url.searchParams.delete("ebayOrderPage");
       url.searchParams.delete("ebayOrderSnapshot");
     }
+    if (selectionMeta?.selectedCount || selectionMeta?.totalCount) {
+      url.searchParams.set("ebaySelectedCount", String(selectionMeta.selectedCount || unique.length));
+      url.searchParams.set("ebayTotalCount", String(selectionMeta.totalCount || unique.length));
+      const allOrderNumbers = Array.isArray(selectionMeta.allOrderNumbers)
+        ? [...new Set(selectionMeta.allOrderNumbers.map(normalizeOrderNumber).filter(Boolean))]
+        : [];
+      if (allOrderNumbers.length) url.searchParams.set("ebayAllOrderIds", allOrderNumbers.join(","));
+    } else {
+      url.searchParams.delete("ebaySelectedCount");
+      url.searchParams.delete("ebayTotalCount");
+      url.searchParams.delete("ebayAllOrderIds");
+    }
     return url.toString();
   }
 
-  async function openInOg(orderNumbers, orderSnapshot = null) {
+  async function openInOg(orderNumbers, orderSnapshot = null, selectionMeta = null) {
     const clean = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     if (!clean.length) return;
 
@@ -3180,7 +3297,7 @@
       window.alert("OG Pending Orders URL was not set. Click the extension icon to set it.");
       return;
     }
-    window.open(buildOgUrl(appUrl, clean, orderSnapshot), "_blank", "noopener,noreferrer");
+    window.open(buildOgUrl(appUrl, clean, orderSnapshot, selectionMeta), "_blank", "noopener,noreferrer");
   }
 
   function decodeHtmlEntities(value) {
@@ -4648,7 +4765,9 @@
   }
 
   function injectFloatingButton() {
-    const orderNumbers = uniqueOrderNumbers();
+    const orderNumbers = getEffectiveFloatingOrderNumbers();
+    const bulkSelectionMeta = getBulkLabelSelectionMeta();
+    const displayCount = bulkSelectionMeta?.selectedCount || orderNumbers.length;
     let button = document.getElementById(FLOATING_ID);
 
     if (isAwaitingShipmentOrdersPage() || !orderNumbers.length) {
@@ -4660,12 +4779,17 @@
       button = document.createElement("button");
       button.type = "button";
       button.id = FLOATING_ID;
-      button.addEventListener("click", () => openInOg(uniqueOrderNumbers()));
+      button.addEventListener("click", () => openInOg(getEffectiveFloatingOrderNumbers(), null, getBulkLabelSelectionMeta()));
       document.body.appendChild(button);
     }
 
-    button.textContent = `Open ${orderNumbers.length} in OG`;
-    button.title = "Open all visible eBay label orders in OG Pending Orders";
+    button.textContent = `Open ${displayCount} in OG`;
+    const selectedTitle = bulkSelectionMeta?.selectedOrderNumbers?.length
+      ? ` Selected: ${bulkSelectionMeta.selectedOrderNumbers.join(", ")}`
+      : "";
+    button.title = bulkSelectionMeta?.selectedCount && bulkSelectionMeta.selectedCount < bulkSelectionMeta.totalCount
+      ? `Open only the selected eBay bulk label rows in OG Pending Orders.${selectedTitle}`
+      : "Open all visible eBay label orders in OG Pending Orders";
   }
 
   function injectSingleOrderButton() {
@@ -5007,6 +5131,19 @@
       injectOgControls();
     }, 250);
   }
+
+  document.addEventListener("change", (event) => {
+    if (!event.target?.matches?.("#bulk-labels-app input[type='checkbox'], .bulk-labels input[type='checkbox']")) return;
+    scheduleInject();
+  }, true);
+  document.addEventListener("input", (event) => {
+    if (!event.target?.matches?.("#bulk-labels-app input[type='checkbox'], .bulk-labels input[type='checkbox']")) return;
+    scheduleInject();
+  }, true);
+  document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("#bulk-labels-app .checkbox, .bulk-labels .checkbox, #bulk-labels-app .orders-list__item__for-edit, .bulk-labels .orders-list__item__for-edit")) return;
+    window.setTimeout(scheduleInject, 50);
+  }, true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {

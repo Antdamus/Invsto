@@ -25,6 +25,9 @@ const state = {
   liveLotOrderMatches: [],
   ebayLaunchOrderNumbers: new Set(),
   ebayLaunchBuyerKeys: new Set(),
+  ebayLaunchAllOrderNumbers: new Set(),
+  ebayLaunchSelectedCount: 0,
+  ebayLaunchTotalCount: 0,
   ebayLaunchSnapshot: null,
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
@@ -973,6 +976,19 @@ function getRequestedEbayOrderNumbers() {
     .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
 }
 
+function getRequestedEbayAllOrderNumbers() {
+  const params = new URLSearchParams(window.location.search);
+  return [...new Set(String(params.get("ebayAllOrderIds") || "")
+    .split(",")
+    .map(normalizeEbayOrderNumber)
+    .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
+}
+
+function getRequestedPositiveIntegerParam(name) {
+  const value = Number(new URLSearchParams(window.location.search).get(name) || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function decodeBase64UrlJson(value) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -1387,9 +1403,12 @@ function applyOrderFilters() {
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {
-  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size && !state.ebayLaunchSnapshot) return;
+  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size && !state.ebayLaunchSnapshot && !state.ebayLaunchAllOrderNumbers.size && !state.ebayLaunchTotalCount) return;
   state.ebayLaunchOrderNumbers.clear();
   state.ebayLaunchBuyerKeys.clear();
+  state.ebayLaunchAllOrderNumbers.clear();
+  state.ebayLaunchSelectedCount = 0;
+  state.ebayLaunchTotalCount = 0;
   state.ebayLaunchSnapshot = null;
   if (apply) applyOrderFilters();
 }
@@ -1400,6 +1419,9 @@ function applyEbayLaunchOrderSelection() {
 
   state.ebayLaunchSnapshot = getRequestedEbayOrderSnapshot();
   state.ebayLaunchOrderNumbers = new Set(orderNumbers);
+  state.ebayLaunchAllOrderNumbers = new Set(getRequestedEbayAllOrderNumbers());
+  state.ebayLaunchSelectedCount = getRequestedPositiveIntegerParam("ebaySelectedCount") || orderNumbers.length;
+  state.ebayLaunchTotalCount = getRequestedPositiveIntegerParam("ebayTotalCount") || state.ebayLaunchAllOrderNumbers.size || orderNumbers.length;
   state.ebayLaunchBuyerKeys.clear();
   clearLiveLotSelection({ render: false });
   const matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
@@ -1413,7 +1435,7 @@ function applyEbayLaunchOrderSelection() {
     return;
   }
 
-  state.ebayLaunchBuyerKeys = new Set(matches.map(getBuyerKey).filter(Boolean));
+  state.ebayLaunchBuyerKeys.clear();
   applyOrderFilters();
   const openMatch = matches.find(isOpenOrderLine) || matches[0];
   if (openMatch) {
@@ -1539,6 +1561,8 @@ function isNoInventoryCompletionLine(line) {
 
 function getNoInventoryCandidateLines(line = state.selectedLine) {
   if (!line) return [];
+  const selectedLines = getSelectedAdminLines().filter(isNoInventoryCompletionLine);
+  if (selectedLines.length) return selectedLines;
   return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
 }
 
@@ -4599,7 +4623,8 @@ function closeWorkerNoInventoryModal(options = {}) {
 
 function updateWorkerNoInventorySelectionSummary() {
   const selected = state.workerNoInventoryLineIds.size;
-  const total = state.workerNoInventoryCandidates.length;
+  const selectedQueueTotal = getBuyerLines(getBuyerKey(state.selectedLine)).filter(isNoInventoryCompletionLine).length;
+  const total = Math.max(state.workerNoInventoryCandidates.length, selectedQueueTotal, state.ebayLaunchTotalCount || 0);
   const count = $("worker-no-inventory-count");
   if (count) count.textContent = `${selected} of ${total} selected`;
   $("confirm-worker-no-inventory")?.toggleAttribute("disabled", selected === 0);
@@ -4748,7 +4773,11 @@ async function openWorkerNoInventoryModal(options = {}) {
 
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = candidates;
-  state.workerNoInventoryLineIds = new Set(candidates.map((entry) => entry.id));
+  state.workerNoInventoryLineIds = state.ebayLaunchOrderNumbers.size
+    ? new Set(candidates
+      .filter((entry) => state.ebayLaunchOrderNumbers.has(String(entry.order?.order_number || "")))
+      .map((entry) => entry.id))
+    : new Set(candidates.map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   $("worker-no-inventory-note").value = "";
