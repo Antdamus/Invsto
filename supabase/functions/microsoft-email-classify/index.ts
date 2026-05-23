@@ -18,7 +18,7 @@ const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "operator_match_context", "confirm_match", "reject_match", "mark_match_stale", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "operator_match_context", "confirm_match", "reject_match", "mark_match_stale", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "diagnose_message_draft_state", "diagnose_all_bad_current_drafts", "diagnose_selector_contract", "repair_bad_current_drafts", "save_draft_review", "approve_draft", "reject_draft"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -314,6 +314,7 @@ type Input = {
   operatorNotes: string | null;
   draftSubject: string | null;
   draftBodyText: string | null;
+  dryRun: boolean;
 };
 
 class ClassifierError extends Error {
@@ -414,7 +415,8 @@ async function parseInput(req: Request): Promise<Input> {
   const body = await req.json().catch(() => ({}));
   const requestedMode = typeof body?.mode === "string" ? body.mode : "";
   const mode = SUPPORTED_MODES.includes(requestedMode as Mode) ? requestedMode as Mode : "enqueue_and_process";
-  const limit = Math.min(Math.max(Number(body?.limit) || 25, 1), MAX_LIMIT);
+  const maxLimitForMode = mode === "diagnose_all_bad_current_drafts" || mode === "repair_bad_current_drafts" ? 100 : MAX_LIMIT;
+  const limit = Math.min(Math.max(Number(body?.limit) || 25, 1), maxLimitForMode);
   const classificationLimit = Math.min(Math.max(Number(body?.classificationLimit) || 20, 1), MAX_LIMIT);
   const replayLimit = Math.min(Math.max(Number(body?.replayLimit) || 20, 1), MAX_LIMIT);
   const failedJobLimit = Math.min(Math.max(Number(body?.failedJobLimit) || 20, 1), MAX_LIMIT);
@@ -459,6 +461,7 @@ async function parseInput(req: Request): Promise<Input> {
   const draftBodyText = typeof body?.draftBodyText === "string"
     ? safeBodyText(body.draftBodyText).slice(0, MAX_DRAFT_BODY_CHARS)
     : null;
+  const dryRun = body?.dryRun !== false;
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
@@ -504,6 +507,12 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "replay_classification" && !messageId && !mailboxId && !classificationRunId) {
     throw new ClassifierError("replay_selector_required", { status: 400, phase: "input" });
   }
+  if ((mode === "diagnose_message_draft_state" || mode === "diagnose_selector_contract") && !messageId) {
+    throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "repair_bad_current_drafts" && body?.dryRun === false) {
+    throw new ClassifierError("repair_apply_disabled_step_4d_7d", { status: 400, phase: "diagnostic_repair" });
+  }
   return {
     mode,
     limit,
@@ -529,6 +538,7 @@ async function parseInput(req: Request): Promise<Input> {
     operatorNotes,
     draftSubject,
     draftBodyText,
+    dryRun,
   };
 }
 
@@ -4238,6 +4248,295 @@ async function adminDraftView(supabase: ServiceClient, input: Input) {
   };
 }
 
+const DIAGNOSTIC_CLASSIFICATION_SELECT = "id, message_id, category, validation_status, is_current, created_at";
+const DIAGNOSTIC_DRAFT_SELECT = "id, message_id, classification_id, draft_version, is_current, validation_status, validation_errors, safety_flags, draft_body_text, metadata, created_at, superseded_at";
+
+function draftBodyPresent(row: Record<string, any>) {
+  return typeof row.draft_body_text === "string" && row.draft_body_text.trim().length > 0;
+}
+
+function draftDiagnosticSummary(row: Record<string, any>) {
+  const metadata = safeMetadata(row.metadata || {}) as Record<string, any>;
+  const bodyPresent = draftBodyPresent(row);
+  return {
+    draft_id: row.id,
+    draft_version: row.draft_version === null ? null : Number(row.draft_version),
+    classification_id: row.classification_id || null,
+    is_current: row.is_current === true,
+    validation_status: row.validation_status || null,
+    validation_errors: Array.isArray(row.validation_errors) ? row.validation_errors : [],
+    draft_body_present: bodyPresent,
+    draft_content_would_return: bodyPresent && draftContentIsSafe(row, metadata),
+    fallback_used: metadata.fallback_used === true,
+    fallback_body_saved: metadata.fallback_body_saved === true,
+    created_at: row.created_at || null,
+    superseded_at: row.superseded_at || null,
+  };
+}
+
+function classificationDiagnosticSummary(row: Record<string, any>) {
+  return {
+    classification_id: row.id,
+    is_current: row.is_current === true,
+    validation_status: row.validation_status || null,
+    category: row.category || null,
+    created_at: row.created_at || null,
+  };
+}
+
+function sortDraftDiagnostics(drafts: Record<string, any>[]) {
+  return [...drafts].sort((a, b) => {
+    const currentDelta = Number(b.is_current === true) - Number(a.is_current === true);
+    if (currentDelta) return currentDelta;
+    const versionDelta = Number(b.draft_version || 0) - Number(a.draft_version || 0);
+    if (versionDelta) return versionDelta;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+}
+
+function selectCanonicalCurrentDraft(drafts: Record<string, any>[]) {
+  const currentDraft = sortDraftDiagnostics(drafts).find((draft) => draft.is_current === true);
+  if (!currentDraft) return null;
+  return {
+    draft_id: currentDraft.id,
+    draft_version: currentDraft.draft_version === null ? null : Number(currentDraft.draft_version),
+    validation_status: currentDraft.validation_status || null,
+    classification_id: currentDraft.classification_id || null,
+    reason_selected: "is_current_true",
+  };
+}
+
+function selectBestUsableDraft(drafts: Record<string, any>[]) {
+  const best = sortDraftDiagnostics(drafts).find((draft) => (
+    draft.validation_status === "valid" &&
+    draftBodyPresent(draft) &&
+    draftContentIsSafe(draft, safeMetadata(draft.metadata || {}) as Record<string, any>)
+  ));
+  if (!best) return null;
+  return {
+    draft_id: best.id,
+    draft_version: best.draft_version === null ? null : Number(best.draft_version),
+    validation_status: best.validation_status || null,
+    classification_id: best.classification_id || null,
+    reason_selected: "latest_valid_body_present",
+  };
+}
+
+async function loadDiagnosticStateForMessage(supabase: ServiceClient, messageId: string) {
+  const [classificationsResult, draftsResult] = await Promise.all([
+    supabase
+      .from("email_message_classifications")
+      .select(DIAGNOSTIC_CLASSIFICATION_SELECT)
+      .eq("message_id", messageId)
+      .order("is_current", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("email_response_drafts")
+      .select(DIAGNOSTIC_DRAFT_SELECT)
+      .eq("message_id", messageId)
+      .order("is_current", { ascending: false })
+      .order("draft_version", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (classificationsResult.error) {
+    throw new ClassifierError("diagnostic_classifications_lookup_failed", { phase: "diagnose_message_draft_state", messageId });
+  }
+  if (draftsResult.error) {
+    throw new ClassifierError("diagnostic_drafts_lookup_failed", { phase: "diagnose_message_draft_state", messageId });
+  }
+
+  return {
+    classifications: (classificationsResult.data || []) as Record<string, any>[],
+    drafts: (draftsResult.data || []) as Record<string, any>[],
+  };
+}
+
+function diagnoseMessageStateFromRows(messageId: string, classifications: Record<string, any>[], drafts: Record<string, any>[]) {
+  const canonicalCurrentDraft = selectCanonicalCurrentDraft(drafts);
+  const bestUsableDraft = selectBestUsableDraft(drafts);
+  const multipleClassifications = classifications.length > 1;
+  const invalidCurrentDraftExists = drafts.some((draft) => (
+    draft.is_current === true &&
+    (draft.validation_status === "invalid" || draft.validation_status === "error")
+  ));
+  const bodylessCurrentDraftExists = drafts.some((draft) => draft.is_current === true && !draftBodyPresent(draft));
+  const usableValidReplacementExists = Boolean(
+    bestUsableDraft &&
+    (!canonicalCurrentDraft || bestUsableDraft.draft_id !== canonicalCurrentDraft.draft_id),
+  );
+  const selectorDriftPossible = multipleClassifications || Boolean(
+    canonicalCurrentDraft?.classification_id &&
+    !classifications.some((classification) => (
+      classification.is_current === true &&
+      classification.id === canonicalCurrentDraft.classification_id
+    )),
+  );
+
+  return {
+    ok: true,
+    mode: "diagnose_message_draft_state",
+    message_id: messageId,
+    classifications: classifications.map(classificationDiagnosticSummary),
+    drafts: sortDraftDiagnostics(drafts).map(draftDiagnosticSummary),
+    canonical_current_draft: canonicalCurrentDraft,
+    best_usable_draft: bestUsableDraft,
+    pollution_detected: invalidCurrentDraftExists || bodylessCurrentDraftExists,
+    diagnostics: {
+      multiple_classifications_for_same_message: multipleClassifications,
+      invalid_current_draft_exists: invalidCurrentDraftExists,
+      bodyless_current_draft_exists: bodylessCurrentDraftExists,
+      selector_drift_possible: selectorDriftPossible,
+      usable_valid_replacement_exists: usableValidReplacementExists,
+    },
+  };
+}
+
+async function diagnoseMessageDraftState(supabase: ServiceClient, input: Input) {
+  if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "diagnose_message_draft_state" });
+  const state = await loadDiagnosticStateForMessage(supabase, input.messageId);
+  return diagnoseMessageStateFromRows(input.messageId, state.classifications, state.drafts);
+}
+
+function pollutedDraftSummary(row: Record<string, any>, replacement: Record<string, any> | null) {
+  return {
+    message_id: row.message_id,
+    bad_current_draft_id: row.id,
+    bad_current_version: row.draft_version === null ? null : Number(row.draft_version),
+    classification_id: row.classification_id || null,
+    validation_status: row.validation_status || null,
+    validation_errors: Array.isArray(row.validation_errors) ? row.validation_errors : [],
+    draft_body_present: draftBodyPresent(row),
+    valid_replacement_exists: Boolean(replacement),
+    replacement_draft_id: replacement?.id || null,
+    replacement_version: replacement?.draft_version === undefined || replacement?.draft_version === null ? null : Number(replacement.draft_version),
+  };
+}
+
+async function loadPollutedCurrentDrafts(supabase: ServiceClient, input: Input) {
+  let query = supabase
+    .from("email_response_drafts")
+    .select(DIAGNOSTIC_DRAFT_SELECT)
+    .eq("is_current", true)
+    .or("validation_status.in.(invalid,error),draft_body_text.is.null")
+    .order("created_at", { ascending: false })
+    .limit(input.limit);
+
+  if (input.messageId) query = query.eq("message_id", input.messageId);
+
+  const { data, error } = await query;
+  if (error) throw new ClassifierError("diagnostic_bad_current_drafts_lookup_failed", { phase: "diagnose_all_bad_current_drafts" });
+  return (data || []) as Record<string, any>[];
+}
+
+async function loadBestReplacementsByMessage(supabase: ServiceClient, messageIds: string[]) {
+  const replacements = new Map<string, Record<string, any>>();
+  if (!messageIds.length) return replacements;
+
+  const { data, error } = await supabase
+    .from("email_response_drafts")
+    .select(DIAGNOSTIC_DRAFT_SELECT)
+    .in("message_id", messageIds)
+    .eq("validation_status", "valid")
+    .not("draft_body_text", "is", null)
+    .order("draft_version", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw new ClassifierError("diagnostic_replacement_drafts_lookup_failed", { phase: "diagnose_all_bad_current_drafts" });
+
+  for (const row of data || []) {
+    const messageId = String(row.message_id || "");
+    if (!messageId || replacements.has(messageId)) continue;
+    if (draftBodyPresent(row as Record<string, any>) && draftContentIsSafe(row as Record<string, any>, safeMetadata(row.metadata || {}) as Record<string, any>)) {
+      replacements.set(messageId, row as Record<string, any>);
+    }
+  }
+  return replacements;
+}
+
+async function diagnoseAllBadCurrentDrafts(supabase: ServiceClient, input: Input) {
+  const pollutedDrafts = await loadPollutedCurrentDrafts(supabase, input);
+  const messageIds = uniqueStrings(pollutedDrafts.map((draft) => draft.message_id), input.limit);
+  const replacements = await loadBestReplacementsByMessage(supabase, messageIds);
+
+  return {
+    ok: true,
+    mode: "diagnose_all_bad_current_drafts",
+    affected_messages: new Set(messageIds).size,
+    polluted_drafts: pollutedDrafts.map((draft) => pollutedDraftSummary(draft, replacements.get(String(draft.message_id || "")) || null)),
+  };
+}
+
+async function diagnoseSelectorContract(supabase: ServiceClient, input: Input) {
+  if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "diagnose_selector_contract" });
+  const { classifications, drafts } = await loadDiagnosticStateForMessage(supabase, input.messageId);
+  const currentDraft = sortDraftDiagnostics(drafts).find((draft) => draft.is_current === true) || null;
+  const currentClassification = [...classifications]
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
+    .find((classification) => classification.is_current === true) || null;
+  const multipleClassifications = classifications.length > 1;
+  const currentDraftClassificationNotCurrentClassification = Boolean(
+    currentDraft?.classification_id &&
+    currentClassification?.id &&
+    currentDraft.classification_id !== currentClassification.id,
+  );
+
+  return {
+    ok: true,
+    mode: "diagnose_selector_contract",
+    message_id: input.messageId,
+    classifications: classifications.map((classification) => ({
+      classification_id: classification.id,
+      is_current: classification.is_current === true,
+      category: classification.category || null,
+    })),
+    current_draft: currentDraft
+      ? {
+        draft_id: currentDraft.id,
+        classification_id: currentDraft.classification_id || null,
+        validation_status: currentDraft.validation_status || null,
+      }
+      : null,
+    ui_risk: {
+      classification_mismatch_possible: multipleClassifications || currentDraftClassificationNotCurrentClassification,
+      multiple_classifications_for_same_message: multipleClassifications,
+      message_scope_vs_classification_scope_conflict: multipleClassifications && Boolean(currentDraft),
+      current_draft_classification_not_current_classification: currentDraftClassificationNotCurrentClassification,
+    },
+  };
+}
+
+async function repairBadCurrentDraftsDryRun(supabase: ServiceClient, input: Input) {
+  if (!input.dryRun) {
+    throw new ClassifierError("repair_apply_disabled_step_4d_7d", { status: 400, phase: "diagnostic_repair" });
+  }
+
+  const pollutedDrafts = await loadPollutedCurrentDrafts(supabase, input);
+  const messageIds = uniqueStrings(pollutedDrafts.map((draft) => draft.message_id), input.limit);
+  const replacements = await loadBestReplacementsByMessage(supabase, messageIds);
+
+  return {
+    ok: true,
+    mode: "repair_bad_current_drafts",
+    dryRun: true,
+    apply_enabled: false,
+    affected_messages: new Set(messageIds).size,
+    repairs: pollutedDrafts.map((draft) => {
+      const replacement = replacements.get(String(draft.message_id || "")) || null;
+      return {
+        message_id: draft.message_id,
+        bad_current_draft_id: draft.id,
+        bad_current_version: draft.draft_version === null ? null : Number(draft.draft_version),
+        bad_validation_status: draft.validation_status || null,
+        bad_validation_errors: Array.isArray(draft.validation_errors) ? draft.validation_errors : [],
+        replacement_draft_id: replacement?.id || null,
+        replacement_version: replacement?.draft_version === undefined || replacement?.draft_version === null ? null : Number(replacement.draft_version),
+        action: replacement ? "would_promote_replacement" : "would_clear_current_without_replacement",
+      };
+    }),
+  };
+}
+
 async function loadSelectedMessages(supabase: ServiceClient, input: Input) {
   if (input.classificationRunId) {
     const { data: rows, error } = await supabase
@@ -4514,6 +4813,22 @@ serve(async (req) => {
 
     if (input.mode === "admin_draft_view") {
       return json(req, 200, await adminDraftView(supabase, input));
+    }
+
+    if (input.mode === "diagnose_message_draft_state") {
+      return json(req, 200, await diagnoseMessageDraftState(supabase, input));
+    }
+
+    if (input.mode === "diagnose_all_bad_current_drafts") {
+      return json(req, 200, await diagnoseAllBadCurrentDrafts(supabase, input));
+    }
+
+    if (input.mode === "diagnose_selector_contract") {
+      return json(req, 200, await diagnoseSelectorContract(supabase, input));
+    }
+
+    if (input.mode === "repair_bad_current_drafts") {
+      return json(req, 200, await repairBadCurrentDraftsDryRun(supabase, input));
     }
 
     if (input.mode === "save_draft_review") {

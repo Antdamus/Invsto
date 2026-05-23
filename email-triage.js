@@ -1364,6 +1364,25 @@
     return currentDraftFromPayload(adminClassificationState.draftsByMessageId[messageId]);
   }
 
+  function logEmailTriageDraftDebug(selected, payload) {
+    if (window.DEBUG_EMAIL_TRIAGE !== true) return;
+    const currentDraft = currentDraftFromPayload(payload);
+    console.debug("[email-triage] draft selector debug", {
+      selected_message_id: selected?.message_id || null,
+      selected_classification_id: selected?.id || selected?.classification_id || null,
+      current_draft_id: currentDraft?.id || null,
+      current_draft_classification_id: currentDraft?.classification_id || null,
+      classification_mismatch_metadata: {
+        classification_mismatch: payload?.classification_mismatch === true,
+        selected_classification_id: payload?.selected_classification_id || null,
+        current_draft_classification_id: payload?.current_draft_classification_id || null,
+      },
+      validation_status: currentDraft?.validation_status || null,
+      draft_body_returned: currentDraft?.draft_content_returned === true,
+      fallback_used: currentDraft?.fallback_used === true || currentDraft?.metadata?.fallback_used === true,
+    });
+  }
+
   function validationExplanationsForDraft(draft) {
     if (!draft || typeof draft !== "object") return [];
     if (Array.isArray(draft.primary_validation_error_explanations) && draft.primary_validation_error_explanations.length) {
@@ -2100,6 +2119,7 @@
 
     try {
       const payload = await fetchDraftView(context, { messageId, classificationId });
+      logEmailTriageDraftDebug(selected, payload);
       setAdminClassificationState({
         draftLoadingMessageId: null,
         draftsByMessageId: {
