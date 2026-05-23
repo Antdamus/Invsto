@@ -991,6 +991,14 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   display: none !important;
 }
 
+#bulk-ebay-exclude svg {
+  stroke: #6b7280;
+}
+
+#bulk-ebay-include svg {
+  stroke: #0f766e;
+}
+
 .bulk-toolbar button::before {
   content: "";
   position: absolute;
@@ -1183,6 +1191,36 @@ class dropdown-toggle and the menu by the dropdown-menu*/
     0 18px 48px rgba(0, 0, 0, 0.08),
     inset 0 0 1px rgba(255, 255, 255, 0.5);
   z-index: 5;
+}
+
+.stock-card.ebay-sync-excluded {
+  border: 1px solid rgba(107, 114, 128, 0.28);
+}
+
+.stock-card.ebay-sync-excluded .stock-image-container {
+  filter: saturate(0.85);
+}
+
+.ebay-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  margin: -4px 0 14px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(107, 114, 128, 0.24);
+  background: rgba(249, 250, 251, 0.92);
+  color: #374151;
+  font-family: 'DM Serif Display', serif;
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.ebay-sync-badge svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
 }
 
 /* Image container */

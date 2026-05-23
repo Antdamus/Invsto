@@ -628,6 +628,49 @@ let uploadedImages = [];
     if (autoCostCheckbox) autoCostCheckbox.checked = true;
   }
 
+  function normalizeInventoryMetal(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes("silver")) return "silver";
+    if (normalized.includes("gold")) return "gold";
+    return null;
+  }
+
+  function purityToBasisPoints(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    const exact = {
+      "999": 9990,
+      "fine silver": 9990,
+      "950": 9500,
+      "925": 9250,
+      "900": 9000,
+      "850": 8500,
+      "24k": 10000,
+      "22k": 9167,
+      "18k": 7500,
+      "14k": 5833,
+      "10k": 4167,
+      "316l": null,
+      "304": null,
+    };
+    if (Object.prototype.hasOwnProperty.call(exact, normalized)) return exact[normalized];
+
+    const numeric = Number(normalized.replace(/[^\d.]/g, ""));
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    if (numeric <= 24 && normalized.includes("k")) return Math.round((numeric / 24) * 10000);
+    if (numeric <= 1000) return Math.round(numeric * 10);
+    if (numeric <= 10000) return Math.round(numeric);
+    return null;
+  }
+
+  function getAssistedMaterialPurityForSave() {
+    const selected = window.addItemAssistedModule?.getSelectedMaterialPurity?.() || {};
+    return {
+      metal: normalizeInventoryMetal(selected.material),
+      purity_basis_points: purityToBasisPoints(selected.purity),
+    };
+  }
+
 
   // === MULTI-IMAGE PREVIEW & UPLOAD ===
   function setupPhotoUploadPreview() {
@@ -2508,6 +2551,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const stone_type = document.getElementById("assisted-stone-type")?.value?.trim() || null;
   const item_length = document.getElementById("assisted-length")?.value?.trim() || null;
   const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
+  const materialPurity = getAssistedMaterialPurityForSave();
   // force sync dropdown selection into hidden input if user typed or skipped selection
   const categoryButton = document.getElementById("category-dropdown-toggle");
   const categoryHiddenInput = document.getElementById("category");
@@ -2617,6 +2661,8 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       weight,
       stone_type,
       item_length,
+      metal: materialPurity.metal,
+      purity_basis_points: materialPurity.purity_basis_points,
       price_per_weight,
       categories,
       cost,

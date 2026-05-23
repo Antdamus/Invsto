@@ -28,8 +28,14 @@ type ItemRow = {
   photo_url: string | null;
   categories: string[] | null;
   weight: number | null;
+  metal?: string | null;
+  purity_basis_points?: number | null;
   stone_type?: string | null;
   item_length?: string | null;
+  ebay_sync_enabled?: boolean | null;
+  ebay_category_id?: string | null;
+  ebay_condition?: string | null;
+  ebay_aspects?: JsonRecord | null;
   deleted_at?: string | null;
 };
 
@@ -43,6 +49,7 @@ type PreparedItem = {
   offerPayload: JsonRecord | null;
   hash: string;
   warnings: string[];
+  blockingReasons: string[];
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -112,6 +119,15 @@ function normalizeEbayCondition(value: unknown): string {
   return EBAY_CONDITION_VALUES.has(condition) ? condition : "NEW";
 }
 
+function firstText(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const found = value.map((entry) => String(entry || "").trim()).find(Boolean);
+    return found || null;
+  }
+  const text = String(value || "").trim();
+  return text || null;
+}
+
 function normalizePhotoPath(value: string): string {
   return value.split("?")[0].replace(/^\/+/, "");
 }
@@ -135,6 +151,9 @@ function collectPhotoPaths(item: ItemRow): string[] {
 }
 
 function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
+  const override = String(item.ebay_category_id || "").trim();
+  if (override) return override;
+
   const haystack = [
     item.title,
     item.description || "",
@@ -181,6 +200,11 @@ function inferJewelryStyle(item: ItemRow, categoryId: string): string {
 }
 
 function inferMetal(item: ItemRow): string | null {
+  const explicitMetal = String(item.metal || "").trim().toLowerCase();
+  if (explicitMetal.includes("silver")) return "Fine Silver";
+  if (explicitMetal.includes("gold")) return "Yellow Gold";
+  if (explicitMetal.includes("platinum")) return "Platinum";
+
   const text = itemSearchText(item);
   if (text.includes("sterling silver") || text.includes("925") || text.includes("fine silver")) return "Fine Silver";
   if (text.includes("white gold")) return "White Gold";
@@ -190,6 +214,14 @@ function inferMetal(item: ItemRow): string | null {
 }
 
 function inferMetalPurity(item: ItemRow): string | null {
+  const purity = Number(item.purity_basis_points || 0);
+  if (purity >= 9980) return String(item.metal || "").toLowerCase().includes("gold") ? "24k" : "999";
+  if (purity >= 9240 && purity <= 9260) return "925";
+  if (purity >= 9100 && purity <= 9200) return "22k";
+  if (purity >= 7450 && purity <= 7550) return "18k";
+  if (purity >= 5780 && purity <= 5880) return "14k";
+  if (purity >= 4100 && purity <= 4200) return "10k";
+
   const text = itemSearchText(item);
   if (text.includes("925") || text.includes("sterling silver") || text.includes("fine silver")) return "925";
   if (text.includes("14k")) return "14k";
@@ -255,7 +287,30 @@ function buildAspects(item: ItemRow, categoryId: string): Record<string, string[
   if (item.weight) aspects["Item Weight"] = [`${item.weight} g`];
   if (item.item_length) aspects["Item Length"] = [String(item.item_length)];
 
+  for (const [name, value] of Object.entries(item.ebay_aspects || {})) {
+    const trimmedName = String(name || "").trim();
+    const text = firstText(value);
+    if (trimmedName && text) aspects[trimmedName] = [text];
+  }
+
   return aspects;
+}
+
+function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: number, imageUrls: string[], categoryId: string, aspects: Record<string, string[]>): string[] {
+  const reasons: string[] = [];
+  if (!String(item.title || "").trim()) reasons.push("missing title");
+  if (!String(item.description || "").trim()) reasons.push("missing description");
+  if (!String(item.barcode || "").trim()) reasons.push("missing SKU/barcode");
+  if (price <= 0) reasons.push("missing sale price");
+  if (quantity <= 0) reasons.push("quantity is 0");
+  if (!categoryId) reasons.push("missing eBay category");
+  if (!imageUrls.length) reasons.push("missing public eBay image");
+
+  for (const aspectName of ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"]) {
+    if (!firstText(aspects[aspectName])) reasons.push(`missing ${aspectName}`);
+  }
+
+  return reasons;
 }
 
 async function sha256(input: unknown): Promise<string> {
@@ -328,6 +383,36 @@ async function ebayRequest(token: string, method: string, path: string, body?: u
   return payload;
 }
 
+async function findExistingEbayOffer(token: string, settings: SyncSettings, sku: string): Promise<{ offerId: string; listingId: string | null; status: string | null } | null> {
+  const query = new URLSearchParams({
+    sku,
+    marketplace_id: settings.marketplace_id,
+    format: settings.listing_format,
+  });
+  let payload: any = {};
+  try {
+    payload = await ebayRequest(token, "GET", `/sell/inventory/v1/offer?${query.toString()}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("failed (404)") || message.includes("\"errorId\":25713")) return null;
+    throw error;
+  }
+
+  const offers = Array.isArray(payload.offers) ? payload.offers : [];
+  const offer = offers.find((entry: any) =>
+    String(entry?.sku || "") === sku &&
+    String(entry?.marketplaceId || "") === settings.marketplace_id &&
+    String(entry?.format || "") === settings.listing_format
+  ) || offers[0];
+
+  if (!offer?.offerId) return null;
+  return {
+    offerId: String(offer.offerId),
+    listingId: offer?.listing?.listingId ? String(offer.listing.listingId) : null,
+    status: offer?.status ? String(offer.status) : null,
+  };
+}
+
 async function ensurePublicImageUrls(supabase: any, item: ItemRow, options: { copyMissing: boolean }): Promise<string[]> {
   const urls: string[] = [];
 
@@ -383,13 +468,16 @@ async function prepareItem(
   const categoryId = chooseCategoryId(item, settings);
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
-  const condition = normalizeEbayCondition(settings.default_condition);
-  if (condition !== settings.default_condition) warnings.push(`Unsupported eBay condition "${settings.default_condition || "blank"}"; using NEW.`);
+  const rawCondition = item.ebay_condition || settings.default_condition;
+  const condition = normalizeEbayCondition(rawCondition);
+  if (condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
+  const aspects = buildAspects(item, categoryId);
+  const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageUrls, categoryId, aspects);
 
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
     description: item.description || item.title || sku,
-    aspects: buildAspects(item, categoryId),
+    aspects,
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
 
@@ -405,7 +493,7 @@ async function prepareItem(
     product,
   };
 
-  const offerPayload = quantity > 0 && price > 0 ? {
+  const offerPayload = price > 0 ? {
     sku,
     marketplaceId: settings.marketplace_id,
     format: settings.listing_format,
@@ -428,7 +516,7 @@ async function prepareItem(
   } : null;
 
   const hash = await sha256({ inventoryPayload, offerPayload });
-  return { item, sku, quantity, imageUrls, categoryId, inventoryPayload, offerPayload, hash, warnings };
+  return { item, sku, quantity, imageUrls, categoryId, inventoryPayload, offerPayload, hash, warnings, blockingReasons };
 }
 
 async function loadSettings(supabase: any): Promise<SyncSettings> {
@@ -445,8 +533,9 @@ async function loadSettings(supabase: any): Promise<SyncSettings> {
 async function loadItems(supabase: any, itemIds: string[], limit: number): Promise<Array<ItemRow & { quantity: number }>> {
   let query = supabase
     .from("item_types")
-    .select("id,title,description,sale_price,barcode,photos,photo_url,categories,weight,stone_type,item_length,deleted_at")
+    .select("id,title,description,sale_price,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
     .is("deleted_at", null)
+    .neq("ebay_sync_enabled", false)
     .not("barcode", "is", null)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -555,8 +644,9 @@ Deno.serve(async (req) => {
             categoryId: next.categoryId,
             price: toMoney(item.sale_price),
             imageCount: next.imageUrls.length,
-            status: next.offerPayload ? "ready" : "inventory_only",
-            warnings: next.warnings,
+            status: next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only",
+            publishReady: next.blockingReasons.length === 0,
+            warnings: [...next.warnings, ...next.blockingReasons.map((reason) => `Publish readiness: ${reason}.`)],
           });
         }
       } catch (error) {
@@ -586,28 +676,43 @@ Deno.serve(async (req) => {
         const status = entry.quantity <= 0 ? "out_of_stock" : "synced";
 
         try {
-          let offerId = existingLink?.offer_id || null;
+          let offerId = existingLink?.offer_id ? String(existingLink.offer_id) : "";
+          let listingId = existingLink?.listing_id ? String(existingLink.listing_id) : "";
+          let matchedExistingOffer: JsonRecord | null = null;
           let offerResponse: JsonRecord = {};
           let publishResponse: JsonRecord = {};
 
           if (entry.offerPayload) {
+            if (!offerId) {
+              const existingOffer = await findExistingEbayOffer(token, settings, entry.sku);
+              if (existingOffer) {
+                offerId = existingOffer.offerId;
+                listingId = existingOffer.listingId || listingId;
+                matchedExistingOffer = { ...existingOffer };
+              }
+            }
+
             if (offerId) {
-              offerResponse = await ebayRequest(token, "PUT", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, entry.offerPayload);
-            } else {
+              const updateResponse = await ebayRequest(token, "PUT", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, entry.offerPayload);
+              offerResponse = matchedExistingOffer ? { matchedExistingOffer, update: updateResponse } : updateResponse;
+            } else if (entry.quantity > 0) {
               offerResponse = await ebayRequest(token, "POST", "/sell/inventory/v1/offer", entry.offerPayload);
               offerId = String(offerResponse.offerId || "");
             }
 
-            if (publishAllowed && offerId && !existingLink?.listing_id) {
+            if (publishAllowed && offerId && !listingId) {
+              if (entry.blockingReasons.length) {
+                throw new Error(`Item is not ready to publish: ${entry.blockingReasons.join(", ")}`);
+              }
               publishResponse = await ebayRequest(token, "POST", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`);
+              listingId = String((publishResponse as any).listingId || listingId || "");
             }
           }
 
-          const listingId = String((publishResponse as any).listingId || existingLink?.listing_id || "");
           await supabase.from("ebay_inventory_links").upsert({
             item_type_id: entry.item.id,
             sku: entry.sku,
-            offer_id: offerId,
+            offer_id: offerId || null,
             listing_id: listingId || null,
             status,
             last_inventory_hash: entry.hash,
@@ -629,9 +734,12 @@ Deno.serve(async (req) => {
             itemTypeId: entry.item.id,
             sku: entry.sku,
             status,
-            offerId,
+            offerId: offerId || null,
             listingId: listingId || null,
             published: Boolean((publishResponse as any).listingId),
+            matchedExistingListing: Boolean(matchedExistingOffer),
+            publishReady: entry.blockingReasons.length === 0,
+            warnings: entry.blockingReasons,
           });
         } catch (error) {
           errors++;

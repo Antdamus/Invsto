@@ -8,8 +8,23 @@ This project now has a safe first pass for syncing internal `item_types` invento
 2. Stock quantity is summed from `item_stock_locations`.
 3. Photos are copied from the private `photos` bucket to the public `public-ebay-photos` bucket so eBay can fetch them.
 4. The Edge Function creates/replaces eBay inventory item records.
-5. For in-stock priced items, it creates or updates eBay offers.
+5. For priced items, it first looks for an existing eBay offer with the same SKU. If one exists, it updates that offer/listing; if not, it creates a new offer only for in-stock items.
 6. Publishing live listings is blocked unless both `ebay_inventory_settings.publish_enabled` and `EBAY_SYNC_ALLOW_PUBLISH` are true.
+
+## Item metadata
+
+The sync uses normal inventory fields first, then eBay-specific overrides when present:
+
+- `barcode` is the eBay SKU.
+- `sale_price` is the eBay offer price.
+- `item_stock_locations.quantity` is summed into eBay quantity.
+- `metal`, `purity_basis_points`, `stone_type`, `item_length`, `categories`, `title`, and `description` are used to build eBay item specifics.
+- `ebay_category_id`, `ebay_condition`, and `ebay_aspects` override inferred eBay values for one-off items.
+- `ebay_sync_enabled = false` excludes an item from automatic sync.
+
+Publishing is blocked for an item until it has title, description, SKU, price, stock, category, at least one public image, and the key jewelry aspects eBay expects: Brand, Type, Style, Main Stone, Metal, and Metal Purity.
+
+Admins can mark test items directly from the Stock page: select the cards, then use `Exclude eBay` in the bulk toolbar. Excluded cards show an `eBay sync off` badge and are skipped by both automatic sync and the older eBay export.
 
 ## Required Supabase secrets
 
@@ -55,7 +70,7 @@ Keep `publish_enabled = false` until dry runs and unpublished offer creation loo
 Deploy the helper:
 
 ```bash
-supabase functions deploy ebay-publishing-setup
+npx supabase functions deploy ebay-publishing-setup --no-verify-jwt --project-ref byhytmarmigalvawkedi
 ```
 
 List eBay business policies and inventory locations:
@@ -79,6 +94,12 @@ curl -X POST "$SUPABASE_FUNCTIONS_URL/ebay-publishing-setup" \
 ```
 
 ## Invoke
+
+Deploy the sync function:
+
+```bash
+npx supabase functions deploy ebay-inventory-sync --no-verify-jwt --project-ref byhytmarmigalvawkedi
+```
 
 Dry run:
 

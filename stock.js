@@ -67,6 +67,7 @@ const STOCK_WORKER_ITEM_SELECT = [
   "categories",
   "stock",
   "stock_batch_size_update",
+  "ebay_sync_enabled",
   "added_by",
   "added_by_email",
 ].join(", ");
@@ -454,8 +455,12 @@ function buildLocationChips(item) {
       const tooltip = item.stock_tooltip || "";
       const showSensitive = canViewSensitiveStockData();
       const isDeleted = isStockItemDeleted(item);
+      const isEbaySyncOff = item.ebay_sync_enabled === false;
       const descriptionText = String(item.description || "").trim() || "No description recorded.";
       const hasFullDescription = Boolean(String(item.description || "").trim());
+      const ebaySyncBadge = isEbaySyncOff
+        ? `<span class="ebay-sync-badge" title="This item is excluded from automatic eBay sync"><i data-lucide="cloud-off"></i> eBay sync off</span>`
+        : "";
       const stockLabel = `
         <button type="button" class="stock-count ${stockClass}" data-tooltip="${escapeStockHtml(tooltip)}" data-id="${item.id}">
           ${stock === 0 ? `<i data-lucide="alert-circle" class="stock-alert-icon"></i>` : ""}
@@ -488,6 +493,7 @@ function buildLocationChips(item) {
             <h2>${escapeStockHtml(item.title || "Untitled item")}</h2>
             ${stockLabel}
           </div>
+          ${ebaySyncBadge}
           <div class="stock-description-wrap">
             <p class="stock-description">${escapeStockHtml(descriptionText)}</p>
             ${hasFullDescription ? `<button type="button" class="stock-description-read-btn" data-id="${item.id}" aria-label="Read full description for ${escapeStockHtml(item.title || "this item")}">Read full description</button>` : ""}
@@ -721,6 +727,7 @@ function buildLocationChips(item) {
     if (isFavorited) card.classList.add("favorited");
     if (isSelected) card.classList.add("selected");
     if (isStockItemDeleted(item)) card.classList.add("is-deleted");
+    if (item.ebay_sync_enabled === false) card.classList.add("ebay-sync-excluded");
 
     const photoCarousel = await buildCarousel(item, index);
     const floatControls = buildFloatControls(item, isSelected, isFavorited);
@@ -2184,19 +2191,64 @@ function buildLocationChips(item) {
     }
   }
 
+  async function setSelectedEbaySyncEnabled(enabled) {
+    if (!canViewSensitiveStockData()) {
+      showToast("Only admins can change eBay sync status.");
+      return;
+    }
+
+    const ids = Array.from(selectedItems);
+    if (!ids.length) return;
+
+    showLoading();
+    try {
+      const { error } = await supabase
+        .from("item_types")
+        .update({ ebay_sync_enabled: enabled })
+        .in("id", ids);
+
+      if (error) throw error;
+
+      const idSet = new Set(ids.map(String));
+      allItems = allItems.map((item) => (
+        idSet.has(String(item.id))
+          ? { ...item, ebay_sync_enabled: enabled }
+          : item
+      ));
+
+      await bumpInventoryVersion(ids);
+      clearSelectionAndRefresh();
+      updateFilterChips(getActiveFilters());
+      showToast(enabled
+        ? `${ids.length} item${ids.length === 1 ? "" : "s"} will be included in eBay sync.`
+        : `${ids.length} item${ids.length === 1 ? "" : "s"} excluded from eBay sync.`
+      );
+    } catch (error) {
+      console.error("eBay sync status update failed:", error);
+      showToast(error?.message || "Could not update eBay sync status.");
+    } finally {
+      hideLoading();
+    }
+  }
+
   //function to count how many items have been selected
   function updateBulkToolbar() {
     const toolbar = document.getElementById("bulk-toolbar");
     const count = document.getElementById("selected-count");
     const deleteBtn = document.getElementById("bulk-delete");
     const restoreBtn = document.getElementById("bulk-restore");
+    const ebayExcludeBtn = document.getElementById("bulk-ebay-exclude");
+    const ebayIncludeBtn = document.getElementById("bulk-ebay-include");
     const selectedCount = selectedItems.size;
+    const canManageEbaySync = canViewSensitiveStockData() && !showDeletedItems;
 
     count.textContent = `${selectedCount} selected`;
     toolbar.classList.toggle("show", selectedCount > 0);
     toolbar.classList.toggle("hide", selectedCount === 0);
     if (deleteBtn) deleteBtn.classList.toggle("hidden", showDeletedItems);
     if (restoreBtn) restoreBtn.classList.toggle("hidden", !showDeletedItems || !canViewSensitiveStockData());
+    if (ebayExcludeBtn) ebayExcludeBtn.classList.toggle("hidden", !canManageEbaySync);
+    if (ebayIncludeBtn) ebayIncludeBtn.classList.toggle("hidden", !canManageEbaySync);
   } 
 
   //function activated upon selecting checkbox
@@ -2458,6 +2510,14 @@ function buildLocationChips(item) {
     });
 
     // 📄 Export selected cards to CSV
+    document.getElementById("bulk-ebay-exclude")?.addEventListener("click", async () => {
+      await setSelectedEbaySyncEnabled(false);
+    });
+
+    document.getElementById("bulk-ebay-include")?.addEventListener("click", async () => {
+      await setSelectedEbaySyncEnabled(true);
+    });
+
     document.getElementById("bulk-export")?.addEventListener("click", () => {
       if (!canViewSensitiveStockData()) {
         showToast("Only admins can export stock data.");
@@ -6612,11 +6672,13 @@ function setupEbayExportButton() {
   if (!ebayBtn || !modal) return;
 
   ebayBtn.addEventListener("click", async () => {
-    const itemsToExport = allItems.filter(item => selectedItems.has(item.id));
+    const selectedForExport = allItems.filter(item => selectedItems.has(item.id));
+    const itemsToExport = selectedForExport.filter(item => item.ebay_sync_enabled !== false);
+    const skippedSyncOffCount = selectedForExport.length - itemsToExport.length;
     const exportType = document.querySelector('input[name="ebay-export-type"]:checked')?.value || "pendant";
     const exportProfile = window.EBAY_EXPORT_PROFILES?.[exportType];
 
-    if (!itemsToExport.length) {
+    if (!selectedForExport.length) {
       showToast("🛑 No items selected for export.");
       updateEbayExportProgress({
         title: "Nothing to export",
@@ -6624,6 +6686,20 @@ function setupEbayExportButton() {
         visible: true
       });
       return;
+    }
+
+    if (!itemsToExport.length) {
+      showToast("Selected items are excluded from eBay sync/export.");
+      updateEbayExportProgress({
+        title: "Nothing to export",
+        detail: "Every selected item is marked eBay sync off.",
+        visible: true
+      });
+      return;
+    }
+
+    if (skippedSyncOffCount > 0) {
+      showToast(`${skippedSyncOffCount} eBay sync-off item${skippedSyncOffCount === 1 ? "" : "s"} skipped.`);
     }
 
     ebayBtn.disabled = true;

@@ -3269,6 +3269,10 @@
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
       getAISelectedUploadedImagePath: () => state.aiSelectedUploadedImagePath,
+      getSelectedMaterialPurity: () => ({
+        material: asTrimmedString(elements.materialSelect?.value),
+        purity: asTrimmedString(elements.puritySelect?.value),
+      }),
       refreshUploadedImages: () => reloadCompletedCapturePhotos(elements, {
         refreshNotice: true,
         autoProcess: false,
