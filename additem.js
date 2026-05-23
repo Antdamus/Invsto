@@ -38,6 +38,15 @@ const stockPlacementScanTimers = {};
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
 const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
+const ADD_ITEM_EBAY_CATEGORY_OPTIONS = [
+  { id: "261988", label: "Fine Jewelry > Bracelets & Charms", terms: ["bracelet", "bangle", "tennis"] },
+  { id: "261989", label: "Fine Jewelry > Brooches & Pins", terms: ["brooch", "pin"] },
+  { id: "261990", label: "Fine Jewelry > Earrings", terms: ["earring", "earrings", "stud", "hoop"] },
+  { id: "261992", label: "Fine Jewelry > Jewelry Sets", terms: ["jewelry set", "set"] },
+  { id: "261993", label: "Fine Jewelry > Necklaces & Pendants", terms: ["necklace", "pendant", "chain", "charm"] },
+  { id: "261995", label: "Fine Jewelry > Toe Rings", terms: ["toe ring"] },
+  { id: "261994", label: "Fine Jewelry > Rings", terms: ["ring"] },
+];
 let automaticDymoTimer = null;
 let addItemSuccessReloadTimer = null;
 let latestItemLabelPrintState = null;
@@ -626,6 +635,11 @@ let uploadedImages = [];
       pricePerWeightInput.value = "";
     }
     if (autoCostCheckbox) autoCostCheckbox.checked = true;
+    const ebaySyncEnabled = document.getElementById("ebay-sync-enabled");
+    if (ebaySyncEnabled) ebaySyncEnabled.checked = true;
+    const ebayCategorySelect = document.getElementById("ebay-category-id");
+    if (ebayCategorySelect) ebayCategorySelect.value = "";
+    updateAddItemEbayReadiness({ infer: false });
   }
 
   function normalizeInventoryMetal(value) {
@@ -669,6 +683,127 @@ let uploadedImages = [];
       metal: normalizeInventoryMetal(selected.material),
       purity_basis_points: purityToBasisPoints(selected.purity),
     };
+  }
+
+  document.addEventListener("add-item-assisted:metadata-change", () => updateAddItemEbayReadiness());
+
+  function escapeAddItemHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escapeAddItemRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function addItemTextMatchesTerm(text, term) {
+    const pattern = escapeAddItemRegExp(term).replace(/\s+/g, "\\s+");
+    return new RegExp(`\\b${pattern}\\b`, "i").test(text);
+  }
+
+  function getAddItemEbayCategoryOption(categoryId) {
+    const normalized = String(categoryId || "").trim();
+    return ADD_ITEM_EBAY_CATEGORY_OPTIONS.find((option) => option.id === normalized) || null;
+  }
+
+  function inferAddItemEbayCategory() {
+    const text = [
+      document.getElementById("title")?.value || "",
+      document.getElementById("description")?.value || "",
+      document.getElementById("category")?.value || "",
+      document.getElementById("category-dropdown-toggle")?.textContent || "",
+    ].join(" ").toLowerCase();
+
+    return ADD_ITEM_EBAY_CATEGORY_OPTIONS.find((option) => (
+      option.terms.some((term) => addItemTextMatchesTerm(text, term))
+    )) || null;
+  }
+
+  function populateAddItemEbayCategorySelect() {
+    const select = document.getElementById("ebay-category-id");
+    if (!select) return;
+
+    select.innerHTML = [
+      '<option value="">Choose an eBay category...</option>',
+      ...ADD_ITEM_EBAY_CATEGORY_OPTIONS.map((option) => (
+        `<option value="${escapeAddItemHtml(option.id)}">${escapeAddItemHtml(option.label)} (${escapeAddItemHtml(option.id)})</option>`
+      )),
+    ].join("");
+  }
+
+  function collectAddItemEbayReadiness() {
+    const syncEnabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
+    const categoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
+    const materialPurity = getAssistedMaterialPurityForSave();
+    const photoFiles = photoInput?.files || [];
+    const assistedSelectedImages = window.addItemAssistedModule?.getSelectedUploadedImagesForSave?.() || [];
+    const pendingStock = pendingStockAssignments[barcodeInput?.value?.trim() || ""] || null;
+    const missing = [];
+
+    if (!syncEnabled) return { syncEnabled, categoryId, missing };
+    if (!getAddItemEbayCategoryOption(categoryId)) missing.push("eBay category");
+    if (!String(document.getElementById("title")?.value || "").trim()) missing.push("title");
+    if (!String(document.getElementById("description")?.value || "").trim()) missing.push("description");
+    if (!(parseFloat(document.getElementById("sale-price")?.value?.replace(/,/g, "") || "0") > 0)) missing.push("sale price");
+    if (!materialPurity.metal) missing.push("material");
+    if (!materialPurity.purity_basis_points) missing.push("purity");
+    if (!String(document.getElementById("assisted-stone-type")?.value || "").trim()) missing.push("stone type");
+    if (!photoFiles.length && !assistedSelectedImages.length) missing.push("photo");
+    if (!pendingStock || !(Number(pendingStock.quantity) > 0)) missing.push("stock quantity");
+
+    return { syncEnabled, categoryId, missing };
+  }
+
+  function updateAddItemEbayReadiness(options = {}) {
+    const select = document.getElementById("ebay-category-id");
+    const enabled = document.getElementById("ebay-sync-enabled");
+    const summary = document.getElementById("ebay-readiness-summary");
+    if (!select || !enabled || !summary) return;
+
+    select.disabled = !enabled.checked;
+    if (enabled.checked && !select.value && options.infer !== false) {
+      const inferred = inferAddItemEbayCategory();
+      if (inferred) select.value = inferred.id;
+    }
+
+    const readiness = collectAddItemEbayReadiness();
+    if (!readiness.syncEnabled) {
+      summary.className = "form-field form-field-wide ebay-readiness-summary is-muted";
+      summary.textContent = "This item will be saved internally but excluded from eBay sync.";
+      return;
+    }
+
+    const category = getAddItemEbayCategoryOption(readiness.categoryId);
+    if (!readiness.missing.length) {
+      summary.className = "form-field form-field-wide ebay-readiness-summary is-ready";
+      summary.textContent = `Ready for eBay sync as ${category.label}.`;
+      return;
+    }
+
+    summary.className = "form-field form-field-wide ebay-readiness-summary is-warning";
+    summary.textContent = `Needs before clean eBay publishing: ${readiness.missing.join(", ")}.`;
+  }
+
+  function setupAddItemEbayReadiness() {
+    populateAddItemEbayCategorySelect();
+    updateAddItemEbayReadiness();
+
+    ["title", "description", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "scanned-barcode"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("input", () => updateAddItemEbayReadiness());
+      document.getElementById(id)?.addEventListener("change", () => updateAddItemEbayReadiness());
+    });
+
+    document.getElementById("ebay-sync-enabled")?.addEventListener("change", () => updateAddItemEbayReadiness());
+    document.getElementById("ebay-category-id")?.addEventListener("change", () => updateAddItemEbayReadiness({ infer: false }));
+    document.addEventListener("click", (event) => {
+      if (event.target?.closest?.("#category-dropdown-menu .dropdown-option")) {
+        setTimeout(() => updateAddItemEbayReadiness(), 0);
+      }
+    });
   }
 
 
@@ -874,6 +1009,9 @@ let uploadedImages = [];
           toggleBtn.innerText = value;
 
           onClick(value, isNew, optionEl);
+          if (hiddenInputId === "category") {
+            updateAddItemEbayReadiness();
+          }
 
           menu.classList.remove("show");
         });
@@ -940,6 +1078,7 @@ let uploadedImages = [];
       // New: round sale price up to nearest 10
       const salePrice = Math.ceil((newCost * 7.5) / 10) * 10;
       document.getElementById('sale-price').value = salePrice.toLocaleString("en-US");
+      updateAddItemEbayReadiness();
     }
   }
 
@@ -978,6 +1117,7 @@ let uploadedImages = [];
       } else {
         document.getElementById('sale-price').value = '';
       }
+      updateAddItemEbayReadiness();
     });
   }
 
@@ -2267,6 +2407,7 @@ let uploadedImages = [];
       showAdminLocationStockModal("-1").catch((error) => {
         console.error("Failed to open stock placement modal:", error);
       });
+      updateAddItemEbayReadiness();
     });
   }
 
@@ -2505,8 +2646,11 @@ let uploadedImages = [];
       if (!document.querySelector(".modal:not(.hidden)")) {
         document.body.classList.remove("modal-open");
       }
+      updateAddItemEbayReadiness();
     };
   }
+
+  setupAddItemEbayReadiness();
 
   //== run the add location modal only if the user is an admin
   if (window.currentUser && window.currentUser.user_metadata?.role === "admin") {
@@ -2552,6 +2696,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const item_length = document.getElementById("assisted-length")?.value?.trim() || null;
   const price_per_weight = parseFloat(pricePerWeightInput?.value || "0");
   const materialPurity = getAssistedMaterialPurityForSave();
+  const ebay_sync_enabled = document.getElementById("ebay-sync-enabled")?.checked !== false;
   // force sync dropdown selection into hidden input if user typed or skipped selection
   const categoryButton = document.getElementById("category-dropdown-toggle");
   const categoryHiddenInput = document.getElementById("category");
@@ -2560,6 +2705,15 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   }
   const categoryInput = document.getElementById("category").value.trim();
   const categories = categoryInput ? [categoryInput] : [];
+  const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
+  const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
+  const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
+  if (ebay_sync_enabled && !getAddItemEbayCategoryOption(ebay_category_id)) {
+    showToast("Choose an eBay category, or turn off eBay sync for this item.");
+    updateAddItemEbayReadiness({ infer: false });
+    releaseAddItemSubmit();
+    return;
+  }
   const cost = parseFloat(document.getElementById("cost").value.replace(/,/g, ''));
   const sale_price = parseFloat(document.getElementById("sale-price").value.replace(/,/g, ''));
   const distributor_name = document.getElementById("distributor-name").value.trim();
@@ -2663,6 +2817,9 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       item_length,
       metal: materialPurity.metal,
       purity_basis_points: materialPurity.purity_basis_points,
+      ebay_sync_enabled,
+      ebay_category_id,
+      ebay_condition: "NEW",
       price_per_weight,
       categories,
       cost,
