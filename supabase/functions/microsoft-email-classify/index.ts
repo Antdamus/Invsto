@@ -17,7 +17,7 @@ const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -433,6 +433,9 @@ async function parseInput(req: Request): Promise<Input> {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
   if (mode === "message_detail" && !messageId) {
+    throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "admin_context_view" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
   if (mode === "save_review" && !classificationId) {
@@ -2202,6 +2205,303 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
   };
 }
 
+function uniqueIds(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function compactTask(row: Record<string, any>, source: "order_task" | "return_task") {
+  return {
+    source,
+    id: row.id,
+    task_type: row.task_type,
+    title: shortText(row.title, 180) || null,
+    status: row.status,
+    priority: row.priority,
+    due_at: row.due_at || null,
+    started_at: row.started_at || null,
+    resolved_at: row.resolved_at || null,
+    created_at: row.created_at || null,
+  };
+}
+
+function safePriorReturnMessage(row: Record<string, any>) {
+  return {
+    id: row.id,
+    return_case_id: row.return_case_id || null,
+    order_id: row.order_id || null,
+    order_number: row.order_number || null,
+    ebay_return_id: row.ebay_return_id || null,
+    buyer_username: row.buyer_username || null,
+    direction: row.direction,
+    channel: row.channel,
+    message_status: row.message_status,
+    item_title: shortText(row.item_title, 180) || null,
+    return_reason: shortText(row.return_reason, 180) || null,
+    sent_at: row.sent_at || null,
+    logged_at: row.logged_at || null,
+    safe_summary: shortText(row.message_body, 300) || null,
+  };
+}
+
+async function adminContextView(supabase: ServiceClient, input: Input) {
+  if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "admin_context_view" });
+
+  const { data: message, error: messageError } = await supabase
+    .from("email_messages")
+    .select("id, subject, from_email, from_name, sender_email, sender_name, received_at, sync_status")
+    .eq("id", input.messageId)
+    .maybeSingle();
+  if (messageError) throw new ClassifierError("message_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+  if (!message?.id) throw new ClassifierError("message_not_found", { status: 404, phase: "admin_context_view", messageId: input.messageId });
+
+  const { data: links, error: linksError } = await supabase
+    .from("email_message_links")
+    .select("id, link_type, matched_value, match_method, confidence, status, ebay_order_id, ebay_order_line_id, item_id, sale_id, metadata, created_at")
+    .eq("message_id", input.messageId)
+    .in("status", ["suggested", "confirmed"])
+    .order("confidence", { ascending: false, nullsFirst: false })
+    .limit(50);
+  if (linksError) throw new ClassifierError("link_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+
+  const activeLinks = (links || []) as Array<Record<string, any>>;
+  const orderIds = uniqueIds(activeLinks.map((link) => link.ebay_order_id));
+  const orderLineIds = uniqueIds(activeLinks.map((link) => link.ebay_order_line_id));
+  const itemIds = uniqueIds(activeLinks.map((link) => link.item_id));
+  const returnCaseIdsFromMetadata = uniqueIds(activeLinks.map((link) => link.metadata?.return_case_id));
+
+  const [ordersResult, linesResult] = await Promise.all([
+    orderIds.length
+      ? supabase
+        .from("ebay_orders")
+        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status")
+        .in("id", orderIds)
+      : Promise.resolve({ data: [], error: null }),
+    orderLineIds.length
+      ? supabase
+        .from("ebay_order_lines")
+        .select("id, order_id, item_number, transaction_id, item_title, custom_label, quantity, fulfilled_quantity, line_status, internal_item_id, sale_id")
+        .in("id", orderLineIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (ordersResult.error) throw new ClassifierError("order_context_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+  if (linesResult.error) throw new ClassifierError("order_line_context_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+
+  const linkedLines = (linesResult.data || []) as Array<Record<string, any>>;
+  const lineOrderIds = uniqueIds(linkedLines.map((line) => line.order_id));
+  const allOrderIds = uniqueIds([...orderIds, ...lineOrderIds]);
+
+  const [lineOrdersResult, orderLinesForOrdersResult, returnCasesByOrderResult, returnCasesByIdResult, orderTasksResult] = await Promise.all([
+    lineOrderIds.filter((id) => !orderIds.includes(id)).length
+      ? supabase
+        .from("ebay_orders")
+        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status")
+        .in("id", lineOrderIds.filter((id) => !orderIds.includes(id)))
+      : Promise.resolve({ data: [], error: null }),
+    allOrderIds.length
+      ? supabase
+        .from("ebay_order_lines")
+        .select("id, order_id, item_number, transaction_id, item_title, custom_label, quantity, fulfilled_quantity, line_status, internal_item_id, sale_id")
+        .in("order_id", allOrderIds)
+        .limit(50)
+      : Promise.resolve({ data: [], error: null }),
+    allOrderIds.length
+      ? supabase
+        .from("ebay_return_cases")
+        .select("id, order_id, order_number, case_type, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, received_at, closed_at")
+        .in("order_id", allOrderIds)
+      : Promise.resolve({ data: [], error: null }),
+    returnCaseIdsFromMetadata.length
+      ? supabase
+        .from("ebay_return_cases")
+        .select("id, order_id, order_number, case_type, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, received_at, closed_at")
+        .in("id", returnCaseIdsFromMetadata)
+      : Promise.resolve({ data: [], error: null }),
+    allOrderIds.length
+      ? supabase
+        .from("ebay_order_tasks")
+        .select("id, order_id, order_line_ids, task_type, title, status, priority, due_at, started_at, resolved_at, created_at")
+        .in("order_id", allOrderIds)
+        .order("created_at", { ascending: false })
+        .limit(20)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  for (const result of [lineOrdersResult, orderLinesForOrdersResult, returnCasesByOrderResult, returnCasesByIdResult, orderTasksResult]) {
+    if (result.error) throw new ClassifierError("business_context_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+  }
+
+  const orders = [...((ordersResult.data || []) as Array<Record<string, any>>), ...((lineOrdersResult.data || []) as Array<Record<string, any>>)];
+  const lineById = new Map<string, Record<string, any>>();
+  for (const line of [...linkedLines, ...((orderLinesForOrdersResult.data || []) as Array<Record<string, any>>)]) {
+    lineById.set(String(line.id), line);
+  }
+  const lines = [...lineById.values()];
+  const internalItemIds = uniqueIds([...itemIds, ...lines.map((line) => line.internal_item_id)]);
+  const internalItemsResult = internalItemIds.length
+    ? await supabase
+      .from("item_types")
+      .select("id, title, barcode, qr_code, categories")
+      .in("id", internalItemIds)
+    : { data: [], error: null };
+  if (internalItemsResult.error) throw new ClassifierError("item_context_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+
+  const returnCaseById = new Map<string, Record<string, any>>();
+  for (const row of [...((returnCasesByOrderResult.data || []) as Array<Record<string, any>>), ...((returnCasesByIdResult.data || []) as Array<Record<string, any>>)]) {
+    returnCaseById.set(String(row.id), row);
+  }
+  const returnCases = [...returnCaseById.values()];
+  const returnCaseIds = uniqueIds(returnCases.map((row) => row.id));
+
+  const [returnItemsResult, returnTasksResult, returnMessagesResult] = await Promise.all([
+    returnCaseIds.length
+      ? supabase
+        .from("ebay_return_items")
+        .select("id, return_case_id, order_id, order_line_id, internal_item_id, item_title, item_number, expected_quantity, received_quantity, condition_received, disposition, processed_at")
+        .in("return_case_id", returnCaseIds)
+      : Promise.resolve({ data: [], error: null }),
+    returnCaseIds.length
+      ? supabase
+        .from("ebay_return_tasks")
+        .select("id, return_case_id, order_id, order_line_ids, task_type, title, status, priority, due_at, started_at, resolved_at, created_at")
+        .in("return_case_id", returnCaseIds)
+        .order("created_at", { ascending: false })
+        .limit(20)
+      : Promise.resolve({ data: [], error: null }),
+    returnCaseIds.length || allOrderIds.length
+      ? supabase
+        .from("ebay_return_messages")
+        .select("id, return_case_id, order_id, order_number, ebay_return_id, buyer_username, direction, channel, message_status, message_body, item_title, return_reason, sent_at, logged_at")
+        .or([
+          returnCaseIds.length ? `return_case_id.in.(${returnCaseIds.join(",")})` : "",
+          allOrderIds.length ? `order_id.in.(${allOrderIds.join(",")})` : "",
+        ].filter(Boolean).join(","))
+        .order("logged_at", { ascending: false })
+        .limit(10)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  for (const result of [returnItemsResult, returnTasksResult, returnMessagesResult]) {
+    if (result.error) throw new ClassifierError("return_context_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
+  }
+
+  const itemById = new Map<string, Record<string, any>>();
+  for (const row of internalItemsResult.data || []) itemById.set(String(row.id), row as Record<string, any>);
+
+  const unknown: string[] = [];
+  if (!activeLinks.length) unknown.push("deterministic link not found");
+  if (!orders.some((order) => order.tracking_number)) unknown.push("tracking number not found");
+  if (!returnCases.length) unknown.push("return case not found");
+  if (!lines.length) unknown.push("order line link not found");
+  if (lines.some((line) => !line.internal_item_id) || (!lines.length && !itemIds.length)) unknown.push("internal item link not found");
+
+  const hasMaskedEmail = [message.from_email, message.sender_email]
+    .map((value) => String(value || "").toLowerCase())
+    .some((value) => value.includes("ebay") || value.includes("noreply") || value.includes("no-reply"));
+  if (hasMaskedEmail) unknown.push("buyer email masked/unreliable");
+
+  return {
+    ok: true,
+    mode: "admin_context_view",
+    message_id: message.id,
+    context_version: "readonly-ebay-context-v1",
+    known: {
+      order: orders.map((order) => ({
+        id: order.id,
+        order_number: order.order_number,
+        sales_record_number: order.sales_record_number || null,
+        buyer_username: order.buyer_username || null,
+        sale_date: order.sale_date || null,
+        paid_on_date: order.paid_on_date || null,
+        ship_by_date: order.ship_by_date || null,
+        shipped_on_date: order.shipped_on_date || null,
+        status: order.status || null,
+      })),
+      order_lines: lines.map((line) => ({
+        id: line.id,
+        order_id: line.order_id,
+        item_number: line.item_number || null,
+        transaction_id: line.transaction_id || null,
+        item_title: shortText(line.item_title, 240) || null,
+        custom_label: line.custom_label || null,
+        quantity: line.quantity,
+        fulfilled_quantity: line.fulfilled_quantity,
+        line_status: line.line_status || null,
+        internal_item: line.internal_item_id && itemById.has(String(line.internal_item_id))
+          ? {
+            id: line.internal_item_id,
+            title: shortText(itemById.get(String(line.internal_item_id))?.title, 200) || null,
+            barcode: itemById.get(String(line.internal_item_id))?.barcode || null,
+            qr_code: itemById.get(String(line.internal_item_id))?.qr_code || null,
+          }
+          : null,
+      })),
+      return_case: returnCases.map((returnCase) => ({
+        id: returnCase.id,
+        order_id: returnCase.order_id || null,
+        order_number: returnCase.order_number || null,
+        case_type: returnCase.case_type || null,
+        ebay_return_id: returnCase.ebay_return_id || null,
+        buyer_username: returnCase.buyer_username || null,
+        return_reason: shortText(returnCase.return_reason, 240) || null,
+        return_tracking_number: returnCase.return_tracking_number || null,
+        status: returnCase.status || null,
+        opened_at: returnCase.opened_at || null,
+        received_at: returnCase.received_at || null,
+        closed_at: returnCase.closed_at || null,
+      })),
+      return_items: ((returnItemsResult.data || []) as Array<Record<string, any>>).map((item) => ({
+        id: item.id,
+        return_case_id: item.return_case_id,
+        order_id: item.order_id,
+        order_line_id: item.order_line_id,
+        internal_item_id: item.internal_item_id || null,
+        item_title: shortText(item.item_title, 240) || null,
+        item_number: item.item_number || null,
+        expected_quantity: item.expected_quantity,
+        received_quantity: item.received_quantity,
+        condition_received: item.condition_received,
+        disposition: item.disposition,
+        processed_at: item.processed_at || null,
+      })),
+      shipping: orders.map((order) => ({
+        order_id: order.id,
+        order_number: order.order_number,
+        tracking_number: order.tracking_number || null,
+        shipping_service: order.shipping_service || null,
+        label_status: order.label_status || null,
+        shipped_on_date: order.shipped_on_date || null,
+        ship_by_date: order.ship_by_date || null,
+      })),
+      tasks: [
+        ...((orderTasksResult.data || []) as Array<Record<string, any>>).map((task) => compactTask(task, "order_task")),
+        ...((returnTasksResult.data || []) as Array<Record<string, any>>).map((task) => compactTask(task, "return_task")),
+      ],
+      prior_messages: ((returnMessagesResult.data || []) as Array<Record<string, any>>).map(safePriorReturnMessage),
+    },
+    unknown: [...new Set(unknown)],
+    do_not_claim: [
+      "do not claim refund has been approved unless verified in returned DB state",
+      "do not claim item type if only generic text matched",
+      "do not claim delivery date unless tracking or delivery data exists",
+      "do not claim replacement availability unless inventory context proves it",
+      "do not quote internal task notes to buyer",
+      "do not expose costs, net payout, fees, taxes, employee emails, raw payloads, evidence paths, or private staff comments",
+    ],
+    match_summary: activeLinks.map((link) => ({
+      id: link.id,
+      link_type: link.link_type,
+      status: link.status,
+      confidence: Number(link.confidence || 0),
+      match_method: link.match_method,
+      matched_value: shortText(link.matched_value, 160) || null,
+      has_ebay_order: Boolean(link.ebay_order_id),
+      has_ebay_order_line: Boolean(link.ebay_order_line_id),
+      has_inventory_item: Boolean(link.item_id),
+      has_sale: Boolean(link.sale_id),
+      metadata_return_case_id: link.metadata?.return_case_id || null,
+      created_at: link.created_at || null,
+    })),
+  };
+}
+
 async function loadResponseDraftInput(
   supabase: ServiceClient,
   input: Input,
@@ -3111,6 +3411,10 @@ serve(async (req) => {
 
     if (input.mode === "message_detail") {
       return json(req, 200, await adminMessageDetail(supabase, input));
+    }
+
+    if (input.mode === "admin_context_view") {
+      return json(req, 200, await adminContextView(supabase, input));
     }
 
     if (input.mode === "save_review") {

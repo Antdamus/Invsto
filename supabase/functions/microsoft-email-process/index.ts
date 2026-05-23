@@ -61,6 +61,9 @@ type Identifiers = {
   transactionIds: string[];
   labels: string[];
   labelValues: string[];
+  returnIds: string[];
+  trackingNumbers: string[];
+  titlePhrases: string[];
   buyerUsernames: string[];
   buyerEmails: string[];
 };
@@ -246,6 +249,9 @@ function identifiersSummary(identifiers: Identifiers) {
     item_numbers: identifiers.itemNumbers.length,
     transaction_ids: identifiers.transactionIds.length,
     listing_labels: identifiers.labels.length,
+    return_ids: identifiers.returnIds.length,
+    tracking_numbers: identifiers.trackingNumbers.length,
+    title_phrases: identifiers.titlePhrases.length,
     buyer_usernames: identifiers.buyerUsernames.length,
     buyer_emails: identifiers.buyerEmails.length,
   };
@@ -315,19 +321,62 @@ function extractIdentifiers(context: { message: EmailMessage; body: EmailBody | 
     .filter((value) => value && !value.includes("@") && value.length <= 80);
 
   const labels = unique(text.match(/#\d+\b/g) || []);
-  const labelValues = unique(labels.map((label) => label.replace(/^#/, "")));
+  const customLabelValues = [
+    ...Array.from(text.matchAll(/\b(?:custom\s+label|sku|label)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{2,40})\b/gi), (match) => match[1]),
+  ];
+  const labelValues = unique([...labels.map((label) => label.replace(/^#/, "")), ...customLabelValues]);
+  const trackingNumbers = unique([
+    ...Array.from(text.matchAll(/\b(?:tracking\s+number|tracking|shipment\s+tracking|shipping\s+barcode|label\s+id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9 -]{7,34})\b/gi), (match) =>
+      String(match[1] || "").replace(/\s+/g, "").trim()
+    ),
+  ]).filter((value) => /[A-Z]/i.test(value) && /\d/.test(value) && value.length >= 8 && value.length <= 34);
+  const titlePhrases = unique([
+    ...Array.from(text.matchAll(/\b(?:item|listing|title)\s*(?:title|name)?\s*[:#-]\s*["“]?([^"\n\r.]{8,120})/gi), (match) => match[1]),
+    ...Array.from(subject.matchAll(/\b(?:re|about|question\s+about)\s*[:#-]\s*["“]?([^"\n\r]{8,120})/gi), (match) => match[1]),
+  ])
+    .map((value) => value.replace(/\s+/g, " ").trim())
+    .filter((value) => isSafeTitlePhrase(value))
+    .slice(0, 10);
   return {
     orderNumbers: unique(text.match(/\b\d{2}-\d{5}-\d{5}\b/g) || []),
     itemNumbers: unique(text.match(/\b\d{12}\b/g) || []),
     transactionIds: unique(text.match(/\b\d{14}\b/g) || []),
     labels,
     labelValues,
+    returnIds: unique([
+      ...Array.from(text.matchAll(/\b(?:return\s+(?:case\s+)?id|ebay\s+return\s+id|return)\s*[:#-]?\s*([A-Z0-9-]{6,40})\b/gi), (match) => match[1]),
+    ]).filter((value) => /\d/.test(value)),
+    trackingNumbers,
+    titlePhrases,
     buyerUsernames: uniqueLower([buyerUsernameFromSubject, ...fromNameCandidates]),
     buyerEmails: uniqueLower([
       ...participantEmails,
       ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []),
     ]),
   } satisfies Identifiers;
+}
+
+const GENERIC_TITLE_WORDS = new Set(["watch", "ring", "bracelet", "chain", "pendant"]);
+
+function isSafeTitlePhrase(value: string) {
+  const cleaned = lowerTrim(value).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  if (words.length === 1 && GENERIC_TITLE_WORDS.has(words[0])) return false;
+  if (words.every((word) => GENERIC_TITLE_WORDS.has(word))) return false;
+  return cleaned.length >= 8;
+}
+
+function isMaskedBuyerEmail(value: string) {
+  const email = lowerTrim(value);
+  return !email ||
+    email.includes("members.ebay") ||
+    email.includes("member.ebay") ||
+    email.includes("reply.ebay") ||
+    email.includes("ebay.com") ||
+    email.includes("no-reply") ||
+    email.includes("noreply");
 }
 
 async function normalizeMessage(supabase: ServiceClient, messageId: string) {
@@ -471,6 +520,90 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
     }
   }
 
+  if (identifiers.returnIds.length) {
+    const returnCases = await queryByChunks(identifiers.returnIds, async (chunk) => {
+      const { data, error } = await supabase
+        .from("ebay_return_cases")
+        .select("id, order_id, order_number, ebay_return_id, buyer_username, status")
+        .in("ebay_return_id", chunk);
+      if (error) throw new ProcessError("matching_failed", { phase: "return_id_lookup", messageId });
+      return data || [];
+    });
+
+    for (const returnCase of returnCases as Array<Record<string, any>>) {
+      if (!returnCase.order_id) {
+        ambiguity[`return_id:${returnCase.ebay_return_id || returnCase.id}`] = "return_case_has_no_order_link";
+        continue;
+      }
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order",
+        ebay_order_id: String(returnCase.order_id),
+        matched_value: String(returnCase.ebay_return_id || returnCase.id),
+        match_method: "return_id_exact",
+        confidence: 1.0,
+        status: "confirmed",
+        metadata: linkMetadata(identifiers, "return_id_exact", {
+          return_case_id: returnCase.id,
+          return_status: returnCase.status,
+        }),
+      });
+    }
+  }
+
+  if (identifiers.trackingNumbers.length) {
+    for (const trackingNumber of identifiers.trackingNumbers.slice(0, 20)) {
+      const orderRows = new Map<string, Record<string, any>>();
+      const lookups = await Promise.all([
+        supabase
+          .from("ebay_orders")
+          .select("id, order_number, tracking_number, label_metadata")
+          .eq("tracking_number", trackingNumber)
+          .limit(5),
+        supabase
+          .from("ebay_orders")
+          .select("id, order_number, tracking_number, label_metadata")
+          .contains("label_metadata", { trackingNumber })
+          .limit(5),
+        supabase
+          .from("ebay_orders")
+          .select("id, order_number, tracking_number, label_metadata")
+          .contains("label_metadata", { shippingBarcodeNumber: trackingNumber })
+          .limit(5),
+        supabase
+          .from("ebay_orders")
+          .select("id, order_number, tracking_number, label_metadata")
+          .contains("label_metadata", { labelId: trackingNumber })
+          .limit(5),
+      ]);
+
+      for (const result of lookups) {
+        if (result.error) throw new ProcessError("matching_failed", { phase: "tracking_lookup", messageId });
+        for (const order of result.data || []) orderRows.set(String(order.id), order);
+      }
+
+      const orders = [...orderRows.values()];
+      if (orders.length === 1) {
+        const order = orders[0];
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order",
+          ebay_order_id: String(order.id),
+          matched_value: trackingNumber,
+          match_method: "tracking_or_label_exact",
+          confidence: 0.9,
+          status: "confirmed",
+          metadata: linkMetadata(identifiers, "tracking_or_label_exact", {
+            unique_order: true,
+            safe_label_metadata_keys: ["trackingNumber", "shippingBarcodeNumber", "labelId"],
+          }),
+        });
+      } else if (orders.length > 1) {
+        ambiguity[`tracking:${trackingNumber}`] = orders.length;
+      }
+    }
+  }
+
   if (identifiers.itemNumbers.length && identifiers.transactionIds.length) {
     const lines = await queryByChunks(identifiers.itemNumbers, async (chunk) => {
       const { data, error } = await supabase
@@ -559,7 +692,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
 
     const orderNumberHints = new Set(identifiers.orderNumbers);
     const itemHints = new Set(identifiers.itemNumbers);
-    const hasStrongContext = orderNumberHints.size > 0 || itemHints.size > 0 || identifiers.labels.length > 0;
+    const hasStrongContext = orderNumberHints.size > 0 || itemHints.size > 0 || identifiers.labelValues.length > 0 || identifiers.trackingNumbers.length > 0 || identifiers.returnIds.length > 0;
     if (hasStrongContext) {
       for (const order of orders as Array<{ id: string; order_number: string; buyer_username: string }>) {
         const alreadyLinked = candidates.some((candidate) => candidate.ebay_order_id === order.id);
@@ -569,18 +702,66 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           link_type: "ebay_order",
           ebay_order_id: order.id,
           matched_value: order.buyer_username,
-          match_method: "buyer_username_exact",
-          confidence: 0.6,
+          match_method: "buyer_username_plus_strong_clue",
+          confidence: 0.65,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "buyer_username_exact", { guarded_by_context: true }),
+          metadata: linkMetadata(identifiers, "buyer_username_plus_strong_clue", { guarded_by_context: true }),
         });
       }
+    } else if (orders.length === 1) {
+      const order = orders[0] as { id: string; buyer_username: string };
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order",
+        ebay_order_id: order.id,
+        matched_value: order.buyer_username,
+        match_method: "buyer_username_alone_unique",
+        confidence: 0.45,
+        status: "suggested",
+        metadata: linkMetadata(identifiers, "buyer_username_alone_unique", { buyer_username_only: true }),
+      });
     } else if (orders.length) {
       ambiguity.buyer_username_context_required = true;
     }
   }
 
-  if (identifiers.labels.length) {
+  if (identifiers.buyerEmails.length) {
+    const usableEmails = identifiers.buyerEmails.filter((email) => !isMaskedBuyerEmail(email));
+    const hasStrongContext = identifiers.orderNumbers.length > 0 ||
+      identifiers.itemNumbers.length > 0 ||
+      identifiers.labelValues.length > 0 ||
+      identifiers.trackingNumbers.length > 0 ||
+      identifiers.returnIds.length > 0;
+    if (usableEmails.length && hasStrongContext) {
+      const orders = await queryByChunks(usableEmails.slice(0, 10), async (chunk) => {
+        const { data, error } = await supabase
+          .from("ebay_orders")
+          .select("id, order_number, buyer_email, buyer_username")
+          .in("buyer_email", chunk);
+        if (error) throw new ProcessError("matching_failed", { phase: "buyer_email_lookup", messageId });
+        return data || [];
+      });
+
+      for (const order of orders as Array<Record<string, any>>) {
+        const alreadyLinked = candidates.some((candidate) => candidate.ebay_order_id === order.id);
+        if (alreadyLinked) continue;
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order",
+          ebay_order_id: String(order.id),
+          matched_value: String(order.buyer_email || ""),
+          match_method: "buyer_email_plus_strong_clue",
+          confidence: 0.65,
+          status: "suggested",
+          metadata: linkMetadata(identifiers, "buyer_email_plus_strong_clue", { masked_email_excluded: true }),
+        });
+      }
+    } else if (identifiers.buyerEmails.some(isMaskedBuyerEmail)) {
+      ambiguity.buyer_email_masked_or_unreliable = true;
+    }
+  }
+
+  if (identifiers.labelValues.length) {
     const labelCandidates = unique([...identifiers.labels, ...identifiers.labelValues]);
     const lineMatches = await queryByChunks(labelCandidates, async (chunk) => {
       const { data, error } = await supabase
@@ -609,7 +790,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           sale_id: line.sale_id || null,
           matched_value: label,
           match_method: "internal_label_custom_label_exact",
-          confidence: 0.7,
+          confidence: 0.78,
           status: "suggested",
           metadata: linkMetadata(identifiers, "internal_label_custom_label_exact"),
         });
@@ -654,7 +835,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           item_id: String(item.id),
           matched_value: label,
           match_method: "internal_label_inventory_exact",
-          confidence: 0.65,
+          confidence: 0.5,
           status: "suggested",
           metadata: linkMetadata(identifiers, "internal_label_inventory_exact"),
         });
@@ -719,6 +900,39 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         });
       } else if (itemTitleMatches.length > 1) {
         ambiguity[`inventory_title_contains:${label}`] = itemTitleMatches.length;
+      }
+    }
+  }
+
+  if (identifiers.titlePhrases.length) {
+    for (const phrase of identifiers.titlePhrases.slice(0, 10)) {
+      const lineTitleResult = await supabase
+        .from("ebay_order_lines")
+        .select(orderLineSelect())
+        .ilike("item_title", `%${phrase}%`)
+        .limit(3);
+      if (lineTitleResult.error) {
+        throw new ProcessError("matching_failed", { phase: "line_title_phrase_lookup", messageId });
+      }
+
+      const lineTitleMatches = lineTitleResult.data || [];
+      if (lineTitleMatches.length === 1) {
+        const line = lineTitleMatches[0] as Record<string, any>;
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order_line",
+          ebay_order_line_id: String(line.id),
+          ebay_order_id: String(line.order_id || ""),
+          item_id: line.internal_item_id || null,
+          sale_id: line.sale_id || null,
+          matched_value: phrase,
+          match_method: "item_title_unique_contains",
+          confidence: 0.5,
+          status: "suggested",
+          metadata: linkMetadata(identifiers, "item_title_unique_contains", { title_only: true }),
+        });
+      } else if (lineTitleMatches.length > 1) {
+        ambiguity[`item_title_phrase:${phrase}`] = lineTitleMatches.length;
       }
     }
   }
