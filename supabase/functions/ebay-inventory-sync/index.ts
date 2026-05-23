@@ -65,6 +65,24 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const EBAY_CONDITION_VALUES = new Set([
+  "NEW",
+  "LIKE_NEW",
+  "NEW_OTHER",
+  "NEW_WITH_DEFECTS",
+  "MANUFACTURER_REFURBISHED",
+  "CERTIFIED_REFURBISHED",
+  "EXCELLENT_REFURBISHED",
+  "VERY_GOOD_REFURBISHED",
+  "GOOD_REFURBISHED",
+  "SELLER_REFURBISHED",
+  "USED_EXCELLENT",
+  "USED_VERY_GOOD",
+  "USED_GOOD",
+  "USED_ACCEPTABLE",
+  "FOR_PARTS_OR_NOT_WORKING",
+]);
+
 function jsonResponse(status: number, body: JsonRecord) {
   return new Response(JSON.stringify(body), {
     status,
@@ -87,6 +105,11 @@ function toPositiveInt(value: unknown): number {
 
 function normalizeSku(value: string): string {
   return value.trim().replace(/\s+/g, "-").slice(0, 50);
+}
+
+function normalizeEbayCondition(value: unknown): string {
+  const condition = String(value || "").trim().toUpperCase();
+  return EBAY_CONDITION_VALUES.has(condition) ? condition : "NEW";
 }
 
 function normalizePhotoPath(value: string): string {
@@ -188,6 +211,7 @@ async function ebayRequest(token: string, method: string, path: string, body?: u
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
       "Content-Language": "en-US",
+      "Accept-Language": "en-US",
       "Accept": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -264,6 +288,15 @@ async function prepareItem(
   const categoryId = chooseCategoryId(item, settings);
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
+  const condition = normalizeEbayCondition(settings.default_condition);
+  if (condition !== settings.default_condition) warnings.push(`Unsupported eBay condition "${settings.default_condition || "blank"}"; using NEW.`);
+
+  const product: JsonRecord = {
+    title: String(item.title || sku).slice(0, 80),
+    description: item.description || item.title || sku,
+    aspects: buildAspects(item),
+  };
+  if (imageUrls.length) product.imageUrls = imageUrls;
 
   const inventoryPayload = {
     sku,
@@ -273,13 +306,8 @@ async function prepareItem(
         quantity,
       },
     },
-    condition: settings.default_condition,
-    product: {
-      title: String(item.title || sku).slice(0, 80),
-      description: item.description || item.title || sku,
-      imageUrls,
-      aspects: buildAspects(item),
-    },
+    condition,
+    product,
   };
 
   const offerPayload = quantity > 0 && price > 0 ? {
