@@ -18,6 +18,7 @@
   const RETURN_MESSAGE_SEND_ID = "og-ebay-send-return-message";
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
+  const VIDEO_RECEIPT_CAPTURE_ID = "og-ebay-capture-video-receipt-frame";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
@@ -3877,6 +3878,11 @@
         padding: 12px 16px;
       }
 
+      #${VIDEO_RECEIPT_CAPTURE_ID} {
+        right: 18px;
+        bottom: 128px;
+      }
+
       #${RETURN_MESSAGE_SEND_ID} {
         margin-left: 12px;
         border: 1px solid #116b36;
@@ -4506,16 +4512,139 @@
     if (inlineContainer && isElementVisible(inlineContainer)) {
       delete button.dataset.ogFloating;
       if (!inlineContainer.contains(button)) inlineContainer.appendChild(button);
+      if (!ogAutoVideoReceiptStarted && shouldAutoOpenVideoReceiptFromItemPage()) {
+        ogAutoVideoReceiptStarted = true;
+        openVideoReceiptFromDetails(button);
+      }
       return;
     }
 
     button.dataset.ogFloating = "true";
     if (!button.parentElement) document.body.appendChild(button);
+    if (!ogAutoVideoReceiptStarted && shouldAutoOpenVideoReceiptFromItemPage()) {
+      ogAutoVideoReceiptStarted = true;
+      openVideoReceiptFromDetails(button);
+    }
+  }
+
+  function isEbayLiveVideoReceiptPage() {
+    try {
+      const url = new URL(window.location.href);
+      return /\/ebaylive\/events\/[^/]+\/stream\/?$/i.test(url.pathname)
+        && (url.searchParams.get("playback") === "true" || Boolean(url.searchParams.get("selectedItemId")));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getVideoReceiptPageMetadata() {
+    const url = new URL(window.location.href);
+    const eventMatch = url.pathname.match(/\/ebaylive\/events\/([^/]+)\/stream\/?$/i);
+    const selectedItemId = String(url.searchParams.get("selectedItemId") || "").trim();
+    const itemIds = String(url.searchParams.get("itemIds") || "")
+      .split(",")
+      .map((itemId) => itemId.trim())
+      .filter(Boolean);
+    return {
+      eventId: eventMatch?.[1] || "",
+      selectedItemId,
+      itemNumber: selectedItemId || itemIds[0] || "",
+      itemIds,
+      videoReceiptUrl: window.location.href,
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+    };
+  }
+
+  function getVisibleVideoRect() {
+    const element = [...document.querySelectorAll("video, iframe")]
+      .filter(isElementVisible)
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+      })[0];
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      devicePixelRatio: window.devicePixelRatio || 1,
+    };
+  }
+
+  function setVideoReceiptCaptureStatus(button, message, tone = "") {
+    button.textContent = message || "Capture item photo";
+    if (tone) button.dataset.statusTone = tone;
+    else delete button.dataset.statusTone;
+  }
+
+  async function captureVideoReceiptFrame(button) {
+    const metadata = getVideoReceiptPageMetadata();
+    if (!metadata.itemNumber) {
+      setVideoReceiptCaptureStatus(button, "No item id", "error");
+      return;
+    }
+    button.disabled = true;
+    setVideoReceiptCaptureStatus(button, "Capturing...", "");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME",
+        payload: {
+          metadata,
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+          videoRect: getVisibleVideoRect(),
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG could not save the video receipt photo.");
+      setVideoReceiptCaptureStatus(button, "Saved to OG", "success");
+      window.setTimeout(() => setVideoReceiptCaptureStatus(button, "Capture item photo", ""), 3500);
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not capture video receipt frame:", error);
+      setVideoReceiptCaptureStatus(button, "Capture failed", "error");
+      window.setTimeout(() => setVideoReceiptCaptureStatus(button, "Capture item photo", ""), 4500);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function injectVideoReceiptCaptureButton() {
+    let button = document.getElementById(VIDEO_RECEIPT_CAPTURE_ID);
+
+    if (!isEbayLiveVideoReceiptPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_CAPTURE_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.dataset.ogFloating = "true";
+      button.textContent = "Capture item photo";
+      button.title = "Capture the visible eBay Live video frame and attach it to the matching OG pending item";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        captureVideoReceiptFrame(button);
+      });
+      document.body.appendChild(button);
+    }
   }
 
   function injectVideoReceiptShortcuts() {
     injectItemVideoReceiptShortcut();
     injectOrderDetailsVideoReceiptShortcut();
+    injectVideoReceiptCaptureButton();
   }
 
   function injectFloatingButton() {

@@ -6,6 +6,7 @@
   const PENDING_REPORT_PREFIX = "ogPendingReport:";
   const PENDING_RETURN_PREFIX = "ogPendingReturn:";
   const PENDING_RETURN_MESSAGE_PREFIX = "ogPendingReturnMessage:";
+  const PENDING_VIDEO_RECEIPT_PHOTO_PREFIX = "ogPendingVideoReceiptPhoto:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
   const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
@@ -16,6 +17,7 @@
   const appReportAcks = new Map();
   const appReturnAcks = new Map();
   const appReturnMessageAcks = new Map();
+  const appVideoReceiptPhotoAcks = new Map();
   let pendingPriorityCache = null;
   let pendingPriorityCacheAt = 0;
   const PENDING_PRIORITY_CACHE_TTL_MS = 15000;
@@ -26,6 +28,115 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function normalizeEbayNavigationUrl(value, baseUrl = "https://www.ebay.com/") {
+    const raw = String(value || "").trim().replace(/&amp;/g, "&");
+    if (!raw) return "";
+    try {
+      return new URL(raw.replace(/\\\//g, "/"), baseUrl).toString().replace(/&amp;/g, "&");
+    } catch (_) {
+      return raw.replace(/\\\//g, "/").replace(/&amp;/g, "&");
+    }
+  }
+
+  function findVideoReceiptUrlInText(text, baseUrl = "https://www.ebay.com/") {
+    const candidates = findVideoReceiptCandidatesInText(text, baseUrl);
+    return candidates[0]?.url || "";
+  }
+
+  function findVideoReceiptCandidatesInText(text, baseUrl = "https://www.ebay.com/") {
+    const body = String(text || "");
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/gi,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/gi,
+    ];
+    const seen = new Set();
+    const candidates = [];
+    for (const pattern of patterns) {
+      for (const match of body.matchAll(pattern)) {
+        const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
+        if (!url || !/\/ebaylive\/events\//i.test(url) || seen.has(url)) continue;
+        seen.add(url);
+        let selectedItemId = "";
+        let itemIds = [];
+        try {
+          const parsed = new URL(url);
+          selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+          itemIds = String(parsed.searchParams.get("itemIds") || "")
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+        } catch (_) {}
+        candidates.push({ url, index: match.index || 0, selectedItemId, itemIds });
+      }
+    }
+    return candidates;
+  }
+
+  function normalizeComparableText(value = "") {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function findBestVideoReceiptUrlInText(text, payload = {}, baseUrl = "https://www.ebay.com/") {
+    const body = String(text || "");
+    const candidates = findVideoReceiptCandidatesInText(body, baseUrl);
+    if (!candidates.length) return "";
+    const itemNumber = String(payload.itemNumber || "").trim();
+    if (itemNumber) {
+      const selectedMatch = candidates.find((candidate) => candidate.selectedItemId === itemNumber);
+      if (selectedMatch) return selectedMatch.url;
+      const itemListMatches = candidates.filter((candidate) => candidate.itemIds.includes(itemNumber));
+      if (itemListMatches.length === 1) return itemListMatches[0].url;
+    }
+    if (candidates.length === 1 && (!itemNumber || candidates[0].selectedItemId === itemNumber || !candidates[0].selectedItemId)) {
+      return candidates[0].url;
+    }
+
+    const identifiers = [
+      itemNumber,
+      payload.transactionId,
+      normalizeComparableText(payload.itemTitle).split(" ").filter((part) => part.length >= 4).slice(0, 5).join(" "),
+    ].filter(Boolean).map(String);
+    if (!identifiers.length) return "";
+
+    const lowerBody = body.toLowerCase();
+    const identifierPositions = identifiers.flatMap((identifier) => {
+      const needle = String(identifier || "").toLowerCase();
+      if (!needle) return [];
+      const positions = [];
+      let index = lowerBody.indexOf(needle);
+      while (index >= 0 && positions.length < 20) {
+        positions.push(index);
+        index = lowerBody.indexOf(needle, index + needle.length);
+      }
+      return positions;
+    });
+    if (!identifierPositions.length) return "";
+
+    const ranked = candidates.map((candidate) => {
+      const distance = Math.min(...identifierPositions.map((position) => Math.abs(candidate.index - position)));
+      return { ...candidate, distance };
+    }).sort((a, b) => a.distance - b.distance);
+    return ranked[0]?.distance <= 12000 ? ranked[0].url : "";
+  }
+
+  function resolveVideoReceiptUrlInText(text, payload = {}, baseUrl = "https://www.ebay.com/") {
+    const candidates = findVideoReceiptCandidatesInText(text, baseUrl);
+    if (!candidates.length) return "";
+    const itemNumber = String(payload.itemNumber || "").trim();
+    if (candidates.length === 1 && (!itemNumber || candidates[0].selectedItemId === itemNumber || !candidates[0].selectedItemId)) {
+      return candidates[0].url;
+    }
+    return findBestVideoReceiptUrlInText(text, payload, baseUrl);
+  }
+
+  function buildEbayOrderDetailsUrl(orderNumber = "") {
+    const cleanNumber = String(orderNumber || "").trim();
+    if (!cleanNumber) return "";
+    const url = new URL("https://www.ebay.com/mesh/ord/details");
+    url.searchParams.set("orderid", cleanNumber);
+    return url.toString();
   }
 
   function buildTransferId(label = {}) {
@@ -58,6 +169,13 @@
     const returnId = String(data.returnId || "return").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
     const orderNumber = String(data.orderNumber || data.orderId || "order").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
     return `return-message:${returnId || "return"}:${orderNumber || "order"}:${Date.now()}`;
+  }
+
+  function buildVideoReceiptPhotoTransferId(photoTransfer = {}) {
+    const data = photoTransfer.metadata || {};
+    const itemNumber = String(data.itemNumber || data.selectedItemId || "item").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    const eventId = String(data.eventId || "video").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    return `video-receipt-photo:${itemNumber || "item"}:${eventId || "video"}:${Date.now()}`;
   }
 
   async function getAppUrl() {
@@ -105,6 +223,16 @@
     });
   }
 
+  async function storePendingVideoReceiptPhoto(transferId, photoTransfer) {
+    await chrome.storage.local.set({
+      [`${PENDING_VIDEO_RECEIPT_PHOTO_PREFIX}${transferId}`]: {
+        ...photoTransfer,
+        transferId,
+        relayedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingLabel(transferId) {
     const key = `${PENDING_LABEL_PREFIX}${transferId}`;
     const stored = await chrome.storage.local.get(key);
@@ -129,6 +257,12 @@
     return stored[key] || null;
   }
 
+  async function getPendingVideoReceiptPhoto(transferId) {
+    const key = `${PENDING_VIDEO_RECEIPT_PHOTO_PREFIX}${transferId}`;
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] || null;
+  }
+
   async function removePendingLabel(transferId) {
     await chrome.storage.local.remove(`${PENDING_LABEL_PREFIX}${transferId}`);
   }
@@ -143,6 +277,10 @@
 
   async function removePendingReturnMessage(transferId) {
     await chrome.storage.local.remove(`${PENDING_RETURN_MESSAGE_PREFIX}${transferId}`);
+  }
+
+  async function removePendingVideoReceiptPhoto(transferId) {
+    await chrome.storage.local.remove(`${PENDING_VIDEO_RECEIPT_PHOTO_PREFIX}${transferId}`);
   }
 
   function waitForAppTransferAck(transferId) {
@@ -229,6 +367,27 @@
     });
   }
 
+  function waitForAppVideoReceiptPhotoAck(transferId) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appVideoReceiptPhotoAcks.delete(transferId);
+        resolve({
+          ok: false,
+          transferId,
+          error: "OG Pending Orders opened, but did not confirm the video receipt photo within 5 minutes.",
+        });
+      }, APP_ACK_TIMEOUT_MS);
+
+      appVideoReceiptPhotoAcks.set(transferId, {
+        resolve: (status) => {
+          clearTimeout(timer);
+          appVideoReceiptPhotoAcks.delete(transferId);
+          resolve(status);
+        },
+      });
+    });
+  }
+
   async function handleAppTransferStatus(status = {}, sender = null) {
     const transferId = status.transferId || "";
     if (!transferId) return;
@@ -286,6 +445,14 @@
     }
     if (status.ok) await removePendingReturnMessage(transferId);
     const waiter = appReturnMessageAcks.get(transferId);
+    if (waiter) waiter.resolve(status);
+  }
+
+  async function handleAppVideoReceiptPhotoStatus(status = {}) {
+    const transferId = status.transferId || "";
+    if (!transferId) return;
+    if (status.ok) await removePendingVideoReceiptPhoto(transferId);
+    const waiter = appVideoReceiptPhotoAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
 
@@ -412,6 +579,44 @@
     } finally {
       if (tab?.id) chrome.tabs.remove(tab.id).catch(() => null);
     }
+  }
+
+  async function openVideoReceiptFromOrder(payload = {}) {
+    const directUrl = normalizeUrl(payload.videoReceiptUrl);
+    if (directUrl && /(^|\.)ebay\.com$/i.test(directUrl.hostname) && /\/ebaylive\/events\//i.test(directUrl.pathname)) {
+      const tab = await chrome.tabs.create({ url: directUrl.toString(), active: true });
+      return { ok: true, openedUrl: directUrl.toString(), tabId: tab.id || null, direct: true };
+    }
+
+    const itemUrl = normalizeUrl(payload.itemUrl || (payload.itemNumber ? `https://www.ebay.com/itm/${encodeURIComponent(payload.itemNumber)}` : ""));
+    if (itemUrl && /(^|\.)ebay\.com$/i.test(itemUrl.hostname) && /\/itm\//i.test(itemUrl.pathname)) {
+      const itemResponse = await fetch(itemUrl.toString(), { credentials: "include" }).catch(() => null);
+      if (itemResponse?.ok) {
+        const itemHtml = await itemResponse.text();
+        const itemReceiptUrl = resolveVideoReceiptUrlInText(itemHtml, payload, itemUrl.toString());
+        if (itemReceiptUrl) {
+          const tab = await chrome.tabs.create({ url: itemReceiptUrl, active: true });
+          return { ok: true, openedUrl: itemReceiptUrl, tabId: tab.id || null, direct: false, source: "item" };
+        }
+      }
+    }
+
+    const detailsUrl = normalizeUrl(payload.orderDetailsUrl || buildEbayOrderDetailsUrl(payload.orderNumber));
+    if (!detailsUrl || !/(^|\.)ebay\.com$/i.test(detailsUrl.hostname) || !/\/mesh\/ord\/details/i.test(detailsUrl.pathname)) {
+      throw new Error("The eBay order details URL is missing or invalid.");
+    }
+
+    const response = await fetch(detailsUrl.toString(), { credentials: "include" });
+    if (!response.ok) {
+      throw new Error(`eBay order details returned HTTP ${response.status}. Make sure you are signed in to eBay.`);
+    }
+    const html = await response.text();
+    const receiptUrl = resolveVideoReceiptUrlInText(html, payload, detailsUrl.toString());
+    if (!receiptUrl) {
+      throw new Error("I could not match a video receipt URL to this item on the eBay order details page.");
+    }
+    const tab = await chrome.tabs.create({ url: receiptUrl, active: true });
+    return { ok: true, openedUrl: receiptUrl, tabId: tab.id || null, direct: false };
   }
 
   async function askAwaitingTabToOrganize(tabId, payload = {}, options = {}) {
@@ -579,6 +784,18 @@
     url.searchParams.set("returnMessageTransferId", payload.transferId);
     if (payload.message?.returnId) url.searchParams.set("ebayReturnId", payload.message.returnId);
     if (payload.message?.orderNumber) url.searchParams.set("orderId", payload.message.orderNumber);
+    return url;
+  }
+
+  function buildVideoReceiptPhotoPageUrl(appUrl, payload, pageName = "pending-orders.html") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    url.searchParams.set("videoReceiptPhotoTransferId", payload.transferId);
+    if (payload.metadata?.itemNumber) url.searchParams.set("itemNumber", payload.metadata.itemNumber);
+    if (payload.metadata?.orderNumber) url.searchParams.set("orderId", payload.metadata.orderNumber);
     return url;
   }
 
@@ -927,6 +1144,89 @@
     };
   }
 
+  async function deliverVideoReceiptPhotoToTab(tab, payload) {
+    const appAckPromise = waitForAppVideoReceiptPhotoAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", payload });
+    return appAckPromise;
+  }
+
+  async function openVideoReceiptPhotoPageAndWait(appUrl, payload, existingTab = null) {
+    const appAckPromise = waitForAppVideoReceiptPhotoAck(payload.transferId);
+    const url = buildVideoReceiptPhotoPageUrl(appUrl, payload);
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function relayVideoReceiptPhotoToApp(photoTransfer) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+
+    const transferId = buildVideoReceiptPhotoTransferId(photoTransfer);
+    const payload = { ...photoTransfer, transferId };
+    await storePendingVideoReceiptPhoto(transferId, payload);
+
+    const tabs = await findAppTabs(appUrl);
+    const pendingTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (pendingTab?.id) {
+      try {
+        const ack = await deliverVideoReceiptPhotoToTab(pendingTab, payload);
+        if (ack?.ok) await focusTab(pendingTab.id);
+        return { ...ack, transferId, delivered: true, opened: false };
+      } catch (error) {
+        const ack = await openVideoReceiptPhotoPageAndWait(appUrl, payload, pendingTab);
+        return {
+          ...ack,
+          transferId,
+          delivered: false,
+          opened: true,
+          reusedTab: true,
+          recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
+        };
+      }
+    }
+
+    const reusableTab = tabs[0] || null;
+    const ack = await openVideoReceiptPhotoPageAndWait(appUrl, payload, reusableTab);
+    return {
+      ...ack,
+      transferId,
+      delivered: false,
+      opened: true,
+      reusedTab: Boolean(reusableTab),
+    };
+  }
+
+  async function captureVideoReceiptFrame(payload = {}, sender = null) {
+    const tab = sender?.tab;
+    if (!tab?.windowId) throw new Error("The video receipt tab was not available for screenshot capture.");
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    if (!dataUrl) throw new Error("Chrome did not return a screenshot for the video receipt.");
+    const base64 = String(dataUrl).split(",")[1] || "";
+    if (!base64) throw new Error("The screenshot payload was empty.");
+    return relayVideoReceiptPhotoToApp({
+      metadata: {
+        ...(payload.metadata || {}),
+        source: "ebay-video-receipt",
+        pageUrl: payload.pageUrl || tab.url || "",
+        pageTitle: payload.pageTitle || tab.title || "",
+        capturedAt: new Date().toISOString(),
+      },
+      screenshot: {
+        source: "chrome-visible-tab",
+        mimeType: "image/png",
+        base64,
+        dataUrl,
+        viewport: payload.viewport || null,
+        videoRect: payload.videoRect || null,
+        capturedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingOrderPriorities(payload = {}) {
     const cacheAllowed = payload.useCache !== false;
     if (
@@ -1233,6 +1533,16 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS") {
+      handleAppVideoReceiptPhotoStatus({
+        ...(message.payload || {}),
+        tabId: _sender?.tab?.id || message.payload?.tabId || null,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
       relayAwaitingReportToApp(message.payload)
         .then(sendResponse)
@@ -1256,6 +1566,20 @@
 
     if (message.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
       captureReturnDetailPage(message.payload || {})
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_OPEN_VIDEO_RECEIPT") {
+      openVideoReceiptFromOrder(message.payload || {})
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME") {
+      captureVideoReceiptFrame(message.payload || {}, _sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -1319,6 +1643,13 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_GET_PENDING_VIDEO_RECEIPT_PHOTO") {
+      getPendingVideoReceiptPhoto(message.transferId)
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_CLEAR_PENDING_LABEL") {
       removePendingLabel(message.transferId)
         .then(() => sendResponse({ ok: true }))
@@ -1342,6 +1673,13 @@
 
     if (message.type === "OG_EBAY_CLEAR_PENDING_RETURN_MESSAGE") {
       removePendingReturnMessage(message.transferId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CLEAR_PENDING_VIDEO_RECEIPT_PHOTO") {
+      removePendingVideoReceiptPhoto(message.transferId)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
