@@ -560,7 +560,8 @@ async function loadItems(supabase: any, itemIds: string[], limit: number): Promi
   const { data: items, error } = await query;
   if (error) throw new Error(`Could not load items: ${error.message}`);
 
-  const rows = (items || []) as ItemRow[];
+  const rows = ((items || []) as ItemRow[])
+    .filter((item) => String(item.barcode || "").trim());
   const ids = rows.map((row) => row.id);
   if (!ids.length) return [];
 
