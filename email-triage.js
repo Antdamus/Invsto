@@ -1506,7 +1506,7 @@
         ${actionMessage ? `<div class="classification-notice is-success">${escapeHtml(actionMessage)}</div>` : ""}
         ${fallbackUsed ? `
           <div class="classification-notice is-warning draft-fallback-notice">
-            <strong>Safe fallback draft generated.</strong>
+            <strong>Conservative safe draft available.</strong>
             <span>${primaryValidationErrors.length ? "Original AI draft was blocked." : weakMatchTreatedAsUnverified ? "Weak match context was treated as unverified for buyer-facing content." : "Specific buyer-facing context was not verified."} This fallback is conservative, editable, and still requires human review.</span>
             ${primaryValidationErrors.length ? `
               <div class="draft-fallback-blocked">
@@ -1710,7 +1710,7 @@
         ${matches.map((match) => renderMatchRow(match, selected, state)).join("")}
         ${validation.fallback_used === true ? `
           <div class="matched-context-block matched-context-fallback">
-            <strong>Safe fallback draft generated</strong>
+            <strong>Conservative safe draft available</strong>
             <p>${primaryValidationErrors.length ? "Original AI draft was blocked." : weakMatchTreatedAsUnverified ? "Weak match context was treated as unverified for buyer-facing content." : "Specific buyer-facing context was not verified."} The fallback remains editable and requires human review.</p>
             ${primaryValidationErrors.length ? `
               <span>Original draft blocked because:</span>
@@ -2085,6 +2085,10 @@
         },
         draftErrorsByMessageId: {
           ...adminClassificationState.draftErrorsByMessageId,
+          [messageId]: null,
+        },
+        draftActionErrorsByMessageId: {
+          ...adminClassificationState.draftActionErrorsByMessageId,
           [messageId]: null,
         },
       });
