@@ -4216,11 +4216,22 @@ async function adminDraftView(supabase: ServiceClient, input: Input) {
   }
 
   const drafts = (data || []).map((row: Record<string, any>) => safeDraftSummary(row, input.includeDraftBody));
+  const currentDraft = drafts.find((draft: Record<string, any>) => draft.is_current === true) || drafts[0] || null;
+  const currentDraftClassificationId = currentDraft?.classification_id ? String(currentDraft.classification_id) : null;
+  const selectedClassificationId = input.classificationId || null;
+  const classificationMismatch = Boolean(
+    selectedClassificationId &&
+    currentDraftClassificationId &&
+    selectedClassificationId !== currentDraftClassificationId,
+  );
   return {
     ok: true,
     mode: "admin_draft_view",
     drafts,
     draft_count: drafts.length,
+    classification_mismatch: classificationMismatch,
+    selected_classification_id: selectedClassificationId,
+    current_draft_classification_id: currentDraftClassificationId,
     include_draft_body_requested: input.includeDraftBody,
     outbound_send_enabled: false,
     outlook_mutation_performed: false,

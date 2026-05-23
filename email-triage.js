@@ -643,15 +643,17 @@
     const timeout = window.setTimeout(() => controller.abort(), DRAFT_GENERATION_TIMEOUT_MS);
 
     try {
+      const body = {
+        mode: values.mode,
+        messageId: values.messageId,
+      };
+      if (values.useDraftSelector && values.draftId) body.draftId = values.draftId;
+      if (values.useClassificationSelector && values.classificationId) body.classificationId = values.classificationId;
+
       return await edgeFetch(CLASSIFY_FUNCTION, session, {
         method: "POST",
         signal: controller.signal,
-        body: JSON.stringify({
-          mode: values.mode,
-          messageId: values.messageId,
-          classificationId: values.classificationId,
-          draftId: values.draftId || undefined,
-        }),
+        body: JSON.stringify(body),
       });
     } catch (error) {
       if (error?.name === "AbortError") {
@@ -680,18 +682,20 @@
     const timeout = window.setTimeout(() => controller.abort(), DRAFT_REVIEW_TIMEOUT_MS);
 
     try {
+      const body = {
+        mode: values.mode,
+        messageId: values.messageId,
+        draftId: values.draftId,
+        draftSubject: values.draftSubject,
+        draftBodyText: values.draftBodyText,
+        operatorNotes: values.operatorNotes || "",
+      };
+      if (values.classificationId) body.classificationId = values.classificationId;
+
       return await edgeFetch(CLASSIFY_FUNCTION, session, {
         method: "POST",
         signal: controller.signal,
-        body: JSON.stringify({
-          mode: values.mode,
-          messageId: values.messageId,
-          classificationId: values.classificationId,
-          draftId: values.draftId,
-          draftSubject: values.draftSubject,
-          draftBodyText: values.draftBodyText,
-          operatorNotes: values.operatorNotes || "",
-        }),
+        body: JSON.stringify(body),
       });
     } catch (error) {
       if (error?.name === "AbortError") {
@@ -1356,6 +1360,10 @@
     return drafts.find((draft) => draft.is_current === true) || drafts[0] || null;
   }
 
+  function currentDraftForMessage(messageId) {
+    return currentDraftFromPayload(adminClassificationState.draftsByMessageId[messageId]);
+  }
+
   function validationExplanationsForDraft(draft) {
     if (!draft || typeof draft !== "object") return [];
     if (Array.isArray(draft.primary_validation_error_explanations) && draft.primary_validation_error_explanations.length) {
@@ -1884,6 +1892,20 @@
     renderAdminClassificationDebug(adminClassificationState);
   }
 
+  function clearDraftActionStateForMessage(messageId) {
+    if (!messageId) return {};
+    return {
+      draftActionErrorsByMessageId: {
+        ...adminClassificationState.draftActionErrorsByMessageId,
+        [messageId]: null,
+      },
+      draftActionMessagesByMessageId: {
+        ...adminClassificationState.draftActionMessagesByMessageId,
+        [messageId]: null,
+      },
+    };
+  }
+
   function renderAdminClassificationDebug(state) {
     if (!els.classificationAdminDebug) return;
 
@@ -2073,6 +2095,7 @@
         ...adminClassificationState.draftErrorsByMessageId,
         [messageId]: null,
       },
+      ...clearDraftActionStateForMessage(messageId),
     });
 
     try {
@@ -2188,8 +2211,6 @@
       await requestResponseDraft(context, {
         mode: values.mode,
         messageId: selected.message_id,
-        classificationId: selected.id,
-        draftId: values.draftId || null,
       });
       setAdminClassificationState({
         draftActionMessageId: null,
@@ -2216,6 +2237,8 @@
   async function runDraftReviewAction(context, values) {
     const selected = selectedClassificationForDraft(values.messageId, values.classificationId);
     if (!selected?.message_id || !selected?.id || !values.draftId) return;
+    const currentDraft = currentDraftForMessage(selected.message_id);
+    if (!currentDraft?.id || String(currentDraft.id) !== String(values.draftId)) return;
 
     setAdminClassificationState({
       draftActionMessageId: selected.message_id,
@@ -2233,7 +2256,7 @@
       const result = await requestDraftReviewAction(context, {
         mode: values.mode,
         messageId: selected.message_id,
-        classificationId: selected.id,
+        classificationId: null,
         draftId: values.draftId,
         draftSubject: values.draftSubject,
         draftBodyText: values.draftBodyText,
@@ -2585,6 +2608,7 @@
       setAdminClassificationState({
         selectedCategory,
         selectedClassificationId: firstMatch?.id || null,
+        ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
       });
       if (firstMatch) {
         loadDraftView(context, firstMatch);
@@ -2599,6 +2623,7 @@
 
       setAdminClassificationState({
         selectedClassificationId: classificationId,
+        ...clearDraftActionStateForMessage(selectedClassificationById(classificationId)?.message_id || ""),
       });
       const selected = selectedClassificationById(classificationId);
       if (selected) {
@@ -2752,6 +2777,7 @@
       setAdminClassificationState({
         sortMode,
         selectedClassificationId: firstMatch?.id || null,
+        ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
       });
       if (firstMatch) {
         loadDraftView(context, firstMatch);
@@ -2791,6 +2817,7 @@
         setAdminClassificationState({
           activeFilters,
           selectedClassificationId: firstMatch?.id || null,
+          ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
         });
         if (firstMatch) {
           loadDraftView(context, firstMatch);
