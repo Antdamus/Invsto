@@ -37,6 +37,7 @@ const STOCK_CAPTURE_PHOTO_SETTLE_MS = 4500;
 const STOCK_CAPTURE_FALLBACK_LOOKBACK_MS = 15000;
 const STOCK_PROCESSED_BACKGROUND_PREFIX = "processed-backgrounds";
 const STOCK_DEFAULT_RECENT_PHOTO_LIMIT = 5;
+const STOCK_EBAY_LINK_BATCH_SIZE = 75;
 const STOCK_THUMBNAIL_SIGNED_URL_TRANSFORM = {
   width: 240,
   height: 240,
@@ -392,22 +393,42 @@ async function mergeEbayLinksIntoItems(items) {
   const itemIds = items.map((item) => item.id).filter(Boolean);
   if (!itemIds.length) return items;
 
-  const { data, error } = await supabase
-    .from("ebay_inventory_links")
-    .select("*")
-    .in("item_type_id", itemIds);
+  const links = [];
+  for (let index = 0; index < itemIds.length; index += STOCK_EBAY_LINK_BATCH_SIZE) {
+    const chunk = itemIds.slice(index, index + STOCK_EBAY_LINK_BATCH_SIZE);
+    const { data, error } = await supabase
+      .from("ebay_inventory_links")
+      .select("*")
+      .in("item_type_id", chunk);
 
-  if (error) {
-    console.warn("Could not load eBay sync state:", error.message || error);
-    return items;
+    if (error) {
+      console.warn("Could not load eBay sync state:", error.message || error);
+      return items;
+    }
+
+    links.push(...(data || []));
   }
 
-  const linkByItemId = new Map((data || []).map((link) => [String(link.item_type_id), link]));
+  const linkByItemId = new Map(links.map((link) => [String(link.item_type_id), link]));
   items.forEach((item) => {
     item.ebay_link = linkByItemId.get(String(item.id)) || null;
   });
 
   return items;
+}
+
+function hydrateEbayLinksInBackground() {
+  if (!canViewSensitiveStockData() || !Array.isArray(allItems) || !allItems.length) return;
+
+  window.setTimeout(async () => {
+    try {
+      await mergeEbayLinksIntoItems(allItems);
+      await writeCurrentInventoryCache();
+      renderCurrentInventoryItems();
+    } catch (error) {
+      console.warn("Background eBay sync state hydration failed:", error);
+    }
+  }, 250);
 }
 
 function applyStockAccessUi() {
@@ -6628,7 +6649,6 @@ async function fetchStockItems() {
   });
   
 
-  await mergeEbayLinksIntoItems(items);
   return items;
 }
 
@@ -6645,6 +6665,7 @@ async function loadAllItemsWithCache() {
   if (!currentVersion) {
     console.warn("⚠️ No version info — fallback to live fetch.");
     allItems = await fetchStockItems(); // fallback load
+    hydrateEbayLinksInBackground();
     overlay.style.display = "none"; // ✅ Hide loading
     return;
   }
@@ -6655,8 +6676,8 @@ async function loadAllItemsWithCache() {
       if (parsed.version === currentVersion && Array.isArray(parsed.data)) {
         console.log("✅ Loaded allItems from cache");
         allItems = parsed.data;
-        await mergeEbayLinksIntoItems(allItems);
         overlay.style.display = "none"; // ✅ Hide loading
+        hydrateEbayLinksInBackground();
         return;
       } else {
         console.log("🌀 Version mismatch — reloading from Supabase");
@@ -6676,6 +6697,7 @@ async function loadAllItemsWithCache() {
   }));
 
   overlay.style.display = "none"; // ✅ Hide loading
+  hydrateEbayLinksInBackground();
 }
 
 //function to change the version of the metadata the cache uses after each operation 
