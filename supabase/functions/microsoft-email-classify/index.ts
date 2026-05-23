@@ -5,10 +5,11 @@ const CLASSIFIER_NAME = "og-email-triage-classifier";
 const CLASSIFIER_VERSION = "4b.4-v1";
 const TAXONOMY_VERSION = "step-4b.4-v1";
 const RESPONSE_DRAFT_GENERATOR_NAME = "og-email-triage-response-drafter";
-const RESPONSE_DRAFT_GENERATOR_VERSION = "4c.3-v1";
-const RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT = "step-4c.3-v1";
+const RESPONSE_DRAFT_GENERATOR_VERSION = "4d.3-v1";
+const RESPONSE_DRAFT_PROMPT_VERSION_DEFAULT = "step-4d.3-v1";
 const TRUNCATION_VERSION = "head-12000-tail-2000-v1";
 const LINK_CONTEXT_VERSION = "links-compact-v1";
+const VERIFIED_ORDER_CONTEXT_VERSION = "verified-ebay-order-context-v1";
 const HEAD_CHARS = 12000;
 const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
@@ -230,7 +231,29 @@ type ResponseDraftInput = {
     prompt_version: string;
     taxonomy_version: string;
     link_context_version: string;
+    verified_order_context_version: string;
     safety_policy_version: string;
+  };
+  verified_order_context: {
+    context_version: string;
+    known: {
+      order: Array<Record<string, unknown>>;
+      order_lines: Array<Record<string, unknown>>;
+      shipping: Array<Record<string, unknown>>;
+      return_case: Array<Record<string, unknown>>;
+      tasks: Array<Record<string, unknown>>;
+    };
+    unknown: string[];
+    do_not_claim: string[];
+    summary: {
+      verified_context_used: boolean;
+      injected_categories: string[];
+      order_context_existed: boolean;
+      return_context_existed: boolean;
+      shipping_context_existed: boolean;
+      order_line_context_existed: boolean;
+      task_context_existed: boolean;
+    };
   };
 };
 type ValidResponseDraft = {
@@ -1068,6 +1091,10 @@ Return strict JSON only. Do not include markdown wrappers, prose outside JSON, o
 Generated drafts are internal suggestions only. They must always require human review. Never instruct the operator to send automatically.
 
 Use only the supplied stored email context, deterministic links, and effective classification. Do not invent order numbers, tracking numbers, delivery status, dates, inventory status, policies, refunds, or compensation.
+You may use verified_order_context only when the exact fact is present under verified_order_context.known.
+Treat verified_order_context.unknown as explicit missing facts and avoid filling them in. Follow every verified_order_context.do_not_claim rule.
+If tracking is unknown, you may say tracking information is not yet available or that the team is reviewing it, but do not invent carrier movement or delivery timing.
+If return status is unknown or not approved in verified context, do not say the return/refund is approved.
 Do not promise refunds, returns, replacements, discounts, store credit, free items, expedited shipping, compensation, legal outcomes, or exact timelines.
 Do not admit legal fault, policy violations, negligence, counterfeit/authenticity conclusions, or liability.
 For refund_request, chargeback, item_not_received, item_not_as_described, account_security, and payment_issue, use cautious review-oriented wording and avoid commitments.
@@ -1677,6 +1704,7 @@ function normalizedGrounding(input: ResponseDraftInput) {
     stableStringify(input.participants),
     stableStringify(input.deterministic_links),
     stableStringify(input.classification),
+    stableStringify(input.verified_order_context),
     input.body.text,
   ].join(" ")).toLowerCase();
 }
@@ -1753,7 +1781,7 @@ function validateResponseDraft(
   }
 
   const combined = cleanWhitespace(`${draftSubject} ${draftBodyText}`).toLowerCase();
-  const grounding = normalizedGrounding(input);
+  const verifiedGrounding = cleanWhitespace(stableStringify(input.verified_order_context.known)).toLowerCase();
   const highCaution = HIGH_CAUTION_DRAFT_CATEGORIES.has(input.classification.effective_category) ||
     input.classification.refund_risk ||
     input.classification.chargeback_risk;
@@ -1794,7 +1822,7 @@ function validateResponseDraft(
   }
   if (containsAny(combined, [
     /\b(shipped|in transit|out for delivery|delivered|delivery attempted|label created|carrier has|tracking shows)\b/i,
-  ]) && !containsAny(grounding, [
+  ]) && !containsAny(verifiedGrounding, [
     /\b(shipped|in transit|out for delivery|delivered|delivery attempted|label created|tracking|carrier)\b/i,
   ])) {
     errors.push("fabricated_shipping_update");
@@ -1802,7 +1830,7 @@ function validateResponseDraft(
   }
   if (containsAny(combined, [
     /\b(will arrive|arrives|delivery is expected|delivered by|ship by|ships by|within \d+\s+(business\s+)?days?|today|tomorrow)\b/i,
-  ]) && !containsAny(grounding, [
+  ]) && !containsAny(verifiedGrounding, [
     /\b(will arrive|arrives|delivery is expected|delivered by|ship by|ships by|within \d+\s+(business\s+)?days?|today|tomorrow)\b/i,
   ])) {
     errors.push("fabricated_timeline");
@@ -1810,7 +1838,7 @@ function validateResponseDraft(
   }
   if (containsAny(combined, [
     /\b(in stock|available now|reserved for you|we have another|replacement is available|inventory is available)\b/i,
-  ]) && !containsAny(grounding, [
+  ]) && !containsAny(verifiedGrounding, [
     /\b(in stock|available|inventory|replacement)\b/i,
   ])) {
     errors.push("fabricated_inventory_promise");
@@ -1819,16 +1847,38 @@ function validateResponseDraft(
 
   const draftTokens = extractTrackingLikeTokens(`${draftSubject} ${draftBodyText}`);
   for (const token of draftTokens) {
-    if (!entityIsGrounded(token, grounding)) {
+    if (!entityIsGrounded(token, verifiedGrounding)) {
       errors.push("fabricated_tracking_information");
       safetyFlags.add("fabricated_tracking_information");
       break;
     }
   }
 
-  if (containsAny(combined, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i]) && !containsAny(grounding, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i])) {
+  if (containsAny(combined, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i]) && !containsAny(verifiedGrounding, [/\border\s+#?\s*[a-z0-9-]{5,}/i, /\bitem\s+#?\s*\d{5,}/i])) {
     errors.push("fabricated_order_detail");
     safetyFlags.add("fabricated_order_detail");
+  }
+  if (containsAny(combined, [
+    /\b(return|return case)\s+(has been|is|was)\s+(approved|accepted|authorized)\b/i,
+    /\bwe\s+(approved|accepted|authorized)\s+(your\s+)?return\b/i,
+  ]) && !containsAny(verifiedGrounding, [/\b(approved|accepted|authorized)\b/i])) {
+    errors.push("unsupported_return_approval_claim");
+    safetyFlags.add("unsupported_claim");
+  }
+  if (containsAny(combined, [
+    /\b(refund|return)\s+(has been|is|was)\s+(approved|processed|issued|completed)\b/i,
+    /\bwe\s+(approved|processed|issued|completed)\s+(your\s+)?refund\b/i,
+  ])) {
+    errors.push("unsupported_refund_state_claim");
+    safetyFlags.add("unsupported_claim");
+    safetyFlags.add("payment_or_refund");
+  }
+  for (const productType of ["watch", "phone", "laptop", "tablet", "camera", "ring", "necklace", "bracelet", "shoe", "bag", "console"]) {
+    if (new RegExp(`\\b${productType}s?\\b`, "i").test(combined) && !new RegExp(`\\b${productType}s?\\b`, "i").test(verifiedGrounding)) {
+      errors.push("fabricated_item_type");
+      safetyFlags.add("fabricated_order_detail");
+      break;
+    }
   }
   if (highCaution && containsAny(combined, [/\b(done|approved|guaranteed|definitely|certainly|no problem)\b/i])) {
     errors.push("unsupported_claim");
@@ -2224,6 +2274,124 @@ function compactTask(row: Record<string, any>, source: "order_task" | "return_ta
   };
 }
 
+function safeLabelMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(
+    ["trackingNumber", "shippingBarcodeNumber", "labelId"]
+      .map((key) => [key, shortText(source[key], 160) || null])
+      .filter(([, item]) => Boolean(item)),
+  );
+}
+
+function taskOperationalSummary(task: Record<string, unknown>) {
+  const source = String(task.source || "");
+  const status = String(task.status || "").replace(/_/g, " ").trim();
+  const taskType = String(task.task_type || "").replace(/_/g, " ").trim();
+  const isReturn = source === "return_task";
+  const state = status || "pending";
+  if (isReturn) {
+    return {
+      source: "return_task",
+      status: task.status || null,
+      operational_state: taskType ? `return ${taskType} is ${state}` : `return intake is ${state}`,
+      due_at: task.due_at || null,
+      resolved_at: task.resolved_at || null,
+    };
+  }
+  return {
+    source: "order_task",
+    status: task.status || null,
+    operational_state: taskType ? `order ${taskType} is ${state}` : `internal review is ${state}`,
+    due_at: task.due_at || null,
+    resolved_at: task.resolved_at || null,
+  };
+}
+
+function buildVerifiedOrderContext(adminContext: Record<string, any>) {
+  const known = adminContext.known && typeof adminContext.known === "object" ? adminContext.known : {};
+  const orders = Array.isArray(known.order) ? known.order : [];
+  const lines = Array.isArray(known.order_lines) ? known.order_lines : [];
+  const shippingRows = Array.isArray(known.shipping) ? known.shipping : [];
+  const returnCases = Array.isArray(known.return_case) ? known.return_case : [];
+  const tasks = Array.isArray(known.tasks) ? known.tasks : [];
+
+  const safeOrders = orders.map((order: Record<string, any>) => ({
+    order_number: order.order_number || null,
+    sale_date: order.sale_date || null,
+    paid_on_date: order.paid_on_date || null,
+    ship_by_date: order.ship_by_date || null,
+    shipped_on_date: order.shipped_on_date || null,
+    status: order.status || null,
+  }));
+  const safeLines = lines.map((line: Record<string, any>) => ({
+    item_number: line.item_number || null,
+    transaction_id: line.transaction_id || null,
+    item_title: shortText(line.item_title, 240) || null,
+    quantity: line.quantity ?? null,
+    line_status: line.line_status || null,
+  }));
+  const safeShipping = shippingRows.map((shipping: Record<string, any>) => ({
+    order_number: shipping.order_number || null,
+    tracking_number: shipping.tracking_number || null,
+    shipping_service: shipping.shipping_service || null,
+    safe_label_metadata: safeLabelMetadata(shipping.safe_label_metadata),
+  }));
+  const safeReturns = returnCases.map((returnCase: Record<string, any>) => ({
+    ebay_return_id: returnCase.ebay_return_id || null,
+    return_reason: shortText(returnCase.return_reason, 240) || null,
+    status: returnCase.status || null,
+    opened_at: returnCase.opened_at || null,
+    received_at: returnCase.received_at || null,
+    closed_at: returnCase.closed_at || null,
+  }));
+  const safeTasks = tasks.map(taskOperationalSummary).slice(0, 10);
+
+  const shippingContextExisted = safeShipping.some((row) =>
+    Boolean(row.tracking_number || row.shipping_service || Object.keys(row.safe_label_metadata || {}).length)
+  );
+  const injectedCategories = [
+    safeOrders.length ? "order" : "",
+    safeLines.length ? "order_lines" : "",
+    shippingContextExisted ? "shipping" : "",
+    safeReturns.length ? "return" : "",
+    safeTasks.length ? "tasks" : "",
+  ].filter(Boolean);
+
+  const unknown = new Set<string>(Array.isArray(adminContext.unknown) ? adminContext.unknown : []);
+  if (!safeOrders.length) unknown.add("verified order context not found");
+  if (!safeLines.length) unknown.add("verified order line context not found");
+  if (!shippingContextExisted) unknown.add("verified tracking/shipping context not found");
+  if (!safeReturns.length) unknown.add("verified return case context not found");
+
+  return {
+    context_version: VERIFIED_ORDER_CONTEXT_VERSION,
+    known: {
+      order: safeOrders,
+      order_lines: safeLines,
+      shipping: safeShipping,
+      return_case: safeReturns,
+      tasks: safeTasks,
+    },
+    unknown: [...unknown].slice(0, 40),
+    do_not_claim: [
+      "do not claim order status, shipment status, refund status, return approval, replacement availability, tracking, or timeline unless present in known facts",
+      "do not expose internal notes, employee names, admin comments, GPS/evidence data, raw payloads, costs, fees, taxes, or payout information",
+      "do not infer item type beyond verified order line item_title",
+      "do not describe label metadata except the safe trackingNumber, shippingBarcodeNumber, or labelId keys",
+    ],
+    summary: {
+      verified_context_used: true,
+      injected_categories: injectedCategories,
+      order_context_existed: safeOrders.length > 0,
+      return_context_existed: safeReturns.length > 0,
+      shipping_context_existed: shippingContextExisted,
+      order_line_context_existed: safeLines.length > 0,
+      task_context_existed: safeTasks.length > 0,
+    },
+  };
+}
+
 function safePriorReturnMessage(row: Record<string, any>) {
   return {
     id: row.id,
@@ -2273,7 +2441,7 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
     orderIds.length
       ? supabase
         .from("ebay_orders")
-        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status")
+        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status, label_metadata")
         .in("id", orderIds)
       : Promise.resolve({ data: [], error: null }),
     orderLineIds.length
@@ -2294,7 +2462,7 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
     lineOrderIds.filter((id) => !orderIds.includes(id)).length
       ? supabase
         .from("ebay_orders")
-        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status")
+        .select("id, order_number, sales_record_number, buyer_username, sale_date, paid_on_date, ship_by_date, shipped_on_date, status, tracking_number, shipping_service, label_status, label_metadata")
         .in("id", lineOrderIds.filter((id) => !orderIds.includes(id)))
       : Promise.resolve({ data: [], error: null }),
     allOrderIds.length
@@ -2387,7 +2555,7 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
 
   const unknown: string[] = [];
   if (!activeLinks.length) unknown.push("deterministic link not found");
-  if (!orders.some((order) => order.tracking_number)) unknown.push("tracking number not found");
+  if (!orders.some((order) => order.tracking_number || Object.keys(safeLabelMetadata(order.label_metadata)).length)) unknown.push("tracking number not found");
   if (!returnCases.length) unknown.push("return case not found");
   if (!lines.length) unknown.push("order line link not found");
   if (lines.some((line) => !line.internal_item_id) || (!lines.length && !itemIds.length)) unknown.push("internal item link not found");
@@ -2402,6 +2570,16 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
     mode: "admin_context_view",
     message_id: message.id,
     context_version: "readonly-ebay-context-v1",
+    draft_enrichment: {
+      verified_order_context_supported: true,
+      safe_context_version: VERIFIED_ORDER_CONTEXT_VERSION,
+      order_context_existed: orders.length > 0,
+      return_context_existed: returnCases.length > 0,
+      shipping_context_existed: orders.some((order) =>
+        Boolean(order.tracking_number || order.shipping_service || Object.keys(safeLabelMetadata(order.label_metadata)).length)
+      ),
+      safe_label_metadata_keys: ["trackingNumber", "shippingBarcodeNumber", "labelId"],
+    },
     known: {
       order: orders.map((order) => ({
         id: order.id,
@@ -2466,6 +2644,7 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
         order_number: order.order_number,
         tracking_number: order.tracking_number || null,
         shipping_service: order.shipping_service || null,
+        safe_label_metadata: safeLabelMetadata(order.label_metadata),
         label_status: order.label_status || null,
         shipped_on_date: order.shipped_on_date || null,
         ship_by_date: order.ship_by_date || null,
@@ -2585,6 +2764,14 @@ async function loadResponseDraftInput(
     throw new ClassifierError("invalid_effective_category", { status: 400, phase: "response_draft_input" });
   }
 
+  const verifiedOrderContext = buildVerifiedOrderContext(
+    await adminContextView(supabase, {
+      ...input,
+      mode: "admin_context_view",
+      messageId: String(classification.message_id),
+    }),
+  );
+
   return {
     message: classifierInput.message,
     participants: classifierInput.participants,
@@ -2597,8 +2784,10 @@ async function loadResponseDraftInput(
       prompt_version: promptVersionValue,
       taxonomy_version: TAXONOMY_VERSION,
       link_context_version: LINK_CONTEXT_VERSION,
+      verified_order_context_version: VERIFIED_ORDER_CONTEXT_VERSION,
       safety_policy_version: "response-draft-safety-v1",
     },
+    verified_order_context: verifiedOrderContext,
   };
 }
 
@@ -2663,6 +2852,8 @@ async function insertResponseDraft(
     generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
     taxonomy_version: TAXONOMY_VERSION,
     link_context_version: LINK_CONTEXT_VERSION,
+    verified_order_context_version: VERIFIED_ORDER_CONTEXT_VERSION,
+    verified_context: values.input.verified_order_context.summary,
     safety_policy_version: values.input.draft_context.safety_policy_version,
     effective_classification: {
       category: values.input.classification.effective_category,
@@ -2788,6 +2979,7 @@ async function generateResponseDraft(
         prompt_version: promptVersionValue,
         prompt_hash: promptHash,
         input_hash: inputHash,
+        verified_context: draftInput.verified_order_context.summary,
         regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
         generated_body_returned: false,
         outbound_send_enabled: false,
@@ -2825,6 +3017,7 @@ async function generateResponseDraft(
       prompt_version: promptVersionValue,
       prompt_hash: promptHash,
       input_hash: inputHash,
+      verified_context: draftInput.verified_order_context.summary,
       regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
       generated_body_returned: false,
       outbound_send_enabled: false,
@@ -2864,6 +3057,7 @@ async function generateResponseDraft(
       prompt_version: promptVersionValue,
       prompt_hash: promptHash,
       input_hash: inputHash,
+      verified_context: draftInput.verified_order_context.summary,
       regenerated_from_draft_id: operationMode === "regenerate_response" ? input.draftId : null,
       generated_body_returned: false,
       outbound_send_enabled: false,
