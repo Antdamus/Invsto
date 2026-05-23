@@ -16,6 +16,7 @@
   const DRAFT_VIEW_TIMEOUT_MS = 15000;
   const DRAFT_GENERATION_TIMEOUT_MS = 45000;
   const DRAFT_REVIEW_TIMEOUT_MS = 15000;
+  const MATCH_CONTEXT_TIMEOUT_MS = 15000;
   const LOW_CONFIDENCE_THRESHOLD = 0.75;
   const DENSITY_STORAGE_KEY = "og-email-triage-density";
   const PANEL_WIDTHS_STORAGE_KEY = "og-email-triage-panel-widths";
@@ -122,6 +123,11 @@
     draftActionMessageId: null,
     draftActionErrorsByMessageId: {},
     draftActionMessagesByMessageId: {},
+    matchContextsByMessageId: {},
+    matchContextLoadingId: null,
+    matchContextErrorsByMessageId: {},
+    matchActionLinkId: null,
+    matchActionMessagesByMessageId: {},
     updatedAt: null,
   };
 
@@ -697,6 +703,62 @@
     } finally {
       window.clearTimeout(timeout);
     }
+  }
+
+  async function fetchMatchContext(context, messageId) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Match context session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), MATCH_CONTEXT_TIMEOUT_MS);
+
+    try {
+      return await edgeFetch(CLASSIFY_FUNCTION, session, {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: "operator_match_context",
+          messageId,
+        }),
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        const timeoutError = new Error("request_timeout");
+        timeoutError.code = "request_timeout";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  async function requestMatchReviewAction(context, values) {
+    const { data: sessionData, error: sessionError } = await context.client.auth.getSession();
+    if (sessionError) console.error("Match review session refresh failed:", sessionError);
+
+    const session = sessionData?.session || context.session;
+    if (!session?.access_token) {
+      const error = new Error("unauthorized");
+      error.code = "unauthorized";
+      throw error;
+    }
+
+    return edgeFetch(CLASSIFY_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: values.mode,
+        linkId: values.linkId,
+        reason: values.reason || undefined,
+      }),
+    });
   }
 
   async function saveClassificationReview(context, values) {
@@ -1475,6 +1537,142 @@
     `;
   }
 
+  function renderCompactList(items = [], emptyText = "None") {
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!list.length) return `<div class="classification-empty matched-context-empty">${escapeHtml(emptyText)}</div>`;
+    return `
+      <ul class="matched-context-list">
+        ${list.slice(0, 8).map((item) => `<li>${escapeHtml(humanizeValue(item))}</li>`).join("")}
+      </ul>
+    `;
+  }
+
+  function matchStatusVariant(status) {
+    const value = String(status || "").toLowerCase();
+    if (value === "confirmed") return "success";
+    if (value === "suggested") return "warning";
+    if (value === "rejected") return "danger";
+    if (value === "stale") return "muted";
+    return "muted";
+  }
+
+  function renderMatchRow(match, selected, state) {
+    const order = match.order || {};
+    const returnCase = match.return_case || {};
+    const shipping = match.shipping || {};
+    const verified = match.verified_context || {};
+    const status = String(match.status || "unknown").toLowerCase();
+    const isActing = state.matchActionLinkId === match.link_id;
+    const controls = status === "suggested"
+      ? `
+        <div class="matched-context-actions">
+          <button type="button" class="secondary-btn" data-match-action="confirm_match" data-message-id="${escapeHtml(selected.message_id || "")}" data-link-id="${escapeHtml(match.link_id || "")}" ${isActing ? "disabled" : ""}>
+            <i data-lucide="${isActing ? "loader-circle" : "check"}"></i>
+            Confirm Match
+          </button>
+          <button type="button" class="secondary-btn" data-match-action="reject_match" data-message-id="${escapeHtml(selected.message_id || "")}" data-link-id="${escapeHtml(match.link_id || "")}" ${isActing ? "disabled" : ""}>
+            <i data-lucide="${isActing ? "loader-circle" : "x"}"></i>
+            Reject Match
+          </button>
+        </div>
+      `
+      : status === "confirmed"
+        ? `
+          <div class="matched-context-actions">
+            <button type="button" class="secondary-btn" data-match-action="mark_match_stale" data-message-id="${escapeHtml(selected.message_id || "")}" data-link-id="${escapeHtml(match.link_id || "")}" ${isActing ? "disabled" : ""}>
+              <i data-lucide="${isActing ? "loader-circle" : "clock"}"></i>
+              Mark Stale
+            </button>
+          </div>
+        `
+        : "";
+
+    return `
+      <div class="matched-context-row">
+        <div class="matched-context-topline">
+          ${renderBadge(humanizeValue(status), matchStatusVariant(status))}
+          ${renderBadge(formatConfidence(match.confidence), confidenceBadgeVariant({ confidence: match.confidence }))}
+          <span>${escapeHtml(humanizeValue(match.match_method || "Unknown method"))}</span>
+        </div>
+        <dl class="matched-context-facts">
+          <div><dt>Order</dt><dd>${escapeHtml(order.order_number || "Unavailable")}</dd></div>
+          <div><dt>Buyer</dt><dd>${escapeHtml(order.buyer_username || returnCase.buyer_username || "Unknown")}</dd></div>
+          <div><dt>Status</dt><dd>${escapeHtml(order.status || "Unknown")}</dd></div>
+          <div><dt>Tracking</dt><dd>${escapeHtml(shipping.tracking_number || "Unavailable")}</dd></div>
+          ${returnCase.ebay_return_id ? `<div><dt>Return</dt><dd>${escapeHtml(returnCase.ebay_return_id)}</dd></div>` : ""}
+          ${shipping.shipping_service ? `<div><dt>Service</dt><dd>${escapeHtml(shipping.shipping_service)}</dd></div>` : ""}
+          ${match.item_title ? `<div class="matched-context-wide"><dt>Item</dt><dd>${escapeHtml(match.item_title)}</dd></div>` : ""}
+        </dl>
+        ${match.evidence?.length ? `<div class="matched-context-evidence">${renderCompactList(match.evidence, "No evidence stored")}</div>` : ""}
+        <div class="matched-context-indicators">
+          ${renderBadge(verified.has_order ? "Verified order" : "Order unknown", verified.has_order ? "success" : "muted")}
+          ${renderBadge(verified.has_shipping ? "Verified shipping" : "Shipping unknown", verified.has_shipping ? "success" : "muted")}
+          ${renderBadge(verified.has_return_case ? "Return linked" : "No return case", verified.has_return_case ? "success" : "muted")}
+        </div>
+        ${controls}
+      </div>
+    `;
+  }
+
+  function renderMatchedContextSection(state, selected) {
+    const messageId = selected?.message_id || "";
+    const payload = messageId ? state.matchContextsByMessageId[messageId] : null;
+    const isLoading = state.matchContextLoadingId === messageId;
+    const error = messageId ? state.matchContextErrorsByMessageId[messageId] : null;
+    const actionMessage = messageId ? state.matchActionMessagesByMessageId[messageId] : null;
+    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+    const validation = payload?.validation || {};
+    const validationErrors = Array.isArray(validation.validation_errors) ? validation.validation_errors : [];
+    const safetyFlags = Array.isArray(validation.safety_flags) ? validation.safety_flags : [];
+    const unknown = Array.isArray(payload?.unknown) ? payload.unknown : [];
+    const doNotClaim = Array.isArray(payload?.do_not_claim) ? payload.do_not_claim : [];
+
+    return `
+      <details class="classification-detail-section matched-context-section detail-disclosure core-disclosure" open>
+        <summary>
+          <span>Matched Order Context</span>
+          ${payload ? renderBadge(`${matches.length} ${matches.length === 1 ? "match" : "matches"}`, matches.length ? "category" : "muted") : ""}
+          <i data-lucide="chevron-down"></i>
+        </summary>
+        ${error ? `<div class="classification-notice is-error">Could not load matched context: ${escapeHtml(error)}</div>` : ""}
+        ${actionMessage ? `<div class="classification-notice is-success">${escapeHtml(actionMessage)}</div>` : ""}
+        <div class="draft-actions matched-context-toolbar">
+          <button type="button" class="secondary-btn" data-match-action="refresh" data-message-id="${escapeHtml(messageId)}" ${isLoading || !messageId ? "disabled" : ""}>
+            <i data-lucide="${isLoading ? "loader-circle" : "refresh-cw"}"></i>
+            ${escapeHtml(isLoading ? "Loading Context" : "Refresh Context")}
+          </button>
+        </div>
+        ${isLoading && !payload ? `<div class="classification-empty matched-context-empty">Loading matched order context.</div>` : ""}
+        ${payload && !matches.length ? `<div class="classification-empty matched-context-empty">No deterministic links exist for this email yet.</div>` : ""}
+        ${matches.map((match) => renderMatchRow(match, selected, state)).join("")}
+        ${validationErrors.length ? `
+          <div class="matched-context-block">
+            <strong>Draft blocked by validation:</strong>
+            ${renderCompactList(validationErrors, "No validation failures")}
+          </div>
+        ` : ""}
+        ${safetyFlags.length ? `
+          <div class="matched-context-block">
+            <strong>Safety flags:</strong>
+            ${renderCompactList(safetyFlags, "No safety flags")}
+          </div>
+        ` : ""}
+        ${unknown.length ? `
+          <div class="matched-context-block">
+            <strong>Unknown:</strong>
+            ${renderCompactList(unknown, "No unknown context")}
+          </div>
+        ` : ""}
+        ${doNotClaim.length ? `
+          <div class="matched-context-block">
+            <strong>Do not claim:</strong>
+            ${renderCompactList(doNotClaim, "No restrictions")}
+          </div>
+        ` : ""}
+      </details>
+    `;
+  }
+
   function renderClassificationDetail(state, data) {
     if (!els.classificationDetail) return;
 
@@ -1535,6 +1733,8 @@
       ${renderEmailBodySection(state, selected)}
 
       ${renderResponseDraftSection(state, selected)}
+
+      ${renderMatchedContextSection(state, selected)}
 
       ${renderAdvancedDisclosure(
         "AI Classification Details",
@@ -1826,6 +2026,45 @@
     }
   }
 
+  async function loadMatchContext(context, selected, options = {}) {
+    const messageId = selected?.message_id || "";
+    if (!messageId) return;
+    if (!options.force && adminClassificationState.matchContextsByMessageId[messageId]) return;
+
+    setAdminClassificationState({
+      matchContextLoadingId: messageId,
+      matchContextErrorsByMessageId: {
+        ...adminClassificationState.matchContextErrorsByMessageId,
+        [messageId]: null,
+      },
+    });
+
+    try {
+      const payload = await fetchMatchContext(context, messageId);
+      setAdminClassificationState({
+        matchContextLoadingId: null,
+        matchContextsByMessageId: {
+          ...adminClassificationState.matchContextsByMessageId,
+          [messageId]: payload,
+        },
+        matchContextErrorsByMessageId: {
+          ...adminClassificationState.matchContextErrorsByMessageId,
+          [messageId]: null,
+        },
+      });
+    } catch (error) {
+      const code = error.code || error.message || "match_context_failed";
+      setAdminClassificationState({
+        matchContextLoadingId: null,
+        matchContextErrorsByMessageId: {
+          ...adminClassificationState.matchContextErrorsByMessageId,
+          [messageId]: code,
+        },
+      });
+      console.error("[email-triage] operator_match_context fetch failed:", error);
+    }
+  }
+
   function selectedClassificationById(classificationId) {
     const data = adminClassificationState.data || normalizeAdminViewPayload({});
     return (data.classifications || []).find((classification) => classification.id === classificationId) || null;
@@ -1842,6 +2081,12 @@
     const selected = selectedClassificationById(adminClassificationState.selectedClassificationId);
     if (!selected) return;
     await loadDraftView(context, selected, options);
+  }
+
+  async function loadSelectedMatchContext(context, options = {}) {
+    const selected = selectedClassificationById(adminClassificationState.selectedClassificationId);
+    if (!selected) return;
+    await loadMatchContext(context, selected, options);
   }
 
   async function runDraftAction(context, values) {
@@ -1941,6 +2186,50 @@
         },
       });
       console.error("[email-triage] draft review action failed:", error);
+    }
+  }
+
+  async function runMatchReviewAction(context, values) {
+    const selected = selectedClassificationForDraft(values.messageId, "");
+    if (!selected?.message_id || !values.linkId) return;
+
+    setAdminClassificationState({
+      matchActionLinkId: values.linkId,
+      matchContextErrorsByMessageId: {
+        ...adminClassificationState.matchContextErrorsByMessageId,
+        [selected.message_id]: null,
+      },
+      matchActionMessagesByMessageId: {
+        ...adminClassificationState.matchActionMessagesByMessageId,
+        [selected.message_id]: null,
+      },
+    });
+
+    try {
+      const result = await requestMatchReviewAction(context, values);
+      const labels = {
+        confirm_match: "Match confirmed. Drafts and sending remain human-controlled.",
+        reject_match: "Match rejected and preserved for audit.",
+        mark_match_stale: "Match marked stale.",
+      };
+      setAdminClassificationState({
+        matchActionLinkId: null,
+        matchActionMessagesByMessageId: {
+          ...adminClassificationState.matchActionMessagesByMessageId,
+          [selected.message_id]: labels[result.mode] || "Match review saved.",
+        },
+      });
+      await loadMatchContext(context, selected, { force: true });
+    } catch (error) {
+      const code = error.code || error.message || "match_review_failed";
+      setAdminClassificationState({
+        matchActionLinkId: null,
+        matchContextErrorsByMessageId: {
+          ...adminClassificationState.matchContextErrorsByMessageId,
+          [selected.message_id]: code,
+        },
+      });
+      console.error("[email-triage] match review action failed:", error);
     }
   }
 
@@ -2217,7 +2506,10 @@
         selectedCategory,
         selectedClassificationId: firstMatch?.id || null,
       });
-      if (firstMatch) loadDraftView(context, firstMatch);
+      if (firstMatch) {
+        loadDraftView(context, firstMatch);
+        loadMatchContext(context, firstMatch);
+      }
     });
 
     els.classificationList?.addEventListener("click", (event) => {
@@ -2229,7 +2521,10 @@
         selectedClassificationId: classificationId,
       });
       const selected = selectedClassificationById(classificationId);
-      if (selected) loadDraftView(context, selected);
+      if (selected) {
+        loadDraftView(context, selected);
+        loadMatchContext(context, selected);
+      }
     });
 
     els.classificationDetail?.addEventListener("click", (event) => {
@@ -2257,6 +2552,28 @@
           operatorNotes: String(formData.get("operatorNotes") || ""),
         });
         return;
+      }
+
+      const matchButton = event.target.closest("[data-match-action]");
+      if (matchButton) {
+        const action = matchButton.getAttribute("data-match-action");
+        const messageId = matchButton.getAttribute("data-message-id");
+        const linkId = matchButton.getAttribute("data-link-id");
+        const selected = selectedClassificationForDraft(messageId, "");
+        if (action === "refresh") {
+          if (selected) loadMatchContext(context, selected, { force: true });
+          return;
+        }
+        if (action === "reject_match") {
+          const reason = window.prompt("Reason for rejecting this match?");
+          if (!reason) return;
+          runMatchReviewAction(context, { mode: action, messageId, linkId, reason });
+          return;
+        }
+        if (action === "confirm_match" || action === "mark_match_stale") {
+          runMatchReviewAction(context, { mode: action, messageId, linkId });
+          return;
+        }
       }
 
       const draftButton = event.target.closest("[data-draft-action]");
@@ -2356,7 +2673,10 @@
         sortMode,
         selectedClassificationId: firstMatch?.id || null,
       });
-      if (firstMatch) loadDraftView(context, firstMatch);
+      if (firstMatch) {
+        loadDraftView(context, firstMatch);
+        loadMatchContext(context, firstMatch);
+      }
     });
 
     els.classificationFiltersToggle?.addEventListener("click", () => {
@@ -2392,7 +2712,10 @@
           activeFilters,
           selectedClassificationId: firstMatch?.id || null,
         });
-        if (firstMatch) loadDraftView(context, firstMatch);
+        if (firstMatch) {
+          loadDraftView(context, firstMatch);
+          loadMatchContext(context, firstMatch);
+        }
       });
     });
   }
@@ -2426,6 +2749,7 @@
     handleOutlookQueryNotice();
     await loadAdminClassificationData(context);
     loadSelectedDraftView(context);
+    loadSelectedMatchContext(context);
 
     setLoading(true);
     setMailboxSummary({

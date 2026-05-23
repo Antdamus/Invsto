@@ -1237,6 +1237,115 @@
   border-color: rgba(214,178,94,.16);
 }
 
+.matched-context-section {
+  border-color: rgba(85,239,196,.14);
+}
+
+.matched-context-toolbar {
+  margin-top: 0;
+}
+
+.matched-context-row {
+  border-top: 1px solid rgba(255,255,255,.07);
+  padding: 9px 0;
+}
+
+.matched-context-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.matched-context-topline,
+.matched-context-indicators,
+.matched-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.matched-context-topline span:not(.classification-badge) {
+  color: rgba(242,243,245,.66);
+  font-size: .74rem;
+  font-weight: 800;
+}
+
+.matched-context-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+  margin: 7px 0;
+}
+
+.matched-context-facts div {
+  min-width: 0;
+}
+
+.matched-context-facts .matched-context-wide {
+  grid-column: 1 / -1;
+}
+
+.matched-context-facts dt {
+  color: rgba(242,243,245,.48);
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.matched-context-facts dd {
+  margin: 2px 0 0;
+  color: rgba(242,243,245,.88);
+  font-size: .8rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.matched-context-list {
+  margin: 5px 0 0;
+  padding-left: 17px;
+  color: rgba(242,243,245,.72);
+  font-size: .78rem;
+  font-weight: 750;
+  line-height: 1.38;
+}
+
+.matched-context-evidence {
+  margin: 4px 0 7px;
+}
+
+.matched-context-block {
+  border-top: 1px solid rgba(255,255,255,.07);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.matched-context-block strong {
+  display: block;
+  color: rgba(242,243,245,.7);
+  font-size: .74rem;
+  font-weight: 900;
+}
+
+.matched-context-actions {
+  margin-top: 7px;
+}
+
+.matched-context-actions .secondary-btn,
+.matched-context-toolbar .secondary-btn {
+  min-height: 28px;
+  border-radius: 7px;
+  padding: 0 8px;
+  font-size: .72rem;
+}
+
+.matched-context-empty {
+  border: 1px dashed rgba(255,255,255,.1);
+  border-radius: 8px;
+  margin-top: 6px;
+  padding: 9px;
+}
+
 .draft-safety-notice {
   margin-top: 0;
 }

@@ -18,7 +18,7 @@ const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "operator_match_context", "confirm_match", "reject_match", "mark_match_stale", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "save_draft_review", "approve_draft", "reject_draft"] as const;
 const CATEGORIES = [
   "buyer_message",
   "order_paid",
@@ -301,6 +301,7 @@ type Input = {
   replaySource: string;
   idempotencyKey: string | null;
   classificationId: string | null;
+  linkId: string | null;
   draftId: string | null;
   includeDraftBody: boolean;
   reviewState: string | null;
@@ -429,6 +430,9 @@ async function parseInput(req: Request): Promise<Input> {
   const classificationId = typeof body?.classificationId === "string" && body.classificationId.trim()
     ? body.classificationId.trim()
     : null;
+  const linkId = typeof body?.linkId === "string" && body.linkId.trim()
+    ? body.linkId.trim()
+    : null;
   const draftId = typeof body?.draftId === "string" && body.draftId.trim()
     ? body.draftId.trim()
     : null;
@@ -458,8 +462,14 @@ async function parseInput(req: Request): Promise<Input> {
   if (mode === "message_detail" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
-  if (mode === "admin_context_view" && !messageId) {
+  if ((mode === "admin_context_view" || mode === "operator_match_context") && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
+  }
+  if ((mode === "confirm_match" || mode === "reject_match" || mode === "mark_match_stale") && !linkId) {
+    throw new ClassifierError("link_id_required", { status: 400, phase: "input" });
+  }
+  if (mode === "reject_match" && !reason) {
+    throw new ClassifierError("reason_required", { status: 400, phase: "input" });
   }
   if (mode === "save_review" && !classificationId) {
     throw new ClassifierError("classification_id_required", { status: 400, phase: "input" });
@@ -506,6 +516,7 @@ async function parseInput(req: Request): Promise<Input> {
     replaySource,
     idempotencyKey,
     classificationId,
+    linkId,
     draftId,
     includeDraftBody,
     reviewState,
@@ -2411,6 +2422,29 @@ function safePriorReturnMessage(row: Record<string, any>) {
   };
 }
 
+function linkEvidence(link: Record<string, any>) {
+  const evidence = new Set<string>();
+  const method = String(link.match_method || link.metadata?.matched_by || "");
+  if (method) evidence.add(`${method.replace(/_/g, " ")} match`);
+  if (link.matched_value) evidence.add(`matched value: ${shortText(link.matched_value, 80)}`);
+  if (link.ebay_order_id) evidence.add("linked eBay order id present");
+  if (link.ebay_order_line_id) evidence.add("linked eBay order line id present");
+  if (link.item_id) evidence.add("linked inventory item id present");
+  if (link.sale_id) evidence.add("linked sale id present");
+  const identifiers = link.metadata?.extracted_identifiers;
+  if (identifiers && typeof identifiers === "object") {
+    for (const [key, value] of Object.entries(identifiers).slice(0, 8)) {
+      const count = Array.isArray(value) ? value.length : value ? 1 : 0;
+      if (count > 0) evidence.add(`${key.replace(/_/g, " ")} extracted`);
+    }
+  }
+  if (link.metadata?.guarded_by_context) evidence.add("guarded by stronger context clue");
+  if (link.metadata?.buyer_username_only) evidence.add("buyer username only; review recommended");
+  if (link.metadata?.masked_email_excluded) evidence.add("masked email excluded");
+  if (link.metadata?.unique_order) evidence.add("unique order candidate");
+  return [...evidence].slice(0, 8);
+}
+
 async function adminContextView(supabase: ServiceClient, input: Input) {
   if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "admin_context_view" });
 
@@ -2422,11 +2456,14 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
   if (messageError) throw new ClassifierError("message_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
   if (!message?.id) throw new ClassifierError("message_not_found", { status: 404, phase: "admin_context_view", messageId: input.messageId });
 
-  const { data: links, error: linksError } = await supabase
+  let linksQuery = supabase
     .from("email_message_links")
     .select("id, link_type, matched_value, match_method, confidence, status, ebay_order_id, ebay_order_line_id, item_id, sale_id, metadata, created_at")
-    .eq("message_id", input.messageId)
-    .in("status", ["suggested", "confirmed"])
+    .eq("message_id", input.messageId);
+  if (input.mode !== "operator_match_context") {
+    linksQuery = linksQuery.in("status", ["suggested", "confirmed"]);
+  }
+  const { data: links, error: linksError } = await linksQuery
     .order("confidence", { ascending: false, nullsFirst: false })
     .limit(50);
   if (linksError) throw new ClassifierError("link_lookup_failed", { phase: "admin_context_view", messageId: input.messageId });
@@ -2567,7 +2604,7 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
 
   return {
     ok: true,
-    mode: "admin_context_view",
+    mode: input.mode === "operator_match_context" ? "operator_match_context" : "admin_context_view",
     message_id: message.id,
     context_version: "readonly-ebay-context-v1",
     draft_enrichment: {
@@ -2671,13 +2708,228 @@ async function adminContextView(supabase: ServiceClient, input: Input) {
       confidence: Number(link.confidence || 0),
       match_method: link.match_method,
       matched_value: shortText(link.matched_value, 160) || null,
+      ebay_order_id: link.ebay_order_id || null,
+      ebay_order_line_id: link.ebay_order_line_id || null,
+      item_id: link.item_id || null,
+      sale_id: link.sale_id || null,
       has_ebay_order: Boolean(link.ebay_order_id),
       has_ebay_order_line: Boolean(link.ebay_order_line_id),
       has_inventory_item: Boolean(link.item_id),
       has_sale: Boolean(link.sale_id),
+      evidence: linkEvidence(link),
       metadata_return_case_id: link.metadata?.return_case_id || null,
       created_at: link.created_at || null,
     })),
+  };
+}
+
+function firstById(rows: Array<Record<string, any>>, id: string | null | undefined) {
+  if (!id) return null;
+  return rows.find((row) => String(row.id) === String(id)) || null;
+}
+
+function firstByOrderId(rows: Array<Record<string, any>>, orderId: string | null | undefined) {
+  if (!orderId) return null;
+  return rows.find((row) => String(row.order_id || "") === String(orderId)) || null;
+}
+
+function orderFacts(order: Record<string, any> | null) {
+  if (!order) return null;
+  return {
+    order_number: order.order_number || null,
+    status: order.status || null,
+    sale_date: order.sale_date || null,
+    buyer_username: order.buyer_username || null,
+    tracking_number: null,
+  };
+}
+
+function returnFacts(returnCase: Record<string, any> | null) {
+  if (!returnCase) return null;
+  return {
+    id: returnCase.id || null,
+    ebay_return_id: returnCase.ebay_return_id || null,
+    status: returnCase.status || null,
+    return_reason: returnCase.return_reason || null,
+    return_tracking_number: returnCase.return_tracking_number || null,
+    opened_at: returnCase.opened_at || null,
+  };
+}
+
+function shippingFacts(shipping: Record<string, any> | null) {
+  if (!shipping) return { tracking_number: null, shipping_service: null };
+  return {
+    tracking_number: shipping.tracking_number || shipping.safe_label_metadata?.trackingNumber || null,
+    shipping_service: shipping.shipping_service || null,
+    label_status: shipping.label_status || null,
+    shipped_on_date: shipping.shipped_on_date || null,
+  };
+}
+
+function itemTitleForMatch(line: Record<string, any> | null, returnCase: Record<string, any> | null, context: Record<string, any>) {
+  if (line?.item_title) return shortText(line.item_title, 180);
+  const returnItem = (context.known?.return_items || []).find((item: Record<string, any>) =>
+    (line?.id && item.order_line_id === line.id) ||
+    (returnCase?.id && item.return_case_id === returnCase.id)
+  );
+  return returnItem?.item_title ? shortText(returnItem.item_title, 180) : null;
+}
+
+async function latestValidationForMessage(supabase: ServiceClient, messageId: string) {
+  const { data: draftRows, error: draftError } = await supabase
+    .from("email_response_drafts")
+    .select("id, validation_status, validation_errors, safety_flags, requires_human_review, draft_status, created_at")
+    .eq("message_id", messageId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (draftError) throw new ClassifierError("response_draft_lookup_failed", { phase: "operator_match_context", messageId });
+
+  const draft = Array.isArray(draftRows) ? draftRows[0] as Record<string, any> | undefined : undefined;
+  if (draft?.id) {
+    return {
+      validation_status: draft.validation_status || "not_validated",
+      validation_errors: Array.isArray(draft.validation_errors) ? draft.validation_errors : [],
+      safety_flags: safeArray(draft.safety_flags),
+      requires_human_review: draft.requires_human_review !== false,
+      source: "current_response_draft",
+      draft_id: draft.id,
+      draft_status: draft.draft_status || null,
+    };
+  }
+
+  const { data: classificationRows, error: classificationError } = await supabase
+    .from("email_message_classifications")
+    .select("id, validation_status, validation_errors, safety_flags, requires_human_review, created_at")
+    .eq("message_id", messageId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (classificationError) throw new ClassifierError("classification_lookup_failed", { phase: "operator_match_context", messageId });
+
+  const classification = Array.isArray(classificationRows) ? classificationRows[0] as Record<string, any> | undefined : undefined;
+  return {
+    validation_status: classification?.validation_status || "not_validated",
+    validation_errors: Array.isArray(classification?.validation_errors) ? classification.validation_errors : [],
+    safety_flags: safeArray(classification?.safety_flags),
+    requires_human_review: classification?.requires_human_review !== false,
+    source: classification?.id ? "current_classification" : "none",
+    classification_id: classification?.id || null,
+  };
+}
+
+async function operatorMatchContext(supabase: ServiceClient, input: Input) {
+  if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "operator_match_context" });
+  const context = await adminContextView(supabase, { ...input, mode: "operator_match_context" });
+  const orders = context.known?.order || [];
+  const lines = context.known?.order_lines || [];
+  const returns = context.known?.return_case || [];
+  const shippingRows = context.known?.shipping || [];
+
+  const matches = (context.match_summary || []).map((link: Record<string, any>) => {
+    const line = firstById(lines, link.ebay_order_line_id);
+    const orderId = link.ebay_order_id || line?.order_id || null;
+    const order = firstById(orders, orderId);
+    const returnCase = firstById(returns, link.metadata_return_case_id) || firstByOrderId(returns, orderId);
+    const shipping = firstByOrderId(shippingRows, orderId);
+    return {
+      link_id: link.id,
+      link_type: link.link_type,
+      status: link.status,
+      confidence: link.confidence,
+      match_method: link.match_method,
+      matched_value: link.matched_value,
+      evidence: Array.isArray(link.evidence) ? link.evidence : [],
+      order: orderFacts(order),
+      return_case: returnFacts(returnCase),
+      shipping: shippingFacts(shipping),
+      item_title: itemTitleForMatch(line, returnCase, context),
+      verified_context: {
+        has_order: Boolean(order),
+        has_return_case: Boolean(returnCase),
+        has_shipping: Boolean(shipping?.tracking_number || shipping?.shipping_service || shipping?.label_status),
+        has_order_line: Boolean(line),
+      },
+    };
+  });
+
+  return {
+    ok: true,
+    mode: "operator_match_context",
+    message_id: context.message_id,
+    matches,
+    validation: await latestValidationForMessage(supabase, String(context.message_id)),
+    unknown: Array.isArray(context.unknown) ? context.unknown : [],
+    do_not_claim: Array.isArray(context.do_not_claim) ? context.do_not_claim : [],
+    verified_context: {
+      context_version: context.context_version || null,
+      indicators: context.draft_enrichment || {},
+    },
+  };
+}
+
+async function updateMatchReviewStatus(
+  supabase: ServiceClient,
+  input: Input,
+  admin: { userId: string; email: string | null },
+  status: "confirmed" | "rejected" | "stale",
+) {
+  if (!input.linkId) throw new ClassifierError("link_id_required", { status: 400, phase: "match_review" });
+  const { data: link, error: lookupError } = await supabase
+    .from("email_message_links")
+    .select("id, message_id, link_type, status, confidence, match_method, matched_value, metadata")
+    .eq("id", input.linkId)
+    .maybeSingle();
+  if (lookupError) throw new ClassifierError("link_lookup_failed", { phase: "match_review" });
+  if (!link?.id) throw new ClassifierError("link_not_found", { status: 404, phase: "match_review" });
+
+  const priorMetadata = link.metadata && typeof link.metadata === "object" ? link.metadata : {};
+  const history = Array.isArray(priorMetadata.operator_review_history) ? priorMetadata.operator_review_history : [];
+  const nowIso = new Date().toISOString();
+  const metadata = {
+    ...priorMetadata,
+    operator_review_history: [
+      ...history.slice(-19),
+      {
+        from_status: link.status || null,
+        to_status: status,
+        reviewed_by: admin.userId,
+        reviewed_at: nowIso,
+        reason: status === "rejected" ? input.reason : null,
+      },
+    ],
+    last_operator_review: {
+      from_status: link.status || null,
+      to_status: status,
+      reviewed_by: admin.userId,
+      reviewed_at: nowIso,
+      reason: status === "rejected" ? input.reason : null,
+    },
+  };
+
+  const { data, error } = await supabase
+    .from("email_message_links")
+    .update({ status, metadata })
+    .eq("id", input.linkId)
+    .select("id, message_id, link_type, status, confidence, match_method, matched_value, metadata")
+    .single();
+  if (error || !data?.id) throw new ClassifierError("link_review_update_failed", { phase: "match_review" });
+
+  return {
+    ok: true,
+    mode: input.mode,
+    link_id: data.id,
+    message_id: data.message_id,
+    link_type: data.link_type,
+    status: data.status,
+    confidence: Number(data.confidence || 0),
+    match_method: data.match_method,
+    matched_value: data.matched_value || null,
+    reviewed_by: admin.userId,
+    reviewed_at: nowIso,
+    outlook_mutation_performed: false,
+    ebay_mutation_performed: false,
+    outbound_send_enabled: false,
   };
 }
 
@@ -3609,6 +3861,22 @@ serve(async (req) => {
 
     if (input.mode === "admin_context_view") {
       return json(req, 200, await adminContextView(supabase, input));
+    }
+
+    if (input.mode === "operator_match_context") {
+      return json(req, 200, await operatorMatchContext(supabase, input));
+    }
+
+    if (input.mode === "confirm_match") {
+      return json(req, 200, await updateMatchReviewStatus(supabase, input, admin, "confirmed"));
+    }
+
+    if (input.mode === "reject_match") {
+      return json(req, 200, await updateMatchReviewStatus(supabase, input, admin, "rejected"));
+    }
+
+    if (input.mode === "mark_match_stale") {
+      return json(req, 200, await updateMatchReviewStatus(supabase, input, admin, "stale"));
     }
 
     if (input.mode === "save_review") {
