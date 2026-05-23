@@ -17,6 +17,7 @@ const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
+const REPAIR_BAD_CURRENT_DRAFTS_CONFIRMATION = "REPAIR_BAD_CURRENT_DRAFTS";
 
 const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "dry_run", "replay_classification", "admin_view", "message_detail", "admin_context_view", "operator_match_context", "confirm_match", "reject_match", "mark_match_stale", "save_review", "generate_response", "regenerate_response", "admin_draft_view", "diagnose_message_draft_state", "diagnose_all_bad_current_drafts", "diagnose_selector_contract", "repair_bad_current_drafts", "save_draft_review", "approve_draft", "reject_draft"] as const;
 const CATEGORIES = [
@@ -315,6 +316,7 @@ type Input = {
   draftSubject: string | null;
   draftBodyText: string | null;
   dryRun: boolean;
+  confirmApply: string | null;
 };
 
 class ClassifierError extends Error {
@@ -462,6 +464,9 @@ async function parseInput(req: Request): Promise<Input> {
     ? safeBodyText(body.draftBodyText).slice(0, MAX_DRAFT_BODY_CHARS)
     : null;
   const dryRun = body?.dryRun !== false;
+  const confirmApply = typeof body?.confirmApply === "string" && body.confirmApply.trim()
+    ? body.confirmApply.trim()
+    : null;
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
@@ -510,9 +515,6 @@ async function parseInput(req: Request): Promise<Input> {
   if ((mode === "diagnose_message_draft_state" || mode === "diagnose_selector_contract") && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
-  if (mode === "repair_bad_current_drafts" && body?.dryRun === false) {
-    throw new ClassifierError("repair_apply_disabled_step_4d_7d", { status: 400, phase: "diagnostic_repair" });
-  }
   return {
     mode,
     limit,
@@ -539,6 +541,7 @@ async function parseInput(req: Request): Promise<Input> {
     draftSubject,
     draftBodyText,
     dryRun,
+    confirmApply,
   };
 }
 
@@ -4506,34 +4509,86 @@ async function diagnoseSelectorContract(supabase: ServiceClient, input: Input) {
   };
 }
 
-async function repairBadCurrentDraftsDryRun(supabase: ServiceClient, input: Input) {
-  if (!input.dryRun) {
-    throw new ClassifierError("repair_apply_disabled_step_4d_7d", { status: 400, phase: "diagnostic_repair" });
-  }
-
+async function repairBadCurrentDrafts(supabase: ServiceClient, input: Input) {
   const pollutedDrafts = await loadPollutedCurrentDrafts(supabase, input);
   const messageIds = uniqueStrings(pollutedDrafts.map((draft) => draft.message_id), input.limit);
   const replacements = await loadBestReplacementsByMessage(supabase, messageIds);
+  const applyEnabled = input.dryRun === false && input.confirmApply === REPAIR_BAD_CURRENT_DRAFTS_CONFIRMATION;
+
+  if (!applyEnabled) {
+    return {
+      ok: true,
+      mode: "repair_bad_current_drafts",
+      dryRun: input.dryRun,
+      apply_enabled: false,
+      affected_messages: new Set(messageIds).size,
+      repairs: pollutedDrafts.map((draft) => {
+        const replacement = replacements.get(String(draft.message_id || "")) || null;
+        return {
+          message_id: draft.message_id,
+          bad_current_draft_id: draft.id,
+          bad_current_version: draft.draft_version === null ? null : Number(draft.draft_version),
+          bad_validation_status: draft.validation_status || null,
+          bad_validation_errors: Array.isArray(draft.validation_errors) ? draft.validation_errors : [],
+          replacement_draft_id: replacement?.id || null,
+          replacement_version: replacement?.draft_version === undefined || replacement?.draft_version === null ? null : Number(replacement.draft_version),
+          action: replacement ? "would_promote_replacement" : "would_clear_current_without_replacement",
+        };
+      }),
+    };
+  }
+
+  const repairedAt = new Date().toISOString();
+  const repairs: Array<Record<string, unknown>> = [];
+
+  for (const draft of pollutedDrafts) {
+    const replacement = replacements.get(String(draft.message_id || "")) || null;
+
+    const { error: clearError } = await supabase
+      .from("email_response_drafts")
+      .update({ is_current: false, superseded_at: repairedAt })
+      .eq("id", draft.id)
+      .eq("is_current", true);
+
+    if (clearError) {
+      throw new ClassifierError("repair_bad_current_draft_clear_failed", {
+        phase: "diagnostic_repair",
+        messageId: String(draft.message_id || ""),
+      });
+    }
+
+    if (replacement?.id) {
+      const { error: promoteError } = await supabase
+        .from("email_response_drafts")
+        .update({ is_current: true, superseded_at: null })
+        .eq("id", replacement.id)
+        .eq("message_id", draft.message_id)
+        .eq("validation_status", "valid")
+        .not("draft_body_text", "is", null);
+
+      if (promoteError) {
+        throw new ClassifierError("repair_replacement_draft_promote_failed", {
+          phase: "diagnostic_repair",
+          messageId: String(draft.message_id || ""),
+        });
+      }
+    }
+
+    repairs.push({
+      message_id: draft.message_id,
+      bad_current_draft_id: draft.id,
+      replacement_draft_id: replacement?.id || null,
+      action: replacement ? "promoted_replacement" : "cleared_current_without_replacement",
+    });
+  }
 
   return {
     ok: true,
     mode: "repair_bad_current_drafts",
-    dryRun: true,
-    apply_enabled: false,
+    dryRun: false,
+    apply_enabled: true,
     affected_messages: new Set(messageIds).size,
-    repairs: pollutedDrafts.map((draft) => {
-      const replacement = replacements.get(String(draft.message_id || "")) || null;
-      return {
-        message_id: draft.message_id,
-        bad_current_draft_id: draft.id,
-        bad_current_version: draft.draft_version === null ? null : Number(draft.draft_version),
-        bad_validation_status: draft.validation_status || null,
-        bad_validation_errors: Array.isArray(draft.validation_errors) ? draft.validation_errors : [],
-        replacement_draft_id: replacement?.id || null,
-        replacement_version: replacement?.draft_version === undefined || replacement?.draft_version === null ? null : Number(replacement.draft_version),
-        action: replacement ? "would_promote_replacement" : "would_clear_current_without_replacement",
-      };
-    }),
+    repairs,
   };
 }
 
@@ -4828,7 +4883,7 @@ serve(async (req) => {
     }
 
     if (input.mode === "repair_bad_current_drafts") {
-      return json(req, 200, await repairBadCurrentDraftsDryRun(supabase, input));
+      return json(req, 200, await repairBadCurrentDrafts(supabase, input));
     }
 
     if (input.mode === "save_draft_review") {
