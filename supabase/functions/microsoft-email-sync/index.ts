@@ -142,7 +142,18 @@ type ClassifyImportedInput = {
   batchSize: number;
 };
 
-type RequestInput = SyncInput | PreviewInput | ImportApprovedInput | ProcessImportedInput | ClassifyImportedInput;
+type PipelineDiagnosticsInput = {
+  mode: "pipeline_diagnostics";
+  folder: "inbox";
+};
+
+type RequestInput =
+  | SyncInput
+  | PreviewInput
+  | ImportApprovedInput
+  | ProcessImportedInput
+  | ClassifyImportedInput
+  | PipelineDiagnosticsInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -495,6 +506,10 @@ async function parseInput(req: Request): Promise<RequestInput> {
       CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
     );
     return { mode: "classify_imported", folder: "inbox", batchSize };
+  }
+
+  if (requestedMode === "pipeline_diagnostics") {
+    return { mode: "pipeline_diagnostics", folder: "inbox" };
   }
 
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
@@ -2741,6 +2756,263 @@ async function classifyImportedEmails(
   };
 }
 
+async function diagnosticCountRows(supabase: ServiceClient, table: string, build: (query: any) => any) {
+  const { count, error } = await build(supabase.from(table).select("id", { count: "exact", head: true }));
+  if (error) throw new SyncError("pipeline_diagnostics_failed", { phase: `pipeline_diagnostics_${table}_count` });
+  return count || 0;
+}
+
+function blankJobStatusSummary() {
+  return { queued: 0, running: 0, succeeded: 0, skipped: 0, failed: 0 };
+}
+
+function blankQueueSummary() {
+  return { queued: 0, running: 0, succeeded: 0, skipped: 0, failed: 0, permanently_failed: 0 };
+}
+
+function incrementNumber(summary: Record<string, number>, key: string, amount = 1) {
+  summary[key] = (summary[key] || 0) + amount;
+}
+
+function numberFromPayload(payload: Record<string, any>, keys: string[]) {
+  return keys.reduce((sum, key) => sum + Number(payload?.[key] || 0), 0);
+}
+
+async function countActiveApprovedImportedMessages(supabase: ServiceClient, mailboxId: string, messageIds: string[]) {
+  let total = 0;
+  for (let index = 0; index < messageIds.length; index += 100) {
+    total += await diagnosticCountRows(supabase, "email_messages", (query) =>
+      query
+        .eq("mailbox_id", mailboxId)
+        .eq("sync_status", "active")
+        .in("id", messageIds.slice(index, index + 100))
+    );
+  }
+  return total;
+}
+
+async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: string, folderId: string) {
+  const { data: events, error: eventError } = await supabase
+    .from("email_operational_events")
+    .select("event_type, created_at, message_ids, payload")
+    .eq("mailbox_id", mailboxId)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (eventError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_events" });
+
+  const operationalEventSummary: Record<string, number> = {};
+  const importedMessageIds = new Set<string>();
+  let skippedTotal = 0;
+  let alreadyImportedTotal = 0;
+  let duplicateTotal = 0;
+  let latestOperationAt: string | null = null;
+  let latestOperationType: string | null = null;
+  let importOperations = 0;
+  let classifyOperations = 0;
+  let processOperations = 0;
+
+  for (const event of events || []) {
+    const eventType = String(event.event_type || "unknown");
+    incrementNumber(operationalEventSummary, eventType);
+    if (!latestOperationAt) {
+      latestOperationAt = event.created_at || null;
+      latestOperationType = eventType;
+    }
+    if (eventType === "sync_import_approved") importOperations += 1;
+    if (["classify_imported", "classification_replay"].includes(eventType)) classifyOperations += 1;
+    if (["processing_requeue", "processing_replay", "process_imported"].includes(eventType)) processOperations += 1;
+
+    const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
+    if (eventType === "sync_import_approved") {
+      for (const id of event.message_ids || []) importedMessageIds.add(String(id));
+      skippedTotal += payload.skipped_count === undefined
+        ? Number(payload.skipped_not_eligible_count || 0)
+        : Number(payload.skipped_count || 0);
+      alreadyImportedTotal += payload.already_imported_count === undefined
+        ? Number(payload.skipped_already_imported_count || 0)
+        : Number(payload.already_imported_count || 0);
+      duplicateTotal += numberFromPayload(payload, ["duplicate_count", "duplicates_count"]);
+      const skippedReasons = payload.skipped_reasons && typeof payload.skipped_reasons === "object"
+        ? payload.skipped_reasons as Record<string, unknown>
+        : {};
+      duplicateTotal += Number(skippedReasons.duplicate || 0) + Number(skippedReasons.already_imported || 0);
+    }
+  }
+
+  if (duplicateTotal === 0 && alreadyImportedTotal > 0) duplicateTotal = alreadyImportedTotal;
+
+  const approvedImportedIds = [...importedMessageIds];
+  const activeImportedTotal = approvedImportedIds.length
+    ? await countActiveApprovedImportedMessages(supabase, mailboxId, approvedImportedIds)
+    : 0;
+
+  const importedSummary = {
+    approved_imported_total: approvedImportedIds.length,
+    active_imported_total: activeImportedTotal,
+    skipped_total: skippedTotal,
+    duplicate_total: duplicateTotal,
+    already_imported_total: alreadyImportedTotal,
+  };
+
+  const processingSummary: Record<ProcessImportedJobType, ReturnType<typeof blankJobStatusSummary>> = {
+    normalize: blankJobStatusSummary(),
+    match_order: blankJobStatusSummary(),
+  };
+  const queueSummary = blankQueueSummary();
+  const failureReasons: Record<string, number> = {};
+  let latestProcessingAt: string | null = null;
+
+  for (const jobType of PROCESS_IMPORTED_JOB_TYPES) {
+    for (const status of ["queued", "running", "succeeded", "skipped", "failed"] as const) {
+      const count = await diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+        query
+          .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+          .eq("email_messages.mailbox_id", mailboxId)
+          .eq("job_type", jobType)
+          .eq("status", status)
+      );
+      processingSummary[jobType][status] = count;
+    }
+  }
+
+  for (const status of ["queued", "running", "succeeded", "skipped", "failed"] as const) {
+    queueSummary[status] = await diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("status", status)
+    );
+  }
+
+  const { data: failedJobs, error: failedJobError } = await supabase
+    .from("email_processing_jobs")
+    .select("status, job_type, attempt_count, max_attempts, last_error_code, last_error_message, metadata, updated_at, completed_at, email_messages!inner(mailbox_id)")
+    .eq("email_messages.mailbox_id", mailboxId)
+    .eq("status", "failed")
+    .order("updated_at", { ascending: false })
+    .limit(1000);
+  if (failedJobError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_failed_jobs" });
+  let classificationPermanentFailures = 0;
+  for (const job of failedJobs || []) {
+    const permanentlyFailed = Number(job.attempt_count || 0) >= Number(job.max_attempts || 3);
+    if (permanentlyFailed) queueSummary.permanently_failed += 1;
+    if (permanentlyFailed && String(job.job_type || "") === "classify") classificationPermanentFailures += 1;
+    const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata as Record<string, any> : {};
+    const reason = String(job.last_error_code || metadata.error || job.last_error_message || "unknown");
+    incrementNumber(failureReasons, reason);
+  }
+
+  const { data: latestProcessingRows, error: latestProcessingError } = await supabase
+    .from("email_processing_jobs")
+    .select("updated_at, completed_at, email_messages!inner(mailbox_id)")
+    .eq("email_messages.mailbox_id", mailboxId)
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (latestProcessingError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_latest_processing" });
+  latestProcessingAt = latestProcessingRows?.[0]?.completed_at || latestProcessingRows?.[0]?.updated_at || null;
+
+  const [
+    classifiedTotal,
+    currentClassifications,
+    inactiveClassifications,
+    failedClassificationsTotal,
+  ] = await Promise.all([
+    diagnosticCountRows(supabase, "email_message_classifications", (query) =>
+      query.select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true }).eq("email_messages.mailbox_id", mailboxId)
+    ),
+    diagnosticCountRows(supabase, "email_message_classifications", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("is_current", true)
+    ),
+    diagnosticCountRows(supabase, "email_message_classifications", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("is_current", false)
+    ),
+    diagnosticCountRows(supabase, "email_message_classifications", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .in("validation_status", ["invalid", "error"])
+    ),
+  ]);
+
+  const categorySummary: Record<string, number> = {};
+  const prioritySummary: Record<string, number> = {};
+  const urgencySummary: Record<string, number> = {};
+  let latestClassificationAt: string | null = null;
+  const { data: classifications, error: classificationError } = await supabase
+    .from("email_message_classifications")
+    .select("category, priority, urgency, validation_status, classified_at, created_at, email_messages!inner(mailbox_id)")
+    .eq("email_messages.mailbox_id", mailboxId)
+    .eq("is_current", true)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (classificationError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_classifications" });
+  for (const classification of classifications || []) {
+    if (!latestClassificationAt) latestClassificationAt = classification.classified_at || classification.created_at || null;
+    incrementSummary(categorySummary, classification.category);
+    incrementSummary(prioritySummary, classification.priority);
+    incrementSummary(urgencySummary, classification.urgency);
+    const validationStatus = String(classification.validation_status || "");
+    if (["invalid", "error"].includes(validationStatus)) incrementNumber(failureReasons, `classification_${validationStatus}`);
+  }
+
+  const classificationSummary = {
+    classified_total: classifiedTotal,
+    current_classifications: currentClassifications,
+    inactive_classifications: inactiveClassifications,
+    permanently_failed_total: classificationPermanentFailures,
+    category_summary: categorySummary,
+    priority_summary: prioritySummary,
+    urgency_summary: urgencySummary,
+  };
+
+  const latestImportEvent = (events || []).find((event) => String(event.event_type || "") === "sync_import_approved");
+  const timingSummary = {
+    latest_import_at: latestImportEvent?.created_at || null,
+    latest_processing_at: latestProcessingAt,
+    latest_classification_at: latestClassificationAt,
+  };
+
+  return {
+    ok: true,
+    mode: "pipeline_diagnostics",
+    mailbox_id: mailboxId,
+    folder_id: folderId,
+    imported_summary: importedSummary,
+    processing_summary: processingSummary,
+    classification_summary: classificationSummary,
+    replay_summary: {
+      import_operations: importOperations,
+      classify_operations: classifyOperations,
+      process_operations: processOperations,
+      latest_operation_at: latestOperationAt,
+      latest_operation_type: latestOperationType,
+      replay_safe: true,
+    },
+    queue_summary: queueSummary,
+    operational_event_summary: operationalEventSummary,
+    failure_summary: {
+      failed_jobs_total: queueSummary.failed,
+      failed_classifications_total: failedClassificationsTotal,
+      failed_reasons: failureReasons,
+    },
+    timing_summary: timingSummary,
+    safety: {
+      outlook_mutation_performed: false,
+      sync_checkpoint_updated: false,
+      drafts_created: 0,
+      automatic_responses_sent: 0,
+      attachments_fetched: 0,
+    },
+  };
+}
+
 function blankCounters(): SyncCounters {
   return {
     graph_request_count: 0,
@@ -2795,7 +3067,29 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
-    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved" || input.mode === "process_imported" || input.mode === "classify_imported";
+    isPreview = input.mode === "sync_preview" ||
+      input.mode === "sync_import_approved" ||
+      input.mode === "process_imported" ||
+      input.mode === "classify_imported" ||
+      input.mode === "pipeline_diagnostics";
+    if (input.mode === "pipeline_diagnostics") {
+      const processingModel = await loadProcessingModel(supabase);
+      mailboxId = processingModel.mailbox.id;
+      folderId = processingModel.folder.id;
+      const result = await buildPipelineDiagnostics(supabase, mailboxId, folderId);
+      console.log("[microsoft-email-sync] pipeline_diagnostics completed", {
+        phase: "pipeline_diagnostics_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        import_operations: result.replay_summary.import_operations,
+        classify_operations: result.replay_summary.classify_operations,
+        process_operations: result.replay_summary.process_operations,
+        failed_jobs_total: result.failure_summary.failed_jobs_total,
+      });
+
+      return json(req, 200, result);
+    }
+
     if (input.mode === "process_imported") {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
