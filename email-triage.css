@@ -101,6 +101,207 @@
   color: var(--gold-2);
 }
 
+.operational-dashboard-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.operational-dashboard-head,
+.operational-panel-head,
+.operational-dashboard-status,
+.operational-safety-strip,
+.operational-event-counts,
+.operational-child-refs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.operational-dashboard-head {
+  justify-content: space-between;
+}
+
+.operational-dashboard-head h2 {
+  margin: 2px 0 0;
+  color: rgba(242,243,245,.96);
+  font-size: 1.04rem;
+  letter-spacing: 0;
+}
+
+.operational-dashboard-inline-status,
+.operational-dashboard-status {
+  white-space: normal;
+}
+
+.operational-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.operational-panel {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  padding: 10px;
+}
+
+.operational-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.operational-panel-head {
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.operational-panel-head strong {
+  color: rgba(242,243,245,.95);
+  font-size: .86rem;
+}
+
+.operational-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.operational-metric-grid div,
+.operational-row,
+.operational-reason-row {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 7px;
+  background: rgba(0,0,0,.12);
+  padding: 8px;
+}
+
+.operational-metric-grid span,
+.operational-row span,
+.operational-reason-row span {
+  display: block;
+  color: rgba(242,243,245,.56);
+  font-size: .7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.operational-metric-grid strong,
+.operational-row strong,
+.operational-reason-row strong {
+  display: block;
+  margin-top: 3px;
+  color: rgba(242,243,245,.95);
+  font-size: .94rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.operational-activity-list,
+.operational-event-list,
+.operational-reason-list {
+  display: grid;
+  gap: 7px;
+}
+
+.operational-activity-list {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.operational-row em {
+  display: block;
+  margin-top: 3px;
+  color: rgba(242,243,245,.58);
+  font-size: .72rem;
+  font-style: normal;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.operational-event-row {
+  display: grid;
+  grid-template-columns: minmax(190px, .8fr) minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-left: 3px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(0,0,0,.12);
+  padding: 9px;
+}
+
+.operational-event-row.is-replay {
+  border-left-color: rgba(214,178,94,.55);
+}
+
+.operational-event-row.is-failure {
+  border-left-color: rgba(255,99,132,.62);
+}
+
+.operational-event-row strong {
+  display: block;
+  color: rgba(242,243,245,.94);
+  font-size: .82rem;
+  overflow-wrap: anywhere;
+}
+
+.operational-event-row span,
+.operational-event-row p {
+  color: rgba(242,243,245,.6);
+  font-size: .74rem;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.operational-event-row p {
+  margin: 0;
+}
+
+.operational-child-refs {
+  grid-column: 1 / -1;
+}
+
+.operational-child-refs b {
+  display: inline-flex;
+  gap: 4px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(255,255,255,.045);
+  padding: 4px 7px;
+  color: rgba(242,243,245,.78);
+  font-size: .72rem;
+}
+
+.operational-child-refs em {
+  color: var(--gold-2);
+  font-style: normal;
+}
+
+.operational-reason-list {
+  margin-top: 8px;
+}
+
+.operational-reason-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.operational-reason-row strong {
+  margin-top: 0;
+  text-align: right;
+}
+
+.operational-empty {
+  border: 1px dashed rgba(255,255,255,.1);
+  border-radius: 8px;
+  padding: 10px;
+}
+
 .admin-diagnostics-drawer {
   display: grid;
   gap: 8px;
@@ -2039,6 +2240,23 @@
 
   .classification-admin-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operational-dashboard-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .operational-dashboard-grid,
+  .operational-metric-grid,
+  .operational-activity-list,
+  .operational-event-row {
+    grid-template-columns: 1fr;
+  }
+
+  .operational-panel-wide,
+  .operational-child-refs {
+    grid-column: auto;
   }
 
   .classification-admin-controls {

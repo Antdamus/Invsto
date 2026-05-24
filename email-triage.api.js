@@ -23,6 +23,7 @@
     matchContext: 15000,
     inboxPreview: 30000,
     inboxImport: 60000,
+    operationalDashboard: 30000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -464,6 +465,87 @@
     };
   }
 
+  function normalizeOperationalDashboardPayload(payload = {}) {
+    const pipelineEnvelope = normalizeEnvelope(payload.pipeline, "pipeline_diagnostics");
+    const liveSyncEnvelope = normalizeEnvelope(payload.liveSync, "live_sync_status");
+    const mailboxEnvelope = normalizeEnvelope(payload.mailbox, "mailbox_status");
+    const pipeline = pipelineEnvelope.data || {};
+    const liveSync = liveSyncEnvelope.data || {};
+    const mailbox = payload.mailbox && typeof payload.mailbox === "object" ? payload.mailbox : {};
+    const connection = mailbox.connection && typeof mailbox.connection === "object" ? mailbox.connection : mailbox;
+    const queueSummary = pipeline.queue_summary && typeof pipeline.queue_summary === "object" ? pipeline.queue_summary : {};
+    const liveQueue = liveSync.queue_state && typeof liveSync.queue_state === "object" ? liveSync.queue_state : {};
+    const classification = pipeline.classification_summary && typeof pipeline.classification_summary === "object" ? pipeline.classification_summary : {};
+    const failures = pipeline.failure_summary && typeof pipeline.failure_summary === "object" ? pipeline.failure_summary : {};
+    const timing = pipeline.timing_summary && typeof pipeline.timing_summary === "object" ? pipeline.timing_summary : {};
+    const replay = pipeline.replay_summary && typeof pipeline.replay_summary === "object" ? pipeline.replay_summary : {};
+    const events = Array.isArray(pipeline.recent_operational_events) ? pipeline.recent_operational_events : [];
+    const latestByType = (types = []) => events.find((event) => types.includes(String(event.event_type || ""))) || null;
+    const latestFailedEvent = events.find((event) => {
+      const status = String(event.status || "").toLowerCase();
+      const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+      return status.includes("fail") || Number(counters.failed_count || 0) > 0;
+    }) || null;
+
+    return {
+      ok: pipelineEnvelope.ok !== false && liveSyncEnvelope.ok !== false && mailboxEnvelope.ok !== false && mailbox.ok !== false,
+      mode: "operational_dashboard",
+      generated_at: new Date().toISOString(),
+      mailbox: {
+        status: connection.status || connection.mailbox_status || "unknown",
+        connected: Boolean(connection.mailbox_email || connection.status || connection.mailbox_status),
+        mailbox_email: connection.mailbox_email || connection.email || null,
+        display_name: connection.display_name || null,
+        last_checked_at: connection.last_successful_check_at || connection.last_successful_sync_at || connection.updated_at || timing.latest_live_refresh_at || null,
+        live_sync_enabled: liveSync.live_sync_enabled === true || pipeline.live_sync_enabled === true,
+      },
+      queue: {
+        queued: Number(liveQueue.queued ?? queueSummary.queued ?? 0),
+        running: Number(liveQueue.running ?? queueSummary.running ?? 0),
+        succeeded: Number(queueSummary.succeeded || 0),
+        skipped: Number(queueSummary.skipped || 0),
+        failed: Number(queueSummary.failed || 0),
+        permanently_failed: Number(queueSummary.permanently_failed || 0),
+        saturated: liveQueue.saturated === true || queueSummary.saturated === true,
+        oldest_queued_age_seconds: queueSummary.oldest_queued_age_seconds ?? null,
+      },
+      activity: {
+        latest_live_refresh: latestByType(["run_live_refresh"]),
+        latest_import: latestByType(["sync_import_approved"]),
+        latest_classification: latestByType(["classify_imported", "classification_replay"]),
+        latest_replay: latestByType(["classification_replay", "processing_replay", "processing_requeue", "sync_replay"]),
+        latest_failed_operation: latestFailedEvent,
+        timing,
+      },
+      replay: {
+        import_operations: Number(replay.import_operations || 0),
+        classify_operations: Number(replay.classify_operations || 0),
+        process_operations: Number(replay.process_operations || 0),
+        live_refresh_operations: Number(replay.live_refresh_operations || 0),
+        latest_operation_at: replay.latest_operation_at || null,
+        latest_operation_type: replay.latest_operation_type || null,
+        replay_safe: replay.replay_safe === true,
+      },
+      failures: {
+        failed_jobs_total: Number(failures.failed_jobs_total || 0),
+        failed_classifications_total: Number(failures.failed_classifications_total || classification.permanently_failed_total || 0),
+        permanently_failed_classifications: Number(classification.permanently_failed_total || 0),
+        failed_reasons: failures.failed_reasons && typeof failures.failed_reasons === "object" ? failures.failed_reasons : {},
+      },
+      recent_operational_events: events,
+      safety: {
+        outlook_mutation_performed: pipeline.safety?.outlook_mutation_performed === true || liveSync.safety?.outlook_mutation_performed === true,
+        sync_checkpoint_updated: pipeline.safety?.sync_checkpoint_updated === true || liveSync.safety?.sync_checkpoint_updated === true,
+        drafts_created: Number(pipeline.safety?.drafts_created || liveSync.safety?.drafts_created || 0),
+        automatic_responses_sent: Number(pipeline.safety?.automatic_responses_sent || liveSync.safety?.automatic_responses_sent || 0),
+        scheduler_started: liveSync.safety?.scheduler_started === true || false,
+        polling_started: liveSync.safety?.polling_started === true || false,
+        realtime_listener_started: liveSync.safety?.realtime_listener_started === true || false,
+      },
+      raw: { pipeline, liveSync, mailbox },
+    };
+  }
+
   async function fetchInboxPreview(context, values = {}) {
     const session = await currentSession(context, "Inbox preview");
     const body = {
@@ -523,6 +605,26 @@
     return normalizeLiveRefreshPayload(payload);
   }
 
+  async function fetchOperationalDashboard(context) {
+    const session = await currentSession(context, "Operational dashboard");
+    const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
+      edgeFetchWithTimeout(STATUS_FUNCTION, session, { method: "GET" }, TIMEOUTS.operationalDashboard),
+      edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+        method: "POST",
+        body: JSON.stringify({ mode: "pipeline_diagnostics" }),
+      }, TIMEOUTS.operationalDashboard),
+      edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+        method: "POST",
+        body: JSON.stringify({ mode: "live_sync_status" }),
+      }, TIMEOUTS.operationalDashboard),
+    ]);
+    const mailbox = mailboxResult.status === "fulfilled" ? mailboxResult.value : mailboxResult.reason?.envelope || toSafeErrorEnvelope(mailboxResult.reason, "mailbox_status_failed");
+    const pipeline = pipelineResult.status === "fulfilled" ? pipelineResult.value : pipelineResult.reason?.envelope || toSafeErrorEnvelope(pipelineResult.reason, "pipeline_diagnostics_failed");
+    const liveSync = liveSyncResult.status === "fulfilled" ? liveSyncResult.value : liveSyncResult.reason?.envelope || toSafeErrorEnvelope(liveSyncResult.reason, "live_sync_status_failed");
+
+    return normalizeOperationalDashboardPayload({ mailbox, pipeline, liveSync });
+  }
+
   window.EmailTriageApi = {
     functions: {
       START_FUNCTION,
@@ -557,8 +659,10 @@
     normalizeInboxPreviewPayload,
     normalizeInboxImportPayload,
     normalizeLiveRefreshPayload,
+    normalizeOperationalDashboardPayload,
     fetchInboxPreview,
     importApprovedInboxPreview,
     runInboxLiveRefresh,
+    fetchOperationalDashboard,
   };
 })();

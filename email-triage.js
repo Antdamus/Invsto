@@ -8,6 +8,7 @@
     normalizeAdminViewPayload,
     isAdminViewEmpty,
     fetchAdminClassificationView,
+    fetchOperationalDashboard,
     fetchMessageDetail,
     fetchDraftView,
     requestResponseDraft,
@@ -71,7 +72,7 @@
     filterToggleLabel,
   } = window.EmailTriageRenderUtils;
   const { renderMessageRows, bindInboxPreviewImport } = window.EmailTriageInbox;
-  const { renderAdminSummary } = window.EmailTriageDiagnostics;
+  const { renderAdminSummary, renderOperationalDashboard } = window.EmailTriageDiagnostics;
   const { successMessageForAction } = window.EmailTriageDrafts;
   const {
     CLASSIFICATION_CATEGORIES,
@@ -105,6 +106,9 @@
     classificationAdminDebug: document.getElementById("classification-admin-debug"),
     classificationAdminStatus: document.getElementById("classification-admin-status"),
     classificationAdminSummary: document.getElementById("classification-admin-summary"),
+    operationalDashboardRefresh: document.getElementById("refresh-operational-dashboard"),
+    operationalDashboardStatus: document.getElementById("operational-dashboard-status"),
+    operationalDashboard: document.getElementById("operational-dashboard"),
     classificationSort: document.getElementById("classification-sort"),
     classificationFiltersToggle: document.getElementById("classification-filters-toggle"),
     classificationFiltersLabel: document.getElementById("classification-filters-label"),
@@ -124,6 +128,9 @@
     densityMode: getStoredDensityMode(),
   }));
   let adminClassificationState = triageStore.getState();
+  triageStore.subscribe((state) => {
+    adminClassificationState = state;
+  });
 
   function applyPanelWidths(widths = getStoredPanelWidths()) {
     applyStoredPanelWidths(els.classificationInboxShell, widths);
@@ -1150,6 +1157,58 @@
     renderClassificationDetail(state, data);
   }
 
+  function renderOperationalDashboardPanel(state = triageStore.getState()) {
+    if (!els.operationalDashboard) return;
+    if (els.operationalDashboardRefresh) {
+      els.operationalDashboardRefresh.disabled = state.operationalDashboardLoading === true;
+      els.operationalDashboardRefresh.setAttribute("aria-busy", state.operationalDashboardLoading ? "true" : "false");
+    }
+    if (els.operationalDashboardStatus) {
+      if (state.operationalDashboardLoading) {
+        els.operationalDashboardStatus.textContent = "Refreshing operational dashboard.";
+      } else if (state.operationalDashboardError) {
+        els.operationalDashboardStatus.textContent = `Dashboard refresh failed: ${state.operationalDashboardError}`;
+      } else if (state.operationalDashboardUpdatedAt) {
+        els.operationalDashboardStatus.textContent = `Operational dashboard refreshed ${formatDateTime(state.operationalDashboardUpdatedAt)}.`;
+      } else {
+        els.operationalDashboardStatus.textContent = "Manual refresh only. No autonomous polling is active.";
+      }
+    }
+    els.operationalDashboard.innerHTML = renderOperationalDashboard(state);
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+  }
+
+  function setOperationalDashboardState(next) {
+    triageStore.dispatch({ type: TRANSITIONS.SET_STATE, payload: next });
+    renderOperationalDashboardPanel(triageStore.getState());
+  }
+
+  async function loadOperationalDashboard(context, options = {}) {
+    if (!els.operationalDashboard) return;
+    const previous = triageStore.getState();
+    setOperationalDashboardState({
+      operationalDashboardLoading: true,
+      operationalDashboardError: null,
+      operationalDashboardSnapshot: options.keepPrevious === false ? null : previous.operationalDashboardSnapshot,
+    });
+
+    try {
+      const snapshot = await fetchOperationalDashboard(context);
+      setOperationalDashboardState({
+        operationalDashboardLoading: false,
+        operationalDashboardError: snapshot.ok === false ? "diagnostics_partial_failure" : null,
+        operationalDashboardSnapshot: snapshot,
+        operationalDashboardUpdatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setOperationalDashboardState({
+        operationalDashboardLoading: false,
+        operationalDashboardError: error.code || error.message || "operational_dashboard_failed",
+      });
+      console.error("[email-triage] operational dashboard fetch failed:", error);
+    }
+  }
+
   async function loadAdminClassificationData(context) {
     setAdminClassificationState({
       status: "loading",
@@ -1979,9 +2038,14 @@
     });
     bindPanelResizeEvents();
     bindInboxPreviewImport(context, triageStore, {
-      onLiveRefreshComplete: () => loadAdminClassificationData(context),
+      onImportComplete: () => loadOperationalDashboard(context),
+      onLiveRefreshComplete: () => {
+        loadAdminClassificationData(context);
+        loadOperationalDashboard(context);
+      },
     });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
+    els.operationalDashboardRefresh?.addEventListener("click", () => loadOperationalDashboard(context));
     els.toggleCategoryPanel?.addEventListener("click", () => {
       setAdminClassificationState({
         categoryPanelCollapsed: !adminClassificationState.categoryPanelCollapsed,
@@ -1996,6 +2060,7 @@
 
     handleOutlookQueryNotice();
     await loadAdminClassificationData(context);
+    loadOperationalDashboard(context, { keepPrevious: false });
     loadSelectedDraftView(context);
     loadSelectedMatchContext(context);
 

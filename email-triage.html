@@ -72,6 +72,21 @@
           </div>
         </section>
 
+        <section class="triage-disclosure operational-dashboard-section" aria-label="Operational dashboard">
+          <div class="operational-dashboard-head">
+            <div>
+              <span class="eyebrow">Operational Console</span>
+              <h2>Dashboard Basics</h2>
+            </div>
+            <button type="button" id="refresh-operational-dashboard" class="secondary-btn">
+              <i data-lucide="refresh-cw"></i>
+              Refresh Dashboard
+            </button>
+          </div>
+          <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
+          <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
+        </section>
+
         <section id="admin-diagnostics-drawer" class="admin-diagnostics-drawer hidden" aria-label="Admin diagnostics">
           <div class="admin-diagnostics-actions">
             <button type="button" id="connect-outlook" class="primary-btn">

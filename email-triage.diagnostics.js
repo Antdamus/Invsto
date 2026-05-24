@@ -42,11 +42,254 @@
     ], utils);
   }
 
+  function dashboardBadge(label, variant = "muted", utils = window.EmailTriageRenderUtils) {
+    return `<span class="inbox-chip is-${utils.escapeHtml(variant)}">${utils.escapeHtml(label)}</span>`;
+  }
+
+  function formatAgeSeconds(seconds, utils = window.EmailTriageRenderUtils) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value)) return "--";
+    if (value < 60) return `${Math.max(Math.round(value), 0)}s`;
+    if (value < 3600) return `${Math.round(value / 60)}m`;
+    if (value < 86400) return `${Math.round(value / 3600)}h`;
+    return `${Math.round(value / 86400)}d`;
+  }
+
+  function firstValue(values = []) {
+    return values.find((value) => value !== undefined && value !== null && value !== "") ?? null;
+  }
+
+  function operationTitle(event = {}, utils = window.EmailTriageRenderUtils) {
+    return utils.humanizeValue(event.event_type || "No event");
+  }
+
+  function operationMeta(event = {}, utils = window.EmailTriageRenderUtils) {
+    if (!event) return "--";
+    const pieces = [
+      event.id ? `id ${utils.compactId(event.id)}` : "",
+      event.created_at ? utils.formatDateTime(event.created_at) : "",
+      event.initiated_by ? `by ${event.initiated_by}` : "",
+    ].filter(Boolean);
+    return pieces.join(" · ") || "--";
+  }
+
+  function renderKeyValueGrid(items = [], utils = window.EmailTriageRenderUtils) {
+    return items.map((item) => `
+      <div>
+        <span>${utils.escapeHtml(item.label)}</span>
+        <strong>${item.html || utils.escapeHtml(item.value ?? "--")}</strong>
+      </div>
+    `).join("");
+  }
+
+  function renderActivityRows(snapshot = {}, utils = window.EmailTriageRenderUtils) {
+    const activity = snapshot.activity || {};
+    const rows = [
+      ["Latest live refresh", activity.latest_live_refresh, activity.timing?.latest_live_refresh_at],
+      ["Latest import", activity.latest_import, activity.timing?.latest_import_at],
+      ["Latest classification", activity.latest_classification, activity.timing?.latest_classification_at],
+      ["Latest replay", activity.latest_replay, snapshot.replay?.latest_operation_at],
+      ["Latest failed operation", activity.latest_failed_operation, null],
+    ];
+
+    return rows.map(([label, event, fallbackAt]) => `
+      <div class="operational-row">
+        <span>${utils.escapeHtml(label)}</span>
+        <strong>${utils.escapeHtml(event ? operationTitle(event, utils) : (fallbackAt ? "Recorded" : "None"))}</strong>
+        <em>${utils.escapeHtml(event ? operationMeta(event, utils) : (fallbackAt ? utils.formatDateTime(fallbackAt) : "--"))}</em>
+      </div>
+    `).join("");
+  }
+
+  function renderChildOperations(event = {}, utils = window.EmailTriageRenderUtils) {
+    const children = Object.entries(event.child_operations || {}).filter(([, value]) => value);
+    if (!children.length) return "";
+    return `
+      <div class="operational-child-refs">
+        ${children.map(([key, value]) => `<b>${utils.escapeHtml(utils.humanizeValue(key))}: <em>${utils.escapeHtml(utils.compactId(value))}</em></b>`).join("")}
+      </div>
+    `;
+  }
+
+  function renderOperationalEventRows(events = [], utils = window.EmailTriageRenderUtils) {
+    if (!events.length) {
+      return `<div class="classification-empty operational-empty">No operational events returned yet.</div>`;
+    }
+
+    return events.slice(0, 12).map((event) => {
+      const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+      const countParts = [
+        Number(event.message_count || 0) ? `${event.message_count} messages` : "",
+        Number(event.new_job_count || 0) ? `${event.new_job_count} new jobs` : "",
+        Number(counters.imported_count || 0) ? `${counters.imported_count} imported` : "",
+        Number(counters.processed_count || 0) ? `${counters.processed_count} processed` : "",
+        Number(counters.classified_count || 0) ? `${counters.classified_count} classified` : "",
+        Number(counters.failed_count || 0) ? `${counters.failed_count} failed` : "",
+      ].filter(Boolean);
+      const isReplay = String(event.event_type || "").includes("replay") || String(event.event_type || "").includes("requeue");
+      const isFailure = String(event.status || "").includes("fail") || Number(counters.failed_count || 0) > 0;
+
+      return `
+        <article class="operational-event-row${isReplay ? " is-replay" : ""}${isFailure ? " is-failure" : ""}">
+          <div>
+            <strong>${utils.escapeHtml(operationTitle(event, utils))}</strong>
+            <span>${utils.escapeHtml(operationMeta(event, utils))}</span>
+          </div>
+          <p>${utils.escapeHtml(firstValue([event.reason, event.replay_source, "No reason recorded"]))}</p>
+          <div class="operational-event-counts">
+            ${countParts.length ? countParts.map((part) => dashboardBadge(part, part.includes("failed") ? "danger" : "muted", utils)).join("") : dashboardBadge("No counts", "muted", utils)}
+            ${event.status ? dashboardBadge(utils.humanizeValue(event.status), isFailure ? "danger" : "success", utils) : ""}
+          </div>
+          ${renderChildOperations(event, utils)}
+        </article>
+      `;
+    }).join("");
+  }
+
+  function renderFailureReasons(reasons = {}, utils = window.EmailTriageRenderUtils) {
+    const rows = Object.entries(reasons)
+      .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0))
+      .slice(0, 8);
+    if (!rows.length) return `<div class="classification-empty operational-empty">No failure reasons reported.</div>`;
+    return rows.map(([reason, count]) => `
+      <div class="operational-reason-row">
+        <span>${utils.escapeHtml(utils.humanizeValue(reason))}</span>
+        <strong>${utils.escapeHtml(count)}</strong>
+      </div>
+    `).join("");
+  }
+
+  function renderOperationalDashboard(state = {}, utils = window.EmailTriageRenderUtils) {
+    const snapshot = state.operationalDashboardSnapshot;
+    if (state.operationalDashboardLoading && !snapshot) {
+      return `<div class="workspace-status operational-dashboard-status">Loading operational dashboard.</div>`;
+    }
+    if (!snapshot) {
+      return `<div class="workspace-status operational-dashboard-status">Refresh dashboard to load operational visibility.</div>`;
+    }
+
+    const mailbox = snapshot.mailbox || {};
+    const queue = snapshot.queue || {};
+    const failures = snapshot.failures || {};
+    const safety = snapshot.safety || {};
+    const connected = mailbox.connected && String(mailbox.status || "").toLowerCase() !== "disconnected";
+    const blocked = queue.saturated || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
+
+    return `
+      <div class="operational-dashboard-status">
+        <span>${state.operationalDashboardLoading ? "Refreshing dashboard" : `Dashboard refreshed ${utils.formatDateTime(state.operationalDashboardUpdatedAt || snapshot.generated_at)}`}</span>
+        ${state.operationalDashboardError ? dashboardBadge(`Error: ${state.operationalDashboardError}`, "danger", utils) : ""}
+        ${dashboardBadge(blocked ? "Attention needed" : "Safe visibility mode", blocked ? "warning" : "success", utils)}
+      </div>
+
+      <div class="operational-dashboard-grid">
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Mailbox Status</strong>
+            ${dashboardBadge(connected ? "Connected" : "Disconnected", connected ? "success" : "warning", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Mailbox", value: mailbox.mailbox_email || "Unavailable" },
+              { label: "Identity", value: mailbox.display_name || "Not provided" },
+              { label: "Last checked", value: mailbox.last_checked_at ? utils.formatDateTime(mailbox.last_checked_at) : "--" },
+              { label: "Live sync enabled", html: dashboardBadge(mailbox.live_sync_enabled ? "true" : "false", mailbox.live_sync_enabled ? "success" : "muted", utils) },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Queue Health</strong>
+            ${dashboardBadge(queue.saturated ? "Saturated" : "Within bounds", queue.saturated ? "danger" : "success", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Queued jobs", value: queue.queued },
+              { label: "Running jobs", value: queue.running },
+              { label: "Failed jobs", value: queue.failed },
+              { label: "Oldest queued age", value: queue.oldest_queued_age_seconds == null ? "Not reported" : formatAgeSeconds(queue.oldest_queued_age_seconds, utils) },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Operational Activity</strong>
+            ${snapshot.activity?.latest_live_refresh?.id ? dashboardBadge(`Live ${utils.compactId(snapshot.activity.latest_live_refresh.id)}`, "muted", utils) : dashboardBadge("No live id", "muted", utils)}
+          </div>
+          <div class="operational-activity-list">
+            ${renderActivityRows(snapshot, utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Replay Visibility</strong>
+            ${dashboardBadge(snapshot.replay?.replay_safe ? "Replay-safe" : "No replay flag", snapshot.replay?.replay_safe ? "success" : "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Import operations", value: snapshot.replay?.import_operations },
+              { label: "Classify operations", value: snapshot.replay?.classify_operations },
+              { label: "Process operations", value: snapshot.replay?.process_operations },
+              { label: "Live refresh operations", value: snapshot.replay?.live_refresh_operations },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Failure Visibility</strong>
+            ${dashboardBadge(failures.failed_jobs_total || failures.failed_classifications_total ? "Failures present" : "No failures", failures.failed_jobs_total || failures.failed_classifications_total ? "danger" : "success", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Failed processing jobs", value: failures.failed_jobs_total },
+              { label: "Failed classifications", value: failures.failed_classifications_total },
+              { label: "Permanent classify failures", value: failures.permanently_failed_classifications },
+              { label: "Blocked/safe state", html: dashboardBadge(blocked ? "attention" : "safe", blocked ? "warning" : "success", utils) },
+            ], utils)}
+          </div>
+          <div class="operational-reason-list">
+            ${renderFailureReasons(failures.failed_reasons, utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Recent Operational Events</strong>
+            ${dashboardBadge(`${snapshot.recent_operational_events.length} visible`, "muted", utils)}
+          </div>
+          <div class="operational-event-list">
+            ${renderOperationalEventRows(snapshot.recent_operational_events, utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel operational-panel-wide">
+          <div class="operational-panel-head">
+            <strong>Safety Flags</strong>
+            ${dashboardBadge("Visibility only", "success", utils)}
+          </div>
+          <div class="operational-safety-strip">
+            ${dashboardBadge(`Outlook mutation: ${safety.outlook_mutation_performed ? "true" : "false"}`, safety.outlook_mutation_performed ? "danger" : "success", utils)}
+            ${dashboardBadge(`Auto-send: ${safety.automatic_responses_sent || 0}`, safety.automatic_responses_sent ? "danger" : "success", utils)}
+            ${dashboardBadge(`Drafts created: ${safety.drafts_created || 0}`, safety.drafts_created ? "warning" : "success", utils)}
+            ${dashboardBadge(`Scheduler: ${safety.scheduler_started ? "true" : "false"}`, safety.scheduler_started ? "danger" : "success", utils)}
+            ${dashboardBadge(`Polling: ${safety.polling_started ? "true" : "false"}`, safety.polling_started ? "danger" : "success", utils)}
+            ${dashboardBadge(`Realtime: ${safety.realtime_listener_started ? "true" : "false"}`, safety.realtime_listener_started ? "danger" : "success", utils)}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
   window.EmailTriageDiagnostics = {
     queueSummaryItems,
     safetySummaryItems,
     replaySummaryItems,
     renderSummaryItems,
     renderAdminSummary,
+    renderOperationalDashboard,
   };
 })();

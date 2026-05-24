@@ -406,6 +406,9 @@
           inboxImportResult: result,
           inboxLastOperationId: result.operation_event_id,
         });
+        if (typeof options.onImportComplete === "function") {
+          options.onImportComplete(result);
+        }
       } catch (error) {
         update({
           inboxImportLoading: false,
@@ -435,6 +438,9 @@
           inboxLastOperationId: result.operation_event_id,
           inboxPreviewSelectedProviderMessageIds: [],
         });
+        if (typeof options.onImportComplete === "function") {
+          options.onImportComplete(result);
+        }
       } catch (error) {
         update({
           inboxImportLoading: false,

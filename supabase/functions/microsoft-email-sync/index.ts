@@ -3530,7 +3530,7 @@ async function runLiveRefresh(
 async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: string, folderId: string) {
   const { data: events, error: eventError } = await supabase
     .from("email_operational_events")
-    .select("event_type, created_at, message_ids, payload")
+    .select("id, event_type, created_at, reason, initiated_by, initiated_by_email, message_ids, job_ids, new_job_ids, job_types, payload, replay_source")
     .eq("mailbox_id", mailboxId)
     .order("created_at", { ascending: false })
     .limit(1000);
@@ -3712,6 +3712,30 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
 
   const latestImportEvent = (events || []).find((event) => String(event.event_type || "") === "sync_import_approved");
   const latestLiveRefreshEvent = (events || []).find((event) => String(event.event_type || "") === "run_live_refresh");
+  const recentOperationalEvents = (events || []).slice(0, 25).map((event: Record<string, any>) => {
+    const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
+    return {
+      id: event.id,
+      event_type: event.event_type,
+      created_at: event.created_at,
+      reason: event.reason || payload.reason || null,
+      initiated_by: event.initiated_by_email || event.initiated_by || payload.initiated_by || null,
+      replay_source: event.replay_source || payload.replay_source || null,
+      message_count: Array.isArray(event.message_ids) ? event.message_ids.length : 0,
+      job_count: Array.isArray(event.job_ids) ? event.job_ids.length : 0,
+      new_job_count: Array.isArray(event.new_job_ids) ? event.new_job_ids.length : 0,
+      job_types: Array.isArray(event.job_types) ? event.job_types : [],
+      counters: {
+        imported_count: numberFromPayload(payload, ["imported_count"]),
+        processed_count: numberFromPayload(payload, ["processed_count"]),
+        classified_count: numberFromPayload(payload, ["classified_count"]),
+        failed_count: numberFromPayload(payload, ["failed_count"]),
+        jobs_enqueued: numberFromPayload(payload, ["jobs_enqueued"]),
+      },
+      child_operations: payload.child_operations && typeof payload.child_operations === "object" ? payload.child_operations : {},
+      status: payload.status || null,
+    };
+  });
   const timingSummary = {
     latest_import_at: latestImportEvent?.created_at || null,
     latest_live_refresh_at: latestLiveRefreshEvent?.created_at || null,
@@ -3738,6 +3762,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
       replay_safe: true,
     },
     queue_summary: queueSummary,
+    recent_operational_events: recentOperationalEvents,
     operational_event_summary: operationalEventSummary,
     failure_summary: {
       failed_jobs_total: queueSummary.failed,
