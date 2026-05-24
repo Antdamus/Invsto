@@ -50,6 +50,7 @@ const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : 
 const DEFAULT_DAYS_BACK = 90;
 const MAX_RETURN_LIMIT = 500;
 const PAGE_LIMIT = 200;
+const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -128,6 +129,34 @@ function firstText(...values: unknown[]): string {
   return "";
 }
 
+function commentText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === "string" || typeof value === "number") {
+      const text = toText(value);
+      if (text) return text;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const text = commentText(...value);
+      if (text) return text;
+      continue;
+    }
+    if (typeof value !== "object") continue;
+    const record = value as any;
+    const text = commentText(
+      record.content,
+      record.text,
+      record.message,
+      record.comment,
+      record.value,
+      record.localizedText,
+    );
+    if (text) return text;
+  }
+  return "";
+}
+
 function firstDate(...values: unknown[]): string | null {
   for (const value of values) {
     const iso = toIsoDate(value);
@@ -144,32 +173,95 @@ function normalizeTitle(value: unknown): string {
   return toText(value).replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function normalizeLookup(value: unknown): string {
+  return toText(value).replace(/\s+/g, "").toLowerCase();
+}
+
 function fileIdFrom(file: any): string {
   return firstText(file?.fileId, file?.id, file?.file_id, file?.returnFileId);
 }
 
-function fileImageUrlFrom(file: any): string {
-  const directUrl = firstText(file?.secureUrl, file?.url, file?.fileUrl);
-  if (directUrl) return directUrl;
+function fileDirectUrlFrom(file: any): string {
+  return firstText(file?.secureUrl, file?.url, file?.fileUrl);
+}
+
+function fileBase64From(file: any): string {
   const data = firstText(file?.resizedFileData, file?.fileData);
   if (!data) return "";
+  return data.startsWith("data:") ? data.split(",", 2)[1] || "" : data;
+}
+
+function fileContentType(file: any): string {
   const format = firstText(file?.fileFormat, file?.format).toLowerCase();
-  const mime = format.includes("png")
+  return format.includes("png")
     ? "image/png"
     : format.includes("gif")
       ? "image/gif"
       : "image/jpeg";
-  return data.startsWith("data:") ? data : `data:${mime};base64,${data}`;
+}
+
+function fileExtension(file: any): string {
+  const contentType = fileContentType(file);
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/gif") return "gif";
+  return "jpg";
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function fileCreatedAt(file: any): string | null {
   return firstDate(file?.creationDate?.value, file?.creationDate, file?.createdAt);
 }
 
+function sanitizeEbayFile(file: any): JsonRecord {
+  return {
+    fileId: fileIdFrom(file),
+    fileName: firstText(file?.fileName, file?.name),
+    filePurpose: firstText(file?.filePurpose, file?.purpose),
+    fileFormat: firstText(file?.fileFormat, file?.format),
+    submitter: firstText(file?.submitter),
+    createdAt: fileCreatedAt(file),
+    url: fileDirectUrlFrom(file),
+    hasFileData: Boolean(fileBase64From(file)),
+  };
+}
+
+function sanitizeEbayFilesPayload(payload: any): JsonRecord {
+  return {
+    files: getFilesFromPayload(payload).map(sanitizeEbayFile),
+  };
+}
+
+function stripLargeEbayFields(value: any): any {
+  if (Array.isArray(value)) return value.map(stripLargeEbayFields);
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && value.length > 2000) {
+      return `[omitted ${value.length} characters]`;
+    }
+    return value;
+  }
+  const output: JsonRecord = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (["fileData", "resizedFileData"].includes(key)) {
+      output[key] = "[omitted file data]";
+    } else {
+      output[key] = stripLargeEbayFields(child);
+    }
+  }
+  return output;
+}
+
 function getComplaintImages(files: any[]): any[] {
   return files
     .map((file) => {
-      const url = fileImageUrlFrom(file);
+      const url = fileDirectUrlFrom(file);
       if (!url) return null;
       return {
         source: "ebay_return_api",
@@ -182,6 +274,58 @@ function getComplaintImages(files: any[]): any[] {
       };
     })
     .filter(Boolean);
+}
+
+function safePathPart(value: unknown): string {
+  return toText(value)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "file";
+}
+
+async function uploadEbayReturnFiles(supabase: any, prepared: PreparedReturn): Promise<any[]> {
+  const records: any[] = [];
+  for (let index = 0; index < prepared.files.length; index += 1) {
+    const file = prepared.files[index];
+    const directUrl = fileDirectUrlFrom(file);
+    const base64 = fileBase64From(file);
+    const fileId = fileIdFrom(file) || `file-${index + 1}`;
+    const record = {
+      source: "ebay_return_api",
+      fileId,
+      filePurpose: firstText(file?.filePurpose, file?.purpose),
+      fileFormat: firstText(file?.fileFormat, file?.format),
+      submitter: firstText(file?.submitter),
+      createdAt: fileCreatedAt(file),
+      url: directUrl,
+    };
+    if (!base64) {
+      records.push(record);
+      continue;
+    }
+
+    const path = [
+      "ebay-api",
+      safePathPart(prepared.returnId),
+      `${safePathPart(fileId)}-${index + 1}.${fileExtension(file)}`,
+    ].join("/");
+    const { error } = await supabase.storage
+      .from(EBAY_RETURN_EVIDENCE_BUCKET)
+      .upload(path, base64ToBytes(base64), {
+        contentType: fileContentType(file),
+        upsert: true,
+      });
+    if (error) throw error;
+    records.push({
+      ...record,
+      url: "",
+      bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      path,
+      storage_bucket: EBAY_RETURN_EVIDENCE_BUCKET,
+      storage_path: path,
+    });
+  }
+  return records.filter((record) => record.url || record.path);
 }
 
 function getFilesFromPayload(payload: any): any[] {
@@ -237,8 +381,8 @@ function extractTracking(detail: any): string {
   );
 }
 
-function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">): JsonRecord {
-  const ebayComplaintImages = getComplaintImages(prepared.files);
+function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedComplaintImages: any[] = []): JsonRecord {
+  const ebayComplaintImages = uploadedComplaintImages.length ? uploadedComplaintImages : getComplaintImages(prepared.files);
   const complaintImageUrls = ebayComplaintImages.map((image) => image.url).filter(Boolean);
   return {
     source: "ebay_return_api",
@@ -280,9 +424,9 @@ function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">): JsonReco
       responseDueAt: prepared.dueAt,
       trackingNumber: prepared.trackingNumber,
     },
-    ebaySummary: prepared.summary,
-    ebayDetail: prepared.detail,
-    ebayFiles: prepared.filesPayload,
+    ebaySummary: stripLargeEbayFields(prepared.summary),
+    ebayDetail: stripLargeEbayFields(prepared.detail),
+    ebayFiles: sanitizeEbayFilesPayload(prepared.filesPayload),
   };
 }
 
@@ -329,7 +473,7 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
     actionDue: firstText(sellerDue?.activityDue, buyerDue?.activityDue, mergedSummary?.sellerAvailableOptions?.[0]?.actionType),
     dueAt: firstDate(sellerDue?.respondByDate?.value, sellerDue?.respondByDate, buyerDue?.respondByDate?.value, mergedSummary?.timeoutDate?.value),
     requestedAt: firstDate(creation?.creationDate?.value, creation?.creationDate, mergedSummary?.creationDate?.value),
-    buyerComment: firstText(creation?.comments?.content, creation?.comments, detail?.comments?.content),
+    buyerComment: commentText(creation?.comments?.content, creation?.comments, detail?.comments?.content, detail?.comments),
     requestAmount: moneyText(refundContainer),
     onHoldAmount: moneyText(holdContainer),
     detailsUrl: getActionUrl(mergedSummary),
@@ -379,10 +523,11 @@ async function ebayRequest(token: string, path: string): Promise<any> {
   const res = await fetch(`${EBAY_API_BASE}${path}`, {
     method: "GET",
     headers: {
-      "Authorization": `Bearer ${token}`,
+      "Authorization": `IAF ${token}`,
       "Accept": "application/json",
       "Accept-Language": "en-US",
       "Content-Language": "en-US",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
     },
   });
 
@@ -445,11 +590,25 @@ function fallbackLineKey(orderId: string, itemNumber: string, title: string): st
   return `${orderId}:${itemNumber}:${normalizeTitle(title)}`;
 }
 
-async function loadOrdersAndLines(supabase: any, orderNumbers: string[]) {
+async function loadOrdersAndLines(supabase: any, orderNumbers: string[], itemNumbers: string[]) {
   const orders = new Map<string, any>();
+  const ordersById = new Map<string, any>();
   const linesExact = new Map<string, any[]>();
   const linesFallback = new Map<string, any[]>();
+  const linesByItemNumber = new Map<string, any[]>();
   const cleanOrderNumbers = unique(orderNumbers.map(toText).filter(Boolean));
+  const cleanItemNumbers = unique(itemNumbers.map(toText).filter(Boolean));
+
+  function indexLine(line: any) {
+    const order = line.order || line.ebay_orders || ordersById.get(line.order_id) || null;
+    if (order) line.order = order;
+    const exact = exactLineKey(line.order_id, toText(line.item_number), toText(line.transaction_id));
+    const fallback = fallbackLineKey(line.order_id, toText(line.item_number), line.item_title);
+    linesExact.set(exact, [...(linesExact.get(exact) || []), line]);
+    linesFallback.set(fallback, [...(linesFallback.get(fallback) || []), line]);
+    const itemKey = normalizeLookup(line.item_number);
+    if (itemKey) linesByItemNumber.set(itemKey, unique([...(linesByItemNumber.get(itemKey) || []), line]));
+  }
 
   for (let index = 0; index < cleanOrderNumbers.length; index += 100) {
     const chunk = cleanOrderNumbers.slice(index, index + 100);
@@ -458,7 +617,10 @@ async function loadOrdersAndLines(supabase: any, orderNumbers: string[]) {
       .select("id,order_number,buyer_username,status")
       .in("order_number", chunk);
     if (error) throw error;
-    (data || []).forEach((order: any) => orders.set(order.order_number, order));
+    (data || []).forEach((order: any) => {
+      orders.set(order.order_number, order);
+      ordersById.set(order.id, order);
+    });
   }
 
   const orderIds = [...orders.values()].map((order: any) => order.id).filter(Boolean);
@@ -469,24 +631,52 @@ async function loadOrdersAndLines(supabase: any, orderNumbers: string[]) {
       .select("id,order_id,item_number,transaction_id,item_title,quantity,line_status,internal_item_id")
       .in("order_id", chunk);
     if (error) throw error;
+    (data || []).forEach(indexLine);
+  }
+
+  for (let index = 0; index < cleanItemNumbers.length; index += 100) {
+    const chunk = cleanItemNumbers.slice(index, index + 100);
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select("id,order_id,item_number,transaction_id,item_title,quantity,line_status,internal_item_id,ebay_orders(id,order_number,buyer_username,status)")
+      .in("item_number", chunk)
+      .limit(1000);
+    if (error) throw error;
     (data || []).forEach((line: any) => {
-      const exact = exactLineKey(line.order_id, toText(line.item_number), toText(line.transaction_id));
-      const fallback = fallbackLineKey(line.order_id, toText(line.item_number), line.item_title);
-      linesExact.set(exact, [...(linesExact.get(exact) || []), line]);
-      linesFallback.set(fallback, [...(linesFallback.get(fallback) || []), line]);
+      if (line.ebay_orders) {
+        line.order = line.ebay_orders;
+        ordersById.set(line.order.id, line.order);
+        orders.set(line.order.order_number, line.order);
+      }
+      indexLine(line);
     });
   }
 
-  return { orders, linesExact, linesFallback };
+  return { orders, ordersById, linesExact, linesFallback, linesByItemNumber };
 }
 
 function findMatches(prepared: PreparedReturn, indexes: any): MatchResult {
   const order = indexes.orders.get(prepared.orderNumber) || null;
-  if (!order) return { order: null, lines: [] };
-  const exact = indexes.linesExact.get(exactLineKey(order.id, prepared.itemNumber, prepared.transactionId)) || [];
-  const fallback = indexes.linesFallback.get(fallbackLineKey(order.id, prepared.itemNumber, prepared.itemTitle)) || [];
-  const lines = unique([...exact, ...fallback]).slice(0, prepared.quantity || 1);
-  return { order, lines };
+  if (order) {
+    const exact = indexes.linesExact.get(exactLineKey(order.id, prepared.itemNumber, prepared.transactionId)) || [];
+    const fallback = indexes.linesFallback.get(fallbackLineKey(order.id, prepared.itemNumber, prepared.itemTitle)) || [];
+    const sameOrderByItem = (indexes.linesByItemNumber.get(normalizeLookup(prepared.itemNumber)) || [])
+      .filter((line: any) => line.order_id === order.id);
+    const lines = unique([...exact, ...fallback, ...sameOrderByItem]).slice(0, prepared.quantity || 1);
+    return { order, lines };
+  }
+
+  const candidates = indexes.linesByItemNumber.get(normalizeLookup(prepared.itemNumber)) || [];
+  const buyer = normalizeLookup(prepared.buyerUsername);
+  const buyerMatches = buyer
+    ? candidates.filter((line: any) => normalizeLookup(line.order?.buyer_username) === buyer)
+    : [];
+  const selected = buyerMatches.length ? buyerMatches : candidates.length === 1 ? candidates : [];
+  const fallbackOrder = selected[0]?.order || indexes.ordersById?.get(selected[0]?.order_id) || null;
+  return {
+    order: fallbackOrder,
+    lines: selected.slice(0, prepared.quantity || 1),
+  };
 }
 
 function localStatusFor(prepared: PreparedReturn, matched: boolean): string {
@@ -514,6 +704,21 @@ function questionFor(prepared: PreparedReturn, matched: boolean): string {
   return "Inspect the returned item, attach evidence photos, choose the disposition, and save the return.";
 }
 
+function caseLooksLikeReturn(row: any, prepared: PreparedReturn): boolean {
+  const payload = row?.raw_payload || {};
+  const details = payload?.returnDetails || {};
+  const rowBuyer = normalizeLookup(row?.buyer_username || payload.buyerUsername || payload.buyer_username);
+  const rowOrder = normalizeLookup(row?.order_number || payload.orderNumber || payload.order_number);
+  const rowItem = normalizeLookup(payload.itemNumber || payload.item_number || details.itemNumber || details.item_number);
+  const buyer = normalizeLookup(prepared.buyerUsername);
+  const orderNumber = normalizeLookup(prepared.orderNumber);
+  const itemNumber = normalizeLookup(prepared.itemNumber);
+
+  if (rowOrder && orderNumber && rowOrder === orderNumber) return true;
+  if (rowItem && itemNumber && rowItem === itemNumber && (!buyer || !rowBuyer || rowBuyer === buyer)) return true;
+  return false;
+}
+
 async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId: string | null): Promise<any | null> {
   if (prepared.returnId) {
     const { data, error } = await supabase
@@ -537,6 +742,33 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
       .maybeSingle();
     if (error) throw error;
     return data || null;
+  }
+
+  if (prepared.orderNumber) {
+    const { data, error } = await supabase
+      .from("ebay_return_cases")
+      .select("*")
+      .eq("order_number", prepared.orderNumber)
+      .not("status", "in", "(closed,cancelled)")
+      .order("opened_at", { ascending: false })
+      .limit(5);
+    if (error) throw error;
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared)) || data?.[0];
+    if (found) return found;
+  }
+
+  if (prepared.buyerUsername || prepared.itemNumber) {
+    let query = supabase
+      .from("ebay_return_cases")
+      .select("*")
+      .not("status", "in", "(closed,cancelled)")
+      .order("opened_at", { ascending: false })
+      .limit(10);
+    if (prepared.buyerUsername) query = query.eq("buyer_username", prepared.buyerUsername);
+    const { data, error } = await query;
+    if (error) throw error;
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared));
+    if (found) return found;
   }
   return null;
 }
@@ -703,11 +935,12 @@ function responseHistoryMessages(prepared: PreparedReturn, caseRow: any, match: 
     });
   }
   for (const entry of history) {
-    const body = firstText(
+    const body = commentText(
       entry?.attributes?.comments?.content,
       entry?.attributes?.comment?.content,
       entry?.comments?.content,
       entry?.comment,
+      entry?.comments,
     );
     if (!body) continue;
     const author = toText(entry?.author).toLowerCase();
@@ -804,7 +1037,11 @@ Deno.serve(async (req) => {
       if (prepared) preparedReturns.push(prepared);
     }
 
-    const indexes = await loadOrdersAndLines(supabase, preparedReturns.map((entry) => entry.orderNumber));
+    const indexes = await loadOrdersAndLines(
+      supabase,
+      preparedReturns.map((entry) => entry.orderNumber),
+      preparedReturns.map((entry) => entry.itemNumber),
+    );
     const results = [];
     let matched = 0;
     let unmatched = 0;
@@ -843,6 +1080,8 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        const uploadedComplaintImages = await uploadEbayReturnFiles(supabase, prepared);
+        prepared.payload = buildReturnPayload(prepared, uploadedComplaintImages);
         const { caseRow, created: caseCreated } = await upsertCase(supabase, prepared, match);
         await upsertReturnItems(supabase, prepared, caseRow, match);
         const taskResult = await upsertTask(supabase, prepared, caseRow, match);
