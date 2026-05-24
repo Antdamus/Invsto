@@ -6620,6 +6620,29 @@ async function addVideoReceiptPhotoToNoInventoryEvidence(line = {}, savedPhoto =
   return photo;
 }
 
+async function rememberVideoReceiptPhotoForQueue(line = {}, savedPhoto = {}, metadata = {}, screenshot = {}) {
+  if (!savedPhoto.bucket || !savedPhoto.path || !line?.id) return null;
+  const capturedAt = screenshot.capturedAt || metadata.capturedAt || savedPhoto.created_at || new Date().toISOString();
+  const actor = savedPhoto.signed_by_email || getVideoReceiptAuditActor();
+  const photo = await ensureEvidencePhotoPreviewUrls({
+    ...savedPhoto,
+    id: savedPhoto.id || `${savedPhoto.bucket}:${savedPhoto.path}`,
+    label: savedPhoto.label || `Video receipt - ${line.item_number || metadata.itemNumber || "item"}`,
+    signed_by_email: actor,
+    auditText: `Captured by ${actor} on ${formatDate(capturedAt)}`,
+    videoReceiptUrl: metadata.videoReceiptUrl || metadata.pageUrl || "",
+    created_at: capturedAt,
+  }).catch(() => ({
+    ...savedPhoto,
+    id: savedPhoto.id || `${savedPhoto.bucket}:${savedPhoto.path}`,
+    signed_by_email: actor,
+    auditText: `Captured by ${actor} on ${formatDate(capturedAt)}`,
+    created_at: capturedAt,
+  }));
+  state.videoReceiptEvidenceByLineId.set(line.id, photo);
+  return photo;
+}
+
 async function showVideoReceiptPhotoInNoInventoryModal(line = {}, savedPhoto = {}, metadata = {}, screenshot = {}) {
   const modalHasLine = () => state.workerNoInventoryCandidates.some((entry) => entry.id === line.id);
   if (!isWorkerNoInventoryModalOpen() || !modalHasLine()) {
@@ -6631,6 +6654,27 @@ async function showVideoReceiptPhotoInNoInventoryModal(line = {}, savedPhoto = {
   state.workerNoInventoryLineIds.add(line.id);
   renderWorkerNoInventoryList();
   await addVideoReceiptPhotoToNoInventoryEvidence(line, savedPhoto, metadata, screenshot);
+}
+
+function returnToPendingQueueAfterVideoReceiptCapture(line = {}) {
+  if (!$("worker-no-inventory-modal")?.classList.contains("hidden")) {
+    closeWorkerNoInventoryModal({ suppressEbayReturn: true, suppressMobileReturn: true });
+  }
+  if (!$("fulfillment-workflow")?.classList.contains("hidden")) {
+    $("fulfillment-workflow")?.classList.add("hidden");
+  }
+  document.body.classList.remove("pending-order-detail-open");
+  document.body.classList.remove("pending-mobile-sheet-open");
+  $("selected-order-empty")?.classList.remove("hidden");
+  state.selectedLine = null;
+  state.activeBuyerKey = "";
+  renderOrders();
+  window.setTimeout(() => {
+    const card = line?.id
+      ? [...document.querySelectorAll("[data-line-id]")].find((entry) => entry.dataset.lineId === line.id)
+      : null;
+    card?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 80);
 }
 
 async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
@@ -6700,12 +6744,12 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
   });
   if (taskError) throw new Error(taskError.message || "Could not attach the video receipt photo to the order task.");
 
+  await rememberVideoReceiptPhotoForQueue(line, savedPhoto, metadata, screenshot);
+
   if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
     await loadSelectedOrderTasks();
   }
-  await showVideoReceiptPhotoInNoInventoryModal(line, savedPhoto, metadata, screenshot).catch((error) => {
-    console.warn("Could not show video receipt photo in no-inventory modal:", error);
-  });
+  returnToPendingQueueAfterVideoReceiptCapture(line);
 
   return {
     lineId: line.id,

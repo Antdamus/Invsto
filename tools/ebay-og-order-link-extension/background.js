@@ -486,6 +486,7 @@
     if (!transferId) return;
     if (status.phase === "started") return;
     if (status.ok) await removePendingVideoReceiptPhoto(transferId);
+    if (status.ok && status.tabId) await focusTab(status.tabId);
     const waiter = appVideoReceiptPhotoAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
