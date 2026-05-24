@@ -412,6 +412,58 @@
     };
   }
 
+  function normalizeLiveRefreshPayload(payload) {
+    const source = normalizeEnvelope(payload, "run_live_refresh").data || {};
+    const preview = source.preview && typeof source.preview === "object" ? source.preview : {};
+    const imported = source.import && typeof source.import === "object" ? source.import : {};
+    const processing = source.processing && typeof source.processing === "object" ? source.processing : {};
+    const classification = source.classification && typeof source.classification === "object" ? source.classification : {};
+    const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "run_live_refresh",
+      operation_id: source.operation_id || source.operationId || null,
+      live_sync_enabled: source.live_sync_enabled === true,
+      blocked: source.blocked === true || source.disabled === true || source.queue_saturated === true,
+      reason: source.reason || source.queue_saturation_reason || null,
+      preview: {
+        previewed_count: Number(preview.previewed_count || 0),
+        likely_ebay_count: Number(preview.likely_ebay_count || 0),
+        maybe_ebay_count: Number(preview.maybe_ebay_count || 0),
+        not_ebay_count: Number(preview.not_ebay_count || 0),
+      },
+      import: {
+        imported_count: Number(imported.imported_count || 0),
+        already_imported_count: Number(imported.already_imported_count || 0),
+        skipped_count: Number(imported.skipped_count || 0),
+      },
+      processing: {
+        processed_count: Number(processing.processed_count || 0),
+        failed_count: Number(processing.failed_count || 0),
+        skipped_count: Number(processing.skipped_count || 0),
+      },
+      classification: {
+        classified_count: Number(classification.classified_count || 0),
+        failed_count: Number(classification.failed_count || 0),
+        skipped_count: Number(classification.skipped_count || 0),
+      },
+      queue_state: source.queue_state && typeof source.queue_state === "object" ? source.queue_state : {},
+      child_operations: source.child_operations && typeof source.child_operations === "object" ? source.child_operations : {},
+      safety: {
+        outlook_mutation_performed: safety.outlook_mutation_performed === true,
+        automatic_responses_sent: Number(safety.automatic_responses_sent || 0),
+        drafts_created: Number(safety.drafts_created || 0),
+        attachments_fetched: Number(safety.attachments_fetched || 0),
+        sync_checkpoint_updated: safety.sync_checkpoint_updated === true,
+        polling_started: safety.polling_started === true,
+        scheduler_started: safety.scheduler_started === true,
+        realtime_listener_started: safety.realtime_listener_started === true,
+      },
+      raw: source,
+    };
+  }
+
   async function fetchInboxPreview(context, values = {}) {
     const session = await currentSession(context, "Inbox preview");
     const body = {
@@ -454,6 +506,23 @@
     return normalizeInboxImportPayload(payload);
   }
 
+  async function runInboxLiveRefresh(context, values = {}) {
+    const session = await currentSession(context, "Inbox live refresh");
+    const body = {
+      mode: "run_live_refresh",
+      limit: Number(values.limit || 25),
+      daysBack: values.daysBack === "" || values.daysBack == null ? null : Number(values.daysBack),
+      bucketMode: values.bucketMode || "ebay_only",
+    };
+
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, TIMEOUTS.inboxImport);
+
+    return normalizeLiveRefreshPayload(payload);
+  }
+
   window.EmailTriageApi = {
     functions: {
       START_FUNCTION,
@@ -487,7 +556,9 @@
     saveClassificationReview,
     normalizeInboxPreviewPayload,
     normalizeInboxImportPayload,
+    normalizeLiveRefreshPayload,
     fetchInboxPreview,
     importApprovedInboxPreview,
+    runInboxLiveRefresh,
   };
 })();

@@ -35,6 +35,8 @@
       body: document.getElementById("inbox-preview-body"),
       importLikely: document.getElementById("inbox-import-likely"),
       importSelected: document.getElementById("inbox-import-selected"),
+      liveRefresh: document.getElementById("inbox-live-refresh-run"),
+      liveRefreshResult: document.getElementById("inbox-live-refresh-result"),
       clear: document.getElementById("inbox-preview-clear"),
       bucketFilters: document.querySelectorAll("[data-inbox-bucket-filter]"),
       section: document.getElementById("inbox-preview-section"),
@@ -155,6 +157,95 @@
     `;
   }
 
+  function renderStageCounts(title, counts = {}, fields = [], utils = window.EmailTriageRenderUtils) {
+    return `
+      <div class="inbox-live-stage">
+        <strong>${utils.escapeHtml(title)}</strong>
+        <dl>
+          ${fields.map(([key, label]) => `
+            <div><dt>${utils.escapeHtml(label)}</dt><dd>${utils.escapeHtml(counts[key] || 0)}</dd></div>
+          `).join("")}
+        </dl>
+      </div>
+    `;
+  }
+
+  function renderLiveRefreshResult(state, els, utils = window.EmailTriageRenderUtils) {
+    if (!els.liveRefreshResult) return;
+    const result = state.inboxLiveRefreshResult;
+    if (!result) {
+      els.liveRefreshResult.innerHTML = "";
+      return;
+    }
+
+    const safety = result.safety || {};
+    const queue = result.queue_state || {};
+    const children = Object.entries(result.child_operations || {}).filter(([, value]) => value);
+    els.liveRefreshResult.innerHTML = `
+      <div class="inbox-live-refresh-head">
+        <strong>Live refresh result</strong>
+        <span>${result.operation_id ? `Operation ${utils.escapeHtml(result.operation_id)}` : "No parent operation id returned"}</span>
+      </div>
+      ${result.blocked ? `<div class="workspace-status inbox-preview-status">Live refresh blocked safely: ${utils.escapeHtml(result.reason || "blocked")}</div>` : ""}
+      <div class="inbox-live-refresh-scope">
+        <div>
+          <strong>This operation:</strong>
+          <ul>
+            <li>previews Outlook emails</li>
+            <li>imports likely eBay messages</li>
+            <li>processes imported messages</li>
+            <li>classifies processed messages</li>
+          </ul>
+        </div>
+        <div>
+          <strong>This operation DOES NOT:</strong>
+          <ul>
+            <li>send emails</li>
+            <li>mutate Outlook</li>
+            <li>auto-generate drafts</li>
+            <li>start autonomous sync</li>
+          </ul>
+        </div>
+      </div>
+      <div class="inbox-live-refresh-grid">
+        ${renderStageCounts("Preview", result.preview, [
+          ["previewed_count", "Previewed"],
+          ["likely_ebay_count", "Likely"],
+          ["maybe_ebay_count", "Maybe"],
+          ["not_ebay_count", "Not eBay"],
+        ], utils)}
+        ${renderStageCounts("Import", result.import, [
+          ["imported_count", "Imported"],
+          ["already_imported_count", "Already"],
+          ["skipped_count", "Skipped"],
+        ], utils)}
+        ${renderStageCounts("Processing", result.processing, [
+          ["processed_count", "Processed"],
+          ["failed_count", "Failed"],
+          ["skipped_count", "Skipped"],
+        ], utils)}
+        ${renderStageCounts("Classification", result.classification, [
+          ["classified_count", "Classified"],
+          ["failed_count", "Failed"],
+          ["skipped_count", "Skipped"],
+        ], utils)}
+      </div>
+      <dl class="inbox-live-refresh-safety">
+        <div><dt>Live Sync Enabled</dt><dd>${renderInboxBadge(result.live_sync_enabled ? "true" : "false", result.live_sync_enabled ? "success" : "danger", utils)}</dd></div>
+        <div><dt>Outlook Mutation</dt><dd>${renderInboxBadge(safety.outlook_mutation_performed ? "true" : "false", safety.outlook_mutation_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Emails Sent</dt><dd>${renderInboxBadge(String(safety.automatic_responses_sent || 0), safety.automatic_responses_sent ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Drafts Created</dt><dd>${renderInboxBadge(String(safety.drafts_created || 0), safety.drafts_created ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Attachments Fetched</dt><dd>${renderInboxBadge(String(safety.attachments_fetched || 0), safety.attachments_fetched ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Checkpoint Updated</dt><dd>${renderInboxBadge(safety.sync_checkpoint_updated ? "true" : "false", safety.sync_checkpoint_updated ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Queue</dt><dd>${utils.escapeHtml(`queued ${queue.queued || 0}, running ${queue.running || 0}${queue.saturated ? ", saturated" : ""}`)}</dd></div>
+      </dl>
+      <div class="inbox-skipped-reasons">
+        <span>Child Operations</span>
+        ${children.length ? children.map(([key, value]) => `<b>${utils.escapeHtml(key)} <em>${utils.escapeHtml(value)}</em></b>`).join("") : "<b>None</b>"}
+      </div>
+    `;
+  }
+
   function renderInboxRows(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.body) return;
     const rows = Array.isArray(state.inboxPreviewResult?.messages) ? state.inboxPreviewResult.messages : [];
@@ -207,21 +298,23 @@
     if (els.daysBack && String(els.daysBack.value) !== String(controls.daysBack ?? "")) els.daysBack.value = String(controls.daysBack ?? "");
     if (els.bucketMode && els.bucketMode.value !== (controls.bucketMode || "ebay_only")) els.bucketMode.value = controls.bucketMode || "ebay_only";
 
-    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true;
-    [els.run, els.importLikely, els.importSelected, els.clear].forEach((button) => {
+    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true;
+    [els.run, els.importLikely, els.importSelected, els.liveRefresh, els.clear].forEach((button) => {
       if (!button) return;
       button.setAttribute("aria-busy", loading ? "true" : "false");
     });
 
-    if (els.run) els.run.disabled = state.inboxPreviewLoading === true || state.inboxImportLoading === true;
+    if (els.run) els.run.disabled = loading;
     const likelyImportable = (result?.messages || []).some((row) => bucketFor(row) === "likely_ebay" && row.already_imported !== true);
     if (els.importLikely) els.importLikely.disabled = loading || !likelyImportable;
     if (els.importSelected) els.importSelected.disabled = loading || selectedIds(state).length === 0;
+    if (els.liveRefresh) els.liveRefresh.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
 
     if (els.status) {
       if (state.inboxPreviewLoading) els.status.textContent = "Loading Outlook preview.";
       else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages.";
+      else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
       else if (result) els.status.textContent = `Preview refreshed ${utils.formatDateTime(state.inboxLastRefreshedAt)}. Selected ${selectedIds(state).length} message${selectedIds(state).length === 1 ? "" : "s"}.`;
       else els.status.textContent = "Run preview to inspect recent Outlook emails before importing.";
@@ -238,6 +331,7 @@
 
     renderInboxSummary(state, els, utils);
     renderImportResult(state, els, utils);
+    renderLiveRefreshResult(state, els, utils);
     renderInboxRows(state, els, utils);
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }
@@ -349,6 +443,33 @@
       }
     });
 
+    els.liveRefresh?.addEventListener("click", async () => {
+      const controls = previewControlsFromEls(els);
+      update({
+        inboxPreviewControls: controls,
+        inboxLiveRefreshLoading: true,
+        inboxPreviewError: null,
+        inboxLiveRefreshResult: null,
+      });
+      try {
+        const result = await api.runInboxLiveRefresh(context, controls);
+        update({
+          inboxLiveRefreshLoading: false,
+          inboxLiveRefreshResult: result,
+          inboxLastOperationId: result.operation_id,
+          inboxLastRefreshedAt: new Date().toISOString(),
+        });
+        if (typeof options.onLiveRefreshComplete === "function") {
+          options.onLiveRefreshComplete(result);
+        }
+      } catch (error) {
+        update({
+          inboxLiveRefreshLoading: false,
+          inboxPreviewError: error.code || error.message || "run_live_refresh_failed",
+        });
+      }
+    });
+
     els.clear?.addEventListener("click", () => {
       update({
         inboxPreviewLoading: false,
@@ -357,6 +478,8 @@
         inboxPreviewSelectedProviderMessageIds: [],
         inboxImportLoading: false,
         inboxImportResult: null,
+        inboxLiveRefreshLoading: false,
+        inboxLiveRefreshResult: null,
         inboxLastOperationId: null,
         inboxLastRefreshedAt: null,
       });

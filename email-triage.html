@@ -146,6 +146,10 @@
                   <button type="button" data-inbox-bucket-filter="all">All</button>
                 </div>
                 <div class="inbox-import-actions">
+                  <button type="button" id="inbox-live-refresh-run" class="primary-btn">
+                    <i data-lucide="refresh-cw"></i>
+                    Run Live Refresh
+                  </button>
                   <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
                     <i data-lucide="download"></i>
                     Import All Likely eBay
@@ -160,6 +164,8 @@
                   </button>
                 </div>
               </div>
+
+              <div id="inbox-live-refresh-result" class="inbox-live-refresh-result"></div>
 
               <div class="inbox-preview-table-wrap">
                 <table class="inbox-preview-table">

@@ -1978,7 +1978,9 @@
       els.adminDiagnosticsDrawer?.classList.toggle("hidden", expanded);
     });
     bindPanelResizeEvents();
-    bindInboxPreviewImport(context, triageStore);
+    bindInboxPreviewImport(context, triageStore, {
+      onLiveRefreshComplete: () => loadAdminClassificationData(context),
+    });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.toggleCategoryPanel?.addEventListener("click", () => {
       setAdminClassificationState({

@@ -148,6 +148,16 @@ type ClassifyImportedInput = {
   batchSize: number;
 };
 
+type RunLiveRefreshInput = {
+  mode: "run_live_refresh";
+  folder: "inbox";
+  limit: number;
+  daysBack: number | null;
+  bucketMode: BucketMode;
+  processBatchSize: number;
+  classifyBatchSize: number;
+};
+
 type PipelineDiagnosticsInput = {
   mode: "pipeline_diagnostics";
   folder: "inbox";
@@ -175,6 +185,7 @@ type RequestInput =
   | ImportApprovedInput
   | ProcessImportedInput
   | ClassifyImportedInput
+  | RunLiveRefreshInput
   | PipelineDiagnosticsInput
   | RolloutStatusInput
   | LiveSyncStatusInput
@@ -557,6 +568,18 @@ async function parseInput(req: Request): Promise<RequestInput> {
   if (requestedMode === "classify_imported") {
     const batchSize = clampBatchSize(body?.batchSize ?? body?.limit, CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE, MAX_CLASSIFICATION_BATCH);
     return { mode: "classify_imported", folder: "inbox", batchSize };
+  }
+
+  if (requestedMode === "run_live_refresh") {
+    const limit = clampBatchSize(body?.limit, PREVIEW_DEFAULT_LIMIT, MAX_IMPORT_BATCH);
+    const rawDaysBack = body?.daysBack === null || body?.daysBack === undefined || body?.daysBack === ""
+      ? null
+      : Number(body.daysBack);
+    const daysBack = rawDaysBack === null ? null : Math.min(Math.max(Number.isFinite(rawDaysBack) && rawDaysBack > 0 ? Math.floor(rawDaysBack) : 1, 1), PREVIEW_MAX_DAYS_BACK);
+    const bucketMode = String(body?.bucketMode || "ebay_only") === "all" ? "all" : "ebay_only";
+    const processBatchSize = clampBatchSize(body?.processBatchSize ?? body?.batchSize, PROCESS_IMPORTED_DEFAULT_BATCH_SIZE, PROCESS_IMPORTED_MAX_BATCH_SIZE);
+    const classifyBatchSize = clampBatchSize(body?.classifyBatchSize ?? body?.batchSize, CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE, CLASSIFY_IMPORTED_MAX_BATCH_SIZE);
+    return { mode: "run_live_refresh", folder: "inbox", limit, daysBack, bucketMode, processBatchSize, classifyBatchSize };
   }
 
   if (requestedMode === "pipeline_diagnostics") {
@@ -1364,6 +1387,62 @@ async function insertSetLiveSyncOperationalEvent(
   }
 
   return data as { id: string; created_at: string };
+}
+
+async function insertRunLiveRefreshOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "run_live_refresh",
+      mailbox_id: values.mailboxId,
+      reason: "Operator-triggered bounded live refresh orchestration. No Outlook mutation, sending, draft generation, polling, or checkpoint update is performed.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      replay_source: "run_live_refresh",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] run_live_refresh audit insert failed", {
+      phase: "run_live_refresh_audit",
+      mailbox_id: values.mailboxId,
+    });
+    throw new SyncError("run_live_refresh_event_failed", {
+      phase: "run_live_refresh_audit",
+      mailboxId: values.mailboxId,
+      status: 500,
+    });
+  }
+
+  return data as { id: string; created_at: string };
+}
+
+async function updateRunLiveRefreshOperationalEvent(
+  supabase: ServiceClient,
+  operationId: string,
+  payload: Record<string, unknown>,
+) {
+  const { error } = await supabase
+    .from("email_operational_events")
+    .update({ payload })
+    .eq("id", operationId);
+
+  if (error) {
+    console.error("[microsoft-email-sync] run_live_refresh audit update failed", {
+      phase: "run_live_refresh_audit_update",
+      operation_id: operationId,
+    });
+  }
 }
 
 async function findExistingMessage(supabase: ServiceClient, mailboxId: string, message: GraphMessage) {
@@ -3092,6 +3171,362 @@ async function setLiveSyncEnabled(
   };
 }
 
+function liveRefreshSafety(overrides: Record<string, unknown> = {}) {
+  return {
+    outlook_mutation_performed: false,
+    automatic_responses_sent: 0,
+    drafts_created: 0,
+    attachments_fetched: 0,
+    sync_checkpoint_updated: false,
+    polling_started: false,
+    scheduler_started: false,
+    realtime_listener_started: false,
+    ...overrides,
+  };
+}
+
+async function runLiveRefreshImportStage(
+  supabase: ServiceClient,
+  model: Awaited<ReturnType<typeof loadModel>>,
+  input: RunLiveRefreshInput,
+  admin: { userId: string; email: string | null },
+) {
+  let refreshToken = "";
+  try {
+    refreshToken = await decryptRefreshToken(model.secret);
+  } catch {
+    throw new SyncError("token_refresh_failed", {
+      phase: "run_live_refresh_token_decrypt",
+      connectionId: model.connection.id,
+      mailboxId: model.mailbox.id,
+      folderId: model.folder.id,
+      status: 401,
+    });
+  }
+
+  const refreshedToken = await exchangeRefreshToken(refreshToken, model.connection.id);
+  if (refreshedToken.refreshToken) {
+    await rotateRefreshToken(supabase, model.connection.id, refreshedToken.refreshToken, refreshedToken.refreshTokenExpiresIn);
+  }
+  await updateConnectionHealth(supabase, model.connection.id, {
+    status: "connected",
+    access_token_expires_at: accessTokenExpiry(refreshedToken.expiresIn),
+    last_error_code: null,
+    last_error_at: null,
+  });
+
+  const previewInput: PreviewInput = {
+    mode: "sync_preview",
+    folder: input.folder,
+    limit: input.limit,
+    daysBack: input.daysBack,
+    bucketMode: input.bucketMode,
+  };
+  const previewPayload = await fetchPreviewMessages(previewMessagesUrl(model.folder.provider_folder_id, previewInput), refreshedToken.accessToken, {
+    connectionId: model.connection.id,
+    mailboxId: model.mailbox.id,
+    folderId: model.folder.id,
+  });
+  const previewMessages = (previewPayload.value || []).filter((message) => Boolean(message.id));
+  const existingMatches = await loadExistingPreviewMatches(supabase, model.mailbox.id, previewMessages);
+  const { rows, bucketSummary } = buildPreviewRows(previewMessages, existingMatches);
+  const skippedReasons: Record<string, number> = {};
+  const messages: Array<{
+    provider_message_id: string | null;
+    message_id: string | null;
+    bucket: EbayBucket | null;
+    import_status: "imported" | "already_imported" | "skipped";
+    reason_codes: string[];
+  }> = [];
+  let importedCount = 0;
+  let alreadyImportedCount = 0;
+  let skippedCount = 0;
+  const importedMessageIds: string[] = [];
+
+  for (const row of rows) {
+    if (row.bucket !== "likely_ebay") {
+      skippedCount += 1;
+      incrementReason(skippedReasons, row.bucket);
+      continue;
+    }
+
+    const providerMessageId = row.provider_message_id;
+    if (!providerMessageId) {
+      skippedCount += 1;
+      incrementReason(skippedReasons, "missing_provider_message_id");
+      messages.push({
+        provider_message_id: null,
+        message_id: null,
+        bucket: row.bucket,
+        import_status: "skipped",
+        reason_codes: ["missing_provider_message_id"],
+      });
+      continue;
+    }
+
+    if (row.already_imported) {
+      alreadyImportedCount += 1;
+      messages.push({
+        provider_message_id: providerMessageId,
+        message_id: row.existing_message_id,
+        bucket: row.bucket,
+        import_status: "already_imported",
+        reason_codes: ["already_imported"],
+      });
+      continue;
+    }
+
+    const fullMessage = await fetchFullMessage(providerMessageId, refreshedToken.accessToken, {
+      connectionId: model.connection.id,
+      mailboxId: model.mailbox.id,
+      folderId: model.folder.id,
+    });
+    const result = await upsertMessage(supabase, model.mailbox.id, model.folder.id, fullMessage);
+    await replaceRecipients(supabase, result.messageId, fullMessage);
+    await upsertBody(supabase, result.messageId, fullMessage);
+    importedCount += 1;
+    importedMessageIds.push(result.messageId);
+    messages.push({
+      provider_message_id: providerMessageId,
+      message_id: result.messageId,
+      bucket: row.bucket,
+      import_status: "imported",
+      reason_codes: row.reason_codes,
+    });
+  }
+
+  const auditEvent = await insertImportOperationalEvent(supabase, {
+    mailboxId: model.mailbox.id,
+    messageIds: importedMessageIds,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    payload: {
+      mode: "sync_import_approved",
+      parent_mode: "run_live_refresh",
+      requested_limit: input.limit,
+      requested_daysBack: input.daysBack,
+      import_bucket: "likely_ebay",
+      imported_count: importedCount,
+      skipped_already_imported_count: alreadyImportedCount,
+      skipped_not_eligible_count: skippedCount,
+      skipped_reasons: skippedReasons,
+      classification_created: 0,
+      drafts_created: 0,
+      outlook_mutation_performed: false,
+      sync_checkpoint_updated: false,
+    },
+  });
+
+  return {
+    preview: {
+      previewed_count: previewMessages.length,
+      likely_ebay_count: bucketSummary.likely_ebay || 0,
+      maybe_ebay_count: bucketSummary.maybe_ebay || 0,
+      not_ebay_count: bucketSummary.not_ebay || 0,
+    },
+    import: {
+      imported_count: importedCount,
+      already_imported_count: alreadyImportedCount,
+      skipped_count: skippedCount,
+      skipped_reasons: skippedReasons,
+    },
+    child_operation_id: auditEvent?.id || null,
+    messages,
+  };
+}
+
+async function runLiveRefresh(
+  req: Request,
+  supabase: ServiceClient,
+  input: RunLiveRefreshInput,
+  admin: { userId: string; email: string | null },
+) {
+  const model = await loadModel(supabase);
+  const liveSyncModel = await loadLiveSyncModel(supabase);
+  const queueState = await assertQueueHasCapacity(supabase, model.mailbox.id);
+  const baseSafety = liveRefreshSafety();
+  const controls = rolloutControls();
+  const parentEvent = await insertRunLiveRefreshOperationalEvent(supabase, {
+    mailboxId: model.mailbox.id,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    payload: {
+      mode: "run_live_refresh",
+      status: "started",
+      requested_limit: input.limit,
+      requested_daysBack: input.daysBack,
+      process_batch_size: input.processBatchSize,
+      classify_batch_size: input.classifyBatchSize,
+      live_sync_enabled: liveSyncModel.connection.live_sync_enabled === true,
+      queue_state: queueState.queue_state,
+      safety: baseSafety,
+    },
+  });
+
+  if (liveSyncModel.connection.live_sync_enabled !== true) {
+    const blockedResult = {
+      ok: false,
+      mode: "run_live_refresh",
+      operation_id: parentEvent.id,
+      mailbox_id: model.mailbox.id,
+      live_sync_enabled: false,
+      blocked: true,
+      reason: "live_sync_disabled",
+      queue_state: queueState.queue_state,
+      queue_limits: queueState.queue_limits,
+      child_operations: {},
+      safety: baseSafety,
+    };
+    await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_live_sync_disabled" });
+    return blockedResult;
+  }
+
+  const disabledReason = !controls.imports_enabled
+    ? "imports_disabled"
+    : !controls.processing_enabled
+    ? "processing_disabled"
+    : !controls.classification_enabled
+    ? "classification_disabled"
+    : null;
+  if (disabledReason) {
+    const blockedResult = {
+      ok: false,
+      mode: "run_live_refresh",
+      operation_id: parentEvent.id,
+      mailbox_id: model.mailbox.id,
+      live_sync_enabled: true,
+      disabled: true,
+      reason: disabledReason,
+      rollout: controls,
+      queue_state: queueState.queue_state,
+      queue_limits: queueState.queue_limits,
+      child_operations: {},
+      safety: baseSafety,
+    };
+    await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_rollout_disabled" });
+    return blockedResult;
+  }
+
+  if (queueState.queue_saturated) {
+    const blockedResult = {
+      ok: false,
+      mode: "run_live_refresh",
+      operation_id: parentEvent.id,
+      mailbox_id: model.mailbox.id,
+      live_sync_enabled: true,
+      queue_saturated: true,
+      queue_saturation_reason: queueState.queue_saturation_reason,
+      queue_state: queueState.queue_state,
+      queue_limits: queueState.queue_limits,
+      child_operations: {},
+      safety: baseSafety,
+    };
+    await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_queue_saturated" });
+    return blockedResult;
+  }
+
+  const importStage = await runLiveRefreshImportStage(supabase, model, input, admin);
+  const queueAfterImport = await assertQueueHasCapacity(supabase, model.mailbox.id);
+  if (queueAfterImport.queue_saturated) {
+    const blockedResult = {
+      ok: false,
+      mode: "run_live_refresh",
+      operation_id: parentEvent.id,
+      mailbox_id: model.mailbox.id,
+      live_sync_enabled: true,
+      ...importStage,
+      processing: { processed_count: 0, failed_count: 0, skipped_count: 0 },
+      classification: { classified_count: 0, failed_count: 0, skipped_count: 0 },
+      queue_saturated: true,
+      queue_saturation_reason: queueAfterImport.queue_saturation_reason,
+      queue_state: queueAfterImport.queue_state,
+      queue_limits: queueAfterImport.queue_limits,
+      child_operations: {
+        import_operation_id: importStage.child_operation_id,
+      },
+      safety: baseSafety,
+    };
+    await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_after_import" });
+    return blockedResult;
+  }
+
+  const processingResult = await processImportedEmails(supabase, model.mailbox.id, {
+    mode: "process_imported",
+    folder: "inbox",
+    batchSize: input.processBatchSize,
+  });
+  const queueAfterProcessing = await assertQueueHasCapacity(supabase, model.mailbox.id);
+  if (queueAfterProcessing.queue_saturated) {
+    const blockedResult = {
+      ok: false,
+      mode: "run_live_refresh",
+      operation_id: parentEvent.id,
+      mailbox_id: model.mailbox.id,
+      live_sync_enabled: true,
+      ...importStage,
+      processing: {
+        processed_count: Number(processingResult.processed_count || 0),
+        failed_count: Number(processingResult.failed_count || 0),
+        skipped_count: Number(processingResult.skipped_count || 0),
+      },
+      classification: { classified_count: 0, failed_count: 0, skipped_count: 0 },
+      queue_saturated: true,
+      queue_saturation_reason: queueAfterProcessing.queue_saturation_reason,
+      queue_state: queueAfterProcessing.queue_state,
+      queue_limits: queueAfterProcessing.queue_limits,
+      child_operations: {
+        import_operation_id: importStage.child_operation_id,
+      },
+      safety: baseSafety,
+    };
+    await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_after_processing" });
+    return blockedResult;
+  }
+
+  const classificationResult = await classifyImportedEmails(req, supabase, model.mailbox.id, {
+    mode: "classify_imported",
+    folder: "inbox",
+    batchSize: input.classifyBatchSize,
+  }, admin);
+  const finalQueue = await assertQueueHasCapacity(supabase, model.mailbox.id);
+  const result = {
+    ok: true,
+    mode: "run_live_refresh",
+    operation_id: parentEvent.id,
+    mailbox_id: model.mailbox.id,
+    live_sync_enabled: true,
+    preview: importStage.preview,
+    import: importStage.import,
+    processing: {
+      processed_count: Number(processingResult.processed_count || 0),
+      failed_count: Number(processingResult.failed_count || 0),
+      skipped_count: Number(processingResult.skipped_count || 0),
+      jobs_enqueued: Number(processingResult.jobs_enqueued || 0),
+      jobs_processed: Number(processingResult.jobs_processed || 0),
+    },
+    classification: {
+      classified_count: Number(classificationResult.classified_count || 0),
+      failed_count: Number(classificationResult.failed_count || 0),
+      skipped_count: Number(classificationResult.skipped_count || 0),
+      jobs_enqueued: Number(classificationResult.jobs_enqueued || 0),
+      jobs_processed: Number(classificationResult.jobs_processed || 0),
+    },
+    queue_state: finalQueue.queue_state,
+    queue_limits: finalQueue.queue_limits,
+    child_operations: {
+      import_operation_id: importStage.child_operation_id,
+      process_operation_id: null,
+      classify_operation_id: classificationResult.replay_operation_references?.operation_event_id || null,
+    },
+    safety: liveRefreshSafety({
+      drafts_created: Number(classificationResult.drafts_created || 0),
+    }),
+  };
+
+  await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...result, status: "completed" });
+  return result;
+}
+
 async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: string, folderId: string) {
   const { data: events, error: eventError } = await supabase
     .from("email_operational_events")
@@ -3111,6 +3546,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   let importOperations = 0;
   let classifyOperations = 0;
   let processOperations = 0;
+  let liveRefreshOperations = 0;
 
   for (const event of events || []) {
     const eventType = String(event.event_type || "unknown");
@@ -3122,6 +3558,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     if (eventType === "sync_import_approved") importOperations += 1;
     if (["classify_imported", "classification_replay"].includes(eventType)) classifyOperations += 1;
     if (["processing_requeue", "processing_replay", "process_imported"].includes(eventType)) processOperations += 1;
+    if (eventType === "run_live_refresh") liveRefreshOperations += 1;
 
     const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
     if (eventType === "sync_import_approved") {
@@ -3274,8 +3711,10 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   };
 
   const latestImportEvent = (events || []).find((event) => String(event.event_type || "") === "sync_import_approved");
+  const latestLiveRefreshEvent = (events || []).find((event) => String(event.event_type || "") === "run_live_refresh");
   const timingSummary = {
     latest_import_at: latestImportEvent?.created_at || null,
+    latest_live_refresh_at: latestLiveRefreshEvent?.created_at || null,
     latest_processing_at: latestProcessingAt,
     latest_classification_at: latestClassificationAt,
   };
@@ -3293,6 +3732,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
       import_operations: importOperations,
       classify_operations: classifyOperations,
       process_operations: processOperations,
+      live_refresh_operations: liveRefreshOperations,
       latest_operation_at: latestOperationAt,
       latest_operation_type: latestOperationType,
       replay_safe: true,
@@ -3392,6 +3832,7 @@ serve(async (req) => {
       input.mode === "sync_import_approved" ||
       input.mode === "process_imported" ||
       input.mode === "classify_imported" ||
+      input.mode === "run_live_refresh" ||
       input.mode === "pipeline_diagnostics" ||
       input.mode === "rollout_status" ||
       input.mode === "live_sync_status" ||
@@ -3407,7 +3848,6 @@ serve(async (req) => {
     if (input.mode === "classify_imported" && !controls.classification_enabled) {
       return json(req, 200, { ok: false, disabled: true, reason: "classification_disabled" });
     }
-
     if (input.mode === "rollout_status") {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
@@ -3471,6 +3911,20 @@ serve(async (req) => {
         classify_operations: result.replay_summary.classify_operations,
         process_operations: result.replay_summary.process_operations,
         failed_jobs_total: result.failure_summary.failed_jobs_total,
+      });
+
+      return json(req, 200, result);
+    }
+
+    if (input.mode === "run_live_refresh") {
+      const result = await runLiveRefresh(req, supabase, input, admin);
+      const resultLog = result as Record<string, unknown>;
+      console.log("[microsoft-email-sync] run_live_refresh completed", {
+        phase: "run_live_refresh_complete",
+        mailbox_id: resultLog.mailbox_id,
+        operation_id: resultLog.operation_id,
+        ok: result.ok,
+        queue_saturated: resultLog.queue_saturated === true,
       });
 
       return json(req, 200, result);

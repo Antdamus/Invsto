@@ -51,6 +51,8 @@
       inboxPreviewSelectedProviderMessageIds: [],
       inboxImportLoading: false,
       inboxImportResult: null,
+      inboxLiveRefreshLoading: false,
+      inboxLiveRefreshResult: null,
       inboxLastOperationId: null,
       inboxLastRefreshedAt: null,
       inboxActiveBucketFilter: "likely_ebay",
