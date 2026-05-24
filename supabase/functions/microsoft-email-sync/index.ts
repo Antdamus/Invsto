@@ -54,6 +54,7 @@ const PREVIEW_MESSAGE_SELECT = [
 const PREVIEW_DEFAULT_LIMIT = 25;
 const PREVIEW_MAX_LIMIT = 100;
 const PREVIEW_MAX_DAYS_BACK = 30;
+const IMPORT_APPROVAL_CONFIRMATION = "IMPORT_PREVIEW_APPROVED";
 
 type ServiceClient = ReturnType<typeof createClient>;
 type DurableSyncMode = typeof DURABLE_SYNC_MODES[number];
@@ -109,7 +110,19 @@ type PreviewInput = {
   bucketMode: BucketMode;
 };
 
-type RequestInput = SyncInput | PreviewInput;
+type ImportApprovedInput = {
+  mode: "sync_import_approved";
+  folder: "inbox";
+  source: "preview";
+  importBucket: EbayBucket;
+  providerMessageIds: string[];
+  limit: number;
+  daysBack: number | null;
+  bucketMode: BucketMode;
+  confirmImport: string | null;
+};
+
+type RequestInput = SyncInput | PreviewInput | ImportApprovedInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -169,6 +182,30 @@ type PreviewBucketResult = {
   bucket: EbayBucket;
   score: number;
   reason_codes: string[];
+};
+
+type PreviewMessageRow = {
+  provider_message_id: string | null;
+  provider_immutable_id: string | null;
+  internet_message_id: string | null;
+  conversation_id: string | null;
+  received_at: string | null;
+  sent_at: string | null;
+  from_email: string | null;
+  from_name: string | null;
+  sender_email: string | null;
+  sender_name: string | null;
+  subject: string | null;
+  body_preview: string | null;
+  has_attachments: boolean;
+  importance: string | null;
+  parent_folder_id: string | null;
+  categories: string[];
+  bucket: EbayBucket;
+  score: number;
+  reason_codes: string[];
+  already_imported: boolean;
+  existing_message_id: string | null;
 };
 
 class SyncError extends Error {
@@ -269,7 +306,7 @@ async function requireAdmin(req: Request) {
     return { ok: false as const, status: 403, error: "admin_required" };
   }
 
-  return { ok: true as const, userId: user.id };
+  return { ok: true as const, userId: user.id, email: user.email || null };
 }
 
 async function parseInput(req: Request): Promise<RequestInput> {
@@ -289,6 +326,36 @@ async function parseInput(req: Request): Promise<RequestInput> {
     const daysBack = rawDaysBack === null ? null : Math.min(Math.max(Number.isFinite(rawDaysBack) && rawDaysBack > 0 ? Math.floor(rawDaysBack) : 1, 1), PREVIEW_MAX_DAYS_BACK);
     const bucketMode = String(body?.bucketMode || "ebay_only") === "all" ? "all" : "ebay_only";
     return { mode: "sync_preview", folder: "inbox", limit, daysBack, bucketMode };
+  }
+
+  if (requestedMode === "sync_import_approved") {
+    const rawLimit = Number(body?.limit);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : PREVIEW_DEFAULT_LIMIT, 1), PREVIEW_MAX_LIMIT);
+    const rawDaysBack = body?.daysBack === null || body?.daysBack === undefined || body?.daysBack === ""
+      ? null
+      : Number(body.daysBack);
+    const daysBack = rawDaysBack === null ? null : Math.min(Math.max(Number.isFinite(rawDaysBack) && rawDaysBack > 0 ? Math.floor(rawDaysBack) : 1, 1), PREVIEW_MAX_DAYS_BACK);
+    const bucketMode = String(body?.bucketMode || "ebay_only") === "all" ? "all" : "ebay_only";
+    const importBucket = String(body?.importBucket || "likely_ebay") as EbayBucket;
+    if (!["likely_ebay", "maybe_ebay", "not_ebay"].includes(importBucket)) {
+      throw new SyncError("invalid_import_bucket", { status: 400, phase: "input" });
+    }
+    const providerMessageIds = Array.isArray(body?.providerMessageIds)
+      ? [...new Set(body.providerMessageIds.map((value: unknown) => graphText(value)).filter(Boolean) as string[])].slice(0, PREVIEW_MAX_LIMIT)
+      : [];
+    const source = String(body?.source || "preview");
+    if (source !== "preview") throw new SyncError("invalid_import_source", { status: 400, phase: "input" });
+    return {
+      mode: "sync_import_approved",
+      folder: "inbox",
+      source: "preview",
+      importBucket,
+      providerMessageIds,
+      limit,
+      daysBack,
+      bucketMode,
+      confirmImport: graphText(body?.confirmImport),
+    };
   }
 
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
@@ -671,6 +738,38 @@ async function fetchPreviewMessages(url: string, accessToken: string, model: { c
   return payload as { value?: GraphMessage[] };
 }
 
+function messageUrl(providerMessageId: string) {
+  const graphBaseUrl = Deno.env.get("MICROSOFT_GRAPH_BASE_URL")?.trim() || DEFAULT_GRAPH_BASE_URL;
+  const url = new URL(`${graphBaseUrl.replace(/\/+$/, "")}/me/messages/${encodeURIComponent(providerMessageId)}`);
+  url.searchParams.set("$select", MESSAGE_SELECT);
+  return url.toString();
+}
+
+async function fetchFullMessage(providerMessageId: string, accessToken: string, model: { connectionId: string; mailboxId: string; folderId: string }) {
+  const response = await fetch(messageUrl(providerMessageId), {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Prefer: 'IdType="ImmutableId"',
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const microsoftError = typeof payload?.error?.code === "string" ? payload.error.code : undefined;
+    throw new SyncError("graph_message_fetch_failed", {
+      phase: "graph_message_fetch",
+      connectionId: model.connectionId,
+      mailboxId: model.mailboxId,
+      folderId: model.folderId,
+      status: response.status >= 500 ? 502 : response.status,
+      microsoftStatus: response.status,
+      microsoftError,
+    });
+  }
+
+  return payload as GraphMessage;
+}
+
 function emailDomain(value?: string | null) {
   const email = normalizeEmail(value);
   const domain = email.includes("@") ? email.split("@").pop() : "";
@@ -760,42 +859,102 @@ function bucketPreviewMessage(message: GraphMessage): PreviewBucketResult {
   return { bucket, score, reason_codes };
 }
 
+function previewInputFrom(input: PreviewInput | ImportApprovedInput): PreviewInput {
+  return {
+    mode: "sync_preview",
+    folder: input.folder,
+    limit: input.limit,
+    daysBack: input.daysBack,
+    bucketMode: input.bucketMode,
+  };
+}
+
+function buildPreviewRows(messages: GraphMessage[], existingMatches: Map<string, string>) {
+  const bucketSummary: Record<EbayBucket, number> = { likely_ebay: 0, maybe_ebay: 0, not_ebay: 0 };
+  const senderDomainSummary: Record<string, number> = {};
+  let alreadyImportedCount = 0;
+
+  const rows: PreviewMessageRow[] = messages.map((message) => {
+    const from = person(message.from);
+    const sender = person(message.sender);
+    const bucket = bucketPreviewMessage(message);
+    bucketSummary[bucket.bucket] += 1;
+    const domain = emailDomain(from.address) || emailDomain(sender.address) || "unknown";
+    senderDomainSummary[domain] = (senderDomainSummary[domain] || 0) + 1;
+    const existingMessageId = (message.id && existingMatches.get(String(message.id))) ||
+      (message.internetMessageId && existingMatches.get(String(message.internetMessageId))) ||
+      null;
+    const alreadyImported = Boolean(existingMessageId);
+    if (alreadyImported) alreadyImportedCount += 1;
+
+    return {
+      provider_message_id: graphText(message.id),
+      provider_immutable_id: graphText(message.id),
+      internet_message_id: graphText(message.internetMessageId),
+      conversation_id: graphText(message.conversationId),
+      received_at: graphDate(message.receivedDateTime),
+      sent_at: graphDate(message.sentDateTime),
+      from_email: normalizeEmail(from.address) || null,
+      from_name: from.name,
+      sender_email: normalizeEmail(sender.address) || null,
+      sender_name: sender.name,
+      subject: graphText(message.subject),
+      body_preview: graphText(message.bodyPreview),
+      has_attachments: message.hasAttachments === true,
+      importance: graphText(message.importance),
+      parent_folder_id: graphText(message.parentFolderId),
+      categories: Array.isArray(message.categories) ? message.categories : [],
+      bucket: bucket.bucket,
+      score: bucket.score,
+      reason_codes: bucket.reason_codes,
+      already_imported: alreadyImported,
+      existing_message_id: existingMessageId,
+    };
+  });
+
+  return { rows, bucketSummary, senderDomainSummary, alreadyImportedCount };
+}
+
+function incrementReason(summary: Record<string, number>, reason: string) {
+  summary[reason] = (summary[reason] || 0) + 1;
+}
+
 async function loadExistingPreviewMatches(supabase: ServiceClient, mailboxId: string, messages: GraphMessage[]) {
   const providerIds = Array.from(new Set(messages.map((message) => graphText(message.id)).filter(Boolean) as string[]));
   const internetIds = Array.from(new Set(messages.map((message) => graphText(message.internetMessageId)).filter(Boolean) as string[]));
-  const matches = new Set<string>();
+  const matches = new Map<string, string>();
 
   if (providerIds.length) {
     const { data, error } = await supabase
       .from("email_messages")
-      .select("provider_message_id")
+      .select("id, provider_message_id")
       .eq("mailbox_id", mailboxId)
       .in("provider_message_id", providerIds);
     if (error) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
     for (const row of data || []) {
-      if (row.provider_message_id) matches.add(String(row.provider_message_id));
+      if (row.provider_message_id && row.id) matches.set(String(row.provider_message_id), String(row.id));
     }
 
     const { data: immutableData, error: immutableError } = await supabase
       .from("email_messages")
-      .select("provider_immutable_id")
+      .select("id, provider_immutable_id")
       .eq("mailbox_id", mailboxId)
       .in("provider_immutable_id", providerIds);
     if (immutableError) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
     for (const row of immutableData || []) {
-      if (row.provider_immutable_id) matches.add(String(row.provider_immutable_id));
+      if (row.provider_immutable_id && row.id) matches.set(String(row.provider_immutable_id), String(row.id));
     }
   }
 
   if (internetIds.length) {
     const { data, error } = await supabase
       .from("email_messages")
-      .select("internet_message_id")
+      .select("id, internet_message_id")
       .eq("mailbox_id", mailboxId)
       .in("internet_message_id", internetIds);
     if (error) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
     for (const row of data || []) {
-      if (row.internet_message_id) matches.add(String(row.internet_message_id));
+      if (row.internet_message_id && row.id) matches.set(String(row.internet_message_id), String(row.id));
     }
   }
 
@@ -845,6 +1004,42 @@ async function updateSyncRun(supabase: ServiceClient, runId: string, values: Rec
 async function updateSyncState(supabase: ServiceClient, stateId: string, values: Record<string, unknown>) {
   const { error } = await supabase.from("email_sync_states").update(values).eq("id", stateId);
   if (error) throw new SyncError("sync_state_update_failed", { phase: "sync_state_update" });
+}
+
+async function insertImportOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    messageIds: string[];
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "sync_import_approved",
+      mailbox_id: values.mailboxId,
+      message_ids: values.messageIds,
+      reason: "Approved preview import without classification, drafts, Outlook mutation, or sync checkpoint updates.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      replay_source: "sync_import_approved",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] import audit insert failed", {
+      phase: "sync_import_approved_audit",
+      mailbox_id: values.mailboxId,
+    });
+    return null;
+  }
+
+  return data as { id: string; created_at: string };
 }
 
 async function findExistingMessage(supabase: ServiceClient, mailboxId: string, message: GraphMessage) {
@@ -1126,7 +1321,7 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
-    isPreview = input.mode === "sync_preview";
+    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved";
     const model = await loadModel(supabase);
     mailboxId = model.mailbox.id;
     folderId = model.folder.id;
@@ -1134,7 +1329,36 @@ serve(async (req) => {
     connectionId = model.connection.id;
     previousErrorCount = Number(model.syncState.consecutive_error_count || 0);
 
-    if (input.mode === "sync_preview") {
+    if (input.mode === "sync_preview" || input.mode === "sync_import_approved") {
+      if (input.mode === "sync_import_approved" && input.confirmImport !== IMPORT_APPROVAL_CONFIRMATION) {
+        return json(req, 400, {
+          ok: false,
+          error: "import_confirmation_required",
+          required_confirmImport: IMPORT_APPROVAL_CONFIRMATION,
+          outlook_mutation_performed: false,
+          classification_created: 0,
+          drafts_created: 0,
+        });
+      }
+      if (input.mode === "sync_import_approved" && input.importBucket === "maybe_ebay" && input.providerMessageIds.length === 0) {
+        return json(req, 400, {
+          ok: false,
+          error: "maybe_ebay_requires_selected_message_ids",
+          outlook_mutation_performed: false,
+          classification_created: 0,
+          drafts_created: 0,
+        });
+      }
+      if (input.mode === "sync_import_approved" && input.importBucket === "not_ebay" && input.providerMessageIds.length === 0) {
+        return json(req, 400, {
+          ok: false,
+          error: "bulk_not_ebay_import_not_allowed",
+          outlook_mutation_performed: false,
+          classification_created: 0,
+          drafts_created: 0,
+        });
+      }
+
       let refreshToken = "";
       try {
         refreshToken = await decryptRefreshToken(model.secret);
@@ -1149,91 +1373,216 @@ serve(async (req) => {
       }
 
       const refreshedToken = await exchangeRefreshToken(refreshToken, connectionId);
+      if (input.mode === "sync_import_approved") {
+        if (refreshedToken.refreshToken) {
+          await rotateRefreshToken(supabase, connectionId, refreshedToken.refreshToken, refreshedToken.refreshTokenExpiresIn);
+        }
+        await updateConnectionHealth(supabase, connectionId, {
+          status: "connected",
+          access_token_expires_at: accessTokenExpiry(refreshedToken.expiresIn),
+          last_error_code: null,
+          last_error_at: null,
+        });
+      }
 
-      const previewPayload = await fetchPreviewMessages(previewMessagesUrl(model.folder.provider_folder_id, input), refreshedToken.accessToken, {
+      const previewInput = previewInputFrom(input);
+      const previewPayload = await fetchPreviewMessages(previewMessagesUrl(model.folder.provider_folder_id, previewInput), refreshedToken.accessToken, {
         connectionId,
         mailboxId,
         folderId,
       });
       const previewMessages = (previewPayload.value || []).filter((message) => Boolean(message.id));
       const existingMatches = await loadExistingPreviewMatches(supabase, mailboxId, previewMessages);
-      const bucketSummary: Record<EbayBucket, number> = { likely_ebay: 0, maybe_ebay: 0, not_ebay: 0 };
-      const senderDomainSummary: Record<string, number> = {};
-      let alreadyImportedCount = 0;
+      const { rows, bucketSummary, senderDomainSummary, alreadyImportedCount } = buildPreviewRows(previewMessages, existingMatches);
 
-      const rows = previewMessages.map((message) => {
-        const from = person(message.from);
-        const sender = person(message.sender);
-        const bucket = bucketPreviewMessage(message);
-        bucketSummary[bucket.bucket] += 1;
-        const domain = emailDomain(from.address) || emailDomain(sender.address) || "unknown";
-        senderDomainSummary[domain] = (senderDomainSummary[domain] || 0) + 1;
-        const alreadyImported = Boolean(
-          (message.id && existingMatches.has(String(message.id))) ||
-            (message.internetMessageId && existingMatches.has(String(message.internetMessageId))),
-        );
-        if (alreadyImported) alreadyImportedCount += 1;
-
-        return {
-          provider_message_id: graphText(message.id),
-          provider_immutable_id: graphText(message.id),
-          internet_message_id: graphText(message.internetMessageId),
-          conversation_id: graphText(message.conversationId),
-          received_at: graphDate(message.receivedDateTime),
-          sent_at: graphDate(message.sentDateTime),
-          from_email: normalizeEmail(from.address) || null,
-          from_name: from.name,
-          sender_email: normalizeEmail(sender.address) || null,
-          sender_name: sender.name,
-          subject: graphText(message.subject),
-          body_preview: graphText(message.bodyPreview),
-          has_attachments: message.hasAttachments === true,
-          importance: graphText(message.importance),
-          parent_folder_id: graphText(message.parentFolderId),
-          categories: Array.isArray(message.categories) ? message.categories : [],
-          bucket: bucket.bucket,
-          score: bucket.score,
-          reason_codes: bucket.reason_codes,
-          already_imported: alreadyImported,
-        };
-      });
-
-      const messages = input.bucketMode === "ebay_only"
+      if (input.mode === "sync_preview") {
+        const messages = input.bucketMode === "ebay_only"
         ? rows.filter((row) => row.bucket !== "not_ebay")
         : rows;
 
-      console.log("[microsoft-email-sync] preview completed", {
-        phase: "sync_preview_complete",
+        console.log("[microsoft-email-sync] preview completed", {
+          phase: "sync_preview_complete",
+          mailbox_id: mailboxId,
+          folder_id: folderId,
+          messages_previewed: previewMessages.length,
+          messages_returned: messages.length,
+          likely_ebay: bucketSummary.likely_ebay,
+          maybe_ebay: bucketSummary.maybe_ebay,
+          not_ebay: bucketSummary.not_ebay,
+          already_imported: alreadyImportedCount,
+        });
+
+        return json(req, 200, {
+          ok: true,
+          mode: "sync_preview",
+          folder: input.folder,
+          limit: input.limit,
+          daysBack: input.daysBack,
+          bucketMode: input.bucketMode,
+          caps: {
+            max_limit: PREVIEW_MAX_LIMIT,
+            max_daysBack: PREVIEW_MAX_DAYS_BACK,
+          },
+          graph_fields: PREVIEW_MESSAGE_SELECT.split(","),
+          bucket_summary: bucketSummary,
+          sender_domain_summary: senderDomainSummary,
+          already_imported_summary: {
+            imported: alreadyImportedCount,
+            not_imported: Math.max(previewMessages.length - alreadyImportedCount, 0),
+          },
+          messages_previewed: previewMessages.length,
+          messages_returned: messages.length,
+          messages,
+        });
+      }
+
+      const selectedIds = new Set(input.providerMessageIds);
+      const explicitSelection = selectedIds.size > 0;
+      const skippedReasons: Record<string, number> = {};
+      const messages: Array<{
+        provider_message_id: string | null;
+        message_id: string | null;
+        bucket: EbayBucket | null;
+        import_status: "imported" | "already_imported" | "skipped";
+        reason_codes: string[];
+      }> = [];
+      let importedCount = 0;
+      let alreadyImportedImportCount = 0;
+      let skippedCount = 0;
+      const importedMessageIds: string[] = [];
+
+      for (const row of rows) {
+        const providerMessageId = row.provider_message_id;
+        const selected = providerMessageId ? selectedIds.has(providerMessageId) : false;
+        const eligible = explicitSelection ? selected : row.bucket === input.importBucket;
+        if (!eligible) continue;
+
+        if (!providerMessageId) {
+          skippedCount += 1;
+          incrementReason(skippedReasons, "missing_provider_message_id");
+          messages.push({
+            provider_message_id: null,
+            message_id: null,
+            bucket: row.bucket,
+            import_status: "skipped",
+            reason_codes: ["missing_provider_message_id"],
+          });
+          continue;
+        }
+
+        if (!explicitSelection && row.bucket !== "likely_ebay") {
+          skippedCount += 1;
+          incrementReason(skippedReasons, row.bucket);
+          messages.push({
+            provider_message_id: providerMessageId,
+            message_id: null,
+            bucket: row.bucket,
+            import_status: "skipped",
+            reason_codes: [`bulk_${row.bucket}_not_allowed`],
+          });
+          continue;
+        }
+
+        if (row.already_imported) {
+          alreadyImportedImportCount += 1;
+          messages.push({
+            provider_message_id: providerMessageId,
+            message_id: row.existing_message_id,
+            bucket: row.bucket,
+            import_status: "already_imported",
+            reason_codes: ["already_imported"],
+          });
+          continue;
+        }
+
+        const fullMessage = await fetchFullMessage(providerMessageId, refreshedToken.accessToken, {
+          connectionId,
+          mailboxId,
+          folderId,
+        });
+        const result = await upsertMessage(supabase, mailboxId, folderId, fullMessage);
+        await replaceRecipients(supabase, result.messageId, fullMessage);
+        await upsertBody(supabase, result.messageId, fullMessage);
+        importedCount += 1;
+        importedMessageIds.push(result.messageId);
+        messages.push({
+          provider_message_id: providerMessageId,
+          message_id: result.messageId,
+          bucket: row.bucket,
+          import_status: "imported",
+          reason_codes: row.reason_codes,
+        });
+      }
+
+      if (explicitSelection) {
+        const previewIds = new Set(rows.map((row) => row.provider_message_id).filter(Boolean) as string[]);
+        for (const providerMessageId of selectedIds) {
+          if (previewIds.has(providerMessageId)) continue;
+          skippedCount += 1;
+          incrementReason(skippedReasons, "not_in_preview");
+          messages.push({
+            provider_message_id: providerMessageId,
+            message_id: null,
+            bucket: null,
+            import_status: "skipped",
+            reason_codes: ["not_in_current_preview_scope"],
+          });
+        }
+      } else if (input.importBucket === "likely_ebay") {
+        const notEligibleCount = rows.filter((row) => row.bucket !== "likely_ebay").length;
+        if (notEligibleCount > 0) {
+          skippedCount += notEligibleCount;
+          for (const row of rows.filter((candidate) => candidate.bucket !== "likely_ebay")) {
+            incrementReason(skippedReasons, row.bucket);
+          }
+        }
+      }
+
+      const eventPayload = {
+        mode: "sync_import_approved",
+        source: input.source,
+        requested_limit: input.limit,
+        requested_daysBack: input.daysBack,
+        import_bucket: input.importBucket,
+        selected_count: selectedIds.size,
+        imported_count: importedCount,
+        skipped_already_imported_count: alreadyImportedImportCount,
+        skipped_not_eligible_count: skippedCount,
+        skipped_reasons: skippedReasons,
+        classification_created: 0,
+        drafts_created: 0,
+        outlook_mutation_performed: false,
+        sync_checkpoint_updated: false,
+      };
+      const auditEvent = await insertImportOperationalEvent(supabase, {
+        mailboxId,
+        messageIds: importedMessageIds,
+        initiatedBy: admin.userId,
+        initiatedByEmail: admin.email,
+        payload: eventPayload,
+      });
+
+      console.log("[microsoft-email-sync] approved import completed", {
+        phase: "sync_import_approved_complete",
         mailbox_id: mailboxId,
         folder_id: folderId,
-        messages_previewed: previewMessages.length,
-        messages_returned: messages.length,
-        likely_ebay: bucketSummary.likely_ebay,
-        maybe_ebay: bucketSummary.maybe_ebay,
-        not_ebay: bucketSummary.not_ebay,
-        already_imported: alreadyImportedCount,
+        imported_count: importedCount,
+        already_imported_count: alreadyImportedImportCount,
+        skipped_count: skippedCount,
       });
 
       return json(req, 200, {
         ok: true,
-        mode: "sync_preview",
-        folder: input.folder,
-        limit: input.limit,
-        daysBack: input.daysBack,
-        bucketMode: input.bucketMode,
-        caps: {
-          max_limit: PREVIEW_MAX_LIMIT,
-          max_daysBack: PREVIEW_MAX_DAYS_BACK,
-        },
-        graph_fields: PREVIEW_MESSAGE_SELECT.split(","),
-        bucket_summary: bucketSummary,
-        sender_domain_summary: senderDomainSummary,
-        already_imported_summary: {
-          imported: alreadyImportedCount,
-          not_imported: Math.max(previewMessages.length - alreadyImportedCount, 0),
-        },
-        messages_previewed: previewMessages.length,
-        messages_returned: messages.length,
+        mode: "sync_import_approved",
+        imported_count: importedCount,
+        already_imported_count: alreadyImportedImportCount,
+        skipped_count: skippedCount,
+        skipped_reasons: skippedReasons,
+        classification_created: 0,
+        drafts_created: 0,
+        outlook_mutation_performed: false,
+        sync_checkpoint_updated: false,
+        operation_event_id: auditEvent?.id || null,
         messages,
       });
     }
