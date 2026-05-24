@@ -1,4 +1,9 @@
 /** =================== Auth (Admin Only) =================== */
+const dashboardState = {
+  user: null,
+  employee: null,
+};
+
 /** =================== Supabase Ready Guard =================== */
 function waitForSupabaseReady(timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
@@ -36,7 +41,7 @@ async function checkAuth() {
   // Fetch the employee record for the current user (RLS allows self-select)
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
-    .select("role, active, display_name")
+    .select("role, active, display_name, email, user_id")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -67,6 +72,9 @@ async function checkAuth() {
     window.location.href = "worker-dashboard.html";
     return false;
   }
+
+  dashboardState.user = session.user;
+  dashboardState.employee = employee;
 
   // Admin -> allowed
   const greeting = document.getElementById("admin-greeting");
@@ -338,9 +346,15 @@ async function loadStoreTransferAlerts() {
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading store transfers...</div>`;
 
+  if (!dashboardState.user?.id) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned store transfers.</div>`;
+    return;
+  }
+
   const { data, error } = await supabase
     .from("store_transfers")
     .select("id, transfer_number, source_store_id, destination_store_id, status, receiver_email, sender_email, created_at")
+    .eq("receiver_user_id", dashboardState.user.id)
     .in("status", ["pending_receipt", "partially_received", "exception"])
     .order("created_at", { ascending: true })
     .limit(6);
@@ -351,7 +365,7 @@ async function loadStoreTransferAlerts() {
   }
 
   if (!data?.length) {
-    container.innerHTML = `<div class="urgent-orders-empty">No open store transfers need attention.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">No store transfers are currently assigned to you.</div>`;
     return;
   }
 
@@ -387,6 +401,79 @@ function getReturnTaskDashboardLabel(task = {}) {
   return "Return";
 }
 
+function getDashboardReturnCase(task = {}) {
+  const entry = task.ebay_return_cases || task.return_case || {};
+  return Array.isArray(entry) ? entry[0] || {} : entry;
+}
+
+function getDashboardReturnPayload(task = {}) {
+  const returnCase = getDashboardReturnCase(task);
+  return {
+    ...(task.metadata || {}),
+    ...(returnCase.raw_payload || {}),
+  };
+}
+
+function firstReturnValue(...values) {
+  return values.find((value) => String(value || "").trim()) || "";
+}
+
+function getDashboardReturnAmount(task = {}) {
+  const payload = getDashboardReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstReturnValue(
+    payload.requestAmount,
+    detail.requestAmount,
+    payload.refundText,
+    detail.refundText,
+    payload.onHoldAmount,
+    detail.onHoldAmount
+  );
+}
+
+function getDashboardReturnComment(task = {}) {
+  const payload = getDashboardReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstReturnValue(
+    payload.buyerComment,
+    detail.buyerComment,
+    payload.comment,
+    payload.buyer_message,
+    task.question,
+    getDashboardReturnCase(task).notes
+  );
+}
+
+function getDashboardReturnReason(task = {}) {
+  const payload = getDashboardReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstReturnValue(
+    getDashboardReturnCase(task).return_reason,
+    payload.returnReason,
+    detail.returnReason,
+    payload.return_reason
+  );
+}
+
+function getDashboardReturnItemLabel(task = {}) {
+  const payload = getDashboardReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstReturnValue(
+    payload.itemTitle,
+    detail.itemTitle,
+    payload.item_title,
+    payload.itemNumber,
+    detail.itemNumber,
+    "No item title captured"
+  );
+}
+
+function getDashboardReturnActionText(task = {}) {
+  const payload = getDashboardReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstReturnValue(payload.returnAction, detail.returnAction, payload.return_action);
+}
+
 function getOrderTaskDashboardLabel(task = {}) {
   if (task.task_type === "admin_review") return "Admin";
   if (task.task_type === "worker_follow_up") return "Worker";
@@ -399,16 +486,16 @@ async function loadAdminOrderTasks() {
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading order tasks...</div>`;
 
-  const { data, error } = await supabase.rpc("list_admin_ebay_order_tasks", { _limit: 6 });
+  const { data, error } = await supabase.rpc("list_my_ebay_order_tasks", { _limit: 6 });
 
   if (error) {
-    console.warn("Failed to load order coordination tasks:", error);
+    console.warn("Failed to load assigned order coordination tasks:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load order tasks.</div>`;
     return;
   }
 
   if (!data?.length) {
-    container.innerHTML = `<div class="urgent-orders-empty">No open order coordination tasks need attention.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">No open order coordination tasks are assigned to you.</div>`;
     return;
   }
 
@@ -448,16 +535,22 @@ async function loadAdminTeamTasks() {
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading team tasks...</div>`;
 
-  const { data, error } = await supabase.rpc("list_admin_team_tasks", { _limit: 6 });
+  const { data, error } = await supabase
+    .from("team_tasks")
+    .select("id, task_type, title, description, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email")
+    .eq("assigned_to_user_id", dashboardState.user?.id)
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
+    .order("created_at", { ascending: true })
+    .limit(6);
 
   if (error) {
-    console.warn("Failed to load team tasks:", error);
+    console.warn("Failed to load assigned team tasks:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load team tasks.</div>`;
     return;
   }
 
   if (!data?.length) {
-    container.innerHTML = `<div class="urgent-orders-empty">No open independent team tasks need attention.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">No independent team tasks are assigned to you.</div>`;
     return;
   }
 
@@ -488,41 +581,59 @@ async function loadAdminReturnTasks() {
   if (!container) return;
   container.innerHTML = `<div class="urgent-orders-empty">Loading return tasks...</div>`;
 
+  if (!dashboardState.user?.id) {
+    container.innerHTML = `<div class="urgent-orders-empty">Sign in to see assigned return tasks.</div>`;
+    return;
+  }
+
   const { data, error } = await supabase
     .from("ebay_return_tasks")
-    .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_number, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, notes, raw_payload, case_type)")
+    .eq("assigned_to_user_id", dashboardState.user.id)
     .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
     .order("created_at", { ascending: true })
     .limit(6);
 
   if (error) {
-    console.warn("Failed to load return tasks:", error);
+    console.warn("Failed to load assigned return tasks:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load return tasks.</div>`;
     return;
   }
 
   if (!data?.length) {
-    container.innerHTML = `<div class="urgent-orders-empty">No open return tasks need attention.</div>`;
+    container.innerHTML = `<div class="urgent-orders-empty">No open return tasks are assigned to you.</div>`;
     return;
   }
 
   container.innerHTML = data.map((task) => {
-    const returnCase = Array.isArray(task.ebay_return_cases) ? task.ebay_return_cases[0] || {} : task.ebay_return_cases || {};
+    const returnCase = getDashboardReturnCase(task);
+    const returnId = returnCase.ebay_return_id || returnCase.id || "Return case";
+    const orderLabel = returnCase.order_number || (returnCase.case_type === "unmatched_legacy" ? "No OG order match" : "No order captured");
+    const amount = getDashboardReturnAmount(task) || "Not captured";
+    const reason = getDashboardReturnReason(task) || "No reason captured";
+    const comment = getDashboardReturnComment(task) || "No buyer comment captured";
+    const itemLabel = getDashboardReturnItemLabel(task);
+    const actionText = getDashboardReturnActionText(task);
     const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
         <div class="urgent-order-top">
           <div>
             <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>
-            <span>${escapeHtml(returnCase.order_number || returnCase.ebay_return_id || "Return case")}</span>
+            <span>${escapeHtml(orderLabel)} / Return ${escapeHtml(returnId)}</span>
           </div>
           <span class="urgent-order-badge">${escapeHtml(getReturnTaskDashboardLabel(task))}</span>
         </div>
-        <small>${escapeHtml(task.question || task.title || returnCase.return_reason || "Return needs attention")}</small>
+        <div class="urgent-return-facts">
+          <span><small>Value</small><b>${escapeHtml(amount)}</b></span>
+          <span><small>Reason</small><b>${escapeHtml(reason)}</b></span>
+          <span><small>Due</small><b>${escapeHtml(task.due_at ? formatDateTime(task.due_at) : "Not set")}</b></span>
+        </div>
+        <small class="urgent-return-comment"><b>Buyer:</b> ${escapeHtml(comment)}</small>
+        <small>${escapeHtml(itemLabel)}</small>
         <div class="urgent-order-meta">
-          <span>${escapeHtml(task.status.replace(/_/g, " "))} / ${escapeHtml(task.priority)}</span>
-          <span>Assigned: ${escapeHtml(task.assigned_to_email || "Unassigned")}</span>
-          <span>Due ${escapeHtml(task.due_at ? formatDateTime(task.due_at) : "not set")}</span>
+          <span>${escapeHtml(String(task.status || "open").replace(/_/g, " "))} / ${escapeHtml(task.priority || "normal")}</span>
+          ${actionText ? `<span>${escapeHtml(actionText)}</span>` : ""}
         </div>
       </a>
     `;

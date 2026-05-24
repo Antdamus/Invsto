@@ -1886,13 +1886,14 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          ${isAdminUser() ? `<span class="buyer-card-value">${formatMoney(group.totalValue)}</span>` : ""}
           <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
       </div>
       <div class="buyer-card-meta">
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
-        ${isAdminUser() ? `<span>${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
+        ${isAdminUser() ? `<span>Order value ${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
       </div>
       ${isAdminUser() ? `
         <div class="buyer-card-admin-row">
@@ -1961,6 +1962,7 @@ function renderOrders() {
         <span>
           <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
           <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+          ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
           ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>` : ""}
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>

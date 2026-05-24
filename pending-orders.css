@@ -833,6 +833,26 @@ textarea:focus {
   gap: 8px;
 }
 
+.buyer-card-value,
+.buyer-line-price {
+  color: #ffd6d6;
+  font-weight: 950;
+}
+
+.buyer-card-value {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 123, 123, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 123, 123, 0.12);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .urgency-pill {
   display: inline-flex;
   align-items: center;
@@ -978,6 +998,11 @@ textarea:focus {
   font-size: 0.8rem;
 }
 
+.buyer-line-btn .buyer-line-price {
+  color: #ffd6d6;
+  font-size: 0.84rem;
+}
+
 .buyer-line-btn b {
   flex: 0 0 auto;
   color: var(--green);
@@ -1044,6 +1069,9 @@ textarea:focus {
   display: grid;
   gap: 9px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(139, 190, 255, 0.18);
   border-radius: 16px;
   background: rgba(139, 190, 255, 0.055);
@@ -1066,11 +1094,24 @@ textarea:focus {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  min-width: 0;
+}
+
+.order-task-card-head > div,
+.order-task-event-head > div {
+  min-width: 0;
 }
 
 .order-task-card-head strong,
-.order-task-event-head strong {
+.order-task-event-head strong,
+.order-task-card-head span,
+.order-task-event-head span,
+.order-task-event p,
+.order-task-event small {
+  min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .order-task-card-head span,
@@ -1086,13 +1127,15 @@ textarea:focus {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .order-task-meta span,
 .order-task-chip {
   display: inline-flex;
   align-items: center;
-  width: fit-content;
+  flex-wrap: wrap;
+  max-width: 100%;
   min-height: 30px;
   padding: 5px 10px;
   border: 1px solid rgba(227, 189, 119, 0.24);
@@ -1101,6 +1144,9 @@ textarea:focus {
   color: var(--gold-strong);
   font-size: 0.82rem;
   font-weight: 900;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .order-task-events {

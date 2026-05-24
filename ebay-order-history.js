@@ -5184,7 +5184,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
     return;
   }
 
-  const requested = Number(summary.requestedCount || 0);
+  const requested = Number(summary.requestedCount ?? summary.total ?? 0);
   const matched = Number(summary.importedCreatedCount ?? summary.importedCount ?? 0);
   const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
   const failed = Number(summary.failedCount || 0);
@@ -5202,6 +5202,9 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       : `${processed} imported`;
   }
 
+  const messagesImported = Number(summary.messagesImported || 0);
+  const filesSeen = Number(summary.filesSeen || 0);
+
   details.innerHTML = `
     <div class="return-import-grid">
       <span><small>Visible on eBay</small><b>${requested.toLocaleString()}</b></span>
@@ -5210,6 +5213,8 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
       <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
+      ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
+      ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
     </div>
     ${summary.message ? `<p class="return-import-message">${escapeHtml(summary.message)}</p>` : ""}
     ${unmatchedReturns.length ? `
@@ -5234,6 +5239,113 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
 function setLastReturnImportSummary(summary) {
   state.lastReturnImportSummary = summary || null;
   renderReturnImportSummary(state.lastReturnImportSummary);
+}
+
+function getEbayReturnSyncUrl() {
+  const projectRef = String(window.SUPABASE_URL || "")
+    .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+  return `https://${projectRef}.functions.supabase.co/ebay-return-sync`;
+}
+
+function setReturnApiSyncButtonsDisabled(disabled) {
+  ["check-ebay-return-api-sync", "run-ebay-return-api-sync"].forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = disabled;
+  });
+}
+
+async function postEbayReturnSyncPayload(payload) {
+  const response = await fetch(getEbayReturnSyncUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { ok: false, error: text || `HTTP ${response.status}` };
+  }
+  if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+  return data;
+}
+
+function buildReturnApiSyncSummary(response = {}) {
+  const results = Array.isArray(response.results) ? response.results : [];
+  const failedReturns = results
+    .filter((entry) => entry?.error)
+    .map((entry) => ({
+      returnId: entry.returnId,
+      buyerUsername: entry.buyerUsername,
+      itemNumber: entry.itemNumber,
+      error: entry.error,
+    }));
+  const unmatchedReturns = results
+    .filter((entry) => entry && entry.matched === false && !entry.error)
+    .map((entry) => ({
+      returnId: entry.returnId,
+      buyerUsername: entry.buyerUsername,
+      itemNumber: entry.itemNumber,
+      reason: entry.reason || entry.status || "No OG match",
+    }));
+  return {
+    ok: response.ok === true,
+    runId: response.runId || null,
+    requestedCount: Number(response.total || results.length || 0),
+    processedCount: Math.max(0, Number(response.total || results.length || 0) - Number(response.errors || 0)),
+    importedCreatedCount: Number(response.matched || 0),
+    unmatchedCreated: Number(response.unmatched || 0),
+    failedCount: Number(response.errors || 0),
+    duplicateResolvedCount: 0,
+    messagesImported: Number(response.messagesImported || 0),
+    filesSeen: Number(response.filesSeen || 0),
+    importedReturns: results.filter((entry) => entry?.matched === true),
+    unmatchedReturns,
+    failedReturns,
+    message: response.error
+      ? response.error
+      : response.dryRun
+        ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
+        : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
+  };
+}
+
+async function runEbayReturnApiSync(dryRun = true) {
+  if (!isAdminUser()) {
+    alert("Only admins can sync eBay returns from the API.");
+    return;
+  }
+  if (!dryRun) {
+    const confirmed = window.confirm("Sync open eBay returns into the OG return queue? This will create or refresh return tasks, but it will not change local intake/restock records.");
+    if (!confirmed) return;
+  }
+
+  setReturnApiSyncButtonsDisabled(true);
+  setReturnTaskSaveStatus(dryRun ? "Checking eBay returns..." : "Syncing eBay returns...", "info");
+  try {
+    const response = await postEbayReturnSyncPayload({
+      dryRun,
+      limit: 200,
+      daysBack: 90,
+    });
+    const summary = buildReturnApiSyncSummary(response);
+    setLastReturnImportSummary(summary);
+    if (!response.ok && response.error) throw new Error(response.error);
+    if (!dryRun) await loadReturnQueue();
+    setReturnTaskSaveStatus(
+      response.ok
+        ? (dryRun ? "eBay return dry check finished." : "eBay returns synced into the work queue.")
+        : "eBay return sync finished with issues. Review the audit panel.",
+      response.ok ? "success" : "error"
+    );
+  } catch (error) {
+    console.error("eBay return API sync failed:", error);
+    setLastReturnImportSummary(buildReturnApiSyncSummary({ ok: false, error: error.message || "Return sync failed.", errors: 1 }));
+    setReturnTaskSaveStatus(error.message || "Could not sync eBay returns.", "error");
+  } finally {
+    setReturnApiSyncButtonsDisabled(false);
+  }
 }
 
 function queueHistoryReturnTransfer(payload) {
@@ -5896,6 +6008,8 @@ function setupListeners() {
   setupHistorySearchAutofillGuard();
   $("refresh-history")?.addEventListener("click", refreshHistoryAndReturns);
   $("refresh-return-queue")?.addEventListener("click", loadReturnQueue);
+  $("check-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(true));
+  $("run-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(false));
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
   $("clear-return-test-imports")?.addEventListener("click", clearReturnImportTestData);
