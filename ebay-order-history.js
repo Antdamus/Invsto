@@ -1119,6 +1119,7 @@ async function loadOrderHistory() {
   state.lines = closedLines;
   state.historyLoaded = true;
   renderWorkerOptions();
+  applyHistoryBuyerLaunchSearch();
   applyFilters();
   applyHistoryLabelLaunchSelection();
   drainQueuedHistoryLabelTransfers();
@@ -4766,6 +4767,17 @@ function applyHistoryLabelLaunchSelection() {
   const orderNumbers = getRequestedHistoryLabelOrderNumbers();
   if (!orderNumbers.length) return;
   openHistoryLabelReceiverForOrders(orderNumbers);
+}
+
+function applyHistoryBuyerLaunchSearch() {
+  const params = new URLSearchParams(window.location.search);
+  const buyer = String(params.get("buyer") || "").trim();
+  if (!buyer || state.historyBuyerSearchApplied) return;
+  const search = $("history-search");
+  if (!search) return;
+  search.value = buyer;
+  state.historySearchUserEdited = true;
+  state.historyBuyerSearchApplied = true;
 }
 
 async function getHistoryLabelSignedUrl(order) {

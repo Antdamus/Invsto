@@ -97,6 +97,20 @@ function setActiveNavLink() {
 
 /** =================== Formatters =================== */
 const fmtMoney = (n) => `$${Number(n || 0).toLocaleString()}`;
+const fmtMoneyFull = (n) => {
+  const number = Number(n || 0);
+  return number.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: number >= 1000 ? 0 : 2,
+  });
+};
+
+const fmtPercent = (n) => {
+  const number = Number(n);
+  if (!Number.isFinite(number)) return "0%";
+  return `${Math.round(number * 100)}%`;
+};
 
 const TRAY_STATUS_LABELS = {
   checked_in: "Checked In",
@@ -640,6 +654,111 @@ async function loadAdminReturnTasks() {
   }).join("");
 }
 
+function renderBuyerProfitabilitySummary(rows = []) {
+  const summary = document.getElementById("buyer-profitability-summary");
+  if (!summary) return;
+
+  if (!rows.length) {
+    summary.innerHTML = `<span>No synced buyer history yet.</span>`;
+    return;
+  }
+
+  const totals = rows.reduce((acc, row) => {
+    acc.buyers += 1;
+    acc.orders += Number(row.order_count || 0);
+    acc.units += Number(row.unit_count || 0);
+    acc.gross += Number(row.gross_sales || 0);
+    acc.net += Number(row.net_payout || 0);
+    acc.openReturns += Number(row.open_return_count || 0);
+    return acc;
+  }, { buyers: 0, orders: 0, units: 0, gross: 0, net: 0, openReturns: 0 });
+
+  summary.innerHTML = `
+    <span><b>${totals.buyers}</b> buyers shown</span>
+    <span><b>${totals.orders}</b> orders</span>
+    <span><b>${totals.units}</b> units</span>
+    <span><b>${fmtMoneyFull(totals.gross)}</b> gross</span>
+    <span><b>${fmtMoneyFull(totals.net)}</b> est. payout</span>
+    <span><b>${totals.openReturns}</b> open returns</span>
+  `;
+}
+
+function renderBuyerProfitabilityCard(row, index) {
+  const buyer = row.buyer_username || "Unknown buyer";
+  const buyerName = row.buyer_name && row.buyer_name !== row.buyer_username ? row.buyer_name : "";
+  const orderCount = Number(row.order_count || 0);
+  const unitCount = Number(row.unit_count || 0);
+  const returnCount = Number(row.return_count || 0);
+  const openReturns = Number(row.open_return_count || 0);
+  const cancelledOrders = Number(row.cancelled_order_count || 0);
+  const pendingOrders = Number(row.pending_order_count || 0);
+  const lastPurchase = row.last_purchase_at ? formatDateTime(row.last_purchase_at) : "No date";
+  const returnClass = openReturns > 0 ? "is-hot" : returnCount > 0 ? "is-warm" : "";
+
+  return `
+    <a class="buyer-profit-card ${index === 0 ? "is-top-buyer" : ""}" href="ebay-order-history.html?buyer=${encodeURIComponent(buyer)}">
+      <div class="buyer-profit-card-top">
+        <div class="buyer-profit-rank">#${index + 1}</div>
+        <div class="buyer-profit-identity">
+          <strong>${escapeHtml(buyer)}</strong>
+          ${buyerName ? `<span>${escapeHtml(buyerName)}</span>` : ""}
+        </div>
+        <div class="buyer-profit-value">
+          <small>Est. payout</small>
+          <b>${fmtMoneyFull(row.net_payout)}</b>
+        </div>
+      </div>
+
+      <div class="buyer-profit-metrics">
+        <span><small>Gross</small><b>${fmtMoneyFull(row.gross_sales)}</b></span>
+        <span><small>Orders</small><b>${orderCount}</b></span>
+        <span><small>Units</small><b>${unitCount}</b></span>
+        <span><small>Avg order</small><b>${fmtMoneyFull(row.avg_order_value)}</b></span>
+      </div>
+
+      <div class="buyer-profit-foot">
+        <span>Last: ${escapeHtml(lastPurchase)}</span>
+        ${row.last_order_number ? `<span>${escapeHtml(row.last_order_number)}</span>` : ""}
+      </div>
+
+      <div class="buyer-profit-flags">
+        <span class="${returnClass}">${returnCount} returns (${fmtPercent(row.return_rate)})</span>
+        ${openReturns ? `<span class="is-hot">${openReturns} open</span>` : ""}
+        ${pendingOrders ? `<span>${pendingOrders} pending</span>` : ""}
+        ${cancelledOrders ? `<span>${cancelledOrders} canceled</span>` : ""}
+      </div>
+    </a>
+  `;
+}
+
+async function loadBuyerProfitability() {
+  const container = document.getElementById("buyer-profitability-container");
+  if (!container) return;
+  container.innerHTML = `<div class="urgent-orders-empty">Loading buyer profitability...</div>`;
+
+  const { data, error } = await supabase.rpc("list_ebay_buyer_profitability", {
+    _limit: 12,
+    _days_back: null,
+  });
+
+  if (error) {
+    console.warn("Failed to load buyer profitability:", error);
+    renderBuyerProfitabilitySummary([]);
+    container.innerHTML = `<div class="urgent-orders-empty">Could not load buyer profitability. Push the latest migration if this is the first run.</div>`;
+    return;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  renderBuyerProfitabilitySummary(rows);
+
+  if (!rows.length) {
+    container.innerHTML = `<div class="urgent-orders-empty">No synced eBay buyer history yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = rows.map(renderBuyerProfitabilityCard).join("");
+}
+
 /** =================== Data Loading =================== */
 async function loadInventoryData() {
   const { data: itemTypes, error: itemTypeError } = await supabase
@@ -982,6 +1101,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadAdminOrderTasks();
   await loadAdminTeamTasks();
   await loadAdminReturnTasks();
+  await loadBuyerProfitability();
 
   const items = await loadInventoryData();
   const summary = computeSummaryByCategory(items);
