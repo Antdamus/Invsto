@@ -57,6 +57,8 @@
   let ogReturnMessageAutoSendHooked = false;
   let ogReturnMessageLastLogKey = "";
   let ogReturnMessageLastLogAt = 0;
+  let ogReturnMessageConfirmationLastLogKey = "";
+  let ogReturnMessageConfirmationLastLogAt = 0;
   const ogReturnDetailCaptureCache = new Map();
   const ogBulkLabelManualSelection = new Set();
   let ogBulkLabelManualSelectionTouched = false;
@@ -4030,6 +4032,72 @@
     };
   }
 
+  function getVisibleTextLines() {
+    return String(document.body?.innerText || "")
+      .split(/\r?\n+/)
+      .map(cleanText)
+      .filter(Boolean);
+  }
+
+  function isReturnMessageSentConfirmationPage() {
+    const text = String(document.body?.innerText || "");
+    return /your message has been sent to the buyer/i.test(text)
+      || /you sent a message/i.test(text) && /message to the buyer/i.test(text);
+  }
+
+  function extractSentReturnMessageBody() {
+    const lines = getVisibleTextLines();
+    const summaryIndex = lines.findIndex((line) => /^message to the buyer$/i.test(line));
+    if (summaryIndex >= 0) {
+      const body = lines.slice(summaryIndex + 1).find((line) => {
+        return !/^how would you like to proceed/i.test(line)
+          && !/^accept the return$/i.test(line)
+          && !/^purchase an ebay return label/i.test(line)
+          && !/^order$/i.test(line)
+          && !/^return id$/i.test(line)
+          && !/^request amount$/i.test(line);
+      });
+      if (body) return body;
+    }
+
+    const historyIndex = lines.findIndex((line) => /you sent a message/i.test(line));
+    if (historyIndex >= 0) {
+      const body = lines.slice(historyIndex + 1).find((line) => {
+        return !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(line)
+          && !/^return started$/i.test(line)
+          && !/^delivered$/i.test(line)
+          && !/^item purchased$/i.test(line);
+      });
+      if (body) return body;
+    }
+
+    const html = document.documentElement?.innerHTML || "";
+    const summaryMatch = html.match(/"MESSAGE_SUMMARY"[\s\S]{0,2500}?"Message to the buyer"[\s\S]{0,1600}?"text"\s*:\s*"([^"]+)"/i);
+    if (summaryMatch?.[1]) return decodeReturnText(summaryMatch[1]);
+    const historyMatch = html.match(/"You sent a message"[\s\S]{0,1200}?"text"\s*:\s*"([^"]+)"/i);
+    return historyMatch?.[1] ? decodeReturnText(historyMatch[1]) : "";
+  }
+
+  function buildSentReturnMessagePayload() {
+    const metadata = extractReturnMessageContext();
+    const messageBody = extractSentReturnMessageBody();
+    return {
+      source: "ebay-return-message-confirmation-page",
+      message: {
+        ...metadata,
+        source: "ebay_return_message_confirmation_page",
+        direction: "outbound",
+        messageStatus: "sent_from_ebay_page_unverified",
+        messageBody,
+        sentAt: new Date().toISOString(),
+      },
+      metadata: {
+        ...metadata,
+        confirmationPageUrl: window.location.href,
+      },
+    };
+  }
+
   function getReturnMessageLogKey(payload = {}) {
     const message = payload.message || {};
     return [
@@ -4040,7 +4108,7 @@
   }
 
   async function logReturnMessageToOg(options = {}) {
-    const payload = buildReturnMessagePayload();
+    const payload = options.payload || buildReturnMessagePayload();
     const message = payload.message || {};
     const button = options.button || document.getElementById(RETURN_MESSAGE_SEND_ID);
     if (!message.messageBody) {
@@ -4097,6 +4165,19 @@
       if (!options.silent) window.alert(error.message || "Could not log this eBay message to OG.");
       return { ok: false, error: error.message || String(error) };
     }
+  }
+
+  function maybeLogSentReturnMessageConfirmation() {
+    if (!isReturnMessageSentConfirmationPage()) return;
+    const payload = buildSentReturnMessagePayload();
+    const message = payload.message || {};
+    if (!message.messageBody || (!message.returnId && !message.orderNumber)) return;
+    const logKey = getReturnMessageLogKey(payload);
+    const now = Date.now();
+    if (logKey === ogReturnMessageConfirmationLastLogKey && now - ogReturnMessageConfirmationLastLogAt < 300000) return;
+    ogReturnMessageConfirmationLastLogKey = logKey;
+    ogReturnMessageConfirmationLastLogAt = now;
+    logReturnMessageToOg({ payload, silent: true }).catch(() => null);
   }
 
   async function sendReturnMessageWithOgLog(event) {
@@ -5370,6 +5451,7 @@
     injectAwaitingReportButton();
     injectReturnPageButtons();
     injectReturnMessageLoggerButton();
+    maybeLogSentReturnMessageConfirmation();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();
     maybeShowBoxReminder();

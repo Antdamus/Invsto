@@ -137,11 +137,23 @@ function firstText(...values: unknown[]): string {
   return "";
 }
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function commentText(...values: unknown[]): string {
   for (const value of values) {
     if (value == null) continue;
     if (typeof value === "string" || typeof value === "number") {
-      const text = toText(value);
+      const text = decodeHtmlEntities(toText(value)).replace(/\s+/g, " ").trim();
       if (text) return text;
       continue;
     }
@@ -152,17 +164,148 @@ function commentText(...values: unknown[]): string {
     }
     if (typeof value !== "object") continue;
     const record = value as any;
+    if (Array.isArray(record.textSpans)) {
+      const text = commentText(...record.textSpans.map((span: any) => span?.text || span?.content || span));
+      if (text) return text;
+    }
     const text = commentText(
       record.content,
       record.text,
+      record.textValue,
+      record.plainText,
       record.message,
+      record.messageText,
       record.comment,
+      record.comments,
+      record.note,
+      record.notes,
       record.value,
       record.localizedText,
+      record.sellerComments,
+      record.sellerComment,
+      record.buyerComments,
+      record.buyerComment,
+      record.returnComments,
+      record.additionalInfo,
     );
     if (text) return text;
   }
   return "";
+}
+
+function normalizeMessageText(value: unknown): string {
+  return decodeHtmlEntities(toText(value)).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function looksLikeReferenceOnlyMessage(value: unknown, prepared: PreparedReturn): boolean {
+  const text = normalizeMessageText(value);
+  if (!text) return true;
+  if (text.length < 3) return true;
+  const references = [
+    prepared.returnId,
+    prepared.orderNumber,
+    prepared.itemNumber,
+    prepared.transactionId,
+    prepared.requestAmount,
+    prepared.onHoldAmount,
+  ].map(normalizeMessageText).filter(Boolean);
+  if (references.includes(text)) return true;
+  return /^\d{5,}$/.test(text.replace(/[-\s]/g, ""));
+}
+
+function findEbayPageModuleContainers(root: unknown, depth = 0, seen = new Set<unknown>()): any[] {
+  if (!root || typeof root !== "object" || depth > 5 || seen.has(root)) return [];
+  seen.add(root);
+  const record = root as any;
+  const containers: any[] = [];
+  if (record.MESSAGE_SUMMARY || record.HISTORY) containers.push(record);
+  for (const candidate of [
+    record.modules,
+    record.inputModules?.response?.modules,
+    record.response?.modules,
+    record.model?.modules,
+    record.data?.modules,
+    record.s?.modules,
+  ]) {
+    if (candidate && typeof candidate === "object" && (candidate.MESSAGE_SUMMARY || candidate.HISTORY)) {
+      containers.push(candidate);
+    }
+  }
+  if (Array.isArray(root)) {
+    for (const item of root) containers.push(...findEbayPageModuleContainers(item, depth + 1, seen));
+  } else {
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object") containers.push(...findEbayPageModuleContainers(value, depth + 1, seen));
+    }
+  }
+  return [...new Set(containers)];
+}
+
+function pageModelHistoryMessages(prepared: PreparedReturn): Array<{
+  key: string;
+  body: string;
+  direction: "inbound" | "outbound" | "internal";
+  status: string;
+  sentAt: string;
+  metadata: JsonRecord;
+}> {
+  const containers = findEbayPageModuleContainers([prepared.detail, prepared.summary, prepared.source, prepared.payload]);
+  const messages: Array<{
+    key: string;
+    body: string;
+    direction: "inbound" | "outbound" | "internal";
+    status: string;
+    sentAt: string;
+    metadata: JsonRecord;
+  }> = [];
+
+  for (const modules of containers) {
+    const historyActivities = Array.isArray(modules?.HISTORY?.historyActivities)
+      ? modules.HISTORY.historyActivities
+      : [];
+    const messageSummaryBody = commentText(
+      modules?.MESSAGE_SUMMARY?.comments?.description,
+      modules?.MESSAGE_SUMMARY?.comments?.message,
+      modules?.MESSAGE_SUMMARY?.comments?.value,
+    );
+    if (messageSummaryBody && !looksLikeReferenceOnlyMessage(messageSummaryBody, prepared)) {
+      const matchingHistory = historyActivities.find((activity: any) => {
+        const title = commentText(activity?.historyDetail?.title, activity?.title).toLowerCase();
+        const body = commentText(activity?.historyDetail?.descriptions, activity?.descriptions);
+        return /sent.*message|message.*sent|you sent/i.test(title) && normalizeMessageText(body) === normalizeMessageText(messageSummaryBody);
+      });
+      messages.push({
+        key: `page-message-summary:${prepared.returnId}:${messageSummaryBody.slice(0, 80)}`,
+        body: messageSummaryBody,
+        direction: "outbound",
+        status: "imported",
+        sentAt: getDateValue(matchingHistory?.date) || prepared.requestedAt || new Date().toISOString(),
+        metadata: { source: "ebay_return_page_model", kind: "message_summary", modulesKey: "MESSAGE_SUMMARY" },
+      });
+    }
+
+    historyActivities.forEach((activity: any, index: number) => {
+      const title = commentText(activity?.historyDetail?.title, activity?.title);
+      const body = commentText(activity?.historyDetail?.descriptions, activity?.descriptions);
+      if (!body || looksLikeReferenceOnlyMessage(body, prepared)) return;
+      const titleKey = title.toLowerCase();
+      const direction = /you sent|seller.*sent|sent.*message|message.*sent/.test(titleKey)
+        ? "outbound"
+        : /buyer|return started|buyer sent|buyer message/.test(titleKey)
+          ? "inbound"
+          : "internal";
+      messages.push({
+        key: `page-history:${prepared.returnId}:${index}:${title}:${body.slice(0, 80)}`,
+        body,
+        direction,
+        status: "imported",
+        sentAt: getDateValue(activity?.date) || prepared.requestedAt || new Date().toISOString(),
+        metadata: { source: "ebay_return_page_model", kind: "history_activity", title, activity },
+      });
+    });
+  }
+
+  return messages;
 }
 
 function firstDate(...values: unknown[]): string | null {
@@ -950,15 +1093,41 @@ function responseHistoryMessages(prepared: PreparedReturn, caseRow: any, match: 
     });
   }
   for (const entry of history) {
+    const attributes = entry?.attributes || {};
     const body = commentText(
-      entry?.attributes?.comments?.content,
-      entry?.attributes?.comment?.content,
+      attributes?.comments?.content,
+      attributes?.comments,
+      attributes?.comment?.content,
+      attributes?.comment,
+      attributes?.message?.content,
+      attributes?.message,
+      attributes?.sellerComments?.content,
+      attributes?.sellerComments,
+      attributes?.sellerComment?.content,
+      attributes?.sellerComment,
+      attributes?.buyerComments?.content,
+      attributes?.buyerComments,
+      attributes?.buyerComment?.content,
+      attributes?.buyerComment,
+      attributes?.note,
+      attributes?.notes,
       entry?.comments?.content,
       entry?.comment,
       entry?.comments,
+      entry?.message,
+      entry?.note,
+      entry?.notes?.content,
+      entry?.notes,
     );
-    if (!body) continue;
-    const author = toText(entry?.author).toLowerCase();
+    if (!body || looksLikeReferenceOnlyMessage(body, prepared)) continue;
+    const author = [
+      entry?.author,
+      entry?.actor,
+      entry?.role,
+      entry?.authorRole,
+      entry?.activityActor,
+      entry?.activity,
+    ].map(toText).join(" ").toLowerCase();
     messages.push({
       key: `response-history:${prepared.returnId}:${entry?.activity || ""}:${getDateValue(entry?.creationDate) || ""}:${body.slice(0, 80)}`,
       body,
@@ -968,6 +1137,7 @@ function responseHistoryMessages(prepared: PreparedReturn, caseRow: any, match: 
       metadata: { source: "ebay_return_api", kind: "response_history", entry },
     });
   }
+  messages.push(...pageModelHistoryMessages(prepared));
   return messages.map((message) => ({
     return_case_id: caseRow.id,
     order_id: match.order?.id || caseRow.order_id || null,
@@ -996,12 +1166,24 @@ async function importMessages(supabase: any, prepared: PreparedReturn, caseRow: 
   if (!rows.length) return 0;
   const { data: existing, error: existingError } = await supabase
     .from("ebay_return_messages")
-    .select("id,metadata")
+    .select("id,metadata,direction,message_body")
     .eq("ebay_return_id", prepared.returnId)
     .eq("channel", "ebay_return_api");
   if (existingError) throw existingError;
   const existingKeys = new Set((existing || []).map((row: any) => toText(row?.metadata?.ebayResponseHistoryKey)).filter(Boolean));
-  const freshRows = rows.filter((row) => !existingKeys.has(toText(row.metadata?.ebayResponseHistoryKey)));
+  const bodyKey = (row: any) => [
+    toText(row.direction),
+    normalizeMessageText(row.message_body),
+  ].join("|");
+  const existingBodyKeys = new Set((existing || []).map(bodyKey).filter((key) => key !== "|"));
+  const freshRows = rows.filter((row) => {
+    const key = toText(row.metadata?.ebayResponseHistoryKey);
+    if (key && existingKeys.has(key)) return false;
+    const normalizedBodyKey = bodyKey(row);
+    if (normalizedBodyKey !== "|" && existingBodyKeys.has(normalizedBodyKey)) return false;
+    existingBodyKeys.add(normalizedBodyKey);
+    return true;
+  });
   if (!freshRows.length) return 0;
   const { data, error } = await supabase
     .from("ebay_return_messages")
