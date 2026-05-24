@@ -81,6 +81,7 @@ const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "con
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const EBAY_SINGLE_LABEL_BASE_URL = "https://www.ebay.com/ship/single/";
+const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
@@ -1738,6 +1739,12 @@ function buildEbaySingleLabelUrl(orderNumber) {
   return normalized ? `${EBAY_SINGLE_LABEL_BASE_URL}${encodeURIComponent(normalized)}` : "";
 }
 
+function buildEbayBulkLabelUrl(orderNumbers = []) {
+  const unique = [...new Set((orderNumbers || []).map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (!unique.length) return "";
+  return `${EBAY_BULK_LABEL_BASE_URL}?t=${unique.map(encodeURIComponent).join(",")}`;
+}
+
 function openEbayLabelPagesForOrderNumbers(orderNumbers = []) {
   const unique = [...new Set((orderNumbers || []).map(normalizeEbayOrderNumber).filter(Boolean))];
   if (!unique.length) {
@@ -1745,13 +1752,11 @@ function openEbayLabelPagesForOrderNumbers(orderNumbers = []) {
     return;
   }
 
-  unique.forEach((orderNumber) => {
-    const url = buildEbaySingleLabelUrl(orderNumber);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-  });
+  const url = unique.length === 1 ? buildEbaySingleLabelUrl(unique[0]) : buildEbayBulkLabelUrl(unique);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
 
   const orderWord = unique.length === 1 ? "order" : "orders";
-  setStatus(`Opened eBay shipping label page${unique.length === 1 ? "" : "s"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
+  setStatus(`Opened ${unique.length === 1 ? "the eBay shipping label page" : "eBay bulk labels"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
 }
 
 function openSelectedEbayLabelPage() {
@@ -1761,6 +1766,11 @@ function openSelectedEbayLabelPage() {
 
 function openAdminSelectedEbayLabelPages() {
   openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(getSelectedAdminLines()));
+}
+
+function openBuyerGroupSelectedEbayLabelPages(group) {
+  const selectedLines = group.lines.filter((line) => state.adminSelectedLineIds.has(line.id));
+  openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(selectedLines));
 }
 
 function pruneAdminSelection() {
@@ -1886,6 +1896,7 @@ function renderOrders() {
       </div>
       ${isAdminUser() ? `
         <div class="buyer-card-admin-row">
+          <button type="button" class="secondary-btn buyer-card-label-btn" data-buyer-label-key="${escapeHtml(group.key)}">Get Labels</button>
           <label class="admin-group-select">
             <input type="checkbox" data-admin-group-select="${escapeHtml(group.key)}" />
             Select pending lines
@@ -1896,16 +1907,26 @@ function renderOrders() {
     `;
 
     const lineList = card.querySelector(".buyer-line-list");
+    const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
+      const selectedOrderNumbers = getUniqueOrderNumbersForLines(selected);
       groupCheckbox.checked = selectable.length > 0 && selected.length === selectable.length;
       groupCheckbox.indeterminate = selected.length > 0 && selected.length < selectable.length;
       groupCheckbox.disabled = selectable.length === 0;
       groupCheckbox.addEventListener("click", (event) => event.stopPropagation());
       groupCheckbox.addEventListener("change", (event) => setAdminGroupSelection(group, event.target.checked));
+      if (buyerLabelButton) {
+        buyerLabelButton.disabled = selectedOrderNumbers.length === 0;
+        buyerLabelButton.textContent = selectedOrderNumbers.length > 1 ? `Get ${selectedOrderNumbers.length} Labels` : "Get Label";
+        buyerLabelButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openBuyerGroupSelectedEbayLabelPages(group);
+        });
+      }
     }
     taskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -1931,7 +1952,7 @@ function renderOrders() {
       button.tabIndex = 0;
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
       const adminSelect = isAdminUser() ? `
-        <label class="admin-order-select" title="Select for admin closeout">
+        <label class="admin-order-select" title="Select pending line">
           <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
         </label>
       ` : "";

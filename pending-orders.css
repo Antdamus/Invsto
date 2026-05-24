@@ -942,8 +942,15 @@ textarea:focus {
 
 .buyer-card-admin-row {
   display: flex;
+  gap: 12px;
+  align-items: center;
   justify-content: flex-end;
   margin-top: 10px;
+}
+
+.buyer-card-label-btn {
+  min-height: 42px;
+  padding-inline: 18px;
 }
 
 .buyer-line-btn:hover,
