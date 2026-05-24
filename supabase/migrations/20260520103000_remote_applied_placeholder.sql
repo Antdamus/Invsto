@@ -1,0 +1,1 @@
+-- Placeholder for migration already applied on the remote database.

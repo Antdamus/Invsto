@@ -58,6 +58,7 @@ const state = {
   orderTaskPhotoUploadKeys: new Set(),
   orderTaskCaptureBusy: false,
   orderTaskSignedUrls: new Map(),
+  orderTaskAssignmentsByLineId: new Map(),
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
   evidencePhotoViewerZoom: 1,
@@ -1400,6 +1401,7 @@ async function loadOrders() {
 
   await hydrateOrderVideoReceipts(data);
   state.orders = data.map(normalizeLine);
+  await hydrateOrderTaskAssignments(state.orders);
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
   }
@@ -1709,12 +1711,17 @@ function renderOrders() {
   groups.forEach((group) => {
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
+    const assignedTask = getAssignedOrderTaskForGroup(group);
+    const assignmentLabel = getGroupAssignmentLabel(group);
     const urgencyMarkup = urgency ? `
       <span class="urgency-pill urgency-${urgency.level}">
         <i data-lucide="${urgency.icon}"></i>
         ${escapeHtml(urgency.label)}
       </span>
     ` : "";
+    const taskControlMarkup = assignedTask
+      ? `<div class="buyer-card-task-btn task-action-btn is-assigned buyer-card-assigned-pill" title="Task assigned to ${escapeHtml(assignmentLabel)}"><span>Assigned:</span><strong>${escapeHtml(assignmentLabel)}</strong></div>`
+      : `<button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>`;
     const card = document.createElement("article");
     card.className = `buyer-order-card ${urgencyClass} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
     card.innerHTML = `
@@ -1726,7 +1733,7 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
-          <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
+          ${taskControlMarkup}
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
       </div>
@@ -1915,7 +1922,7 @@ function renderSelectedOrder() {
   $("selected-order-title").textContent = order.order_number || "eBay order";
   $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
-  $("assign-order-task")?.toggleAttribute("disabled", !line?.order_id);
+  renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
   $("complete-no-inventory")?.toggleAttribute("disabled", !isNoInventoryCompletionLine(line));
   $("money-grid")?.classList.toggle("hidden", !isAdminUser());
@@ -2175,7 +2182,75 @@ function getOrderTaskLineIdsForSelectedOrder() {
 }
 
 function isActiveOrderTask(task = {}) {
-  return !["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
+  if (task?.metadata?.history_removed_at) return false;
+  return ![
+    "resolved",
+    "cancelled",
+    "closed",
+    "approved_by_admin",
+    "approved_for_shipping",
+    "shipped_completed",
+  ].includes(String(task.status || "").toLowerCase());
+}
+
+function rememberOrderTaskAssignment(task = {}) {
+  if (!isActiveOrderTask(task) || isVideoReceiptCaptureOrderTask(task) || !(task.assigned_to_user_id || task.assigned_to_email)) return;
+  const lineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+  lineIds.forEach((lineId) => {
+    const current = state.orderTaskAssignmentsByLineId.get(lineId);
+    const currentTime = new Date(current?.updated_at || current?.created_at || 0).getTime();
+    const nextTime = new Date(task.updated_at || task.created_at || 0).getTime();
+    if (!current || nextTime >= currentTime) state.orderTaskAssignmentsByLineId.set(lineId, task);
+  });
+}
+
+async function hydrateOrderTaskAssignments(lines = []) {
+  state.orderTaskAssignmentsByLineId.clear();
+  const orderIds = [...new Set(lines.map((line) => line.order_id).filter(Boolean))];
+  if (!orderIds.length) return;
+  const lineIdsByOrderId = new Map();
+  lines.forEach((line) => {
+    if (!line.order_id || !line.id) return;
+    const ids = lineIdsByOrderId.get(line.order_id) || [];
+    ids.push(line.id);
+    lineIdsByOrderId.set(line.order_id, ids);
+  });
+
+  try {
+    const { data, error } = await supabase
+      .from("ebay_order_tasks")
+      .select("id, order_id, order_line_ids, title, question, status, assigned_to_email, assigned_to_user_id, updated_at, created_at, metadata")
+      .in("order_id", orderIds)
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    (data || []).forEach((task) => {
+      const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+      rememberOrderTaskAssignment(taskLineIds.length ? task : {
+        ...task,
+        order_line_ids: lineIdsByOrderId.get(task.order_id) || [],
+      });
+    });
+  } catch (error) {
+    console.warn("Could not load pending order assignment state:", error);
+  }
+}
+
+function getAssignedOrderTaskForGroup(group = {}) {
+  const tasks = (group.lines || [])
+    .map((line) => state.orderTaskAssignmentsByLineId.get(line.id))
+    .filter(Boolean);
+  if (!tasks.length) return null;
+  return tasks.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null;
+}
+
+function getGroupAssignmentLabel(group = {}) {
+  const tasks = (group.lines || [])
+    .map((line) => state.orderTaskAssignmentsByLineId.get(line.id))
+    .filter(Boolean);
+  if (!tasks.length) return "";
+  const names = [...new Set(tasks.map(getOrderTaskAssigneeName).filter(Boolean))];
+  if (names.length === 1) return names[0];
+  return `${names.length} people`;
 }
 
 function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
@@ -2194,6 +2269,56 @@ function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
 
 function getOrderTaskAssigneeLabel(task = {}) {
   return task.assigned_to_email || "Unassigned";
+}
+
+function getOrderTaskAssigneeName(task = {}) {
+  const assignee = state.orderTaskAssignees.find((employee) => (
+    employee.user_id && employee.user_id === task.assigned_to_user_id
+  ));
+  return assignee?.display_name || assignee?.email || task.assigned_to_email || "Unassigned";
+}
+
+function isVideoReceiptCaptureOrderTask(task = {}) {
+  const taskText = [
+    task.title,
+    task.question,
+    task.latest_note,
+    task.resolution_notes,
+  ].filter(Boolean).join(" ");
+  return /video receipt screenshot captured/i.test(taskText);
+}
+
+function orderTaskMatchesLine(task = {}, line = {}) {
+  if (!line?.id && !line?.order_id) return false;
+  const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
+  if (taskLineIds.length) return taskLineIds.includes(line.id);
+  return Boolean(line.order_id && task.order_id === line.order_id);
+}
+
+function getAssignedOrderTaskForLine(line = state.selectedLine) {
+  if (!line?.order_id) return null;
+  return state.selectedOrderTasks
+    .filter((task) => isActiveOrderTask(task))
+    .filter((task) => !isVideoReceiptCaptureOrderTask(task))
+    .filter((task) => orderTaskMatchesLine(task, line))
+    .filter((task) => task.assigned_to_user_id || task.assigned_to_email)
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))[0] || null;
+}
+
+function renderSelectedOrderTaskAssignment() {
+  const button = $("assign-order-task");
+  if (!button) return;
+  const line = state.selectedLine;
+  const assignedTask = getAssignedOrderTaskForLine(line);
+  const isAssigned = Boolean(assignedTask);
+  button.classList.toggle("is-assigned", isAssigned);
+  button.toggleAttribute("disabled", !line?.order_id || isAssigned);
+  button.innerHTML = isAssigned
+    ? `<span>Assigned:</span><strong>${escapeHtml(getOrderTaskAssigneeName(assignedTask))}</strong>`
+    : "Assign Task";
+  button.title = isAssigned
+    ? `Task assigned to ${getOrderTaskAssigneeName(assignedTask)}`
+    : "Assign task";
 }
 
 function getOrderTaskPhotoKey(photo) {
@@ -2293,6 +2418,7 @@ async function loadSelectedOrderTasks() {
     if (!taskIds.length) {
       state.selectedOrderTaskEvents = new Map();
       renderOrderTaskPanel();
+      renderSelectedOrderTaskAssignment();
       return;
     }
 
@@ -2311,11 +2437,13 @@ async function loadSelectedOrderTasks() {
     });
     state.selectedOrderTaskEvents = byTask;
     renderOrderTaskPanel();
+    renderSelectedOrderTaskAssignment();
   } catch (error) {
     console.warn("Could not load order coordination tasks:", error);
     state.selectedOrderTasks = [];
     state.selectedOrderTaskEvents = new Map();
     renderOrderTaskPanel({ error: error?.message || "Could not load coordination tasks." });
+    renderSelectedOrderTaskAssignment();
   }
 }
 
@@ -2960,6 +3088,9 @@ async function submitOrderTask() {
 
     closeOrderTaskModal();
     await loadSelectedOrderTasks();
+    await hydrateOrderTaskAssignments(state.orders);
+    renderOrders();
+    renderSelectedOrderTaskAssignment();
   } catch (error) {
     console.error("Could not save order task:", error);
     setOrderTaskError(error?.message || "Could not save this order task.");

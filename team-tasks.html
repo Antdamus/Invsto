@@ -71,6 +71,16 @@
                 <select id="team-task-scope">
                   <option value="mine">My tasks</option>
                   <option value="all">Everyone's tasks</option>
+                  <option value="canceled">Canceled tasks</option>
+                </select>
+              </label>
+              <label id="team-task-history-sort-control" class="team-task-sort hidden">
+                Sort
+                <select id="team-task-history-sort">
+                  <option value="recent">Most recent</option>
+                  <option value="user">By user</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="az">A to Z</option>
                 </select>
               </label>
               <span id="team-task-count" class="team-task-count">0 tasks</span>
@@ -79,6 +89,16 @@
           <div id="team-task-list" class="team-task-list">
             <div class="empty-state">Loading tasks...</div>
           </div>
+          <section id="team-task-canceled-section" class="team-task-canceled-section hidden" aria-label="Canceled tasks">
+            <div class="team-task-canceled-head">
+              <div>
+                <span class="eyebrow">Admin Only</span>
+                <h3>Canceled Tasks</h3>
+              </div>
+              <span id="team-task-canceled-count" class="team-task-count">0 tasks</span>
+            </div>
+            <div id="team-task-canceled-list" class="team-task-list"></div>
+          </section>
         </section>
       </main>
     </div>

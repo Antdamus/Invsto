@@ -99,6 +99,11 @@ body {
   color: var(--task-text);
 }
 
+.secondary-btn.danger-btn {
+  border-color: rgba(255, 157, 157, 0.36);
+  color: var(--task-red);
+}
+
 .primary-btn:disabled,
 .secondary-btn:disabled {
   opacity: 0.55;
@@ -175,7 +180,8 @@ body {
   color: var(--task-green);
 }
 
-.team-task-scope {
+.team-task-scope,
+.team-task-sort {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -184,20 +190,50 @@ body {
   font-weight: 900;
 }
 
-.team-task-scope select {
+.team-task-scope select,
+.team-task-sort select {
   min-height: 38px;
   border: 1px solid var(--task-line);
   border-radius: 999px;
   padding: 6px 34px 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: #151312;
   color: var(--task-text);
   font-weight: 900;
+  color-scheme: dark;
+}
+
+.team-task-scope select option,
+.team-task-sort select option {
+  background: #151312;
+  color: var(--task-text);
 }
 
 .team-task-list,
 .team-task-events {
   display: grid;
   gap: 12px;
+}
+
+.team-task-canceled-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 157, 157, 0.22);
+}
+
+.team-task-canceled-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.team-task-canceled-head h3 {
+  margin: 0;
+  color: var(--task-red);
+  font-size: 1.05rem;
 }
 
 .team-task-card,
@@ -218,6 +254,25 @@ body {
 
 .team-task-card.is-resolved {
   border-color: rgba(157, 242, 189, 0.3);
+}
+
+.team-task-admin-notice {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0;
+  padding: 12px;
+  border: 1px solid rgba(227, 189, 119, 0.35);
+  border-radius: 8px;
+  background: rgba(227, 189, 119, 0.09);
+}
+
+.team-task-admin-notice strong {
+  color: var(--task-gold);
+}
+
+.team-task-admin-notice span,
+.team-task-admin-notice small {
+  color: var(--task-muted);
 }
 
 .team-task-card-head strong,
