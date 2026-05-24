@@ -10,6 +10,7 @@ const state = {
   returnTasks: [],
   returnMessages: [],
   returnTaskLines: new Map(),
+  relatedOrderTaskEvents: [],
   returnAssignees: [],
   returnTaskLaunchApplied: false,
   relatedAdminEvents: [],
@@ -49,6 +50,13 @@ const state = {
 };
 
 let evidencePhotoViewerReturnFocus = null;
+const evidencePhotoViewerState = {
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  panning: false,
+  panStart: null,
+};
 const EBAY_LABEL_BUCKET = "ebay-labels";
 const EXTRA_LABEL_EVIDENCE_BUCKET = "order-evidence-photos";
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
@@ -394,11 +402,107 @@ function getEventGpsLabel(event) {
   return `GPS ${status.replace(/_/g, " ")}`;
 }
 
+function getEvidencePhotoBucket(photo = {}) {
+  return photo.bucket || photo.storage_bucket || photo.source_bucket || EXTRA_LABEL_EVIDENCE_BUCKET;
+}
+
+function getEvidencePhotoPath(photo = {}) {
+  return photo.path || photo.storage_path || photo.source_path || "";
+}
+
 function getEventEvidencePhotos(event) {
-  const photos = event?.evidence_photos || event?.payload?.evidence_photos || event?.label_metadata?.evidence_photos;
-  return Array.isArray(photos)
-    ? photos.filter((photo) => photo?.bucket && photo?.path)
-    : [];
+  const photos = [
+    ...(Array.isArray(event?.evidence_photos) ? event.evidence_photos : []),
+    ...(Array.isArray(event?.payload?.evidence_photos) ? event.payload.evidence_photos : []),
+    ...(Array.isArray(event?.label_metadata?.evidence_photos) ? event.label_metadata.evidence_photos : []),
+    ...(Array.isArray(event?.photo_attachments) ? event.photo_attachments : []),
+  ];
+  return photos
+    .map((photo) => ({
+      ...photo,
+      bucket: getEvidencePhotoBucket(photo),
+      path: getEvidencePhotoPath(photo),
+      signed_by_email: photo?.signed_by_email || event?.signed_by_email || event?.created_by_email || "",
+      created_at: photo?.created_at || event?.created_at || "",
+    }))
+    .filter((photo) => photo?.bucket && photo?.path);
+}
+
+function isVideoReceiptEvidencePhoto(photo = {}) {
+  const text = [
+    photo.label,
+    photo.path,
+    photo.source_path,
+    photo.metadata?.videoReceiptUrl,
+    photo.metadata?.pageUrl,
+    photo.metadata?.source,
+  ].filter(Boolean).join(" ");
+  return /video[-_\s]?receipt|ebaylive\/events/i.test(text);
+}
+
+function getEvidencePhotoAuditText(photo = {}) {
+  const actor = photo.signed_by_email || "logged-in user";
+  const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
+  return `Captured by ${actor}${capturedAt ? ` on ${formatDateTime(capturedAt)}` : ""}`;
+}
+
+function getEvidencePhotoViewerMeta(photo = {}) {
+  return [
+    getEvidencePhotoAuditText(photo),
+    photo.bucket && photo.path ? `${photo.bucket}/${photo.path}` : "",
+  ].filter(Boolean).join(" - ");
+}
+
+function normalizeEvidenceItemNumber(value = "") {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getEvidencePhotoExplicitItemNumbers(photo = {}) {
+  const values = [
+    photo.itemNumber,
+    photo.item_number,
+    photo.selectedItemId,
+    photo.metadata?.itemNumber,
+    photo.metadata?.item_number,
+    photo.metadata?.selectedItemId,
+  ];
+
+  const label = String(photo.label || "");
+  const labelMatch = label.match(/video[-_\s]?receipt\s*[-:]?\s*(\d{6,})/i);
+  if (labelMatch?.[1]) values.push(labelMatch[1]);
+
+  const path = String(photo.path || "");
+  const pathMatch = path.match(/(?:^|[-_/])(\d{6,})(?:\.png|[-_/]|$)/i);
+  if (pathMatch?.[1]) values.push(pathMatch[1]);
+
+  return [...new Set(values.map(normalizeEvidenceItemNumber).filter(Boolean))];
+}
+
+function evidencePhotoMatchesLine(photo = {}, event = {}, line = {}) {
+  const itemNumber = normalizeEvidenceItemNumber(line.item_number);
+  const lineIds = getEventLineIds(event);
+  const eventIncludesLine = Boolean(line.id && lineIds.includes(line.id));
+
+  const explicitItemNumbers = getEvidencePhotoExplicitItemNumbers(photo);
+  if (explicitItemNumbers.length) return Boolean(itemNumber && explicitItemNumbers.includes(itemNumber));
+  if (isVideoReceiptEvidencePhoto(photo)) return false;
+
+  return eventIncludesLine;
+}
+
+function getHistoryLineVideoReceiptPhotos(line = {}, events = []) {
+  const seen = new Set();
+  return events
+    .flatMap((event) => getEventEvidencePhotos(event)
+      .filter(isVideoReceiptEvidencePhoto)
+      .filter((photo) => evidencePhotoMatchesLine(photo, event, line))
+      .map((photo) => ({ ...photo, event })))
+    .filter((photo) => {
+      const key = `${photo.bucket}:${photo.path}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function getReturnItemsForLine(lineId) {
@@ -500,15 +604,82 @@ async function signEventEvidencePhoto(photo, options = {}) {
   return "";
 }
 
+function applyEvidencePhotoViewerTransform() {
+  const image = $("evidence-photo-viewer-image");
+  const frame = $("evidence-photo-viewer-frame");
+  if (!image) return;
+  image.style.transform = `translate(${evidencePhotoViewerState.panX}px, ${evidencePhotoViewerState.panY}px) scale(${evidencePhotoViewerState.zoom})`;
+  frame?.classList.toggle("is-pannable", evidencePhotoViewerState.zoom > 1);
+}
+
+function resetEvidencePhotoViewerTransform() {
+  evidencePhotoViewerState.zoom = 1;
+  evidencePhotoViewerState.panX = 0;
+  evidencePhotoViewerState.panY = 0;
+  evidencePhotoViewerState.panning = false;
+  evidencePhotoViewerState.panStart = null;
+  $("evidence-photo-viewer-frame")?.classList.remove("is-panning");
+  applyEvidencePhotoViewerTransform();
+}
+
+function setEvidencePhotoViewerZoom(nextZoom) {
+  const clamped = Math.max(1, Math.min(5, Number(nextZoom) || 1));
+  evidencePhotoViewerState.zoom = clamped;
+  if (clamped === 1) {
+    evidencePhotoViewerState.panX = 0;
+    evidencePhotoViewerState.panY = 0;
+  }
+  applyEvidencePhotoViewerTransform();
+}
+
+function adjustEvidencePhotoViewerZoom(delta) {
+  setEvidencePhotoViewerZoom(evidencePhotoViewerState.zoom + delta);
+}
+
+function startEvidencePhotoViewerPan(event) {
+  if (evidencePhotoViewerState.zoom <= 1) return;
+  const image = $("evidence-photo-viewer-image");
+  if (!image) return;
+  evidencePhotoViewerState.panning = true;
+  evidencePhotoViewerState.panStart = {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    panX: evidencePhotoViewerState.panX,
+    panY: evidencePhotoViewerState.panY,
+  };
+  image.setPointerCapture?.(event.pointerId);
+  $("evidence-photo-viewer-frame")?.classList.add("is-panning");
+}
+
+function moveEvidencePhotoViewerPan(event) {
+  if (!evidencePhotoViewerState.panning || !evidencePhotoViewerState.panStart) return;
+  event.preventDefault();
+  const start = evidencePhotoViewerState.panStart;
+  evidencePhotoViewerState.panX = start.panX + event.clientX - start.clientX;
+  evidencePhotoViewerState.panY = start.panY + event.clientY - start.clientY;
+  applyEvidencePhotoViewerTransform();
+}
+
+function endEvidencePhotoViewerPan(event) {
+  if (!evidencePhotoViewerState.panning) return;
+  $("evidence-photo-viewer-image")?.releasePointerCapture?.(event.pointerId);
+  evidencePhotoViewerState.panning = false;
+  evidencePhotoViewerState.panStart = null;
+  $("evidence-photo-viewer-frame")?.classList.remove("is-panning");
+}
+
 function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "") {
   if (!url) return;
   evidencePhotoViewerReturnFocus = document.activeElement;
   const image = $("evidence-photo-viewer-image");
   const title = $("evidence-photo-viewer-title");
   const caption = $("evidence-photo-viewer-caption");
+  resetEvidencePhotoViewerTransform();
   if (image) {
     image.src = url;
     image.alt = label;
+    image.draggable = false;
   }
   if (title) title.textContent = label;
   if (caption) caption.textContent = meta;
@@ -518,7 +689,11 @@ function openEvidencePhotoViewer(url, label = "Evidence photo", meta = "") {
 
 function closeEvidencePhotoViewer() {
   const image = $("evidence-photo-viewer-image");
-  if (image) image.src = "";
+  if (image) {
+    image.src = "";
+    image.style.transform = "";
+  }
+  resetEvidencePhotoViewerTransform();
   closeModal("evidence-photo-viewer-modal");
   evidencePhotoViewerReturnFocus?.focus?.();
   evidencePhotoViewerReturnFocus = null;
@@ -785,10 +960,11 @@ async function loadOrderHistory() {
   let relatedRevertEvents = [];
   let relatedLabelEvents = [];
   let relatedReturnEvents = [];
+  let relatedOrderTaskEvents = [];
   let returnCases = [];
 
   if (closedLineIds.length) {
-    const [relatedAdminResult, relatedRevertResult, relatedLabelResult, returnCasesResult, relatedReturnResult] = await Promise.all([
+    const [relatedAdminResult, relatedRevertResult, relatedLabelResult, returnCasesResult, relatedReturnResult, relatedOrderTaskResult] = await Promise.all([
       supabase
         .from("ebay_order_admin_events")
         .select("*")
@@ -819,6 +995,9 @@ async function loadOrderHistory() {
         .select("*")
         .overlaps("order_line_ids", closedLineIds)
         .limit(500),
+      loadOrderTaskEventsForLines(closedLineIds)
+        .then((data) => ({ data, error: null }))
+        .catch((error) => ({ data: [], error })),
     ]);
 
     if (relatedAdminResult.error) {
@@ -850,6 +1029,12 @@ async function loadOrderHistory() {
     } else {
       relatedReturnEvents = relatedReturnResult.data || [];
     }
+
+    if (relatedOrderTaskResult.error) {
+      console.warn("Failed to load order coordination video receipt photos for visible order lines:", relatedOrderTaskResult.error);
+    } else {
+      relatedOrderTaskEvents = relatedOrderTaskResult.data || [];
+    }
   }
 
   state.adminEvents = adminEventsResult.data || [];
@@ -860,6 +1045,7 @@ async function loadOrderHistory() {
   state.relatedRevertEvents = relatedRevertEvents;
   state.relatedLabelEvents = relatedLabelEvents;
   state.relatedReturnEvents = relatedReturnEvents;
+  state.relatedOrderTaskEvents = relatedOrderTaskEvents;
   state.returnCases = returnCases;
   state.adminCloseoutLineIds = new Set(
     [...state.adminEvents, ...state.relatedAdminEvents]
@@ -874,6 +1060,45 @@ async function loadOrderHistory() {
   drainQueuedHistoryLabelTransfers();
   drainQueuedHistoryReturnTransfers();
   drainQueuedHistoryReturnMessageTransfers();
+}
+
+async function loadOrderTaskEventsForLines(lineIds = []) {
+  const cleanLineIds = [...new Set(lineIds.filter(Boolean))];
+  if (!cleanLineIds.length) return [];
+
+  const { data: tasks, error } = await supabase
+    .from("ebay_order_tasks")
+    .select("id, order_id, order_line_ids, title, question, status, priority, created_by_email, created_at")
+    .overlaps("order_line_ids", cleanLineIds)
+    .limit(500);
+  if (error) throw error;
+
+  const taskById = new Map((tasks || []).map((task) => [task.id, task]));
+  const taskIds = [...taskById.keys()];
+  if (!taskIds.length) return [];
+
+  const { data: events, error: eventError } = await supabase
+    .from("ebay_order_task_events")
+    .select("*")
+    .in("task_id", taskIds)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (eventError) throw eventError;
+
+  return (events || []).map((event) => {
+    const task = taskById.get(event.task_id) || {};
+    return {
+      ...event,
+      category: "task",
+      order_line_ids: Array.isArray(task.order_line_ids) ? task.order_line_ids : [],
+      task_title: task.title || "",
+      task_question: task.question || "",
+      task_status: task.status || "",
+      task_priority: task.priority || "",
+      task_created_by_email: task.created_by_email || "",
+      created_by_email: event.signed_by_email || task.created_by_email || "",
+    };
+  });
 }
 
 function renderWorkerOptions() {
@@ -1721,6 +1946,7 @@ function getRelatedEventsForLineIds(lineIds = []) {
     ...state.relatedRevertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.relatedLabelEvents.map((event) => ({ ...event, category: "label" })),
     ...state.relatedReturnEvents.map((event) => ({ ...event, category: "return" })),
+    ...state.relatedOrderTaskEvents.map((event) => ({ ...event, category: "task" })),
     ...state.adminEvents.map((event) => ({ ...event, category: "admin" })),
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
@@ -1734,6 +1960,11 @@ function getRelatedEventsForLineIds(lineIds = []) {
 function getEventLabel(event) {
   if (event.category === "revert") return "Reverted";
   if (event.category === "label") return event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached";
+  if (event.category === "task") {
+    return getEventEvidencePhotos(event).some(isVideoReceiptEvidencePhoto)
+      ? "Video receipt screenshot"
+      : "Order coordination";
+  }
   if (event.category === "return") {
     if (event.action === "restocked") return "Return restocked";
     if (event.action === "item_inspected") return "Return inspected";
@@ -1766,7 +1997,7 @@ function getHistoryGroupStatusClass(group) {
 
 function getHistoryGroupEvidencePhotos(group) {
   const seen = new Set();
-  return group.events.flatMap(getEventEvidencePhotos).filter((photo) => {
+  return group.events.flatMap(getEventEvidencePhotos).filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
     const key = `${photo.bucket}:${photo.path}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -2070,6 +2301,38 @@ function renderGroupReturnControl(group) {
   `;
 }
 
+function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
+  const photos = getHistoryLineVideoReceiptPhotos(line, events);
+  if (!photos.length) return "";
+
+  return `
+    <div class="history-video-receipt-strip">
+      <span>Video receipt screenshots</span>
+      <div class="history-video-receipt-grid">
+        ${photos.map((photo, index) => {
+          const label = photo.label || `Video receipt ${index + 1}`;
+          const meta = getEvidencePhotoViewerMeta(photo);
+          return `
+            <button
+              type="button"
+              class="history-video-receipt-thumb"
+              data-history-video-receipt-photo="1"
+              data-bucket="${escapeHtml(photo.bucket)}"
+              data-path="${escapeHtml(photo.path)}"
+              data-label="${escapeHtml(label)}"
+              data-meta="${escapeHtml(meta)}"
+            >
+              <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
+              <span>${escapeHtml(label)}</span>
+              <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderHistoryList(groups = getVisibleHistoryGroups()) {
   const list = $("history-list");
   if (!list) return;
@@ -2144,6 +2407,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 <span>${escapeHtml(line.fulfilled_by_email || "Unknown worker")}</span>
                 <span>${escapeHtml(formatDateTime(line.fulfilled_at))}</span>
               </div>
+              ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
             </div>
             <div class="history-line-actions">
               <span class="history-status ${getLineStatusClass(line)}">${escapeHtml(getLineStatusLabel(line))}</span>
@@ -2195,6 +2459,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
   hydrateHistoryGroupEvidencePhotos(groups).catch((error) => {
     console.warn("Could not load grouped evidence photos:", error);
   });
+  hydrateHistoryVideoReceiptThumbnails().catch((error) => {
+    console.warn("Could not load video receipt screenshots:", error);
+  });
 }
 
 async function hydrateHistoryGroupEvidencePhotos(groups) {
@@ -2231,6 +2498,39 @@ async function hydrateHistoryGroupEvidencePhotos(groups) {
   }
 }
 
+async function hydrateHistoryVideoReceiptThumbnails() {
+  const buttons = [...document.querySelectorAll("[data-history-video-receipt-photo]")];
+  await Promise.all(buttons.map(async (button) => {
+    if (button.dataset.loaded === "true") return;
+    const bucket = button.dataset.bucket || "";
+    const path = button.dataset.path || "";
+    if (!bucket || !path) return;
+
+    const photo = { bucket, path };
+    const [thumbUrl, fullUrl] = await Promise.all([
+      signEventEvidencePhoto(photo),
+      signEventEvidencePhoto(photo, { thumbnail: false }),
+    ]);
+    const url = fullUrl || thumbUrl;
+    if (!url) return;
+
+    button.dataset.evidencePhotoUrl = url;
+    button.dataset.loaded = "true";
+    const host = button.querySelector("[data-history-video-receipt-image]");
+    if (host) {
+      host.innerHTML = `<img src="${escapeHtml(thumbUrl || url)}" alt="${escapeHtml(button.dataset.label || "Video receipt screenshot")}" />`;
+    }
+    if (button.dataset.bound !== "true") {
+      button.dataset.bound = "true";
+      button.addEventListener("click", () => openEvidencePhotoViewer(
+        button.dataset.evidencePhotoUrl,
+        button.dataset.label || "Video receipt screenshot",
+        button.dataset.meta || `${bucket}/${path}`
+      ));
+    }
+  }));
+}
+
 function getFilteredEvents() {
   const term = String($("history-search")?.value || "").trim().toLowerCase();
   const worker = $("history-worker")?.value || "";
@@ -2241,6 +2541,7 @@ function getFilteredEvents() {
     ...state.revertEvents.map((event) => ({ ...event, category: "revert", action: "reverted" })),
     ...state.labelEvents.map((event) => ({ ...event, category: "label" })),
     ...state.returnEvents.map((event) => ({ ...event, category: "return" })),
+    ...state.relatedOrderTaskEvents.map((event) => ({ ...event, category: "task" })),
   ];
 
   return events.filter((event) => {
@@ -2265,6 +2566,8 @@ function getFilteredEvents() {
         event.label_file_path,
         event.shipment_id,
         event.return_case_id,
+        event.task_title,
+        event.task_question,
         getLabelMetadataSearchText(event.label_metadata),
         getEventBuyerLabel(event, eventLines),
         ...eventLines.flatMap((line) => [
@@ -2288,6 +2591,12 @@ function getFilteredEvents() {
         ...(event.order_ids || []),
         ...(event.order_line_ids || []),
         ...(event.return_item_ids || []),
+        ...getEventEvidencePhotos(event).flatMap((photo) => [
+          photo.label,
+          photo.bucket,
+          photo.path,
+          photo.metadata?.videoReceiptUrl,
+        ]),
       ].filter(Boolean).join(" ").toLowerCase();
       if (!haystack.includes(term)) return false;
     }
@@ -2312,6 +2621,8 @@ function renderEventList() {
         ? event.action === "extra_label" ? "Extra shipping label added" : event.action === "replaced" ? "Shipping label replaced" : "Shipping label attached"
         : event.category === "return"
           ? getEventLabel(event)
+          : event.category === "task"
+          ? getEventLabel(event)
           : event.action === "fulfilled_no_inventory"
           ? "Packed without inventory removal"
           : isAdminUser() ? "Canceled by admin" : "Canceled";
@@ -2321,10 +2632,10 @@ function renderEventList() {
     const evidenceCount = getEventEvidencePhotos(event).length;
     const eventStatusClass = event.category === "return"
       ? "is-returned"
-      : event.category === "revert" || event.category === "label"
+      : event.category === "revert" || event.category === "label" || event.category === "task"
       ? "is-admin"
       : event.action === "cancelled" ? "is-cancelled" : "";
-    const eventDetail = event.notes || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
+    const eventDetail = event.notes || event.task_question || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
     return `
       <article class="event-card">
         <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>
@@ -5595,6 +5906,18 @@ function setupListeners() {
   });
   $("close-evidence-photo-viewer")?.addEventListener("click", closeEvidencePhotoViewer);
   $("dismiss-evidence-photo-viewer")?.addEventListener("click", closeEvidencePhotoViewer);
+  $("evidence-photo-zoom-out")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(-0.25));
+  $("evidence-photo-reset")?.addEventListener("click", resetEvidencePhotoViewerTransform);
+  $("evidence-photo-zoom-in")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(0.25));
+  $("evidence-photo-viewer-image")?.addEventListener("pointerdown", startEvidencePhotoViewerPan);
+  $("evidence-photo-viewer-image")?.addEventListener("pointermove", moveEvidencePhotoViewerPan);
+  $("evidence-photo-viewer-image")?.addEventListener("pointerup", endEvidencePhotoViewerPan);
+  $("evidence-photo-viewer-image")?.addEventListener("pointercancel", endEvidencePhotoViewerPan);
+  $("evidence-photo-viewer-frame")?.addEventListener("wheel", (event) => {
+    if (!isModalOpen("evidence-photo-viewer-modal")) return;
+    event.preventDefault();
+    adjustEvidencePhotoViewerZoom(event.deltaY < 0 ? 0.25 : -0.25);
+  }, { passive: false });
   $("revert-password")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -5603,9 +5926,18 @@ function setupListeners() {
   });
   document.addEventListener("keydown", (event) => {
     if (isModalOpen("evidence-photo-viewer-modal")) {
-      if (event.key === "Escape" || event.key === "Enter") {
+      if (event.key === "Escape") {
         event.preventDefault();
         closeEvidencePhotoViewer();
+      } else if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        adjustEvidencePhotoViewerZoom(0.25);
+      } else if (event.key === "-") {
+        event.preventDefault();
+        adjustEvidencePhotoViewerZoom(-0.25);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        resetEvidencePhotoViewerTransform();
       }
       return;
     }

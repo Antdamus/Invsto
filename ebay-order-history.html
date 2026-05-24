@@ -420,8 +420,13 @@
       <button id="close-evidence-photo-viewer" type="button" class="modal-close-btn" aria-label="Close">x</button>
       <span class="eyebrow">Evidence Photo</span>
       <h2 id="evidence-photo-viewer-title">Evidence photo</h2>
-      <div class="evidence-viewer-frame">
-        <img id="evidence-photo-viewer-image" alt="Evidence photo preview" />
+      <div class="evidence-viewer-tools" aria-label="Photo zoom controls">
+        <button id="evidence-photo-zoom-out" type="button" class="secondary-btn">Zoom Out</button>
+        <button id="evidence-photo-reset" type="button" class="secondary-btn">Reset</button>
+        <button id="evidence-photo-zoom-in" type="button" class="secondary-btn">Zoom In</button>
+      </div>
+      <div id="evidence-photo-viewer-frame" class="evidence-viewer-frame">
+        <img id="evidence-photo-viewer-image" alt="Evidence photo preview" draggable="false" />
       </div>
       <p id="evidence-photo-viewer-caption" class="evidence-viewer-caption"></p>
       <div class="history-modal-actions">

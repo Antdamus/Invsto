@@ -1203,6 +1203,77 @@ textarea {
   white-space: nowrap;
 }
 
+.history-video-receipt-strip {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.history-video-receipt-strip > span {
+  color: var(--history-accent);
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.history-video-receipt-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.history-video-receipt-thumb {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 4px 9px;
+  width: min(320px, 100%);
+  padding: 7px;
+  border: 1px solid rgba(229, 193, 119, 0.42);
+  border-radius: 10px;
+  background: rgba(229, 193, 119, 0.08);
+  color: var(--history-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-video-receipt-image {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 42px;
+  border-radius: 7px;
+  background: #050505;
+  color: var(--history-muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  overflow: hidden;
+}
+
+.history-video-receipt-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.history-video-receipt-thumb > span:not(.history-video-receipt-image) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--history-accent);
+  font-size: 0.76rem;
+  font-weight: 950;
+}
+
+.history-video-receipt-thumb small {
+  color: var(--history-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .evidence-viewer-card {
   width: min(1040px, 100%);
 }
@@ -1227,6 +1298,16 @@ textarea {
   border-radius: 18px;
   background: #050505;
   overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+
+.evidence-viewer-frame.is-pannable {
+  cursor: grab;
+}
+
+.evidence-viewer-frame.is-panning {
+  cursor: grabbing;
 }
 
 .evidence-viewer-frame img {
@@ -1235,6 +1316,23 @@ textarea {
   height: 100%;
   max-height: min(68vh, 720px);
   object-fit: contain;
+  transform-origin: center;
+  transition: transform 140ms ease;
+  cursor: inherit;
+  touch-action: none;
+  user-select: none;
+}
+
+.evidence-viewer-frame.is-panning img {
+  transition: none;
+}
+
+.evidence-viewer-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
 }
 
 .evidence-viewer-caption {

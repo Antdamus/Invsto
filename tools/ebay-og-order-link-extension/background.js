@@ -31,13 +31,42 @@
   }
 
   function normalizeEbayNavigationUrl(value, baseUrl = "https://www.ebay.com/") {
-    const raw = String(value || "").trim().replace(/&amp;/g, "&");
+    const raw = String(value || "").trim().replace(/&amp;/g, "&").replace(/\\u0026/gi, "&");
     if (!raw) return "";
     try {
       return new URL(raw.replace(/\\\//g, "/"), baseUrl).toString().replace(/&amp;/g, "&");
     } catch (_) {
       return raw.replace(/\\\//g, "/").replace(/&amp;/g, "&");
     }
+  }
+
+  function getPayloadItemNumber(payload = {}) {
+    return String(payload.itemNumber || payload.selectedItemId || "").trim();
+  }
+
+  function normalizeVideoReceiptUrlForPayload(value, payload = {}, baseUrl = "https://www.ebay.com/") {
+    const normalized = normalizeEbayNavigationUrl(value, baseUrl);
+    const parsed = normalizeUrl(normalized);
+    if (!parsed || !/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) {
+      return "";
+    }
+
+    const itemNumber = getPayloadItemNumber(payload);
+    if (!itemNumber) return parsed.toString();
+
+    const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+    const itemIds = String(parsed.searchParams.get("itemIds") || "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (selectedItemId === itemNumber) return parsed.toString();
+    if (itemIds.includes(itemNumber)) {
+      parsed.searchParams.set("selectedItemId", itemNumber);
+      if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+      return parsed.toString();
+    }
+    return "";
   }
 
   function findVideoReceiptUrlInText(text, baseUrl = "https://www.ebay.com/") {
@@ -82,12 +111,13 @@
     const body = String(text || "");
     const candidates = findVideoReceiptCandidatesInText(body, baseUrl);
     if (!candidates.length) return "";
-    const itemNumber = String(payload.itemNumber || "").trim();
+    const itemNumber = getPayloadItemNumber(payload);
     if (itemNumber) {
-      const selectedMatch = candidates.find((candidate) => candidate.selectedItemId === itemNumber);
-      if (selectedMatch) return selectedMatch.url;
-      const itemListMatches = candidates.filter((candidate) => candidate.itemIds.includes(itemNumber));
-      if (itemListMatches.length === 1) return itemListMatches[0].url;
+      const exactMatches = candidates
+        .map((candidate) => normalizeVideoReceiptUrlForPayload(candidate.url, payload, baseUrl))
+        .filter(Boolean);
+      if (exactMatches.length) return exactMatches[0];
+      return "";
     }
     if (candidates.length === 1 && (!itemNumber || candidates[0].selectedItemId === itemNumber || !candidates[0].selectedItemId)) {
       return candidates[0].url;
@@ -124,8 +154,11 @@
   function resolveVideoReceiptUrlInText(text, payload = {}, baseUrl = "https://www.ebay.com/") {
     const candidates = findVideoReceiptCandidatesInText(text, baseUrl);
     if (!candidates.length) return "";
-    const itemNumber = String(payload.itemNumber || "").trim();
-    if (candidates.length === 1 && (!itemNumber || candidates[0].selectedItemId === itemNumber || !candidates[0].selectedItemId)) {
+    const itemNumber = getPayloadItemNumber(payload);
+    if (itemNumber) {
+      return findBestVideoReceiptUrlInText(text, payload, baseUrl);
+    }
+    if (candidates.length === 1) {
       return candidates[0].url;
     }
     return findBestVideoReceiptUrlInText(text, payload, baseUrl);
@@ -451,6 +484,7 @@
   async function handleAppVideoReceiptPhotoStatus(status = {}) {
     const transferId = status.transferId || "";
     if (!transferId) return;
+    if (status.phase === "started") return;
     if (status.ok) await removePendingVideoReceiptPhoto(transferId);
     const waiter = appVideoReceiptPhotoAcks.get(transferId);
     if (waiter) waiter.resolve(status);
@@ -582,10 +616,10 @@
   }
 
   async function openVideoReceiptFromOrder(payload = {}) {
-    const directUrl = normalizeUrl(payload.videoReceiptUrl);
-    if (directUrl && /(^|\.)ebay\.com$/i.test(directUrl.hostname) && /\/ebaylive\/events\//i.test(directUrl.pathname)) {
-      const tab = await chrome.tabs.create({ url: directUrl.toString(), active: true });
-      return { ok: true, openedUrl: directUrl.toString(), tabId: tab.id || null, direct: true };
+    const directUrl = normalizeVideoReceiptUrlForPayload(payload.videoReceiptUrl, payload);
+    if (directUrl) {
+      const tab = await chrome.tabs.create({ url: directUrl, active: true });
+      return { ok: true, openedUrl: directUrl, tabId: tab.id || null, direct: true };
     }
 
     const itemUrl = normalizeUrl(payload.itemUrl || (payload.itemNumber ? `https://www.ebay.com/itm/${encodeURIComponent(payload.itemNumber)}` : ""));

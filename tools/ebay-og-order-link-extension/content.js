@@ -3508,18 +3508,53 @@
     }
   }
 
-  function findVideoReceiptUrlInText(text, baseUrl = window.location.href) {
-    const body = String(text || "");
-    const patterns = [
-      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/i,
-      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/i,
-    ];
-    for (const pattern of patterns) {
-      const match = body.match(pattern);
-      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
-      if (url && /\/ebaylive\/events\//i.test(url)) return url;
-    }
+  function getCurrentEbayItemNumber() {
+    const pathMatch = window.location.pathname.match(/\/itm\/(\d+)/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+    const canonical = document.querySelector('link[rel="canonical"][href*="/itm/"]')?.getAttribute("href") || "";
+    const canonicalMatch = canonical.match(/\/itm\/(\d+)/i);
+    return canonicalMatch?.[1] || "";
+  }
+
+  function normalizeVideoReceiptUrlForItem(value, itemNumber = "", baseUrl = window.location.href) {
+    const url = normalizeEbayNavigationUrl(value, baseUrl);
+    if (!url || !/\/ebaylive\/events\//i.test(url)) return "";
+    if (!itemNumber) return url;
+    try {
+      const parsed = new URL(url);
+      const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+      const itemIds = String(parsed.searchParams.get("itemIds") || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (selectedItemId === itemNumber) return parsed.toString();
+      if (itemIds.includes(itemNumber)) {
+        parsed.searchParams.set("selectedItemId", itemNumber);
+        if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+        return parsed.toString();
+      }
+    } catch (_) {}
     return "";
+  }
+
+  function findVideoReceiptUrlInText(text, baseUrl = window.location.href, options = {}) {
+    const body = String(text || "");
+    const itemNumber = String(options.itemNumber || "").trim();
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/gi,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/gi,
+    ];
+    const fallbackUrls = [];
+    for (const pattern of patterns) {
+      for (const match of body.matchAll(pattern)) {
+        const rawUrl = match?.[0] || "";
+        const matchingUrl = normalizeVideoReceiptUrlForItem(rawUrl, itemNumber, baseUrl);
+        if (matchingUrl) return matchingUrl;
+        const fallbackUrl = normalizeVideoReceiptUrlForItem(rawUrl, "", baseUrl);
+        if (fallbackUrl) fallbackUrls.push(fallbackUrl);
+      }
+    }
+    return itemNumber ? "" : (fallbackUrls[0] || "");
   }
 
   function findOrderDetailsUrlInText(text, baseUrl = window.location.href) {
@@ -3620,7 +3655,7 @@
       const response = await fetch(orderDetailsUrl, { credentials: "include" });
       if (!response.ok) throw new Error(`Order details returned HTTP ${response.status}`);
       const html = await response.text();
-      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl, { itemNumber: getCurrentEbayItemNumber() });
       if (receiptUrl) {
         if (receiptWindow) receiptWindow.location.href = receiptUrl;
         else window.open(receiptUrl, "_blank", "noopener,noreferrer");
@@ -3766,7 +3801,7 @@
     if (orderDetailsUrl && !enriched.videoReceiptUrl) {
       try {
         const orderHtml = await fetchEbayHtml(orderDetailsUrl);
-        enriched.videoReceiptUrl = findVideoReceiptUrlInText(orderHtml, orderDetailsUrl);
+        enriched.videoReceiptUrl = findVideoReceiptUrlInText(orderHtml, orderDetailsUrl, { itemNumber: enriched.itemNumber || returnInfo.itemNumber });
         if (enriched.returnDetails) {
           enriched.returnDetails.videoReceiptUrl = enriched.videoReceiptUrl || "";
         }
@@ -3828,7 +3863,7 @@
     setVideoReceiptStatus(button, "Opening receipt...");
     try {
       const html = await fetchEbayHtml(orderDetailsUrl);
-      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl, { itemNumber: getCurrentEbayItemNumber() });
       if (receiptUrl) {
         window.location.assign(receiptUrl);
         return true;
@@ -3875,7 +3910,7 @@
     try {
       for (const url of unique([returnInfo.itemUrl, returnInfo.detailsUrl]).filter(Boolean)) {
         const html = await fetchEbayHtml(url);
-        const directReceiptUrl = findVideoReceiptUrlInText(html, url);
+        const directReceiptUrl = findVideoReceiptUrlInText(html, url, { itemNumber: returnInfo.itemNumber });
         if (directReceiptUrl) {
           if (receiptWindow) receiptWindow.location.href = directReceiptUrl;
           else window.open(directReceiptUrl, "_blank", "noopener,noreferrer");
@@ -3889,7 +3924,7 @@
 
       if (orderDetailsUrl) {
         const detailsHtml = await fetchEbayHtml(orderDetailsUrl);
-        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl);
+        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl, { itemNumber: returnInfo.itemNumber });
         if (receiptUrl) {
           if (receiptWindow) receiptWindow.location.href = receiptUrl;
           else window.open(receiptUrl, "_blank", "noopener,noreferrer");
@@ -4911,7 +4946,7 @@
         },
       });
       if (!response?.ok) throw new Error(response?.error || "OG could not save the video receipt photo.");
-      setVideoReceiptCaptureStatus(button, "Saved to OG", "success");
+      setVideoReceiptCaptureStatus(button, "Capture image saved", "success");
       window.setTimeout(() => setVideoReceiptCaptureStatus(button, "Capture item photo", ""), 3500);
     } catch (error) {
       console.warn("[OG eBay Receipt] Could not capture video receipt frame:", error);

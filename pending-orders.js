@@ -620,27 +620,61 @@ function getLabelTrackingDisplay(metadata = {}) {
 }
 
 function getMetadataVideoReceiptUrl(metadata = {}) {
-  if (!metadata || typeof metadata !== "object") return "";
+  return getMetadataVideoReceiptUrls(metadata)[0] || "";
+}
+
+function getMetadataVideoReceiptUrls(metadata = {}) {
+  if (!metadata || typeof metadata !== "object") return [];
   const detail = metadata.returnDetails && typeof metadata.returnDetails === "object" ? metadata.returnDetails : {};
-  const urls = [
+  return [
     metadata.videoReceiptUrl,
     metadata.videoReceiptURL,
     ...(Array.isArray(metadata.videoReceiptUrls) ? metadata.videoReceiptUrls : []),
     detail.videoReceiptUrl,
     detail.videoReceiptURL,
     ...(Array.isArray(detail.videoReceiptUrls) ? detail.videoReceiptUrls : []),
-  ].filter(Boolean);
-  return String(urls[0] || "").trim();
+  ].filter(Boolean).map((url) => String(url || "").trim()).filter(Boolean);
+}
+
+function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
+  const cleanUrl = String(url || "").trim().replace(/&amp;/g, "&");
+  if (!cleanUrl) return "";
+  let parsed;
+  try {
+    parsed = new URL(cleanUrl);
+  } catch (_) {
+    return "";
+  }
+  if (!/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) return "";
+
+  const itemNumber = String(line.item_number || line.itemNumber || "").trim();
+  if (!itemNumber) return parsed.toString();
+
+  const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+  const itemIds = String(parsed.searchParams.get("itemIds") || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (selectedItemId === itemNumber) return parsed.toString();
+  if (itemIds.includes(itemNumber)) {
+    parsed.searchParams.set("selectedItemId", itemNumber);
+    if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+    return parsed.toString();
+  }
+  return "";
 }
 
 function getOrderVideoReceiptUrl(line = {}) {
   const order = line.order || {};
-  return getMetadataVideoReceiptUrl(line.label_metadata)
-    || getMetadataVideoReceiptUrl(order.label_metadata)
-    || state.orderVideoReceipts.get(line.order_id)
-    || state.orderVideoReceipts.get(order.id)
-    || state.orderVideoReceipts.get(order.order_number)
-    || String(line.videoReceiptUrl || "").trim();
+  return [
+    ...getMetadataVideoReceiptUrls(line.label_metadata),
+    ...getMetadataVideoReceiptUrls(order.label_metadata),
+    state.orderVideoReceipts.get(line.order_id),
+    state.orderVideoReceipts.get(order.id),
+    state.orderVideoReceipts.get(order.order_number),
+    line.videoReceiptUrl,
+  ].map((url) => normalizeVideoReceiptUrlForLine(url, line)).find(Boolean) || "";
 }
 
 function rememberOrderVideoReceipt(order = {}, url = "") {
