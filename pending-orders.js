@@ -69,6 +69,7 @@ const NO_INVENTORY_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const NO_INVENTORY_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const NO_INVENTORY_EVIDENCE_BUCKET = "order-evidence-photos";
 const EBAY_LABEL_BUCKET = "ebay-labels";
+const EBAY_SINGLE_LABEL_BASE_URL = "https://www.ebay.com/ship/single/";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
@@ -1503,6 +1504,42 @@ function getSelectedAdminLines() {
   return state.orders.filter((line) => state.adminSelectedLineIds.has(line.id) && isAdminCloseoutSelectable(line));
 }
 
+function getUniqueOrderNumbersForLines(lines = []) {
+  return [...new Set((lines || [])
+    .map((line) => normalizeEbayOrderNumber(line?.order?.order_number))
+    .filter(Boolean))];
+}
+
+function buildEbaySingleLabelUrl(orderNumber) {
+  const normalized = normalizeEbayOrderNumber(orderNumber);
+  return normalized ? `${EBAY_SINGLE_LABEL_BASE_URL}${encodeURIComponent(normalized)}` : "";
+}
+
+function openEbayLabelPagesForOrderNumbers(orderNumbers = []) {
+  const unique = [...new Set((orderNumbers || []).map(normalizeEbayOrderNumber).filter(Boolean))];
+  if (!unique.length) {
+    setStatus("Select at least one eBay order with an order number before opening labels.", "error");
+    return;
+  }
+
+  unique.forEach((orderNumber) => {
+    const url = buildEbaySingleLabelUrl(orderNumber);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  });
+
+  const orderWord = unique.length === 1 ? "order" : "orders";
+  setStatus(`Opened eBay shipping label page${unique.length === 1 ? "" : "s"} for ${unique.length} ${orderWord}: ${unique.join(", ")}.`, "info");
+}
+
+function openSelectedEbayLabelPage() {
+  const orderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
+  openEbayLabelPagesForOrderNumbers(orderNumber ? [orderNumber] : []);
+}
+
+function openAdminSelectedEbayLabelPages() {
+  openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(getSelectedAdminLines()));
+}
+
 function pruneAdminSelection() {
   const validIds = new Set(state.orders.filter(isAdminCloseoutSelectable).map((line) => line.id));
   [...state.adminSelectedLineIds].forEach((lineId) => {
@@ -1520,6 +1557,7 @@ function renderAdminOrderActions() {
   if (countEl) countEl.textContent = `${count} selected`;
 
   $("admin-clear-order-selection")?.toggleAttribute("disabled", count === 0);
+  $("admin-open-ebay-labels")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-packed-no-stock")?.toggleAttribute("disabled", count === 0);
   $("admin-mark-cancelled")?.toggleAttribute("disabled", count === 0);
 }
@@ -1870,8 +1908,10 @@ function renderEbayLabelPanel() {
     const summary = $("ebay-label-summary");
     const details = $("ebay-label-details");
     const previewButton = $("preview-ebay-label");
+    const openLabelButton = $("open-ebay-label-page");
     summary.textContent = summaryText;
     details.innerHTML = detailsHtml;
+    openLabelButton?.toggleAttribute("disabled", !normalizeEbayOrderNumber(state.selectedLine?.order?.order_number));
     previewButton?.classList.toggle("hidden", !label.path);
     previewButton?.toggleAttribute("disabled", !label.path);
   }
@@ -4676,13 +4716,26 @@ async function confirmWorkerCancelOrder() {
     );
     const savedEvidencePhotos = await persistWorkerCancelEvidencePhotos(selectedLineIds);
 
-    const { data, error } = await supabase.rpc("cancel_ebay_order_lines", {
+    const cancellationPayload = {
       _order_line_ids: selectedLineIds,
       _notes: note,
       _signed_by_email: state.user.email,
       _checkout_store_id: state.checkoutStoreId || null,
       _evidence_photos: savedEvidencePhotos,
-    });
+    };
+    let { data, error } = await supabase.rpc("cancel_ebay_order_lines", cancellationPayload);
+    const errorText = String(error?.message || error?.details || "");
+    const canRetryLegacyCancel =
+      error
+      && savedEvidencePhotos.length === 0
+      && /cancel_ebay_order_lines/i.test(errorText)
+      && /schema cache|could not find/i.test(errorText);
+
+    if (canRetryLegacyCancel) {
+      const legacyPayload = { ...cancellationPayload };
+      delete legacyPayload._evidence_photos;
+      ({ data, error } = await supabase.rpc("cancel_ebay_order_lines", legacyPayload));
+    }
     if (error) throw error;
 
     selectedLineIds.forEach((lineId) => state.stagedFulfillments.delete(lineId));
@@ -5659,6 +5712,7 @@ function setupListeners() {
   });
   $("checkout-store-select")?.addEventListener("change", handleCheckoutStoreChange);
   $("admin-clear-order-selection")?.addEventListener("click", clearAdminOrderSelection);
+  $("admin-open-ebay-labels")?.addEventListener("click", openAdminSelectedEbayLabelPages);
   $("admin-mark-packed-no-stock")?.addEventListener("click", () => openAdminOrderCloseoutModal("fulfilled_no_inventory"));
   $("admin-mark-cancelled")?.addEventListener("click", () => openAdminOrderCloseoutModal("cancelled"));
   $("close-admin-order-closeout")?.addEventListener("click", closeAdminOrderCloseoutModal);
@@ -5691,6 +5745,7 @@ function setupListeners() {
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
+  $("open-ebay-label-page")?.addEventListener("click", openSelectedEbayLabelPage);
   $("assign-order-task")?.addEventListener("click", () => openOrderTaskModal());
   $("open-order-task-modal")?.addEventListener("click", () => openOrderTaskModal());
   $("submit-order-task")?.addEventListener("click", submitOrderTask);
