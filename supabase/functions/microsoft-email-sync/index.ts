@@ -76,6 +76,7 @@ type BucketMode = "ebay_only" | "all";
 type MailboxConnection = {
   id: string;
   status: string;
+  live_sync_enabled?: boolean | null;
 };
 
 type MailboxSecret = {
@@ -157,6 +158,17 @@ type RolloutStatusInput = {
   folder: "inbox";
 };
 
+type LiveSyncStatusInput = {
+  mode: "live_sync_status";
+  folder: "inbox";
+};
+
+type SetLiveSyncInput = {
+  mode: "set_live_sync";
+  folder: "inbox";
+  enabled: boolean;
+};
+
 type RequestInput =
   | SyncInput
   | PreviewInput
@@ -164,7 +176,9 @@ type RequestInput =
   | ProcessImportedInput
   | ClassifyImportedInput
   | PipelineDiagnosticsInput
-  | RolloutStatusInput;
+  | RolloutStatusInput
+  | LiveSyncStatusInput
+  | SetLiveSyncInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -553,6 +567,17 @@ async function parseInput(req: Request): Promise<RequestInput> {
     return { mode: "rollout_status", folder: "inbox" };
   }
 
+  if (requestedMode === "live_sync_status") {
+    return { mode: "live_sync_status", folder: "inbox" };
+  }
+
+  if (requestedMode === "set_live_sync") {
+    if (typeof body?.enabled !== "boolean") {
+      throw new SyncError("invalid_live_sync_enabled", { status: 400, phase: "input" });
+    }
+    return { mode: "set_live_sync", folder: "inbox", enabled: body.enabled };
+  }
+
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
   const maxPages = Math.min(Math.max(Number(body?.maxPages) || 1, 1), 5);
   const pageSize = Math.min(Math.max(Number(body?.pageSize) || 25, 1), 50);
@@ -799,7 +824,7 @@ async function loadModel(supabase: ServiceClient) {
 async function loadProcessingModel(supabase: ServiceClient) {
   const { data: mailboxes, error: mailboxError } = await supabase
     .from("email_mailboxes")
-    .select("id")
+    .select("id, microsoft_connection_id")
     .eq("provider", "microsoft")
     .eq("status", "active")
     .limit(2);
@@ -808,7 +833,7 @@ async function loadProcessingModel(supabase: ServiceClient) {
   if (!mailboxes?.length) throw new SyncError("bootstrap_required", { phase: "mailbox_lookup", status: 400 });
   if (mailboxes.length > 1) throw new SyncError("multiple_active_mailboxes", { phase: "mailbox_lookup", status: 409 });
 
-  const mailbox = mailboxes[0] as { id: string };
+  const mailbox = mailboxes[0] as { id: string; microsoft_connection_id?: string | null };
   const { data: folder, error: folderError } = await supabase
     .from("email_folders")
     .select("id")
@@ -822,6 +847,37 @@ async function loadProcessingModel(supabase: ServiceClient) {
   return {
     mailbox,
     folder: folder as { id: string },
+  };
+}
+
+async function loadLiveSyncModel(supabase: ServiceClient) {
+  const processingModel = await loadProcessingModel(supabase);
+  const connectionId = processingModel.mailbox.microsoft_connection_id;
+  if (!connectionId) {
+    throw new SyncError("mailbox_not_connected", {
+      phase: "live_sync_connection_lookup",
+      mailboxId: processingModel.mailbox.id,
+      status: 404,
+    });
+  }
+
+  const { data: connection, error: connectionError } = await supabase
+    .from("microsoft_mailbox_connections")
+    .select("id, status, live_sync_enabled")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (connectionError || !connection) {
+    throw new SyncError("mailbox_not_connected", {
+      phase: "live_sync_connection_lookup",
+      mailboxId: processingModel.mailbox.id,
+      status: 404,
+    });
+  }
+
+  return {
+    ...processingModel,
+    connection: connection as MailboxConnection,
   };
 }
 
@@ -1261,6 +1317,50 @@ async function insertImportOperationalEvent(
       mailbox_id: values.mailboxId,
     });
     return null;
+  }
+
+  return data as { id: string; created_at: string };
+}
+
+async function insertSetLiveSyncOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    previousValue: boolean;
+    currentValue: boolean;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "set_live_sync",
+      mailbox_id: values.mailboxId,
+      reason: "Operator-controlled mailbox live sync eligibility toggle. No sync, import, processing, classification, Outlook mutation, or checkpoint update was triggered.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      replay_source: "set_live_sync",
+      payload: {
+        mode: "set_live_sync",
+        previous_value: values.previousValue,
+        current_value: values.currentValue,
+        safety: liveSyncSafety(),
+      },
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] set_live_sync audit insert failed", {
+      phase: "set_live_sync_audit",
+      mailbox_id: values.mailboxId,
+    });
+    throw new SyncError("set_live_sync_event_failed", {
+      phase: "set_live_sync_audit",
+      mailboxId: values.mailboxId,
+      status: 500,
+    });
   }
 
   return data as { id: string; created_at: string };
@@ -2548,6 +2648,43 @@ async function buildRolloutQueueState(supabase: ServiceClient, mailboxId: string
   return { queued, running, saturated };
 }
 
+async function countLiveSyncConnections(supabase: ServiceClient, enabled: boolean) {
+  const { count, error } = await supabase
+    .from("microsoft_mailbox_connections")
+    .select("id", { count: "exact", head: true })
+    .in("status", ACTIVE_CONNECTION_STATUSES)
+    .eq("live_sync_enabled", enabled);
+
+  if (error) throw new SyncError("live_sync_status_failed", { phase: "live_sync_count" });
+  return count || 0;
+}
+
+async function buildLiveSyncRolloutSummary(supabase: ServiceClient) {
+  const [enabledMailboxes, disabledMailboxes] = await Promise.all([
+    countLiveSyncConnections(supabase, true),
+    countLiveSyncConnections(supabase, false),
+  ]);
+  return {
+    enabled_mailboxes: enabledMailboxes,
+    disabled_mailboxes: disabledMailboxes,
+  };
+}
+
+function liveSyncSafety() {
+  return {
+    outlook_mutation_performed: false,
+    sync_checkpoint_updated: false,
+    sync_triggered: false,
+    preview_triggered: false,
+    import_triggered: false,
+    processing_triggered: false,
+    classification_triggered: false,
+    drafts_created: 0,
+    automatic_responses_sent: 0,
+    attachments_fetched: 0,
+  };
+}
+
 function queueSaturationReason(queueState: { queued: number; running: number; saturated: boolean }) {
   if (queueState.queued >= MAX_QUEUED_PROCESSING_JOBS) return "queued_processing_jobs_at_limit";
   if (queueState.running >= MAX_RUNNING_PROCESSING_JOBS) return "running_processing_jobs_at_limit";
@@ -2873,6 +3010,88 @@ async function countActiveApprovedImportedMessages(supabase: ServiceClient, mail
   return total;
 }
 
+async function getMailboxLiveSyncEnabled(supabase: ServiceClient, mailboxId: string) {
+  const { data: mailbox, error: mailboxError } = await supabase
+    .from("email_mailboxes")
+    .select("microsoft_connection_id")
+    .eq("id", mailboxId)
+    .maybeSingle();
+
+  if (mailboxError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_mailbox_connection" });
+  const connectionId = mailbox?.microsoft_connection_id;
+  if (!connectionId) return false;
+
+  const { data: connection, error: connectionError } = await supabase
+    .from("microsoft_mailbox_connections")
+    .select("live_sync_enabled")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (connectionError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_live_sync" });
+  return connection?.live_sync_enabled === true;
+}
+
+async function buildLiveSyncStatus(supabase: ServiceClient, model: Awaited<ReturnType<typeof loadLiveSyncModel>>) {
+  return {
+    ok: true,
+    mode: "live_sync_status",
+    mailbox_id: model.mailbox.id,
+    live_sync_enabled: model.connection.live_sync_enabled === true,
+    rollout: rolloutControls(),
+    queue_state: await buildRolloutQueueState(supabase, model.mailbox.id),
+    safety: liveSyncSafety(),
+  };
+}
+
+async function setLiveSyncEnabled(
+  supabase: ServiceClient,
+  model: Awaited<ReturnType<typeof loadLiveSyncModel>>,
+  enabled: boolean,
+  admin: { userId: string; email: string | null },
+) {
+  const previousValue = model.connection.live_sync_enabled === true;
+  const { data: updated, error } = await supabase
+    .from("microsoft_mailbox_connections")
+    .update({
+      live_sync_enabled: enabled,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", model.connection.id)
+    .select("live_sync_enabled")
+    .single();
+
+  if (error || !updated) {
+    throw new SyncError("set_live_sync_failed", {
+      phase: "set_live_sync_update",
+      mailboxId: model.mailbox.id,
+      connectionId: model.connection.id,
+      status: 500,
+    });
+  }
+
+  const currentValue = updated.live_sync_enabled === true;
+  const auditEvent = await insertSetLiveSyncOperationalEvent(supabase, {
+    mailboxId: model.mailbox.id,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    previousValue,
+    currentValue,
+  });
+
+  return {
+    ok: true,
+    mode: "set_live_sync",
+    mailbox_id: model.mailbox.id,
+    previous_value: previousValue,
+    current_value: currentValue,
+    replay_operation_reference: {
+      operation_event_id: auditEvent?.id || null,
+      operation_event_created_at: auditEvent?.created_at || null,
+    },
+    safety: liveSyncSafety(),
+  };
+}
+
 async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: string, folderId: string) {
   const { data: events, error: eventError } = await supabase
     .from("email_operational_events")
@@ -3066,6 +3285,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     mode: "pipeline_diagnostics",
     mailbox_id: mailboxId,
     folder_id: folderId,
+    live_sync_enabled: await getMailboxLiveSyncEnabled(supabase, mailboxId),
     imported_summary: importedSummary,
     processing_summary: processingSummary,
     classification_summary: classificationSummary,
@@ -3100,6 +3320,7 @@ async function buildRolloutStatus(supabase: ServiceClient, mailboxId: string) {
     ok: true,
     mode: "rollout_status",
     rollout: rolloutControls(),
+    live_sync: await buildLiveSyncRolloutSummary(supabase),
     caps: rolloutCaps(),
     queue_limits: rolloutQueueLimits(),
     queue_state: await buildRolloutQueueState(supabase, mailboxId),
@@ -3172,7 +3393,9 @@ serve(async (req) => {
       input.mode === "process_imported" ||
       input.mode === "classify_imported" ||
       input.mode === "pipeline_diagnostics" ||
-      input.mode === "rollout_status";
+      input.mode === "rollout_status" ||
+      input.mode === "live_sync_status" ||
+      input.mode === "set_live_sync";
 
     const controls = rolloutControls();
     if (input.mode === "sync_import_approved" && !controls.imports_enabled) {
@@ -3197,6 +3420,39 @@ serve(async (req) => {
         queued: result.queue_state.queued,
         running: result.queue_state.running,
         saturated: result.queue_state.saturated,
+      });
+
+      return json(req, 200, result);
+    }
+
+    if (input.mode === "live_sync_status") {
+      const liveSyncModel = await loadLiveSyncModel(supabase);
+      mailboxId = liveSyncModel.mailbox.id;
+      folderId = liveSyncModel.folder.id;
+      connectionId = liveSyncModel.connection.id;
+      const result = await buildLiveSyncStatus(supabase, liveSyncModel);
+      console.log("[microsoft-email-sync] live_sync_status completed", {
+        phase: "live_sync_status_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        live_sync_enabled: result.live_sync_enabled,
+      });
+
+      return json(req, 200, result);
+    }
+
+    if (input.mode === "set_live_sync") {
+      const liveSyncModel = await loadLiveSyncModel(supabase);
+      mailboxId = liveSyncModel.mailbox.id;
+      folderId = liveSyncModel.folder.id;
+      connectionId = liveSyncModel.connection.id;
+      const result = await setLiveSyncEnabled(supabase, liveSyncModel, input.enabled, admin);
+      console.log("[microsoft-email-sync] set_live_sync completed", {
+        phase: "set_live_sync_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        previous_value: result.previous_value,
+        current_value: result.current_value,
       });
 
       return json(req, 200, result);
