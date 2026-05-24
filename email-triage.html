@@ -97,6 +97,95 @@
             </section>
           </details>
 
+          <details id="inbox-preview-section" class="triage-disclosure inbox-preview-section" open>
+            <summary>
+              <span>Inbox Preview / Import</span>
+              <span id="inbox-preview-count-pill" class="email-count-pill">No preview</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <section aria-label="Inbox preview and approved import">
+              <div class="inbox-preview-toolbar">
+                <button type="button" id="inbox-preview-run" class="primary-btn">
+                  <i data-lucide="mail-search"></i>
+                  Preview Outlook Emails
+                </button>
+                <label>
+                  <span>Limit</span>
+                  <select id="inbox-preview-limit">
+                    <option value="10">10</option>
+                    <option value="25" selected>25</option>
+                    <option value="100">100</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Days Back</span>
+                  <select id="inbox-preview-days-back">
+                    <option value="" selected>Blank</option>
+                    <option value="7">7</option>
+                    <option value="30">30</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Bucket Mode</span>
+                  <select id="inbox-preview-bucket-mode">
+                    <option value="ebay_only" selected>eBay-only</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+              </div>
+
+              <div id="inbox-preview-status" class="workspace-status inbox-preview-status">Run preview to inspect recent Outlook emails before importing.</div>
+              <div id="inbox-preview-summary" class="inbox-preview-summary"></div>
+              <div id="inbox-preview-import-result" class="inbox-import-result"></div>
+
+              <div class="inbox-preview-actions">
+                <div class="inbox-bucket-tabs" aria-label="Preview bucket filter">
+                  <button type="button" data-inbox-bucket-filter="likely_ebay" class="is-active">Likely eBay</button>
+                  <button type="button" data-inbox-bucket-filter="maybe_ebay">Maybe eBay</button>
+                  <button type="button" data-inbox-bucket-filter="not_ebay">Not eBay</button>
+                  <button type="button" data-inbox-bucket-filter="all">All</button>
+                </div>
+                <div class="inbox-import-actions">
+                  <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
+                    <i data-lucide="download"></i>
+                    Import All Likely eBay
+                  </button>
+                  <button type="button" id="inbox-import-selected" class="secondary-btn" disabled>
+                    <i data-lucide="check-square"></i>
+                    Import Selected
+                  </button>
+                  <button type="button" id="inbox-preview-clear" class="secondary-btn" disabled>
+                    <i data-lucide="x"></i>
+                    Clear Preview
+                  </button>
+                </div>
+              </div>
+
+              <div class="inbox-preview-table-wrap">
+                <table class="inbox-preview-table">
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>Sender</th>
+                      <th>Subject</th>
+                      <th>Received</th>
+                      <th>Preview</th>
+                      <th>Bucket</th>
+                      <th>Score</th>
+                      <th>Reason Codes</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inbox-preview-body">
+                    <tr>
+                      <td colspan="9">No inbox preview loaded.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </details>
+
           <details class="triage-disclosure system-metrics">
             <summary>
               <span>System Metrics</span>

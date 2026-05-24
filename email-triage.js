@@ -70,7 +70,7 @@
     renderWorkflowMetaText,
     filterToggleLabel,
   } = window.EmailTriageRenderUtils;
-  const { renderMessageRows } = window.EmailTriageInbox;
+  const { renderMessageRows, bindInboxPreviewImport } = window.EmailTriageInbox;
   const { renderAdminSummary } = window.EmailTriageDiagnostics;
   const { successMessageForAction } = window.EmailTriageDrafts;
   const {
@@ -1978,6 +1978,7 @@
       els.adminDiagnosticsDrawer?.classList.toggle("hidden", expanded);
     });
     bindPanelResizeEvents();
+    bindInboxPreviewImport(context, triageStore);
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.toggleCategoryPanel?.addEventListener("click", () => {
       setAdminClassificationState({

@@ -6,6 +6,7 @@
   const STATUS_FUNCTION = "microsoft-mailbox-status";
   const DISCONNECT_FUNCTION = "microsoft-mailbox-disconnect";
   const CLASSIFY_FUNCTION = "microsoft-email-classify";
+  const SYNC_FUNCTION = "microsoft-email-sync";
 
   const DEFAULT_LIMITS = {
     classificationLimit: 50,
@@ -20,6 +21,8 @@
     draftGeneration: 45000,
     draftReview: 15000,
     matchContext: 15000,
+    inboxPreview: 30000,
+    inboxImport: 60000,
   };
 
   function waitForSupabaseReady(timeoutMs = 8000) {
@@ -358,6 +361,99 @@
     });
   }
 
+  function normalizeInboxPreviewPayload(payload) {
+    const source = normalizeEnvelope(payload, "sync_preview").data || {};
+    const messages = Array.isArray(source.messages) ? source.messages : [];
+    const bucketSummary = source.bucket_summary && typeof source.bucket_summary === "object" ? source.bucket_summary : {};
+    const importedSummary = source.already_imported_summary && typeof source.already_imported_summary === "object" ? source.already_imported_summary : {};
+    const senderDomainSummary = source.sender_domain_summary && typeof source.sender_domain_summary === "object" ? source.sender_domain_summary : {};
+
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "sync_preview",
+      limit: Number(source.limit || 25),
+      daysBack: source.daysBack ?? null,
+      bucketMode: source.bucketMode || "ebay_only",
+      messages_previewed: Number(source.messages_previewed || messages.length || 0),
+      messages_returned: Number(source.messages_returned || messages.length || 0),
+      bucket_summary: {
+        likely_ebay: Number(bucketSummary.likely_ebay || 0),
+        maybe_ebay: Number(bucketSummary.maybe_ebay || 0),
+        not_ebay: Number(bucketSummary.not_ebay || 0),
+      },
+      already_imported_summary: {
+        imported: Number(importedSummary.imported || 0),
+        not_imported: Number(importedSummary.not_imported || 0),
+      },
+      sender_domain_summary: senderDomainSummary,
+      messages,
+      raw: source,
+    };
+  }
+
+  function normalizeInboxImportPayload(payload) {
+    const source = normalizeEnvelope(payload, "sync_import_approved").data || {};
+    const skippedReasons = source.skipped_reasons && typeof source.skipped_reasons === "object" ? source.skipped_reasons : {};
+
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "sync_import_approved",
+      imported_count: Number(source.imported_count || 0),
+      already_imported_count: Number(source.already_imported_count || 0),
+      skipped_count: Number(source.skipped_count || 0),
+      skipped_reasons: skippedReasons,
+      operation_event_id: source.operation_event_id || source.operationEventId || null,
+      classification_created: Number(source.classification_created || 0),
+      drafts_created: Number(source.drafts_created || 0),
+      outlook_mutation_performed: source.outlook_mutation_performed === true,
+      sync_checkpoint_updated: source.sync_checkpoint_updated === true,
+      messages: Array.isArray(source.messages) ? source.messages : [],
+      raw: source,
+    };
+  }
+
+  async function fetchInboxPreview(context, values = {}) {
+    const session = await currentSession(context, "Inbox preview");
+    const body = {
+      mode: "sync_preview",
+      limit: Number(values.limit || 25),
+      daysBack: values.daysBack === "" || values.daysBack == null ? null : Number(values.daysBack),
+      bucketMode: values.bucketMode || "ebay_only",
+    };
+
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, TIMEOUTS.inboxPreview);
+
+    return normalizeInboxPreviewPayload(payload);
+  }
+
+  async function importApprovedInboxPreview(context, values = {}) {
+    const session = await currentSession(context, "Inbox approved import");
+    const providerMessageIds = Array.isArray(values.providerMessageIds)
+      ? values.providerMessageIds.filter(Boolean)
+      : [];
+    const body = {
+      mode: "sync_import_approved",
+      source: "preview",
+      importBucket: values.importBucket || "likely_ebay",
+      limit: Number(values.limit || 25),
+      bucketMode: values.bucketMode || "ebay_only",
+      confirmImport: "IMPORT_PREVIEW_APPROVED",
+    };
+    const daysBack = values.daysBack === "" || values.daysBack == null ? null : Number(values.daysBack);
+    body.daysBack = daysBack;
+    if (providerMessageIds.length) body.providerMessageIds = providerMessageIds;
+
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, TIMEOUTS.inboxImport);
+
+    return normalizeInboxImportPayload(payload);
+  }
+
   window.EmailTriageApi = {
     functions: {
       START_FUNCTION,
@@ -365,6 +461,7 @@
       STATUS_FUNCTION,
       DISCONNECT_FUNCTION,
       CLASSIFY_FUNCTION,
+      SYNC_FUNCTION,
     },
     DEFAULT_LIMITS,
     TIMEOUTS,
@@ -388,5 +485,9 @@
     fetchMatchContext,
     requestMatchReviewAction,
     saveClassificationReview,
+    normalizeInboxPreviewPayload,
+    normalizeInboxImportPayload,
+    fetchInboxPreview,
+    importApprovedInboxPreview,
   };
 })();
