@@ -1907,7 +1907,7 @@ function renderOrders() {
   }
 
   list.innerHTML = "";
-  groups.forEach((group) => {
+  groups.forEach((group, groupIndex) => {
     const urgency = group.pendingCount ? getOrderUrgency(group.nextShipBy) : null;
     const urgencyClass = urgency?.level === "today" ? "is-due-today" : urgency ? `is-${urgency.level}` : "";
     const urgencyMarkup = urgency ? `
@@ -1917,7 +1917,8 @@ function renderOrders() {
       </span>
     ` : "";
     const card = document.createElement("article");
-    card.className = `buyer-order-card ${urgencyClass} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
+    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
     card.innerHTML = `
       <div class="buyer-card-head">
         <div>
@@ -1990,12 +1991,36 @@ function renderOrders() {
       openBuyerGroupNoInventoryModal(group);
     });
 
+    const orderLineTotals = new Map();
+    group.lines.forEach((line) => {
+      const order = line.order || {};
+      const key = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
+      orderLineTotals.set(key, (orderLineTotals.get(key) || 0) + 1);
+    });
+    const orderLinePositions = new Map();
+
     group.lines.forEach((line) => {
       const order = line.order || {};
       const receiptLink = getOrderVideoReceiptLink(line);
       const canActOnLine = isOpenOrderLine(line);
+      const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
+      const lineDueTone = lineUrgency?.level || "neutral";
+      const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
+      const orderLineTotal = orderLineTotals.get(orderLineKey) || 1;
+      const orderLinePosition = (orderLinePositions.get(orderLineKey) || 0) + 1;
+      orderLinePositions.set(orderLineKey, orderLinePosition);
+      const orderLineSequence = orderLineTotal > 1 ? `Order ${orderLinePosition} of ${orderLineTotal}` : "";
+      const lineDueLabel = lineUrgency
+        ? `${lineUrgency.label} · ${formatDate(order.ship_by_date)}`
+        : order.ship_by_date
+          ? `Due ${formatDate(order.ship_by_date)}`
+          : "No ship-by date";
+      const isAdminSelected = state.adminSelectedLineIds.has(line.id);
+      const visibleLineDueLabel = lineUrgency
+        ? `${lineUrgency.label} - ${formatDate(order.ship_by_date)}`
+        : lineDueLabel;
       const button = document.createElement("div");
-      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
+      button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${isAdminSelected ? "is-admin-selected" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
           <input type="checkbox" data-admin-line-select="${escapeHtml(line.id)}" ${state.adminSelectedLineIds.has(line.id) ? "checked" : ""} ${isAdminCloseoutSelectable(line) ? "" : "disabled"} />
@@ -2007,6 +2032,13 @@ function renderOrders() {
           <span class="buyer-line-copy">
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
             <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+            <span class="buyer-line-meta-row">
+              <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">
+                ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
+                ${escapeHtml(visibleLineDueLabel)}
+              </span>
+              ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
+            </span>
             ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
           </span>
           <span class="buyer-line-actions">
