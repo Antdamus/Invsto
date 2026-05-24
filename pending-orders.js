@@ -1951,6 +1951,36 @@ function isVideoReceiptEvidencePhoto(photo = {}) {
   return /video[-_\s]?receipt|ebaylive\/events/.test(text);
 }
 
+function normalizeVideoReceiptItemNumber(value = "") {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getVideoReceiptPhotoItemNumbers(photo = {}) {
+  const values = [
+    photo.itemNumber,
+    photo.item_number,
+    photo.selectedItemId,
+    photo.metadata?.itemNumber,
+    photo.metadata?.item_number,
+    photo.metadata?.selectedItemId,
+  ];
+  const labelMatch = String(photo.label || "").match(/video[-_\s]?receipt\s*[-:]?\s*(\d{6,})/i);
+  if (labelMatch?.[1]) values.push(labelMatch[1]);
+  const pathMatch = String(photo.path || "").match(/(?:^|[-_/])(\d{6,})(?:\.png|[-_/]|$)/i);
+  if (pathMatch?.[1]) values.push(pathMatch[1]);
+  return [...new Set(values.map(normalizeVideoReceiptItemNumber).filter(Boolean))];
+}
+
+function videoReceiptPhotoMatchesLine(photo = {}, task = {}, line = {}) {
+  const lineItemNumber = normalizeVideoReceiptItemNumber(line.item_number);
+  const explicitItemNumbers = getVideoReceiptPhotoItemNumbers(photo);
+  if (explicitItemNumbers.length) return Boolean(lineItemNumber && explicitItemNumbers.includes(lineItemNumber));
+
+  const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
+  if (taskLineIds.length) return taskLineIds.includes(line.id);
+  return false;
+}
+
 function getSelectedVideoReceiptEvidencePhotos() {
   const line = state.selectedLine;
   if (!line?.id) return [];
@@ -1965,12 +1995,13 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
 
   state.selectedOrderTasks.forEach((task) => {
     const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
-    const taskMatchesLine = taskLineIds.includes(line.id) || task.order_id === line.order_id;
+    const taskMatchesLine = taskLineIds.length ? taskLineIds.includes(line.id) : task.order_id === line.order_id;
     if (!taskMatchesLine) return;
     const events = state.selectedOrderTaskEvents.get(task.id) || [];
     events.forEach((event) => {
       (Array.isArray(event.photo_attachments) ? event.photo_attachments : [])
         .filter(isVideoReceiptEvidencePhoto)
+        .filter((photo) => videoReceiptPhotoMatchesLine(photo, task, line))
         .forEach((photo) => photos.push({
           ...photo,
           signed_by_email: photo.signed_by_email || event.signed_by_email || task.created_by_email || "",
@@ -2147,6 +2178,20 @@ function isActiveOrderTask(task = {}) {
   return !["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
 }
 
+function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
+  const taskText = [
+    task.title,
+    task.question,
+    task.latest_note,
+    task.resolution_notes,
+  ].filter(Boolean).join(" ");
+  if (!/video receipt screenshot captured/i.test(taskText)) return false;
+  const remainingPhotos = events.flatMap((event) => (
+    Array.isArray(event.photo_attachments) ? event.photo_attachments : []
+  ));
+  return !remainingPhotos.length && !isActiveOrderTask(task);
+}
+
 function getOrderTaskAssigneeLabel(task = {}) {
   return task.assigned_to_email || "Unassigned";
 }
@@ -2274,6 +2319,51 @@ async function loadSelectedOrderTasks() {
   }
 }
 
+async function ensureNoInventoryVideoReceiptTasksLoaded() {
+  const orderIds = [...new Set(state.workerNoInventoryCandidates.map((line) => line.order_id).filter(Boolean))];
+  if (!orderIds.length) return;
+
+  const loadedOrderIds = new Set(state.selectedOrderTasks.map((task) => task.order_id).filter(Boolean));
+  const missingOrderIds = orderIds.filter((orderId) => !loadedOrderIds.has(orderId));
+  if (!missingOrderIds.length) return;
+
+  const { data: tasks, error } = await supabase
+    .from("ebay_order_tasks")
+    .select("*")
+    .in("order_id", missingOrderIds)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  const incomingTasks = tasks || [];
+  if (!incomingTasks.length) return;
+  const existingTaskIds = new Set(state.selectedOrderTasks.map((task) => task.id));
+  incomingTasks.forEach((task) => {
+    if (!existingTaskIds.has(task.id)) {
+      state.selectedOrderTasks.push(task);
+      existingTaskIds.add(task.id);
+    }
+  });
+
+  const taskIds = incomingTasks.map((task) => task.id).filter(Boolean);
+  if (!taskIds.length) return;
+
+  const { data: events, error: eventError } = await supabase
+    .from("ebay_order_task_events")
+    .select("*")
+    .in("task_id", taskIds)
+    .order("created_at", { ascending: true });
+  if (eventError) throw eventError;
+
+  (events || []).forEach((event) => {
+    const list = state.selectedOrderTaskEvents.get(event.task_id) || [];
+    if (!list.some((entry) => entry.id === event.id)) {
+      list.push(event);
+      list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    }
+    state.selectedOrderTaskEvents.set(event.task_id, list);
+  });
+}
+
 function renderOrderTaskPanel(options = {}) {
   const list = $("order-task-list");
   const summary = $("order-task-summary");
@@ -2294,19 +2384,23 @@ function renderOrderTaskPanel(options = {}) {
     return;
   }
 
-  const activeCount = state.selectedOrderTasks.filter(isActiveOrderTask).length;
+  const visibleOrderTasks = state.selectedOrderTasks.filter((task) => {
+    const events = state.selectedOrderTaskEvents.get(task.id) || [];
+    return !isClearedVideoReceiptCaptureTask(task, events);
+  });
+  const activeCount = visibleOrderTasks.filter(isActiveOrderTask).length;
   if (summary) {
     summary.textContent = activeCount
       ? `${activeCount} active coordination task${activeCount === 1 ? "" : "s"} for this order.`
       : "No active coordination task is waiting on this order.";
   }
 
-  if (!state.selectedOrderTasks.length) {
+  if (!visibleOrderTasks.length) {
     list.innerHTML = `<div class="empty-state">No coordination tasks for this order.</div>`;
     return;
   }
 
-  list.innerHTML = state.selectedOrderTasks.map((task) => {
+  list.innerHTML = visibleOrderTasks.map((task) => {
     const events = state.selectedOrderTaskEvents.get(task.id) || [];
     const isUrgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
     const isResolved = !isActiveOrderTask(task);
@@ -2357,6 +2451,13 @@ function renderOrderTaskPanel(options = {}) {
       );
     });
   });
+  list.querySelectorAll("[data-delete-video-receipt-capture]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteVideoReceiptCapture(buttonEl);
+    });
+  });
   hydrateOrderTaskVideoReceiptThumbnails();
 }
 
@@ -2364,22 +2465,35 @@ function renderOrderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
   const photoHtml = photos.length
     ? `<div class="order-task-photo-strip">${photos.map((photo, index) => `
-        <button
-          type="button"
-          class="${isVideoReceiptEvidencePhoto(photo) ? "order-task-video-receipt-thumb" : ""}"
-          data-order-task-photo="1"
-          data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
-          data-path="${escapeHtml(photo.path || "")}"
-          data-label="${escapeHtml(photo.label || `Photo ${index + 1}`)}"
-          data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
-          data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
-        >
-          ${isVideoReceiptEvidencePhoto(photo)
-            ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}:${escapeHtml(photo.path || "")}"></span>
-               <span>${escapeHtml(photo.label || `Video receipt ${index + 1}`)}</span>
-               <small>${escapeHtml(`Captured by ${photo.signed_by_email || event.signed_by_email || "logged-in user"}${photo.created_at || event.created_at ? ` on ${formatDate(photo.created_at || event.created_at)}` : ""}`)}</small>`
-            : escapeHtml(photo.label || `Photo ${index + 1}`)}
-        </button>
+        <span class="order-task-photo-entry">
+          <button
+            type="button"
+            class="${isVideoReceiptEvidencePhoto(photo) ? "order-task-video-receipt-thumb" : ""}"
+            data-order-task-photo="1"
+            data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+            data-path="${escapeHtml(photo.path || "")}"
+            data-label="${escapeHtml(photo.label || `Photo ${index + 1}`)}"
+            data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
+            data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
+          >
+            ${isVideoReceiptEvidencePhoto(photo)
+              ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}:${escapeHtml(photo.path || "")}"></span>
+                 <span>${escapeHtml(photo.label || `Video receipt ${index + 1}`)}</span>
+                 <small>${escapeHtml(`Captured by ${photo.signed_by_email || event.signed_by_email || "logged-in user"}${photo.created_at || event.created_at ? ` on ${formatDate(photo.created_at || event.created_at)}` : ""}`)}</small>`
+              : escapeHtml(photo.label || `Photo ${index + 1}`)}
+          </button>
+          ${isVideoReceiptEvidencePhoto(photo) ? `
+            <button
+              type="button"
+              class="order-task-photo-delete"
+              data-delete-video-receipt-capture="1"
+              data-event-id="${escapeHtml(event.id || "")}"
+              data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+              data-path="${escapeHtml(photo.path || "")}"
+              data-label="${escapeHtml(photo.label || `Video receipt ${index + 1}`)}"
+            >Delete</button>
+          ` : ""}
+        </span>
       `).join("")}</div>`
     : "";
 
@@ -2394,6 +2508,59 @@ function renderOrderTaskEvent(event = {}) {
       ${photoHtml}
     </article>
   `;
+}
+
+async function deleteVideoReceiptCapture(buttonEl) {
+  const eventId = buttonEl?.dataset?.eventId || "";
+  const bucket = buttonEl?.dataset?.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+  const path = buttonEl?.dataset?.path || "";
+  const label = buttonEl?.dataset?.label || "this video receipt capture";
+  if (!eventId || !path) {
+    setStatus("This video receipt capture is missing delete details.", "error");
+    return;
+  }
+  const confirmed = window.confirm(`Delete ${label}? This removes the mistaken screenshot from OG and the video receipt audit thumbnails.`);
+  if (!confirmed) return;
+
+  const originalText = buttonEl.textContent;
+  buttonEl.disabled = true;
+  buttonEl.textContent = "Deleting...";
+  setStatus("Deleting video receipt capture...", "info");
+
+  try {
+    const { data, error } = await supabase.rpc("delete_ebay_video_receipt_capture", {
+      _event_id: eventId,
+      _bucket: bucket,
+      _path: path,
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw error;
+    if (!Number(data?.removed_count || 0)) {
+      throw new Error("Supabase did not remove that capture. The stored path may not match the task photo.");
+    }
+
+    const { error: storageError } = await supabase.storage.from(bucket).remove([path]);
+    if (storageError) {
+      console.warn("Video receipt capture was removed from coordination, but storage cleanup failed:", storageError);
+    }
+    state.orderTaskSignedUrls.delete(`${bucket}/${path}`);
+    await loadSelectedOrderTasks();
+    if (state.selectedLine?.id) await renderSelectedVideoReceiptEvidence();
+    if (state.workerNoInventoryLineIds.size) renderWorkerNoInventoryList();
+    setStatus(
+      storageError
+        ? `Video receipt capture removed from coordination. Storage cleanup needs admin review: ${storageError.message || "Storage API rejected deletion."}`
+        : `Video receipt capture deleted (${Number(data.removed_count).toLocaleString()} attachment${Number(data.removed_count) === 1 ? "" : "s"} removed).`,
+      storageError ? "error" : "success"
+    );
+  } catch (error) {
+    console.error("Could not delete video receipt capture:", error);
+    buttonEl.disabled = false;
+    buttonEl.textContent = originalText;
+    const message = error.message || "Could not delete that video receipt capture.";
+    setStatus(message, "error");
+    alert(message);
+  }
 }
 
 async function openOrderTaskPhoto(bucket, path, options = {}) {
@@ -4752,6 +4919,9 @@ function renderWorkerNoInventoryList() {
 
 async function hydrateNoInventoryVideoReceiptEvidenceThumbnails() {
   const containers = [...document.querySelectorAll("[data-no-inventory-video-evidence]")];
+  await ensureNoInventoryVideoReceiptTasksLoaded().catch((error) => {
+    console.warn("Could not load all no-inventory video receipt task photos:", error);
+  });
   await Promise.all(containers.map(async (container) => {
     const line = state.workerNoInventoryCandidates.find((entry) => entry.id === container.dataset.noInventoryVideoEvidence);
     if (!line?.id) return;

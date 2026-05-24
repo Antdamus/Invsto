@@ -2313,19 +2313,30 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
           const label = photo.label || `Video receipt ${index + 1}`;
           const meta = getEvidencePhotoViewerMeta(photo);
           return `
-            <button
-              type="button"
-              class="history-video-receipt-thumb"
-              data-history-video-receipt-photo="1"
-              data-bucket="${escapeHtml(photo.bucket)}"
-              data-path="${escapeHtml(photo.path)}"
-              data-label="${escapeHtml(label)}"
-              data-meta="${escapeHtml(meta)}"
-            >
-              <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
-              <span>${escapeHtml(label)}</span>
-              <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
-            </button>
+            <span class="history-video-receipt-entry">
+              <button
+                type="button"
+                class="history-video-receipt-thumb"
+                data-history-video-receipt-photo="1"
+                data-bucket="${escapeHtml(photo.bucket)}"
+                data-path="${escapeHtml(photo.path)}"
+                data-label="${escapeHtml(label)}"
+                data-meta="${escapeHtml(meta)}"
+              >
+                <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
+                <span>${escapeHtml(label)}</span>
+                <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
+              </button>
+              <button
+                type="button"
+                class="history-video-receipt-delete"
+                data-delete-history-video-receipt="1"
+                data-event-id="${escapeHtml(photo.event?.id || "")}"
+                data-bucket="${escapeHtml(photo.bucket)}"
+                data-path="${escapeHtml(photo.path)}"
+                data-label="${escapeHtml(label)}"
+              >Delete</button>
+            </span>
           `;
         }).join("")}
       </div>
@@ -2454,6 +2465,13 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     card.querySelectorAll("[data-revert-line]").forEach((button) => {
       button.addEventListener("click", () => openRevertModal([button.dataset.revertLine].filter(Boolean)));
     });
+    card.querySelectorAll("[data-delete-history-video-receipt]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteHistoryVideoReceiptCapture(button);
+      });
+    });
     list.appendChild(card);
   });
   hydrateHistoryGroupEvidencePhotos(groups).catch((error) => {
@@ -2529,6 +2547,44 @@ async function hydrateHistoryVideoReceiptThumbnails() {
       ));
     }
   }));
+}
+
+async function deleteHistoryVideoReceiptCapture(button) {
+  const eventId = button?.dataset?.eventId || "";
+  const bucket = button?.dataset?.bucket || EXTRA_LABEL_EVIDENCE_BUCKET;
+  const path = button?.dataset?.path || "";
+  const label = button?.dataset?.label || "this video receipt capture";
+  if (!eventId || !path) return;
+  if (!window.confirm(`Delete ${label}? This removes the mistaken screenshot from OG and order history.`)) return;
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Deleting...";
+  try {
+    const { data, error } = await supabase.rpc("delete_ebay_video_receipt_capture", {
+      _event_id: eventId,
+      _bucket: bucket,
+      _path: path,
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw error;
+    if (!Number(data?.removed_count || 0)) {
+      throw new Error("Supabase did not remove that capture. The stored path may not match the history photo.");
+    }
+    const { error: storageError } = await supabase.storage.from(bucket).remove([path]);
+    if (storageError) {
+      console.warn("History video receipt capture was removed from coordination, but storage cleanup failed:", storageError);
+    }
+    await loadOrderHistory();
+    if (storageError) {
+      alert(`Video receipt capture was removed from coordination, but storage cleanup needs admin review: ${storageError.message || "Storage API rejected deletion."}`);
+    }
+  } catch (error) {
+    console.error("Could not delete history video receipt capture:", error);
+    button.disabled = false;
+    button.textContent = originalText;
+    alert(error.message || "Could not delete that video receipt capture.");
+  }
 }
 
 function getFilteredEvents() {

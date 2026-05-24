@@ -1065,6 +1065,12 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+.order-task-photo-entry {
+  position: relative;
+  display: inline-grid;
+  gap: 6px;
+}
+
 .order-task-photo-strip button {
   min-height: 34px;
   border: 1px solid rgba(125, 240, 178, 0.26);
@@ -1118,6 +1124,17 @@ textarea:focus {
   font-size: 0.7rem;
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.order-task-photo-delete {
+  justify-self: end;
+  min-height: 0 !important;
+  padding: 4px 9px;
+  border-color: rgba(255, 122, 122, 0.42) !important;
+  background: rgba(255, 122, 122, 0.1) !important;
+  color: #ffc4c4 !important;
+  font-size: 0.68rem;
+  line-height: 1;
 }
 
 .order-task-context {

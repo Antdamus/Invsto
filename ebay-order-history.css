@@ -1221,6 +1221,12 @@ textarea {
   gap: 10px;
 }
 
+.history-video-receipt-entry {
+  display: inline-grid;
+  gap: 6px;
+  width: min(320px, 100%);
+}
+
 .history-video-receipt-thumb {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
@@ -1272,6 +1278,20 @@ textarea {
   font-weight: 800;
   line-height: 1.25;
   overflow-wrap: anywhere;
+}
+
+.history-video-receipt-delete {
+  justify-self: end;
+  min-height: 0;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 122, 122, 0.42);
+  border-radius: 999px;
+  background: rgba(255, 122, 122, 0.1);
+  color: #ffc4c4;
+  font-size: 0.68rem;
+  font-weight: 950;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .evidence-viewer-card {
