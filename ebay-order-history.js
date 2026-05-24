@@ -410,12 +410,69 @@ function getEvidencePhotoPath(photo = {}) {
   return photo.path || photo.storage_path || photo.source_path || "";
 }
 
+const CANCELLATION_EVIDENCE_NOTE_MARKER = "Cancellation proof saved in OG evidence storage:";
+
+function trimStoragePathToken(value = "") {
+  return String(value || "").trim().replace(/[),.;]+$/g, "");
+}
+
+function getCancellationEvidencePhotosFromText(text = "", source = {}) {
+  const note = String(text || "");
+  if (!note.includes(CANCELLATION_EVIDENCE_NOTE_MARKER) && !note.includes("pending-order-cancellations/")) return [];
+
+  const photos = [];
+  const seen = new Set();
+  const pathPattern = /\b(order-evidence-photos)\/([^\s]+?\.(?:png|jpe?g|webp|gif|heic|heif))/gi;
+  let match = pathPattern.exec(note);
+  while (match) {
+    const bucket = match[1];
+    const path = trimStoragePathToken(match[2]);
+    const key = `${bucket}:${path}`;
+    if (path && !seen.has(key)) {
+      seen.add(key);
+      photos.push({
+        bucket,
+        path,
+        label: "Cancellation proof",
+        signed_by_email: source.signed_by_email || source.fulfilled_by_email || source.created_by_email || "",
+        created_at: source.created_at || source.fulfilled_at || "",
+        metadata: {
+          source: "cancellation_proof_note",
+        },
+      });
+    }
+    match = pathPattern.exec(note);
+  }
+  return photos;
+}
+
+function getDisplayHistoryNote(note = "") {
+  const text = String(note || "");
+  const markerIndex = text.indexOf(CANCELLATION_EVIDENCE_NOTE_MARKER);
+  if (markerIndex < 0) return text;
+
+  const before = text.slice(0, markerIndex).trimEnd();
+  const after = text
+    .slice(markerIndex + CANCELLATION_EVIDENCE_NOTE_MARKER.length)
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      return !/^(?:\d+\.\s*)?order-evidence-photos\/[^\s]+/i.test(trimmed);
+    })
+    .join("\n")
+    .trim();
+
+  return [before, after].filter(Boolean).join("\n\n");
+}
+
 function getEventEvidencePhotos(event) {
   const photos = [
     ...(Array.isArray(event?.evidence_photos) ? event.evidence_photos : []),
     ...(Array.isArray(event?.payload?.evidence_photos) ? event.payload.evidence_photos : []),
     ...(Array.isArray(event?.label_metadata?.evidence_photos) ? event.label_metadata.evidence_photos : []),
     ...(Array.isArray(event?.photo_attachments) ? event.photo_attachments : []),
+    ...getCancellationEvidencePhotosFromText(event?.notes, event),
   ];
   return photos
     .map((photo) => ({
@@ -426,6 +483,13 @@ function getEventEvidencePhotos(event) {
       created_at: photo?.created_at || event?.created_at || "",
     }))
     .filter((photo) => photo?.bucket && photo?.path);
+}
+
+function getLineCancellationEvidencePhotos(line = {}) {
+  return getCancellationEvidencePhotosFromText(line.notes, {
+    signed_by_email: line.fulfilled_by_email,
+    created_at: line.fulfilled_at,
+  });
 }
 
 function isVideoReceiptEvidencePhoto(photo = {}) {
@@ -2287,7 +2351,10 @@ function getHistoryGroupStatusClass(group) {
 
 function getHistoryGroupEvidencePhotos(group) {
   const seen = new Set();
-  return group.events.flatMap(getEventEvidencePhotos).filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
+  return [
+    ...(group.events || []).flatMap(getEventEvidencePhotos),
+    ...(group.lines || []).flatMap(getLineCancellationEvidencePhotos),
+  ].filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
     const key = `${photo.bucket}:${photo.path}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -2702,7 +2769,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-line-row">
             <div>
               <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(line.notes || "No notes")}</small>
+              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>
                 <span>${escapeHtml(line.fulfilled_by_email || "Unknown worker")}</span>
@@ -2725,7 +2792,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               <article>
                 <strong>${escapeHtml(getEventLabel(event))}</strong>
                 <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
-                <p>${escapeHtml(event.notes || "No note recorded.")}</p>
+                <p>${escapeHtml(getDisplayHistoryNote(event.notes) || "No note recorded.")}</p>
               </article>
             `).join("")}
           </div>
@@ -2981,7 +3048,7 @@ function renderEventList() {
       : event.category === "revert" || event.category === "label" || event.category === "task"
       ? "is-admin"
       : event.action === "cancelled" ? "is-cancelled" : "";
-    const eventDetail = event.notes || event.task_question || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
+    const eventDetail = getDisplayHistoryNote(event.notes) || event.task_question || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
     return `
       <article class="event-card">
         <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>

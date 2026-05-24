@@ -5698,6 +5698,36 @@ function openWorkerCancelOrderModal(options = {}) {
   });
 }
 
+function isRpcSchemaCacheMiss(error, functionName) {
+  const text = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code,
+  ].filter(Boolean).join(" ");
+  return Boolean(error)
+    && new RegExp(functionName, "i").test(text)
+    && /schema cache|could not find|not found|PGRST202/i.test(text);
+}
+
+function buildCancellationEvidenceFallbackNote(note, savedEvidencePhotos = []) {
+  if (!savedEvidencePhotos.length) return note;
+  const evidenceLines = savedEvidencePhotos
+    .map((photo, index) => {
+      const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+      const path = photo.path || "";
+      return path ? `${index + 1}. ${bucket}/${path}` : "";
+    })
+    .filter(Boolean);
+  if (!evidenceLines.length) return note;
+  return [
+    note,
+    "",
+    "Cancellation proof saved in OG evidence storage:",
+    ...evidenceLines,
+  ].join("\n");
+}
+
 async function confirmWorkerCancelOrder() {
   if (state.busy) return;
   const errorEl = $("worker-cancel-order-error");
@@ -5754,17 +5784,25 @@ async function confirmWorkerCancelOrder() {
       _evidence_photos: savedEvidencePhotos,
     };
     let { data, error } = await supabase.rpc("cancel_ebay_order_lines", cancellationPayload);
-    const errorText = String(error?.message || error?.details || "");
     const canRetryLegacyCancel =
-      error
-      && savedEvidencePhotos.length === 0
-      && /cancel_ebay_order_lines/i.test(errorText)
-      && /schema cache|could not find/i.test(errorText);
+      isRpcSchemaCacheMiss(error, "cancel_ebay_order_lines");
 
     if (canRetryLegacyCancel) {
       const legacyPayload = { ...cancellationPayload };
       delete legacyPayload._evidence_photos;
+      if (savedEvidencePhotos.length) {
+        legacyPayload._notes = buildCancellationEvidenceFallbackNote(note, savedEvidencePhotos);
+        setWorkerCancelPhotoStatus(
+          "The live database is using the older cancellation RPC. Saving the proof links in the signed note and completing the cancellation.",
+          "info"
+        );
+      }
       ({ data, error } = await supabase.rpc("cancel_ebay_order_lines", legacyPayload));
+      if (isRpcSchemaCacheMiss(error, "cancel_ebay_order_lines")) {
+        const minimalLegacyPayload = { ...legacyPayload };
+        delete minimalLegacyPayload._checkout_store_id;
+        ({ data, error } = await supabase.rpc("cancel_ebay_order_lines", minimalLegacyPayload));
+      }
     }
     if (error) throw error;
 
