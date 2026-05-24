@@ -5248,7 +5248,7 @@ function getEbayReturnSyncUrl() {
 }
 
 function setReturnApiSyncButtonsDisabled(disabled) {
-  ["check-ebay-return-api-sync", "run-ebay-return-api-sync"].forEach((id) => {
+  ["check-ebay-return-api-sync", "run-ebay-return-api-sync", "clean-ebay-return-api-sync"].forEach((id) => {
     const button = $(id);
     if (button) button.disabled = disabled;
   });
@@ -5300,11 +5300,17 @@ function buildReturnApiSyncSummary(response = {}) {
     duplicateResolvedCount: 0,
     messagesImported: Number(response.messagesImported || 0),
     filesSeen: Number(response.filesSeen || 0),
+    staleCasesClosed: Number(response.staleCasesClosed || 0),
+    staleTasksResolved: Number(response.staleTasksResolved || 0),
     importedReturns: results.filter((entry) => entry?.matched === true),
     unmatchedReturns,
     failedReturns,
     message: response.error
       ? response.error
+      : response.cleanupClosed
+        ? (response.dryRun
+          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would be hidden from the open queue.`
+          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} and resolved ${Number(response.staleTasksResolved || 0).toLocaleString()} task${Number(response.staleTasksResolved || 0) === 1 ? "" : "s"}.`)
       : response.dryRun
         ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
         : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
@@ -5343,6 +5349,42 @@ async function runEbayReturnApiSync(dryRun = true) {
     console.error("eBay return API sync failed:", error);
     setLastReturnImportSummary(buildReturnApiSyncSummary({ ok: false, error: error.message || "Return sync failed.", errors: 1 }));
     setReturnTaskSaveStatus(error.message || "Could not sync eBay returns.", "error");
+  } finally {
+    setReturnApiSyncButtonsDisabled(false);
+  }
+}
+
+async function runEbayReturnApiCleanup() {
+  if (!isAdminUser()) {
+    alert("Only admins can clean eBay returns from the API.");
+    return;
+  }
+  const confirmed = window.confirm("Clean the return queue so only returns still open on eBay remain pending? This closes local return cases and resolves tasks that no longer appear in eBay's open-return list.");
+  if (!confirmed) return;
+
+  setReturnApiSyncButtonsDisabled(true);
+  setReturnTaskSaveStatus("Cleaning closed eBay returns...", "info");
+  try {
+    const response = await postEbayReturnSyncPayload({
+      dryRun: false,
+      limit: 500,
+      daysBack: 540,
+      cleanupClosed: true,
+    });
+    const summary = buildReturnApiSyncSummary(response);
+    setLastReturnImportSummary(summary);
+    if (!response.ok && response.error) throw new Error(response.error);
+    await loadReturnQueue();
+    setReturnTaskSaveStatus(
+      response.ok
+        ? "Closed eBay returns cleaned from the pending queue."
+        : "Cleaner finished with issues. Review the audit panel.",
+      response.ok ? "success" : "error"
+    );
+  } catch (error) {
+    console.error("eBay return cleaner failed:", error);
+    setLastReturnImportSummary(buildReturnApiSyncSummary({ ok: false, error: error.message || "Return cleaner failed.", errors: 1, cleanupClosed: true }));
+    setReturnTaskSaveStatus(error.message || "Could not clean closed eBay returns.", "error");
   } finally {
     setReturnApiSyncButtonsDisabled(false);
   }
@@ -6010,6 +6052,7 @@ function setupListeners() {
   $("refresh-return-queue")?.addEventListener("click", loadReturnQueue);
   $("check-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(true));
   $("run-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(false));
+  $("clean-ebay-return-api-sync")?.addEventListener("click", runEbayReturnApiCleanup);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
   $("clear-return-test-imports")?.addEventListener("click", clearReturnImportTestData);

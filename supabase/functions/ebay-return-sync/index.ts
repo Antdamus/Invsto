@@ -36,6 +36,14 @@ type MatchResult = {
   lines: any[];
 };
 
+type ReturnSummaryFetch = {
+  summaries: any[];
+  totalEntries: number | null;
+  truncated: boolean;
+  from: string;
+  to: string;
+};
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
@@ -554,13 +562,14 @@ async function ebayOptionalRequest(token: string, path: string): Promise<{ ok: t
   }
 }
 
-async function fetchReturnSummaries(token: string, body: JsonRecord): Promise<any[]> {
+async function fetchReturnSummaries(token: string, body: JsonRecord): Promise<ReturnSummaryFetch> {
   const limit = Math.min(Math.max(1, Math.trunc(Number(body.limit || 100))), MAX_RETURN_LIMIT);
   const daysBack = Math.min(Math.max(1, Math.trunc(Number(body.daysBack || DEFAULT_DAYS_BACK))), 540);
   const includeClosed = body.includeClosed === true;
   const from = toIsoDate(body.from) || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
   const to = toIsoDate(body.to) || new Date().toISOString();
   const summaries: any[] = [];
+  let totalEntries: number | null = null;
 
   for (let offset = 0; summaries.length < limit; offset += PAGE_LIMIT) {
     const params = new URLSearchParams({
@@ -575,11 +584,17 @@ async function fetchReturnSummaries(token: string, body: JsonRecord): Promise<an
     const payload = await ebayRequest(token, `/post-order/v2/return/search?${params.toString()}`);
     const page = Array.isArray(payload?.members) ? payload.members : [];
     summaries.push(...page);
-    const totalEntries = Number(payload?.paginationOutput?.totalEntries || 0);
+    totalEntries = Number(payload?.paginationOutput?.totalEntries || 0);
     if (!page.length || summaries.length >= totalEntries) break;
   }
 
-  return summaries.slice(0, limit);
+  return {
+    summaries: summaries.slice(0, limit),
+    totalEntries,
+    truncated: totalEntries != null && totalEntries > summaries.length,
+    from,
+    to,
+  };
 }
 
 function exactLineKey(orderId: string, itemNumber: string, transactionId: string): string {
@@ -996,6 +1011,99 @@ async function importMessages(supabase: any, prepared: PreparedReturn, caseRow: 
   return (data || []).length;
 }
 
+async function cleanupClosedReturnCases(
+  supabase: any,
+  openReturnIds: Set<string>,
+  dryRun: boolean,
+): Promise<{ casesClosed: number; tasksResolved: number; results: any[] }> {
+  const { data: cases, error: caseError } = await supabase
+    .from("ebay_return_cases")
+    .select("id,ebay_return_id,order_number,buyer_username,status,raw_payload")
+    .not("ebay_return_id", "is", null)
+    .limit(1000);
+  if (caseError) throw caseError;
+
+  const staleCases = (cases || []).filter((row: any) => {
+    const returnId = toText(row.ebay_return_id || row.raw_payload?.ebayReturnId);
+    return returnId && !openReturnIds.has(returnId);
+  });
+  if (!staleCases.length) return { casesClosed: 0, tasksResolved: 0, results: [] };
+
+  const staleCaseIds = staleCases.map((row: any) => row.id).filter(Boolean);
+  const casesToClose = staleCases.filter((row: any) => !["closed", "cancelled"].includes(toText(row.status)));
+  const caseIdsToClose = casesToClose.map((row: any) => row.id).filter(Boolean);
+  const { data: tasks, error: taskError } = await supabase
+    .from("ebay_return_tasks")
+    .select("id,return_case_id,status")
+    .in("return_case_id", staleCaseIds)
+    .not("status", "in", "(resolved,cancelled)");
+  if (taskError) throw taskError;
+
+  const staleTasks = tasks || [];
+  const cleanupResults = staleCases.map((row: any) => ({
+    returnId: row.ebay_return_id || row.raw_payload?.ebayReturnId || "",
+    orderNumber: row.order_number || "",
+    buyerUsername: row.buyer_username || "",
+    status: ["closed", "cancelled"].includes(toText(row.status))
+      ? "already_closed"
+      : dryRun ? "would_close" : "closed",
+    caseId: row.id,
+    previousStatus: row.status,
+    staleTaskCount: staleTasks.filter((task: any) => task.return_case_id === row.id).length,
+  }));
+
+  if (dryRun) {
+    return { casesClosed: casesToClose.length, tasksResolved: staleTasks.length, results: cleanupResults };
+  }
+
+  const now = new Date().toISOString();
+  if (caseIdsToClose.length) {
+    const { error: closeError } = await supabase
+      .from("ebay_return_cases")
+      .update({
+        status: "closed",
+        closed_at: now,
+        updated_at: now,
+      })
+      .in("id", caseIdsToClose);
+    if (closeError) throw closeError;
+  }
+
+  const staleTaskIds = staleTasks.map((task: any) => task.id).filter(Boolean);
+  if (staleTaskIds.length) {
+    const { error: resolveError } = await supabase
+      .from("ebay_return_tasks")
+      .update({
+        status: "resolved",
+        resolved_at: now,
+        resolved_by_email: "ebay-return-sync",
+        resolution_notes: "Resolved by eBay return cleaner because this return is no longer open on eBay.",
+        updated_at: now,
+      })
+      .in("id", staleTaskIds);
+    if (resolveError) throw resolveError;
+
+    const { error: eventError } = await supabase
+      .from("ebay_return_task_events")
+      .insert(staleTasks.map((task: any) => ({
+        task_id: task.id,
+        return_case_id: task.return_case_id,
+        action: "resolved",
+        old_status: task.status,
+        new_status: "resolved",
+        notes: "Auto-resolved by eBay return cleaner: return no longer appears in eBay open returns.",
+        signed_by_email: "ebay-return-sync",
+        payload: {
+          source: "ebay_return_api_cleanup",
+          cleanedAt: now,
+        },
+      })));
+    if (eventError) throw eventError;
+  }
+
+  return { casesClosed: casesToClose.length, tasksResolved: staleTasks.length, results: cleanupResults };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse(405, { ok: false, error: "Method not allowed" });
@@ -1010,6 +1118,7 @@ Deno.serve(async (req) => {
   try {
     body = await req.json().catch(() => ({}));
     const dryRun = body.dryRun !== false;
+    const cleanupClosed = body.cleanupClosed === true;
     const { data: run, error: runError } = await supabase
       .from("ebay_return_sync_runs")
       .insert({ dry_run: dryRun, status: "running" })
@@ -1019,7 +1128,8 @@ Deno.serve(async (req) => {
     runId = run.id;
 
     const token = await getEbayAccessToken();
-    const summaries = await fetchReturnSummaries(token, body);
+    const fetchResult = await fetchReturnSummaries(token, body);
+    const summaries = fetchResult.summaries;
     const preparedReturns: PreparedReturn[] = [];
     const warnings: any[] = [];
 
@@ -1050,6 +1160,8 @@ Deno.serve(async (req) => {
     let messagesImported = 0;
     let filesSeen = 0;
     let errors = 0;
+    let staleCasesClosed = 0;
+    let staleTasksResolved = 0;
 
     for (const prepared of preparedReturns) {
       try {
@@ -1126,6 +1238,37 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (cleanupClosed) {
+      if (fetchResult.truncated) {
+        warnings.push({
+          reason: "cleanup_skipped_truncated_open_return_search",
+          totalEntries: fetchResult.totalEntries,
+          fetched: preparedReturns.length,
+        });
+      } else {
+        try {
+          const cleanup = await cleanupClosedReturnCases(
+            supabase,
+            new Set(preparedReturns.map((entry) => entry.returnId).filter(Boolean)),
+            dryRun,
+          );
+          staleCasesClosed = cleanup.casesClosed;
+          staleTasksResolved = cleanup.tasksResolved;
+          results.push(...cleanup.results.map((entry) => ({
+            ...entry,
+            cleanup: true,
+          })));
+        } catch (error) {
+          errors += 1;
+          results.push({
+            status: "error",
+            cleanup: true,
+            error: compactError(error),
+          });
+        }
+      }
+    }
+
     const completed = {
       status: errors ? "failed" : "completed",
       returns_seen: preparedReturns.length,
@@ -1152,6 +1295,9 @@ Deno.serve(async (req) => {
       tasksUpdated,
       messagesImported,
       filesSeen,
+      cleanupClosed,
+      staleCasesClosed,
+      staleTasksResolved,
       errors,
       warnings,
       results,
