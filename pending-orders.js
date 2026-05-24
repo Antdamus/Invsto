@@ -2508,6 +2508,20 @@ function isActiveOrderTask(task = {}) {
   ].includes(String(task.status || "").toLowerCase());
 }
 
+function isHiddenOrderCoordinationTask(task = {}, events = []) {
+  const status = String(task.status || "").toLowerCase();
+  if (task?.metadata?.history_removed_at) return true;
+  if (["cancelled", "canceled"].includes(status)) return true;
+  return isClearedVideoReceiptCaptureTask(task, events);
+}
+
+function isVisibleActiveAssignedOrderCoordinationTask(task = {}, events = []) {
+  if (isHiddenOrderCoordinationTask(task, events)) return false;
+  if (isVideoReceiptCaptureOrderTask(task)) return true;
+  if (!isActiveOrderTask(task)) return false;
+  return Boolean(task.assigned_to_user_id || task.assigned_to_email);
+}
+
 function rememberOrderTaskAssignment(task = {}) {
   if (!isActiveOrderTask(task) || isVideoReceiptCaptureOrderTask(task) || !(task.assigned_to_user_id || task.assigned_to_email)) return;
   const lineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
@@ -2927,7 +2941,7 @@ function renderOrderTaskPanel(options = {}) {
 
   const visibleOrderTasks = state.selectedOrderTasks.filter((task) => {
     const events = state.selectedOrderTaskEvents.get(task.id) || [];
-    return !isClearedVideoReceiptCaptureTask(task, events);
+    return isVisibleActiveAssignedOrderCoordinationTask(task, events);
   });
   const activeCount = visibleOrderTasks.filter(isActiveOrderTask).length;
   if (summary) {
@@ -6201,6 +6215,14 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     : `Confirming and removing ${staged.length} packed item(s)...`);
 
   try {
+    const completedLineIds = [...new Set((liveItems.length && !staged.length
+      ? [state.selectedLine?.id]
+      : staged.map((entry) => entry.line?.id))
+      .filter(Boolean))];
+    const completedOrderIds = [...new Set((liveItems.length && !staged.length
+      ? [state.selectedLine?.order_id]
+      : staged.map((entry) => entry.line?.order_id))
+      .filter(Boolean))];
     const completedOrderNumbers = [...new Set((liveItems.length && !staged.length
       ? [state.selectedLine?.order?.order_number]
       : staged.map((entry) => entry.line?.order?.order_number))
@@ -6242,8 +6264,14 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     }
 
     await bumpInventoryVersion([...new Set(changedItemIds)]);
+    const completedTaskCount = await completeFulfilledShippingTasksForLines({
+      lineIds: completedLineIds,
+      orderIds: completedOrderIds,
+    });
     state.stagedFulfillments.clear();
-    setStatus("Packed bundle confirmed. Stock was removed and signed.", "info");
+    setStatus(completedTaskCount
+      ? "Packed bundle confirmed. Shipment task moved to history."
+      : "Packed bundle confirmed. Stock was removed and signed.", "info");
     await loadOrders();
     postEbayPendingQueueChanged({
       action: liveItems.length && !staged.length ? "live_lot_fulfillment" : "inventory_fulfillment",
@@ -6267,6 +6295,74 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
     state.busy = false;
     $("fulfill-order").disabled = false;
     $("stage-current-line").disabled = false;
+  }
+}
+
+async function completeFulfilledShippingTasksForLines({ lineIds = [], orderIds = [] } = {}) {
+  const fulfilledLineIds = new Set((lineIds || []).filter(Boolean));
+  const fulfilledOrderIds = new Set((orderIds || []).filter(Boolean));
+  if (!fulfilledLineIds.size && !fulfilledOrderIds.size) return 0;
+
+  const taskMap = new Map();
+  const selectFields = "id, order_id, order_line_ids, task_type, status, assigned_to_user_id, assigned_to_email, title";
+  const activeStatuses = ["assigned_for_shipping", "in_progress", "waiting_on_worker"];
+  const taskTypes = ["pending_shipping", "pending_packaging"];
+
+  const addTasks = (tasks = []) => {
+    tasks.forEach((task) => {
+      if (task?.id) taskMap.set(task.id, task);
+    });
+  };
+
+  try {
+    if (fulfilledLineIds.size) {
+      const { data, error } = await supabase
+        .from("ebay_order_tasks")
+        .select(selectFields)
+        .in("task_type", taskTypes)
+        .in("status", activeStatuses)
+        .overlaps("order_line_ids", [...fulfilledLineIds]);
+      if (error) throw error;
+      addTasks(data);
+    }
+
+    if (fulfilledOrderIds.size) {
+      const { data, error } = await supabase
+        .from("ebay_order_tasks")
+        .select(selectFields)
+        .in("task_type", taskTypes)
+        .in("status", activeStatuses)
+        .in("order_id", [...fulfilledOrderIds]);
+      if (error) throw error;
+      addTasks(data);
+    }
+
+    const matchingTasks = [...taskMap.values()].filter((task) => {
+      if (!isAdminUser() && task.assigned_to_user_id && task.assigned_to_user_id !== state.user?.id) return false;
+      const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids.filter(Boolean) : [];
+      if (taskLineIds.length) return taskLineIds.every((lineId) => fulfilledLineIds.has(lineId));
+      return Boolean(task.order_id && fulfilledOrderIds.has(task.order_id));
+    });
+
+    let completedCount = 0;
+    for (const task of matchingTasks) {
+      const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
+        _task_id: task.id,
+        _note: "Shipment fulfilled from Pending Orders.",
+        _assigned_to_user_id: null,
+        _status: "shipped_completed",
+        _priority: null,
+        _photo_attachments: [],
+        _signed_by_email: state.user?.email || state.employee?.display_name || "",
+        _due_at: null,
+      });
+      if (error) throw error;
+      completedCount += 1;
+    }
+    return completedCount;
+  } catch (error) {
+    console.warn("Could not close matching shipment task after fulfillment:", error);
+    return 0;
   }
 }
 

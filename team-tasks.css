@@ -514,10 +514,90 @@ body {
   gap: 8px;
 }
 
+.team-task-line-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.team-task-line-head em {
+  font-style: normal;
+  color: var(--task-green);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.team-task-line-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.team-task-line-facts span {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .team-task-line span {
   display: block;
   color: var(--task-muted);
   font-weight: 800;
+}
+
+.team-task-line-receipt {
+  margin-top: 8px;
+}
+
+.team-task-line-receipt a,
+.team-task-line-receipt span {
+  color: var(--task-gold);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.team-task-video-receipt-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.team-task-video-receipt-thumb {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: min(320px, 100%);
+  min-height: 62px;
+  padding: 7px;
+  border: 1px solid rgba(241, 214, 155, 0.5);
+  border-radius: 10px;
+  background: rgba(241, 214, 155, 0.08);
+  color: var(--task-text);
+  cursor: zoom-in;
+  text-align: left;
+}
+
+.team-task-video-receipt-thumb img {
+  width: 54px;
+  height: 46px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.team-task-video-receipt-thumb span {
+  color: var(--task-muted);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .team-task-more,
@@ -637,6 +717,14 @@ body.modal-open {
   width: min(1100px, 100%);
 }
 
+.team-task-photo-viewer-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .team-task-photo-viewer-frame {
   display: grid;
   place-items: center;
@@ -652,6 +740,10 @@ body.modal-open {
   max-width: 100%;
   max-height: min(68vh, 760px);
   object-fit: contain;
+  touch-action: none;
+  transform-origin: center center;
+  transition: transform 120ms ease;
+  user-select: none;
 }
 
 .team-task-photo-viewer-caption {
