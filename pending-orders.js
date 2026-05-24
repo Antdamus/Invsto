@@ -61,6 +61,9 @@ const state = {
   orderTaskSignedUrls: new Map(),
   orderVideoReceipts: new Map(),
   videoReceiptEvidenceByLineId: new Map(),
+  queueVideoReceiptTasks: [],
+  queueVideoReceiptTaskEvents: new Map(),
+  queueVideoReceiptLoadedOrderIds: new Set(),
   evidencePhotoViewerZoom: 1,
   evidencePhotoViewerPanX: 0,
   evidencePhotoViewerPanY: 0,
@@ -1513,6 +1516,9 @@ async function loadOrders() {
   }
 
   await hydrateOrderVideoReceipts(data);
+  state.queueVideoReceiptTasks = [];
+  state.queueVideoReceiptTaskEvents = new Map();
+  state.queueVideoReceiptLoadedOrderIds.clear();
   state.orders = data.map(normalizeLine);
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
@@ -1773,6 +1779,41 @@ function openBuyerGroupSelectedEbayLabelPages(group) {
   openEbayLabelPagesForOrderNumbers(getUniqueOrderNumbersForLines(selectedLines));
 }
 
+function getNoInventoryLineIdsForGroupAction(group) {
+  const noInventoryLines = group.lines.filter(isNoInventoryCompletionLine);
+  const selectedNoInventoryLines = noInventoryLines.filter((line) => state.adminSelectedLineIds.has(line.id));
+  return (selectedNoInventoryLines.length ? selectedNoInventoryLines : noInventoryLines).map((line) => line.id);
+}
+
+function openBuyerGroupNoInventoryModal(group) {
+  const lineIds = getNoInventoryLineIdsForGroupAction(group);
+  if (!lineIds.length) {
+    setStatus("No pending untouched lines in this card can be completed without inventory.", "error");
+    return;
+  }
+
+  const firstLine = group.lines.find((line) => line.id === lineIds[0]) || group.lines.find(isNoInventoryCompletionLine);
+  if (!firstLine) {
+    setStatus("No pending untouched lines in this card can be completed without inventory.", "error");
+    return;
+  }
+
+  selectOrderLine(firstLine.id, { openDetail: false });
+  setTimeout(() => openWorkerNoInventoryModal({ lineIds }), 80);
+}
+
+function openBuyerGroupInventoryCompletion(group) {
+  const selectedLines = group.lines.filter((line) => state.adminSelectedLineIds.has(line.id) && isOpenOrderLine(line));
+  const nextLine = selectedLines[0]
+    || group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id))
+    || group.lines.find(isOpenOrderLine);
+  if (!nextLine) {
+    setStatus("No open pending line in this card can be completed from inventory.", "error");
+    return;
+  }
+  selectOrderLine(nextLine.id, { openDetail: true });
+}
+
 function pruneAdminSelection() {
   const validIds = new Set(state.orders.filter(isAdminCloseoutSelectable).map((line) => line.id));
   [...state.adminSelectedLineIds].forEach((lineId) => {
@@ -1887,7 +1928,9 @@ function renderOrders() {
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
           ${isAdminUser() ? `<span class="buyer-card-value">${formatMoney(group.totalValue)}</span>` : ""}
+          <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
           <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
+          <button type="button" class="buyer-card-no-inventory-btn secondary-btn caution-btn" data-buyer-no-inventory-key="${escapeHtml(group.key)}" ${getNoInventoryLineIdsForGroupAction(group).length ? "" : "disabled"}>Complete Without Inventory</button>
           <span class="status-badge">${group.pendingCount} pending</span>
         </div>
       </div>
@@ -1910,7 +1953,9 @@ function renderOrders() {
     const lineList = card.querySelector(".buyer-line-list");
     const buyerLabelButton = card.querySelector("[data-buyer-label-key]");
     const groupCheckbox = card.querySelector("[data-admin-group-select]");
+    const completeButton = card.querySelector("[data-buyer-complete-key]");
     const taskButton = card.querySelector("[data-buyer-task-key]");
+    const noInventoryButton = card.querySelector("[data-buyer-no-inventory-key]");
     if (groupCheckbox) {
       const selectable = group.lines.filter(isAdminCloseoutSelectable);
       const selected = selectable.filter((line) => state.adminSelectedLineIds.has(line.id));
@@ -1929,28 +1974,27 @@ function renderOrders() {
         });
       }
     }
+    completeButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openBuyerGroupInventoryCompletion(group);
+    });
     taskButton?.addEventListener("click", (event) => {
       event.stopPropagation();
       const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
       if (!nextLine) return;
-      selectOrderLine(nextLine.id);
+      selectOrderLine(nextLine.id, { openDetail: false });
       setTimeout(() => openOrderTaskModal(), 80);
     });
-
-    card.addEventListener("click", (event) => {
-      if (event.target.closest("button")) return;
-      if (event.target.closest("input")) return;
-      if (event.target.closest(".buyer-line-btn")) return;
-      const nextLine = group.lines.find((line) => isOpenOrderLine(line) && !state.stagedFulfillments.has(line.id)) || group.lines[0];
-      if (nextLine) selectOrderLine(nextLine.id);
+    noInventoryButton?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openBuyerGroupNoInventoryModal(group);
     });
 
     group.lines.forEach((line) => {
       const order = line.order || {};
       const receiptLink = getOrderVideoReceiptLink(line);
+      const canActOnLine = isOpenOrderLine(line);
       const button = document.createElement("div");
-      button.setAttribute("role", "button");
-      button.tabIndex = 0;
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select pending line">
@@ -1959,11 +2003,21 @@ function renderOrders() {
       ` : "";
       button.innerHTML = `
         ${adminSelect}
-        <span>
-          <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-          <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
-          ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
-          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>` : ""}
+        <span class="buyer-line-main">
+          <span class="buyer-line-copy">
+            <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+            <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+            ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
+          </span>
+          <span class="buyer-line-actions">
+            <button type="button" class="secondary-btn buyer-line-action-btn" data-line-open-label="${escapeHtml(line.id)}" ${normalizeEbayOrderNumber(order.order_number) ? "" : "disabled"}>Get Label</button>
+            <button type="button" class="secondary-btn buyer-line-action-btn task-action-btn" data-line-assign-task="${escapeHtml(line.id)}" ${line.order_id ? "" : "disabled"}>Assign Task</button>
+            <button type="button" class="secondary-btn buyer-line-action-btn danger-btn" data-line-cancel="${escapeHtml(line.id)}" ${canActOnLine ? "" : "disabled"}>Cancel</button>
+          </span>
+          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Open video receipt</a>` : ""}
+          <span class="queue-video-receipt-evidence" data-queue-video-evidence="${escapeHtml(line.id)}">
+            <span class="queue-video-receipt-empty">Loading saved video receipt screenshot...</span>
+          </span>
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
@@ -1971,11 +2025,19 @@ function renderOrders() {
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
       button.querySelectorAll("a").forEach((link) => link.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink)));
-      button.addEventListener("click", () => selectOrderLine(line.id));
-      button.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        selectOrderLine(line.id);
+      button.querySelectorAll(".buyer-line-action-btn").forEach((actionButton) => {
+        actionButton.addEventListener("click", (event) => event.stopPropagation());
+      });
+      button.querySelector("[data-line-open-label]")?.addEventListener("click", () => {
+        openEbayLabelPagesForOrderNumbers([order.order_number]);
+      });
+      button.querySelector("[data-line-assign-task]")?.addEventListener("click", () => {
+        selectOrderLine(line.id, { openDetail: false });
+        setTimeout(() => openOrderTaskModal(), 80);
+      });
+      button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
+        selectOrderLine(line.id, { openDetail: false });
+        setTimeout(() => openWorkerCancelOrderModal({ lineIds: [line.id] }), 80);
       });
       lineList.appendChild(button);
     });
@@ -1984,9 +2046,11 @@ function renderOrders() {
   });
 
   if (window.lucide) window.lucide.createIcons();
+  hydrateQueueVideoReceiptEvidenceThumbnails(groups.flatMap((group) => group.lines));
 }
 
-function selectOrderLine(lineId) {
+function selectOrderLine(lineId, options = {}) {
+  const shouldOpenDetail = options.openDetail !== false;
   const line = state.orders.find((entry) => entry.id === lineId);
   if (!line) return;
   clearItemSearchTimer();
@@ -2004,9 +2068,11 @@ function selectOrderLine(lineId) {
   state.stockRows = [];
   state.selectedStockRow = null;
 
-  $("selected-order-empty")?.classList.add("hidden");
-  $("fulfillment-workflow")?.classList.remove("hidden");
-  openMobileOrderDetail();
+  if (shouldOpenDetail) {
+    $("selected-order-empty")?.classList.add("hidden");
+    $("fulfillment-workflow")?.classList.remove("hidden");
+    openMobileOrderDetail();
+  }
   renderOrders();
   renderLiveLotOrderMatches();
   renderSelectedOrder();
@@ -2021,6 +2087,7 @@ function selectOrderLine(lineId) {
 
   $("item-scan").value = "";
   updateCheckoutStoreGate();
+  if (!shouldOpenDetail) return;
   if (!state.checkoutStoreId) {
     setStatus("Select the checkout store before scanning this order.", "error");
     setTimeout(() => $("checkout-store-select")?.focus(), 80);
@@ -2034,20 +2101,23 @@ function isMobilePendingOrderLayout() {
 }
 
 function openMobileOrderDetail() {
+  document.body.classList.add("pending-order-detail-open");
   if (isMobilePendingOrderLayout()) {
     document.body.classList.add("pending-mobile-sheet-open");
   }
 }
 
 function closeMobileOrderDetail() {
-  if (!isMobilePendingOrderLayout()) return;
   clearSelection();
 }
 
 function syncMobileOrderDetailMode() {
   if (isMobilePendingOrderLayout() && state.selectedLine && !$("fulfillment-workflow")?.classList.contains("hidden")) {
+    document.body.classList.add("pending-order-detail-open");
     document.body.classList.add("pending-mobile-sheet-open");
   } else {
+    const shouldKeepDesktopDetail = state.selectedLine && !$("fulfillment-workflow")?.classList.contains("hidden");
+    document.body.classList.toggle("pending-order-detail-open", Boolean(shouldKeepDesktopDetail));
     document.body.classList.remove("pending-mobile-sheet-open");
   }
 }
@@ -2166,11 +2236,17 @@ function getVideoReceiptEvidencePhotosForLine(line = {}) {
   const livePhoto = state.videoReceiptEvidenceByLineId.get(line.id);
   if (livePhoto) photos.push(livePhoto);
 
-  state.selectedOrderTasks.forEach((task) => {
+  const taskSources = [
+    ...state.selectedOrderTasks.map((task) => ({ task, events: state.selectedOrderTaskEvents.get(task.id) || [] })),
+    ...state.queueVideoReceiptTasks.map((task) => ({ task, events: state.queueVideoReceiptTaskEvents.get(task.id) || [] })),
+  ];
+  const seenTaskIds = new Set();
+  taskSources.forEach(({ task, events }) => {
+    if (!task?.id || seenTaskIds.has(task.id)) return;
+    seenTaskIds.add(task.id);
     const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
     const taskMatchesLine = taskLineIds.length ? taskLineIds.includes(line.id) : task.order_id === line.order_id;
     if (!taskMatchesLine) return;
-    const events = state.selectedOrderTaskEvents.get(task.id) || [];
     events.forEach((event) => {
       (Array.isArray(event.photo_attachments) ? event.photo_attachments : [])
         .filter(isVideoReceiptEvidencePhoto)
@@ -2537,6 +2613,104 @@ async function ensureNoInventoryVideoReceiptTasksLoaded() {
     }
     state.selectedOrderTaskEvents.set(event.task_id, list);
   });
+}
+
+async function ensureQueueVideoReceiptTasksLoaded(lines = []) {
+  const orderIds = [...new Set((lines || []).map((line) => line?.order_id).filter(Boolean))];
+  const missingOrderIds = orderIds.filter((orderId) => !state.queueVideoReceiptLoadedOrderIds.has(orderId));
+  if (!missingOrderIds.length) return;
+
+  missingOrderIds.forEach((orderId) => state.queueVideoReceiptLoadedOrderIds.add(orderId));
+
+  const incomingTasks = [];
+  for (let index = 0; index < missingOrderIds.length; index += 100) {
+    const chunk = missingOrderIds.slice(index, index + 100);
+    const { data, error } = await supabase
+      .from("ebay_order_tasks")
+      .select("*")
+      .in("order_id", chunk)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    incomingTasks.push(...(data || []));
+  }
+
+  if (!incomingTasks.length) return;
+
+  const existingTaskIds = new Set(state.queueVideoReceiptTasks.map((task) => task.id));
+  incomingTasks.forEach((task) => {
+    if (!existingTaskIds.has(task.id)) {
+      state.queueVideoReceiptTasks.push(task);
+      existingTaskIds.add(task.id);
+    }
+  });
+
+  const taskIds = incomingTasks.map((task) => task.id).filter(Boolean);
+  if (!taskIds.length) return;
+
+  for (let index = 0; index < taskIds.length; index += 100) {
+    const chunk = taskIds.slice(index, index + 100);
+    const { data: events, error } = await supabase
+      .from("ebay_order_task_events")
+      .select("*")
+      .in("task_id", chunk)
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+
+    (events || []).forEach((event) => {
+      const list = state.queueVideoReceiptTaskEvents.get(event.task_id) || [];
+      if (!list.some((entry) => entry.id === event.id)) {
+        list.push(event);
+        list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      }
+      state.queueVideoReceiptTaskEvents.set(event.task_id, list);
+    });
+  }
+}
+
+async function hydrateQueueVideoReceiptEvidenceThumbnails(lines = []) {
+  const containers = [...document.querySelectorAll("[data-queue-video-evidence]")];
+  if (!containers.length) return;
+
+  try {
+    await ensureQueueVideoReceiptTasksLoaded(lines);
+  } catch (error) {
+    console.warn("Could not load video receipt screenshots for the queue:", error);
+    return;
+  }
+
+  await Promise.all(containers.map(async (container) => {
+    const line = (lines || []).find((entry) => entry.id === container.dataset.queueVideoEvidence);
+    if (!line?.id) return;
+    const photos = getVideoReceiptEvidencePhotosForLine(line);
+    if (!photos.length) {
+      container.innerHTML = `<span class="queue-video-receipt-empty">No saved video receipt screenshot yet.</span>`;
+      return;
+    }
+    const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));
+    container.innerHTML = hydrated.map((photo, index) => {
+      const actor = photo.signed_by_email || getVideoReceiptAuditActor();
+      const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
+      const auditText = photo.auditText || `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
+      return `
+        <button type="button" class="video-receipt-evidence-thumb queue-video-receipt-thumb" data-queue-video-photo="${index}" title="Open video receipt screenshot">
+          ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label || "Video receipt screenshot")}" />` : ""}
+          <span>${escapeHtml(auditText)}</span>
+        </button>
+      `;
+    }).join("");
+    container.querySelectorAll("[data-queue-video-photo]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const photo = hydrated[Number(button.dataset.queueVideoPhoto || 0)];
+        if (!photo?.previewUrl) return;
+        openEvidencePhotoObjectViewer({
+          ...photo,
+          auditText: photo.auditText || `Captured by ${photo.signed_by_email || getVideoReceiptAuditActor()}${photo.created_at ? ` on ${formatDate(photo.created_at)}` : ""}`,
+        }, "orders-list");
+      });
+    });
+  }));
 }
 
 function renderOrderTaskPanel(options = {}) {
@@ -5144,7 +5318,12 @@ async function openWorkerNoInventoryModal(options = {}) {
     setStatus("This eBay line is already closed.", "error");
     return;
   }
-  const candidates = getNoInventoryCandidateLines(line);
+  const requestedLineIds = Array.isArray(options.lineIds)
+    ? options.lineIds.filter(Boolean)
+    : [];
+  const candidates = requestedLineIds.length
+    ? getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine)
+    : getNoInventoryCandidateLines(line);
   if (!candidates.length) {
     setStatus("No untouched pending lines for this buyer can be completed without inventory removal.", "error");
     return;
@@ -5152,7 +5331,10 @@ async function openWorkerNoInventoryModal(options = {}) {
 
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = candidates;
-  state.workerNoInventoryLineIds = state.ebayLaunchOrderNumbers.size
+  const validRequestedLineIds = requestedLineIds.filter((lineId) => candidates.some((entry) => entry.id === lineId));
+  state.workerNoInventoryLineIds = validRequestedLineIds.length
+    ? new Set(validRequestedLineIds)
+    : state.ebayLaunchOrderNumbers.size
     ? new Set(candidates
       .filter((entry) => state.ebayLaunchOrderNumbers.has(String(entry.order?.order_number || "")))
       .map((entry) => entry.id))
@@ -5363,7 +5545,7 @@ function closeWorkerCancelOrderModal(options = {}) {
   returnToOrdersAfterMobileModalClose(options);
 }
 
-function openWorkerCancelOrderModal() {
+function openWorkerCancelOrderModal(options = {}) {
   const line = state.selectedLine;
   if (!line) {
     setStatus("Select an eBay order first.", "error");
@@ -5381,8 +5563,12 @@ function openWorkerCancelOrderModal() {
   }
 
   const order = line.order || {};
+  const requestedLineIds = Array.isArray(options.lineIds)
+    ? options.lineIds.filter((lineId) => candidates.some((candidate) => candidate.id === lineId))
+    : [];
+  const initialLineIds = requestedLineIds.length ? requestedLineIds : candidates.map((entry) => entry.id);
   state.workerCancelCandidates = candidates;
-  state.workerCancelLineIds = new Set(candidates.map((entry) => entry.id));
+  state.workerCancelLineIds = new Set(initialLineIds);
   state.workerCancelEvidencePhotos.forEach((photo) => {
     if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
   });
@@ -5390,7 +5576,7 @@ function openWorkerCancelOrderModal() {
   state.workerCancelEvidencePhotoUploadKeys.clear();
   $("worker-cancel-order-title").textContent = `Mark ${order.order_number || "this order"} canceled?`;
   $("worker-cancel-order-subtitle").textContent =
-    `This closes ${candidates.length} open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
+    `This closes ${initialLineIds.length} selected open line(s) for ${order.buyer_username || "this buyer"} as canceled. It will be signed by your logged-in account and recorded in Order History.`;
   $("worker-cancel-order-note").value = "";
   $("worker-cancel-order-password").value = "";
   $("worker-cancel-order-error").textContent = "";
@@ -5832,6 +6018,7 @@ function clearSelection() {
   closeModal("worker-cancel-order-modal");
   closeModal("order-task-modal");
   closeModal("admin-order-closeout-modal");
+  document.body.classList.remove("pending-order-detail-open");
   document.body.classList.remove("pending-mobile-sheet-open");
   $("selected-order-empty")?.classList.remove("hidden");
   $("fulfillment-workflow")?.classList.add("hidden");
