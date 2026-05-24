@@ -12,6 +12,8 @@ const state = {
   selectedCaptureStationId: "",
   captureBusy: false,
   taskScope: "mine",
+  taskView: "active",
+  childTasksByParent: new Map(),
   photoViewerReturnFocus: null,
 };
 
@@ -25,8 +27,29 @@ const CAPTURE_POLL_INTERVAL_MS = 1_500;
 const CAPTURE_PHOTO_SETTLE_MS = 3_000;
 const CAPTURE_THUMBNAIL_TRANSFORM = { width: 240, height: 240, resize: "contain", quality: 55 };
 const EBAY_RETURN_EVIDENCE_BUCKET = "ebay-return-evidence";
-const ACTIVE_TASK_STATUSES = ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"];
+const ACTIVE_TASK_STATUSES = [
+  "open",
+  "assigned",
+  "in_progress",
+  "waiting_on_admin",
+  "waiting_on_worker",
+  "blocked",
+  "deferred",
+  "pending_admin_review",
+  "needs_subtasks",
+  "waiting_on_subtasks",
+  "ready_for_admin_approval",
+  "approved_for_shipping",
+  "assigned_for_shipping",
+  "completed_by_employee",
+  "sent_back_for_rework",
+];
+const HISTORY_TASK_STATUSES = ["resolved", "cancelled", "approved_by_admin", "shipped_completed", "closed"];
 const ACTIVE_RETURN_TASK_STATUSES = ["open", "assigned", "in_progress", "blocked", "deferred"];
+const HISTORY_RETURN_TASK_STATUSES = ["resolved", "cancelled"];
+const ORDER_PARENT_TASK_TYPES = new Set(["coordination", "admin_review", "pending_admin_review", "worker_follow_up", "special_order"]);
+const ORDER_SUBTASK_TYPE = "pending_subtask";
+const ORDER_SHIPPING_TYPE = "pending_shipping";
 const TASK_LINE_SELECT = `
   id,
   order_id,
@@ -130,6 +153,10 @@ function isTeamWideTaskScope() {
   return isAdminUser() && state.taskScope === "all";
 }
 
+function isTaskHistoryView() {
+  return state.taskView === "history";
+}
+
 function updateTaskScopeChrome() {
   if (!isAdminUser()) state.taskScope = "mine";
 
@@ -142,7 +169,11 @@ function updateTaskScopeChrome() {
   }
 
   const mode = $("team-task-mode");
-  if (mode) mode.textContent = isTeamWideTaskScope() ? "Everyone's Tasks" : "My Tasks";
+  if (mode) mode.textContent = `${isTeamWideTaskScope() ? "Everyone's" : "My"} ${isTaskHistoryView() ? "History" : "Tasks"}`;
+
+  document.querySelectorAll("[data-task-view]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.taskView === state.taskView);
+  });
 }
 
 function getRequestedTaskId() {
@@ -234,8 +265,9 @@ async function loadAssignees() {
 
 async function loadTasks() {
   const list = $("team-task-list");
-  if (list) list.innerHTML = `<div class="empty-state">Loading tasks...</div>`;
+  if (list) list.innerHTML = `<div class="empty-state">Loading ${isTaskHistoryView() ? "task history" : "tasks"}...</div>`;
   setStatus("");
+  state.childTasksByParent = new Map();
 
   const results = await Promise.allSettled([
     loadTeamTaskRecords(),
@@ -253,6 +285,7 @@ async function loadTasks() {
 
   state.tasks = sortUnifiedTasks(tasks);
   await enrichTasksWithDetails(state.tasks);
+  await hydrateOrderWorkflowChildren(state.tasks);
   const requested = getRequestedTaskId();
   if (requested && !state.tasks.some((task) => task.id === requested)) {
     const { data: requestedTask, error: requestedError } = await supabase
@@ -274,6 +307,18 @@ async function loadTasks() {
 }
 
 async function loadTeamTaskRecords() {
+  if (isTaskHistoryView()) {
+    let query = supabase
+      .from("team_tasks")
+      .select("*")
+      .in("status", HISTORY_TASK_STATUSES)
+      .order("updated_at", { ascending: false })
+      .limit(80);
+    if (!isTeamWideTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data || []).map(normalizeTeamTask);
+  }
   const rpcName = isTeamWideTaskScope() ? "list_admin_team_tasks" : "list_my_team_tasks";
   const { data, error } = await supabase.rpc(rpcName, { _limit: 80 });
   if (error) throw error;
@@ -281,11 +326,16 @@ async function loadTeamTaskRecords() {
 }
 
 async function loadOrderTaskRecords() {
+  const statuses = isTaskHistoryView()
+    ? HISTORY_TASK_STATUSES
+    : isAdminUser()
+      ? ACTIVE_TASK_STATUSES
+      : ACTIVE_TASK_STATUSES.filter((status) => status !== "completed_by_employee");
   let query = supabase
     .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout)")
-    .in("status", ACTIVE_TASK_STATUSES)
-    .order("created_at", { ascending: true })
+    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout)")
+    .in("status", statuses)
+    .order(isTaskHistoryView() ? "updated_at" : "created_at", { ascending: !isTaskHistoryView() })
     .limit(80);
   if (!isTeamWideTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
 
@@ -295,11 +345,12 @@ async function loadOrderTaskRecords() {
 }
 
 async function loadReturnTaskRecords() {
+  const statuses = isTaskHistoryView() ? HISTORY_RETURN_TASK_STATUSES : ACTIVE_RETURN_TASK_STATUSES;
   let query = supabase
     .from("ebay_return_tasks")
     .select("id, return_case_id, order_id, order_line_ids, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_id, order_number, ebay_return_id, buyer_username, return_reason, status, opened_at, notes, raw_payload)")
-    .in("status", ACTIVE_RETURN_TASK_STATUSES)
-    .order("created_at", { ascending: true })
+    .in("status", statuses)
+    .order("created_at", { ascending: !isTaskHistoryView() })
     .limit(80);
   if (!isTeamWideTaskScope()) query = query.eq("assigned_to_user_id", state.user?.id);
 
@@ -321,10 +372,15 @@ function normalizeOrderTask(task = {}) {
   const order = getEmbeddedOne(task.ebay_orders);
   const orderNumber = task.order_number || order.order_number || "";
   const buyer = task.buyer_username || order.buyer_username || "";
+  const sourceLabel = task.task_type === ORDER_SUBTASK_TYPE
+    ? "Subtask"
+    : task.task_type === ORDER_SHIPPING_TYPE
+      ? "Shipping Task"
+      : "Pending Order";
   return {
     ...task,
     source: "order",
-    sourceLabel: "Pending Order",
+    sourceLabel,
     title: task.title || `Pending order ${orderNumber || ""}`.trim(),
     description: task.question || task.latest_note || "",
     latest_note: task.latest_note || task.question || "",
@@ -489,6 +545,47 @@ async function enrichTasksWithDetails(tasks = []) {
   ]);
 }
 
+function isOrderParentTask(task = {}) {
+  return task.source === "order" && !task.parent_task_id && ORDER_PARENT_TASK_TYPES.has(task.task_type || "coordination");
+}
+
+function getOrderWorkflowChildren(parentTask = {}) {
+  return state.childTasksByParent.get(parentTask.id) || [];
+}
+
+function getAllWorkflowChildTasks() {
+  return [...state.childTasksByParent.values()].flat();
+}
+
+async function hydrateOrderWorkflowChildren(tasks = []) {
+  state.childTasksByParent = new Map();
+  const parentIds = unique(tasks.filter(isOrderParentTask).map((task) => task.id));
+  if (!parentIds.length) return;
+
+  const childStatuses = unique([...ACTIVE_TASK_STATUSES, ...HISTORY_TASK_STATUSES]);
+  const { data, error } = await supabase
+    .from("ebay_order_tasks")
+    .select("id, order_id, order_line_ids, parent_task_id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, updated_at, completed_at, resolved_at, latest_note, latest_photo_count, created_by_email, metadata, ebay_orders(order_number, buyer_username, sale_date, paid_on_date, ship_by_date, status, total_price, net_payout)")
+    .in("parent_task_id", parentIds)
+    .in("status", childStatuses)
+    .order("created_at", { ascending: true })
+    .limit(500);
+
+  if (error) {
+    console.warn("Could not load pending order subtasks:", error);
+    return;
+  }
+
+  const children = (data || []).map(normalizeOrderTask);
+  await hydrateTaskLines(children);
+  children.forEach((child) => {
+    const parentId = child.parent_task_id || "";
+    const list = state.childTasksByParent.get(parentId) || [];
+    list.push(child);
+    state.childTasksByParent.set(parentId, list);
+  });
+}
+
 async function loadEventsForTasks() {
   state.eventsByTask = new Map();
   const sources = [
@@ -498,7 +595,8 @@ async function loadEventsForTasks() {
   ];
 
   await Promise.all(sources.map(async ({ source, table }) => {
-    const ids = state.tasks.filter((task) => task.source === source).map((task) => task.id).filter(Boolean);
+    const sourceTasks = source === "order" ? [...state.tasks, ...getAllWorkflowChildTasks()] : state.tasks;
+    const ids = sourceTasks.filter((task) => task.source === source).map((task) => task.id).filter(Boolean);
     if (!ids.length) return;
 
     const { data, error } = await supabase
@@ -550,6 +648,17 @@ function getTaskStatusLabel(value) {
     waiting_on_worker: "Waiting on worker",
     resolved: "Resolved",
     cancelled: "Cancelled",
+    pending_admin_review: "Pending admin review",
+    needs_subtasks: "Needs subtasks",
+    waiting_on_subtasks: "Waiting on subtasks",
+    ready_for_admin_approval: "Ready for admin approval",
+    approved_for_shipping: "Approved for shipping",
+    assigned_for_shipping: "Assigned for shipping",
+    shipped_completed: "Shipped",
+    closed: "Closed",
+    completed_by_employee: "Completed by employee",
+    sent_back_for_rework: "Sent back for rework",
+    approved_by_admin: "Approved by admin",
   };
   return labels[value] || String(value || "open").replace(/_/g, " ");
 }
@@ -572,6 +681,58 @@ function renderTaskLines(task = {}) {
   `;
 }
 
+function canOrderTaskApproveForShipping(task = {}) {
+  const subtasks = getOrderWorkflowChildren(task).filter((child) => child.task_type === ORDER_SUBTASK_TYPE);
+  return subtasks.every((child) => ["completed_by_employee", "approved_by_admin"].includes(child.status));
+}
+
+function renderOrderWorkflowPanel(task = {}) {
+  if (!isOrderParentTask(task)) return "";
+  const children = getOrderWorkflowChildren(task);
+  const subtasks = children.filter((child) => child.task_type === ORDER_SUBTASK_TYPE);
+  const shippingTasks = children.filter((child) => child.task_type === ORDER_SHIPPING_TYPE);
+  const rows = [...subtasks, ...shippingTasks];
+  const canApprove = canOrderTaskApproveForShipping(task);
+  return `
+    <section class="team-task-context order-workflow-panel">
+      <div class="team-task-context-head">
+        <span class="eyebrow">Admin Workflow</span>
+        <strong>${subtasks.length ? `${subtasks.filter((subtask) => ["completed_by_employee", "approved_by_admin"].includes(subtask.status)).length} of ${subtasks.length} subtasks complete` : "No subtasks required yet"}</strong>
+      </div>
+      ${rows.length ? `
+        <div class="order-workflow-list">
+          ${rows.map((child) => {
+            const events = state.eventsByTask.get(getUnifiedTaskKey(child)) || [];
+            return `
+              <article class="order-workflow-item">
+                <div class="order-workflow-item-head">
+                  <div>
+                    <strong>${escapeHtml(child.title || "Order workflow task")}</strong>
+                    <p>${escapeHtml(child.latest_note || child.description || child.question || "No note yet.")}</p>
+                  </div>
+                  <span class="team-task-chip">${escapeHtml(getTaskStatusLabel(child.status))}</span>
+                </div>
+                <div class="team-task-meta">
+                  <span class="team-task-source">${escapeHtml(child.sourceLabel)}</span>
+                  <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(child))}</span>
+                  <span>Due ${escapeHtml(formatDate(child.due_at))}</span>
+                </div>
+                ${events.length ? `
+                  <div class="order-workflow-mini-events">
+                    ${events.slice(-3).map(renderTaskEvent).join("")}
+                  </div>
+                ` : ""}
+                ${renderOrderTaskActions(child, HISTORY_TASK_STATUSES.includes(child.status), { compact: true })}
+              </article>
+            `;
+          }).join("")}
+        </div>
+      ` : `<div class="empty-state">No subtasks have been created for this pending order.</div>`}
+      ${!canApprove && subtasks.length ? `<p class="team-task-photo-note">Shipping approval unlocks after every required subtask is completed.</p>` : ""}
+    </section>
+  `;
+}
+
 function renderOrderTaskContext(task = {}) {
   const order = task.order || {};
   const orderValue = formatMoney(order.total_price || task.total_price);
@@ -590,6 +751,7 @@ function renderOrderTaskContext(task = {}) {
       </div>
       ${renderTaskLines(task)}
     </section>
+    ${renderOrderWorkflowPanel(task)}
   `;
 }
 
@@ -694,11 +856,13 @@ function renderTasks() {
   const title = $("team-task-list-title");
   if (!list) return;
 
-  if (title) title.textContent = isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks";
+  if (title) title.textContent = isTaskHistoryView()
+    ? (isTeamWideTaskScope() ? "Everyone's Task History" : "My Task History")
+    : (isTeamWideTaskScope() ? "Everyone's Active Tasks" : "My Assigned Tasks");
   if (count) count.textContent = `${state.tasks.length} task${state.tasks.length === 1 ? "" : "s"}`;
 
   if (!state.tasks.length) {
-    list.innerHTML = `<div class="empty-state">No active tasks right now.</div>`;
+    list.innerHTML = `<div class="empty-state">${isTaskHistoryView() ? "No completed tasks in history yet." : "No active tasks right now."}</div>`;
     return;
   }
 
@@ -706,7 +870,7 @@ function renderTasks() {
     const events = state.eventsByTask.get(getUnifiedTaskKey(task)) || [];
     const urgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase())
       || ["blocked", "deferred"].includes(String(task.status || "").toLowerCase());
-    const resolved = ["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
+    const resolved = HISTORY_TASK_STATUSES.includes(String(task.status || "").toLowerCase());
     return `
       <article class="team-task-card ${urgent ? "is-urgent" : ""} ${resolved ? "is-resolved" : ""}" data-team-task-card="${escapeHtml(task.id)}">
         <div class="team-task-card-head">
@@ -759,11 +923,15 @@ function renderTasks() {
       openTaskPhoto(button.dataset.bucket, button.dataset.path);
     });
   });
+  list.querySelectorAll("[data-order-workflow-action]").forEach((button) => {
+    button.addEventListener("click", () => handleOrderWorkflowAction(button.dataset.orderWorkflowAction, button.dataset.taskId));
+  });
 }
 
 function renderTaskActions(task = {}, resolved = false) {
   if (task.source !== "team") {
-    const label = task.source === "order" ? "Open Pending Order Task" : "Open Return Task";
+    if (task.source === "order") return renderOrderTaskActions(task, resolved);
+    const label = "Open Return Task";
     return `
       <div class="team-task-actions">
         <a class="secondary-btn" href="${escapeHtml(task.actionHref || "#")}">${escapeHtml(label)}</a>
@@ -778,6 +946,46 @@ function renderTaskActions(task = {}, resolved = false) {
       ${resolved ? "" : `<button type="button" class="primary-btn" data-team-task-resolve="${escapeHtml(task.id)}">Mark Completed</button>`}
     </div>
   `;
+}
+
+function renderOrderTaskActions(task = {}, resolved = false, options = {}) {
+  const compact = Boolean(options.compact);
+  const isParent = isOrderParentTask(task);
+  const isSubtask = task.task_type === ORDER_SUBTASK_TYPE;
+  const isShipping = task.task_type === ORDER_SHIPPING_TYPE;
+  const assigneeCanUpdate = task.assigned_to_user_id === state.user?.id || isAdminUser();
+  const canApproveShipping = isParent && isAdminUser() && canOrderTaskApproveForShipping(task)
+    && !["assigned_for_shipping", "shipped_completed", "closed", "cancelled"].includes(task.status);
+
+  if (resolved && !isParent) return "";
+
+  const buttons = [];
+  if (!compact && task.actionHref) {
+    buttons.push(`<a class="secondary-btn" href="${escapeHtml(task.actionHref)}">Open Pending Order</a>`);
+  }
+
+  if (isParent && isAdminUser() && !isTaskHistoryView()) {
+    buttons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="add-subtask" data-task-id="${escapeHtml(task.id)}">Add Subtask</button>`);
+    buttons.push(`<button type="button" class="primary-btn" data-order-workflow-action="assign-shipping" data-task-id="${escapeHtml(task.id)}" ${canApproveShipping ? "" : "disabled"}>Approve / Assign Shipping</button>`);
+  }
+
+  if (isSubtask && assigneeCanUpdate && !["completed_by_employee", "approved_by_admin"].includes(task.status) && !isTaskHistoryView()) {
+    buttons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="subtask-progress" data-task-id="${escapeHtml(task.id)}">Progress Update</button>`);
+    buttons.push(`<button type="button" class="primary-btn" data-order-workflow-action="subtask-complete" data-task-id="${escapeHtml(task.id)}">Mark Completed</button>`);
+  }
+
+  if (isSubtask && isAdminUser() && task.status === "completed_by_employee" && !isTaskHistoryView()) {
+    buttons.push(`<button type="button" class="primary-btn" data-order-workflow-action="approve-subtask" data-task-id="${escapeHtml(task.id)}">Approve Subtask</button>`);
+    buttons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="send-back-subtask" data-task-id="${escapeHtml(task.id)}">Send Back</button>`);
+  }
+
+  if (isShipping && assigneeCanUpdate && !["shipped_completed", "closed"].includes(task.status) && !isTaskHistoryView()) {
+    buttons.push(`<button type="button" class="secondary-btn" data-order-workflow-action="shipping-progress" data-task-id="${escapeHtml(task.id)}">Mark In Progress</button>`);
+    buttons.push(`<button type="button" class="primary-btn" data-order-workflow-action="shipping-complete" data-task-id="${escapeHtml(task.id)}">Mark Shipped</button>`);
+  }
+
+  if (!buttons.length) return "";
+  return `<div class="team-task-actions">${buttons.join("")}</div>`;
 }
 
 function renderTaskEvent(event = {}) {
@@ -1260,6 +1468,110 @@ function closeModal() {
   setPhotoStatus("");
 }
 
+function findOrderTaskById(taskId = "") {
+  return [...state.tasks, ...getAllWorkflowChildTasks()].find((task) => task.source === "order" && task.id === taskId) || null;
+}
+
+function configureOrderWorkflowModal(task, options = {}) {
+  state.mode = options.mode || "order-progress";
+  state.activeTaskId = task?.id || "";
+  resetPhotos();
+  setModalError("");
+  setPhotoStatus("");
+
+  const mode = state.mode;
+  const isSubtaskCreate = mode === "order-subtask-create";
+  const isShippingAssign = mode === "order-shipping-assign";
+  const isSendBack = mode === "order-subtask-sendback";
+  const isComplete = mode === "order-subtask-complete" || mode === "order-shipping-complete";
+
+  const titles = {
+    "order-subtask-create": "Create pending order subtask",
+    "order-subtask-progress": "Subtask progress update",
+    "order-subtask-complete": "Complete subtask",
+    "order-subtask-approve": "Approve subtask",
+    "order-subtask-sendback": "Send subtask back",
+    "order-shipping-assign": "Approve and assign shipping",
+    "order-shipping-complete": "Complete shipping task",
+  };
+  const subtitles = {
+    "order-subtask-create": "Assign the required work before this pending order can be approved for shipment.",
+    "order-subtask-progress": "Add a progress note, blocker, or evidence photo for the admin to review.",
+    "order-subtask-complete": "Add the final sign-off note and any proof before sending this back to the admin.",
+    "order-subtask-approve": "Confirm this subtask is complete and acceptable for shipment approval.",
+    "order-subtask-sendback": "Explain exactly what needs to be corrected before this can be approved.",
+    "order-shipping-assign": "Confirm the pending order is ready and assign the shipping task to an employee.",
+    "order-shipping-complete": "Confirm shipment completion with final notes or proof.",
+  };
+
+  $("team-task-modal-title").textContent = titles[mode] || "Pending order task update";
+  $("team-task-modal-subtitle").textContent = subtitles[mode] || "Save the next workflow update in the audit trail.";
+  $("team-task-title-field")?.classList.toggle("hidden", !isSubtaskCreate);
+  $("team-task-status-field")?.classList.add("hidden");
+  $("submit-team-task").textContent = isSubtaskCreate
+    ? "Create Subtask"
+    : isShippingAssign
+      ? "Approve / Assign"
+      : isComplete
+        ? "Mark Completed"
+        : isSendBack
+          ? "Send Back"
+          : "Save Update";
+
+  $("team-task-title-input").value = "";
+  $("team-task-note").value = "";
+  $("team-task-note").placeholder = isSubtaskCreate
+    ? "Write the instructions the employee must follow."
+    : isShippingAssign
+      ? "Add shipment notes for the employee."
+      : isSendBack
+        ? "What needs to be fixed or redone?"
+        : isComplete
+          ? "Final completion note."
+          : "Progress update, blocker, or admin note.";
+  $("team-task-type").value = isShippingAssign ? "shipping" : "admin_review";
+  $("team-task-priority").value = task?.priority || "normal";
+  $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
+  $("team-task-status-input").value = "";
+  renderAssigneeSelect();
+  $("team-task-assignee").value = isSubtaskCreate || isShippingAssign || isSendBack
+    ? (task?.assigned_to_user_id || "")
+    : "";
+
+  openModal();
+  setTimeout(() => (isSubtaskCreate ? $("team-task-title-input") : $("team-task-note"))?.focus(), 80);
+  loadCaptureStations({ silent: true }).catch((error) => {
+    console.warn("Could not load team task capture stations:", error);
+    setPhotoStatus(error?.message || "Could not load capture stations.", "error");
+  });
+}
+
+function handleOrderWorkflowAction(action = "", taskId = "") {
+  const task = findOrderTaskById(taskId);
+  if (!task) return setStatus("Could not find that pending order task. Refresh and try again.", "error");
+
+  if (action === "add-subtask") return configureOrderWorkflowModal(task, { mode: "order-subtask-create" });
+  if (action === "subtask-progress") return configureOrderWorkflowModal(task, { mode: "order-subtask-progress" });
+  if (action === "subtask-complete") return configureOrderWorkflowModal(task, { mode: "order-subtask-complete" });
+  if (action === "approve-subtask") return configureOrderWorkflowModal(task, { mode: "order-subtask-approve" });
+  if (action === "send-back-subtask") return configureOrderWorkflowModal(task, { mode: "order-subtask-sendback" });
+  if (action === "assign-shipping") return configureOrderWorkflowModal(task, { mode: "order-shipping-assign" });
+  if (action === "shipping-complete") return configureOrderWorkflowModal(task, { mode: "order-shipping-complete" });
+  if (action === "shipping-progress") {
+    return saveOrderWorkflowUpdate({
+      task,
+      status: "in_progress",
+      note: "Shipping task started.",
+      successMessage: "Shipping task marked in progress.",
+    }).catch((error) => {
+      console.error("Could not mark shipping task in progress:", error);
+      setStatus(error?.message || "Could not update shipping task.", "error");
+    });
+  }
+
+  return setStatus("That pending order action is not available.", "error");
+}
+
 async function openTaskModal(options = {}) {
   const taskId = options.taskId || "";
   const task = taskId ? state.tasks.find((entry) => entry.source === "team" && entry.id === taskId) : null;
@@ -1301,7 +1613,151 @@ async function openTaskModal(options = {}) {
   });
 }
 
+async function saveOrderWorkflowUpdate({
+  task,
+  status = null,
+  note = "",
+  assignedToUserId = null,
+  priority = null,
+  dueAt = null,
+  photos = [],
+  successMessage = "Pending order task updated.",
+} = {}) {
+  if (!task?.id) throw new Error("Missing pending order task.");
+  const signedByEmail = state.user?.email || state.employee?.email || state.employee?.display_name || "";
+  const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
+    _task_id: task.id,
+    _note: note || null,
+    _assigned_to_user_id: assignedToUserId || null,
+    _status: status || null,
+    _priority: priority || null,
+    _photo_attachments: photos,
+    _signed_by_email: signedByEmail,
+    _due_at: dueAt || null,
+  });
+  if (error) throw error;
+  setStatus(successMessage, "success");
+  await loadTasks();
+}
+
+async function submitOrderWorkflowTask() {
+  const task = findOrderTaskById(state.activeTaskId);
+  if (!task) return setModalError("Could not find this pending order task. Refresh and try again.");
+
+  const mode = state.mode;
+  const title = String($("team-task-title-input")?.value || "").trim();
+  const note = String($("team-task-note")?.value || "").trim();
+  const assigneeId = $("team-task-assignee")?.value || null;
+  const priority = $("team-task-priority")?.value || "normal";
+  const dueAt = localDateTimeToIso($("team-task-due-at")?.value || "");
+
+  if (mode === "order-subtask-create" && !title) return setModalError("Write a subtask title first.");
+  if (mode === "order-subtask-create" && !note) return setModalError("Write the subtask instructions first.");
+  if (["order-subtask-create", "order-shipping-assign"].includes(mode) && !assigneeId) return setModalError("Choose the employee who should receive this task.");
+  if (["order-subtask-complete", "order-subtask-sendback", "order-shipping-complete"].includes(mode) && !note) {
+    return setModalError("Write the required note before saving.");
+  }
+
+  if (mode === "order-shipping-assign" && !window.confirm("Approve this pending order for shipment and assign the shipping task?")) return;
+  if (mode === "order-subtask-sendback" && !window.confirm("Send this subtask back for rework?")) return;
+  if (mode === "order-shipping-complete" && !window.confirm("Mark this shipment task completed?")) return;
+
+  const submit = $("submit-team-task");
+  submit?.toggleAttribute("disabled", true);
+  setModalError("");
+  setPhotoStatus("Saving pending order workflow update...", "info");
+
+  try {
+    const photos = await uploadPhotos(title || task.title || "pending-order-task");
+    const signedByEmail = state.user?.email || state.employee?.email || state.employee?.display_name || "";
+
+    if (mode === "order-subtask-create") {
+      const { error } = await supabase.rpc("create_ebay_order_subtask", {
+        _parent_task_id: task.id,
+        _title: title,
+        _description: note,
+        _assigned_to_user_id: assigneeId,
+        _priority: priority,
+        _due_at: dueAt || null,
+        _photo_attachments: photos,
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus("Subtask created and assigned.", "success");
+    } else if (mode === "order-subtask-progress") {
+      await saveOrderWorkflowUpdate({
+        task,
+        status: "in_progress",
+        note,
+        priority,
+        dueAt,
+        photos,
+        successMessage: "Subtask progress saved.",
+      });
+    } else if (mode === "order-subtask-complete") {
+      await saveOrderWorkflowUpdate({
+        task,
+        status: "completed_by_employee",
+        note,
+        priority,
+        dueAt,
+        photos,
+        successMessage: "Subtask marked completed for admin review.",
+      });
+    } else if (mode === "order-subtask-approve") {
+      const { error } = await supabase.rpc("approve_ebay_order_subtask", {
+        _task_id: task.id,
+        _note: note || null,
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus("Subtask approved.", "success");
+    } else if (mode === "order-subtask-sendback") {
+      const { error } = await supabase.rpc("send_back_ebay_order_subtask", {
+        _task_id: task.id,
+        _note: note,
+        _assigned_to_user_id: assigneeId || task.assigned_to_user_id || null,
+        _due_at: dueAt || null,
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus("Subtask sent back for rework.", "success");
+    } else if (mode === "order-shipping-assign") {
+      const { error } = await supabase.rpc("assign_ebay_order_shipping_task", {
+        _parent_task_id: task.id,
+        _assigned_to_user_id: assigneeId,
+        _note: note || null,
+        _due_at: dueAt || null,
+        _signed_by_email: signedByEmail,
+      });
+      if (error) throw error;
+      setStatus("Pending order approved and shipping task assigned.", "success");
+    } else if (mode === "order-shipping-complete") {
+      await saveOrderWorkflowUpdate({
+        task,
+        status: "shipped_completed",
+        note,
+        priority,
+        dueAt,
+        photos,
+        successMessage: "Shipping task completed.",
+      });
+    }
+
+    closeModal();
+    await loadTasks();
+  } catch (error) {
+    console.error("Could not save pending order workflow task:", error);
+    setModalError(error?.message || "Could not save this pending order workflow update.");
+    setPhotoStatus("", "info");
+  } finally {
+    submit?.toggleAttribute("disabled", false);
+  }
+}
+
 async function submitTask() {
+  if (String(state.mode || "").startsWith("order-")) return submitOrderWorkflowTask();
+
   const title = String($("team-task-title-input")?.value || "").trim();
   const note = String($("team-task-note")?.value || "").trim();
   if (state.mode === "create" && !title) return setModalError("Write a task title first.");
@@ -1376,6 +1832,13 @@ async function openTaskPhoto(bucket, path) {
 function setupListeners() {
   $("new-team-task")?.addEventListener("click", () => openTaskModal());
   $("refresh-team-tasks")?.addEventListener("click", loadTasks);
+  document.querySelectorAll("[data-task-view]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.taskView = button.dataset.taskView === "history" ? "history" : "active";
+      updateTaskScopeChrome();
+      await loadTasks();
+    });
+  });
   $("team-task-scope")?.addEventListener("change", async (event) => {
     state.taskScope = event.target.value === "all" && isAdminUser() ? "all" : "mine";
     updateTaskScopeChrome();
