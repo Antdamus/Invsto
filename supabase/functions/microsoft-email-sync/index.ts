@@ -60,6 +60,8 @@ const PROCESS_IMPORTED_DEFAULT_BATCH_SIZE = 10;
 const PROCESS_IMPORTED_MAX_BATCH_SIZE = 25;
 const PROCESS_IMPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
 const PROCESS_IMPORTED_LOCKED_BY = "microsoft-email-sync:process_imported";
+const CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE = 5;
+const CLASSIFY_IMPORTED_MAX_BATCH_SIZE = 10;
 const NORMALIZED_TEXT_LIMIT = 200000;
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -134,7 +136,13 @@ type ProcessImportedInput = {
   batchSize: number;
 };
 
-type RequestInput = SyncInput | PreviewInput | ImportApprovedInput | ProcessImportedInput;
+type ClassifyImportedInput = {
+  mode: "classify_imported";
+  folder: "inbox";
+  batchSize: number;
+};
+
+type RequestInput = SyncInput | PreviewInput | ImportApprovedInput | ProcessImportedInput | ClassifyImportedInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -305,6 +313,22 @@ type ProcessImportedCounters = {
   links_updated: number;
 };
 
+type ClassifyImportedCounters = {
+  classified_count: number;
+  skipped_count: number;
+  failed_count: number;
+  already_classified_count: number;
+  currently_classifying_count: number;
+  permanently_failed_count: number;
+  processing_incomplete_count: number;
+  processing_failed_count: number;
+  jobs_enqueued: number;
+  jobs_processed: number;
+  jobs_succeeded: number;
+  jobs_failed: number;
+  jobs_skipped: number;
+};
+
 class SyncError extends Error {
   code: string;
   status: number;
@@ -462,6 +486,15 @@ async function parseInput(req: Request): Promise<RequestInput> {
       PROCESS_IMPORTED_MAX_BATCH_SIZE,
     );
     return { mode: "process_imported", folder: "inbox", batchSize };
+  }
+
+  if (requestedMode === "classify_imported") {
+    const rawBatchSize = Number(body?.batchSize ?? body?.limit);
+    const batchSize = Math.min(
+      Math.max(Number.isFinite(rawBatchSize) && rawBatchSize > 0 ? Math.floor(rawBatchSize) : CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE, 1),
+      CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
+    );
+    return { mode: "classify_imported", folder: "inbox", batchSize };
   }
 
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
@@ -2298,6 +2331,416 @@ async function processImportedEmails(
   };
 }
 
+function classifyImportedCounters(): ClassifyImportedCounters {
+  return {
+    classified_count: 0,
+    skipped_count: 0,
+    failed_count: 0,
+    already_classified_count: 0,
+    currently_classifying_count: 0,
+    permanently_failed_count: 0,
+    processing_incomplete_count: 0,
+    processing_failed_count: 0,
+    jobs_enqueued: 0,
+    jobs_processed: 0,
+    jobs_succeeded: 0,
+    jobs_failed: 0,
+    jobs_skipped: 0,
+  };
+}
+
+function isPermanentFailure(job: Record<string, unknown>) {
+  return String(job.status) === "failed" && Number(job.attempt_count || 0) >= Number(job.max_attempts || 3);
+}
+
+async function loadClassifyImportedCandidateIds(
+  supabase: ServiceClient,
+  mailboxId: string,
+  approvedMessageIds: string[],
+  batchSize: number,
+  counters: ClassifyImportedCounters,
+) {
+  if (!approvedMessageIds.length) return [];
+  const { data: messages, error: messageError } = await supabase
+    .from("email_messages")
+    .select("id, received_at, sync_status")
+    .eq("mailbox_id", mailboxId)
+    .eq("sync_status", "active")
+    .in("id", approvedMessageIds)
+    .order("received_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(batchSize * 8, batchSize));
+
+  if (messageError) throw new SyncError("classify_imported_message_lookup_failed", { phase: "classify_imported_message_lookup", mailboxId });
+  const ids = (messages || []).map((message: { id: string }) => message.id);
+  if (!ids.length) return [];
+
+  const { data: processingJobs, error: processingJobError } = await supabase
+    .from("email_processing_jobs")
+    .select("message_id, job_type, status, attempt_count, max_attempts")
+    .in("message_id", ids)
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .eq("input_version", IMPORT_PROCESSOR_VERSION);
+
+  if (processingJobError) throw new SyncError("classify_imported_processing_lookup_failed", { phase: "classify_imported_processing_lookup", mailboxId });
+
+  const { data: classifyJobs, error: classifyJobError } = await supabase
+    .from("email_processing_jobs")
+    .select("message_id, status, attempt_count, max_attempts")
+    .in("message_id", ids)
+    .eq("job_type", "classify");
+
+  if (classifyJobError) throw new SyncError("classify_imported_job_lookup_failed", { phase: "classify_imported_job_lookup", mailboxId });
+
+  const { data: classifications, error: classificationError } = await supabase
+    .from("email_message_classifications")
+    .select("message_id, source, validation_status, is_current")
+    .in("message_id", ids)
+    .eq("source", "ai")
+    .eq("is_current", true);
+
+  if (classificationError) throw new SyncError("classify_imported_classification_lookup_failed", { phase: "classify_imported_classification_lookup", mailboxId });
+
+  const processingByMessage = new Map<string, Array<Record<string, unknown>>>();
+  for (const job of processingJobs || []) {
+    const key = String(job.message_id);
+    processingByMessage.set(key, [...(processingByMessage.get(key) || []), job]);
+  }
+
+  const classifyByMessage = new Map<string, Array<Record<string, unknown>>>();
+  for (const job of classifyJobs || []) {
+    const key = String(job.message_id);
+    classifyByMessage.set(key, [...(classifyByMessage.get(key) || []), job]);
+  }
+
+  const classified = new Set<string>();
+  for (const row of classifications || []) {
+    const validationStatus = String(row.validation_status || "");
+    if (!validationStatus || validationStatus === "valid") classified.add(String(row.message_id));
+  }
+
+  const candidates: string[] = [];
+  for (const id of ids) {
+    const processing = processingByMessage.get(id) || [];
+    const terminalProcessingTypes = new Set(
+      processing
+        .filter((job) => ["succeeded", "skipped"].includes(String(job.status)))
+        .map((job) => String(job.job_type)),
+    );
+    const hasFailedProcessing = processing.some(isPermanentFailure);
+    const hasCompletedProcessing = PROCESS_IMPORTED_JOB_TYPES.every((jobType) => terminalProcessingTypes.has(jobType));
+
+    if (!hasCompletedProcessing) {
+      counters.skipped_count += 1;
+      if (hasFailedProcessing) counters.processing_failed_count += 1;
+      else counters.processing_incomplete_count += 1;
+      continue;
+    }
+
+    const classify = classifyByMessage.get(id) || [];
+    if (classified.has(id)) {
+      counters.already_classified_count += 1;
+      counters.skipped_count += 1;
+      continue;
+    }
+    if (classify.some((job) => ["queued", "running"].includes(String(job.status)))) {
+      counters.currently_classifying_count += 1;
+      counters.skipped_count += 1;
+      continue;
+    }
+    if (classify.some(isPermanentFailure)) {
+      counters.permanently_failed_count += 1;
+      counters.skipped_count += 1;
+      continue;
+    }
+
+    candidates.push(id);
+    if (candidates.length >= batchSize) break;
+  }
+
+  return candidates;
+}
+
+async function countRows(supabase: ServiceClient, table: string, build: (query: any) => any) {
+  const query = build(supabase.from(table).select("id", { count: "exact", head: true }));
+  const { count, error } = await query;
+  if (error) throw new SyncError("classify_imported_count_failed", { phase: "classify_imported_count" });
+  return count || 0;
+}
+
+async function countResponseDrafts(supabase: ServiceClient, messageIds: string[]) {
+  if (!messageIds.length) return 0;
+  return await countRows(supabase, "email_response_drafts", (query) => query.in("message_id", messageIds));
+}
+
+async function callClassifierForImportedMessage(req: Request, messageId: string) {
+  const accessToken = getBearerToken(req);
+  if (!accessToken) throw new SyncError("unauthorized", { status: 401, phase: "classify_imported_auth" });
+  const baseUrl = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")?.trim();
+  if (anonKey) headers.apikey = anonKey;
+  const response = await fetch(`${baseUrl}/functions/v1/microsoft-email-classify`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      mode: "process_message",
+      messageId,
+      limit: 1,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) {
+    throw new SyncError("classify_imported_classifier_failed", {
+      phase: "classify_imported_classifier",
+      status: response.status || 500,
+    });
+  }
+  return payload as Record<string, unknown>;
+}
+
+function incrementSummary(summary: Record<string, number>, value: unknown) {
+  const key = String(value || "unknown");
+  summary[key] = (summary[key] || 0) + 1;
+}
+
+async function loadClassifyImportedSummaries(supabase: ServiceClient, messageIds: string[]) {
+  const categorySummary: Record<string, number> = {};
+  const prioritySummary: Record<string, number> = {};
+  const urgencySummary: Record<string, number> = {};
+  if (!messageIds.length) {
+    return {
+      category_summary: categorySummary,
+      priority_summary: prioritySummary,
+      urgency_summary: urgencySummary,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("email_message_classifications")
+    .select("category, priority, urgency")
+    .in("message_id", messageIds.slice(0, 500))
+    .eq("source", "ai")
+    .eq("is_current", true)
+    .eq("validation_status", "valid")
+    .limit(1000);
+
+  if (error) throw new SyncError("classify_imported_summary_failed", { phase: "classify_imported_summary" });
+  for (const row of data || []) {
+    incrementSummary(categorySummary, row.category);
+    incrementSummary(prioritySummary, row.priority);
+    incrementSummary(urgencySummary, row.urgency);
+  }
+
+  return {
+    category_summary: categorySummary,
+    priority_summary: prioritySummary,
+    urgency_summary: urgencySummary,
+  };
+}
+
+async function buildClassifyImportedQueueSummary(supabase: ServiceClient, approvedMessageIds: string[]) {
+  if (!approvedMessageIds.length) {
+    return {
+      queued: 0,
+      running: 0,
+      succeeded: 0,
+      skipped: 0,
+      failed: 0,
+      classification_duration_ms: { count: 0, min: null, max: null, avg: null },
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("email_processing_jobs")
+    .select("status, started_at, completed_at")
+    .in("message_id", approvedMessageIds.slice(0, 500))
+    .eq("job_type", "classify")
+    .order("updated_at", { ascending: false })
+    .limit(1000);
+
+  if (error) throw new SyncError("classify_imported_queue_summary_failed", { phase: "classify_imported_queue_summary" });
+  const statusCounts: Record<string, number> = {};
+  const durations: number[] = [];
+  for (const job of data || []) {
+    const status = String(job.status || "unknown");
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    const duration = durationMs(job.started_at, job.completed_at);
+    if (duration !== null) durations.push(duration);
+  }
+
+  return {
+    queued: statusCounts.queued || 0,
+    running: statusCounts.running || 0,
+    succeeded: statusCounts.succeeded || 0,
+    skipped: statusCounts.skipped || 0,
+    failed: statusCounts.failed || 0,
+    classification_duration_ms: {
+      count: durations.length,
+      min: durations.length ? Math.min(...durations) : null,
+      max: durations.length ? Math.max(...durations) : null,
+      avg: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
+    },
+  };
+}
+
+async function loadClassifyImportedJobIds(supabase: ServiceClient, messageIds: string[]) {
+  if (!messageIds.length) return [];
+  const { data, error } = await supabase
+    .from("email_processing_jobs")
+    .select("id")
+    .in("message_id", messageIds)
+    .eq("job_type", "classify")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) throw new SyncError("classify_imported_job_reference_failed", { phase: "classify_imported_job_reference" });
+  return (data || []).map((row: { id: string }) => row.id);
+}
+
+async function insertClassifyImportedOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    messageIds: string[];
+    jobIds: string[];
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "classify_imported",
+      mailbox_id: values.mailboxId,
+      message_ids: values.messageIds,
+      job_ids: values.jobIds,
+      new_job_ids: values.jobIds,
+      job_types: ["classify"],
+      reason: "Controlled classification gate for approved imported and deterministically processed Outlook emails.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      processor_version: IMPORT_PROCESSOR_VERSION,
+      replay_source: "classify_imported",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] classify_imported audit insert failed", {
+      phase: "classify_imported_audit",
+      mailbox_id: values.mailboxId,
+    });
+    return null;
+  }
+
+  return data as { id: string; created_at: string };
+}
+
+async function classifyImportedEmails(
+  req: Request,
+  supabase: ServiceClient,
+  mailboxId: string,
+  input: ClassifyImportedInput,
+  admin: { userId: string; email: string | null },
+) {
+  const counters = classifyImportedCounters();
+  const approvedMessageIds = await loadApprovedImportedMessageIds(supabase);
+  const candidateMessageIds = await loadClassifyImportedCandidateIds(supabase, mailboxId, approvedMessageIds, input.batchSize, counters);
+  const draftsBefore = await countResponseDrafts(supabase, candidateMessageIds);
+  const classificationResults: Array<Record<string, unknown>> = [];
+
+  for (const messageId of candidateMessageIds) {
+    try {
+      const result = await callClassifierForImportedMessage(req, messageId);
+      const created = Number(result.classifications_created || 0);
+      counters.classified_count += created;
+      counters.jobs_enqueued += Number(result.jobs_enqueued || 0);
+      counters.jobs_processed += Number(result.jobs_processed || 0);
+      counters.jobs_succeeded += Number(result.jobs_succeeded || 0);
+      counters.jobs_failed += Number(result.jobs_failed || 0);
+      counters.jobs_skipped += Number(result.jobs_skipped || 0);
+      if (Number(result.jobs_failed || 0) > 0) counters.failed_count += 1;
+      if (created === 0 && Number(result.jobs_failed || 0) === 0) counters.skipped_count += 1;
+      classificationResults.push({
+        message_id: messageId,
+        mode: result.mode || "process_message",
+        jobs_enqueued: Number(result.jobs_enqueued || 0),
+        jobs_processed: Number(result.jobs_processed || 0),
+        jobs_succeeded: Number(result.jobs_succeeded || 0),
+        jobs_failed: Number(result.jobs_failed || 0),
+        jobs_skipped: Number(result.jobs_skipped || 0),
+        classifications_created: created,
+      });
+    } catch (error) {
+      const safe = safeError(error);
+      counters.failed_count += 1;
+      classificationResults.push({
+        message_id: messageId,
+        status: "failed",
+        error: safe.code,
+      });
+      console.error("[microsoft-email-sync] classify_imported message failed", {
+        phase: safe.phase,
+        error: safe.code,
+        message_id: messageId,
+      });
+    }
+  }
+
+  const draftsAfter = await countResponseDrafts(supabase, candidateMessageIds);
+  const draftsCreated = Math.max(draftsAfter - draftsBefore, 0);
+  const queueSummary = await buildClassifyImportedQueueSummary(supabase, approvedMessageIds);
+  const summaries = await loadClassifyImportedSummaries(supabase, approvedMessageIds);
+  const jobIds = await loadClassifyImportedJobIds(supabase, candidateMessageIds);
+  const eventPayload = {
+    mode: "classify_imported",
+    batch_size: input.batchSize,
+    candidate_count: candidateMessageIds.length,
+    approved_imported_message_count: approvedMessageIds.length,
+    classified_count: counters.classified_count,
+    skipped_count: counters.skipped_count,
+    failed_count: counters.failed_count,
+    already_classified_count: counters.already_classified_count,
+    currently_classifying_count: counters.currently_classifying_count,
+    permanently_failed_count: counters.permanently_failed_count,
+    drafts_created: draftsCreated,
+    outlook_mutation_performed: false,
+    sync_checkpoint_updated: false,
+    attachments_fetched: 0,
+    automatic_responses_sent: 0,
+  };
+  const auditEvent = await insertClassifyImportedOperationalEvent(supabase, {
+    mailboxId,
+    messageIds: candidateMessageIds,
+    jobIds,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    payload: eventPayload,
+  });
+
+  return {
+    ...counters,
+    classification_created: counters.classified_count,
+    approved_imported_message_count: approvedMessageIds.length,
+    candidate_message_ids: candidateMessageIds,
+    classification_results: classificationResults,
+    queue_summary: queueSummary,
+    ...summaries,
+    replay_operation_references: {
+      operation_event_id: auditEvent?.id || null,
+      operation_event_created_at: auditEvent?.created_at || null,
+      job_ids: jobIds,
+    },
+    drafts_created: draftsCreated,
+  };
+}
+
 function blankCounters(): SyncCounters {
   return {
     graph_request_count: 0,
@@ -2352,7 +2795,7 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
-    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved" || input.mode === "process_imported";
+    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved" || input.mode === "process_imported" || input.mode === "classify_imported";
     if (input.mode === "process_imported") {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
@@ -2384,6 +2827,42 @@ serve(async (req) => {
         ...result,
         classification_created: 0,
         drafts_created: 0,
+        outlook_mutation_performed: false,
+        sync_checkpoint_updated: false,
+        attachments_fetched: 0,
+        automatic_responses_sent: 0,
+      });
+    }
+
+    if (input.mode === "classify_imported") {
+      const processingModel = await loadProcessingModel(supabase);
+      mailboxId = processingModel.mailbox.id;
+      folderId = processingModel.folder.id;
+      const result = await classifyImportedEmails(req, supabase, mailboxId, input, admin);
+      console.log("[microsoft-email-sync] classify_imported completed", {
+        phase: "classify_imported_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        batch_size: input.batchSize,
+        classified_count: result.classified_count,
+        skipped_count: result.skipped_count,
+        failed_count: result.failed_count,
+        already_classified_count: result.already_classified_count,
+        currently_classifying_count: result.currently_classifying_count,
+        drafts_created: result.drafts_created,
+      });
+
+      return json(req, 200, {
+        ok: true,
+        mode: "classify_imported",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        batch_size: input.batchSize,
+        caps: {
+          default_batch_size: CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE,
+          max_batch_size: CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
+        },
+        ...result,
         outlook_mutation_performed: false,
         sync_checkpoint_updated: false,
         attachments_fetched: 0,
