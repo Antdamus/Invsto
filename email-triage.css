@@ -932,6 +932,105 @@
   gap: 6px;
 }
 
+.classification-category-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.category-order-controls {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.category-order-actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.category-order-actions.is-editing {
+  grid-template-columns: 1fr;
+}
+
+.category-order-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  color: rgba(242,243,245,.86);
+  padding: 0 10px;
+  font-size: .78rem;
+  font-weight: 850;
+  transition: border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
+}
+
+.category-order-action-btn:hover,
+.category-order-action-btn:focus-visible {
+  border-color: rgba(214,178,94,.32);
+  background: rgba(214,178,94,.1);
+  color: rgba(255,255,255,.95);
+}
+
+.category-order-action-btn:focus-visible {
+  outline: 2px solid rgba(214,178,94,.72);
+  outline-offset: 2px;
+}
+
+.category-order-action-btn.is-primary {
+  border-color: rgba(214,178,94,.34);
+  background: rgba(214,178,94,.14);
+  color: var(--gold-2);
+}
+
+.category-order-action-btn.is-danger {
+  border-color: rgba(255,99,132,.24);
+  color: #ff9eb2;
+}
+
+.category-order-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 40px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  color: rgba(242,243,245,.72);
+  padding: 0;
+  transition: border-color .18s var(--ease), background .18s var(--ease), color .18s var(--ease);
+}
+
+.category-order-btn:hover,
+.category-order-btn:focus-visible {
+  border-color: rgba(214,178,94,.32);
+  background: rgba(214,178,94,.1);
+  color: rgba(255,255,255,.95);
+}
+
+.category-order-btn:focus-visible {
+  outline: 2px solid rgba(214,178,94,.72);
+  outline-offset: 2px;
+}
+
+.category-order-btn:disabled {
+  cursor: not-allowed;
+  opacity: .34;
+}
+
+.category-order-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
 .classification-category-button,
 .classification-row {
   width: 100%;
@@ -943,6 +1042,7 @@
 
 .classification-category-button {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 10px;

@@ -84,6 +84,7 @@
 
   const DASHBOARD_COLLAPSED_STORAGE_KEY = "og-email-triage-dashboard-collapsed";
   const CATEGORY_SORT_STORAGE_KEY = "og-email-triage-category-sort";
+  const CUSTOM_CATEGORY_ORDER_STORAGE_KEY = "og-email-triage-custom-category-order";
 
   const els = {
     connect: document.getElementById("connect-outlook"),
@@ -148,7 +149,8 @@
 
   function getStoredCategorySortMode() {
     try {
-      return window.localStorage?.getItem(CATEGORY_SORT_STORAGE_KEY) === "alphabetical" ? "alphabetical" : "default";
+      const stored = window.localStorage?.getItem(CATEGORY_SORT_STORAGE_KEY);
+      return ["alphabetical", "custom"].includes(stored) ? stored : "default";
     } catch (error) {
       return "default";
     }
@@ -156,9 +158,34 @@
 
   function storeCategorySortMode(mode) {
     try {
-      window.localStorage?.setItem(CATEGORY_SORT_STORAGE_KEY, mode === "alphabetical" ? "alphabetical" : "default");
+      window.localStorage?.setItem(CATEGORY_SORT_STORAGE_KEY, ["alphabetical", "custom"].includes(mode) ? mode : "default");
     } catch (error) {
       // Category sorting remains available for the current session.
+    }
+  }
+
+  function getStoredCustomCategoryOrder() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function storeCustomCategoryOrder(order) {
+    try {
+      window.localStorage?.setItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY, JSON.stringify(order.filter(Boolean)));
+    } catch (error) {
+      // Custom ordering still works in memory if local storage is unavailable.
+    }
+  }
+
+  function clearStoredCustomCategoryOrder() {
+    try {
+      window.localStorage?.removeItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY);
+    } catch (error) {
+      // Reset remains available in memory if local storage is unavailable.
     }
   }
 
@@ -166,6 +193,7 @@
     data: normalizeAdminViewPayload({}),
     densityMode: getStoredDensityMode(),
     categorySortMode: getStoredCategorySortMode(),
+    customCategoryOrder: getStoredCustomCategoryOrder(),
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
   }));
   let adminClassificationState = triageStore.getState();
@@ -338,7 +366,17 @@
     )).length;
   }
 
-  function buildCategorySidebarGroups(data, categorySortMode = "default") {
+  function mergeCustomCategoryOrder(groups, customCategoryOrder = []) {
+    const groupIds = new Set(groups.map((group) => group.id));
+    const orderedIds = [
+      ...customCategoryOrder.filter((id, index, order) => groupIds.has(id) && order.indexOf(id) === index),
+      ...groups.map((group) => group.id).filter((id) => !customCategoryOrder.includes(id)),
+    ];
+    const groupById = new Map(groups.map((group) => [group.id, group]));
+    return orderedIds.map((id) => groupById.get(id)).filter(Boolean);
+  }
+
+  function buildCategorySidebarGroups(data, categorySortMode = "default", customCategoryOrder = []) {
     const classifications = data.classifications || [];
     const representedCategories = [...new Set(classifications.map(getClassificationCategory).filter(Boolean))];
     const dynamicGroups = representedCategories.map((category) => ({
@@ -349,6 +387,7 @@
     }));
     const groups = [...CATEGORY_GROUPS, ...dynamicGroups];
 
+    if (categorySortMode === "custom") return mergeCustomCategoryOrder(groups, customCategoryOrder);
     if (categorySortMode !== "alphabetical") return groups;
 
     const allGroup = groups.filter((group) => group.id === "all");
@@ -359,23 +398,84 @@
     return [...allGroup, ...sortedGroups, ...reviewGroup];
   }
 
+  function mergedCustomCategoryOrder(data, customCategoryOrder = []) {
+    return buildCategorySidebarGroups(data, "custom", customCategoryOrder).map((group) => group.id);
+  }
+
+  function preserveHiddenCustomCategoryIds(visibleOrder, customCategoryOrder = []) {
+    const visibleIds = new Set(visibleOrder);
+    return [
+      ...visibleOrder,
+      ...customCategoryOrder.filter((id) => !visibleIds.has(id)),
+    ];
+  }
+
+  function moveCustomCategory(data, categoryId, direction, customCategoryOrder = []) {
+    const order = mergedCustomCategoryOrder(data, customCategoryOrder);
+    const index = order.indexOf(categoryId);
+    const nextIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return customCategoryOrder;
+    const nextOrder = [...order];
+    [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
+    return preserveHiddenCustomCategoryIds(nextOrder, customCategoryOrder);
+  }
+
+  function renderCustomCategoryOrderActions(state) {
+    if (state.categorySortMode !== "custom") return "";
+    if (state.customCategoryOrderEditing === true) {
+      return `
+        <div class="category-order-actions is-editing" aria-label="Custom category order actions">
+          <button type="button" class="category-order-action-btn is-primary" data-category-order-action="save">Save order</button>
+          <button type="button" class="category-order-action-btn" data-category-order-action="cancel">Cancel</button>
+          <button type="button" class="category-order-action-btn is-danger" data-category-order-action="reset">Reset custom order</button>
+        </div>
+      `;
+    }
+    return `
+      <div class="category-order-actions" aria-label="Custom category order actions">
+        <button type="button" class="category-order-action-btn" data-category-order-action="edit">Edit order</button>
+      </div>
+    `;
+  }
+
   function renderCategorySidebar(state, data) {
     if (!els.classificationCategoryList) return;
 
     const classifications = data.classifications || [];
-    const groups = buildCategorySidebarGroups(data, state.categorySortMode);
-    els.classificationCategoryList.innerHTML = groups.map((group) => {
+    const customMode = state.categorySortMode === "custom";
+    const editingCustomOrder = customMode && state.customCategoryOrderEditing === true;
+    const activeCustomOrder = editingCustomOrder && Array.isArray(state.customCategoryOrderDraft)
+      ? state.customCategoryOrderDraft
+      : state.customCategoryOrder;
+    const groups = buildCategorySidebarGroups(data, state.categorySortMode, activeCustomOrder);
+    els.classificationCategoryList.classList.toggle("is-custom-order", customMode);
+    els.classificationCategoryList.classList.toggle("is-editing-order", editingCustomOrder);
+    els.classificationCategoryList.innerHTML = groups.map((group, index) => {
       const count = sidebarGroupCount(classifications, group, state.activeFilters);
       const active = state.selectedCategory === group.id;
       const dynamicClass = group.isDynamic ? " is-dynamic" : "";
+      const moveControls = editingCustomOrder ? `
+        <span class="category-order-controls" aria-label="Move ${escapeHtml(group.label)}">
+          <button type="button" class="category-order-btn" data-category-move="up" data-category-id="${escapeHtml(group.id)}" aria-label="Move ${escapeHtml(group.label)} up" ${index === 0 ? "disabled" : ""}>
+            <i data-lucide="arrow-up"></i>
+          </button>
+          <button type="button" class="category-order-btn" data-category-move="down" data-category-id="${escapeHtml(group.id)}" aria-label="Move ${escapeHtml(group.label)} down" ${index === groups.length - 1 ? "disabled" : ""}>
+            <i data-lucide="arrow-down"></i>
+          </button>
+        </span>
+      ` : "";
 
       return `
-        <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}${dynamicClass}" data-category-id="${escapeHtml(group.id)}">
-          <span>${escapeHtml(group.label)}</span>
-          <b>${escapeHtml(count)}</b>
-        </button>
+        <div class="classification-category-item${editingCustomOrder ? " has-order-controls" : ""}">
+          ${moveControls}
+          <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}${dynamicClass}" data-category-id="${escapeHtml(group.id)}">
+            <span>${escapeHtml(group.label)}</span>
+            <b>${escapeHtml(count)}</b>
+          </button>
+        </div>
       `;
-    }).join("");
+    }).join("") + renderCustomCategoryOrderActions(state);
+    if (window.lucide?.createIcons) window.lucide.createIcons();
   }
 
   function renderClassificationList(state, data) {
@@ -1887,6 +1987,65 @@
 
   function bindClassificationInboxEvents(context) {
     els.classificationCategoryList?.addEventListener("click", (event) => {
+      const orderActionButton = event.target.closest("[data-category-order-action]");
+      if (orderActionButton) {
+        const action = orderActionButton.getAttribute("data-category-order-action");
+        const data = adminClassificationState.data || normalizeAdminViewPayload({});
+        const savedOrder = adminClassificationState.customCategoryOrder;
+
+        if (action === "edit") {
+          setAdminClassificationState({
+            customCategoryOrderEditing: true,
+            customCategoryOrderDraft: preserveHiddenCustomCategoryIds(mergedCustomCategoryOrder(data, savedOrder), savedOrder),
+          });
+          return;
+        }
+
+        if (action === "save") {
+          const nextOrder = preserveHiddenCustomCategoryIds(
+            mergedCustomCategoryOrder(data, adminClassificationState.customCategoryOrderDraft || savedOrder),
+            adminClassificationState.customCategoryOrderDraft || savedOrder,
+          );
+          storeCustomCategoryOrder(nextOrder);
+          setAdminClassificationState({
+            customCategoryOrder: nextOrder,
+            customCategoryOrderEditing: false,
+            customCategoryOrderDraft: null,
+          });
+          return;
+        }
+
+        if (action === "cancel") {
+          setAdminClassificationState({
+            customCategoryOrderEditing: false,
+            customCategoryOrderDraft: null,
+          });
+          return;
+        }
+
+        if (action === "reset") {
+          const nextOrder = mergedCustomCategoryOrder(data, []);
+          clearStoredCustomCategoryOrder();
+          setAdminClassificationState({
+            customCategoryOrder: nextOrder,
+            customCategoryOrderEditing: false,
+            customCategoryOrderDraft: null,
+          });
+          return;
+        }
+      }
+
+      const moveButton = event.target.closest("[data-category-move]");
+      if (moveButton) {
+        const categoryId = moveButton.getAttribute("data-category-id") || "";
+        const direction = moveButton.getAttribute("data-category-move") === "up" ? "up" : "down";
+        const data = adminClassificationState.data || normalizeAdminViewPayload({});
+        const draftOrder = adminClassificationState.customCategoryOrderDraft || adminClassificationState.customCategoryOrder;
+        const customCategoryOrderDraft = moveCustomCategory(data, categoryId, direction, draftOrder);
+        setAdminClassificationState({ customCategoryOrderDraft });
+        return;
+      }
+
       const button = event.target.closest("[data-category-id]");
       if (!button) return;
 
@@ -2080,9 +2239,20 @@
     });
 
     els.classificationCategorySort?.addEventListener("change", (event) => {
-      const categorySortMode = event.target.value === "alphabetical" ? "alphabetical" : "default";
+      const categorySortMode = ["alphabetical", "custom"].includes(event.target.value) ? event.target.value : "default";
+      const data = adminClassificationState.data || normalizeAdminViewPayload({});
+      const currentCustomOrder = adminClassificationState.customCategoryOrder;
+      const customCategoryOrder = categorySortMode === "custom"
+        ? preserveHiddenCustomCategoryIds(mergedCustomCategoryOrder(data, currentCustomOrder), currentCustomOrder)
+        : currentCustomOrder;
       storeCategorySortMode(categorySortMode);
-      setAdminClassificationState({ categorySortMode });
+      if (categorySortMode === "custom") storeCustomCategoryOrder(customCategoryOrder);
+      setAdminClassificationState({
+        categorySortMode,
+        customCategoryOrder,
+        customCategoryOrderEditing: false,
+        customCategoryOrderDraft: null,
+      });
     });
 
     els.classificationFiltersToggle?.addEventListener("click", () => {
