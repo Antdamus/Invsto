@@ -54,14 +54,19 @@ const PREVIEW_MESSAGE_SELECT = [
 const PREVIEW_DEFAULT_LIMIT = 25;
 const PREVIEW_MAX_LIMIT = 100;
 const PREVIEW_MAX_DAYS_BACK = 30;
+const MAX_IMPORT_BATCH = 25;
+const MAX_PROCESS_BATCH = 25;
+const MAX_CLASSIFICATION_BATCH = 10;
+const MAX_QUEUED_PROCESSING_JOBS = 100;
+const MAX_RUNNING_PROCESSING_JOBS = 25;
 const IMPORT_APPROVAL_CONFIRMATION = "IMPORT_PREVIEW_APPROVED";
 const IMPORT_PROCESSOR_VERSION = "v1";
 const PROCESS_IMPORTED_DEFAULT_BATCH_SIZE = 10;
-const PROCESS_IMPORTED_MAX_BATCH_SIZE = 25;
+const PROCESS_IMPORTED_MAX_BATCH_SIZE = MAX_PROCESS_BATCH;
 const PROCESS_IMPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
 const PROCESS_IMPORTED_LOCKED_BY = "microsoft-email-sync:process_imported";
 const CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE = 5;
-const CLASSIFY_IMPORTED_MAX_BATCH_SIZE = 10;
+const CLASSIFY_IMPORTED_MAX_BATCH_SIZE = MAX_CLASSIFICATION_BATCH;
 const NORMALIZED_TEXT_LIMIT = 200000;
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -147,13 +152,19 @@ type PipelineDiagnosticsInput = {
   folder: "inbox";
 };
 
+type RolloutStatusInput = {
+  mode: "rollout_status";
+  folder: "inbox";
+};
+
 type RequestInput =
   | SyncInput
   | PreviewInput
   | ImportApprovedInput
   | ProcessImportedInput
   | ClassifyImportedInput
-  | PipelineDiagnosticsInput;
+  | PipelineDiagnosticsInput
+  | RolloutStatusInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -441,6 +452,41 @@ async function requireAdmin(req: Request) {
   return { ok: true as const, userId: user.id, email: user.email || null };
 }
 
+function envFlag(name: string) {
+  return String(Deno.env.get(name) || "").trim().toLowerCase() === "true";
+}
+
+function rolloutControls() {
+  return {
+    imports_enabled: !envFlag("EMAIL_TRIAGE_DISABLE_IMPORTS"),
+    processing_enabled: !envFlag("EMAIL_TRIAGE_DISABLE_PROCESSING"),
+    classification_enabled: !envFlag("EMAIL_TRIAGE_DISABLE_CLASSIFICATION"),
+  };
+}
+
+function rolloutCaps() {
+  return {
+    max_import_batch: MAX_IMPORT_BATCH,
+    max_process_batch: MAX_PROCESS_BATCH,
+    max_classification_batch: MAX_CLASSIFICATION_BATCH,
+  };
+}
+
+function rolloutQueueLimits() {
+  return {
+    max_queued_processing_jobs: MAX_QUEUED_PROCESSING_JOBS,
+    max_running_processing_jobs: MAX_RUNNING_PROCESSING_JOBS,
+  };
+}
+
+function clampBatchSize(value: unknown, fallback: number, maximum: number) {
+  const raw = Number(value);
+  return Math.min(
+    Math.max(Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback, 1),
+    maximum,
+  );
+}
+
 async function parseInput(req: Request): Promise<RequestInput> {
   const body = await req.json().catch(() => ({}));
   const requestedMode = typeof body?.mode === "string" ? body.mode : "";
@@ -461,8 +507,7 @@ async function parseInput(req: Request): Promise<RequestInput> {
   }
 
   if (requestedMode === "sync_import_approved") {
-    const rawLimit = Number(body?.limit);
-    const limit = Math.min(Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : PREVIEW_DEFAULT_LIMIT, 1), PREVIEW_MAX_LIMIT);
+    const limit = clampBatchSize(body?.limit, PREVIEW_DEFAULT_LIMIT, MAX_IMPORT_BATCH);
     const rawDaysBack = body?.daysBack === null || body?.daysBack === undefined || body?.daysBack === ""
       ? null
       : Number(body.daysBack);
@@ -473,7 +518,7 @@ async function parseInput(req: Request): Promise<RequestInput> {
       throw new SyncError("invalid_import_bucket", { status: 400, phase: "input" });
     }
     const providerMessageIds = Array.isArray(body?.providerMessageIds)
-      ? [...new Set(body.providerMessageIds.map((value: unknown) => graphText(value)).filter(Boolean) as string[])].slice(0, PREVIEW_MAX_LIMIT)
+      ? [...new Set(body.providerMessageIds.map((value: unknown) => graphText(value)).filter(Boolean) as string[])].slice(0, MAX_IMPORT_BATCH)
       : [];
     const source = String(body?.source || "preview");
     if (source !== "preview") throw new SyncError("invalid_import_source", { status: 400, phase: "input" });
@@ -491,25 +536,21 @@ async function parseInput(req: Request): Promise<RequestInput> {
   }
 
   if (requestedMode === "process_imported") {
-    const rawBatchSize = Number(body?.batchSize ?? body?.limit);
-    const batchSize = Math.min(
-      Math.max(Number.isFinite(rawBatchSize) && rawBatchSize > 0 ? Math.floor(rawBatchSize) : PROCESS_IMPORTED_DEFAULT_BATCH_SIZE, 1),
-      PROCESS_IMPORTED_MAX_BATCH_SIZE,
-    );
+    const batchSize = clampBatchSize(body?.batchSize ?? body?.limit, PROCESS_IMPORTED_DEFAULT_BATCH_SIZE, MAX_PROCESS_BATCH);
     return { mode: "process_imported", folder: "inbox", batchSize };
   }
 
   if (requestedMode === "classify_imported") {
-    const rawBatchSize = Number(body?.batchSize ?? body?.limit);
-    const batchSize = Math.min(
-      Math.max(Number.isFinite(rawBatchSize) && rawBatchSize > 0 ? Math.floor(rawBatchSize) : CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE, 1),
-      CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
-    );
+    const batchSize = clampBatchSize(body?.batchSize ?? body?.limit, CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE, MAX_CLASSIFICATION_BATCH);
     return { mode: "classify_imported", folder: "inbox", batchSize };
   }
 
   if (requestedMode === "pipeline_diagnostics") {
     return { mode: "pipeline_diagnostics", folder: "inbox" };
+  }
+
+  if (requestedMode === "rollout_status") {
+    return { mode: "rollout_status", folder: "inbox" };
   }
 
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
@@ -2482,6 +2523,47 @@ async function countRows(supabase: ServiceClient, table: string, build: (query: 
   return count || 0;
 }
 
+async function countMailboxProcessingJobs(
+  supabase: ServiceClient,
+  mailboxId: string,
+  status: "queued" | "running",
+  phase = "rollout_queue_count",
+) {
+  const { count, error } = await supabase
+    .from("email_processing_jobs")
+    .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+    .eq("email_messages.mailbox_id", mailboxId)
+    .eq("status", status);
+
+  if (error) throw new SyncError("queue_state_lookup_failed", { phase, mailboxId });
+  return count || 0;
+}
+
+async function buildRolloutQueueState(supabase: ServiceClient, mailboxId: string) {
+  const [queued, running] = await Promise.all([
+    countMailboxProcessingJobs(supabase, mailboxId, "queued"),
+    countMailboxProcessingJobs(supabase, mailboxId, "running"),
+  ]);
+  const saturated = queued >= MAX_QUEUED_PROCESSING_JOBS || running >= MAX_RUNNING_PROCESSING_JOBS;
+  return { queued, running, saturated };
+}
+
+function queueSaturationReason(queueState: { queued: number; running: number; saturated: boolean }) {
+  if (queueState.queued >= MAX_QUEUED_PROCESSING_JOBS) return "queued_processing_jobs_at_limit";
+  if (queueState.running >= MAX_RUNNING_PROCESSING_JOBS) return "running_processing_jobs_at_limit";
+  return null;
+}
+
+async function assertQueueHasCapacity(supabase: ServiceClient, mailboxId: string) {
+  const queueState = await buildRolloutQueueState(supabase, mailboxId);
+  return {
+    queue_saturated: queueState.saturated,
+    queue_saturation_reason: queueSaturationReason(queueState),
+    queue_state: queueState,
+    queue_limits: rolloutQueueLimits(),
+  };
+}
+
 async function countResponseDrafts(supabase: ServiceClient, messageIds: string[]) {
   if (!messageIds.length) return 0;
   return await countRows(supabase, "email_response_drafts", (query) => query.in("message_id", messageIds));
@@ -3013,6 +3095,24 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   };
 }
 
+async function buildRolloutStatus(supabase: ServiceClient, mailboxId: string) {
+  return {
+    ok: true,
+    mode: "rollout_status",
+    rollout: rolloutControls(),
+    caps: rolloutCaps(),
+    queue_limits: rolloutQueueLimits(),
+    queue_state: await buildRolloutQueueState(supabase, mailboxId),
+    safety: {
+      outlook_mutation_performed: false,
+      sync_checkpoint_updated: false,
+      drafts_created: 0,
+      automatic_responses_sent: 0,
+      attachments_fetched: 0,
+    },
+  };
+}
+
 function blankCounters(): SyncCounters {
   return {
     graph_request_count: 0,
@@ -3071,7 +3171,37 @@ serve(async (req) => {
       input.mode === "sync_import_approved" ||
       input.mode === "process_imported" ||
       input.mode === "classify_imported" ||
-      input.mode === "pipeline_diagnostics";
+      input.mode === "pipeline_diagnostics" ||
+      input.mode === "rollout_status";
+
+    const controls = rolloutControls();
+    if (input.mode === "sync_import_approved" && !controls.imports_enabled) {
+      return json(req, 200, { ok: false, disabled: true, reason: "imports_disabled" });
+    }
+    if (input.mode === "process_imported" && !controls.processing_enabled) {
+      return json(req, 200, { ok: false, disabled: true, reason: "processing_disabled" });
+    }
+    if (input.mode === "classify_imported" && !controls.classification_enabled) {
+      return json(req, 200, { ok: false, disabled: true, reason: "classification_disabled" });
+    }
+
+    if (input.mode === "rollout_status") {
+      const processingModel = await loadProcessingModel(supabase);
+      mailboxId = processingModel.mailbox.id;
+      folderId = processingModel.folder.id;
+      const result = await buildRolloutStatus(supabase, mailboxId);
+      console.log("[microsoft-email-sync] rollout_status completed", {
+        phase: "rollout_status_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        queued: result.queue_state.queued,
+        running: result.queue_state.running,
+        saturated: result.queue_state.saturated,
+      });
+
+      return json(req, 200, result);
+    }
+
     if (input.mode === "pipeline_diagnostics") {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
@@ -3094,6 +3224,26 @@ serve(async (req) => {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
       folderId = processingModel.folder.id;
+      const saturation = await assertQueueHasCapacity(supabase, mailboxId);
+      if (saturation.queue_saturated) {
+        return json(req, 200, {
+          ok: true,
+          mode: "process_imported",
+          mailbox_id: mailboxId,
+          folder_id: folderId,
+          batch_size: input.batchSize,
+          caps: rolloutCaps(),
+          ...saturation,
+          jobs_enqueued: 0,
+          jobs_processed: 0,
+          classification_created: 0,
+          drafts_created: 0,
+          outlook_mutation_performed: false,
+          sync_checkpoint_updated: false,
+          attachments_fetched: 0,
+          automatic_responses_sent: 0,
+        });
+      }
       const result = await processImportedEmails(supabase, mailboxId, input);
       console.log("[microsoft-email-sync] process_imported completed", {
         phase: "process_imported_complete",
@@ -3117,7 +3267,12 @@ serve(async (req) => {
         caps: {
           default_batch_size: PROCESS_IMPORTED_DEFAULT_BATCH_SIZE,
           max_batch_size: PROCESS_IMPORTED_MAX_BATCH_SIZE,
+          max_process_batch: MAX_PROCESS_BATCH,
         },
+        queue_saturated: false,
+        queue_saturation_reason: null,
+        queue_limits: saturation.queue_limits,
+        queue_state: saturation.queue_state,
         ...result,
         classification_created: 0,
         drafts_created: 0,
@@ -3132,6 +3287,27 @@ serve(async (req) => {
       const processingModel = await loadProcessingModel(supabase);
       mailboxId = processingModel.mailbox.id;
       folderId = processingModel.folder.id;
+      const saturation = await assertQueueHasCapacity(supabase, mailboxId);
+      if (saturation.queue_saturated) {
+        return json(req, 200, {
+          ok: true,
+          mode: "classify_imported",
+          mailbox_id: mailboxId,
+          folder_id: folderId,
+          batch_size: input.batchSize,
+          caps: rolloutCaps(),
+          ...saturation,
+          jobs_enqueued: 0,
+          jobs_processed: 0,
+          classification_created: 0,
+          classified_count: 0,
+          drafts_created: 0,
+          outlook_mutation_performed: false,
+          sync_checkpoint_updated: false,
+          attachments_fetched: 0,
+          automatic_responses_sent: 0,
+        });
+      }
       const result = await classifyImportedEmails(req, supabase, mailboxId, input, admin);
       console.log("[microsoft-email-sync] classify_imported completed", {
         phase: "classify_imported_complete",
@@ -3155,7 +3331,12 @@ serve(async (req) => {
         caps: {
           default_batch_size: CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE,
           max_batch_size: CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
+          max_classification_batch: MAX_CLASSIFICATION_BATCH,
         },
+        queue_saturated: false,
+        queue_saturation_reason: null,
+        queue_limits: saturation.queue_limits,
+        queue_state: saturation.queue_state,
         ...result,
         outlook_mutation_performed: false,
         sync_checkpoint_updated: false,
@@ -3416,6 +3597,9 @@ serve(async (req) => {
       return json(req, 200, {
         ok: true,
         mode: "sync_import_approved",
+        caps: {
+          max_import_batch: MAX_IMPORT_BATCH,
+        },
         imported_count: importedCount,
         already_imported_count: alreadyImportedImportCount,
         skipped_count: skippedCount,
