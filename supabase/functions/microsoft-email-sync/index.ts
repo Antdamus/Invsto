@@ -55,6 +55,12 @@ const PREVIEW_DEFAULT_LIMIT = 25;
 const PREVIEW_MAX_LIMIT = 100;
 const PREVIEW_MAX_DAYS_BACK = 30;
 const IMPORT_APPROVAL_CONFIRMATION = "IMPORT_PREVIEW_APPROVED";
+const IMPORT_PROCESSOR_VERSION = "v1";
+const PROCESS_IMPORTED_DEFAULT_BATCH_SIZE = 10;
+const PROCESS_IMPORTED_MAX_BATCH_SIZE = 25;
+const PROCESS_IMPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
+const PROCESS_IMPORTED_LOCKED_BY = "microsoft-email-sync:process_imported";
+const NORMALIZED_TEXT_LIMIT = 200000;
 
 type ServiceClient = ReturnType<typeof createClient>;
 type DurableSyncMode = typeof DURABLE_SYNC_MODES[number];
@@ -122,7 +128,13 @@ type ImportApprovedInput = {
   confirmImport: string | null;
 };
 
-type RequestInput = SyncInput | PreviewInput | ImportApprovedInput;
+type ProcessImportedInput = {
+  mode: "process_imported";
+  folder: "inbox";
+  batchSize: number;
+};
+
+type RequestInput = SyncInput | PreviewInput | ImportApprovedInput | ProcessImportedInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -206,6 +218,91 @@ type PreviewMessageRow = {
   reason_codes: string[];
   already_imported: boolean;
   existing_message_id: string | null;
+};
+
+type ProcessImportedJobType = typeof PROCESS_IMPORTED_JOB_TYPES[number];
+
+type ImportedEmailBody = {
+  body_text: string | null;
+  body_html: string | null;
+  normalized_text: string | null;
+  normalized_text_sha256: string | null;
+  normalization_version: string | null;
+};
+
+type ImportedEmailMessage = {
+  id: string;
+  subject: string | null;
+  body_preview: string | null;
+  from_email: string | null;
+  from_name: string | null;
+  sender_email: string | null;
+  sender_name: string | null;
+  received_at: string | null;
+  sync_status: string;
+};
+
+type ImportedEmailRecipient = {
+  recipient_type: string;
+  display_name: string | null;
+  email: string | null;
+  email_normalized: string | null;
+};
+
+type ImportedProcessingJob = {
+  id: string;
+  message_id: string;
+  job_type: ProcessImportedJobType;
+  status: string;
+  attempt_count: number | null;
+  max_attempts: number | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+type ImportedIdentifiers = {
+  orderNumbers: string[];
+  itemNumbers: string[];
+  transactionIds: string[];
+  labels: string[];
+  labelValues: string[];
+  returnIds: string[];
+  trackingNumbers: string[];
+  titlePhrases: string[];
+  buyerUsernames: string[];
+  buyerEmails: string[];
+};
+
+type ImportedLinkCandidate = {
+  message_id: string;
+  link_type: "ebay_order" | "ebay_order_line" | "inventory_item" | "sale" | "customer_identity";
+  ebay_order_id?: string | null;
+  ebay_order_line_id?: string | null;
+  item_id?: string | null;
+  sale_id?: string | null;
+  matched_value: string;
+  match_method: string;
+  confidence: number;
+  status: "suggested" | "confirmed";
+  metadata: Record<string, unknown>;
+};
+
+type ProcessImportedCounters = {
+  queued_count: number;
+  processed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  already_processed_count: number;
+  currently_processing_count: number;
+  permanently_failed_count: number;
+  jobs_enqueued: number;
+  jobs_processed: number;
+  jobs_succeeded: number;
+  jobs_failed: number;
+  jobs_skipped: number;
+  links_created: number;
+  links_updated: number;
 };
 
 class SyncError extends Error {
@@ -356,6 +453,15 @@ async function parseInput(req: Request): Promise<RequestInput> {
       bucketMode,
       confirmImport: graphText(body?.confirmImport),
     };
+  }
+
+  if (requestedMode === "process_imported") {
+    const rawBatchSize = Number(body?.batchSize ?? body?.limit);
+    const batchSize = Math.min(
+      Math.max(Number.isFinite(rawBatchSize) && rawBatchSize > 0 ? Math.floor(rawBatchSize) : PROCESS_IMPORTED_DEFAULT_BATCH_SIZE, 1),
+      PROCESS_IMPORTED_MAX_BATCH_SIZE,
+    );
+    return { mode: "process_imported", folder: "inbox", batchSize };
   }
 
   const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
@@ -598,6 +704,35 @@ async function loadModel(supabase: ServiceClient) {
     folder: folder as EmailFolder,
     syncState: syncState as EmailSyncState,
     secret: secret as MailboxSecret,
+  };
+}
+
+async function loadProcessingModel(supabase: ServiceClient) {
+  const { data: mailboxes, error: mailboxError } = await supabase
+    .from("email_mailboxes")
+    .select("id")
+    .eq("provider", "microsoft")
+    .eq("status", "active")
+    .limit(2);
+
+  if (mailboxError) throw new SyncError("bootstrap_required", { phase: "mailbox_lookup", status: 500 });
+  if (!mailboxes?.length) throw new SyncError("bootstrap_required", { phase: "mailbox_lookup", status: 400 });
+  if (mailboxes.length > 1) throw new SyncError("multiple_active_mailboxes", { phase: "mailbox_lookup", status: 409 });
+
+  const mailbox = mailboxes[0] as { id: string };
+  const { data: folder, error: folderError } = await supabase
+    .from("email_folders")
+    .select("id")
+    .eq("mailbox_id", mailbox.id)
+    .eq("well_known_name", "inbox")
+    .maybeSingle();
+
+  if (folderError) throw new SyncError("missing_folder", { phase: "folder_lookup", mailboxId: mailbox.id });
+  if (!folder?.id) throw new SyncError("bootstrap_required", { phase: "folder_lookup", mailboxId: mailbox.id, status: 400 });
+
+  return {
+    mailbox,
+    folder: folder as { id: string },
   };
 }
 
@@ -1267,6 +1402,902 @@ async function processGraphMessage(
   await upsertBody(supabase, result.messageId, message);
 }
 
+function lowerTrim(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function unique(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function uniqueLower(values: Array<string | null | undefined>) {
+  return unique(values.map((value) => lowerTrim(value))).filter(Boolean);
+}
+
+function normalizeImportedText(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, NORMALIZED_TEXT_LIMIT);
+}
+
+function importedIdentifiersSummary(identifiers: ImportedIdentifiers) {
+  return {
+    order_numbers: identifiers.orderNumbers.length,
+    item_numbers: identifiers.itemNumbers.length,
+    transaction_ids: identifiers.transactionIds.length,
+    listing_labels: identifiers.labels.length,
+    return_ids: identifiers.returnIds.length,
+    tracking_numbers: identifiers.trackingNumbers.length,
+    title_phrases: identifiers.titlePhrases.length,
+    buyer_usernames: identifiers.buyerUsernames.length,
+    buyer_emails: identifiers.buyerEmails.length,
+  };
+}
+
+function workflowCandidates(identifiers: ImportedIdentifiers) {
+  const candidates = new Set<string>();
+  if (identifiers.returnIds.length) candidates.add("return_request");
+  if (identifiers.trackingNumbers.length) candidates.add("shipping_issue");
+  if (identifiers.orderNumbers.length) candidates.add("order_reference");
+  if (identifiers.itemNumbers.length || identifiers.transactionIds.length || identifiers.titlePhrases.length) {
+    candidates.add("item_reference");
+  }
+  if (identifiers.buyerUsernames.length || identifiers.buyerEmails.length) candidates.add("buyer_message");
+  if (!candidates.size) candidates.add("needs_review");
+  return [...candidates];
+}
+
+function importedProcessingCounters(): ProcessImportedCounters {
+  return {
+    queued_count: 0,
+    processed_count: 0,
+    skipped_count: 0,
+    failed_count: 0,
+    already_processed_count: 0,
+    currently_processing_count: 0,
+    permanently_failed_count: 0,
+    jobs_enqueued: 0,
+    jobs_processed: 0,
+    jobs_succeeded: 0,
+    jobs_failed: 0,
+    jobs_skipped: 0,
+    links_created: 0,
+    links_updated: 0,
+  };
+}
+
+async function loadApprovedImportedMessageIds(supabase: ServiceClient) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .select("message_ids")
+    .eq("event_type", "sync_import_approved")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) throw new SyncError("process_imported_event_lookup_failed", { phase: "process_imported_event_lookup" });
+  return [...new Set((data || []).flatMap((row: { message_ids?: string[] | null }) => row.message_ids || []))];
+}
+
+async function loadImportedCandidateIds(
+  supabase: ServiceClient,
+  mailboxId: string,
+  approvedMessageIds: string[],
+  batchSize: number,
+  counters: ProcessImportedCounters,
+) {
+  if (!approvedMessageIds.length) return [];
+  const { data: messages, error: messageError } = await supabase
+    .from("email_messages")
+    .select("id, received_at, sync_status")
+    .eq("mailbox_id", mailboxId)
+    .eq("sync_status", "active")
+    .in("id", approvedMessageIds)
+    .order("received_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(batchSize * 4, batchSize));
+
+  if (messageError) throw new SyncError("process_imported_message_lookup_failed", { phase: "process_imported_message_lookup", mailboxId });
+  const ids = (messages || []).map((message: { id: string }) => message.id);
+  if (!ids.length) return [];
+
+  const { data: jobs, error: jobError } = await supabase
+    .from("email_processing_jobs")
+    .select("message_id, job_type, status, attempt_count, max_attempts")
+    .in("message_id", ids)
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .eq("input_version", IMPORT_PROCESSOR_VERSION);
+
+  if (jobError) throw new SyncError("process_imported_job_lookup_failed", { phase: "process_imported_job_lookup", mailboxId });
+
+  const byMessage = new Map<string, Array<Record<string, unknown>>>();
+  for (const job of jobs || []) {
+    const key = String(job.message_id);
+    byMessage.set(key, [...(byMessage.get(key) || []), job]);
+  }
+
+  const candidates: string[] = [];
+  for (const id of ids) {
+    const messageJobs = byMessage.get(id) || [];
+    const terminalTypes = new Set(
+      messageJobs
+        .filter((job) => ["succeeded", "skipped"].includes(String(job.status)))
+        .map((job) => String(job.job_type)),
+    );
+    const hasActive = messageJobs.some((job) => ["queued", "running"].includes(String(job.status)));
+    const hasPermanentFailure = messageJobs.some((job) =>
+      String(job.status) === "failed" &&
+      Number(job.attempt_count || 0) >= Number(job.max_attempts || 3)
+    );
+
+    if (PROCESS_IMPORTED_JOB_TYPES.every((jobType) => terminalTypes.has(jobType))) {
+      counters.already_processed_count += 1;
+      continue;
+    }
+    if (hasActive) {
+      counters.currently_processing_count += 1;
+      continue;
+    }
+    if (hasPermanentFailure) {
+      counters.permanently_failed_count += 1;
+      continue;
+    }
+
+    candidates.push(id);
+    if (candidates.length >= batchSize) break;
+  }
+
+  return candidates;
+}
+
+async function enqueueImportedProcessingJobs(supabase: ServiceClient, messageIds: string[]) {
+  const rows = messageIds.flatMap((messageId) =>
+    PROCESS_IMPORTED_JOB_TYPES.map((jobType) => ({
+      message_id: messageId,
+      job_type: jobType,
+      input_version: IMPORT_PROCESSOR_VERSION,
+      status: "queued",
+      priority: jobType === "normalize" ? 50 : 60,
+      metadata: {
+        processor_version: IMPORT_PROCESSOR_VERSION,
+        enqueue_source: "microsoft-email-sync:process_imported",
+        deterministic_only: true,
+      },
+    }))
+  );
+
+  if (!rows.length) return 0;
+  const { data, error } = await supabase
+    .from("email_processing_jobs")
+    .upsert(rows, { onConflict: "message_id,job_type,input_version", ignoreDuplicates: true })
+    .select("id");
+
+  if (error) throw new SyncError("process_imported_enqueue_failed", { phase: "process_imported_enqueue" });
+  return data?.length || 0;
+}
+
+async function claimImportedJobs(supabase: ServiceClient, messageIds: string[], jobLimit: number) {
+  if (!messageIds.length) return [];
+  const { data, error } = await supabase
+    .from("email_processing_jobs")
+    .select("id, message_id, job_type, status, attempt_count, max_attempts, metadata")
+    .eq("status", "queued")
+    .lte("available_at", new Date().toISOString())
+    .in("message_id", messageIds)
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .eq("input_version", IMPORT_PROCESSOR_VERSION)
+    .order("priority", { ascending: true })
+    .order("created_at", { ascending: true })
+    .limit(jobLimit);
+
+  if (error) throw new SyncError("process_imported_claim_failed", { phase: "process_imported_claim" });
+  return (data || []) as ImportedProcessingJob[];
+}
+
+async function loadImportedMessageContext(supabase: ServiceClient, messageId: string) {
+  const { data: message, error: messageError } = await supabase
+    .from("email_messages")
+    .select("id, subject, body_preview, from_email, from_name, sender_email, sender_name, received_at, sync_status")
+    .eq("id", messageId)
+    .maybeSingle();
+
+  if (messageError) throw new SyncError("process_imported_message_lookup_failed", { phase: "process_imported_message_context" });
+  if (!message) throw new SyncError("process_imported_message_not_found", { phase: "process_imported_message_context", status: 404 });
+  if (message.sync_status !== "active") throw new SyncError("process_imported_message_not_active", { phase: "process_imported_message_context", status: 400 });
+
+  const { data: body, error: bodyError } = await supabase
+    .from("email_message_bodies")
+    .select("body_text, body_html, normalized_text, normalized_text_sha256, normalization_version")
+    .eq("message_id", messageId)
+    .maybeSingle();
+  if (bodyError) throw new SyncError("process_imported_body_lookup_failed", { phase: "process_imported_body_context" });
+
+  const { data: recipients, error: recipientsError } = await supabase
+    .from("email_message_recipients")
+    .select("recipient_type, display_name, email, email_normalized")
+    .eq("message_id", messageId);
+  if (recipientsError) throw new SyncError("process_imported_recipient_lookup_failed", { phase: "process_imported_recipient_context" });
+
+  return {
+    message: message as ImportedEmailMessage,
+    body: body as ImportedEmailBody | null,
+    recipients: (recipients || []) as ImportedEmailRecipient[],
+  };
+}
+
+function buildImportedSearchText(context: { message: ImportedEmailMessage; body: ImportedEmailBody | null; recipients: ImportedEmailRecipient[] }) {
+  const recipientText = context.recipients
+    .map((recipient) => [recipient.display_name, recipient.email, recipient.email_normalized].filter(Boolean).join(" "))
+    .join(" ");
+
+  return [
+    context.message.subject,
+    context.message.body_preview,
+    context.body?.normalized_text,
+    context.message.from_email,
+    context.message.from_name,
+    context.message.sender_email,
+    context.message.sender_name,
+    recipientText,
+  ].filter(Boolean).join("\n");
+}
+
+const GENERIC_IMPORTED_TITLE_WORDS = new Set(["watch", "ring", "bracelet", "chain", "pendant"]);
+
+function isSafeImportedTitlePhrase(value: string) {
+  const cleaned = lowerTrim(value).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  if (words.length === 1 && GENERIC_IMPORTED_TITLE_WORDS.has(words[0])) return false;
+  if (words.every((word) => GENERIC_IMPORTED_TITLE_WORDS.has(word))) return false;
+  return cleaned.length >= 8;
+}
+
+function extractImportedIdentifiers(context: { message: ImportedEmailMessage; body: ImportedEmailBody | null; recipients: ImportedEmailRecipient[] }) {
+  const text = buildImportedSearchText(context);
+  const subject = String(context.message.subject || "");
+  const participantEmails = [
+    context.message.from_email,
+    context.message.sender_email,
+    ...context.recipients.map((recipient) => recipient.email_normalized || recipient.email),
+  ];
+  const buyerUsernameFromSubject = subject.match(/^(.+?)\s+sent a message\b/i)?.[1]?.trim();
+  const fromNameCandidates = [context.message.from_name, context.message.sender_name]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && !value.includes("@") && value.length <= 80);
+  const labels = unique(text.match(/#\d+\b/g) || []);
+  const customLabelValues = [
+    ...Array.from(text.matchAll(/\b(?:custom\s+label|sku|label)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{2,40})\b/gi), (match) => match[1]),
+  ];
+  const trackingNumbers = unique([
+    ...Array.from(text.matchAll(/\b(?:tracking\s+number|tracking|shipment\s+tracking|shipping\s+barcode|label\s+id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9 -]{7,34})\b/gi), (match) =>
+      String(match[1] || "").replace(/\s+/g, "").trim()
+    ),
+  ]).filter((value) => /[A-Z]/i.test(value) && /\d/.test(value) && value.length >= 8 && value.length <= 34);
+  const titlePhrases = unique([
+    ...Array.from(text.matchAll(/\b(?:item|listing|title)\s*(?:title|name)?\s*[:#-]\s*["]?([^"\n\r.]{8,120})/gi), (match) => match[1]),
+    ...Array.from(subject.matchAll(/\b(?:re|about|question\s+about)\s*[:#-]\s*["]?([^"\n\r]{8,120})/gi), (match) => match[1]),
+  ])
+    .map((value) => value.replace(/\s+/g, " ").trim())
+    .filter((value) => isSafeImportedTitlePhrase(value))
+    .slice(0, 10);
+
+  return {
+    orderNumbers: unique(text.match(/\b\d{2}-\d{5}-\d{5}\b/g) || []),
+    itemNumbers: unique(text.match(/\b\d{12}\b/g) || []),
+    transactionIds: unique(text.match(/\b\d{14}\b/g) || []),
+    labels,
+    labelValues: unique([...labels.map((label) => label.replace(/^#/, "")), ...customLabelValues]),
+    returnIds: unique([
+      ...Array.from(text.matchAll(/\b(?:return\s+(?:case\s+)?id|ebay\s+return\s+id|return)\s*[:#-]?\s*([A-Z0-9-]{6,40})\b/gi), (match) => match[1]),
+    ]).filter((value) => /\d/.test(value)),
+    trackingNumbers,
+    titlePhrases,
+    buyerUsernames: uniqueLower([buyerUsernameFromSubject, ...fromNameCandidates]),
+    buyerEmails: uniqueLower([
+      ...participantEmails,
+      ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []),
+    ]),
+  } satisfies ImportedIdentifiers;
+}
+
+function isMaskedImportedBuyerEmail(value: string) {
+  const email = lowerTrim(value);
+  return !email ||
+    email.includes("members.ebay") ||
+    email.includes("member.ebay") ||
+    email.includes("reply.ebay") ||
+    email.includes("ebay.com") ||
+    email.includes("no-reply") ||
+    email.includes("noreply");
+}
+
+async function normalizeImportedMessage(supabase: ServiceClient, messageId: string) {
+  const context = await loadImportedMessageContext(supabase, messageId);
+  if (context.body?.normalized_text && context.body.normalization_version === IMPORT_PROCESSOR_VERSION) {
+    return { skipped: true, metadata: { processor_version: IMPORT_PROCESSOR_VERSION, normalized: false, reason: "already_normalized_v1" } };
+  }
+
+  const source = context.body?.body_text || (context.body?.body_html ? stripHtml(context.body.body_html) : context.message.body_preview || "");
+  const normalizedText = normalizeImportedText(source);
+  const normalizedHash = normalizedText ? await sha256Hex(normalizedText) : null;
+  const nowIso = new Date().toISOString();
+  const bodyPatch: Record<string, unknown> = {
+    message_id: messageId,
+    normalized_text: normalizedText || null,
+    normalized_text_sha256: normalizedHash,
+    normalization_version: IMPORT_PROCESSOR_VERSION,
+    metadata: {
+      ...(context.body ? {} : { source: "microsoft-email-sync:process_imported" }),
+      normalization_processor: IMPORT_PROCESSOR_VERSION,
+      deterministic_only: true,
+    },
+    stored_at: nowIso,
+    updated_at: nowIso,
+  };
+  if (!context.body) bodyPatch.redaction_status = "body_omitted";
+
+  const { error } = await supabase.from("email_message_bodies").upsert(bodyPatch, { onConflict: "message_id" });
+  if (error) throw new SyncError("process_imported_normalization_failed", { phase: "process_imported_body_update" });
+  return {
+    skipped: !normalizedText,
+    metadata: {
+      processor_version: IMPORT_PROCESSOR_VERSION,
+      deterministic_only: true,
+      normalized: Boolean(normalizedText),
+      normalized_text_sha256: normalizedHash,
+    },
+  };
+}
+
+async function queryImportedByChunks<T>(values: string[], load: (chunk: string[]) => Promise<T[]>) {
+  const rows: T[] = [];
+  for (let index = 0; index < values.length; index += 50) {
+    rows.push(...await load(values.slice(index, index + 50)));
+  }
+  return rows;
+}
+
+function importedOrderLineSelect() {
+  return "id, order_id, item_number, transaction_id, item_title, custom_label, internal_item_id, sale_id, order:ebay_orders(id, order_number, buyer_username, buyer_email, sale_date, paid_on_date)";
+}
+
+function importedLinkMetadata(identifiers: ImportedIdentifiers, matchedBy: string, extra: Record<string, unknown> = {}) {
+  return {
+    processor_version: IMPORT_PROCESSOR_VERSION,
+    deterministic_only: true,
+    matched_by: matchedBy,
+    extracted_identifiers: importedIdentifiersSummary(identifiers),
+    workflow_candidates: workflowCandidates(identifiers),
+    ...extra,
+  };
+}
+
+async function upsertImportedLink(supabase: ServiceClient, candidate: ImportedLinkCandidate) {
+  let lookup = supabase
+    .from("email_message_links")
+    .select("id, confidence, status")
+    .eq("message_id", candidate.message_id)
+    .eq("link_type", candidate.link_type)
+    .in("status", ["suggested", "confirmed"]);
+
+  lookup = candidate.ebay_order_id ? lookup.eq("ebay_order_id", candidate.ebay_order_id) : lookup.is("ebay_order_id", null);
+  lookup = candidate.ebay_order_line_id ? lookup.eq("ebay_order_line_id", candidate.ebay_order_line_id) : lookup.is("ebay_order_line_id", null);
+  lookup = candidate.item_id ? lookup.eq("item_id", candidate.item_id) : lookup.is("item_id", null);
+  lookup = candidate.sale_id ? lookup.eq("sale_id", candidate.sale_id) : lookup.is("sale_id", null);
+
+  const { data: existingRows, error: lookupError } = await lookup.limit(5);
+  if (lookupError) throw new SyncError("process_imported_link_failed", { phase: "process_imported_link_lookup" });
+
+  const rows = Array.isArray(existingRows) ? existingRows : [];
+  const existing = rows.find((row) => row.status === candidate.status) ||
+    rows.find((row) => row.status === "suggested") ||
+    rows[0] ||
+    null;
+  if (existing?.id) {
+    const shouldImprove = Number(candidate.confidence) > Number(existing.confidence || 0) ||
+      (existing.status === "suggested" && candidate.status === "confirmed");
+    if (!shouldImprove) return { created: 0, updated: 0 };
+
+    const { error } = await supabase
+      .from("email_message_links")
+      .update({
+        confidence: candidate.confidence,
+        status: candidate.status,
+        match_method: candidate.match_method,
+        matched_value: candidate.matched_value,
+        metadata: candidate.metadata,
+      })
+      .eq("id", existing.id);
+
+    if (error) throw new SyncError("process_imported_link_failed", { phase: "process_imported_link_update" });
+    return { created: 0, updated: 1 };
+  }
+
+  const { error } = await supabase.from("email_message_links").insert(candidate);
+  if (error) throw new SyncError("process_imported_link_failed", { phase: "process_imported_link_insert" });
+  return { created: 1, updated: 0 };
+}
+
+async function matchImportedMessage(supabase: ServiceClient, messageId: string) {
+  const context = await loadImportedMessageContext(supabase, messageId);
+  const identifiers = extractImportedIdentifiers(context);
+  const candidates: ImportedLinkCandidate[] = [];
+  const ambiguity: Record<string, unknown> = {};
+
+  if (identifiers.orderNumbers.length) {
+    const orders = await queryImportedByChunks(identifiers.orderNumbers, async (chunk) => {
+      const { data, error } = await supabase.from("ebay_orders").select("id, order_number").in("order_number", chunk);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_order_lookup" });
+      return data || [];
+    });
+    for (const order of orders as Array<{ id: string; order_number: string }>) {
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order",
+        ebay_order_id: order.id,
+        matched_value: order.order_number,
+        match_method: "order_number_exact",
+        confidence: 1.0,
+        status: "confirmed",
+        metadata: importedLinkMetadata(identifiers, "order_number_exact"),
+      });
+    }
+  }
+
+  if (identifiers.returnIds.length) {
+    const returnCases = await queryImportedByChunks(identifiers.returnIds, async (chunk) => {
+      const { data, error } = await supabase
+        .from("ebay_return_cases")
+        .select("id, order_id, ebay_return_id, status")
+        .in("ebay_return_id", chunk);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_return_lookup" });
+      return data || [];
+    });
+    for (const returnCase of returnCases as Array<Record<string, any>>) {
+      if (!returnCase.order_id) {
+        ambiguity[`return_id:${returnCase.ebay_return_id || returnCase.id}`] = "return_case_has_no_order_link";
+        continue;
+      }
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order",
+        ebay_order_id: String(returnCase.order_id),
+        matched_value: String(returnCase.ebay_return_id || returnCase.id),
+        match_method: "return_id_exact",
+        confidence: 1.0,
+        status: "confirmed",
+        metadata: importedLinkMetadata(identifiers, "return_id_exact", {
+          return_case_id: returnCase.id,
+          return_status: returnCase.status,
+        }),
+      });
+    }
+  }
+
+  if (identifiers.itemNumbers.length && identifiers.transactionIds.length) {
+    const lines = await queryImportedByChunks(identifiers.itemNumbers, async (chunk) => {
+      const { data, error } = await supabase
+        .from("ebay_order_lines")
+        .select(importedOrderLineSelect())
+        .in("item_number", chunk)
+        .in("transaction_id", identifiers.transactionIds);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_item_transaction_lookup" });
+      return data || [];
+    });
+    for (const line of lines as Array<Record<string, any>>) {
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order_line",
+        ebay_order_line_id: String(line.id),
+        ebay_order_id: String(line.order_id || ""),
+        item_id: line.internal_item_id || null,
+        sale_id: line.sale_id || null,
+        matched_value: `${line.item_number}:${line.transaction_id}`,
+        match_method: "item_transaction_exact",
+        confidence: 1.0,
+        status: "confirmed",
+        metadata: importedLinkMetadata(identifiers, "item_transaction_exact"),
+      });
+    }
+  }
+
+  if (identifiers.itemNumbers.length) {
+    const lines = await queryImportedByChunks(identifiers.itemNumbers, async (chunk) => {
+      const { data, error } = await supabase
+        .from("ebay_order_lines")
+        .select(importedOrderLineSelect())
+        .in("item_number", chunk);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_item_lookup" });
+      return data || [];
+    });
+    const byItem = new Map<string, Array<Record<string, any>>>();
+    for (const line of lines as Array<Record<string, any>>) {
+      const itemNumber = String(line.item_number || "");
+      byItem.set(itemNumber, [...(byItem.get(itemNumber) || []), line]);
+    }
+    for (const [itemNumber, matchedLines] of byItem) {
+      const alreadyHasStrong = candidates.some((candidate) =>
+        candidate.link_type === "ebay_order_line" &&
+        candidate.match_method === "item_transaction_exact" &&
+        candidate.matched_value.startsWith(`${itemNumber}:`)
+      );
+      if (alreadyHasStrong) continue;
+      if (matchedLines.length === 1) {
+        const line = matchedLines[0];
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order_line",
+          ebay_order_line_id: String(line.id),
+          ebay_order_id: String(line.order_id || ""),
+          item_id: line.internal_item_id || null,
+          sale_id: line.sale_id || null,
+          matched_value: itemNumber,
+          match_method: "item_number_exact",
+          confidence: 0.8,
+          status: "suggested",
+          metadata: importedLinkMetadata(identifiers, "item_number_exact"),
+        });
+      } else if (matchedLines.length > 1) {
+        ambiguity[`item_number:${itemNumber}`] = matchedLines.length;
+      }
+    }
+  }
+
+  if (identifiers.buyerUsernames.length) {
+    const orders: Array<Record<string, unknown>> = [];
+    for (const username of identifiers.buyerUsernames.slice(0, 10)) {
+      const { data, error } = await supabase
+        .from("ebay_orders")
+        .select("id, order_number, buyer_username")
+        .ilike("buyer_username", username);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_buyer_username_lookup" });
+      orders.push(...(data || []));
+    }
+    const hasStrongContext = identifiers.orderNumbers.length > 0 ||
+      identifiers.itemNumbers.length > 0 ||
+      identifiers.labelValues.length > 0 ||
+      identifiers.trackingNumbers.length > 0 ||
+      identifiers.returnIds.length > 0;
+    if (hasStrongContext) {
+      for (const order of orders as Array<{ id: string; buyer_username: string }>) {
+        if (candidates.some((candidate) => candidate.ebay_order_id === order.id)) continue;
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order",
+          ebay_order_id: order.id,
+          matched_value: order.buyer_username,
+          match_method: "buyer_username_plus_strong_clue",
+          confidence: 0.65,
+          status: "suggested",
+          metadata: importedLinkMetadata(identifiers, "buyer_username_plus_strong_clue", { guarded_by_context: true }),
+        });
+      }
+    } else if (orders.length === 1) {
+      const order = orders[0] as { id: string; buyer_username: string };
+      candidates.push({
+        message_id: messageId,
+        link_type: "ebay_order",
+        ebay_order_id: order.id,
+        matched_value: order.buyer_username,
+        match_method: "buyer_username_alone_unique",
+        confidence: 0.45,
+        status: "suggested",
+        metadata: importedLinkMetadata(identifiers, "buyer_username_alone_unique", { buyer_username_only: true }),
+      });
+    } else if (orders.length) {
+      ambiguity.buyer_username_context_required = true;
+    }
+  }
+
+  if (identifiers.buyerEmails.length) {
+    const usableEmails = identifiers.buyerEmails.filter((email) => !isMaskedImportedBuyerEmail(email));
+    const hasStrongContext = identifiers.orderNumbers.length > 0 ||
+      identifiers.itemNumbers.length > 0 ||
+      identifiers.labelValues.length > 0 ||
+      identifiers.trackingNumbers.length > 0 ||
+      identifiers.returnIds.length > 0;
+    if (usableEmails.length && hasStrongContext) {
+      const orders = await queryImportedByChunks(usableEmails.slice(0, 10), async (chunk) => {
+        const { data, error } = await supabase
+          .from("ebay_orders")
+          .select("id, order_number, buyer_email, buyer_username")
+          .in("buyer_email", chunk);
+        if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_buyer_email_lookup" });
+        return data || [];
+      });
+      for (const order of orders as Array<Record<string, any>>) {
+        if (candidates.some((candidate) => candidate.ebay_order_id === order.id)) continue;
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order",
+          ebay_order_id: String(order.id),
+          matched_value: String(order.buyer_email || ""),
+          match_method: "buyer_email_plus_strong_clue",
+          confidence: 0.65,
+          status: "suggested",
+          metadata: importedLinkMetadata(identifiers, "buyer_email_plus_strong_clue", { masked_email_excluded: true }),
+        });
+      }
+    } else if (identifiers.buyerEmails.some(isMaskedImportedBuyerEmail)) {
+      ambiguity.buyer_email_masked_or_unreliable = true;
+    }
+  }
+
+  if (identifiers.labelValues.length) {
+    const labelCandidates = unique([...identifiers.labels, ...identifiers.labelValues]);
+    const lineMatches = await queryImportedByChunks(labelCandidates, async (chunk) => {
+      const { data, error } = await supabase
+        .from("ebay_order_lines")
+        .select(importedOrderLineSelect())
+        .in("custom_label", chunk);
+      if (error) throw new SyncError("process_imported_matching_failed", { phase: "process_imported_custom_label_lookup" });
+      return data || [];
+    });
+    const byLabel = new Map<string, Array<Record<string, any>>>();
+    for (const line of lineMatches as Array<Record<string, any>>) {
+      const key = String(line.custom_label || "");
+      byLabel.set(key, [...(byLabel.get(key) || []), line]);
+    }
+    for (const [label, lines] of byLabel) {
+      if (lines.length === 1) {
+        const line = lines[0];
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order_line",
+          ebay_order_line_id: String(line.id),
+          ebay_order_id: String(line.order_id || ""),
+          item_id: line.internal_item_id || null,
+          sale_id: line.sale_id || null,
+          matched_value: label,
+          match_method: "internal_label_custom_label_exact",
+          confidence: 0.78,
+          status: "suggested",
+          metadata: importedLinkMetadata(identifiers, "internal_label_custom_label_exact"),
+        });
+      } else if (lines.length > 1) {
+        ambiguity[`custom_label:${label}`] = lines.length;
+      }
+    }
+  }
+
+  const deduped = new Map<string, ImportedLinkCandidate>();
+  for (const candidate of candidates) {
+    const key = [
+      candidate.link_type,
+      candidate.ebay_order_id || "",
+      candidate.ebay_order_line_id || "",
+      candidate.item_id || "",
+      candidate.sale_id || "",
+      candidate.status,
+    ].join(":");
+    const existing = deduped.get(key);
+    if (!existing || candidate.confidence > existing.confidence) deduped.set(key, candidate);
+  }
+
+  let linksCreated = 0;
+  let linksUpdated = 0;
+  for (const candidate of deduped.values()) {
+    const result = await upsertImportedLink(supabase, candidate);
+    linksCreated += result.created;
+    linksUpdated += result.updated;
+  }
+
+  return {
+    skipped: deduped.size === 0,
+    identifiers,
+    links_created: linksCreated,
+    links_updated: linksUpdated,
+    metadata: {
+      processor_version: IMPORT_PROCESSOR_VERSION,
+      deterministic_only: true,
+      identifiers_found: importedIdentifiersSummary(identifiers),
+      workflow_candidates: workflowCandidates(identifiers),
+      links_created: linksCreated,
+      links_updated: linksUpdated,
+      ambiguity,
+    },
+  };
+}
+
+async function markImportedJob(
+  supabase: ServiceClient,
+  job: ImportedProcessingJob,
+  status: "running" | "succeeded" | "failed" | "skipped",
+  values: Record<string, unknown> = {},
+) {
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = { status, ...values };
+  if (status === "running") {
+    patch.started_at = nowIso;
+    patch.locked_at = nowIso;
+    patch.locked_by = PROCESS_IMPORTED_LOCKED_BY;
+    patch.attempt_count = Number(job.attempt_count || 0) + 1;
+  }
+  if (["succeeded", "failed", "skipped"].includes(status)) {
+    patch.completed_at = nowIso;
+    patch.locked_at = null;
+    patch.locked_by = null;
+  }
+
+  let query = supabase.from("email_processing_jobs").update(patch).eq("id", job.id);
+  if (status === "running") query = query.eq("status", "queued");
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error || !data?.id) throw new SyncError("process_imported_claim_failed", { phase: "process_imported_job_update" });
+}
+
+async function processImportedJob(supabase: ServiceClient, job: ImportedProcessingJob) {
+  await markImportedJob(supabase, job, "running");
+  try {
+    if (job.job_type === "normalize") {
+      const result = await normalizeImportedMessage(supabase, job.message_id);
+      await markImportedJob(supabase, job, result.skipped ? "skipped" : "succeeded", {
+        last_error_code: null,
+        last_error_message: null,
+        metadata: result.metadata,
+      });
+      return { status: result.skipped ? "skipped" as const : "succeeded" as const, links_created: 0, links_updated: 0, metadata: result.metadata };
+    }
+
+    const result = await matchImportedMessage(supabase, job.message_id);
+    await markImportedJob(supabase, job, result.skipped ? "skipped" : "succeeded", {
+      last_error_code: null,
+      last_error_message: null,
+      metadata: result.metadata,
+    });
+    return {
+      status: result.skipped ? "skipped" as const : "succeeded" as const,
+      links_created: result.links_created,
+      links_updated: result.links_updated,
+      metadata: result.metadata,
+    };
+  } catch (error) {
+    const safe = safeError(error);
+    await markImportedJob(supabase, job, "failed", {
+      last_error_code: safe.code,
+      last_error_message: safe.code,
+      metadata: {
+        processor_version: IMPORT_PROCESSOR_VERSION,
+        deterministic_only: true,
+        error: safe.code,
+        phase: safe.phase,
+      },
+    }).catch(() => undefined);
+    throw safe;
+  }
+}
+
+function durationMs(startedAt?: string | null, completedAt?: string | null) {
+  if (!startedAt || !completedAt) return null;
+  const started = new Date(startedAt).getTime();
+  const completed = new Date(completedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return null;
+  return completed - started;
+}
+
+async function buildImportedQueueSummary(supabase: ServiceClient, approvedMessageIds: string[]) {
+  if (!approvedMessageIds.length) {
+    return {
+      queued: 0,
+      running: 0,
+      succeeded: 0,
+      skipped: 0,
+      failed: 0,
+      deterministic_match_indicators: {},
+      processing_duration_ms: { count: 0, min: null, max: null, avg: null },
+    };
+  }
+
+  const { data: jobs, error } = await supabase
+    .from("email_processing_jobs")
+    .select("status, metadata, started_at, completed_at")
+    .in("message_id", approvedMessageIds.slice(0, 500))
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .eq("input_version", IMPORT_PROCESSOR_VERSION)
+    .order("updated_at", { ascending: false })
+    .limit(1000);
+
+  if (error) throw new SyncError("process_imported_summary_failed", { phase: "process_imported_summary" });
+  const statusCounts: Record<string, number> = {};
+  const indicators: Record<string, number> = {};
+  const durations: number[] = [];
+  for (const job of jobs || []) {
+    const status = String(job.status || "unknown");
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata as Record<string, any> : {};
+    const found = metadata.identifiers_found && typeof metadata.identifiers_found === "object"
+      ? metadata.identifiers_found as Record<string, unknown>
+      : {};
+    for (const [key, value] of Object.entries(found)) {
+      indicators[key] = (indicators[key] || 0) + Number(value || 0);
+    }
+    for (const candidate of Array.isArray(metadata.workflow_candidates) ? metadata.workflow_candidates : []) {
+      indicators[`workflow:${candidate}`] = (indicators[`workflow:${candidate}`] || 0) + 1;
+    }
+    const duration = durationMs(job.started_at, job.completed_at);
+    if (duration !== null) durations.push(duration);
+  }
+
+  return {
+    queued: statusCounts.queued || 0,
+    running: statusCounts.running || 0,
+    succeeded: statusCounts.succeeded || 0,
+    skipped: statusCounts.skipped || 0,
+    failed: statusCounts.failed || 0,
+    deterministic_match_indicators: indicators,
+    processing_duration_ms: {
+      count: durations.length,
+      min: durations.length ? Math.min(...durations) : null,
+      max: durations.length ? Math.max(...durations) : null,
+      avg: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
+    },
+  };
+}
+
+async function processImportedEmails(
+  supabase: ServiceClient,
+  mailboxId: string,
+  input: ProcessImportedInput,
+) {
+  const counters = importedProcessingCounters();
+  const approvedMessageIds = await loadApprovedImportedMessageIds(supabase);
+  const candidateMessageIds = await loadImportedCandidateIds(supabase, mailboxId, approvedMessageIds, input.batchSize, counters);
+  counters.queued_count = candidateMessageIds.length;
+  counters.jobs_enqueued = await enqueueImportedProcessingJobs(supabase, candidateMessageIds);
+
+  const jobs = await claimImportedJobs(supabase, candidateMessageIds, input.batchSize * PROCESS_IMPORTED_JOB_TYPES.length);
+  const processingReasons: Record<string, number> = {};
+  const deterministicResults: Array<Record<string, unknown>> = [];
+  for (const job of jobs) {
+    try {
+      const result = await processImportedJob(supabase, job);
+      counters.jobs_processed += 1;
+      counters.processed_count += 1;
+      if (result.status === "succeeded") counters.jobs_succeeded += 1;
+      if (result.status === "skipped") {
+        counters.jobs_skipped += 1;
+        counters.skipped_count += 1;
+      }
+      counters.links_created += result.links_created;
+      counters.links_updated += result.links_updated;
+      for (const candidate of Array.isArray((result.metadata as Record<string, any>)?.workflow_candidates)
+        ? (result.metadata as Record<string, any>).workflow_candidates
+        : []) {
+        processingReasons[String(candidate)] = (processingReasons[String(candidate)] || 0) + 1;
+      }
+      deterministicResults.push({
+        message_id: job.message_id,
+        job_type: job.job_type,
+        status: result.status,
+        identifiers_found: (result.metadata as Record<string, unknown>)?.identifiers_found || null,
+        workflow_candidates: (result.metadata as Record<string, unknown>)?.workflow_candidates || [],
+        links_created: result.links_created,
+        links_updated: result.links_updated,
+      });
+    } catch (error) {
+      const safe = safeError(error);
+      counters.jobs_processed += 1;
+      counters.jobs_failed += 1;
+      counters.failed_count += 1;
+      processingReasons[safe.code] = (processingReasons[safe.code] || 0) + 1;
+      console.error("[microsoft-email-sync] process_imported job failed", {
+        phase: safe.phase,
+        error: safe.code,
+        job_id: job.id,
+        message_id: job.message_id,
+        job_type: job.job_type,
+      });
+    }
+  }
+
+  const queueSummary = await buildImportedQueueSummary(supabase, approvedMessageIds);
+  return {
+    ...counters,
+    approved_imported_message_count: approvedMessageIds.length,
+    candidate_message_ids: candidateMessageIds,
+    processing_reasons: processingReasons,
+    deterministic_results: deterministicResults,
+    queue_summary: queueSummary,
+  };
+}
+
 function blankCounters(): SyncCounters {
   return {
     graph_request_count: 0,
@@ -1321,7 +2352,45 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
-    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved";
+    isPreview = input.mode === "sync_preview" || input.mode === "sync_import_approved" || input.mode === "process_imported";
+    if (input.mode === "process_imported") {
+      const processingModel = await loadProcessingModel(supabase);
+      mailboxId = processingModel.mailbox.id;
+      folderId = processingModel.folder.id;
+      const result = await processImportedEmails(supabase, mailboxId, input);
+      console.log("[microsoft-email-sync] process_imported completed", {
+        phase: "process_imported_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        batch_size: input.batchSize,
+        queued_count: result.queued_count,
+        processed_count: result.processed_count,
+        skipped_count: result.skipped_count,
+        failed_count: result.failed_count,
+        already_processed_count: result.already_processed_count,
+        currently_processing_count: result.currently_processing_count,
+      });
+
+      return json(req, 200, {
+        ok: true,
+        mode: "process_imported",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        batch_size: input.batchSize,
+        caps: {
+          default_batch_size: PROCESS_IMPORTED_DEFAULT_BATCH_SIZE,
+          max_batch_size: PROCESS_IMPORTED_MAX_BATCH_SIZE,
+        },
+        ...result,
+        classification_created: 0,
+        drafts_created: 0,
+        outlook_mutation_performed: false,
+        sync_checkpoint_updated: false,
+        attachments_fetched: 0,
+        automatic_responses_sent: 0,
+      });
+    }
+
     const model = await loadModel(supabase);
     mailboxId = model.mailbox.id;
     folderId = model.folder.id;
