@@ -855,6 +855,15 @@ window.editCardModule = (function () {
             return;
         }
 
+        if (existingItem.ebay_sync_enabled !== false && uploadedPaths.length && typeof window.copyStockPhotosToPublicEbayBucket === "function") {
+            try {
+                await window.copyStockPhotosToPublicEbayBucket(currentItemId, uploadedPaths);
+            } catch (ebayPhotoError) {
+                console.warn("Could not prepare newly uploaded photos for eBay:", ebayPhotoError);
+                showToast("Item saved, but the new eBay photo copies may need sync prep.");
+            }
+        }
+
         await bumpInventoryVersion();
         await refreshItemById(currentItemId);
         showToast("Item updated and signed audit trail saved.");

@@ -210,10 +210,11 @@
               <option value="needs_fix">Needs Fix</option>
               <option value="ready">Ready to Publish</option>
               <option value="published">Published</option>
-              <option value="synced">Synced Offer</option>
-              <option value="out_of_stock">Out of Stock</option>
-              <option value="sync_off">Sync Off</option>
-              <option value="never_checked">Never Checked</option>
+            <option value="synced">Synced Offer</option>
+            <option value="dirty">Needs Sync</option>
+            <option value="out_of_stock">Out of Stock</option>
+            <option value="sync_off">Sync Off</option>
+            <option value="never_checked">Never Checked</option>
             </select>
           </div>
         </div>
@@ -877,18 +878,41 @@
           <select id="ebay-sync-scope">
             <option value="selected">Selected items</option>
             <option value="filtered">Current filtered view</option>
-            <option value="backend_limit">Next limit from backend</option>
+            <option value="backend_limit">Dirty / never checked queue</option>
           </select>
 
           <label for="ebay-sync-limit">Limit</label>
-          <input id="ebay-sync-limit" type="number" min="1" max="250" step="1" value="50" />
+          <input id="ebay-sync-limit" type="number" min="1" max="1000" step="1" value="50" />
+
+          <label for="ebay-sync-batch-size">Publish batch size</label>
+          <input id="ebay-sync-batch-size" type="number" min="1" max="50" step="1" value="10" />
 
           <div id="ebay-sync-scope-summary" class="ebay-sync-scope-summary">Choose a run mode.</div>
+          <div id="ebay-sync-progress" class="ebay-sync-progress hidden" aria-live="polite">
+            <div class="ebay-sync-progress-top">
+              <span id="ebay-sync-progress-label">Ready</span>
+              <strong id="ebay-sync-progress-count">0/0</strong>
+            </div>
+            <div class="ebay-sync-progress-track">
+              <div id="ebay-sync-progress-bar" class="ebay-sync-progress-bar"></div>
+            </div>
+            <div id="ebay-sync-progress-log" class="ebay-sync-progress-log"></div>
+          </div>
 
           <div class="ebay-sync-console-actions">
             <button type="button" id="ebay-sync-dry-run" class="stock-secondary-btn">Dry Run</button>
             <button type="button" id="ebay-sync-run" class="stock-primary-btn">Sync</button>
             <button type="button" id="ebay-sync-publish" class="stock-primary-btn ebay-sync-publish-btn">Publish Ready</button>
+          </div>
+
+          <div class="ebay-sync-order-tools">
+            <h3>Orders</h3>
+            <label for="ebay-order-sync-days-back">Look back days</label>
+            <input id="ebay-order-sync-days-back" type="number" min="1" max="90" step="1" value="14" />
+            <div class="ebay-sync-console-actions">
+              <button type="button" id="ebay-order-sync-dry-run" class="stock-secondary-btn">Check Orders</button>
+              <button type="button" id="ebay-order-sync-run" class="stock-primary-btn">Sync Orders & Reserve</button>
+            </div>
           </div>
         </section>
 

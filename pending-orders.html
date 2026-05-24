@@ -202,19 +202,36 @@
 
       <section id="order-import-panel" class="import-panel hidden" aria-label="Import eBay orders">
         <div>
-          <span class="eyebrow">eBay Import</span>
-          <h2>Upload eBay Orders Report</h2>
-          <p>Import pending order lines from the eBay CSV. Existing orders are checked for missing line items.</p>
+          <span class="eyebrow">eBay Orders</span>
+          <h2>Sync Awaiting Shipments</h2>
+          <p>Pull current awaiting-shipment orders from eBay, add missing pending lines, and reserve matching stock.</p>
         </div>
-        <div class="import-actions">
-          <label class="file-picker">
-            <input id="ebay-orders-file" type="file" accept=".csv,text/csv" />
-            <i data-lucide="upload"></i>
-            Choose CSV
+        <div class="import-actions ebay-order-sync-actions">
+          <label class="days-back-field">
+            Days
+            <input id="ebay-order-sync-days-back" type="number" min="1" max="180" step="1" value="14" />
           </label>
-          <button id="import-ebay-orders" type="button" class="primary-btn">Import Orders</button>
+          <button id="ebay-order-sync-check" type="button" class="secondary-btn">
+            <i data-lucide="search-check"></i>
+            Check Orders
+          </button>
+          <button id="ebay-order-sync-run" type="button" class="primary-btn">
+            <i data-lucide="download-cloud"></i>
+            Sync & Reserve
+          </button>
         </div>
         <p id="import-status" class="import-status"></p>
+        <details class="legacy-import-details">
+          <summary>CSV report fallback</summary>
+          <div class="legacy-import-actions">
+            <label class="file-picker">
+              <input id="ebay-orders-file" type="file" accept=".csv,text/csv" />
+              <i data-lucide="upload"></i>
+              Choose CSV
+            </label>
+            <button id="import-ebay-orders" type="button" class="secondary-btn">Import CSV</button>
+          </div>
+        </details>
       </section>
 
       <section id="admin-order-actions-panel" class="admin-order-actions hidden" aria-label="Admin order closeout actions">

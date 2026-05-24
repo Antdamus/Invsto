@@ -45,6 +45,7 @@ const state = {
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
+  ebayOrderSyncBusy: false,
   orderTaskAssignees: [],
   selectedOrderTasks: [],
   selectedOrderTaskEvents: new Map(),
@@ -1094,6 +1095,117 @@ async function importEbayOrdersFromCsv() {
     setImportStatus(error.message || "Could not import eBay orders.", "error");
   } finally {
     if (button) button.disabled = false;
+  }
+}
+
+function getEbayOrderSyncUrl() {
+  const projectRef = String(window.SUPABASE_URL || "")
+    .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+  return `https://${projectRef}.functions.supabase.co/ebay-order-sync`;
+}
+
+async function postEbayOrderSyncPayload(payload) {
+  const response = await fetch(getEbayOrderSyncUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { ok: false, error: text || `HTTP ${response.status}` };
+  }
+  if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+  return data;
+}
+
+function getEbayOrderSyncDaysBack() {
+  const value = Number($("ebay-order-sync-days-back")?.value || 14);
+  if (!Number.isFinite(value)) return 14;
+  return Math.min(180, Math.max(1, Math.round(value)));
+}
+
+function setEbayOrderSyncBusy(busy) {
+  state.ebayOrderSyncBusy = busy;
+  $("ebay-order-sync-check")?.toggleAttribute("disabled", busy);
+  $("ebay-order-sync-run")?.toggleAttribute("disabled", busy);
+  $("import-ebay-orders")?.toggleAttribute("disabled", busy);
+}
+
+function summarizeEbayOrderSyncResult(result, dryRun) {
+  if (!result?.ok) {
+    return formatEbayOrderSyncError(result?.error || result) || "Could not sync eBay orders.";
+  }
+
+  if (dryRun) {
+    const warnings = Array.isArray(result.warnings) && result.warnings.length
+      ? ` ${result.warnings.length} warning(s).`
+      : "";
+    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${warnings}`;
+  }
+
+  const warnings = Array.isArray(result.warnings) && result.warnings.length
+    ? ` ${result.warnings.length} warning(s).`
+    : "";
+  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${warnings}`;
+}
+
+function formatEbayOrderSyncError(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object") {
+    const parts = [
+      error.message,
+      error.details,
+      error.hint,
+      error.code ? `code: ${error.code}` : "",
+    ].map((value) => String(value || "").trim()).filter(Boolean);
+    if (parts.length) return parts.join(" | ");
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "Unknown eBay order sync error.";
+    }
+  }
+  return String(error);
+}
+
+async function runEbayOrderApiSync(dryRun = true) {
+  if (!canImportOrders()) {
+    setImportStatus("Your OG user is not allowed to sync eBay orders.", "error");
+    return;
+  }
+  if (state.ebayOrderSyncBusy) return;
+
+  const payload = {
+    dryRun,
+    reserve: !dryRun,
+    limit: 100,
+    daysBack: getEbayOrderSyncDaysBack(),
+  };
+
+  setEbayOrderSyncBusy(true);
+  setImportStatus(dryRun ? "Checking eBay awaiting shipments..." : "Syncing eBay orders and reserving stock...");
+
+  try {
+    const result = await postEbayOrderSyncPayload(payload);
+    setImportStatus(summarizeEbayOrderSyncResult(result, dryRun), result?.ok ? "success" : "error");
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      console.warn("eBay order sync warnings:", result.warnings);
+    }
+    if (!dryRun && result?.ok) {
+      clearEbayLaunchFilter({ apply: false });
+      clearOrderSearch({ apply: false });
+      await loadOrders();
+    }
+  } catch (error) {
+    console.error("eBay API order sync failed:", error);
+    setImportStatus(formatEbayOrderSyncError(error) || "Could not sync eBay orders.", "error");
+  } finally {
+    setEbayOrderSyncBusy(false);
   }
 }
 
@@ -5529,6 +5641,8 @@ function setupListeners() {
   });
   $("close-mobile-order-detail")?.addEventListener("click", closeMobileOrderDetail);
   window.addEventListener("resize", syncMobileOrderDetailMode);
+  $("ebay-order-sync-check")?.addEventListener("click", () => runEbayOrderApiSync(true));
+  $("ebay-order-sync-run")?.addEventListener("click", () => runEbayOrderApiSync(false));
   $("import-ebay-orders")?.addEventListener("click", importEbayOrdersFromCsv);
   $("ebay-orders-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0];

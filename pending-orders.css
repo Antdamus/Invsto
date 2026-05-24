@@ -532,6 +532,32 @@ h1 {
   flex-wrap: wrap;
 }
 
+.ebay-order-sync-actions {
+  align-items: end;
+}
+
+.days-back-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.days-back-field input {
+  width: 92px;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-weight: 900;
+}
+
 .file-picker {
   position: relative;
   display: inline-flex;
@@ -574,6 +600,24 @@ h1 {
 
 .import-status.is-success {
   color: var(--green);
+}
+
+.legacy-import-details {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.legacy-import-details summary {
+  width: max-content;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.legacy-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .workspace-grid {

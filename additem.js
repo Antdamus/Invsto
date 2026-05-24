@@ -37,6 +37,8 @@ let stockPlacementMode = "tray";
 const stockPlacementScanTimers = {};
 const OG_WEBSITE_QR_URL = "https://www.og-jewelers.com/";
 const IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
+const ADD_ITEM_SOURCE_PHOTO_BUCKET = "photos";
+const ADD_ITEM_PUBLIC_EBAY_PHOTO_BUCKET = "public-ebay-photos";
 const ADD_ITEM_RELOAD_TOP_KEY = "og.addItem.reloadTopAfterSuccess";
 const ADD_ITEM_EBAY_CATEGORY_OPTIONS = [
   { id: "261988", label: "Fine Jewelry > Bracelets & Charms", terms: ["bracelet", "bangle", "tennis"] },
@@ -723,6 +725,119 @@ let uploadedImages = [];
     )) || null;
   }
 
+  function getAddItemEbayTextBlob() {
+    return [
+      document.getElementById("title")?.value || "",
+      document.getElementById("description")?.value || "",
+      document.getElementById("category")?.value || "",
+      document.getElementById("category-dropdown-toggle")?.textContent || "",
+      document.getElementById("assisted-stone-type")?.value || "",
+      document.getElementById("assisted-material")?.value || "",
+      document.getElementById("assisted-purity")?.value || "",
+      document.getElementById("assisted-length")?.value || "",
+    ].join(" ").toLowerCase();
+  }
+
+  function addItemAspectValue(value) {
+    const normalized = String(value || "").trim();
+    return normalized ? [normalized] : null;
+  }
+
+  function setAddItemAspect(aspects, name, value) {
+    const normalized = addItemAspectValue(value);
+    if (normalized) aspects[name] = normalized;
+  }
+
+  function inferAddItemEbayType(categoryId, text) {
+    if (categoryId === "261988") return "Bracelet";
+    if (categoryId === "261990") return "Earrings";
+    if (categoryId === "261994" || categoryId === "261995") return "Ring";
+    if (categoryId === "261992") return "Jewelry Set";
+    if (addItemTextMatchesTerm(text, "bracelet") || addItemTextMatchesTerm(text, "tennis")) return "Bracelet";
+    if (addItemTextMatchesTerm(text, "necklace")) return "Necklace";
+    if (addItemTextMatchesTerm(text, "pendant") || addItemTextMatchesTerm(text, "charm")) return "Pendant";
+    if (addItemTextMatchesTerm(text, "ring")) return "Ring";
+    if (addItemTextMatchesTerm(text, "earring") || addItemTextMatchesTerm(text, "earrings")) return "Earrings";
+    if (addItemTextMatchesTerm(text, "chain")) return "Chain";
+    return "Jewelry";
+  }
+
+  function inferAddItemEbayStyle(categoryId, text) {
+    if (addItemTextMatchesTerm(text, "tennis")) return "Tennis";
+    if (addItemTextMatchesTerm(text, "halo")) return "Halo";
+    if (addItemTextMatchesTerm(text, "heart")) return "Heart";
+    if (addItemTextMatchesTerm(text, "cross")) return "Cross";
+    if (addItemTextMatchesTerm(text, "cuban")) return "Cuban";
+    if (addItemTextMatchesTerm(text, "link")) return "Link";
+    if (categoryId === "261988") return "Tennis";
+    if (categoryId === "261993") return "Pendant";
+    return "Jewelry";
+  }
+
+  function inferAddItemEbayMetal(materialPurity, text) {
+    const metal = String(materialPurity?.metal || "").toLowerCase();
+    if (metal.includes("silver") || text.includes("silver") || text.includes("925")) return "Fine Silver";
+    if (text.includes("white gold")) return "White Gold";
+    if (text.includes("rose gold")) return "Rose Gold";
+    if (metal.includes("gold") || text.includes("gold")) return "Yellow Gold";
+    if (metal.includes("platinum") || text.includes("platinum")) return "Platinum";
+    return "";
+  }
+
+  function inferAddItemEbayPurity(materialPurity, text) {
+    const basisPoints = Number(materialPurity?.purity_basis_points || 0);
+    if (basisPoints >= 10000 || text.includes("24k")) return "24k";
+    if (basisPoints >= 9990 || text.includes("999")) return "999";
+    if (basisPoints >= 9250 || text.includes("925") || text.includes("sterling silver")) return "925";
+    if (basisPoints >= 9167 || text.includes("22k")) return "22k";
+    if (basisPoints >= 7500 || text.includes("18k")) return "18k";
+    if (basisPoints >= 5833 || text.includes("14k")) return "14k";
+    if (basisPoints >= 4167 || text.includes("10k")) return "10k";
+    return "";
+  }
+
+  function inferAddItemEbayMainStone(text) {
+    const stone = String(document.getElementById("assisted-stone-type")?.value || "").trim();
+    const stoneText = `${stone} ${text}`.toLowerCase();
+    if (stoneText.includes("simulated diamond") || stoneText.includes("cubic zirconia") || /\bcz\b/i.test(stoneText)) return "Simulated Diamond";
+    if (stoneText.includes("sapphire")) return "Sapphire";
+    if (stoneText.includes("diamond")) return "Diamond";
+    if (stoneText.includes("ruby")) return "Ruby";
+    if (stoneText.includes("emerald")) return "Emerald";
+    if (stoneText.includes("turquoise")) return "Turquoise";
+    if (stoneText.includes("no stone") || stoneText.includes("without stone")) return "No Stone";
+    return stone || "Unknown";
+  }
+
+  function inferAddItemEbayColor(text) {
+    const colors = ["pink", "purple", "blue", "green", "red", "black", "white", "clear", "yellow", "gold", "silver", "turquoise", "multicolor", "rainbow"];
+    const found = colors.find((color) => addItemTextMatchesTerm(text, color));
+    if (!found) return "";
+    if (found === "clear") return "White";
+    return found.charAt(0).toUpperCase() + found.slice(1);
+  }
+
+  function buildAddItemEbayAspects(categoryId, materialPurity, weightValue = null, itemLengthValue = null) {
+    const text = getAddItemEbayTextBlob();
+    const aspects = {};
+
+    setAddItemAspect(aspects, "Brand", "Unbranded");
+    setAddItemAspect(aspects, "Type", inferAddItemEbayType(categoryId, text));
+    setAddItemAspect(aspects, "Style", inferAddItemEbayStyle(categoryId, text));
+    setAddItemAspect(aspects, "Main Stone", inferAddItemEbayMainStone(text));
+    setAddItemAspect(aspects, "Metal", inferAddItemEbayMetal(materialPurity, text));
+    setAddItemAspect(aspects, "Metal Purity", inferAddItemEbayPurity(materialPurity, text));
+
+    const color = inferAddItemEbayColor(text);
+    setAddItemAspect(aspects, "Main Stone Color", color);
+
+    const weight = Number(weightValue);
+    if (Number.isFinite(weight) && weight > 0) setAddItemAspect(aspects, "Item Weight", `${weight} g`);
+    setAddItemAspect(aspects, "Item Length", itemLengthValue);
+
+    return aspects;
+  }
+
   function populateAddItemEbayCategorySelect() {
     const select = document.getElementById("ebay-category-id");
     if (!select) return;
@@ -792,7 +907,7 @@ let uploadedImages = [];
     populateAddItemEbayCategorySelect();
     updateAddItemEbayReadiness();
 
-    ["title", "description", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "scanned-barcode"].forEach((id) => {
+    ["title", "description", "category", "assisted-material", "assisted-purity", "assisted-stone-type", "assisted-length", "sale-price", "scanned-barcode"].forEach((id) => {
       document.getElementById(id)?.addEventListener("input", () => updateAddItemEbayReadiness());
       document.getElementById(id)?.addEventListener("change", () => updateAddItemEbayReadiness());
     });
@@ -831,6 +946,28 @@ let uploadedImages = [];
     return String(fileName || "image.jpg")
       .replace(/[^\w.\-]+/g, "_")
       .replace(/_+/g, "_");
+  }
+
+  function normalizeAddItemPhotoPath(value) {
+    return String(value || "").split("?")[0].replace(/^\/+/, "");
+  }
+
+  function addItemPhotoFilename(path) {
+    return normalizeAddItemPhotoPath(path).split("/").pop() || "";
+  }
+
+  function addItemPublicEbayPhotoPath(itemId, sourcePath) {
+    const filename = addItemPhotoFilename(sourcePath);
+    return itemId && filename ? `${itemId}/${filename}` : "";
+  }
+
+  function addItemPhotoContentType(path, fallback = "image/jpeg") {
+    const ext = addItemPhotoFilename(path).split(".").pop()?.toLowerCase();
+    if (ext === "png") return "image/png";
+    if (ext === "webp") return "image/webp";
+    if (ext === "gif") return "image/gif";
+    if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+    return fallback;
   }
 
   async function copyAssistedImageToPhotosBucket(image, index) {
@@ -901,6 +1038,49 @@ let uploadedImages = [];
     }
 
     return destinationPath;
+  }
+
+  async function copyItemPhotosToPublicEbayBucket(item, photoPaths) {
+    const itemId = String(item?.id || "").trim();
+    const paths = [...new Set((photoPaths || []).map(normalizeAddItemPhotoPath).filter(Boolean))];
+    if (!itemId || !paths.length) return { copied: 0, failed: 0 };
+
+    let copied = 0;
+    let failed = 0;
+
+    for (const sourcePath of paths.slice(0, 12)) {
+      if (/^https?:\/\//i.test(sourcePath)) continue;
+
+      const publicPath = addItemPublicEbayPhotoPath(itemId, sourcePath);
+      if (!publicPath) continue;
+
+      try {
+        const { data: blob, error: downloadError } = await supabase
+          .storage
+          .from(ADD_ITEM_SOURCE_PHOTO_BUCKET)
+          .download(sourcePath);
+
+        if (downloadError || !blob) {
+          throw new Error(downloadError?.message || "Photo was not available in the item photo bucket.");
+        }
+
+        const { error: uploadError } = await supabase
+          .storage
+          .from(ADD_ITEM_PUBLIC_EBAY_PHOTO_BUCKET)
+          .upload(publicPath, blob, {
+            upsert: true,
+            contentType: blob.type || addItemPhotoContentType(sourcePath),
+          });
+
+        if (uploadError) throw uploadError;
+        copied += 1;
+      } catch (error) {
+        failed += 1;
+        console.warn(`Could not prepare eBay public photo for ${sourcePath}:`, error);
+      }
+    }
+
+    return { copied, failed };
   }
 
   async function ensureItemPhotosSaved(item, photoPaths) {
@@ -2708,6 +2888,9 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
   const selectedEbayCategoryId = String(document.getElementById("ebay-category-id")?.value || "").trim();
   const inferredEbayCategoryId = inferAddItemEbayCategory()?.id || "";
   const ebay_category_id = selectedEbayCategoryId || inferredEbayCategoryId || null;
+  const ebay_aspects = ebay_sync_enabled
+    ? buildAddItemEbayAspects(ebay_category_id, materialPurity, weight, item_length)
+    : {};
   if (ebay_sync_enabled && !getAddItemEbayCategoryOption(ebay_category_id)) {
     showToast("Choose an eBay category, or turn off eBay sync for this item.");
     updateAddItemEbayReadiness({ infer: false });
@@ -2820,6 +3003,7 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
       ebay_sync_enabled,
       ebay_category_id,
       ebay_condition: "NEW",
+      ebay_aspects,
       price_per_weight,
       categories,
       cost,
@@ -2872,6 +3056,16 @@ document.getElementById("add-item-form")?.addEventListener("submit", async (e) =
     alert(photoAttachError.message || "Item saved, but selected photos could not be attached.");
     releaseAddItemSubmit();
     return;
+  }
+
+  if (ebay_sync_enabled && finalPhotoPaths.length) {
+    const ebayPhotoPrep = await copyItemPhotosToPublicEbayBucket(newItem, finalPhotoPaths);
+    if (photoStatus && ebayPhotoPrep.copied > 0) {
+      photoStatus.innerHTML += `Prepared ${ebayPhotoPrep.copied} eBay public photo${ebayPhotoPrep.copied === 1 ? "" : "s"}.<br>`;
+    }
+    if (ebayPhotoPrep.failed > 0) {
+      showToast(`Item saved, but ${ebayPhotoPrep.failed} eBay photo${ebayPhotoPrep.failed === 1 ? "" : "s"} still need prep.`);
+    }
   }
 
 // Hoisted so we can check it later (outside the try)

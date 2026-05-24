@@ -21,6 +21,7 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1 hour
 const STOCK_IMAGE_PROCESS_FUNCTION_NAME = "process-inventory-image";
 const STOCK_UPLOAD_LIST_FUNCTION_NAME = "list-inventory-upload-images";
 const STOCK_PHOTO_BUCKET = "photos";
+const STOCK_PUBLIC_EBAY_PHOTO_BUCKET = "public-ebay-photos";
 const STOCK_CAPTURE_PHOTO_BUCKET = "capture-photos";
 const STOCK_INVENTORY_UPLOAD_BUCKET = "InventoryUpload";
 const STOCK_BACKGROUND_REMOVAL_MODULE_URL = "https://esm.sh/@imgly/background-removal@1.7.0?bundle";
@@ -259,6 +260,7 @@ function itemMatchesEbayStatus(item, ebayStatus) {
   if (status === "ready") return item.ebay_sync_enabled !== false && link?.publish_ready === true && !link?.listing_id;
   if (status === "published") return Boolean(link?.listing_id);
   if (status === "synced") return link?.status === "synced" && !link?.listing_id;
+  if (status === "dirty") return item.ebay_sync_enabled !== false && link?.sync_dirty === true;
   if (status === "out_of_stock") return link?.status === "out_of_stock" || Number(item.stock || 0) <= 0;
   if (status === "sync_off") return item.ebay_sync_enabled === false;
   if (status === "never_checked") return item.ebay_sync_enabled !== false && !link?.last_checked_at;
@@ -271,6 +273,7 @@ function getEbayStatusLabel(value) {
     ready: "Ready to Publish",
     published: "Published",
     synced: "Synced Offer",
+    dirty: "Needs Sync",
     out_of_stock: "Out of Stock",
     sync_off: "Sync Off",
     never_checked: "Never Checked",
@@ -288,6 +291,10 @@ function buildEbayStatusBadge(item) {
   if (itemNeedsEbayFix(item)) {
     const reason = link?.last_error || warnings[0] || (!String(item?.barcode || "").trim() ? "Missing SKU/barcode" : "Needs eBay category or readiness data");
     return `<span class="ebay-status-badge ebay-status-badge--fix" title="${escapeStockHtml(lastChecked)}"><i data-lucide="alert-triangle"></i> Needs fix: ${escapeStockHtml(reason)}</span>`;
+  }
+
+  if (link?.sync_dirty === true && link?.last_checked_at) {
+    return `<span class="ebay-status-badge ebay-status-badge--muted" title="${escapeStockHtml(link.dirty_reason || "Changed since last eBay sync")}"><i data-lucide="refresh-cw"></i> Needs sync</span>`;
   }
 
   if (link?.listing_id) {
@@ -2512,6 +2519,12 @@ function buildLocationChips(item) {
     return `https://${projectRef}.functions.supabase.co/ebay-inventory-sync`;
   }
 
+  function getEbayOrderSyncUrl() {
+    const projectRef = String(window.SUPABASE_URL || "")
+      .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+    return `https://${projectRef}.functions.supabase.co/ebay-order-sync`;
+  }
+
   function getEbaySyncConsoleScopeItems(scope = "selected") {
     if (scope === "selected") {
       return allItems.filter((item) => selectedItems.has(item.id));
@@ -2527,9 +2540,60 @@ function buildLocationChips(item) {
     const missingSku = items.filter((item) => !String(item.barcode || "").trim()).length;
     const outOfStock = items.filter((item) => Number(item.stock || 0) <= 0).length;
     const missingCategory = items.filter((item) => !getEffectiveEbayCategoryOption(item)).length;
+    const readyToPublish = getEbayPublishReadyItems(items).length;
+    const dirty = items.filter((item) => item.ebay_sync_enabled !== false && getEbayLinkState(item)?.sync_dirty === true).length;
     const eligible = items.length - syncOff - missingSku;
 
-    return { syncOff, missingSku, outOfStock, missingCategory, eligible };
+    return { syncOff, missingSku, outOfStock, missingCategory, eligible, readyToPublish, dirty };
+  }
+
+  function getEbayPublishBatchSize() {
+    const value = Number(document.getElementById("ebay-sync-batch-size")?.value || 10);
+    return Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), 50) : 10;
+  }
+
+  function chunkEbayItemIds(itemIds = [], size = 10) {
+    const chunks = [];
+    for (let index = 0; index < itemIds.length; index += size) {
+      chunks.push(itemIds.slice(index, index + size));
+    }
+    return chunks;
+  }
+
+  function setEbaySyncProgress({ current = 0, total = 0, label = "Ready", log = null } = {}) {
+    const progress = document.getElementById("ebay-sync-progress");
+    const labelEl = document.getElementById("ebay-sync-progress-label");
+    const countEl = document.getElementById("ebay-sync-progress-count");
+    const bar = document.getElementById("ebay-sync-progress-bar");
+    const logEl = document.getElementById("ebay-sync-progress-log");
+    if (!progress) return;
+
+    progress.classList.remove("hidden");
+    if (labelEl) labelEl.textContent = label;
+    if (countEl) countEl.textContent = `${current}/${total}`;
+    if (bar) bar.style.width = `${total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0}%`;
+    if (log && logEl) {
+      const entry = document.createElement("div");
+      entry.textContent = log;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+
+  function resetEbaySyncProgress() {
+    const progress = document.getElementById("ebay-sync-progress");
+    const logEl = document.getElementById("ebay-sync-progress-log");
+    const bar = document.getElementById("ebay-sync-progress-bar");
+    if (progress) progress.classList.add("hidden");
+    if (logEl) logEl.innerHTML = "";
+    if (bar) bar.style.width = "0%";
+  }
+
+  function getEbayPublishReadyItems(items = []) {
+    return items.filter((item) => {
+      const link = getEbayLinkState(item);
+      return item.ebay_sync_enabled !== false && link?.publish_ready === true && !link?.listing_id;
+    });
   }
 
   function updateEbaySyncConsoleScopeSummary() {
@@ -2538,16 +2602,18 @@ function buildLocationChips(item) {
 
     const scope = document.getElementById("ebay-sync-scope")?.value || "selected";
     const limit = Number(document.getElementById("ebay-sync-limit")?.value || 50);
+    const batchSize = getEbayPublishBatchSize();
 
     if (scope === "backend_limit") {
-      summary.textContent = `The backend will process the next ${Number.isFinite(limit) && limit > 0 ? limit : 50} eBay-enabled item(s). Publishing is disabled for this scope.`;
+      summary.textContent = `The backend will process the next ${Number.isFinite(limit) && limit > 0 ? limit : 50} dirty or never checked eBay item(s). Publishing is disabled for this scope.`;
       return;
     }
 
     const items = getEbaySyncConsoleScopeItems(scope);
     const local = getEbaySyncConsoleLocalStatus(items);
     const label = scope === "selected" ? "selected" : "currently filtered";
-    summary.textContent = `${items.length} ${label} item(s). ${Math.max(local.eligible, 0)} can be sent to eBay, ${local.outOfStock} out of stock, ${local.missingCategory} missing eBay category, ${local.syncOff} sync off, ${local.missingSku} missing SKU.`;
+    const estimatedBatches = local.readyToPublish ? Math.ceil(local.readyToPublish / batchSize) : 0;
+    summary.textContent = `${items.length} ${label} item(s). ${Math.max(local.eligible, 0)} can be sent to eBay, ${local.dirty} need sync, ${local.readyToPublish} ready to publish${estimatedBatches ? ` in about ${estimatedBatches} publish batch${estimatedBatches === 1 ? "" : "es"}` : ""}, ${local.outOfStock} out of stock, ${local.missingCategory} missing eBay category, ${local.syncOff} sync off, ${local.missingSku} missing SKU.`;
   }
 
   function openEbaySyncConsole() {
@@ -2560,6 +2626,7 @@ function buildLocationChips(item) {
     if (!modal) return;
 
     document.getElementById("ebay-sync-scope").value = selectedItems.size ? "selected" : "filtered";
+    resetEbaySyncProgress();
     updateEbaySyncConsoleScopeSummary();
     modal.classList.remove("hidden");
     modal.classList.add("show");
@@ -2643,6 +2710,99 @@ function buildLocationChips(item) {
     `;
   }
 
+  function renderEbayOrderSyncReport(response, requestPayload) {
+    const summary = document.getElementById("ebay-sync-report-summary");
+    const table = document.getElementById("ebay-sync-result-table");
+    const debugOutput = document.getElementById("ebay-sync-debug-output");
+    const downloadBtn = document.getElementById("ebay-sync-download-report");
+    const selectProblemsBtn = document.getElementById("ebay-sync-select-problems");
+    const preview = Array.isArray(response?.preview) ? response.preview : [];
+    const reservations = Array.isArray(response?.reservations) ? response.reservations : [];
+
+    ebaySyncConsoleState.lastRequest = requestPayload;
+    ebaySyncConsoleState.lastResponse = response;
+    ebaySyncConsoleState.lastResults = [];
+
+    if (summary) {
+      const okLabel = response?.ok ? "OK" : "Needs attention";
+      if (response?.dryRun) {
+        summary.textContent = `${okLabel}: found ${response?.ordersSeen ?? 0} eBay order(s), ${response?.ordersImportable ?? 0} importable, ${response?.skippedClosed ?? 0} already closed.`;
+      } else {
+        summary.textContent = `${okLabel}: found ${response?.ordersSeen ?? 0}, imported ${response?.ordersImported ?? 0} order(s), imported ${response?.linesImported ?? 0} line(s), reserved ${response?.linesReserved ?? 0} line(s).`;
+      }
+    }
+
+    if (debugOutput) {
+      debugOutput.textContent = JSON.stringify({ request: requestPayload, response }, null, 2);
+    }
+
+    if (downloadBtn) downloadBtn.disabled = false;
+    if (selectProblemsBtn) selectProblemsBtn.disabled = true;
+    if (!table) return;
+
+    if (response?.dryRun) {
+      if (!preview.length) {
+        table.innerHTML = `<div class="ebay-sync-empty">No importable eBay orders were found in that window.</div>`;
+        return;
+      }
+
+      table.innerHTML = `
+        <div class="ebay-sync-row ebay-sync-row-head">
+          <span>Order</span>
+          <span>Buyer</span>
+          <span>Lines</span>
+          <span>Match Status</span>
+        </div>
+        ${preview.map((order) => {
+          const unmatched = (order.lines || []).filter((line) => !line.matched);
+          const notes = unmatched.length
+            ? `${unmatched.length} line${unmatched.length === 1 ? "" : "s"} need SKU matching`
+            : "All visible lines matched to OG items";
+          return `
+            <div class="ebay-sync-row ${unmatched.length ? "is-warning" : "is-ok"}">
+              <span><strong>${escapeStockHtml(order.orderNumber || "No order")}</strong></span>
+              <span>${escapeStockHtml(order.buyer || "-")}</span>
+              <span>${Number(order.lineCount || 0).toLocaleString()}</span>
+              <span>${escapeStockHtml(notes)}</span>
+            </div>
+          `;
+        }).join("")}
+      `;
+      return;
+    }
+
+    if (!reservations.length) {
+      const warnings = Array.isArray(response?.warnings) ? response.warnings : [];
+      table.innerHTML = warnings.length
+        ? `<div class="ebay-sync-empty">${escapeStockHtml(JSON.stringify(warnings, null, 2))}</div>`
+        : `<div class="ebay-sync-empty">No order lines were imported or reserved.</div>`;
+      return;
+    }
+
+    table.innerHTML = `
+      <div class="ebay-sync-row ebay-sync-row-head">
+        <span>Status</span>
+        <span>SKU</span>
+        <span>Reservation</span>
+        <span>Problem / Notes</span>
+      </div>
+      ${reservations.map((entry) => {
+        const status = entry.status || (entry.ok ? "reserved" : "error");
+        const qty = entry.result?.quantity || "";
+        const location = entry.result?.stockLocationRowId || "";
+        const notes = entry.error || entry.result?.reason || (entry.ok ? "Reserved locally until fulfillment" : "Needs attention");
+        return `
+          <div class="ebay-sync-row ${entry.ok ? "is-ok" : "is-warning"}">
+            <span><strong>${escapeStockHtml(status)}</strong></span>
+            <span>${escapeStockHtml(entry.sku || "No SKU")}</span>
+            <span>${escapeStockHtml(qty ? `${qty} unit${Number(qty) === 1 ? "" : "s"}` : location || "-")}</span>
+            <span>${escapeStockHtml(notes)}</span>
+          </div>
+        `;
+      }).join("")}
+    `;
+  }
+
   function applyEbaySyncResultsToItems(results = [], requestPayload = {}) {
     const byId = new Map((Array.isArray(results) ? results : [])
       .filter((result) => result?.itemTypeId)
@@ -2673,6 +2833,12 @@ function buildLocationChips(item) {
           last_quantity: result.quantity ?? previous.last_quantity ?? item.stock ?? null,
           last_checked_at: new Date().toISOString(),
           last_sync_mode: requestPayload.publish ? "publish" : requestPayload.dryRun ? "dry_run" : "sync",
+          sync_dirty: result.status === "synced" || result.status === "out_of_stock" || result.status === "skipped"
+            ? false
+            : previous.sync_dirty ?? null,
+          dirty_reason: result.status === "synced" || result.status === "out_of_stock" || result.status === "skipped"
+            ? null
+            : previous.dirty_reason ?? null,
         },
       };
     });
@@ -2686,22 +2852,35 @@ function buildLocationChips(item) {
   function buildEbaySyncRequestPayload(mode) {
     const scope = document.getElementById("ebay-sync-scope")?.value || "selected";
     const limitValue = Number(document.getElementById("ebay-sync-limit")?.value || 50);
-    const limit = Number.isFinite(limitValue) && limitValue > 0 ? Math.min(Math.floor(limitValue), 250) : 50;
+    const limit = Number.isFinite(limitValue) && limitValue > 0 ? Math.min(Math.floor(limitValue), 1000) : 50;
     const payload = {
       dryRun: mode === "dryRun",
       limit,
+      dirtyOnly: scope === "backend_limit",
+      skipUnchanged: true,
     };
 
     if (mode === "publish") payload.publish = true;
 
     if (scope !== "backend_limit") {
       const items = getEbaySyncConsoleScopeItems(scope);
-      const itemIds = items.map((item) => item.id).filter(Boolean);
+      const scopedItems = mode === "publish" ? getEbayPublishReadyItems(items) : items;
+      const itemIds = scopedItems.map((item) => item.id).filter(Boolean);
       if (!itemIds.length) {
+        if (mode === "publish") {
+          throw new Error(scope === "selected"
+            ? "Select at least one item marked Ready to Publish."
+            : "No Ready to Publish items match the current filters.");
+        }
         throw new Error(scope === "selected" ? "Select at least one item first." : "No items match the current filters.");
       }
       payload.itemIds = itemIds;
       payload.limit = itemIds.length;
+      payload.dirtyOnly = false;
+      if (mode === "publish") {
+        payload.clientScopeCount = items.length;
+        payload.clientPublishReadyCount = itemIds.length;
+      }
     }
 
     if (mode === "publish" && scope === "backend_limit") {
@@ -2709,6 +2888,180 @@ function buildLocationChips(item) {
     }
 
     return payload;
+  }
+
+  async function postEbaySyncPayload(payload) {
+    const response = await fetch(getEbayInventorySyncUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { ok: false, error: text || `HTTP ${response.status}` };
+    }
+
+    if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+    return data;
+  }
+
+  async function postEbayOrderSyncPayload(payload) {
+    const response = await fetch(getEbayOrderSyncUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { ok: false, error: text || `HTTP ${response.status}` };
+    }
+
+    if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+    return data;
+  }
+
+  function buildAggregateEbaySyncResponse(originalPayload, responses = []) {
+    const results = responses.flatMap((response) => Array.isArray(response.results) ? response.results : []);
+    const errors = responses.reduce((sum, response) => sum + Number(response.errors || 0), 0);
+    return {
+      ok: responses.length > 0 && responses.every((response) => response.ok === true),
+      runIds: responses.map((response) => response.runId).filter(Boolean),
+      total: responses.reduce((sum, response) => sum + Number(response.total || 0), 0),
+      synced: responses.reduce((sum, response) => sum + Number(response.synced || 0), 0),
+      skipped: responses.reduce((sum, response) => sum + Number(response.skipped || 0), 0),
+      errors,
+      dryRun: Boolean(originalPayload.dryRun),
+      publishAllowed: responses.some((response) => response.publishAllowed === true),
+      batches: responses.map((response, index) => ({
+        index: index + 1,
+        runId: response.runId || null,
+        ok: response.ok === true,
+        total: response.total || 0,
+        synced: response.synced || 0,
+        errors: response.errors || 0,
+      })),
+      results,
+    };
+  }
+
+  async function runEbayPublishBatches(payload) {
+    const itemIds = Array.isArray(payload.itemIds) ? payload.itemIds : [];
+    const batchSize = getEbayPublishBatchSize();
+    const batches = chunkEbayItemIds(itemIds, batchSize);
+    const responses = [];
+    const actionLabel = payload.publish ? "Publishing" : payload.dryRun ? "Checking" : "Syncing";
+
+    setEbaySyncProgress({
+      current: 0,
+      total: batches.length,
+      label: `${actionLabel} ${itemIds.length} item${itemIds.length === 1 ? "" : "s"}`,
+      log: `Starting ${batches.length} batch${batches.length === 1 ? "" : "es"} of up to ${batchSize}.`,
+    });
+
+    for (let index = 0; index < batches.length; index++) {
+      const batchPayload = {
+        ...payload,
+        itemIds: batches[index],
+        limit: batches[index].length,
+      };
+      delete batchPayload.clientScopeCount;
+      delete batchPayload.clientPublishReadyCount;
+
+      setEbaySyncProgress({
+        current: index,
+        total: batches.length,
+        label: `${actionLabel} batch ${index + 1} of ${batches.length}`,
+        log: `Batch ${index + 1}: sending ${batches[index].length} item${batches[index].length === 1 ? "" : "s"}.`,
+      });
+
+      const response = await postEbaySyncPayload(batchPayload);
+      responses.push(response);
+      const aggregate = buildAggregateEbaySyncResponse(payload, responses);
+      renderEbaySyncReport(aggregate, payload);
+      applyEbaySyncResultsToItems(response.results, batchPayload);
+
+      setEbaySyncProgress({
+        current: index + 1,
+        total: batches.length,
+        label: `Completed batch ${index + 1} of ${batches.length}`,
+        log: `Batch ${index + 1}: ${response.ok ? "OK" : "needs attention"}; ${response.synced || 0} synced, ${response.skipped || 0} skipped, ${response.errors || 0} errors.`,
+      });
+    }
+
+    return buildAggregateEbaySyncResponse(payload, responses);
+  }
+
+  async function runEbayOrderSyncConsole(dryRun = true) {
+    if (ebaySyncConsoleState.busy) return;
+    if (!canViewSensitiveStockData()) {
+      showToast("Only admins can sync eBay orders.");
+      return;
+    }
+
+    const limitValue = Number(document.getElementById("ebay-sync-limit")?.value || 50);
+    const daysBackValue = Number(document.getElementById("ebay-order-sync-days-back")?.value || 14);
+    const payload = {
+      dryRun,
+      reserve: true,
+      limit: Number.isFinite(limitValue) && limitValue > 0 ? Math.min(Math.floor(limitValue), 200) : 50,
+      daysBack: Number.isFinite(daysBackValue) && daysBackValue > 0 ? Math.min(Math.floor(daysBackValue), 90) : 14,
+    };
+
+    if (!dryRun) {
+      const confirmed = window.confirm("Import paid eBay orders and reserve matching OG stock? Physical stock will not be removed until fulfillment.");
+      if (!confirmed) return;
+    }
+
+    ebaySyncConsoleState.busy = true;
+    const buttons = [
+      document.getElementById("ebay-sync-dry-run"),
+      document.getElementById("ebay-sync-run"),
+      document.getElementById("ebay-sync-publish"),
+      document.getElementById("ebay-order-sync-dry-run"),
+      document.getElementById("ebay-order-sync-run"),
+    ].filter(Boolean);
+    buttons.forEach((button) => { button.disabled = true; });
+    resetEbaySyncProgress();
+    setEbaySyncProgress({
+      current: 0,
+      total: 1,
+      label: dryRun ? "Checking eBay orders" : "Syncing eBay orders",
+      log: `${dryRun ? "Checking" : "Importing"} paid unshipped eBay orders from the last ${payload.daysBack} day${payload.daysBack === 1 ? "" : "s"}.`,
+    });
+    showLoading();
+
+    try {
+      const data = await postEbayOrderSyncPayload(payload);
+      renderEbayOrderSyncReport(data, payload);
+      setEbaySyncProgress({
+        current: 1,
+        total: 1,
+        label: data.ok ? "Order sync finished" : "Order sync needs attention",
+        log: data.ok ? "Order sync response received." : (data.error || "Order sync finished with issues."),
+      });
+
+      if (!dryRun && data.ok) {
+        allItems = await fetchStockItems();
+        await writeCurrentInventoryCache();
+        renderCurrentInventoryItems();
+      }
+
+      showToast(data.ok ? "eBay order sync finished." : (data.error || "eBay order sync finished with issues."));
+    } catch (error) {
+      const data = { ok: false, error: error.message || "Could not reach the eBay order sync function." };
+      renderEbayOrderSyncReport(data, payload);
+      showToast(data.error);
+    } finally {
+      ebaySyncConsoleState.busy = false;
+      buttons.forEach((button) => { button.disabled = false; });
+      hideLoading();
+    }
   }
 
   async function runEbaySyncConsole(mode) {
@@ -2728,7 +3081,9 @@ function buildLocationChips(item) {
 
     if (mode === "publish") {
       const count = Array.isArray(payload.itemIds) ? payload.itemIds.length : payload.limit;
-      const confirmed = window.confirm(`Publish ${count} item${count === 1 ? "" : "s"} live on eBay? Run a dry check first if you are unsure.`);
+      const skipped = Math.max(Number(payload.clientScopeCount || count) - count, 0);
+      const skippedText = skipped ? ` ${skipped} item${skipped === 1 ? "" : "s"} in the scope will be skipped because they are not Ready to Publish.` : "";
+      const confirmed = window.confirm(`Publish ${count} ready item${count === 1 ? "" : "s"} live on eBay?${skippedText} Run a dry check first if you are unsure.`);
       if (!confirmed) return;
     }
 
@@ -2737,27 +3092,18 @@ function buildLocationChips(item) {
       document.getElementById("ebay-sync-dry-run"),
       document.getElementById("ebay-sync-run"),
       document.getElementById("ebay-sync-publish"),
+      document.getElementById("ebay-order-sync-dry-run"),
+      document.getElementById("ebay-order-sync-run"),
     ].filter(Boolean);
     buttons.forEach((button) => { button.disabled = true; });
-    showLoading();
+    resetEbaySyncProgress();
+    if (mode !== "publish") showLoading();
 
     try {
-      const response = await fetch(getEbayInventorySyncUrl(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const text = await response.text();
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { ok: false, error: text || `HTTP ${response.status}` };
-      }
-
-      if (!response.ok && !data.error) {
-        data.error = `HTTP ${response.status}`;
-      }
+      const shouldBatch = Array.isArray(payload.itemIds) && payload.itemIds.length > getEbayPublishBatchSize();
+      const data = (mode === "publish" || shouldBatch)
+        ? await runEbayPublishBatches(payload)
+        : await postEbaySyncPayload(payload);
 
       renderEbaySyncReport(data, payload);
       applyEbaySyncResultsToItems(data.results, payload);
@@ -2769,7 +3115,7 @@ function buildLocationChips(item) {
     } finally {
       ebaySyncConsoleState.busy = false;
       buttons.forEach((button) => { button.disabled = false; });
-      hideLoading();
+      if (mode !== "publish") hideLoading();
     }
   }
 
@@ -2817,9 +3163,12 @@ function buildLocationChips(item) {
     });
     document.getElementById("ebay-sync-scope")?.addEventListener("change", updateEbaySyncConsoleScopeSummary);
     document.getElementById("ebay-sync-limit")?.addEventListener("input", updateEbaySyncConsoleScopeSummary);
+    document.getElementById("ebay-sync-batch-size")?.addEventListener("input", updateEbaySyncConsoleScopeSummary);
     document.getElementById("ebay-sync-dry-run")?.addEventListener("click", () => runEbaySyncConsole("dryRun"));
     document.getElementById("ebay-sync-run")?.addEventListener("click", () => runEbaySyncConsole("sync"));
     document.getElementById("ebay-sync-publish")?.addEventListener("click", () => runEbaySyncConsole("publish"));
+    document.getElementById("ebay-order-sync-dry-run")?.addEventListener("click", () => runEbayOrderSyncConsole(true));
+    document.getElementById("ebay-order-sync-run")?.addEventListener("click", () => runEbayOrderSyncConsole(false));
     document.getElementById("ebay-sync-select-problems")?.addEventListener("click", selectEbaySyncProblemItems);
     document.getElementById("ebay-sync-download-report")?.addEventListener("click", downloadEbaySyncReport);
   }
@@ -5349,6 +5698,10 @@ async function saveStockPhotoEditorImage() {
       if (error) throw new Error(error.message || "Could not replace the item photo.");
 
       setStockPhotoProgress(84, "Refreshing item photo...", true);
+      const item = getStockItemById(stockMediaState.itemId);
+      if (item?.ebay_sync_enabled !== false) {
+        await copyStockPhotosToPublicEbayBucket(stockMediaState.itemId, [uploaded.path]);
+      }
       await bumpInventoryVersion([stockMediaState.itemId]);
       await refreshItemById(stockMediaState.itemId);
       window.dispatchEvent(new CustomEvent("stock:photos-replaced", {
@@ -5516,6 +5869,75 @@ function sanitizeStockStorageFileName(fileName) {
     .replace(/[^\w.\-]+/g, "_")
     .replace(/_+/g, "_");
 }
+
+function normalizeStockPhotoStoragePath(value) {
+  return String(value || "").split("?")[0].replace(/^\/+/, "");
+}
+
+function getStockPhotoFileName(path) {
+  return normalizeStockPhotoStoragePath(path).split("/").pop() || "";
+}
+
+function getStockPublicEbayPhotoPath(itemId, sourcePath) {
+  const filename = getStockPhotoFileName(sourcePath);
+  return itemId && filename ? `${itemId}/${filename}` : "";
+}
+
+function getStockPhotoContentType(path, fallback = "image/jpeg") {
+  const ext = getStockPhotoFileName(path).split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return fallback;
+}
+
+async function copyStockPhotosToPublicEbayBucket(itemId, photoPaths = []) {
+  const item = getStockItemById(itemId);
+  if (!itemId || item?.ebay_sync_enabled === false) return { copied: 0, failed: 0 };
+
+  const paths = [...new Set((photoPaths || []).map(normalizeStockPhotoStoragePath).filter(Boolean))];
+  if (!paths.length) return { copied: 0, failed: 0 };
+
+  let copied = 0;
+  let failed = 0;
+
+  for (const sourcePath of paths.slice(0, 12)) {
+    if (/^https?:\/\//i.test(sourcePath)) continue;
+
+    const publicPath = getStockPublicEbayPhotoPath(itemId, sourcePath);
+    if (!publicPath) continue;
+
+    try {
+      const { data: blob, error: downloadError } = await supabase
+        .storage
+        .from(STOCK_PHOTO_BUCKET)
+        .download(sourcePath);
+
+      if (downloadError || !blob) {
+        throw new Error(downloadError?.message || "Photo was not available in the item photo bucket.");
+      }
+
+      const { error: uploadError } = await supabase
+        .storage
+        .from(STOCK_PUBLIC_EBAY_PHOTO_BUCKET)
+        .upload(publicPath, blob, {
+          upsert: true,
+          contentType: blob.type || getStockPhotoContentType(sourcePath),
+        });
+
+      if (uploadError) throw uploadError;
+      copied += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn(`Could not prepare eBay public photo for ${sourcePath}:`, error);
+    }
+  }
+
+  return { copied, failed };
+}
+
+window.copyStockPhotosToPublicEbayBucket = copyStockPhotosToPublicEbayBucket;
 
 async function copyStockStagedImageToPhotosBucket(image, index = 0) {
   const sourceBucket = String(image?.storageBucket || STOCK_PHOTO_BUCKET).trim() || STOCK_PHOTO_BUCKET;
@@ -5741,6 +6163,15 @@ async function saveSelectedStockPhotos() {
     setStockPhotoStatus(error.message || "Could not save photos.", "error");
     setStockPhotoProgress(100, "Photo save failed.", true);
     return;
+  }
+
+  const item = getStockItemById(itemId);
+  if (item?.ebay_sync_enabled !== false) {
+    setStockPhotoProgress(74, "Preparing eBay photo copies...", true);
+    const ebayPrep = await copyStockPhotosToPublicEbayBucket(itemId, selectedPaths);
+    if (ebayPrep.failed > 0) {
+      showToast(`${ebayPrep.failed} eBay photo${ebayPrep.failed === 1 ? "" : "s"} still need prep.`);
+    }
   }
 
   setStockPhotoProgress(82, "Refreshing item...", true);

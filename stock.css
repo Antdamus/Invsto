@@ -1406,6 +1406,60 @@ class dropdown-toggle and the menu by the dropdown-menu*/
   line-height: 1.45;
 }
 
+.ebay-sync-progress {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.ebay-sync-progress.hidden {
+  display: none;
+}
+
+.ebay-sync-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.ebay-sync-progress-track {
+  height: 9px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.13);
+}
+
+.ebay-sync-progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 180ms ease;
+}
+
+.ebay-sync-progress-log {
+  display: grid;
+  gap: 6px;
+  max-height: 132px;
+  margin-top: 10px;
+  overflow: auto;
+  color: #374151;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.ebay-sync-progress-log div {
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
 .ebay-sync-console-actions {
   display: grid;
   grid-template-columns: 1fr;
@@ -1415,6 +1469,16 @@ class dropdown-toggle and the menu by the dropdown-menu*/
 
 .ebay-sync-publish-btn {
   background: #111827;
+}
+
+.ebay-sync-order-tools {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(17, 24, 39, 0.09);
+}
+
+.ebay-sync-order-tools h3 {
+  margin-bottom: 10px;
 }
 
 .ebay-sync-report-head {
