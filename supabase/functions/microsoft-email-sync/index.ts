@@ -5,7 +5,7 @@ const DEFAULT_AUTHORITY_HOST = "https://login.microsoftonline.com";
 const DEFAULT_GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
 const DEFAULT_SCOPES = "offline_access Mail.Read User.Read";
 const ACTIVE_CONNECTION_STATUSES = ["connected", "error", "reconnect_required"];
-const SUPPORTED_MODES = ["initial_backfill", "incremental", "manual_resync"] as const;
+const DURABLE_SYNC_MODES = ["initial_backfill", "incremental", "manual_resync"] as const;
 const MESSAGE_SELECT = [
   "id",
   "createdDateTime",
@@ -34,9 +34,30 @@ const MESSAGE_SELECT = [
   "bccRecipients",
   "replyTo",
 ].join(",");
+const PREVIEW_MESSAGE_SELECT = [
+  "id",
+  "internetMessageId",
+  "conversationId",
+  "receivedDateTime",
+  "sentDateTime",
+  "subject",
+  "from",
+  "sender",
+  "toRecipients",
+  "ccRecipients",
+  "bodyPreview",
+  "hasAttachments",
+  "importance",
+  "parentFolderId",
+  "categories",
+].join(",");
+const PREVIEW_DEFAULT_LIMIT = 25;
+const PREVIEW_MAX_LIMIT = 100;
+const PREVIEW_MAX_DAYS_BACK = 30;
 
 type ServiceClient = ReturnType<typeof createClient>;
-type SyncMode = typeof SUPPORTED_MODES[number];
+type DurableSyncMode = typeof DURABLE_SYNC_MODES[number];
+type BucketMode = "ebay_only" | "all";
 
 type MailboxConnection = {
   id: string;
@@ -74,11 +95,21 @@ type TokenRefreshResult = {
 };
 
 type SyncInput = {
-  mode: SyncMode;
+  mode: DurableSyncMode;
   folder: "inbox";
   maxPages: number;
   pageSize: number;
 };
+
+type PreviewInput = {
+  mode: "sync_preview";
+  folder: "inbox";
+  limit: number;
+  daysBack: number | null;
+  bucketMode: BucketMode;
+};
+
+type RequestInput = SyncInput | PreviewInput;
 
 type SyncCounters = {
   graph_request_count: number;
@@ -130,6 +161,14 @@ type GraphMessage = {
   ccRecipients?: GraphRecipient[];
   bccRecipients?: GraphRecipient[];
   replyTo?: GraphRecipient[];
+};
+
+type EbayBucket = "likely_ebay" | "maybe_ebay" | "not_ebay";
+
+type PreviewBucketResult = {
+  bucket: EbayBucket;
+  score: number;
+  reason_codes: string[];
 };
 
 class SyncError extends Error {
@@ -233,15 +272,26 @@ async function requireAdmin(req: Request) {
   return { ok: true as const, userId: user.id };
 }
 
-async function parseInput(req: Request): Promise<SyncInput> {
+async function parseInput(req: Request): Promise<RequestInput> {
   const body = await req.json().catch(() => ({}));
   const requestedMode = typeof body?.mode === "string" ? body.mode : "";
-  const mode = SUPPORTED_MODES.includes(requestedMode as SyncMode) ? requestedMode as SyncMode : "initial_backfill";
   const folder = String(body?.folder || "inbox").toLowerCase();
   if (folder !== "inbox") {
     throw new SyncError("missing_folder", { status: 400, phase: "input" });
   }
 
+  if (requestedMode === "sync_preview") {
+    const rawLimit = Number(body?.limit);
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : PREVIEW_DEFAULT_LIMIT, 1), PREVIEW_MAX_LIMIT);
+    const rawDaysBack = body?.daysBack === null || body?.daysBack === undefined || body?.daysBack === ""
+      ? null
+      : Number(body.daysBack);
+    const daysBack = rawDaysBack === null ? null : Math.min(Math.max(Number.isFinite(rawDaysBack) && rawDaysBack > 0 ? Math.floor(rawDaysBack) : 1, 1), PREVIEW_MAX_DAYS_BACK);
+    const bucketMode = String(body?.bucketMode || "ebay_only") === "all" ? "all" : "ebay_only";
+    return { mode: "sync_preview", folder: "inbox", limit, daysBack, bucketMode };
+  }
+
+  const mode = DURABLE_SYNC_MODES.includes(requestedMode as DurableSyncMode) ? requestedMode as DurableSyncMode : "initial_backfill";
   const maxPages = Math.min(Math.max(Number(body?.maxPages) || 1, 1), 5);
   const pageSize = Math.min(Math.max(Number(body?.pageSize) || 25, 1), 50);
   return { mode, folder: "inbox", maxPages, pageSize };
@@ -583,9 +633,178 @@ async function fetchDeltaPage(url: string, accessToken: string, model: { connect
   };
 }
 
+function previewMessagesUrl(folderProviderId: string, input: PreviewInput) {
+  const graphBaseUrl = Deno.env.get("MICROSOFT_GRAPH_BASE_URL")?.trim() || DEFAULT_GRAPH_BASE_URL;
+  const url = new URL(`${graphBaseUrl.replace(/\/+$/, "")}/me/mailFolders/${encodeURIComponent(folderProviderId)}/messages`);
+  url.searchParams.set("$top", String(input.limit));
+  url.searchParams.set("$select", PREVIEW_MESSAGE_SELECT);
+  url.searchParams.set("$orderby", "receivedDateTime desc");
+  if (input.daysBack !== null) {
+    const since = new Date(Date.now() - input.daysBack * 24 * 60 * 60 * 1000).toISOString();
+    url.searchParams.set("$filter", `receivedDateTime ge ${since}`);
+  }
+  return url.toString();
+}
+
+async function fetchPreviewMessages(url: string, accessToken: string, model: { connectionId: string; mailboxId: string; folderId: string }) {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Prefer: 'IdType="ImmutableId"',
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const microsoftError = typeof payload?.error?.code === "string" ? payload.error.code : undefined;
+    throw new SyncError("graph_preview_failed", {
+      phase: "graph_preview",
+      connectionId: model.connectionId,
+      mailboxId: model.mailboxId,
+      folderId: model.folderId,
+      status: response.status >= 500 ? 502 : response.status,
+      microsoftStatus: response.status,
+      microsoftError,
+    });
+  }
+
+  return payload as { value?: GraphMessage[] };
+}
+
+function emailDomain(value?: string | null) {
+  const email = normalizeEmail(value);
+  const domain = email.includes("@") ? email.split("@").pop() : "";
+  return domain || null;
+}
+
+function hasAny(text: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function bucketPreviewMessage(message: GraphMessage): PreviewBucketResult {
+  const from = person(message.from);
+  const sender = person(message.sender);
+  const fromAddress = normalizeEmail(from.address);
+  const senderAddress = normalizeEmail(sender.address);
+  const fromDomain = emailDomain(fromAddress);
+  const senderDomain = emailDomain(senderAddress);
+  const displayText = `${from.name || ""} ${sender.name || ""}`.toLowerCase();
+  const subject = String(message.subject || "");
+  const bodyPreview = String(message.bodyPreview || "");
+  const searchable = `${subject}\n${bodyPreview}`.toLowerCase();
+  const reason_codes: string[] = [];
+  let score = 0;
+
+  const ebayDomains = [
+    "ebay.com",
+    "ebay.co.uk",
+    "ebay.ca",
+    "ebay.com.au",
+    "ebay.de",
+    "ebay.fr",
+    "ebay.it",
+    "ebay.es",
+    "ebaystatic.com",
+    "ebayinc.com",
+  ];
+  const domainIsEbay = (domain: string | null) => Boolean(domain && (ebayDomains.includes(domain) || domain.endsWith(".ebay.com")));
+
+  if (domainIsEbay(fromDomain) || domainIsEbay(senderDomain)) {
+    reason_codes.push("sender_domain_ebay");
+    score += 45;
+  }
+  if (/\bebay\b/i.test(displayText)) {
+    reason_codes.push("sender_display_name_ebay");
+    score += 25;
+  }
+  if (hasAny(searchable, [/\bebay\b/, /\bmy ebay\b/, /\bebay account\b/, /\bon ebay\b/])) {
+    reason_codes.push("text_contains_ebay");
+    score += 20;
+  }
+  if (hasAny(searchable, [/\border\s*(?:number|#|id)\s*[:#-]?\s*\d{2,}[-\d]*/i, /\b\d{2}-\d{5}-\d{5}\b/])) {
+    reason_codes.push("text_contains_order_number_pattern");
+    score += 25;
+  }
+  if (hasAny(searchable, [/\breturn\s+(?:case|request|started|received|approved|closed)\b/i, /\bcase\s*(?:id|number|#)\b/i])) {
+    reason_codes.push("text_contains_return_case_phrase");
+    score += 25;
+  }
+  if (hasAny(searchable, [/\b(?:cancellation|cancelled|canceled|refund|refunded|shipping|shipped|delivered|tracking|label|payment|paid|order update|purchase|sold|item won)\b/i])) {
+    reason_codes.push("text_contains_order_shipping_refund_phrase");
+    score += 15;
+  }
+  if (hasAny(searchable, [/\b(?:buyer|seller)\s+(?:sent|message|responded|contacted)\b/i, /\bmessage from (?:a )?(?:buyer|seller)\b/i, /\brespond to (?:the )?(?:buyer|seller)\b/i])) {
+    reason_codes.push("text_contains_marketplace_buyer_message_language");
+    score += 20;
+  }
+  if (hasAny(searchable, [/[a-z0-9._%+-]+@[a-z0-9.-]*members\.ebay\.[a-z.]+/i, /@reply\.ebay\.com/i, /@members\.ebay\./i])) {
+    reason_codes.push("text_contains_masked_ebay_email_pattern");
+    score += 30;
+  }
+  if (hasAny(searchable, [/\bitem\s*(?:number|#|id)\s*[:#-]?\s*\d{6,}\b/i, /\btransaction\s*(?:id|number|#)\s*[:#-]?\s*[a-z0-9-]{6,}\b/i])) {
+    reason_codes.push("text_contains_item_or_transaction_pattern");
+    score += /\bebay\b/i.test(searchable) ? 25 : 10;
+  }
+  if (!reason_codes.length && hasAny(searchable, [/\b(?:marketplace|seller|buyer|listing|order|return|shipment|tracking)\b/i])) {
+    reason_codes.push("text_contains_vague_marketplace_phrase");
+    score += 10;
+  }
+  if (!domainIsEbay(fromDomain) && !domainIsEbay(senderDomain) && /^fwd?:|^fw:/i.test(subject) && /\bebay\b/i.test(searchable)) {
+    reason_codes.push("forwarded_looking_ebay_content");
+    score += 15;
+  }
+
+  score = Math.min(score, 100);
+  const bucket: EbayBucket = score >= 60 ? "likely_ebay" : score >= 20 ? "maybe_ebay" : "not_ebay";
+  if (!reason_codes.length) reason_codes.push("no_ebay_preview_signals");
+  return { bucket, score, reason_codes };
+}
+
+async function loadExistingPreviewMatches(supabase: ServiceClient, mailboxId: string, messages: GraphMessage[]) {
+  const providerIds = Array.from(new Set(messages.map((message) => graphText(message.id)).filter(Boolean) as string[]));
+  const internetIds = Array.from(new Set(messages.map((message) => graphText(message.internetMessageId)).filter(Boolean) as string[]));
+  const matches = new Set<string>();
+
+  if (providerIds.length) {
+    const { data, error } = await supabase
+      .from("email_messages")
+      .select("provider_message_id")
+      .eq("mailbox_id", mailboxId)
+      .in("provider_message_id", providerIds);
+    if (error) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
+    for (const row of data || []) {
+      if (row.provider_message_id) matches.add(String(row.provider_message_id));
+    }
+
+    const { data: immutableData, error: immutableError } = await supabase
+      .from("email_messages")
+      .select("provider_immutable_id")
+      .eq("mailbox_id", mailboxId)
+      .in("provider_immutable_id", providerIds);
+    if (immutableError) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
+    for (const row of immutableData || []) {
+      if (row.provider_immutable_id) matches.add(String(row.provider_immutable_id));
+    }
+  }
+
+  if (internetIds.length) {
+    const { data, error } = await supabase
+      .from("email_messages")
+      .select("internet_message_id")
+      .eq("mailbox_id", mailboxId)
+      .in("internet_message_id", internetIds);
+    if (error) throw new SyncError("preview_existing_lookup_failed", { phase: "preview_existing_lookup", mailboxId });
+    for (const row of data || []) {
+      if (row.internet_message_id) matches.add(String(row.internet_message_id));
+    }
+  }
+
+  return matches;
+}
+
 async function createSyncRun(
   supabase: ServiceClient,
-  values: { mailboxId: string; folderId: string; syncStateId: string; mode: SyncMode; startedBy: string },
+  values: { mailboxId: string; folderId: string; syncStateId: string; mode: DurableSyncMode; startedBy: string },
 ) {
   const { data, error } = await supabase
     .from("email_sync_runs")
@@ -898,6 +1117,7 @@ serve(async (req) => {
   let folderId: string | undefined;
   let connectionId: string | undefined;
   let previousErrorCount = 0;
+  let isPreview = false;
   const counters = blankCounters();
 
   try {
@@ -906,12 +1126,117 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
+    isPreview = input.mode === "sync_preview";
     const model = await loadModel(supabase);
     mailboxId = model.mailbox.id;
     folderId = model.folder.id;
     syncStateId = model.syncState.id;
     connectionId = model.connection.id;
     previousErrorCount = Number(model.syncState.consecutive_error_count || 0);
+
+    if (input.mode === "sync_preview") {
+      let refreshToken = "";
+      try {
+        refreshToken = await decryptRefreshToken(model.secret);
+      } catch {
+        throw new SyncError("token_refresh_failed", {
+          phase: "token_decrypt",
+          connectionId,
+          mailboxId,
+          folderId,
+          status: 401,
+        });
+      }
+
+      const refreshedToken = await exchangeRefreshToken(refreshToken, connectionId);
+
+      const previewPayload = await fetchPreviewMessages(previewMessagesUrl(model.folder.provider_folder_id, input), refreshedToken.accessToken, {
+        connectionId,
+        mailboxId,
+        folderId,
+      });
+      const previewMessages = (previewPayload.value || []).filter((message) => Boolean(message.id));
+      const existingMatches = await loadExistingPreviewMatches(supabase, mailboxId, previewMessages);
+      const bucketSummary: Record<EbayBucket, number> = { likely_ebay: 0, maybe_ebay: 0, not_ebay: 0 };
+      const senderDomainSummary: Record<string, number> = {};
+      let alreadyImportedCount = 0;
+
+      const rows = previewMessages.map((message) => {
+        const from = person(message.from);
+        const sender = person(message.sender);
+        const bucket = bucketPreviewMessage(message);
+        bucketSummary[bucket.bucket] += 1;
+        const domain = emailDomain(from.address) || emailDomain(sender.address) || "unknown";
+        senderDomainSummary[domain] = (senderDomainSummary[domain] || 0) + 1;
+        const alreadyImported = Boolean(
+          (message.id && existingMatches.has(String(message.id))) ||
+            (message.internetMessageId && existingMatches.has(String(message.internetMessageId))),
+        );
+        if (alreadyImported) alreadyImportedCount += 1;
+
+        return {
+          provider_message_id: graphText(message.id),
+          provider_immutable_id: graphText(message.id),
+          internet_message_id: graphText(message.internetMessageId),
+          conversation_id: graphText(message.conversationId),
+          received_at: graphDate(message.receivedDateTime),
+          sent_at: graphDate(message.sentDateTime),
+          from_email: normalizeEmail(from.address) || null,
+          from_name: from.name,
+          sender_email: normalizeEmail(sender.address) || null,
+          sender_name: sender.name,
+          subject: graphText(message.subject),
+          body_preview: graphText(message.bodyPreview),
+          has_attachments: message.hasAttachments === true,
+          importance: graphText(message.importance),
+          parent_folder_id: graphText(message.parentFolderId),
+          categories: Array.isArray(message.categories) ? message.categories : [],
+          bucket: bucket.bucket,
+          score: bucket.score,
+          reason_codes: bucket.reason_codes,
+          already_imported: alreadyImported,
+        };
+      });
+
+      const messages = input.bucketMode === "ebay_only"
+        ? rows.filter((row) => row.bucket !== "not_ebay")
+        : rows;
+
+      console.log("[microsoft-email-sync] preview completed", {
+        phase: "sync_preview_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        messages_previewed: previewMessages.length,
+        messages_returned: messages.length,
+        likely_ebay: bucketSummary.likely_ebay,
+        maybe_ebay: bucketSummary.maybe_ebay,
+        not_ebay: bucketSummary.not_ebay,
+        already_imported: alreadyImportedCount,
+      });
+
+      return json(req, 200, {
+        ok: true,
+        mode: "sync_preview",
+        folder: input.folder,
+        limit: input.limit,
+        daysBack: input.daysBack,
+        bucketMode: input.bucketMode,
+        caps: {
+          max_limit: PREVIEW_MAX_LIMIT,
+          max_daysBack: PREVIEW_MAX_DAYS_BACK,
+        },
+        graph_fields: PREVIEW_MESSAGE_SELECT.split(","),
+        bucket_summary: bucketSummary,
+        sender_domain_summary: senderDomainSummary,
+        already_imported_summary: {
+          imported: alreadyImportedCount,
+          not_imported: Math.max(previewMessages.length - alreadyImportedCount, 0),
+        },
+        messages_previewed: previewMessages.length,
+        messages_returned: messages.length,
+        messages,
+      });
+    }
 
     syncRunId = await createSyncRun(supabase, {
       mailboxId,
@@ -1105,7 +1430,7 @@ serve(async (req) => {
     const statusForState = safe.code === "graph_delta_expired" ? "reset_required" : "error";
     console.error("[microsoft-email-sync] failed", safeLog(safe, counters));
 
-    if (supabase && syncStateId) {
+    if (!isPreview && supabase && syncStateId) {
       await supabase
         .from("email_sync_states")
         .update({
@@ -1117,7 +1442,7 @@ serve(async (req) => {
         .eq("id", syncStateId);
     }
 
-    if (supabase && syncRunId) {
+    if (!isPreview && supabase && syncRunId) {
       await updateSyncRun(supabase, syncRunId, {
         ...counters,
         status: "failed",
@@ -1127,7 +1452,7 @@ serve(async (req) => {
       });
     }
 
-    if (supabase && mailboxId) {
+    if (!isPreview && supabase && mailboxId) {
       await supabase
         .from("email_mailboxes")
         .update({
@@ -1137,9 +1462,9 @@ serve(async (req) => {
         .eq("id", mailboxId);
     }
 
-    if (supabase && connectionId && ["token_refresh_failed", "missing_connection_secret"].includes(safe.code)) {
+    if (!isPreview && supabase && connectionId && ["token_refresh_failed", "missing_connection_secret"].includes(safe.code)) {
       await markConnectionFailure(supabase, connectionId, "reconnect_required", safe.code);
-    } else if (supabase && connectionId && ["graph_delta_failed", "graph_delta_expired"].includes(safe.code)) {
+    } else if (!isPreview && supabase && connectionId && ["graph_delta_failed", "graph_delta_expired"].includes(safe.code)) {
       await markConnectionFailure(supabase, connectionId, "error", safe.code);
     }
 
