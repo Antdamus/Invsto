@@ -2652,6 +2652,11 @@ body.pending-order-detail-open .mobile-detail-close {
   outline-offset: -3px;
 }
 
+.buyer-order-card.has-sync-mismatch {
+  outline: 1px solid rgba(255, 139, 139, 0.34);
+  outline-offset: -4px;
+}
+
 .buyer-order-card.is-overdue {
   --queue-accent: rgba(255, 100, 100, 0.9);
   --queue-tint: rgba(255, 92, 92, 0.18);
@@ -2729,8 +2734,30 @@ body.pending-order-detail-open .mobile-detail-close {
 
 .buyer-card-value,
 .status-badge,
-.urgency-pill {
+.urgency-pill,
+.sync-mismatch-pill {
   min-height: 32px;
+}
+
+.sync-mismatch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid rgba(255, 139, 139, 0.46);
+  border-radius: 999px;
+  background: rgba(255, 86, 86, 0.12);
+  color: #ffd6d6;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.sync-mismatch-pill svg {
+  width: 14px;
+  height: 14px;
 }
 
 .buyer-card-value,
@@ -2882,6 +2909,20 @@ body.pending-order-detail-open .mobile-detail-close {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.045);
   color: #efe8dc;
+  font-size: 0.72rem;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.buyer-line-sync-warning {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 139, 139, 0.36);
+  border-radius: 999px;
+  background: rgba(255, 86, 86, 0.11);
+  color: #ffd6d6;
   font-size: 0.72rem;
   font-weight: 950;
   line-height: 1.1;

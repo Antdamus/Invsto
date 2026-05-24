@@ -290,6 +290,12 @@ function getOrderFromLine(line) {
   return Array.isArray(order) ? order[0] || {} : order;
 }
 
+function getOrderSyncMismatch(line) {
+  const order = getOrderFromLine(line);
+  const mismatch = order?.raw_payload?.pending_order_sync_mismatch || line?.raw_payload?.pending_order_sync_mismatch || null;
+  return mismatch && typeof mismatch === "object" ? mismatch : null;
+}
+
 function getRemainingLineQuantity(line) {
   return Math.max(0, Number(line?.quantity || 0) - Number(line?.fulfilled_quantity || 0));
 }
@@ -1313,13 +1319,27 @@ function summarizeEbayOrderSyncResult(result, dryRun) {
     const warnings = Array.isArray(result.warnings) && result.warnings.length
       ? ` ${result.warnings.length} warning(s).`
       : "";
-    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${warnings}`;
+    const mismatches = Number(result.localPendingMismatches?.length || 0);
+    const mismatchText = mismatches
+      ? ` ${mismatches.toLocaleString()} local pending order(s) need eBay review.`
+      : "";
+    const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
+      ? " Local missing-order check was skipped because the eBay fetch reached its limit."
+      : "";
+    return `Found ${Number(result.ordersSeen || 0).toLocaleString()} eBay order(s); ${Number(result.ordersImportable || 0).toLocaleString()} can be imported or updated.${mismatchText}${skippedMismatchCheck}${warnings}`;
   }
 
   const warnings = Array.isArray(result.warnings) && result.warnings.length
     ? ` ${result.warnings.length} warning(s).`
     : "";
-  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${warnings}`;
+  const mismatches = Number(result.localPendingMismatches?.length || 0);
+  const mismatchText = mismatches
+    ? ` ${mismatches.toLocaleString()} local pending order(s) were flagged for eBay review.`
+    : "";
+  const skippedMismatchCheck = result.localPendingMismatchCheckSkipped
+    ? " Local missing-order check was skipped because the eBay fetch reached its limit."
+    : "";
+  return `Synced ${Number(result.ordersImported || 0).toLocaleString()} order(s), ${Number(result.linesImported || 0).toLocaleString()} line(s), and reserved ${Number(result.linesReserved || 0).toLocaleString()} line(s).${mismatchText}${skippedMismatchCheck}${warnings}`;
 }
 
 function formatEbayOrderSyncError(error) {
@@ -1408,6 +1428,7 @@ function buildOrderLineQueueQuery(status, admin) {
       fulfilled_quantity,
       fulfilled_at,
       notes,
+      raw_payload,
       ebay_orders!inner(
         id,
         order_number,
@@ -1418,6 +1439,7 @@ function buildOrderLineQueueQuery(status, admin) {
         ship_by_date,
         ${moneyOrderFields}
         status,
+        raw_payload,
         label_status,
         label_storage_bucket,
         label_file_path,
@@ -1918,7 +1940,8 @@ function renderOrders() {
     ` : "";
     const card = document.createElement("article");
     const hasSelectedAdminLines = group.lines.some((line) => state.adminSelectedLineIds.has(line.id));
-    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
+    const syncMismatch = group.lines.map(getOrderSyncMismatch).find(Boolean);
+    card.className = `buyer-order-card ${urgencyClass} ${groupIndex % 2 ? "is-alt-group" : ""} ${hasSelectedAdminLines ? "has-admin-selected-lines" : ""} ${syncMismatch ? "has-sync-mismatch" : ""} ${state.selectedLine && getBuyerKey(state.selectedLine) === group.key ? "is-selected" : ""}`;
     card.innerHTML = `
       <div class="buyer-card-head">
         <div>
@@ -1928,6 +1951,12 @@ function renderOrders() {
         </div>
         <div class="buyer-card-alerts">
           ${urgencyMarkup}
+          ${syncMismatch ? `
+            <span class="sync-mismatch-pill" title="${escapeHtml(syncMismatch.message || "Verify this order in eBay before acting.")}">
+              <i data-lucide="shield-alert"></i>
+              eBay review
+            </span>
+          ` : ""}
           ${isAdminUser() ? `<span class="buyer-card-value">${formatMoney(group.totalValue)}</span>` : ""}
           <button type="button" class="buyer-card-complete-btn primary-btn" data-buyer-complete-key="${escapeHtml(group.key)}" ${group.lines.some(isOpenOrderLine) ? "" : "disabled"}>Complete From Inventory</button>
           <button type="button" class="buyer-card-task-btn task-action-btn" data-buyer-task-key="${escapeHtml(group.key)}">Assign Task</button>
@@ -2003,6 +2032,7 @@ function renderOrders() {
       const order = line.order || {};
       const receiptLink = getOrderVideoReceiptLink(line);
       const canActOnLine = isOpenOrderLine(line);
+      const lineSyncMismatch = getOrderSyncMismatch(line);
       const lineUrgency = canActOnLine ? getOrderUrgency(order.ship_by_date) : null;
       const lineDueTone = lineUrgency?.level || "neutral";
       const orderLineKey = normalizeEbayOrderNumber(order.order_number) || order.order_number || order.id || line.order_id || line.id;
@@ -2038,6 +2068,7 @@ function renderOrders() {
                 ${escapeHtml(visibleLineDueLabel)}
               </span>
               ${orderLineSequence ? `<span class="buyer-line-sequence">${escapeHtml(orderLineSequence)}</span>` : ""}
+              ${lineSyncMismatch ? `<span class="buyer-line-sync-warning" title="${escapeHtml(lineSyncMismatch.message || "Verify this order in eBay before acting.")}">Verify in eBay</span>` : ""}
             </span>
             ${isAdminUser() ? `<small class="buyer-line-price">Line total ${formatMoney(line.total_price || line.sold_for || 0)}</small>` : ""}
           </span>

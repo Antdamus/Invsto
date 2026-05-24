@@ -13,6 +13,24 @@ type ExistingLineIndex = {
   fallback: Map<string, any>;
 };
 
+type LocalOpenOrderSummary = {
+  id: string;
+  orderNumber: string;
+  buyerUsername: string;
+  shipByDate: string | null;
+  status: string;
+  lineCount: number;
+};
+
+type LocalOrderMismatch = LocalOpenOrderSummary & {
+  reason: string;
+  message: string;
+  ebayPaymentStatus: string;
+  ebayFulfillmentStatus: string;
+  ebayCancelStatus: string;
+  fetchError?: string;
+};
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
@@ -393,52 +411,160 @@ function findExistingLine(existingLines: ExistingLineIndex, orderId: string, lin
     || null;
 }
 
-async function archiveExistingOrdersOutsideAwaitingQueue(supabase: any, orderNumbers: string[]): Promise<any> {
-  const cleanOrderNumbers = unique(orderNumbers.map(toText).filter(Boolean));
-  if (!cleanOrderNumbers.length) return { ordersArchived: 0, linesSkipped: 0 };
-
-  const { data: orders, error: orderError } = await supabase
-    .from("ebay_orders")
-    .select("id,order_number,status")
-    .in("order_number", cleanOrderNumbers);
-  if (orderError) throw orderError;
-
-  const orderIds = (orders || [])
-    .filter((order: any) => !CLOSED_LOCAL_ORDER_STATUSES.has(String(order.status || "").toLowerCase()))
-    .map((order: any) => order.id)
-    .filter(Boolean);
-
-  if (!orderIds.length) return { ordersArchived: 0, linesSkipped: 0 };
-
-  const { data: skippedLines, error: lineError } = await supabase
+async function loadLocalOpenOrderSummaries(supabase: any): Promise<LocalOpenOrderSummary[]> {
+  const { data, error } = await supabase
     .from("ebay_order_lines")
-    .update({
-      line_status: "skipped",
-      notes: "Auto-hidden by eBay API sync because eBay no longer reports this order as paid awaiting shipment.",
-      updated_at: new Date().toISOString(),
-    })
-    .in("order_id", orderIds)
+    .select(`
+      id,
+      line_status,
+      order_id,
+      ebay_orders!inner(
+        id,
+        order_number,
+        buyer_username,
+        ship_by_date,
+        status
+      )
+    `)
     .in("line_status", ["pending", "partially_fulfilled"])
-    .eq("fulfilled_quantity", 0)
-    .is("stock_transaction_id", null)
-    .select("id");
-  if (lineError) throw lineError;
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (error) throw error;
 
-  const { data: archivedOrders, error: archiveError } = await supabase
-    .from("ebay_orders")
-    .update({
-      status: "archived",
-      updated_at: new Date().toISOString(),
-    })
-    .in("id", orderIds)
-    .in("status", ["pending", "partially_fulfilled"])
-    .select("id");
-  if (archiveError) throw archiveError;
+  const byOrder = new Map<string, LocalOpenOrderSummary>();
+  (data || []).forEach((line: any) => {
+    const order = line.ebay_orders || {};
+    const orderNumber = toText(order.order_number);
+    if (!orderNumber || CLOSED_LOCAL_ORDER_STATUSES.has(String(order.status || "").toLowerCase())) return;
+    const existing = byOrder.get(orderNumber);
+    if (existing) {
+      existing.lineCount += 1;
+      return;
+    }
+    byOrder.set(orderNumber, {
+      id: order.id,
+      orderNumber,
+      buyerUsername: toText(order.buyer_username),
+      shipByDate: order.ship_by_date || null,
+      status: toText(order.status),
+      lineCount: 1,
+    });
+  });
 
+  return [...byOrder.values()];
+}
+
+async function verifyLocalOpenOrderMismatches(
+  token: string,
+  localOrders: LocalOpenOrderSummary[],
+  seenOrderNumbers: Set<string>,
+  limit: number,
+): Promise<LocalOrderMismatch[]> {
+  const toVerify = localOrders
+    .filter((order) => !seenOrderNumbers.has(order.orderNumber))
+    .slice(0, Math.max(0, limit));
+  const mismatches: LocalOrderMismatch[] = [];
+
+  for (const local of toVerify) {
+    try {
+      const ebayOrder = await ebayRequest(token, `/sell/fulfillment/v1/order/${encodeURIComponent(local.orderNumber)}`);
+      if (isAwaitingShipmentOrder(ebayOrder)) continue;
+      const paymentStatus = getOrderPaymentStatus(ebayOrder);
+      const fulfillmentStatus = getOrderFulfillmentStatus(ebayOrder);
+      const cancelStatus = getOrderCancelStatus(ebayOrder);
+      mismatches.push({
+        ...local,
+        reason: "not_awaiting_shipment",
+        message: "Local pending order is not currently reported by eBay as paid awaiting shipment. Verify before packing, cancelling, or completing it.",
+        ebayPaymentStatus: paymentStatus,
+        ebayFulfillmentStatus: fulfillmentStatus,
+        ebayCancelStatus: cancelStatus,
+      });
+    } catch (error) {
+      mismatches.push({
+        ...local,
+        reason: "order_lookup_failed",
+        message: "Local pending order was not returned by the eBay awaiting-shipment sync and the follow-up order lookup failed. Verify this order in eBay before acting on it.",
+        ebayPaymentStatus: "",
+        ebayFulfillmentStatus: "",
+        ebayCancelStatus: "",
+        fetchError: compactError(error),
+      });
+    }
+  }
+
+  return mismatches;
+}
+
+function buildReturnedNotAwaitingMismatch(
+  localByOrderNumber: Map<string, LocalOpenOrderSummary>,
+  ebayOrder: any,
+): LocalOrderMismatch | null {
+  const orderNumber = extractOrderNumber(ebayOrder);
+  const local = localByOrderNumber.get(orderNumber);
+  if (!local) return null;
+  const paymentStatus = getOrderPaymentStatus(ebayOrder);
+  const fulfillmentStatus = getOrderFulfillmentStatus(ebayOrder);
+  const cancelStatus = getOrderCancelStatus(ebayOrder);
   return {
-    ordersArchived: (archivedOrders || []).length,
-    linesSkipped: (skippedLines || []).length,
+    ...local,
+    reason: "not_awaiting_shipment",
+    message: "Local pending order was returned by eBay, but eBay no longer reports it as paid awaiting shipment. Verify before packing, cancelling, or completing it.",
+    ebayPaymentStatus: paymentStatus,
+    ebayFulfillmentStatus: fulfillmentStatus,
+    ebayCancelStatus: cancelStatus,
   };
+}
+
+async function updateOrderSyncMismatchFlags(
+  supabase: any,
+  mismatches: LocalOrderMismatch[],
+  clearedOrderNumbers: string[],
+  runId: string | null,
+) {
+  const now = new Date().toISOString();
+  const mismatchByOrderNumber = new Map(mismatches.map((entry) => [entry.orderNumber, entry]));
+  const orderNumbers = unique([
+    ...mismatches.map((entry) => entry.orderNumber),
+    ...clearedOrderNumbers,
+  ].map(toText).filter(Boolean));
+  if (!orderNumbers.length) return;
+
+  const { data, error } = await supabase
+    .from("ebay_orders")
+    .select("id,order_number,raw_payload")
+    .in("order_number", orderNumbers);
+  if (error) throw error;
+
+  for (const order of data || []) {
+    const mismatch = mismatchByOrderNumber.get(order.order_number);
+    const rawPayload = order.raw_payload && typeof order.raw_payload === "object" ? order.raw_payload : {};
+    const nextPayload = {
+      ...rawPayload,
+      pending_order_sync_mismatch: mismatch
+        ? {
+          runId,
+          detectedAt: now,
+          reason: mismatch.reason,
+          message: mismatch.message,
+          ebayPaymentStatus: mismatch.ebayPaymentStatus,
+          ebayFulfillmentStatus: mismatch.ebayFulfillmentStatus,
+          ebayCancelStatus: mismatch.ebayCancelStatus,
+          fetchError: mismatch.fetchError || null,
+        }
+        : null,
+      last_ebay_order_sync_seen_at: mismatch ? rawPayload.last_ebay_order_sync_seen_at || null : now,
+    };
+
+    const { error: updateError } = await supabase
+      .from("ebay_orders")
+      .update({
+        raw_payload: nextPayload,
+        updated_at: now,
+      })
+      .eq("id", order.id);
+    if (updateError) throw updateError;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -467,16 +593,58 @@ Deno.serve(async (req) => {
 
     const token = await getEbayAccessToken();
     const rawOrders = await fetchOrders(token, body);
+    const orderIdsRequested = Array.isArray(body.orderIds)
+      ? unique(body.orderIds.map(toText).filter(Boolean)).slice(0, MAX_ORDER_LIMIT)
+      : [];
+    const requestedOrderLimit = orderIdsRequested.length
+      ? orderIdsRequested.length
+      : Math.min(Math.max(Math.trunc(Number(body.limit || 50)), 1), MAX_ORDER_LIMIT);
+    const fetchedCompleteOrderWindow = orderIdsRequested.length > 0 || rawOrders.length < requestedOrderLimit;
+    const checkLocalMismatches = body.checkLocalMismatches !== false;
+    const localMismatchLimit = Math.min(Math.max(Math.trunc(Number(body.localMismatchLimit || 100)), 0), 200);
+    const rawOrderNumbers = new Set(rawOrders.map(extractOrderNumber).filter(Boolean));
     const notAwaitingOrderNumbers = unique(rawOrders.filter((order) => !isAwaitingShipmentOrder(order)).map(extractOrderNumber).filter(Boolean));
     const candidateOrders = rawOrders.filter(isAwaitingShipmentOrder);
     const skippedUnpaid = rawOrders.filter((order) => !isPaidOrder(order)).length;
     const skippedNotAwaitingShipment = rawOrders.filter((order) =>
       isPaidOrder(order) && !isAwaitingShipmentOrder(order)
     ).length;
-    let outsideAwaitingCleanup: any = null;
+    const localOpenOrders = checkLocalMismatches ? await loadLocalOpenOrderSummaries(supabase) : [];
+    const localByOrderNumber = new Map(localOpenOrders.map((order) => [order.orderNumber, order]));
+    const returnedNotAwaitingMismatches = unique(rawOrders
+      .filter((order) => !isAwaitingShipmentOrder(order))
+      .map((order) => buildReturnedNotAwaitingMismatch(localByOrderNumber, order))
+      .filter(Boolean) as LocalOrderMismatch[]);
+    const localPendingMismatchCandidates = checkLocalMismatches
+      ? localOpenOrders.filter((order) => !rawOrderNumbers.has(order.orderNumber)).length
+      : 0;
+    const missingLocalMismatches = checkLocalMismatches && fetchedCompleteOrderWindow
+      ? await verifyLocalOpenOrderMismatches(token, localOpenOrders, rawOrderNumbers, localMismatchLimit)
+      : [];
+    const localPendingMismatches = [...new Map([
+      ...returnedNotAwaitingMismatches,
+      ...missingLocalMismatches,
+    ].map((entry) => [entry.orderNumber, entry])).values()];
+    const localMismatchWarnings = [
+      ...(localPendingMismatches.length
+        ? [{
+          localPendingMismatches: localPendingMismatches.length,
+          reason: "local_pending_not_in_ebay_awaiting_shipments",
+          orders: localPendingMismatches,
+        }]
+        : []),
+      ...(checkLocalMismatches && !fetchedCompleteOrderWindow
+        ? [{
+          localPendingMismatchCheckSkipped: true,
+          reason: "ebay_order_fetch_reached_limit",
+          message: "The eBay order fetch reached its limit, so local missing-order detection was skipped to avoid false alarms. Increase the sync limit and run again for a full mismatch check.",
+          requestedOrderLimit,
+        }]
+        : []),
+    ];
 
-    if (!dryRun && notAwaitingOrderNumbers.length) {
-      outsideAwaitingCleanup = await archiveExistingOrdersOutsideAwaitingQueue(supabase, notAwaitingOrderNumbers);
+    if (!dryRun) {
+      await updateOrderSyncMismatchFlags(supabase, localPendingMismatches, [...rawOrderNumbers], runId);
     }
 
     const allSkus = unique(candidateOrders.flatMap((order) =>
@@ -519,6 +687,7 @@ Deno.serve(async (req) => {
             ...(skippedClosed ? [{ skippedClosed }] : []),
             ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
             ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+            ...localMismatchWarnings,
           ],
           finished_at: new Date().toISOString(),
         })
@@ -533,6 +702,10 @@ Deno.serve(async (req) => {
         skippedClosed,
         skippedUnpaid,
         skippedNotAwaitingShipment,
+        localPendingMismatches,
+        localPendingMismatchCandidates,
+        localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
+        localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
         preview,
       });
     }
@@ -643,7 +816,8 @@ Deno.serve(async (req) => {
     const warnings = [
       ...(skippedClosed ? [{ skippedClosed }] : []),
       ...(skippedUnpaid ? [{ skippedUnpaid, reason: "payment_not_paid" }] : []),
-      ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment", cleanup: outsideAwaitingCleanup }] : []),
+      ...(skippedNotAwaitingShipment ? [{ skippedNotAwaitingShipment, reason: "not_awaiting_shipment" }] : []),
+      ...localMismatchWarnings,
       ...reservationResults.filter((entry) => !entry.ok).map((entry) => ({
         lineId: entry.lineId,
         sku: entry.sku,
@@ -677,7 +851,10 @@ Deno.serve(async (req) => {
       skippedClosed,
       skippedUnpaid,
       skippedNotAwaitingShipment,
-      outsideAwaitingCleanup,
+      localPendingMismatches,
+      localPendingMismatchCandidates,
+      localPendingMismatchChecked: checkLocalMismatches && fetchedCompleteOrderWindow,
+      localPendingMismatchCheckSkipped: checkLocalMismatches && !fetchedCompleteOrderWindow,
       warnings,
       reservations: reservationResults,
     });
