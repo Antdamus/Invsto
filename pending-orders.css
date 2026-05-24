@@ -2145,6 +2145,21 @@ body.modal-open {
   padding: 20px;
 }
 
+#worker-cancel-order-modal.is-proof-attached .no-inventory-card {
+  border-color: rgba(125, 240, 178, 0.42);
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(125, 240, 178, 0.12),
+    0 0 54px rgba(125, 240, 178, 0.12);
+}
+
+#worker-cancel-order-modal.is-proof-attached #worker-cancel-photo-status {
+  border: 1px solid rgba(125, 240, 178, 0.28);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(125, 240, 178, 0.08);
+}
+
 .no-inventory-card h2 {
   max-width: calc(100% - 56px);
   margin-bottom: 8px;

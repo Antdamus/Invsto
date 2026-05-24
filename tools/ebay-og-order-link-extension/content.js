@@ -19,6 +19,7 @@
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
   const VIDEO_RECEIPT_CAPTURE_ID = "og-ebay-capture-video-receipt-frame";
+  const CANCEL_CONFIRM_CAPTURE_ID = "og-ebay-capture-cancel-confirmation";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
@@ -4240,6 +4241,106 @@
     }
   }
 
+  function isCancelConfirmationDetailsPage() {
+    try {
+      const url = new URL(window.location.href);
+      return /\/Cancel\/Details$/i.test(url.pathname) && Boolean(url.searchParams.get("cancelId"));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getVisiblePageLines() {
+    return String(document.body?.innerText || "")
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function getValueAfterLabel(lines, label) {
+    const normalizedLabel = String(label || "").toLowerCase();
+    const index = lines.findIndex((line) => line.toLowerCase() === normalizedLabel);
+    if (index >= 0 && lines[index + 1]) return lines[index + 1];
+    const inline = lines.find((line) => line.toLowerCase().startsWith(`${normalizedLabel} `));
+    return inline ? inline.slice(label.length).trim() : "";
+  }
+
+  function getCancelConfirmationMetadata() {
+    const url = new URL(window.location.href);
+    const lines = getVisiblePageLines();
+    const bodyText = lines.join("\n");
+    const orderNumber = normalizeOrderNumber(getValueAfterLabel(lines, "Order number") || bodyText);
+    const itemIdMatch = bodyText.match(/\bItem ID:\s*([0-9]{8,15})\b/i);
+    return {
+      cancelId: String(url.searchParams.get("cancelId") || "").trim(),
+      orderNumber,
+      orderId: orderNumber,
+      omsOrderId: orderNumber,
+      itemNumber: itemIdMatch?.[1] || "",
+      buyerUsername: getValueAfterLabel(lines, "Buyer"),
+      orderTotal: getValueAfterLabel(lines, "Order total"),
+      totalRefund: getValueAfterLabel(lines, "Total refund"),
+      cancellationReason: getValueAfterLabel(lines, "Cancellation reason"),
+      pageUrl: window.location.href,
+      pageTitle: document.title || "eBay cancellation confirmation",
+      visibleSummaryText: lines.slice(0, 80).join("\n"),
+    };
+  }
+
+  function setCancelProofButtonStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone || "";
+    button.disabled = tone === "working";
+  }
+
+  async function captureCancelConfirmationProof(button = null) {
+    setCancelProofButtonStatus(button, "Capturing proof...", "working");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_CAPTURE_CANCEL_CONFIRMATION",
+        payload: {
+          metadata: getCancelConfirmationMetadata(),
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG did not accept the cancellation proof.");
+      setCancelProofButtonStatus(button, "Proof added to OG", "success");
+      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 2600);
+    } catch (error) {
+      console.warn("[OG eBay Cancel] Could not capture cancellation proof:", error);
+      setCancelProofButtonStatus(button, "Proof capture failed", "error");
+      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 3000);
+    }
+  }
+
+  function injectCancelConfirmationProofButton() {
+    const existing = document.getElementById(CANCEL_CONFIRM_CAPTURE_ID);
+    if (!isCancelConfirmationDetailsPage()) {
+      existing?.remove();
+      return;
+    }
+
+    if (existing) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = CANCEL_CONFIRM_CAPTURE_ID;
+    button.textContent = "Capture cancellation proof";
+    button.title = "Take a screenshot of this eBay cancellation confirmation and attach it to the OG cancellation modal.";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      captureCancelConfirmationProof(button);
+    });
+    document.body.appendChild(button);
+  }
+
   function ensureStyles() {
     if (document.getElementById("og-ebay-order-link-styles")) return;
     const style = document.createElement("style");
@@ -4303,6 +4404,39 @@
       #${VIDEO_RECEIPT_CAPTURE_ID} {
         right: 18px;
         bottom: 128px;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID} {
+        position: fixed;
+        right: 18px;
+        bottom: 128px;
+        z-index: 2147483647;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
+        cursor: pointer;
+        font: 800 14px Arial, sans-serif;
+        max-width: min(360px, calc(100vw - 36px));
+        padding: 12px 16px;
+        white-space: normal;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
       }
 
       #${RETURN_MESSAGE_SEND_ID} {
@@ -5451,6 +5585,7 @@
     injectAwaitingReportButton();
     injectReturnPageButtons();
     injectReturnMessageLoggerButton();
+    injectCancelConfirmationProofButton();
     maybeLogSentReturnMessageConfirmation();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();

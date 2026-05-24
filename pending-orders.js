@@ -46,6 +46,7 @@ const state = {
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
   handledVideoReceiptPhotoTransferIds: new Set(),
+  handledEbayCancelProofTransferIds: new Set(),
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
@@ -2100,7 +2101,7 @@ function renderOrders() {
       });
       button.querySelector("[data-line-cancel]")?.addEventListener("click", () => {
         selectOrderLine(line.id, { openDetail: false });
-        setTimeout(() => openWorkerCancelOrderModal({ lineIds: [line.id] }), 80);
+        openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: true });
       });
       lineList.appendChild(button);
     });
@@ -5591,6 +5592,43 @@ function renderWorkerCancelOrderList() {
   updateWorkerCancelOrderSelectionSummary();
 }
 
+function getWorkerCancelSelectedLines() {
+  const validCandidateIds = new Set(state.workerCancelCandidates.map((line) => line.id));
+  return [...state.workerCancelLineIds]
+    .filter((lineId) => validCandidateIds.has(lineId))
+    .map((lineId) => state.workerCancelCandidates.find((line) => line.id === lineId))
+    .filter(Boolean);
+}
+
+function getWorkerCancelPrimaryOrderNumber() {
+  const selectedLines = getWorkerCancelSelectedLines();
+  const candidateLines = selectedLines.length ? selectedLines : state.workerCancelCandidates;
+  return normalizeEbayOrderNumber(candidateLines[0]?.order?.order_number || state.selectedLine?.order?.order_number || "");
+}
+
+function buildEbayCancelStartUrl(orderNumber = "") {
+  const cleanOrderNumber = normalizeEbayOrderNumber(orderNumber);
+  if (!cleanOrderNumber) return "";
+  const url = new URL("https://www.ebay.com/cmr/Start");
+  url.searchParams.set("omsOrderId", cleanOrderNumber);
+  url.searchParams.set("userIntent", "Cancel");
+  return url.toString();
+}
+
+function openEbayCancelFlowForWorkerModal(options = {}) {
+  const orderNumber = getWorkerCancelPrimaryOrderNumber();
+  const url = buildEbayCancelStartUrl(orderNumber);
+  if (!url) {
+    setWorkerCancelPhotoStatus("Could not find a valid eBay order number for this cancellation.", "error");
+    return false;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+  if (!options.silent) {
+    setWorkerCancelPhotoStatus("eBay cancellation opened. Finish eBay's cancel flow, then capture the confirmation proof back into OG.", "info");
+  }
+  return true;
+}
+
 function closeWorkerCancelOrderModal(options = {}) {
   state.workerCancelEvidencePhotos.forEach((photo) => {
     if (photo?.localId && photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
@@ -5604,6 +5642,7 @@ function closeWorkerCancelOrderModal(options = {}) {
   $("worker-cancel-order-error").textContent = "";
   setWorkerCancelPhotoStatus("");
   renderWorkerCancelEvidencePhotos();
+  $("worker-cancel-order-modal")?.classList.remove("is-proof-attached");
   closeModal("worker-cancel-order-modal");
   returnToOrdersAfterMobileModalClose(options);
 }
@@ -5648,6 +5687,10 @@ function openWorkerCancelOrderModal(options = {}) {
   renderWorkerCancelEvidencePhotos();
   openModal("worker-cancel-order-modal");
   setTimeout(() => $("worker-cancel-order-note")?.focus(), 80);
+  if (options.openEbayCancel) {
+    openEbayCancelFlowForWorkerModal({ silent: true });
+    setWorkerCancelPhotoStatus("eBay cancellation opened. After eBay confirms it, use the OG proof button on the eBay confirmation page.", "info");
+  }
 
   loadNoInventoryCaptureStations({ silent: true }).catch((error) => {
     console.warn("Could not load cancellation capture stations:", error);
@@ -6158,6 +6201,19 @@ function setVideoReceiptPhotoTransferStatus(message = "", type = "info") {
 function postVideoReceiptPhotoTransferStatus(payload = {}) {
   window.postMessage({
     type: "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
+function setEbayCancelProofTransferStatus(message = "", type = "info") {
+  const text = message || "Waiting for eBay cancellation proof.";
+  setWorkerCancelPhotoStatus(text, type);
+  setStatus(text, type);
+}
+
+function postEbayCancelProofTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_CANCEL_PROOF_TRANSFER_STATUS",
     payload,
   }, window.location.origin);
 }
@@ -6794,6 +6850,134 @@ async function handleVideoReceiptPhotoTransfer(payload) {
   }
 }
 
+function getEbayCancelProofLineMatches(metadata = {}) {
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
+  const itemNumber = String(metadata.itemNumber || metadata.itemId || "").trim();
+  if (!orderNumber && !itemNumber) return [];
+
+  return state.orders.filter((line) => {
+    const order = getOrderFromLine(line);
+    if (orderNumber && normalizeEbayOrderNumber(order.order_number) !== orderNumber) return false;
+    if (itemNumber && String(line.item_number || "").trim() !== itemNumber) return false;
+    return true;
+  });
+}
+
+async function findEbayCancelProofLine(metadata = {}) {
+  let matches = getEbayCancelProofLineMatches(metadata);
+  if (!matches.length) {
+    await loadOrders();
+    matches = getEbayCancelProofLineMatches(metadata);
+  }
+  if (!matches.length) return null;
+  const openMatch = matches.find(isOpenOrderLine);
+  return openMatch || matches[0];
+}
+
+function createLocalCancelProofPhoto(blob, metadata = {}, screenshot = {}) {
+  const capturedAt = screenshot.capturedAt || metadata.capturedAt || new Date().toISOString();
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
+  const cancelId = String(metadata.cancelId || "").trim();
+  const localId = `local:${crypto.randomUUID()}`;
+  const previewUrl = URL.createObjectURL(blob);
+  return {
+    localId,
+    file: blob,
+    bucket: "",
+    path: `ebay-cancel-proof-${safeNoInventoryEvidenceSegment(orderNumber || cancelId, "order")}.png`,
+    previewUrl,
+    thumbnailUrl: previewUrl,
+    label: `eBay cancel proof${orderNumber ? ` - ${orderNumber}` : ""}`,
+    mime_type: blob.type || screenshot.mimeType || "image/png",
+    created_at: capturedAt,
+    metadata: {
+      source: "ebay-cancel-confirmation",
+      orderNumber,
+      cancelId,
+      cancellationReason: metadata.cancellationReason || "",
+      pageUrl: metadata.pageUrl || "",
+      pageTitle: metadata.pageTitle || "",
+      capturedAt,
+    },
+  };
+}
+
+function applyEbayCancelProofNote(metadata = {}) {
+  const noteEl = $("worker-cancel-order-note");
+  if (!noteEl || String(noteEl.value || "").trim()) return;
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
+  const parts = [
+    "Canceled on eBay.",
+    metadata.cancellationReason ? `Reason: ${metadata.cancellationReason}.` : "",
+    metadata.cancelId ? `Cancel ID: ${metadata.cancelId}.` : "",
+    orderNumber ? `Order: ${orderNumber}.` : "",
+  ].filter(Boolean);
+  noteEl.value = parts.join(" ");
+}
+
+async function attachEbayCancelProofToWorkerModal(payload = {}) {
+  const metadata = payload.metadata || {};
+  const screenshot = payload.screenshot || {};
+  const line = await findEbayCancelProofLine(metadata);
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || metadata.omsOrderId || "");
+  if (!line?.id) {
+    throw new Error(`Could not find eBay order ${orderNumber || "from the cancellation page"} in the pending queue. Import/sync pending orders, then try again.`);
+  }
+
+  if (state.selectedLine?.id !== line.id) {
+    selectOrderLine(line.id, { openDetail: false });
+  }
+  openWorkerCancelOrderModal({ lineIds: [line.id], openEbayCancel: false });
+
+  const blob = getVideoReceiptScreenshotBlob(screenshot);
+  const photo = createLocalCancelProofPhoto(blob, metadata, screenshot);
+  state.workerCancelEvidencePhotos.unshift(photo);
+  state.workerCancelEvidencePhotoUploadKeys.add(photo.localId);
+  renderWorkerCancelEvidencePhotos();
+  applyEbayCancelProofNote(metadata);
+  setEbayCancelProofTransferStatus("eBay cancellation proof attached. Add a short note, sign, and mark the order canceled in OG.", "success");
+  $("worker-cancel-order-modal")?.classList.add("is-proof-attached");
+  window.setTimeout(() => $("worker-cancel-order-note")?.focus(), 120);
+
+  return {
+    lineId: line.id,
+    orderId: line.order_id || "",
+    orderNumber: getOrderFromLine(line).order_number || orderNumber,
+    cancelId: metadata.cancelId || "",
+  };
+}
+
+async function handleEbayCancelProofTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledEbayCancelProofTransferIds.has(transferId)) return;
+  if (transferId) state.handledEbayCancelProofTransferIds.add(transferId);
+  setEbayCancelProofTransferStatus("Attaching eBay cancellation proof...");
+  postEbayCancelProofTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Pending Orders accepted the eBay cancellation proof transfer.",
+  });
+
+  try {
+    const attached = await attachEbayCancelProofToWorkerModal(payload);
+    postEbayCancelProofTransferStatus({
+      transferId,
+      ok: true,
+      message: `Cancellation proof attached for eBay order ${attached.orderNumber || "order"}.`,
+      ...attached,
+    });
+  } catch (error) {
+    console.error("eBay cancellation proof transfer failed:", error);
+    const message = error.message || "Could not attach eBay cancellation proof.";
+    setEbayCancelProofTransferStatus(message, "error");
+    postEbayCancelProofTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  }
+}
+
 function getPendingLabelReceiverState() {
   const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
   return {
@@ -6923,6 +7107,10 @@ function setupEbayLabelReceiver() {
     }
     if (event.data?.type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER") {
       handleVideoReceiptPhotoTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_CANCEL_PROOF_TRANSFER") {
+      handleEbayCancelProofTransfer(event.data.payload);
     }
   });
 }
@@ -6988,7 +7176,7 @@ function setupListeners() {
   });
   $("find-location")?.addEventListener("click", searchSourceLocation);
   $("stage-current-line")?.addEventListener("click", () => stageCurrentLine({ autoAdvance: true }));
-  $("cancel-pending-order")?.addEventListener("click", openWorkerCancelOrderModal);
+  $("cancel-pending-order")?.addEventListener("click", () => openWorkerCancelOrderModal({ openEbayCancel: true }));
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
   $("clear-selection")?.addEventListener("click", clearSelection);
@@ -7022,6 +7210,7 @@ function setupListeners() {
   $("cancel-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("close-worker-no-inventory")?.addEventListener("click", closeWorkerNoInventoryModal);
   $("confirm-worker-cancel-order")?.addEventListener("click", confirmWorkerCancelOrder);
+  $("open-ebay-cancel-flow")?.addEventListener("click", () => openEbayCancelFlowForWorkerModal());
   $("cancel-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
   $("close-worker-cancel-order")?.addEventListener("click", closeWorkerCancelOrderModal);
   $("select-all-worker-cancel-order")?.addEventListener("click", () => setAllWorkerCancelOrderLines(true));
