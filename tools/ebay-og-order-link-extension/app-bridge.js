@@ -21,7 +21,7 @@
       type,
       payload,
     };
-    const maxAttempts = ["OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG"].includes(type) ? 60 : 10;
+    const maxAttempts = ["OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG", "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER"].includes(type) ? 60 : 10;
     window.postMessage(message, window.location.origin);
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -92,11 +92,19 @@
     });
   }
 
+  function requestVideoReceiptOpen(payload) {
+    return chrome.runtime.sendMessage({
+      type: "OG_EBAY_OPEN_VIDEO_RECEIPT",
+      payload,
+    }).catch((error) => ({ ok: false, error: error.message || String(error) }));
+  }
+
   async function deliverPendingTransferFromUrl() {
     const transferId = new URLSearchParams(window.location.search).get("labelTransferId");
     const reportTransferId = new URLSearchParams(window.location.search).get("reportTransferId");
     const returnTransferId = new URLSearchParams(window.location.search).get("returnTransferId");
     const returnMessageTransferId = new URLSearchParams(window.location.search).get("returnMessageTransferId");
+    const videoReceiptPhotoTransferId = new URLSearchParams(window.location.search).get("videoReceiptPhotoTransferId");
     if (transferId) {
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_GET_PENDING_LABEL",
@@ -125,6 +133,13 @@
       }).catch(() => null);
       if (response?.payload) postToOgApp(response.payload, "OG_EBAY_RETURN_MESSAGE_LOG");
     }
+    if (videoReceiptPhotoTransferId) {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_GET_PENDING_VIDEO_RECEIPT_PHOTO",
+        transferId: videoReceiptPhotoTransferId,
+      }).catch(() => null);
+      if (response?.payload) postToOgApp(response.payload, "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER");
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -148,6 +163,12 @@
 
     if (message?.type === "OG_EBAY_RETURN_MESSAGE_LOG") {
       postToOgApp(message.payload, "OG_EBAY_RETURN_MESSAGE_LOG");
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message?.type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER") {
+      postToOgApp(message.payload, "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER");
       sendResponse({ ok: true });
       return true;
     }
@@ -187,8 +208,23 @@
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_RETURN_MESSAGE_LOG_STATUS");
       return;
     }
+    if (event.data?.type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS") {
+      relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS");
+      return;
+    }
     if (event.data?.type === "OG_EBAY_PENDING_QUEUE_CHANGED") {
       relayOgStatusToExtension(event.data.payload || {}, "OG_EBAY_PENDING_QUEUE_CHANGED");
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST") {
+      const requestId = event.data.requestId;
+      requestVideoReceiptOpen(event.data.payload || {}).then((payload) => {
+        window.postMessage({
+          type: "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE",
+          requestId,
+          payload,
+        }, window.location.origin);
+      });
     }
   });
 

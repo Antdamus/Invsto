@@ -302,6 +302,7 @@
                   <span class="eyebrow">eBay Order</span>
                   <h2 id="selected-order-title">Order</h2>
                   <p id="selected-order-subtitle"></p>
+                  <div id="selected-video-receipt" class="selected-video-receipt hidden"></div>
                 </div>
                 <div class="detail-actions">
                   <span id="selected-order-status" class="status-badge">Pending</span>
@@ -548,6 +549,11 @@
       <button id="close-no-inventory-photo-viewer" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Evidence Photo</span>
       <h2 id="no-inventory-photo-viewer-title">Inspect photo</h2>
+      <div class="evidence-photo-viewer-tools" aria-label="Photo zoom controls">
+        <button id="zoom-out-no-inventory-photo" type="button" class="secondary-btn">Zoom Out</button>
+        <button id="reset-zoom-no-inventory-photo" type="button" class="secondary-btn">Reset</button>
+        <button id="zoom-in-no-inventory-photo" type="button" class="secondary-btn">Zoom In</button>
+      </div>
       <div class="evidence-photo-viewer-frame">
         <img id="no-inventory-photo-viewer-image" alt="Evidence photo preview" />
       </div>

@@ -25,6 +25,9 @@ const state = {
   liveLotOrderMatches: [],
   ebayLaunchOrderNumbers: new Set(),
   ebayLaunchBuyerKeys: new Set(),
+  ebayLaunchAllOrderNumbers: new Set(),
+  ebayLaunchSelectedCount: 0,
+  ebayLaunchTotalCount: 0,
   ebayLaunchSnapshot: null,
   workerNoInventoryGps: null,
   workerNoInventoryCandidates: [],
@@ -42,6 +45,7 @@ const state = {
   ebayLabelPreviewUrls: new Map(),
   handledEbayLabelTransferIds: new Set(),
   handledEbayReportTransferIds: new Set(),
+  handledVideoReceiptPhotoTransferIds: new Set(),
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
@@ -55,6 +59,13 @@ const state = {
   orderTaskPhotoUploadKeys: new Set(),
   orderTaskCaptureBusy: false,
   orderTaskSignedUrls: new Map(),
+  orderVideoReceipts: new Map(),
+  videoReceiptEvidenceByLineId: new Map(),
+  evidencePhotoViewerZoom: 1,
+  evidencePhotoViewerPanX: 0,
+  evidencePhotoViewerPanY: 0,
+  evidencePhotoViewerPanning: false,
+  evidencePhotoViewerPanStart: null,
   launchOrderTaskId: "",
   busy: false,
 };
@@ -515,9 +526,11 @@ function setupDashboardShell() {
 function normalizeLine(line) {
   const order = getOrderFromLine(line);
   const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
+  const videoReceiptUrl = getOrderVideoReceiptUrl({ ...line, order });
   return {
     ...line,
     order,
+    videoReceiptUrl,
     searchText: [
       order.order_number,
       order.sales_record_number,
@@ -526,6 +539,7 @@ function normalizeLine(line) {
       line.transaction_id,
       line.item_title,
       line.custom_label,
+      videoReceiptUrl,
       labelSearchText,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
@@ -548,6 +562,8 @@ function getLabelMetadataSearchText(...metadataObjects) {
     "shipmentIds",
     "labelId",
     "labelIds",
+    "videoReceiptUrl",
+    "videoReceiptUrls",
     "lookupKeys",
     "labelRows",
   ];
@@ -603,6 +619,142 @@ function getLabelTrackingDisplay(metadata = {}) {
     ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
     ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
   ].filter(Boolean).map(String))].join(", ");
+}
+
+function getMetadataVideoReceiptUrl(metadata = {}) {
+  return getMetadataVideoReceiptUrls(metadata)[0] || "";
+}
+
+function getMetadataVideoReceiptUrls(metadata = {}) {
+  if (!metadata || typeof metadata !== "object") return [];
+  const detail = metadata.returnDetails && typeof metadata.returnDetails === "object" ? metadata.returnDetails : {};
+  return [
+    metadata.videoReceiptUrl,
+    metadata.videoReceiptURL,
+    ...(Array.isArray(metadata.videoReceiptUrls) ? metadata.videoReceiptUrls : []),
+    detail.videoReceiptUrl,
+    detail.videoReceiptURL,
+    ...(Array.isArray(detail.videoReceiptUrls) ? detail.videoReceiptUrls : []),
+  ].filter(Boolean).map((url) => String(url || "").trim()).filter(Boolean);
+}
+
+function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
+  const cleanUrl = String(url || "").trim().replace(/&amp;/g, "&");
+  if (!cleanUrl) return "";
+  let parsed;
+  try {
+    parsed = new URL(cleanUrl);
+  } catch (_) {
+    return "";
+  }
+  if (!/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) return "";
+
+  const itemNumber = String(line.item_number || line.itemNumber || "").trim();
+  if (!itemNumber) return parsed.toString();
+
+  const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+  const itemIds = String(parsed.searchParams.get("itemIds") || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (selectedItemId === itemNumber) return parsed.toString();
+  if (itemIds.includes(itemNumber)) {
+    parsed.searchParams.set("selectedItemId", itemNumber);
+    if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+    return parsed.toString();
+  }
+  return "";
+}
+
+function getOrderVideoReceiptUrl(line = {}) {
+  const order = line.order || {};
+  return [
+    ...getMetadataVideoReceiptUrls(line.label_metadata),
+    ...getMetadataVideoReceiptUrls(order.label_metadata),
+    state.orderVideoReceipts.get(line.order_id),
+    state.orderVideoReceipts.get(order.id),
+    state.orderVideoReceipts.get(order.order_number),
+    line.videoReceiptUrl,
+  ].map((url) => normalizeVideoReceiptUrlForLine(url, line)).find(Boolean) || "";
+}
+
+function rememberOrderVideoReceipt(order = {}, url = "") {
+  const cleanUrl = String(url || "").trim();
+  if (!cleanUrl) return;
+  if (order.id) state.orderVideoReceipts.set(order.id, cleanUrl);
+  if (order.order_id) state.orderVideoReceipts.set(order.order_id, cleanUrl);
+  if (order.order_number) state.orderVideoReceipts.set(order.order_number, cleanUrl);
+}
+
+function buildEbayOrderDetailsUrl(orderNumber = "") {
+  const cleanNumber = String(orderNumber || "").trim();
+  if (!cleanNumber) return "";
+  const url = new URL("https://www.ebay.com/mesh/ord/details");
+  url.searchParams.set("orderid", cleanNumber);
+  return url.toString();
+}
+
+function getOrderVideoReceiptLink(line = {}) {
+  const order = line.order || {};
+  const directUrl = getOrderVideoReceiptUrl(line);
+  return {
+    url: directUrl,
+    orderNumber: order.order_number || "",
+    orderDetailsUrl: buildEbayOrderDetailsUrl(order.order_number),
+    itemNumber: line.item_number || "",
+    transactionId: line.transaction_id || "",
+    itemTitle: line.item_title || "",
+    itemUrl: line.item_number ? `https://www.ebay.com/itm/${encodeURIComponent(line.item_number)}` : "",
+    direct: Boolean(directUrl),
+    title: directUrl
+      ? "Open the captured eBay Live video receipt"
+      : "Resolve and open the eBay Live video receipt",
+  };
+}
+
+function requestExtensionVideoReceiptOpen(payload = {}) {
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(result || null);
+    };
+    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 4000);
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
+      if (event.data?.requestId !== requestId) return;
+      finish(event.data.payload || null);
+    };
+    window.addEventListener("message", onMessage);
+    window.postMessage({
+      type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST",
+      requestId,
+      payload,
+    }, window.location.origin);
+  });
+}
+
+async function openVideoReceiptLink(event, receiptLink = {}) {
+  if (receiptLink.direct || !receiptLink.orderNumber) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const result = await requestExtensionVideoReceiptOpen({
+    orderNumber: receiptLink.orderNumber,
+    orderDetailsUrl: receiptLink.orderDetailsUrl,
+    itemNumber: receiptLink.itemNumber,
+    transactionId: receiptLink.transactionId,
+    itemTitle: receiptLink.itemTitle,
+    itemUrl: receiptLink.itemUrl,
+  });
+  if (!result?.ok) {
+    setStatus(result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.", "error");
+  }
 }
 
 function parseCsv(text) {
@@ -858,6 +1010,19 @@ function getRequestedEbayOrderNumbers() {
   return [...new Set(values
     .map(normalizeEbayOrderNumber)
     .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
+}
+
+function getRequestedEbayAllOrderNumbers() {
+  const params = new URLSearchParams(window.location.search);
+  return [...new Set(String(params.get("ebayAllOrderIds") || "")
+    .split(",")
+    .map(normalizeEbayOrderNumber)
+    .filter((value) => EBAY_ORDER_NUMBER_PATTERN.test(value)))];
+}
+
+function getRequestedPositiveIntegerParam(name) {
+  const value = Number(new URLSearchParams(window.location.search).get(name) || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function decodeBase64UrlJson(value) {
@@ -1282,6 +1447,55 @@ async function fetchOrderLineQueue(status, admin) {
   return rows;
 }
 
+async function hydrateOrderVideoReceipts(lines = []) {
+  state.orderVideoReceipts.clear();
+  lines.forEach((line) => {
+    const order = getOrderFromLine(line);
+    rememberOrderVideoReceipt(order, getMetadataVideoReceiptUrl(line.label_metadata) || getMetadataVideoReceiptUrl(order.label_metadata));
+  });
+
+  const orderIds = [...new Set(lines.map((line) => line.order_id || getOrderFromLine(line).id).filter(Boolean))];
+  const orderNumbers = [...new Set(lines.map((line) => getOrderFromLine(line).order_number).filter(Boolean))];
+  if (!orderIds.length && !orderNumbers.length) return;
+
+  try {
+    const returnRows = [];
+    for (let index = 0; index < orderIds.length; index += 100) {
+      const chunk = orderIds.slice(index, index + 100);
+      const { data, error } = await supabase
+        .from("ebay_return_cases")
+        .select("order_id, order_number, raw_payload, opened_at")
+        .in("order_id", chunk)
+        .order("opened_at", { ascending: false });
+      if (error) throw error;
+      returnRows.push(...(data || []));
+    }
+
+    const idsCovered = new Set(returnRows.map((row) => row.order_id).filter(Boolean));
+    const missingOrderNumbers = orderNumbers.filter((orderNumber) => {
+      const matchingLine = lines.find((line) => getOrderFromLine(line).order_number === orderNumber);
+      const orderId = matchingLine?.order_id || getOrderFromLine(matchingLine).id;
+      return !orderId || !idsCovered.has(orderId);
+    });
+    for (let index = 0; index < missingOrderNumbers.length; index += 100) {
+      const chunk = missingOrderNumbers.slice(index, index + 100);
+      const { data, error } = await supabase
+        .from("ebay_return_cases")
+        .select("order_id, order_number, raw_payload, opened_at")
+        .in("order_number", chunk)
+        .order("opened_at", { ascending: false });
+      if (error) throw error;
+      returnRows.push(...(data || []));
+    }
+
+    returnRows.forEach((returnCase) => {
+      rememberOrderVideoReceipt(returnCase, getMetadataVideoReceiptUrl(returnCase.raw_payload));
+    });
+  } catch (error) {
+    console.warn("Could not load return video receipts for pending orders:", error);
+  }
+}
+
 async function loadOrders() {
   const status = $("order-status-filter")?.value || "pending";
   const list = $("orders-list");
@@ -1297,6 +1511,7 @@ async function loadOrders() {
     return;
   }
 
+  await hydrateOrderVideoReceipts(data);
   state.orders = data.map(normalizeLine);
   if (state.selectedLiveLot) {
     setLiveLotOrderMatches(calculateLiveLotOrderMatches(state.selectedLiveLot, state.selectedLiveLotItems));
@@ -1335,9 +1550,12 @@ function applyOrderFilters() {
 }
 
 function clearEbayLaunchFilter({ apply = true } = {}) {
-  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size && !state.ebayLaunchSnapshot) return;
+  if (!state.ebayLaunchOrderNumbers.size && !state.ebayLaunchBuyerKeys.size && !state.ebayLaunchSnapshot && !state.ebayLaunchAllOrderNumbers.size && !state.ebayLaunchTotalCount) return;
   state.ebayLaunchOrderNumbers.clear();
   state.ebayLaunchBuyerKeys.clear();
+  state.ebayLaunchAllOrderNumbers.clear();
+  state.ebayLaunchSelectedCount = 0;
+  state.ebayLaunchTotalCount = 0;
   state.ebayLaunchSnapshot = null;
   if (apply) applyOrderFilters();
 }
@@ -1348,6 +1566,9 @@ function applyEbayLaunchOrderSelection() {
 
   state.ebayLaunchSnapshot = getRequestedEbayOrderSnapshot();
   state.ebayLaunchOrderNumbers = new Set(orderNumbers);
+  state.ebayLaunchAllOrderNumbers = new Set(getRequestedEbayAllOrderNumbers());
+  state.ebayLaunchSelectedCount = getRequestedPositiveIntegerParam("ebaySelectedCount") || orderNumbers.length;
+  state.ebayLaunchTotalCount = getRequestedPositiveIntegerParam("ebayTotalCount") || state.ebayLaunchAllOrderNumbers.size || orderNumbers.length;
   state.ebayLaunchBuyerKeys.clear();
   clearLiveLotSelection({ render: false });
   const matches = state.orders.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
@@ -1361,7 +1582,7 @@ function applyEbayLaunchOrderSelection() {
     return;
   }
 
-  state.ebayLaunchBuyerKeys = new Set(matches.map(getBuyerKey).filter(Boolean));
+  state.ebayLaunchBuyerKeys.clear();
   applyOrderFilters();
   const openMatch = matches.find(isOpenOrderLine) || matches[0];
   if (openMatch) {
@@ -1487,6 +1708,8 @@ function isNoInventoryCompletionLine(line) {
 
 function getNoInventoryCandidateLines(line = state.selectedLine) {
   if (!line) return [];
+  const selectedLines = getSelectedAdminLines().filter(isNoInventoryCompletionLine);
+  if (selectedLines.length) return selectedLines;
   return getBuyerLines(getBuyerKey(line)).filter(isNoInventoryCompletionLine);
 }
 
@@ -1702,12 +1925,10 @@ function renderOrders() {
 
     group.lines.forEach((line) => {
       const order = line.order || {};
-      const button = document.createElement(isAdminUser() ? "div" : "button");
-      if (button.tagName === "BUTTON") button.type = "button";
-      else {
-        button.setAttribute("role", "button");
-        button.tabIndex = 0;
-      }
+      const receiptLink = getOrderVideoReceiptLink(line);
+      const button = document.createElement("div");
+      button.setAttribute("role", "button");
+      button.tabIndex = 0;
       button.className = `buyer-line-btn ${isAdminUser() ? "has-admin-select" : ""} ${state.selectedLine?.id === line.id ? "is-selected" : ""}`;
       const adminSelect = isAdminUser() ? `
         <label class="admin-order-select" title="Select for admin closeout">
@@ -1719,12 +1940,14 @@ function renderOrders() {
         <span>
           <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
           <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
+          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>` : ""}
         </span>
         <b>${escapeHtml(line.line_status || "pending")}</b>
       `;
       const lineCheckbox = button.querySelector("[data-admin-line-select]");
       lineCheckbox?.addEventListener("click", (event) => event.stopPropagation());
       lineCheckbox?.addEventListener("change", (event) => setAdminLineSelection(line.id, event.target.checked));
+      button.querySelectorAll("a").forEach((link) => link.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink)));
       button.addEventListener("click", () => selectOrderLine(line.id));
       button.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
@@ -1850,7 +2073,158 @@ function renderSelectedOrder() {
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
   $("detail-total").textContent = formatMoney(line.total_price || order.total_price || line.sold_for);
   $("detail-payout").textContent = line.net_payout || order.net_payout ? formatMoney(line.net_payout || order.net_payout) : "Not imported";
+  renderSelectedVideoReceipt(line);
   renderEbayLabelPanel();
+}
+
+function renderSelectedVideoReceipt(line = state.selectedLine) {
+  const panel = $("selected-video-receipt");
+  if (!panel) return;
+  const receiptLink = getOrderVideoReceiptLink(line);
+  panel.classList.toggle("hidden", !(receiptLink.url || receiptLink.orderNumber));
+  panel.innerHTML = receiptLink.url || receiptLink.orderNumber
+    ? `
+      <a href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>
+    `
+    : "";
+  panel.querySelector("a")?.addEventListener("click", (event) => openVideoReceiptLink(event, receiptLink));
+}
+
+function isVideoReceiptEvidencePhoto(photo = {}) {
+  const text = [
+    photo.label,
+    photo.path,
+    photo.source_path,
+    photo.metadata?.videoReceiptUrl,
+    photo.metadata?.source,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /video[-_\s]?receipt|ebaylive\/events/.test(text);
+}
+
+function normalizeVideoReceiptItemNumber(value = "") {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getVideoReceiptPhotoItemNumbers(photo = {}) {
+  const values = [
+    photo.itemNumber,
+    photo.item_number,
+    photo.selectedItemId,
+    photo.metadata?.itemNumber,
+    photo.metadata?.item_number,
+    photo.metadata?.selectedItemId,
+  ];
+  const labelMatch = String(photo.label || "").match(/video[-_\s]?receipt\s*[-:]?\s*(\d{6,})/i);
+  if (labelMatch?.[1]) values.push(labelMatch[1]);
+  const pathMatch = String(photo.path || "").match(/(?:^|[-_/])(\d{6,})(?:\.png|[-_/]|$)/i);
+  if (pathMatch?.[1]) values.push(pathMatch[1]);
+  return [...new Set(values.map(normalizeVideoReceiptItemNumber).filter(Boolean))];
+}
+
+function videoReceiptPhotoMatchesLine(photo = {}, task = {}, line = {}) {
+  const lineItemNumber = normalizeVideoReceiptItemNumber(line.item_number);
+  const explicitItemNumbers = getVideoReceiptPhotoItemNumbers(photo);
+  if (explicitItemNumbers.length) return Boolean(lineItemNumber && explicitItemNumbers.includes(lineItemNumber));
+
+  const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
+  if (taskLineIds.length) return taskLineIds.includes(line.id);
+  return false;
+}
+
+function getSelectedVideoReceiptEvidencePhotos() {
+  const line = state.selectedLine;
+  if (!line?.id) return [];
+  return getVideoReceiptEvidencePhotosForLine(line);
+}
+
+function getVideoReceiptEvidencePhotosForLine(line = {}) {
+  if (!line?.id) return [];
+  const photos = [];
+  const livePhoto = state.videoReceiptEvidenceByLineId.get(line.id);
+  if (livePhoto) photos.push(livePhoto);
+
+  state.selectedOrderTasks.forEach((task) => {
+    const taskLineIds = Array.isArray(task.order_line_ids) ? task.order_line_ids : [];
+    const taskMatchesLine = taskLineIds.length ? taskLineIds.includes(line.id) : task.order_id === line.order_id;
+    if (!taskMatchesLine) return;
+    const events = state.selectedOrderTaskEvents.get(task.id) || [];
+    events.forEach((event) => {
+      (Array.isArray(event.photo_attachments) ? event.photo_attachments : [])
+        .filter(isVideoReceiptEvidencePhoto)
+        .filter((photo) => videoReceiptPhotoMatchesLine(photo, task, line))
+        .forEach((photo) => photos.push({
+          ...photo,
+          signed_by_email: photo.signed_by_email || event.signed_by_email || task.created_by_email || "",
+          created_at: photo.created_at || event.created_at || task.created_at || "",
+        }));
+    });
+  });
+
+  const seen = new Set();
+  return photos.filter((photo) => {
+    const key = getNoInventoryEvidencePhotoKey(photo);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return Boolean(photo.path || photo.previewUrl);
+  });
+}
+
+async function ensureEvidencePhotoPreviewUrls(photo = {}) {
+  if (photo.previewUrl) return photo;
+  const bucket = photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+  const path = photo.path || "";
+  if (!path) return photo;
+  const [previewUrl, thumbnailUrl] = await Promise.all([
+    createNoInventorySignedImageUrl(bucket, path),
+    createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
+  ]);
+  return {
+    ...photo,
+    bucket,
+    previewUrl,
+    thumbnailUrl: thumbnailUrl || previewUrl,
+  };
+}
+
+async function renderSelectedVideoReceiptEvidence() {
+  const container = $("selected-video-receipt-evidence");
+  if (!container) return;
+  const photos = getSelectedVideoReceiptEvidencePhotos();
+  if (!photos.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = photos.map((photo, index) => `
+    <button type="button" class="video-receipt-evidence-thumb is-loading" data-selected-video-receipt-photo="${index}">
+      <span>Loading video receipt screenshot...</span>
+    </button>
+  `).join("");
+
+  const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));
+  if (!$("selected-video-receipt-evidence")) return;
+
+  container.innerHTML = hydrated.map((photo, index) => {
+    const actor = photo.signed_by_email || getVideoReceiptAuditActor();
+    const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
+    const auditText = photo.auditText || `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
+    return `
+      <button type="button" class="video-receipt-evidence-thumb" data-selected-video-receipt-photo="${index}" title="Open video receipt screenshot">
+        ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label || "Video receipt screenshot")}" />` : ""}
+        <span>${escapeHtml(auditText)}</span>
+      </button>
+    `;
+  }).join("");
+
+  container.querySelectorAll("[data-selected-video-receipt-photo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const photo = hydrated[Number(button.dataset.selectedVideoReceiptPhoto || 0)];
+      if (photo?.previewUrl) openEvidencePhotoObjectViewer({
+        ...photo,
+        auditText: photo.auditText || `Captured by ${photo.signed_by_email || getVideoReceiptAuditActor()}${photo.created_at ? ` on ${formatDate(photo.created_at)}` : ""}`,
+      }, "assign-order-task");
+    });
+  });
 }
 
 function getSelectedOrderLabelData() {
@@ -1954,6 +2328,20 @@ function getOrderTaskLineIdsForSelectedOrder() {
 
 function isActiveOrderTask(task = {}) {
   return !["resolved", "cancelled"].includes(String(task.status || "").toLowerCase());
+}
+
+function isClearedVideoReceiptCaptureTask(task = {}, events = []) {
+  const taskText = [
+    task.title,
+    task.question,
+    task.latest_note,
+    task.resolution_notes,
+  ].filter(Boolean).join(" ");
+  if (!/video receipt screenshot captured/i.test(taskText)) return false;
+  const remainingPhotos = events.flatMap((event) => (
+    Array.isArray(event.photo_attachments) ? event.photo_attachments : []
+  ));
+  return !remainingPhotos.length && !isActiveOrderTask(task);
 }
 
 function getOrderTaskAssigneeLabel(task = {}) {
@@ -2083,6 +2471,51 @@ async function loadSelectedOrderTasks() {
   }
 }
 
+async function ensureNoInventoryVideoReceiptTasksLoaded() {
+  const orderIds = [...new Set(state.workerNoInventoryCandidates.map((line) => line.order_id).filter(Boolean))];
+  if (!orderIds.length) return;
+
+  const loadedOrderIds = new Set(state.selectedOrderTasks.map((task) => task.order_id).filter(Boolean));
+  const missingOrderIds = orderIds.filter((orderId) => !loadedOrderIds.has(orderId));
+  if (!missingOrderIds.length) return;
+
+  const { data: tasks, error } = await supabase
+    .from("ebay_order_tasks")
+    .select("*")
+    .in("order_id", missingOrderIds)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  const incomingTasks = tasks || [];
+  if (!incomingTasks.length) return;
+  const existingTaskIds = new Set(state.selectedOrderTasks.map((task) => task.id));
+  incomingTasks.forEach((task) => {
+    if (!existingTaskIds.has(task.id)) {
+      state.selectedOrderTasks.push(task);
+      existingTaskIds.add(task.id);
+    }
+  });
+
+  const taskIds = incomingTasks.map((task) => task.id).filter(Boolean);
+  if (!taskIds.length) return;
+
+  const { data: events, error: eventError } = await supabase
+    .from("ebay_order_task_events")
+    .select("*")
+    .in("task_id", taskIds)
+    .order("created_at", { ascending: true });
+  if (eventError) throw eventError;
+
+  (events || []).forEach((event) => {
+    const list = state.selectedOrderTaskEvents.get(event.task_id) || [];
+    if (!list.some((entry) => entry.id === event.id)) {
+      list.push(event);
+      list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    }
+    state.selectedOrderTaskEvents.set(event.task_id, list);
+  });
+}
+
 function renderOrderTaskPanel(options = {}) {
   const list = $("order-task-list");
   const summary = $("order-task-summary");
@@ -2103,19 +2536,23 @@ function renderOrderTaskPanel(options = {}) {
     return;
   }
 
-  const activeCount = state.selectedOrderTasks.filter(isActiveOrderTask).length;
+  const visibleOrderTasks = state.selectedOrderTasks.filter((task) => {
+    const events = state.selectedOrderTaskEvents.get(task.id) || [];
+    return !isClearedVideoReceiptCaptureTask(task, events);
+  });
+  const activeCount = visibleOrderTasks.filter(isActiveOrderTask).length;
   if (summary) {
     summary.textContent = activeCount
       ? `${activeCount} active coordination task${activeCount === 1 ? "" : "s"} for this order.`
       : "No active coordination task is waiting on this order.";
   }
 
-  if (!state.selectedOrderTasks.length) {
+  if (!visibleOrderTasks.length) {
     list.innerHTML = `<div class="empty-state">No coordination tasks for this order.</div>`;
     return;
   }
 
-  list.innerHTML = state.selectedOrderTasks.map((task) => {
+  list.innerHTML = visibleOrderTasks.map((task) => {
     const events = state.selectedOrderTaskEvents.get(task.id) || [];
     const isUrgent = ["urgent", "high"].includes(String(task.priority || "").toLowerCase());
     const isResolved = !isActiveOrderTask(task);
@@ -2154,21 +2591,61 @@ function renderOrderTaskPanel(options = {}) {
   });
   list.querySelectorAll("[data-order-task-photo]").forEach((buttonEl) => {
     buttonEl.addEventListener("click", () => {
-      openOrderTaskPhoto(buttonEl.dataset.bucket, buttonEl.dataset.path);
+      openOrderTaskPhoto(
+        buttonEl.dataset.bucket,
+        buttonEl.dataset.path,
+        {
+          label: buttonEl.dataset.label || "",
+          signedBy: buttonEl.dataset.signedBy || "",
+          createdAt: buttonEl.dataset.createdAt || "",
+          returnFocusId: "open-order-task-modal",
+        }
+      );
     });
   });
+  list.querySelectorAll("[data-delete-video-receipt-capture]").forEach((buttonEl) => {
+    buttonEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteVideoReceiptCapture(buttonEl);
+    });
+  });
+  hydrateOrderTaskVideoReceiptThumbnails();
 }
 
 function renderOrderTaskEvent(event = {}) {
   const photos = Array.isArray(event.photo_attachments) ? event.photo_attachments : [];
   const photoHtml = photos.length
     ? `<div class="order-task-photo-strip">${photos.map((photo, index) => `
-        <button
-          type="button"
-          data-order-task-photo="1"
-          data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
-          data-path="${escapeHtml(photo.path || "")}"
-        >${escapeHtml(photo.label || `Photo ${index + 1}`)}</button>
+        <span class="order-task-photo-entry">
+          <button
+            type="button"
+            class="${isVideoReceiptEvidencePhoto(photo) ? "order-task-video-receipt-thumb" : ""}"
+            data-order-task-photo="1"
+            data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+            data-path="${escapeHtml(photo.path || "")}"
+            data-label="${escapeHtml(photo.label || `Photo ${index + 1}`)}"
+            data-signed-by="${escapeHtml(photo.signed_by_email || event.signed_by_email || "")}"
+            data-created-at="${escapeHtml(photo.created_at || event.created_at || "")}"
+          >
+            ${isVideoReceiptEvidencePhoto(photo)
+              ? `<span class="order-task-video-receipt-thumb-image" data-order-task-thumb-image="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}:${escapeHtml(photo.path || "")}"></span>
+                 <span>${escapeHtml(photo.label || `Video receipt ${index + 1}`)}</span>
+                 <small>${escapeHtml(`Captured by ${photo.signed_by_email || event.signed_by_email || "logged-in user"}${photo.created_at || event.created_at ? ` on ${formatDate(photo.created_at || event.created_at)}` : ""}`)}</small>`
+              : escapeHtml(photo.label || `Photo ${index + 1}`)}
+          </button>
+          ${isVideoReceiptEvidencePhoto(photo) ? `
+            <button
+              type="button"
+              class="order-task-photo-delete"
+              data-delete-video-receipt-capture="1"
+              data-event-id="${escapeHtml(event.id || "")}"
+              data-bucket="${escapeHtml(photo.bucket || NO_INVENTORY_EVIDENCE_BUCKET)}"
+              data-path="${escapeHtml(photo.path || "")}"
+              data-label="${escapeHtml(photo.label || `Video receipt ${index + 1}`)}"
+            >Delete</button>
+          ` : ""}
+        </span>
       `).join("")}</div>`
     : "";
 
@@ -2185,7 +2662,60 @@ function renderOrderTaskEvent(event = {}) {
   `;
 }
 
-async function openOrderTaskPhoto(bucket, path) {
+async function deleteVideoReceiptCapture(buttonEl) {
+  const eventId = buttonEl?.dataset?.eventId || "";
+  const bucket = buttonEl?.dataset?.bucket || NO_INVENTORY_EVIDENCE_BUCKET;
+  const path = buttonEl?.dataset?.path || "";
+  const label = buttonEl?.dataset?.label || "this video receipt capture";
+  if (!eventId || !path) {
+    setStatus("This video receipt capture is missing delete details.", "error");
+    return;
+  }
+  const confirmed = window.confirm(`Delete ${label}? This removes the mistaken screenshot from OG and the video receipt audit thumbnails.`);
+  if (!confirmed) return;
+
+  const originalText = buttonEl.textContent;
+  buttonEl.disabled = true;
+  buttonEl.textContent = "Deleting...";
+  setStatus("Deleting video receipt capture...", "info");
+
+  try {
+    const { data, error } = await supabase.rpc("delete_ebay_video_receipt_capture", {
+      _event_id: eventId,
+      _bucket: bucket,
+      _path: path,
+      _signed_by_email: state.user?.email || state.employee?.display_name || "",
+    });
+    if (error) throw error;
+    if (!Number(data?.removed_count || 0)) {
+      throw new Error("Supabase did not remove that capture. The stored path may not match the task photo.");
+    }
+
+    const { error: storageError } = await supabase.storage.from(bucket).remove([path]);
+    if (storageError) {
+      console.warn("Video receipt capture was removed from coordination, but storage cleanup failed:", storageError);
+    }
+    state.orderTaskSignedUrls.delete(`${bucket}/${path}`);
+    await loadSelectedOrderTasks();
+    if (state.selectedLine?.id) await renderSelectedVideoReceiptEvidence();
+    if (state.workerNoInventoryLineIds.size) renderWorkerNoInventoryList();
+    setStatus(
+      storageError
+        ? `Video receipt capture removed from coordination. Storage cleanup needs admin review: ${storageError.message || "Storage API rejected deletion."}`
+        : `Video receipt capture deleted (${Number(data.removed_count).toLocaleString()} attachment${Number(data.removed_count) === 1 ? "" : "s"} removed).`,
+      storageError ? "error" : "success"
+    );
+  } catch (error) {
+    console.error("Could not delete video receipt capture:", error);
+    buttonEl.disabled = false;
+    buttonEl.textContent = originalText;
+    const message = error.message || "Could not delete that video receipt capture.";
+    setStatus(message, "error");
+    alert(message);
+  }
+}
+
+async function openOrderTaskPhoto(bucket, path, options = {}) {
   if (!path) return setStatus("That task photo is missing a storage path.", "error");
   const storageBucket = bucket || NO_INVENTORY_EVIDENCE_BUCKET;
   const key = `${storageBucket}/${path}`;
@@ -2201,7 +2731,31 @@ async function openOrderTaskPhoto(bucket, path) {
     url = data.signedUrl;
     state.orderTaskSignedUrls.set(key, url);
   }
-  window.open(url, "_blank", "noopener,noreferrer");
+  openEvidencePhotoObjectViewer({
+    bucket: storageBucket,
+    path,
+    previewUrl: url,
+    thumbnailUrl: url,
+    label: options.label || "Order task photo",
+    signed_by_email: options.signedBy || "",
+    created_at: options.createdAt || "",
+    auditText: options.signedBy || options.createdAt
+      ? `Captured by ${options.signedBy || "logged-in user"}${options.createdAt ? ` on ${formatDate(options.createdAt)}` : ""}`
+      : "",
+  }, options.returnFocusId || "open-order-task-modal");
+}
+
+async function hydrateOrderTaskVideoReceiptThumbnails() {
+  const placeholders = [...document.querySelectorAll("[data-order-task-thumb-image]")];
+  await Promise.all(placeholders.map(async (placeholder) => {
+    const [bucket, ...pathParts] = String(placeholder.dataset.orderTaskThumbImage || "").split(":");
+    const path = pathParts.join(":");
+    if (!bucket || !path || placeholder.dataset.loaded === "true") return;
+    const url = await createNoInventorySignedImageUrl(bucket, path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM });
+    if (!url) return;
+    placeholder.innerHTML = `<img src="${escapeHtml(url)}" alt="Video receipt screenshot" />`;
+    placeholder.dataset.loaded = "true";
+  }));
 }
 
 function resetOrderTaskPhotos() {
@@ -3949,6 +4503,7 @@ function renderNoInventoryEvidencePhotos() {
       <button type="button" data-no-inventory-photo-index="${index}" title="Open evidence photo">
         <img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl || "")}" alt="${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}" />
         <span>${escapeHtml(photo.label || `Evidence photo ${index + 1}`)}</span>
+        ${photo.auditText ? `<small>${escapeHtml(photo.auditText)}</small>` : ""}
       </button>
     </article>
   `).join("");
@@ -3986,26 +4541,111 @@ function scrollNoInventoryConfirmIntoView() {
 
 function openNoInventoryEvidencePhotoViewer(index) {
   const photo = state.noInventoryEvidencePhotos[index];
+  openEvidencePhotoObjectViewer(photo, "request-no-inventory-photo");
+}
+
+function openEvidencePhotoObjectViewer(photo, returnFocusId = "request-no-inventory-photo") {
   if (!photo?.previewUrl) return;
 
   const image = $("no-inventory-photo-viewer-image");
   const caption = $("no-inventory-photo-viewer-caption");
+  state.evidencePhotoViewerZoom = 1;
+  state.evidencePhotoViewerPanX = 0;
+  state.evidencePhotoViewerPanY = 0;
+  state.evidencePhotoViewerPanning = false;
+  state.evidencePhotoViewerPanStart = null;
   if (image) {
     image.src = photo.previewUrl;
-    image.alt = photo.label || `Evidence photo ${index + 1}`;
+    image.alt = photo.label || "Evidence photo";
+    applyEvidencePhotoViewerTransform();
   }
   if (caption) {
-    caption.textContent = `${photo.label || `Evidence photo ${index + 1}`} - ${photo.bucket}/${photo.path}`;
+    caption.textContent = [
+      photo.label || `Evidence photo ${index + 1}`,
+      photo.auditText || "",
+      photo.bucket && photo.path ? `${photo.bucket}/${photo.path}` : "",
+    ].filter(Boolean).join(" - ");
   }
   openModal("no-inventory-photo-viewer-modal");
+  $("no-inventory-photo-viewer-modal")?.setAttribute("data-return-focus-id", returnFocusId || "");
   setTimeout(() => $("dismiss-no-inventory-photo-viewer")?.focus(), 80);
 }
 
 function closeNoInventoryEvidencePhotoViewer() {
   const image = $("no-inventory-photo-viewer-image");
-  if (image) image.removeAttribute("src");
+  if (image) {
+    image.removeAttribute("src");
+    image.style.transform = "";
+  }
+  state.evidencePhotoViewerZoom = 1;
+  state.evidencePhotoViewerPanX = 0;
+  state.evidencePhotoViewerPanY = 0;
+  state.evidencePhotoViewerPanning = false;
+  state.evidencePhotoViewerPanStart = null;
+  const returnFocusId = $("no-inventory-photo-viewer-modal")?.getAttribute("data-return-focus-id") || "request-no-inventory-photo";
+  $("no-inventory-photo-viewer-modal")?.removeAttribute("data-return-focus-id");
   closeModal("no-inventory-photo-viewer-modal");
-  setTimeout(() => $("request-no-inventory-photo")?.focus(), 80);
+  setTimeout(() => $(returnFocusId)?.focus(), 80);
+}
+
+function setEvidencePhotoViewerZoom(nextZoom) {
+  state.evidencePhotoViewerZoom = Math.min(4, Math.max(0.5, Number(nextZoom) || 1));
+  if (state.evidencePhotoViewerZoom <= 1) {
+    state.evidencePhotoViewerPanX = 0;
+    state.evidencePhotoViewerPanY = 0;
+  }
+  applyEvidencePhotoViewerTransform();
+}
+
+function adjustEvidencePhotoViewerZoom(delta) {
+  setEvidencePhotoViewerZoom((state.evidencePhotoViewerZoom || 1) + delta);
+}
+
+function applyEvidencePhotoViewerTransform() {
+  const image = $("no-inventory-photo-viewer-image");
+  if (!image) return;
+  image.style.transform = `translate(${state.evidencePhotoViewerPanX || 0}px, ${state.evidencePhotoViewerPanY || 0}px) scale(${state.evidencePhotoViewerZoom || 1})`;
+}
+
+function resetEvidencePhotoViewerTransform() {
+  state.evidencePhotoViewerZoom = 1;
+  state.evidencePhotoViewerPanX = 0;
+  state.evidencePhotoViewerPanY = 0;
+  state.evidencePhotoViewerPanning = false;
+  state.evidencePhotoViewerPanStart = null;
+  applyEvidencePhotoViewerTransform();
+}
+
+function startEvidencePhotoPan(event) {
+  if ((state.evidencePhotoViewerZoom || 1) <= 1) return;
+  const image = $("no-inventory-photo-viewer-image");
+  if (!image?.src) return;
+  state.evidencePhotoViewerPanning = true;
+  state.evidencePhotoViewerPanStart = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    panX: state.evidencePhotoViewerPanX || 0,
+    panY: state.evidencePhotoViewerPanY || 0,
+  };
+  image.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveEvidencePhotoPan(event) {
+  if (!state.evidencePhotoViewerPanning || !state.evidencePhotoViewerPanStart) return;
+  state.evidencePhotoViewerPanX = state.evidencePhotoViewerPanStart.panX + (event.clientX - state.evidencePhotoViewerPanStart.x);
+  state.evidencePhotoViewerPanY = state.evidencePhotoViewerPanStart.panY + (event.clientY - state.evidencePhotoViewerPanStart.y);
+  applyEvidencePhotoViewerTransform();
+  event.preventDefault();
+}
+
+function endEvidencePhotoPan(event) {
+  if (!state.evidencePhotoViewerPanning) return;
+  const image = $("no-inventory-photo-viewer-image");
+  image?.releasePointerCapture?.(event.pointerId);
+  state.evidencePhotoViewerPanning = false;
+  state.evidencePhotoViewerPanStart = null;
 }
 
 function getSelectedWorkerCancelEvidencePhotos() {
@@ -4086,9 +4726,11 @@ function openWorkerCancelEvidencePhotoViewer(index) {
   if (!photo?.previewUrl) return;
   const image = $("no-inventory-photo-viewer-image");
   const caption = $("no-inventory-photo-viewer-caption");
+  state.evidencePhotoViewerZoom = 1;
   if (image) {
     image.src = photo.previewUrl;
     image.alt = photo.label || `Cancellation photo ${index + 1}`;
+    image.style.transform = "scale(1)";
   }
   if (caption) {
     caption.textContent = `${photo.label || `Cancellation photo ${index + 1}`} - ${photo.bucket ? `${photo.bucket}/${photo.path}` : photo.path || "local file"}`;
@@ -4334,7 +4976,8 @@ function closeWorkerNoInventoryModal(options = {}) {
 
 function updateWorkerNoInventorySelectionSummary() {
   const selected = state.workerNoInventoryLineIds.size;
-  const total = state.workerNoInventoryCandidates.length;
+  const selectedQueueTotal = getBuyerLines(getBuyerKey(state.selectedLine)).filter(isNoInventoryCompletionLine).length;
+  const total = Math.max(state.workerNoInventoryCandidates.length, selectedQueueTotal, state.ebayLaunchTotalCount || 0);
   const count = $("worker-no-inventory-count");
   if (count) count.textContent = `${selected} of ${total} selected`;
   $("confirm-worker-no-inventory")?.toggleAttribute("disabled", selected === 0);
@@ -4367,6 +5010,8 @@ function renderWorkerNoInventoryList() {
   list.innerHTML = state.workerNoInventoryCandidates.map((line) => {
     const order = line?.order || {};
     const selected = state.workerNoInventoryLineIds.has(line.id);
+    const receiptLink = getOrderVideoReceiptLink(line);
+    const receiptEvidence = state.videoReceiptEvidenceByLineId.get(line.id);
     return `
       <article class="bundle-review-item no-inventory-line ${selected ? "is-selected" : ""}" data-no-inventory-card="${escapeHtml(line.id)}">
         <label class="no-inventory-check" aria-label="Select this order line">
@@ -4378,6 +5023,15 @@ function renderWorkerNoInventoryList() {
             <span>${escapeHtml(order.order_number || "No order")} - ${escapeHtml(order.buyer_username || "No buyer")}</span>
           </div>
           <small>Qty ${Number(getRemainingLineQuantity(line) || line?.quantity || 1).toLocaleString()} - ${escapeHtml(storeName)} - no stock row will be removed</small>
+          ${receiptLink.url || receiptLink.orderNumber ? `<a class="buyer-line-receipt no-inventory-video-receipt" href="${escapeHtml(receiptLink.url || "#")}" target="_blank" rel="noopener" title="${escapeHtml(receiptLink.title)}">Video receipt</a>` : ""}
+          <div class="no-inventory-video-receipt-evidence" data-no-inventory-video-evidence="${escapeHtml(line.id)}">
+          ${receiptEvidence?.thumbnailUrl || receiptEvidence?.previewUrl ? `
+            <button type="button" class="video-receipt-evidence-thumb" data-video-receipt-evidence-line="${escapeHtml(line.id)}" title="Open video receipt screenshot">
+              <img src="${escapeHtml(receiptEvidence.thumbnailUrl || receiptEvidence.previewUrl)}" alt="${escapeHtml(receiptEvidence.label || "Video receipt screenshot")}" />
+              <span>${escapeHtml(receiptEvidence.auditText || "Video receipt screenshot")}</span>
+            </button>
+          ` : ""}
+          </div>
         </div>
       </article>
     `;
@@ -4395,7 +5049,64 @@ function renderWorkerNoInventoryList() {
       setWorkerNoInventoryLineSelection(lineId, !state.workerNoInventoryLineIds.has(lineId));
     });
   });
+  list.querySelectorAll(".no-inventory-video-receipt").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const card = event.currentTarget.closest("[data-no-inventory-card]");
+      const line = state.workerNoInventoryCandidates.find((entry) => entry.id === card?.dataset.noInventoryCard);
+      openVideoReceiptLink(event, getOrderVideoReceiptLink(line || {}));
+    });
+  });
+  list.querySelectorAll("[data-video-receipt-evidence-line]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const photo = state.videoReceiptEvidenceByLineId.get(button.dataset.videoReceiptEvidenceLine);
+      if (photo) openEvidencePhotoObjectViewer(photo, "confirm-worker-no-inventory");
+    });
+  });
+  hydrateNoInventoryVideoReceiptEvidenceThumbnails();
   updateWorkerNoInventorySelectionSummary();
+}
+
+async function hydrateNoInventoryVideoReceiptEvidenceThumbnails() {
+  const containers = [...document.querySelectorAll("[data-no-inventory-video-evidence]")];
+  await ensureNoInventoryVideoReceiptTasksLoaded().catch((error) => {
+    console.warn("Could not load all no-inventory video receipt task photos:", error);
+  });
+  await Promise.all(containers.map(async (container) => {
+    const line = state.workerNoInventoryCandidates.find((entry) => entry.id === container.dataset.noInventoryVideoEvidence);
+    if (!line?.id) return;
+    const photos = getVideoReceiptEvidencePhotosForLine(line);
+    if (!photos.length) {
+      container.innerHTML = "";
+      return;
+    }
+    const hydrated = await Promise.all(photos.map((photo) => ensureEvidencePhotoPreviewUrls(photo).catch(() => photo)));
+    container.innerHTML = hydrated.map((photo, index) => {
+      const actor = photo.signed_by_email || getVideoReceiptAuditActor();
+      const capturedAt = photo.created_at || photo.metadata?.capturedAt || "";
+      const auditText = photo.auditText || `Captured by ${actor}${capturedAt ? ` on ${formatDate(capturedAt)}` : ""}`;
+      return `
+        <button type="button" class="video-receipt-evidence-thumb" data-no-inventory-video-photo="${index}" title="Open video receipt screenshot">
+          ${photo.thumbnailUrl || photo.previewUrl ? `<img src="${escapeHtml(photo.thumbnailUrl || photo.previewUrl)}" alt="${escapeHtml(photo.label || "Video receipt screenshot")}" />` : ""}
+          <span>${escapeHtml(auditText)}</span>
+        </button>
+      `;
+    }).join("");
+    container.querySelectorAll("[data-no-inventory-video-photo]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const photo = hydrated[Number(button.dataset.noInventoryVideoPhoto || 0)];
+        if (!photo?.previewUrl) return;
+        openEvidencePhotoObjectViewer({
+          ...photo,
+          auditText: photo.auditText || `Captured by ${photo.signed_by_email || getVideoReceiptAuditActor()}${photo.created_at ? ` on ${formatDate(photo.created_at)}` : ""}`,
+        }, "confirm-worker-no-inventory");
+      });
+    });
+  }));
 }
 
 async function openWorkerNoInventoryModal(options = {}) {
@@ -4418,7 +5129,11 @@ async function openWorkerNoInventoryModal(options = {}) {
 
   state.workerNoInventoryGps = null;
   state.workerNoInventoryCandidates = candidates;
-  state.workerNoInventoryLineIds = new Set(candidates.map((entry) => entry.id));
+  state.workerNoInventoryLineIds = state.ebayLaunchOrderNumbers.size
+    ? new Set(candidates
+      .filter((entry) => state.ebayLaunchOrderNumbers.has(String(entry.order?.order_number || "")))
+      .map((entry) => entry.id))
+    : new Set(candidates.map((entry) => entry.id));
   state.noInventoryEvidencePhotos = [];
   state.noInventoryEvidencePhotoUploadKeys.clear();
   $("worker-no-inventory-note").value = "";
@@ -5162,6 +5877,18 @@ function postEbayReportTransferStatus(payload = {}) {
   }, window.location.origin);
 }
 
+function setVideoReceiptPhotoTransferStatus(message = "", type = "info") {
+  const text = message || "Waiting for a video receipt photo.";
+  setStatus(text, type);
+}
+
+function postVideoReceiptPhotoTransferStatus(payload = {}) {
+  window.postMessage({
+    type: "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER_STATUS",
+    payload,
+  }, window.location.origin);
+}
+
 function postEbayPendingQueueChanged(payload = {}) {
   const orderNumbers = [...new Set((payload.orderNumbers || [])
     .map(normalizeEbayOrderNumber)
@@ -5549,6 +6276,207 @@ async function handleEbayAwaitingReportTransfer(payload) {
   }
 }
 
+function getVideoReceiptPhotoLineMatches(metadata = {}) {
+  const itemNumber = String(metadata.itemNumber || metadata.selectedItemId || "").trim();
+  const transactionId = String(metadata.transactionId || "").trim();
+  const orderNumber = normalizeEbayOrderNumber(metadata.orderNumber || metadata.orderId || "");
+  if (!itemNumber) return [];
+
+  return state.orders.filter((line) => {
+    const order = getOrderFromLine(line);
+    if (String(line.item_number || "").trim() !== itemNumber) return false;
+    if (transactionId && String(line.transaction_id || "").trim() !== transactionId) return false;
+    if (orderNumber && normalizeEbayOrderNumber(order.order_number) !== orderNumber) return false;
+    return true;
+  });
+}
+
+async function findVideoReceiptPhotoLine(metadata = {}) {
+  let matches = getVideoReceiptPhotoLineMatches(metadata);
+  if (!matches.length) {
+    await loadOrders();
+    matches = getVideoReceiptPhotoLineMatches(metadata);
+  }
+  if (!matches.length) return null;
+  const openMatch = matches.find(isOpenOrderLine);
+  return openMatch || matches[0];
+}
+
+function getVideoReceiptScreenshotBlob(screenshot = {}) {
+  if (screenshot.base64) return base64ToBlob(screenshot.base64, screenshot.mimeType || "image/png");
+  const dataUrl = String(screenshot.dataUrl || "");
+  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/);
+  if (!match) throw new Error("The extension did not send a readable video receipt screenshot.");
+  return base64ToBlob(match[2], match[1] || screenshot.mimeType || "image/png");
+}
+
+function getVideoReceiptAuditActor() {
+  return state.user?.email || state.employee?.display_name || "logged-in account";
+}
+
+async function addVideoReceiptPhotoToNoInventoryEvidence(line = {}, savedPhoto = {}, metadata = {}, screenshot = {}) {
+  if (!savedPhoto.bucket || !savedPhoto.path) return null;
+  const capturedAt = screenshot.capturedAt || metadata.capturedAt || savedPhoto.created_at || new Date().toISOString();
+  const actor = savedPhoto.signed_by_email || getVideoReceiptAuditActor();
+  const [previewUrl, thumbnailUrl] = await Promise.all([
+    createNoInventorySignedImageUrl(savedPhoto.bucket, savedPhoto.path),
+    createNoInventorySignedImageUrl(savedPhoto.bucket, savedPhoto.path, { transform: NO_INVENTORY_THUMBNAIL_TRANSFORM }),
+  ]);
+  if (!previewUrl) return null;
+
+  const photo = {
+    ...savedPhoto,
+    id: savedPhoto.id || `${savedPhoto.bucket}:${savedPhoto.path}`,
+    previewUrl,
+    thumbnailUrl: thumbnailUrl || previewUrl,
+    label: savedPhoto.label || `Video receipt - ${line.item_number || metadata.itemNumber || "item"}`,
+    signed_by_email: actor,
+    auditText: `Captured by ${actor} on ${formatDate(capturedAt)}`,
+    videoReceiptUrl: metadata.videoReceiptUrl || metadata.pageUrl || "",
+    created_at: capturedAt,
+  };
+  if (line.id) state.videoReceiptEvidenceByLineId.set(line.id, photo);
+  const key = getNoInventoryEvidencePhotoKey(photo);
+  const existingIndex = state.noInventoryEvidencePhotos.findIndex((entry) => getNoInventoryEvidencePhotoKey(entry) === key);
+  if (existingIndex >= 0) state.noInventoryEvidencePhotos[existingIndex] = photo;
+  else state.noInventoryEvidencePhotos.unshift(photo);
+  state.noInventoryEvidencePhotoUploadKeys.add(key);
+  renderWorkerNoInventoryList();
+  renderNoInventoryEvidencePhotos();
+  setNoInventoryPhotoStatus(`Video receipt screenshot added for item ${line.item_number || metadata.itemNumber || "item"}.`, "success");
+  return photo;
+}
+
+async function showVideoReceiptPhotoInNoInventoryModal(line = {}, savedPhoto = {}, metadata = {}, screenshot = {}) {
+  const modalHasLine = () => state.workerNoInventoryCandidates.some((entry) => entry.id === line.id);
+  if (!isWorkerNoInventoryModalOpen() || !modalHasLine()) {
+    if (state.selectedLine?.id !== line.id) selectOrderLine(line.id);
+    await openWorkerNoInventoryModal();
+  }
+
+  if (!isWorkerNoInventoryModalOpen() || !modalHasLine()) return;
+  state.workerNoInventoryLineIds.add(line.id);
+  renderWorkerNoInventoryList();
+  await addVideoReceiptPhotoToNoInventoryEvidence(line, savedPhoto, metadata, screenshot);
+}
+
+async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
+  const metadata = payload.metadata || {};
+  const screenshot = payload.screenshot || {};
+  const line = await findVideoReceiptPhotoLine(metadata);
+  if (!line?.id || !line.order_id) {
+    const itemNumber = metadata.itemNumber || metadata.selectedItemId || "that item";
+    throw new Error(`Could not find pending eBay item ${itemNumber} in OG. Import the latest pending orders report, then try the capture again.`);
+  }
+
+  const order = getOrderFromLine(line);
+  const blob = getVideoReceiptScreenshotBlob(screenshot);
+  const dateFolder = new Date().toISOString().slice(0, 10);
+  const orderSegment = safeStorageSegment(order.order_number || line.order_id, "order");
+  const itemSegment = safeStorageSegment(metadata.itemNumber || line.item_number || line.id, "item");
+  const destinationPath = [
+    "video-receipts",
+    dateFolder,
+    orderSegment,
+    `${Date.now()}-${crypto.randomUUID()}-${itemSegment}.png`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(NO_INVENTORY_EVIDENCE_BUCKET)
+    .upload(destinationPath, blob, {
+      contentType: blob.type || screenshot.mimeType || "image/png",
+      upsert: false,
+    });
+  if (uploadError) throw new Error(uploadError.message || "Could not save the video receipt screenshot.");
+
+  const savedPhoto = {
+    bucket: NO_INVENTORY_EVIDENCE_BUCKET,
+    path: destinationPath,
+    source_bucket: null,
+    source_path: metadata.videoReceiptUrl || metadata.pageUrl || null,
+    capture_job_id: null,
+    sort_order: 0,
+    label: `Video receipt - ${line.item_number || "item"}`,
+    mime_type: blob.type || screenshot.mimeType || "image/png",
+    size_bytes: blob.size || 0,
+    created_at: new Date().toISOString(),
+    signed_by_email: getVideoReceiptAuditActor(),
+    metadata: {
+      videoReceiptUrl: metadata.videoReceiptUrl || metadata.pageUrl || "",
+      eventId: metadata.eventId || "",
+      selectedItemId: metadata.selectedItemId || metadata.itemNumber || "",
+      capturedAt: screenshot.capturedAt || metadata.capturedAt || new Date().toISOString(),
+      videoRect: screenshot.videoRect || null,
+    },
+  };
+
+  const question = [
+    `Video receipt screenshot captured for eBay item ${line.item_number || metadata.itemNumber || "item"}.`,
+    metadata.videoReceiptUrl || metadata.pageUrl ? `Receipt: ${metadata.videoReceiptUrl || metadata.pageUrl}` : "",
+  ].filter(Boolean).join("\n");
+
+  const { error: taskError } = await supabase.rpc("create_ebay_order_coordination_task", {
+    _order_id: line.order_id,
+    _order_line_ids: [line.id],
+    _assigned_to_user_id: null,
+    _priority: "normal",
+    _question: question,
+    _due_at: order.ship_by_date || null,
+    _photo_attachments: [savedPhoto],
+    _signed_by_email: state.user?.email || state.employee?.display_name || "",
+  });
+  if (taskError) throw new Error(taskError.message || "Could not attach the video receipt photo to the order task.");
+
+  if (state.selectedLine?.id === line.id || state.selectedLine?.order_id === line.order_id) {
+    await loadSelectedOrderTasks();
+  }
+  await showVideoReceiptPhotoInNoInventoryModal(line, savedPhoto, metadata, screenshot).catch((error) => {
+    console.warn("Could not show video receipt photo in no-inventory modal:", error);
+  });
+
+  return {
+    lineId: line.id,
+    orderId: line.order_id,
+    orderNumber: order.order_number || "",
+    itemNumber: line.item_number || metadata.itemNumber || "",
+    storagePath: destinationPath,
+    photo: savedPhoto,
+  };
+}
+
+async function handleVideoReceiptPhotoTransfer(payload) {
+  const transferId = payload?.transferId || "";
+  if (transferId && state.handledVideoReceiptPhotoTransferIds.has(transferId)) return;
+  if (transferId) state.handledVideoReceiptPhotoTransferIds.add(transferId);
+  setVideoReceiptPhotoTransferStatus("Saving video receipt photo to OG...");
+  postVideoReceiptPhotoTransferStatus({
+    transferId,
+    phase: "started",
+    message: "Pending Orders accepted the video receipt photo.",
+  });
+
+  try {
+    const attached = await attachVideoReceiptPhotoToPendingLine(payload);
+    const message = `Video receipt photo saved for item ${attached.itemNumber || "item"}.`;
+    setVideoReceiptPhotoTransferStatus(message, "success");
+    postVideoReceiptPhotoTransferStatus({
+      transferId,
+      ok: true,
+      message,
+      ...attached,
+    });
+  } catch (error) {
+    console.error("Video receipt photo transfer failed:", error);
+    const message = error.message || "Could not save the video receipt photo.";
+    setVideoReceiptPhotoTransferStatus(message, "error");
+    postVideoReceiptPhotoTransferStatus({
+      transferId,
+      ok: false,
+      error: message,
+    });
+  }
+}
+
 function getPendingLabelReceiverState() {
   const selectedOrderNumber = normalizeEbayOrderNumber(state.selectedLine?.order?.order_number);
   return {
@@ -5674,6 +6602,10 @@ function setupEbayLabelReceiver() {
     }
     if (event.data?.type === "OG_EBAY_AWAITING_REPORT_TRANSFER") {
       handleEbayAwaitingReportTransfer(event.data.payload);
+      return;
+    }
+    if (event.data?.type === "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER") {
+      handleVideoReceiptPhotoTransfer(event.data.payload);
     }
   });
 }
@@ -5878,6 +6810,13 @@ function setupListeners() {
   });
   $("close-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
   $("dismiss-no-inventory-photo-viewer")?.addEventListener("click", closeNoInventoryEvidencePhotoViewer);
+  $("zoom-in-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(0.25));
+  $("zoom-out-no-inventory-photo")?.addEventListener("click", () => adjustEvidencePhotoViewerZoom(-0.25));
+  $("reset-zoom-no-inventory-photo")?.addEventListener("click", resetEvidencePhotoViewerTransform);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointerdown", startEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointermove", moveEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointerup", endEvidencePhotoPan);
+  $("no-inventory-photo-viewer-image")?.addEventListener("pointercancel", endEvidencePhotoPan);
 
   $("admin-order-closeout-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "admin-order-closeout-modal") closeAdminOrderCloseoutModal();

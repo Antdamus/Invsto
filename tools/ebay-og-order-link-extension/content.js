@@ -18,6 +18,7 @@
   const RETURN_MESSAGE_SEND_ID = "og-ebay-send-return-message";
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
+  const VIDEO_RECEIPT_CAPTURE_ID = "og-ebay-capture-video-receipt-frame";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
@@ -25,6 +26,7 @@
   const CLEAR_SELECTED_SHORTCUT_ID = "og-ebay-clear-selected-shortcut";
   const URGENT_COVERAGE_WARNING_ID = "og-ebay-urgent-coverage-warning";
   const BOX_REMINDER_ID = "og-ebay-box-reminder";
+  const BULK_LABEL_DEBUG_VERSION = "bulk-selection-v4";
   const LABEL_EVENT_TYPE = "OG_EBAY_LABEL_CAPTURED";
   const LABEL_PROBE_READY_EVENT_TYPE = "OG_EBAY_LABEL_PROBE_READY";
   const REPORT_EVENT_TYPE = "OG_EBAY_AWAITING_REPORT_CAPTURED";
@@ -56,6 +58,15 @@
   let ogReturnMessageLastLogKey = "";
   let ogReturnMessageLastLogAt = 0;
   const ogReturnDetailCaptureCache = new Map();
+  const ogBulkLabelManualSelection = new Set();
+  let ogBulkLabelManualSelectionTouched = false;
+  let ogBulkLabelObserverStarted = false;
+  let ogBulkLabelRefreshTimer = null;
+  let ogBulkLabelLastInteractedOrderNumber = "";
+  let ogBulkLabelLastIntentAt = 0;
+  let ogBulkLabelLastIntentOrderNumber = "";
+  let ogBulkLabelLastDebugSignature = "";
+  const ogBulkLabelHandledRows = new WeakSet();
 
   function normalizeOrderNumber(value) {
     const match = String(value || "").match(ORDER_NUMBER_PATTERN);
@@ -80,6 +91,18 @@
   }
 
   function getOrderLinks() {
+    const bulkRows = getBulkLabelOrderRows();
+    if (bulkRows.length) {
+      return bulkRows
+        .map((row) => {
+          const orderNumber = getBulkLabelRowOrderNumber(row);
+          const link = row.querySelector('a[data-testid^="unique-order-id-link-"], a[href*="orderId="], a[href*="orderid="], a[href*="/FetchOrderDetails"]')
+            || row.querySelector("a[href], [role='link']");
+          return { link, orderNumber };
+        })
+        .filter((entry) => entry.link && entry.orderNumber);
+    }
+
     const awaitingRows = typeof getEbayAwaitingShipmentRows === "function" ? getEbayAwaitingShipmentRows() : [];
     if (awaitingRows.length) {
       return awaitingRows
@@ -118,6 +141,278 @@
 
   function uniqueOrderNumbers() {
     return [...new Set(getOrderLinks().map((entry) => entry.orderNumber))];
+  }
+
+  function isBulkLabelPageContext() {
+    const text = cleanText([
+      document.title,
+      document.body?.innerText,
+      document.body?.textContent,
+      window.location.href,
+    ].filter(Boolean).join(" "));
+    return Boolean(
+      document.querySelector("#bulk-labels-app, .bulk-labels, [data-testid='order-filters-card'], [data-testid='bulk-payment-button-review-purchase']")
+      || /\/ship\/bulk\b/i.test(window.location.pathname)
+      || /\bGet labels in bulk\b/i.test(text)
+      || /\b(?:Edit|Remove)\s*\(\d+\)/i.test(text)
+    );
+  }
+
+  function getBulkLabelOrderRows() {
+    if (!isBulkLabelPageContext()) return [];
+
+    const rows = [
+      ...document.querySelectorAll(".orders-list__item"),
+      ...[...document.querySelectorAll('a[data-testid^="unique-order-id-link-"], a[href*="/vod/FetchOrderDetails"], a[href*="orderId="], a[href*="orderid="]')]
+        .map((link) =>
+          link.closest(".orders-list__item")
+          || link.closest("[class*='orders-list__item']")
+          || link.closest("[role='listitem']")
+          || link.closest("tr")
+          || link.parentElement?.parentElement?.parentElement?.parentElement)
+        .filter(Boolean),
+    ];
+
+    return [...new Set(rows)]
+      .filter((row) =>
+        normalizeOrderNumber(row.textContent || row.getAttribute?.("aria-label") || "")
+        || row.querySelector?.('a[href*="/vod/FetchOrderDetails"], a[href*="orderId="], a[href*="orderid="]'));
+  }
+
+  function getBulkLabelRowCheckbox(row) {
+    return row?.querySelector?.('.orders-list__item__for-edit input[type="checkbox"]')
+      || row?.querySelector?.('input[aria-label*="select this row" i][type="checkbox"]')
+      || row?.querySelector?.('input[type="checkbox"]')
+      || null;
+  }
+
+  function isBulkLabelRowChecked(row) {
+    const checkbox = getBulkLabelRowCheckbox(row);
+    if (!checkbox) return false;
+    const wrapper = checkbox.closest(".checkbox, .orders-list__item__for-edit");
+    return Boolean(
+      checkbox.checked
+      || checkbox.matches?.(":checked")
+      || checkbox.getAttribute("aria-checked") === "true"
+      || wrapper?.getAttribute?.("aria-checked") === "true"
+      || wrapper?.classList.contains("checkbox--checked")
+    );
+  }
+
+  function getBulkLabelRowOrderNumber(row) {
+    const link = row?.querySelector?.('a[data-testid^="unique-order-id-link-"], a[href*="orderId="], a[href*="orderid="], a[href*="/FetchOrderDetails"]');
+    return normalizeOrderNumber([
+      link?.textContent,
+      link?.getAttribute?.("href"),
+      link?.getAttribute?.("aria-label"),
+      row?.textContent,
+    ].filter(Boolean).join(" "));
+  }
+
+  function getSelectedBulkLabelOrderNumbers() {
+    return [...new Set(getBulkLabelOrderRows()
+      .filter(isBulkLabelRowChecked)
+      .map(getBulkLabelRowOrderNumber)
+      .filter(Boolean))];
+  }
+
+  function reconcileBulkLabelManualSelection(allOrderNumbers = []) {
+    const visible = new Set(allOrderNumbers.length
+      ? allOrderNumbers
+      : getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean));
+    [...ogBulkLabelManualSelection].forEach((orderNumber) => {
+      if (!visible.has(orderNumber)) ogBulkLabelManualSelection.delete(orderNumber);
+    });
+  }
+
+  function getBulkLabelManualSelectedOrderNumbers(allOrderNumbers = []) {
+    reconcileBulkLabelManualSelection(allOrderNumbers);
+    const visible = new Set(allOrderNumbers.length
+      ? allOrderNumbers
+      : getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean));
+    return [...ogBulkLabelManualSelection].filter((orderNumber) => visible.has(orderNumber));
+  }
+
+  function getActiveBulkLabelOrderNumber(allOrderNumbers = []) {
+    const activeRow = document.activeElement?.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(activeRow);
+    if (!orderNumber) return "";
+    return !allOrderNumbers.length || allOrderNumbers.includes(orderNumber) ? orderNumber : "";
+  }
+
+  function recordBulkLabelCheckboxIntent(event) {
+    const row = event.target?.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(row);
+    if (!orderNumber) return;
+    const now = Date.now();
+    if (ogBulkLabelLastIntentOrderNumber === orderNumber && now - ogBulkLabelLastIntentAt < 220) return;
+    ogBulkLabelLastIntentOrderNumber = orderNumber;
+    ogBulkLabelLastIntentAt = now;
+    ogBulkLabelLastInteractedOrderNumber = orderNumber;
+
+    const beforeCount = getBulkLabelSelectionCountFromControls();
+    window.setTimeout(() => {
+      const afterCount = getBulkLabelSelectionCountFromControls();
+      ogBulkLabelManualSelectionTouched = true;
+      if (afterCount === 0) {
+        ogBulkLabelManualSelection.clear();
+      } else if (afterCount === 1 && (beforeCount !== afterCount || !ogBulkLabelManualSelection.has(orderNumber))) {
+        ogBulkLabelManualSelection.clear();
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (afterCount > beforeCount) {
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (afterCount < beforeCount) {
+        ogBulkLabelManualSelection.delete(orderNumber);
+      } else if (isBulkLabelRowChecked(row)) {
+        ogBulkLabelManualSelection.add(orderNumber);
+      } else if (ogBulkLabelManualSelection.has(orderNumber)) {
+        ogBulkLabelManualSelection.delete(orderNumber);
+      } else {
+        ogBulkLabelManualSelection.add(orderNumber);
+      }
+      reconcileBulkLabelManualSelection();
+      if (afterCount > 0 && ogBulkLabelManualSelection.size > afterCount) {
+        const keep = new Set(ogBulkLabelLastInteractedOrderNumber ? [ogBulkLabelLastInteractedOrderNumber] : []);
+        [...ogBulkLabelManualSelection].forEach((selectedOrderNumber) => {
+          if (ogBulkLabelManualSelection.size <= afterCount) return;
+          if (!keep.has(selectedOrderNumber)) ogBulkLabelManualSelection.delete(selectedOrderNumber);
+        });
+      }
+      scheduleInject();
+      window.setTimeout(scheduleInject, 200);
+    }, 120);
+  }
+
+  function attachBulkLabelRowSelectionHandlers() {
+    getBulkLabelOrderRows().forEach((row) => {
+      if (ogBulkLabelHandledRows.has(row)) return;
+      ogBulkLabelHandledRows.add(row);
+      const record = (event) => recordBulkLabelCheckboxIntent(event);
+      row.querySelectorAll('.orders-list__item__for-edit, .orders-list__item__for-edit input[type="checkbox"], .checkbox').forEach((element) => {
+        element.addEventListener("pointerdown", record, true);
+        element.addEventListener("mousedown", record, true);
+        element.addEventListener("click", record, true);
+        element.addEventListener("keydown", (event) => {
+          if (event.key === " " || event.key === "Enter") record(event);
+        }, true);
+      });
+    });
+  }
+
+  function getBulkLabelSelectionCountFromControls() {
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const controls = [...root.querySelectorAll?.("button, [role='button']") || []];
+    const directCount = controls
+      .map((element) => cleanText(`${element.innerText || element.textContent || ""} ${element.getAttribute?.("aria-label") || ""}`))
+      .map((text) => text.match(/^(?:Edit|Remove)\s*\((\d+)\)/i))
+      .find(Boolean);
+    if (directCount) {
+      const count = Number(directCount[1] || 0);
+      if (Number.isFinite(count) && count > 0) return count;
+    }
+    const controlText = controls
+      .map((element) => cleanText(`${element.innerText || element.textContent || ""} ${element.getAttribute?.("aria-label") || ""}`))
+      .join(" ");
+    const text = [
+      controlText,
+      root?.innerText,
+      root?.textContent,
+      document.documentElement?.innerHTML,
+    ].map(cleanText).join(" ");
+    const match = text.match(/\b(?:Edit|Remove)\s*\((\d+)\)/i);
+    const count = Number(match?.[1] || 0);
+    return Number.isFinite(count) && count > 0 ? count : 0;
+  }
+
+  function getBulkLabelTotalCountFromControls() {
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const text = [
+      root?.innerText,
+      root?.textContent,
+      document.documentElement?.innerHTML,
+    ].map(cleanText).join(" ");
+    const badgeMatch = text.match(/\bCombine orders per buyer\s*(\d+)\b/i);
+    const badgeCount = Number(badgeMatch?.[1] || 0);
+    const rowCount = getBulkLabelOrderRows().length;
+    return Math.max(Number.isFinite(badgeCount) ? badgeCount : 0, rowCount);
+  }
+
+  function getBulkLabelSelectionMeta() {
+    const rows = getBulkLabelOrderRows();
+    if (!rows.length) return null;
+    const selectedOrderNumbers = getSelectedBulkLabelOrderNumbers();
+    const allOrderNumbers = [...new Set(rows.map(getBulkLabelRowOrderNumber).filter(Boolean))];
+    const controlSelectedCount = getBulkLabelSelectionCountFromControls();
+    const manualSelectedOrderNumbers = getBulkLabelManualSelectedOrderNumbers(allOrderNumbers);
+    const activeOrderNumber = getActiveBulkLabelOrderNumber(allOrderNumbers);
+    const detectedSelectedOrderNumbers = (() => {
+      if (controlSelectedCount > 0 && selectedOrderNumbers.length === controlSelectedCount) return selectedOrderNumbers;
+      if (controlSelectedCount > 0 && manualSelectedOrderNumbers.length === controlSelectedCount) return manualSelectedOrderNumbers;
+      if (controlSelectedCount === 1 && activeOrderNumber) return [activeOrderNumber];
+      if (controlSelectedCount === 1 && ogBulkLabelLastInteractedOrderNumber && allOrderNumbers.includes(ogBulkLabelLastInteractedOrderNumber)) {
+        return [ogBulkLabelLastInteractedOrderNumber];
+      }
+      if (controlSelectedCount > 0) return [];
+      return ogBulkLabelManualSelectionTouched && manualSelectedOrderNumbers.length
+        ? manualSelectedOrderNumbers
+        : selectedOrderNumbers;
+    })();
+    const hasExplicitSelection = controlSelectedCount > 0 || detectedSelectedOrderNumbers.length > 0;
+    const selectedCount = hasExplicitSelection
+      ? (controlSelectedCount || detectedSelectedOrderNumbers.length)
+      : allOrderNumbers.length;
+    const totalCount = Math.max(getBulkLabelTotalCountFromControls(), allOrderNumbers.length, selectedCount);
+    const effectiveSelectedOrderNumbers = hasExplicitSelection
+      ? (detectedSelectedOrderNumbers.length ? detectedSelectedOrderNumbers.slice(0, selectedCount) : allOrderNumbers.slice(0, selectedCount))
+      : allOrderNumbers;
+    return {
+      source: "ebay-bulk-label-selection",
+      debugVersion: BULK_LABEL_DEBUG_VERSION,
+      selectedCount,
+      totalCount,
+      selectedOrderNumbers: effectiveSelectedOrderNumbers,
+      checkedOrderNumbers: selectedOrderNumbers,
+      trackedOrderNumbers: manualSelectedOrderNumbers,
+      allOrderNumbers,
+      toolbarSelectedCount: controlSelectedCount,
+      lastInteractedOrderNumber: ogBulkLabelLastInteractedOrderNumber,
+      activeOrderNumber,
+    };
+  }
+
+  function getEffectiveBulkLabelOrderNumbers() {
+    const meta = getBulkLabelSelectionMeta();
+    if (meta) {
+      if (meta.selectedOrderNumbers.length) return meta.selectedOrderNumbers;
+      return meta.selectedCount > 0 && meta.selectedCount < meta.totalCount
+        ? []
+        : [...new Set(getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean))];
+    }
+    const selected = getSelectedBulkLabelOrderNumbers();
+    return selected.length ? selected : [...new Set(getBulkLabelOrderRows().map(getBulkLabelRowOrderNumber).filter(Boolean))];
+  }
+
+  function getEffectiveFloatingOrderNumbers() {
+    return isBulkLabelPageContext() ? getEffectiveBulkLabelOrderNumbers() : uniqueOrderNumbers();
+  }
+
+  function getBulkLabelDebugSnapshot() {
+    const rows = getBulkLabelOrderRows();
+    const meta = getBulkLabelSelectionMeta();
+    return {
+      version: BULK_LABEL_DEBUG_VERSION,
+      isBulkLabelPage: Boolean(rows.length),
+      toolbarSelectedCount: getBulkLabelSelectionCountFromControls(),
+      visibleOrderNumbers: rows.map(getBulkLabelRowOrderNumber).filter(Boolean),
+      checkboxSelectedOrderNumbers: getSelectedBulkLabelOrderNumbers(),
+      trackedOrderNumbers: getBulkLabelManualSelectedOrderNumbers(),
+      activeOrderNumber: getActiveBulkLabelOrderNumber(),
+      effectiveOrderNumbers: getEffectiveBulkLabelOrderNumbers(),
+      lastInteractedOrderNumber: ogBulkLabelLastInteractedOrderNumber,
+      buttonText: document.getElementById(FLOATING_ID)?.textContent || "",
+      buttonDataset: { ...(document.getElementById(FLOATING_ID)?.dataset || {}) },
+      meta,
+    };
   }
 
   function cleanText(value) {
@@ -3146,7 +3441,7 @@
     return normalized;
   }
 
-  function buildOgUrl(appUrl, orderNumbers, orderSnapshot = null) {
+  function buildOgUrl(appUrl, orderNumbers, orderSnapshot = null, selectionMeta = null) {
     const url = new URL(appUrl);
     const unique = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     url.searchParams.set("source", "ebay");
@@ -3167,10 +3462,22 @@
       url.searchParams.delete("ebayOrderPage");
       url.searchParams.delete("ebayOrderSnapshot");
     }
+    if (selectionMeta?.selectedCount || selectionMeta?.totalCount) {
+      url.searchParams.set("ebaySelectedCount", String(selectionMeta.selectedCount || unique.length));
+      url.searchParams.set("ebayTotalCount", String(selectionMeta.totalCount || unique.length));
+      const allOrderNumbers = Array.isArray(selectionMeta.allOrderNumbers)
+        ? [...new Set(selectionMeta.allOrderNumbers.map(normalizeOrderNumber).filter(Boolean))]
+        : [];
+      if (allOrderNumbers.length) url.searchParams.set("ebayAllOrderIds", allOrderNumbers.join(","));
+    } else {
+      url.searchParams.delete("ebaySelectedCount");
+      url.searchParams.delete("ebayTotalCount");
+      url.searchParams.delete("ebayAllOrderIds");
+    }
     return url.toString();
   }
 
-  async function openInOg(orderNumbers, orderSnapshot = null) {
+  async function openInOg(orderNumbers, orderSnapshot = null, selectionMeta = null) {
     const clean = [...new Set(orderNumbers.map(normalizeOrderNumber).filter(Boolean))];
     if (!clean.length) return;
 
@@ -3179,7 +3486,7 @@
       window.alert("OG Pending Orders URL was not set. Click the extension icon to set it.");
       return;
     }
-    window.open(buildOgUrl(appUrl, clean, orderSnapshot), "_blank", "noopener,noreferrer");
+    window.open(buildOgUrl(appUrl, clean, orderSnapshot, selectionMeta), "_blank", "noopener,noreferrer");
   }
 
   function decodeHtmlEntities(value) {
@@ -3201,18 +3508,53 @@
     }
   }
 
-  function findVideoReceiptUrlInText(text, baseUrl = window.location.href) {
-    const body = String(text || "");
-    const patterns = [
-      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/i,
-      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/i,
-    ];
-    for (const pattern of patterns) {
-      const match = body.match(pattern);
-      const url = normalizeEbayNavigationUrl(match?.[0] || "", baseUrl);
-      if (url && /\/ebaylive\/events\//i.test(url)) return url;
-    }
+  function getCurrentEbayItemNumber() {
+    const pathMatch = window.location.pathname.match(/\/itm\/(\d+)/i);
+    if (pathMatch?.[1]) return pathMatch[1];
+    const canonical = document.querySelector('link[rel="canonical"][href*="/itm/"]')?.getAttribute("href") || "";
+    const canonicalMatch = canonical.match(/\/itm\/(\d+)/i);
+    return canonicalMatch?.[1] || "";
+  }
+
+  function normalizeVideoReceiptUrlForItem(value, itemNumber = "", baseUrl = window.location.href) {
+    const url = normalizeEbayNavigationUrl(value, baseUrl);
+    if (!url || !/\/ebaylive\/events\//i.test(url)) return "";
+    if (!itemNumber) return url;
+    try {
+      const parsed = new URL(url);
+      const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+      const itemIds = String(parsed.searchParams.get("itemIds") || "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (selectedItemId === itemNumber) return parsed.toString();
+      if (itemIds.includes(itemNumber)) {
+        parsed.searchParams.set("selectedItemId", itemNumber);
+        if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+        return parsed.toString();
+      }
+    } catch (_) {}
     return "";
+  }
+
+  function findVideoReceiptUrlInText(text, baseUrl = window.location.href, options = {}) {
+    const body = String(text || "");
+    const itemNumber = String(options.itemNumber || "").trim();
+    const patterns = [
+      /https?:\/\/(?:www\.)?ebay\.com\/ebaylive\/events\/[^"'<>\s\\]+/gi,
+      /https?:\\\/\\\/(?:www\.)?ebay\.com\\\/ebaylive\\\/events\\\/[^"'<>\s]+/gi,
+    ];
+    const fallbackUrls = [];
+    for (const pattern of patterns) {
+      for (const match of body.matchAll(pattern)) {
+        const rawUrl = match?.[0] || "";
+        const matchingUrl = normalizeVideoReceiptUrlForItem(rawUrl, itemNumber, baseUrl);
+        if (matchingUrl) return matchingUrl;
+        const fallbackUrl = normalizeVideoReceiptUrlForItem(rawUrl, "", baseUrl);
+        if (fallbackUrl) fallbackUrls.push(fallbackUrl);
+      }
+    }
+    return itemNumber ? "" : (fallbackUrls[0] || "");
   }
 
   function findOrderDetailsUrlInText(text, baseUrl = window.location.href) {
@@ -3313,7 +3655,7 @@
       const response = await fetch(orderDetailsUrl, { credentials: "include" });
       if (!response.ok) throw new Error(`Order details returned HTTP ${response.status}`);
       const html = await response.text();
-      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl, { itemNumber: getCurrentEbayItemNumber() });
       if (receiptUrl) {
         if (receiptWindow) receiptWindow.location.href = receiptUrl;
         else window.open(receiptUrl, "_blank", "noopener,noreferrer");
@@ -3459,7 +3801,7 @@
     if (orderDetailsUrl && !enriched.videoReceiptUrl) {
       try {
         const orderHtml = await fetchEbayHtml(orderDetailsUrl);
-        enriched.videoReceiptUrl = findVideoReceiptUrlInText(orderHtml, orderDetailsUrl);
+        enriched.videoReceiptUrl = findVideoReceiptUrlInText(orderHtml, orderDetailsUrl, { itemNumber: enriched.itemNumber || returnInfo.itemNumber });
         if (enriched.returnDetails) {
           enriched.returnDetails.videoReceiptUrl = enriched.videoReceiptUrl || "";
         }
@@ -3521,7 +3863,7 @@
     setVideoReceiptStatus(button, "Opening receipt...");
     try {
       const html = await fetchEbayHtml(orderDetailsUrl);
-      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl);
+      const receiptUrl = findVideoReceiptUrlInText(html, orderDetailsUrl, { itemNumber: getCurrentEbayItemNumber() });
       if (receiptUrl) {
         window.location.assign(receiptUrl);
         return true;
@@ -3568,7 +3910,7 @@
     try {
       for (const url of unique([returnInfo.itemUrl, returnInfo.detailsUrl]).filter(Boolean)) {
         const html = await fetchEbayHtml(url);
-        const directReceiptUrl = findVideoReceiptUrlInText(html, url);
+        const directReceiptUrl = findVideoReceiptUrlInText(html, url, { itemNumber: returnInfo.itemNumber });
         if (directReceiptUrl) {
           if (receiptWindow) receiptWindow.location.href = directReceiptUrl;
           else window.open(directReceiptUrl, "_blank", "noopener,noreferrer");
@@ -3582,7 +3924,7 @@
 
       if (orderDetailsUrl) {
         const detailsHtml = await fetchEbayHtml(orderDetailsUrl);
-        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl);
+        const receiptUrl = findVideoReceiptUrlInText(detailsHtml, orderDetailsUrl, { itemNumber: returnInfo.itemNumber });
         if (receiptUrl) {
           if (receiptWindow) receiptWindow.location.href = receiptUrl;
           else window.open(receiptUrl, "_blank", "noopener,noreferrer");
@@ -3875,6 +4217,11 @@
         box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
         font-size: 14px;
         padding: 12px 16px;
+      }
+
+      #${VIDEO_RECEIPT_CAPTURE_ID} {
+        right: 18px;
+        bottom: 128px;
       }
 
       #${RETURN_MESSAGE_SEND_ID} {
@@ -4506,23 +4853,148 @@
     if (inlineContainer && isElementVisible(inlineContainer)) {
       delete button.dataset.ogFloating;
       if (!inlineContainer.contains(button)) inlineContainer.appendChild(button);
+      if (!ogAutoVideoReceiptStarted && shouldAutoOpenVideoReceiptFromItemPage()) {
+        ogAutoVideoReceiptStarted = true;
+        openVideoReceiptFromDetails(button);
+      }
       return;
     }
 
     button.dataset.ogFloating = "true";
     if (!button.parentElement) document.body.appendChild(button);
+    if (!ogAutoVideoReceiptStarted && shouldAutoOpenVideoReceiptFromItemPage()) {
+      ogAutoVideoReceiptStarted = true;
+      openVideoReceiptFromDetails(button);
+    }
+  }
+
+  function isEbayLiveVideoReceiptPage() {
+    try {
+      const url = new URL(window.location.href);
+      return /\/ebaylive\/events\/[^/]+\/stream\/?$/i.test(url.pathname)
+        && (url.searchParams.get("playback") === "true" || Boolean(url.searchParams.get("selectedItemId")));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getVideoReceiptPageMetadata() {
+    const url = new URL(window.location.href);
+    const eventMatch = url.pathname.match(/\/ebaylive\/events\/([^/]+)\/stream\/?$/i);
+    const selectedItemId = String(url.searchParams.get("selectedItemId") || "").trim();
+    const itemIds = String(url.searchParams.get("itemIds") || "")
+      .split(",")
+      .map((itemId) => itemId.trim())
+      .filter(Boolean);
+    return {
+      eventId: eventMatch?.[1] || "",
+      selectedItemId,
+      itemNumber: selectedItemId || itemIds[0] || "",
+      itemIds,
+      videoReceiptUrl: window.location.href,
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+    };
+  }
+
+  function getVisibleVideoRect() {
+    const element = [...document.querySelectorAll("video, iframe")]
+      .filter(isElementVisible)
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        return (bRect.width * bRect.height) - (aRect.width * aRect.height);
+      })[0];
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      devicePixelRatio: window.devicePixelRatio || 1,
+    };
+  }
+
+  function setVideoReceiptCaptureStatus(button, message, tone = "") {
+    button.textContent = message || "Capture item photo";
+    if (tone) button.dataset.statusTone = tone;
+    else delete button.dataset.statusTone;
+  }
+
+  async function captureVideoReceiptFrame(button) {
+    const metadata = getVideoReceiptPageMetadata();
+    if (!metadata.itemNumber) {
+      setVideoReceiptCaptureStatus(button, "No item id", "error");
+      return;
+    }
+    button.disabled = true;
+    setVideoReceiptCaptureStatus(button, "Capturing...", "");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME",
+        payload: {
+          metadata,
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+          videoRect: getVisibleVideoRect(),
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG could not save the video receipt photo.");
+      setVideoReceiptCaptureStatus(button, "Capture image saved", "success");
+      window.setTimeout(() => setVideoReceiptCaptureStatus(button, "Capture item photo", ""), 3500);
+    } catch (error) {
+      console.warn("[OG eBay Receipt] Could not capture video receipt frame:", error);
+      setVideoReceiptCaptureStatus(button, "Capture failed", "error");
+      window.setTimeout(() => setVideoReceiptCaptureStatus(button, "Capture item photo", ""), 4500);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function injectVideoReceiptCaptureButton() {
+    let button = document.getElementById(VIDEO_RECEIPT_CAPTURE_ID);
+
+    if (!isEbayLiveVideoReceiptPage()) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.id = VIDEO_RECEIPT_CAPTURE_ID;
+      button.className = VIDEO_RECEIPT_BUTTON_CLASS;
+      button.dataset.ogFloating = "true";
+      button.textContent = "Capture item photo";
+      button.title = "Capture the visible eBay Live video frame and attach it to the matching OG pending item";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        captureVideoReceiptFrame(button);
+      });
+      document.body.appendChild(button);
+    }
   }
 
   function injectVideoReceiptShortcuts() {
     injectItemVideoReceiptShortcut();
     injectOrderDetailsVideoReceiptShortcut();
+    injectVideoReceiptCaptureButton();
   }
 
   function injectFloatingButton() {
-    const orderNumbers = uniqueOrderNumbers();
+    const orderNumbers = getEffectiveFloatingOrderNumbers();
+    const bulkSelectionMeta = getBulkLabelSelectionMeta();
+    const displayCount = bulkSelectionMeta?.selectedCount || orderNumbers.length;
     let button = document.getElementById(FLOATING_ID);
 
-    if (isAwaitingShipmentOrdersPage() || !orderNumbers.length) {
+    if (isAwaitingShipmentOrdersPage() || (!orderNumbers.length && !bulkSelectionMeta?.selectedCount)) {
       button?.remove();
       return;
     }
@@ -4531,12 +5003,40 @@
       button = document.createElement("button");
       button.type = "button";
       button.id = FLOATING_ID;
-      button.addEventListener("click", () => openInOg(uniqueOrderNumbers()));
+      button.addEventListener("click", () => openInOg(getEffectiveFloatingOrderNumbers(), null, getBulkLabelSelectionMeta()));
       document.body.appendChild(button);
     }
 
-    button.textContent = `Open ${orderNumbers.length} in OG`;
-    button.title = "Open all visible eBay label orders in OG Pending Orders";
+    button.textContent = `Open ${displayCount} in OG`;
+    button.dataset.ogBulkDebugVersion = BULK_LABEL_DEBUG_VERSION;
+    button.dataset.ogBulkSelectedCount = String(displayCount || 0);
+    button.dataset.ogBulkSelectedOrderIds = bulkSelectionMeta?.selectedOrderNumbers?.join(",") || orderNumbers.join(",");
+    button.dataset.ogBulkVisibleOrderIds = bulkSelectionMeta?.allOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkToolbarSelectedCount = String(bulkSelectionMeta?.toolbarSelectedCount || 0);
+    button.dataset.ogBulkCheckboxSelectedOrderIds = bulkSelectionMeta?.checkedOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkTrackedOrderIds = bulkSelectionMeta?.trackedOrderNumbers?.join(",") || "";
+    button.dataset.ogBulkLastInteractedOrderId = bulkSelectionMeta?.lastInteractedOrderNumber || "";
+    button.dataset.ogBulkActiveOrderId = bulkSelectionMeta?.activeOrderNumber || "";
+    button.disabled = Boolean(bulkSelectionMeta?.selectedCount && !orderNumbers.length);
+    const debugSignature = [
+      button.textContent,
+      button.dataset.ogBulkToolbarSelectedCount,
+      button.dataset.ogBulkSelectedOrderIds,
+      button.dataset.ogBulkCheckboxSelectedOrderIds,
+      button.dataset.ogBulkTrackedOrderIds,
+      button.dataset.ogBulkLastInteractedOrderId,
+      button.dataset.ogBulkActiveOrderId,
+    ].join("|");
+    if (debugSignature !== ogBulkLabelLastDebugSignature) {
+      ogBulkLabelLastDebugSignature = debugSignature;
+      console.info("[OG eBay] Orange button bulk-label state", getBulkLabelDebugSnapshot());
+    }
+    const selectedTitle = bulkSelectionMeta?.selectedOrderNumbers?.length
+      ? ` Selected: ${bulkSelectionMeta.selectedOrderNumbers.join(", ")}`
+      : "";
+    button.title = bulkSelectionMeta?.selectedCount && bulkSelectionMeta.selectedCount < bulkSelectionMeta.totalCount
+      ? `Open only the selected eBay bulk label rows in OG Pending Orders.${selectedTitle} [${BULK_LABEL_DEBUG_VERSION}; toolbar=${button.dataset.ogBulkToolbarSelectedCount}; checkbox=${button.dataset.ogBulkCheckboxSelectedOrderIds || "none"}; tracked=${button.dataset.ogBulkTrackedOrderIds || "none"}; last=${button.dataset.ogBulkLastInteractedOrderId || "none"}; active=${button.dataset.ogBulkActiveOrderId || "none"}]`
+      : `Open all visible eBay label orders in OG Pending Orders [${BULK_LABEL_DEBUG_VERSION}; visible=${button.dataset.ogBulkVisibleOrderIds || "none"}]`;
   }
 
   function injectSingleOrderButton() {
@@ -4852,7 +5352,14 @@
 
   function injectOgControls() {
     ensureStyles();
+    window.__ogEbayBulkDebug = getBulkLabelDebugSnapshot;
+    window.__ogEbayRefreshOrangeButton = () => {
+      injectFloatingButton();
+      return getBulkLabelDebugSnapshot();
+    };
     attachBuyerGroupSelectionHandlers();
+    startBulkLabelSelectionWatcher();
+    attachBulkLabelRowSelectionHandlers();
     syncLocallyClosedAwaitingRows();
     injectRowButtons();
     injectVideoReceiptShortcuts();
@@ -4878,6 +5385,50 @@
       injectOgControls();
     }, 250);
   }
+
+  function startBulkLabelSelectionWatcher() {
+    if (ogBulkLabelObserverStarted || !isBulkLabelPageContext()) return;
+    ogBulkLabelObserverStarted = true;
+    const root = document.querySelector("#bulk-labels-app, .bulk-labels") || document.body;
+    const observer = new MutationObserver(() => scheduleInject());
+    observer.observe(root, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributeFilter: ["checked", "aria-checked", "class", "disabled"],
+    });
+    ogBulkLabelRefreshTimer = window.setInterval(() => {
+      if (!isBulkLabelPageContext()) {
+        window.clearInterval(ogBulkLabelRefreshTimer);
+        ogBulkLabelRefreshTimer = null;
+        ogBulkLabelObserverStarted = false;
+        return;
+      }
+      scheduleInject();
+    }, 700);
+  }
+
+  document.addEventListener("change", (event) => {
+    if (!isBulkLabelPageContext() || !event.target?.matches?.("input[type='checkbox']")) return;
+    const row = event.target.closest?.(".orders-list__item, [class*='orders-list__item'], [role='listitem'], tr");
+    const orderNumber = getBulkLabelRowOrderNumber(row);
+    if (orderNumber) {
+      ogBulkLabelManualSelectionTouched = true;
+      if (event.target.checked || event.target.matches?.(":checked")) ogBulkLabelManualSelection.add(orderNumber);
+      else ogBulkLabelManualSelection.delete(orderNumber);
+    }
+    scheduleInject();
+  }, true);
+  document.addEventListener("input", (event) => {
+    if (!isBulkLabelPageContext() || !event.target?.matches?.("input[type='checkbox']")) return;
+    scheduleInject();
+  }, true);
+  document.addEventListener("click", (event) => {
+    if (!isBulkLabelPageContext() || !event.target?.closest?.(".checkbox, .orders-list__item__for-edit, [class*='orders-list__item'] input[type='checkbox']")) return;
+    recordBulkLabelCheckboxIntent(event);
+    window.setTimeout(scheduleInject, 50);
+  }, true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "OG_EBAY_CAPTURE_RETURN_DETAIL_PAGE") {
