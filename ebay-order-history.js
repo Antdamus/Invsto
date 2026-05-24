@@ -410,12 +410,69 @@ function getEvidencePhotoPath(photo = {}) {
   return photo.path || photo.storage_path || photo.source_path || "";
 }
 
+const CANCELLATION_EVIDENCE_NOTE_MARKER = "Cancellation proof saved in OG evidence storage:";
+
+function trimStoragePathToken(value = "") {
+  return String(value || "").trim().replace(/[),.;]+$/g, "");
+}
+
+function getCancellationEvidencePhotosFromText(text = "", source = {}) {
+  const note = String(text || "");
+  if (!note.includes(CANCELLATION_EVIDENCE_NOTE_MARKER) && !note.includes("pending-order-cancellations/")) return [];
+
+  const photos = [];
+  const seen = new Set();
+  const pathPattern = /\b(order-evidence-photos)\/([^\s]+?\.(?:png|jpe?g|webp|gif|heic|heif))/gi;
+  let match = pathPattern.exec(note);
+  while (match) {
+    const bucket = match[1];
+    const path = trimStoragePathToken(match[2]);
+    const key = `${bucket}:${path}`;
+    if (path && !seen.has(key)) {
+      seen.add(key);
+      photos.push({
+        bucket,
+        path,
+        label: "Cancellation proof",
+        signed_by_email: source.signed_by_email || source.fulfilled_by_email || source.created_by_email || "",
+        created_at: source.created_at || source.fulfilled_at || "",
+        metadata: {
+          source: "cancellation_proof_note",
+        },
+      });
+    }
+    match = pathPattern.exec(note);
+  }
+  return photos;
+}
+
+function getDisplayHistoryNote(note = "") {
+  const text = String(note || "");
+  const markerIndex = text.indexOf(CANCELLATION_EVIDENCE_NOTE_MARKER);
+  if (markerIndex < 0) return text;
+
+  const before = text.slice(0, markerIndex).trimEnd();
+  const after = text
+    .slice(markerIndex + CANCELLATION_EVIDENCE_NOTE_MARKER.length)
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      return !/^(?:\d+\.\s*)?order-evidence-photos\/[^\s]+/i.test(trimmed);
+    })
+    .join("\n")
+    .trim();
+
+  return [before, after].filter(Boolean).join("\n\n");
+}
+
 function getEventEvidencePhotos(event) {
   const photos = [
     ...(Array.isArray(event?.evidence_photos) ? event.evidence_photos : []),
     ...(Array.isArray(event?.payload?.evidence_photos) ? event.payload.evidence_photos : []),
     ...(Array.isArray(event?.label_metadata?.evidence_photos) ? event.label_metadata.evidence_photos : []),
     ...(Array.isArray(event?.photo_attachments) ? event.photo_attachments : []),
+    ...getCancellationEvidencePhotosFromText(event?.notes, event),
   ];
   return photos
     .map((photo) => ({
@@ -426,6 +483,13 @@ function getEventEvidencePhotos(event) {
       created_at: photo?.created_at || event?.created_at || "",
     }))
     .filter((photo) => photo?.bucket && photo?.path);
+}
+
+function getLineCancellationEvidencePhotos(line = {}) {
+  return getCancellationEvidencePhotosFromText(line.notes, {
+    signed_by_email: line.fulfilled_by_email,
+    created_at: line.fulfilled_at,
+  });
 }
 
 function isVideoReceiptEvidencePhoto(photo = {}) {
@@ -1055,6 +1119,7 @@ async function loadOrderHistory() {
   state.lines = closedLines;
   state.historyLoaded = true;
   renderWorkerOptions();
+  applyHistoryBuyerLaunchSearch();
   applyFilters();
   applyHistoryLabelLaunchSelection();
   drainQueuedHistoryLabelTransfers();
@@ -1467,13 +1532,303 @@ function getReturnMessagesForTask(task = {}) {
   const metadata = getReturnTaskPayload(task);
   const returnId = normalizeReturnLookup(returnCase.ebay_return_id || metadata.returnId || metadata.ebayReturnId);
   const orderNumber = normalizeReturnLookup(returnCase.order_number || metadata.orderNumber || metadata.order_number);
-  return (state.returnMessages || [])
+  const loggedMessages = (state.returnMessages || [])
     .filter((message) => Boolean(
       message.return_case_id && returnCase.id && message.return_case_id === returnCase.id
       || returnId && normalizeReturnLookup(message.ebay_return_id) === returnId
       || orderNumber && normalizeReturnLookup(message.order_number) === orderNumber
-    ))
-    .sort((a, b) => new Date(a.logged_at || a.created_at || 0) - new Date(b.logged_at || b.created_at || 0));
+    ));
+  const payloadMessages = getReturnMessagesFromPayload(task);
+  const seen = new Set();
+  return [...loggedMessages, ...payloadMessages]
+    .filter((message) => {
+      if (looksLikeReturnReferenceOnlyMessage(message.message_body, task)) return false;
+      const key = [
+        normalizeReturnLookup(message.ebay_return_id || returnId),
+        message.direction || "",
+        normalizeReturnMessageText(message.message_body || ""),
+      ].join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return Boolean(normalizeReturnMessageText(message.message_body || ""));
+    })
+    .sort((a, b) => new Date(a.sent_at || a.logged_at || a.created_at || 0) - new Date(b.sent_at || b.logged_at || b.created_at || 0));
+}
+
+function decodeReturnHtmlEntities(value = "") {
+  let decoded = String(value || "");
+  for (let i = 0; i < 2; i += 1) {
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = decoded;
+    const next = textarea.value || decoded;
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
+}
+
+function normalizeReturnMessageText(value = "") {
+  return decodeReturnHtmlEntities(value).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function looksLikeReturnReferenceOnlyMessage(value = "", task = {}) {
+  const text = normalizeReturnMessageText(value);
+  if (!text || text.length < 3) return true;
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const references = [
+    returnCase.ebay_return_id,
+    metadata.ebayReturnId,
+    metadata.returnId,
+    returnCase.order_number,
+    metadata.orderNumber,
+    metadata.order_number,
+    metadata.itemNumber,
+    detail.itemNumber,
+    metadata.transactionId,
+    detail.transactionId,
+    metadata.requestAmount,
+    detail.requestAmount,
+    metadata.onHoldAmount,
+    detail.onHoldAmount,
+    metadata.refundText,
+  ].map(normalizeReturnMessageText).filter(Boolean);
+  if (references.includes(text)) return true;
+  return /^\d{5,}$/.test(text.replace(/[-\s]/g, ""));
+}
+
+function returnCommentText(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === "string" || typeof value === "number") {
+      const text = decodeReturnHtmlEntities(value).replace(/\s+/g, " ").trim();
+      if (text) return text;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const text = returnCommentText(...value);
+      if (text) return text;
+      continue;
+    }
+    if (typeof value !== "object") continue;
+    if (Array.isArray(value.textSpans)) {
+      const text = returnCommentText(...value.textSpans.map((span) => span?.text || span?.content || span));
+      if (text) return text;
+    }
+    const text = returnCommentText(
+      value.content,
+      value.text,
+      value.textValue,
+      value.plainText,
+      value.message,
+      value.messageText,
+      value.comment,
+      value.comments,
+      value.note,
+      value.notes,
+      value.value,
+      value.localizedText,
+      value.sellerComments,
+      value.sellerComment,
+      value.buyerComments,
+      value.buyerComment,
+      value.returnComments,
+      value.additionalInfo
+    );
+    if (text) return text;
+  }
+  return "";
+}
+
+function getReturnPayloadDate(...values) {
+  for (const value of values) {
+    if (!value) continue;
+    const raw = typeof value === "object"
+      ? value.value || value.formattedValue || value.date || value.timestamp || value
+      : value;
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return "";
+}
+
+function findReturnPageModuleContainers(root, depth = 0, seen = new Set()) {
+  if (!root || typeof root !== "object" || depth > 5 || seen.has(root)) return [];
+  seen.add(root);
+  const containers = [];
+  if (root.MESSAGE_SUMMARY || root.HISTORY) containers.push(root);
+  [
+    root.modules,
+    root.inputModules?.response?.modules,
+    root.response?.modules,
+    root.model?.modules,
+    root.data?.modules,
+    root.s?.modules,
+  ].forEach((candidate) => {
+    if (candidate && typeof candidate === "object" && (candidate.MESSAGE_SUMMARY || candidate.HISTORY)) {
+      containers.push(candidate);
+    }
+  });
+  if (Array.isArray(root)) {
+    root.forEach((item) => containers.push(...findReturnPageModuleContainers(item, depth + 1, seen)));
+  } else {
+    Object.values(root).forEach((value) => {
+      if (value && typeof value === "object") {
+        containers.push(...findReturnPageModuleContainers(value, depth + 1, seen));
+      }
+    });
+  }
+  return [...new Set(containers)];
+}
+
+function getReturnPageModelMessages(task = {}, base = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const containers = findReturnPageModuleContainers([
+    metadata,
+    detail,
+    metadata.ebayDetail,
+    metadata.ebaySummary,
+    metadata.pageModel,
+    metadata.returnPageModel,
+  ]);
+  const messages = [];
+  containers.forEach((modules, moduleIndex) => {
+    const historyActivities = Array.isArray(modules.HISTORY?.historyActivities)
+      ? modules.HISTORY.historyActivities
+      : [];
+    const summaryBody = returnCommentText(
+      modules.MESSAGE_SUMMARY?.comments?.description,
+      modules.MESSAGE_SUMMARY?.comments?.message,
+      modules.MESSAGE_SUMMARY?.comments?.value
+    );
+    if (summaryBody && !looksLikeReturnReferenceOnlyMessage(summaryBody, task)) {
+      const matchingHistory = historyActivities.find((activity) => {
+        const title = returnCommentText(activity?.historyDetail?.title, activity?.title).toLowerCase();
+        const body = returnCommentText(activity?.historyDetail?.descriptions, activity?.descriptions);
+        return /sent.*message|message.*sent|you sent/i.test(title) && normalizeReturnMessageText(body) === normalizeReturnMessageText(summaryBody);
+      });
+      messages.push({
+        ...base,
+        direction: "outbound",
+        message_body: summaryBody,
+        sent_at: getReturnPayloadDate(matchingHistory?.date) || metadata.syncedAt || task.updated_at || task.created_at,
+        logged_at: metadata.syncedAt || task.updated_at || task.created_at,
+        metadata: { source: "ebay_return_page_model", kind: "message_summary", moduleIndex },
+      });
+    }
+    historyActivities.forEach((activity, index) => {
+      const title = returnCommentText(activity?.historyDetail?.title, activity?.title);
+      const body = returnCommentText(activity?.historyDetail?.descriptions, activity?.descriptions);
+      if (!body || looksLikeReturnReferenceOnlyMessage(body, task)) return;
+      const titleKey = title.toLowerCase();
+      messages.push({
+        ...base,
+        direction: /you sent|seller.*sent|sent.*message|message.*sent/.test(titleKey)
+          ? "outbound"
+          : /buyer|return started|buyer sent|buyer message/.test(titleKey)
+            ? "inbound"
+            : "internal",
+        message_body: body,
+        sent_at: getReturnPayloadDate(activity?.date) || metadata.syncedAt || task.updated_at || task.created_at,
+        logged_at: metadata.syncedAt || task.updated_at || task.created_at,
+        metadata: { source: "ebay_return_page_model", kind: "history_activity", title, moduleIndex, index },
+      });
+    });
+  });
+  return messages;
+}
+
+function getReturnMessagesFromPayload(task = {}) {
+  const returnCase = getReturnTaskCase(task);
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const returnId = returnCase.ebay_return_id || metadata.ebayReturnId || metadata.returnId || "";
+  const orderNumber = returnCase.order_number || metadata.orderNumber || metadata.order_number || "";
+  const buyerUsername = returnCase.buyer_username || metadata.buyerUsername || metadata.buyer_username || "";
+  const base = {
+    return_case_id: returnCase.id || null,
+    order_number: orderNumber,
+    ebay_return_id: returnId,
+    buyer_username: buyerUsername,
+    channel: "ebay_return_api",
+    message_status: "imported",
+  };
+  const messages = [];
+  const buyerComment = returnCommentText(metadata.buyerComment, detail.buyerComment);
+  if (buyerComment && !looksLikeReturnReferenceOnlyMessage(buyerComment, task)) {
+    messages.push({
+      ...base,
+      direction: "inbound",
+      message_body: buyerComment,
+      sent_at: metadata.returnInitiated || detail.datePurchased || returnCase.opened_at || task.created_at,
+      logged_at: metadata.syncedAt || task.updated_at || task.created_at,
+      metadata: { source: "ebay_return_payload", kind: "buyer_creation_comment" },
+    });
+  }
+
+  const history = Array.isArray(metadata.ebayDetail?.responseHistory)
+    ? metadata.ebayDetail.responseHistory
+    : Array.isArray(detail.responseHistory)
+      ? detail.responseHistory
+      : Array.isArray(metadata.responseHistory)
+        ? metadata.responseHistory
+        : [];
+  history.forEach((entry, index) => {
+    const attributes = entry?.attributes || {};
+    const body = returnCommentText(
+      attributes.comments?.content,
+      attributes.comments,
+      attributes.comment?.content,
+      attributes.comment,
+      attributes.message?.content,
+      attributes.message,
+      attributes.sellerComments?.content,
+      attributes.sellerComments,
+      attributes.sellerComment?.content,
+      attributes.sellerComment,
+      attributes.buyerComments?.content,
+      attributes.buyerComments,
+      attributes.buyerComment?.content,
+      attributes.buyerComment,
+      attributes.note,
+      attributes.notes,
+      entry.comments?.content,
+      entry.comment,
+      entry.comments,
+      entry.message,
+      entry.note,
+      entry.notes?.content,
+      entry.notes
+    );
+    if (!body || looksLikeReturnReferenceOnlyMessage(body, task)) return;
+    const author = [
+      entry.author,
+      entry.actor,
+      entry.role,
+      entry.authorRole,
+      entry.activityActor,
+      entry.activity,
+    ].filter(Boolean).join(" ").toLowerCase();
+    messages.push({
+      ...base,
+      direction: author.includes("seller") ? "outbound" : author.includes("buyer") ? "inbound" : "internal",
+      message_body: body,
+      sent_at: getReturnPayloadDate(entry.creationDate, entry.activityDate, entry.date, entry.timestamp) || metadata.syncedAt || task.updated_at || task.created_at,
+      logged_at: metadata.syncedAt || task.updated_at || task.created_at,
+      metadata: { source: "ebay_return_payload", kind: "response_history", index },
+    });
+  });
+
+  messages.push(...getReturnPageModelMessages(task, base));
+  return messages;
+}
+
+function getReturnMessageDirectionLabel(message = {}) {
+  if (message.direction === "inbound") return "Buyer";
+  if (message.direction === "outbound") return "Seller / OG";
+  return "eBay update";
 }
 
 function renderReturnMessageLog(task = {}) {
@@ -1482,15 +1837,15 @@ function renderReturnMessageLog(task = {}) {
   return `
     <div class="return-message-log">
       <div class="return-complaint-header">
-        <span class="eyebrow">Buyer Message Log</span>
+        <span class="eyebrow">eBay Message Log</span>
       </div>
-      ${messages.slice(-6).map((message) => `
+      ${messages.slice(-12).map((message) => `
         <article class="return-message-entry is-${escapeHtml(message.direction || "outbound")}">
           <div>
-            <strong>${escapeHtml(message.direction === "inbound" ? "Buyer" : "OG / eBay reply")}</strong>
+            <strong>${escapeHtml(getReturnMessageDirectionLabel(message))}</strong>
             <time>${escapeHtml(formatDateTime(message.sent_at || message.logged_at))}</time>
           </div>
-          <p>${escapeHtml(message.message_body || "")}</p>
+          <p>${escapeHtml(decodeReturnHtmlEntities(message.message_body || ""))}</p>
           <small>${escapeHtml(message.message_status === "sent_from_ebay_page_unverified" ? "Logged from eBay send-message page" : message.message_status || "Logged")}</small>
         </article>
       `).join("")}
@@ -1997,7 +2352,10 @@ function getHistoryGroupStatusClass(group) {
 
 function getHistoryGroupEvidencePhotos(group) {
   const seen = new Set();
-  return group.events.flatMap(getEventEvidencePhotos).filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
+  return [
+    ...(group.events || []).flatMap(getEventEvidencePhotos),
+    ...(group.lines || []).flatMap(getLineCancellationEvidencePhotos),
+  ].filter((photo) => !isVideoReceiptEvidencePhoto(photo)).filter((photo) => {
     const key = `${photo.bucket}:${photo.path}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -2412,7 +2770,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           <div class="history-line-row">
             <div>
               <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
-              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(line.notes || "No notes")}</small>
+              <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>
                 <span>${escapeHtml(line.fulfilled_by_email || "Unknown worker")}</span>
@@ -2435,7 +2793,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               <article>
                 <strong>${escapeHtml(getEventLabel(event))}</strong>
                 <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.signed_by_email || "Unknown user")}</span>
-                <p>${escapeHtml(event.notes || "No note recorded.")}</p>
+                <p>${escapeHtml(getDisplayHistoryNote(event.notes) || "No note recorded.")}</p>
               </article>
             `).join("")}
           </div>
@@ -2691,7 +3049,7 @@ function renderEventList() {
       : event.category === "revert" || event.category === "label" || event.category === "task"
       ? "is-admin"
       : event.action === "cancelled" ? "is-cancelled" : "";
-    const eventDetail = event.notes || event.task_question || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
+    const eventDetail = getDisplayHistoryNote(event.notes) || event.task_question || event.label_metadata?.notes || event.label_file_path || event.payload?.disposition || "No note recorded.";
     return `
       <article class="event-card">
         <span class="history-status ${eventStatusClass}">${escapeHtml(label)}</span>
@@ -4411,6 +4769,17 @@ function applyHistoryLabelLaunchSelection() {
   openHistoryLabelReceiverForOrders(orderNumbers);
 }
 
+function applyHistoryBuyerLaunchSearch() {
+  const params = new URLSearchParams(window.location.search);
+  const buyer = String(params.get("buyer") || "").trim();
+  if (!buyer || state.historyBuyerSearchApplied) return;
+  const search = $("history-search");
+  if (!search) return;
+  search.value = buyer;
+  state.historySearchUserEdited = true;
+  state.historyBuyerSearchApplied = true;
+}
+
 async function getHistoryLabelSignedUrl(order) {
   const bucket = order?.label_storage_bucket || EBAY_LABEL_BUCKET;
   const path = order?.label_file_path || "";
@@ -5004,7 +5373,7 @@ async function recordEbayReturnMessageLog(payload = {}) {
   const message = payload.message || payload.metadata || {};
   const transferId = payload.transferId || "";
   const messageBody = String(message.messageBody || message.message || "").trim();
-  if (!messageBody) throw new Error("The eBay buyer message was empty.");
+  if (!messageBody) throw new Error("The eBay return message was empty.");
 
   const rpcPayload = {
     ...message,
@@ -5013,6 +5382,29 @@ async function recordEbayReturnMessageLog(payload = {}) {
     source: payload.source || message.source || "ebay_return_message_page",
     pageUrl: message.pageUrl || payload.pageUrl || "",
   };
+  const duplicateLookup = String(rpcPayload.returnId || rpcPayload.ebayReturnId || rpcPayload.orderNumber || rpcPayload.orderId || "").trim();
+  if (duplicateLookup) {
+    let query = supabase
+      .from("ebay_return_messages")
+      .select("*")
+      .eq("direction", rpcPayload.direction || "outbound")
+      .order("logged_at", { ascending: false })
+      .limit(50);
+    if (rpcPayload.returnId || rpcPayload.ebayReturnId) {
+      query = query.eq("ebay_return_id", rpcPayload.returnId || rpcPayload.ebayReturnId);
+    } else {
+      query = query.eq("order_number", rpcPayload.orderNumber || rpcPayload.orderId);
+    }
+    const { data: existingRows, error: duplicateError } = await query;
+    if (duplicateError) {
+      console.warn("Could not check for duplicate eBay return message log:", duplicateError);
+    } else {
+      const duplicate = (existingRows || []).find((row) => {
+        return normalizeReturnMessageText(row.message_body || "") === normalizeReturnMessageText(messageBody);
+      });
+      if (duplicate) return duplicate;
+    }
+  }
   const { data, error } = await supabase.rpc("record_ebay_return_message_log", {
     _payload: rpcPayload,
     _signed_by_email: state.user?.email || null,
@@ -5184,7 +5576,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
     return;
   }
 
-  const requested = Number(summary.requestedCount || 0);
+  const requested = Number(summary.requestedCount ?? summary.total ?? 0);
   const matched = Number(summary.importedCreatedCount ?? summary.importedCount ?? 0);
   const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
   const failed = Number(summary.failedCount || 0);
@@ -5202,6 +5594,9 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       : `${processed} imported`;
   }
 
+  const messagesImported = Number(summary.messagesImported || 0);
+  const filesSeen = Number(summary.filesSeen || 0);
+
   details.innerHTML = `
     <div class="return-import-grid">
       <span><small>Visible on eBay</small><b>${requested.toLocaleString()}</b></span>
@@ -5210,6 +5605,8 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
       <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
+      ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
+      ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
     </div>
     ${summary.message ? `<p class="return-import-message">${escapeHtml(summary.message)}</p>` : ""}
     ${unmatchedReturns.length ? `
@@ -5234,6 +5631,155 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
 function setLastReturnImportSummary(summary) {
   state.lastReturnImportSummary = summary || null;
   renderReturnImportSummary(state.lastReturnImportSummary);
+}
+
+function getEbayReturnSyncUrl() {
+  const projectRef = String(window.SUPABASE_URL || "")
+    .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+  return `https://${projectRef}.functions.supabase.co/ebay-return-sync`;
+}
+
+function setReturnApiSyncButtonsDisabled(disabled) {
+  ["check-ebay-return-api-sync", "run-ebay-return-api-sync", "clean-ebay-return-api-sync"].forEach((id) => {
+    const button = $(id);
+    if (button) button.disabled = disabled;
+  });
+}
+
+async function postEbayReturnSyncPayload(payload) {
+  const response = await fetch(getEbayReturnSyncUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { ok: false, error: text || `HTTP ${response.status}` };
+  }
+  if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+  return data;
+}
+
+function buildReturnApiSyncSummary(response = {}) {
+  const results = Array.isArray(response.results) ? response.results : [];
+  const failedReturns = results
+    .filter((entry) => entry?.error)
+    .map((entry) => ({
+      returnId: entry.returnId,
+      buyerUsername: entry.buyerUsername,
+      itemNumber: entry.itemNumber,
+      error: entry.error,
+    }));
+  const unmatchedReturns = results
+    .filter((entry) => entry && entry.matched === false && !entry.error)
+    .map((entry) => ({
+      returnId: entry.returnId,
+      buyerUsername: entry.buyerUsername,
+      itemNumber: entry.itemNumber,
+      reason: entry.reason || entry.status || "No OG match",
+    }));
+  return {
+    ok: response.ok === true,
+    runId: response.runId || null,
+    requestedCount: Number(response.total || results.length || 0),
+    processedCount: Math.max(0, Number(response.total || results.length || 0) - Number(response.errors || 0)),
+    importedCreatedCount: Number(response.matched || 0),
+    unmatchedCreated: Number(response.unmatched || 0),
+    failedCount: Number(response.errors || 0),
+    duplicateResolvedCount: 0,
+    messagesImported: Number(response.messagesImported || 0),
+    filesSeen: Number(response.filesSeen || 0),
+    staleCasesClosed: Number(response.staleCasesClosed || 0),
+    staleTasksResolved: Number(response.staleTasksResolved || 0),
+    importedReturns: results.filter((entry) => entry?.matched === true),
+    unmatchedReturns,
+    failedReturns,
+    message: response.error
+      ? response.error
+      : response.cleanupClosed
+        ? (response.dryRun
+          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would be hidden from the open queue.`
+          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} and resolved ${Number(response.staleTasksResolved || 0).toLocaleString()} task${Number(response.staleTasksResolved || 0) === 1 ? "" : "s"}.`)
+      : response.dryRun
+        ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
+        : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
+  };
+}
+
+async function runEbayReturnApiSync(dryRun = true) {
+  if (!isAdminUser()) {
+    alert("Only admins can sync eBay returns from the API.");
+    return;
+  }
+  if (!dryRun) {
+    const confirmed = window.confirm("Sync open eBay returns into the OG return queue? This will create or refresh return tasks, but it will not change local intake/restock records.");
+    if (!confirmed) return;
+  }
+
+  setReturnApiSyncButtonsDisabled(true);
+  setReturnTaskSaveStatus(dryRun ? "Checking eBay returns..." : "Syncing eBay returns...", "info");
+  try {
+    const response = await postEbayReturnSyncPayload({
+      dryRun,
+      limit: 200,
+      daysBack: 90,
+    });
+    const summary = buildReturnApiSyncSummary(response);
+    setLastReturnImportSummary(summary);
+    if (!response.ok && response.error) throw new Error(response.error);
+    if (!dryRun) await loadReturnQueue();
+    setReturnTaskSaveStatus(
+      response.ok
+        ? (dryRun ? "eBay return dry check finished." : "eBay returns synced into the work queue.")
+        : "eBay return sync finished with issues. Review the audit panel.",
+      response.ok ? "success" : "error"
+    );
+  } catch (error) {
+    console.error("eBay return API sync failed:", error);
+    setLastReturnImportSummary(buildReturnApiSyncSummary({ ok: false, error: error.message || "Return sync failed.", errors: 1 }));
+    setReturnTaskSaveStatus(error.message || "Could not sync eBay returns.", "error");
+  } finally {
+    setReturnApiSyncButtonsDisabled(false);
+  }
+}
+
+async function runEbayReturnApiCleanup() {
+  if (!isAdminUser()) {
+    alert("Only admins can clean eBay returns from the API.");
+    return;
+  }
+  const confirmed = window.confirm("Clean the return queue so only returns still open on eBay remain pending? This closes local return cases and resolves tasks that no longer appear in eBay's open-return list.");
+  if (!confirmed) return;
+
+  setReturnApiSyncButtonsDisabled(true);
+  setReturnTaskSaveStatus("Cleaning closed eBay returns...", "info");
+  try {
+    const response = await postEbayReturnSyncPayload({
+      dryRun: false,
+      limit: 500,
+      daysBack: 540,
+      cleanupClosed: true,
+    });
+    const summary = buildReturnApiSyncSummary(response);
+    setLastReturnImportSummary(summary);
+    if (!response.ok && response.error) throw new Error(response.error);
+    await loadReturnQueue();
+    setReturnTaskSaveStatus(
+      response.ok
+        ? "Closed eBay returns cleaned from the pending queue."
+        : "Cleaner finished with issues. Review the audit panel.",
+      response.ok ? "success" : "error"
+    );
+  } catch (error) {
+    console.error("eBay return cleaner failed:", error);
+    setLastReturnImportSummary(buildReturnApiSyncSummary({ ok: false, error: error.message || "Return cleaner failed.", errors: 1, cleanupClosed: true }));
+    setReturnTaskSaveStatus(error.message || "Could not clean closed eBay returns.", "error");
+  } finally {
+    setReturnApiSyncButtonsDisabled(false);
+  }
 }
 
 function queueHistoryReturnTransfer(payload) {
@@ -5896,6 +6442,9 @@ function setupListeners() {
   setupHistorySearchAutofillGuard();
   $("refresh-history")?.addEventListener("click", refreshHistoryAndReturns);
   $("refresh-return-queue")?.addEventListener("click", loadReturnQueue);
+  $("check-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(true));
+  $("run-ebay-return-api-sync")?.addEventListener("click", () => runEbayReturnApiSync(false));
+  $("clean-ebay-return-api-sync")?.addEventListener("click", runEbayReturnApiCleanup);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
   $("clear-return-test-imports")?.addEventListener("click", clearReturnImportTestData);

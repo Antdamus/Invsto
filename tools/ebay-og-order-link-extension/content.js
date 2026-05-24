@@ -19,6 +19,7 @@
   const VIDEO_RECEIPT_ITEM_ID = "og-ebay-open-video-receipt-from-item";
   const VIDEO_RECEIPT_DETAILS_ID = "og-ebay-open-video-receipt";
   const VIDEO_RECEIPT_CAPTURE_ID = "og-ebay-capture-video-receipt-frame";
+  const CANCEL_CONFIRM_CAPTURE_ID = "og-ebay-capture-cancel-confirmation";
   const VIDEO_RECEIPT_BUTTON_CLASS = "og-ebay-video-receipt";
   const VIDEO_RECEIPT_AUTO_PARAM = "ogOpenVideoReceipt";
   const PRIORITIZE_DUE_ORDERS_ID = "og-ebay-prioritize-due-orders";
@@ -57,6 +58,8 @@
   let ogReturnMessageAutoSendHooked = false;
   let ogReturnMessageLastLogKey = "";
   let ogReturnMessageLastLogAt = 0;
+  let ogReturnMessageConfirmationLastLogKey = "";
+  let ogReturnMessageConfirmationLastLogAt = 0;
   const ogReturnDetailCaptureCache = new Map();
   const ogBulkLabelManualSelection = new Set();
   let ogBulkLabelManualSelectionTouched = false;
@@ -4030,6 +4033,72 @@
     };
   }
 
+  function getVisibleTextLines() {
+    return String(document.body?.innerText || "")
+      .split(/\r?\n+/)
+      .map(cleanText)
+      .filter(Boolean);
+  }
+
+  function isReturnMessageSentConfirmationPage() {
+    const text = String(document.body?.innerText || "");
+    return /your message has been sent to the buyer/i.test(text)
+      || /you sent a message/i.test(text) && /message to the buyer/i.test(text);
+  }
+
+  function extractSentReturnMessageBody() {
+    const lines = getVisibleTextLines();
+    const summaryIndex = lines.findIndex((line) => /^message to the buyer$/i.test(line));
+    if (summaryIndex >= 0) {
+      const body = lines.slice(summaryIndex + 1).find((line) => {
+        return !/^how would you like to proceed/i.test(line)
+          && !/^accept the return$/i.test(line)
+          && !/^purchase an ebay return label/i.test(line)
+          && !/^order$/i.test(line)
+          && !/^return id$/i.test(line)
+          && !/^request amount$/i.test(line);
+      });
+      if (body) return body;
+    }
+
+    const historyIndex = lines.findIndex((line) => /you sent a message/i.test(line));
+    if (historyIndex >= 0) {
+      const body = lines.slice(historyIndex + 1).find((line) => {
+        return !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i.test(line)
+          && !/^return started$/i.test(line)
+          && !/^delivered$/i.test(line)
+          && !/^item purchased$/i.test(line);
+      });
+      if (body) return body;
+    }
+
+    const html = document.documentElement?.innerHTML || "";
+    const summaryMatch = html.match(/"MESSAGE_SUMMARY"[\s\S]{0,2500}?"Message to the buyer"[\s\S]{0,1600}?"text"\s*:\s*"([^"]+)"/i);
+    if (summaryMatch?.[1]) return decodeReturnText(summaryMatch[1]);
+    const historyMatch = html.match(/"You sent a message"[\s\S]{0,1200}?"text"\s*:\s*"([^"]+)"/i);
+    return historyMatch?.[1] ? decodeReturnText(historyMatch[1]) : "";
+  }
+
+  function buildSentReturnMessagePayload() {
+    const metadata = extractReturnMessageContext();
+    const messageBody = extractSentReturnMessageBody();
+    return {
+      source: "ebay-return-message-confirmation-page",
+      message: {
+        ...metadata,
+        source: "ebay_return_message_confirmation_page",
+        direction: "outbound",
+        messageStatus: "sent_from_ebay_page_unverified",
+        messageBody,
+        sentAt: new Date().toISOString(),
+      },
+      metadata: {
+        ...metadata,
+        confirmationPageUrl: window.location.href,
+      },
+    };
+  }
+
   function getReturnMessageLogKey(payload = {}) {
     const message = payload.message || {};
     return [
@@ -4040,7 +4109,7 @@
   }
 
   async function logReturnMessageToOg(options = {}) {
-    const payload = buildReturnMessagePayload();
+    const payload = options.payload || buildReturnMessagePayload();
     const message = payload.message || {};
     const button = options.button || document.getElementById(RETURN_MESSAGE_SEND_ID);
     if (!message.messageBody) {
@@ -4097,6 +4166,19 @@
       if (!options.silent) window.alert(error.message || "Could not log this eBay message to OG.");
       return { ok: false, error: error.message || String(error) };
     }
+  }
+
+  function maybeLogSentReturnMessageConfirmation() {
+    if (!isReturnMessageSentConfirmationPage()) return;
+    const payload = buildSentReturnMessagePayload();
+    const message = payload.message || {};
+    if (!message.messageBody || (!message.returnId && !message.orderNumber)) return;
+    const logKey = getReturnMessageLogKey(payload);
+    const now = Date.now();
+    if (logKey === ogReturnMessageConfirmationLastLogKey && now - ogReturnMessageConfirmationLastLogAt < 300000) return;
+    ogReturnMessageConfirmationLastLogKey = logKey;
+    ogReturnMessageConfirmationLastLogAt = now;
+    logReturnMessageToOg({ payload, silent: true }).catch(() => null);
   }
 
   async function sendReturnMessageWithOgLog(event) {
@@ -4157,6 +4239,106 @@
         if (button.textContent !== "Send + Log to OG") button.textContent = "Send + Log to OG";
       });
     }
+  }
+
+  function isCancelConfirmationDetailsPage() {
+    try {
+      const url = new URL(window.location.href);
+      return /\/Cancel\/Details$/i.test(url.pathname) && Boolean(url.searchParams.get("cancelId"));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function getVisiblePageLines() {
+    return String(document.body?.innerText || "")
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function getValueAfterLabel(lines, label) {
+    const normalizedLabel = String(label || "").toLowerCase();
+    const index = lines.findIndex((line) => line.toLowerCase() === normalizedLabel);
+    if (index >= 0 && lines[index + 1]) return lines[index + 1];
+    const inline = lines.find((line) => line.toLowerCase().startsWith(`${normalizedLabel} `));
+    return inline ? inline.slice(label.length).trim() : "";
+  }
+
+  function getCancelConfirmationMetadata() {
+    const url = new URL(window.location.href);
+    const lines = getVisiblePageLines();
+    const bodyText = lines.join("\n");
+    const orderNumber = normalizeOrderNumber(getValueAfterLabel(lines, "Order number") || bodyText);
+    const itemIdMatch = bodyText.match(/\bItem ID:\s*([0-9]{8,15})\b/i);
+    return {
+      cancelId: String(url.searchParams.get("cancelId") || "").trim(),
+      orderNumber,
+      orderId: orderNumber,
+      omsOrderId: orderNumber,
+      itemNumber: itemIdMatch?.[1] || "",
+      buyerUsername: getValueAfterLabel(lines, "Buyer"),
+      orderTotal: getValueAfterLabel(lines, "Order total"),
+      totalRefund: getValueAfterLabel(lines, "Total refund"),
+      cancellationReason: getValueAfterLabel(lines, "Cancellation reason"),
+      pageUrl: window.location.href,
+      pageTitle: document.title || "eBay cancellation confirmation",
+      visibleSummaryText: lines.slice(0, 80).join("\n"),
+    };
+  }
+
+  function setCancelProofButtonStatus(button, text, tone = "") {
+    if (!button) return;
+    button.textContent = text;
+    button.dataset.statusTone = tone || "";
+    button.disabled = tone === "working";
+  }
+
+  async function captureCancelConfirmationProof(button = null) {
+    setCancelProofButtonStatus(button, "Capturing proof...", "working");
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OG_EBAY_CAPTURE_CANCEL_CONFIRMATION",
+        payload: {
+          metadata: getCancelConfirmationMetadata(),
+          pageUrl: window.location.href,
+          pageTitle: document.title || "",
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+            devicePixelRatio: window.devicePixelRatio || 1,
+          },
+        },
+      });
+      if (!response?.ok) throw new Error(response?.error || "OG did not accept the cancellation proof.");
+      setCancelProofButtonStatus(button, "Proof added to OG", "success");
+      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 2600);
+    } catch (error) {
+      console.warn("[OG eBay Cancel] Could not capture cancellation proof:", error);
+      setCancelProofButtonStatus(button, "Proof capture failed", "error");
+      window.setTimeout(() => setCancelProofButtonStatus(button, "Capture cancellation proof"), 3000);
+    }
+  }
+
+  function injectCancelConfirmationProofButton() {
+    const existing = document.getElementById(CANCEL_CONFIRM_CAPTURE_ID);
+    if (!isCancelConfirmationDetailsPage()) {
+      existing?.remove();
+      return;
+    }
+
+    if (existing) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = CANCEL_CONFIRM_CAPTURE_ID;
+    button.textContent = "Capture cancellation proof";
+    button.title = "Take a screenshot of this eBay cancellation confirmation and attach it to the OG cancellation modal.";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      captureCancelConfirmationProof(button);
+    });
+    document.body.appendChild(button);
   }
 
   function ensureStyles() {
@@ -4222,6 +4404,39 @@
       #${VIDEO_RECEIPT_CAPTURE_ID} {
         right: 18px;
         bottom: 128px;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID} {
+        position: fixed;
+        right: 18px;
+        bottom: 128px;
+        z-index: 2147483647;
+        border: 1px solid #116b36;
+        border-radius: 999px;
+        background: #e8fff0;
+        color: #0a5b2b;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, .22);
+        cursor: pointer;
+        font: 800 14px Arial, sans-serif;
+        max-width: min(360px, calc(100vw - 36px));
+        padding: 12px 16px;
+        white-space: normal;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}:hover {
+        background: #d4f8df;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}[data-status-tone="error"] {
+        border-color: #b42318;
+        background: #fff0ed;
+        color: #9f1f14;
+      }
+
+      #${CANCEL_CONFIRM_CAPTURE_ID}[data-status-tone="success"] {
+        border-color: #116b36;
+        background: #d8f8e2;
+        color: #0a5b2b;
       }
 
       #${RETURN_MESSAGE_SEND_ID} {
@@ -5370,6 +5585,8 @@
     injectAwaitingReportButton();
     injectReturnPageButtons();
     injectReturnMessageLoggerButton();
+    injectCancelConfirmationProofButton();
+    maybeLogSentReturnMessageConfirmation();
     injectPrioritizeDueOrdersButton();
     updateBulkActionsShortcut();
     maybeShowBoxReminder();

@@ -28,8 +28,14 @@ type ItemRow = {
   photo_url: string | null;
   categories: string[] | null;
   weight: number | null;
+  metal?: string | null;
+  purity_basis_points?: number | null;
   stone_type?: string | null;
   item_length?: string | null;
+  ebay_sync_enabled?: boolean | null;
+  ebay_category_id?: string | null;
+  ebay_condition?: string | null;
+  ebay_aspects?: JsonRecord | null;
   deleted_at?: string | null;
 };
 
@@ -38,11 +44,14 @@ type PreparedItem = {
   sku: string;
   quantity: number;
   imageUrls: string[];
+  sourceImageCount: number;
   categoryId: string;
+  categorySource: "override" | "rule" | "default";
   inventoryPayload: JsonRecord;
   offerPayload: JsonRecord | null;
   hash: string;
   warnings: string[];
+  blockingReasons: string[];
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -56,6 +65,8 @@ const EBAY_SCOPE = (Deno.env.get("EBAY_SCOPE") ?? "https://api.ebay.com/oauth/ap
 const EBAY_SYNC_ALLOW_PUBLISH = (Deno.env.get("EBAY_SYNC_ALLOW_PUBLISH") ?? "false").toLowerCase() === "true";
 const SOURCE_PHOTO_BUCKET = Deno.env.get("EBAY_SOURCE_PHOTO_BUCKET") ?? "photos";
 const PUBLIC_EBAY_PHOTO_BUCKET = Deno.env.get("EBAY_PUBLIC_PHOTO_BUCKET") ?? "public-ebay-photos";
+const MAX_SYNC_LIMIT = 1000;
+const SUPABASE_IN_CHUNK_SIZE = 100;
 
 const EBAY_API_BASE = EBAY_ENV === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
 
@@ -112,12 +123,35 @@ function normalizeEbayCondition(value: unknown): string {
   return EBAY_CONDITION_VALUES.has(condition) ? condition : "NEW";
 }
 
+function firstText(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const found = value.map((entry) => String(entry || "").trim()).find(Boolean);
+    return found || null;
+  }
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function textMatchesTerm(text: string, term: unknown): boolean {
+  const pattern = escapeRegExp(String(term || "").trim()).replace(/\s+/g, "\\s+");
+  if (!pattern) return false;
+  return new RegExp(`\\b${pattern}\\b`, "i").test(text);
+}
+
 function normalizePhotoPath(value: string): string {
   return value.split("?")[0].replace(/^\/+/, "");
 }
 
 function filenameFromPath(path: string): string {
   return normalizePhotoPath(path).split("/").pop() || "";
+}
+
+function publicEbayPhotoPath(item: ItemRow, filename: string): string {
+  return `${item.id}/${filename}`;
 }
 
 function contentTypeForPath(path: string): string {
@@ -134,7 +168,10 @@ function collectPhotoPaths(item: ItemRow): string[] {
   ].filter(Boolean).slice(0, 12);
 }
 
-function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
+function chooseCategory(item: ItemRow, settings: SyncSettings): { categoryId: string; source: "override" | "rule" | "default" } {
+  const override = String(item.ebay_category_id || "").trim();
+  if (override) return { categoryId: override, source: "override" };
+
   const haystack = [
     item.title,
     item.description || "",
@@ -143,12 +180,12 @@ function chooseCategoryId(item: ItemRow, settings: SyncSettings): string {
 
   for (const rule of settings.category_rules || []) {
     const terms = Array.isArray(rule.match) ? rule.match : [];
-    if (rule.categoryId && terms.some((term) => haystack.includes(String(term).toLowerCase()))) {
-      return rule.categoryId;
+    if (rule.categoryId && terms.some((term) => textMatchesTerm(haystack, term))) {
+      return { categoryId: rule.categoryId, source: "rule" };
     }
   }
 
-  return settings.default_category_id;
+  return { categoryId: settings.default_category_id, source: "default" };
 }
 
 function itemSearchText(item: ItemRow): string {
@@ -181,6 +218,11 @@ function inferJewelryStyle(item: ItemRow, categoryId: string): string {
 }
 
 function inferMetal(item: ItemRow): string | null {
+  const explicitMetal = String(item.metal || "").trim().toLowerCase();
+  if (explicitMetal.includes("silver")) return "Fine Silver";
+  if (explicitMetal.includes("gold")) return "Yellow Gold";
+  if (explicitMetal.includes("platinum")) return "Platinum";
+
   const text = itemSearchText(item);
   if (text.includes("sterling silver") || text.includes("925") || text.includes("fine silver")) return "Fine Silver";
   if (text.includes("white gold")) return "White Gold";
@@ -190,6 +232,14 @@ function inferMetal(item: ItemRow): string | null {
 }
 
 function inferMetalPurity(item: ItemRow): string | null {
+  const purity = Number(item.purity_basis_points || 0);
+  if (purity >= 9980) return String(item.metal || "").toLowerCase().includes("gold") ? "24k" : "999";
+  if (purity >= 9240 && purity <= 9260) return "925";
+  if (purity >= 9100 && purity <= 9200) return "22k";
+  if (purity >= 7450 && purity <= 7550) return "18k";
+  if (purity >= 5780 && purity <= 5880) return "14k";
+  if (purity >= 4100 && purity <= 4200) return "10k";
+
   const text = itemSearchText(item);
   if (text.includes("925") || text.includes("sterling silver") || text.includes("fine silver")) return "925";
   if (text.includes("14k")) return "14k";
@@ -255,7 +305,30 @@ function buildAspects(item: ItemRow, categoryId: string): Record<string, string[
   if (item.weight) aspects["Item Weight"] = [`${item.weight} g`];
   if (item.item_length) aspects["Item Length"] = [String(item.item_length)];
 
+  for (const [name, value] of Object.entries(item.ebay_aspects || {})) {
+    const trimmedName = String(name || "").trim();
+    const text = firstText(value);
+    if (trimmedName && text) aspects[trimmedName] = [text];
+  }
+
   return aspects;
+}
+
+function collectPublishBlockingReasons(item: ItemRow, price: number, quantity: number, imageReady: boolean, categoryId: string, categorySource: PreparedItem["categorySource"], aspects: Record<string, string[]>): string[] {
+  const reasons: string[] = [];
+  if (!String(item.title || "").trim()) reasons.push("missing title");
+  if (!String(item.description || "").trim()) reasons.push("missing description");
+  if (!String(item.barcode || "").trim()) reasons.push("missing SKU/barcode");
+  if (price <= 0) reasons.push("missing sale price");
+  if (quantity <= 0) reasons.push("quantity is 0");
+  if (!categoryId || categorySource === "default") reasons.push("missing eBay category");
+  if (!imageReady) reasons.push("missing eBay image");
+
+  for (const aspectName of ["Brand", "Type", "Style", "Main Stone", "Metal", "Metal Purity"]) {
+    if (!firstText(aspects[aspectName])) reasons.push(`missing ${aspectName}`);
+  }
+
+  return reasons;
 }
 
 async function sha256(input: unknown): Promise<string> {
@@ -328,6 +401,36 @@ async function ebayRequest(token: string, method: string, path: string, body?: u
   return payload;
 }
 
+async function findExistingEbayOffer(token: string, settings: SyncSettings, sku: string): Promise<{ offerId: string; listingId: string | null; status: string | null } | null> {
+  const query = new URLSearchParams({
+    sku,
+    marketplace_id: settings.marketplace_id,
+    format: settings.listing_format,
+  });
+  let payload: any = {};
+  try {
+    payload = await ebayRequest(token, "GET", `/sell/inventory/v1/offer?${query.toString()}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("failed (404)") || message.includes("\"errorId\":25713")) return null;
+    throw error;
+  }
+
+  const offers = Array.isArray(payload.offers) ? payload.offers : [];
+  const offer = offers.find((entry: any) =>
+    String(entry?.sku || "") === sku &&
+    String(entry?.marketplaceId || "") === settings.marketplace_id &&
+    String(entry?.format || "") === settings.listing_format
+  ) || offers[0];
+
+  if (!offer?.offerId) return null;
+  return {
+    offerId: String(offer.offerId),
+    listingId: offer?.listing?.listingId ? String(offer.listing.listingId) : null,
+    status: offer?.status ? String(offer.status) : null,
+  };
+}
+
 async function ensurePublicImageUrls(supabase: any, item: ItemRow, options: { copyMissing: boolean }): Promise<string[]> {
   const urls: string[] = [];
 
@@ -341,12 +444,12 @@ async function ensurePublicImageUrls(supabase: any, item: ItemRow, options: { co
     const filename = filenameFromPath(sourcePath);
     if (!filename) continue;
 
-    const publicPath = filename;
+    const publicPath = publicEbayPhotoPath(item, filename);
     const { data: publicInfo } = supabase.storage.from(PUBLIC_EBAY_PHOTO_BUCKET).getPublicUrl(publicPath);
     const publicUrl = publicInfo?.publicUrl;
     if (!publicUrl) continue;
 
-    const { data: existing } = await supabase.storage.from(PUBLIC_EBAY_PHOTO_BUCKET).list("", { search: filename });
+    const { data: existing } = await supabase.storage.from(PUBLIC_EBAY_PHOTO_BUCKET).list(item.id, { search: filename });
     if (!Array.isArray(existing) || !existing.some((file: any) => file.name === filename)) {
       if (!options.copyMissing) continue;
 
@@ -377,19 +480,28 @@ async function prepareItem(
   const sku = normalizeSku(item.barcode || "");
   if (!sku) throw new Error("Item is missing barcode/SKU.");
 
+  const sourceImageCount = collectPhotoPaths(item).length;
   const imageUrls = await ensurePublicImageUrls(supabase, item, { copyMissing: options.copyMissingPhotos });
-  if (!imageUrls.length) warnings.push("No public eBay image URLs were found.");
+  const imageReady = imageUrls.length > 0 || (sourceImageCount > 0 && !options.copyMissingPhotos);
+  if (!imageUrls.length && sourceImageCount === 0) warnings.push("No stock photo or public eBay image URL was found.");
 
-  const categoryId = chooseCategoryId(item, settings);
+  const categoryChoice = chooseCategory(item, settings);
+  const categoryId = categoryChoice.categoryId;
+  if (categoryChoice.source === "default") {
+    warnings.push("No matching eBay category rule or item override was found; set an eBay category before publishing.");
+  }
   const price = Number(item.sale_price || 0);
   if (price <= 0) warnings.push("Item has no sale price.");
-  const condition = normalizeEbayCondition(settings.default_condition);
-  if (condition !== settings.default_condition) warnings.push(`Unsupported eBay condition "${settings.default_condition || "blank"}"; using NEW.`);
+  const rawCondition = item.ebay_condition || settings.default_condition;
+  const condition = normalizeEbayCondition(rawCondition);
+  if (condition !== rawCondition) warnings.push(`Unsupported eBay condition "${rawCondition || "blank"}"; using NEW.`);
+  const aspects = buildAspects(item, categoryId);
+  const blockingReasons = collectPublishBlockingReasons(item, price, quantity, imageReady, categoryId, categoryChoice.source, aspects);
 
   const product: JsonRecord = {
     title: String(item.title || sku).slice(0, 80),
     description: item.description || item.title || sku,
-    aspects: buildAspects(item, categoryId),
+    aspects,
   };
   if (imageUrls.length) product.imageUrls = imageUrls;
 
@@ -405,7 +517,7 @@ async function prepareItem(
     product,
   };
 
-  const offerPayload = quantity > 0 && price > 0 ? {
+  const offerPayload = price > 0 ? {
     sku,
     marketplaceId: settings.marketplace_id,
     format: settings.listing_format,
@@ -428,7 +540,7 @@ async function prepareItem(
   } : null;
 
   const hash = await sha256({ inventoryPayload, offerPayload });
-  return { item, sku, quantity, imageUrls, categoryId, inventoryPayload, offerPayload, hash, warnings };
+  return { item, sku, quantity, imageUrls, sourceImageCount, categoryId, categorySource: categoryChoice.source, inventoryPayload, offerPayload, hash, warnings, blockingReasons };
 }
 
 async function loadSettings(supabase: any): Promise<SyncSettings> {
@@ -442,13 +554,23 @@ async function loadSettings(supabase: any): Promise<SyncSettings> {
   return data as SyncSettings;
 }
 
-async function loadItems(supabase: any, itemIds: string[], limit: number): Promise<Array<ItemRow & { quantity: number }>> {
+async function loadItems(supabase: any, itemIds: string[], limit: number, dirtyOnly = true): Promise<Array<ItemRow & { quantity: number }>> {
+  if (!itemIds.length) {
+    const { data: candidateRows, error: candidateError } = await supabase.rpc("get_ebay_sync_candidate_item_ids", {
+      _limit: limit,
+      _dirty_only: dirtyOnly,
+    });
+    if (candidateError) throw new Error(`Could not load eBay sync candidates: ${candidateError.message}`);
+    itemIds = (candidateRows || []).map((row: any) => String(row.item_id || "")).filter(Boolean);
+    if (!itemIds.length) return [];
+  }
+
   let query = supabase
     .from("item_types")
-    .select("id,title,description,sale_price,barcode,photos,photo_url,categories,weight,stone_type,item_length,deleted_at")
+    .select("id,title,description,sale_price,barcode,photos,photo_url,categories,weight,metal,purity_basis_points,stone_type,item_length,ebay_sync_enabled,ebay_category_id,ebay_condition,ebay_aspects,deleted_at")
     .is("deleted_at", null)
+    .neq("ebay_sync_enabled", false)
     .not("barcode", "is", null)
-    .order("created_at", { ascending: false })
     .limit(limit);
 
   if (itemIds.length) query = query.in("id", itemIds);
@@ -456,16 +578,12 @@ async function loadItems(supabase: any, itemIds: string[], limit: number): Promi
   const { data: items, error } = await query;
   if (error) throw new Error(`Could not load items: ${error.message}`);
 
-  const rows = (items || []) as ItemRow[];
+  const rows = ((items || []) as ItemRow[])
+    .filter((item) => String(item.barcode || "").trim());
   const ids = rows.map((row) => row.id);
   if (!ids.length) return [];
 
-  const { data: stockRows, error: stockError } = await supabase
-    .from("item_stock_locations")
-    .select("item_id,quantity")
-    .in("item_id", ids);
-
-  if (stockError) throw new Error(`Could not load stock quantities: ${stockError.message}`);
+  const stockRows = await loadRowsByItemIds(supabase, "item_stock_locations", ids, "item_id,quantity");
 
   const quantityByItem = new Map<string, number>();
   for (const row of stockRows || []) {
@@ -473,6 +591,124 @@ async function loadItems(supabase: any, itemIds: string[], limit: number): Promi
   }
 
   return rows.map((item) => ({ ...item, quantity: quantityByItem.get(item.id) || 0 }));
+}
+
+function linkStatusForResult(status: unknown): string {
+  const value = String(status || "").trim();
+  if (value === "error") return "error";
+  if (value === "out_of_stock") return "out_of_stock";
+  if (value === "skipped") return "skipped";
+  if (value === "inventory_only") return "pending";
+  if (value === "ready") return "pending";
+  if (value === "synced") return "synced";
+  return "pending";
+}
+
+function cleanWarnings(warnings: unknown): string[] {
+  return Array.isArray(warnings)
+    ? warnings.map((entry) => String(entry || "").trim()).filter(Boolean)
+    : [];
+}
+
+function preparedImageCount(item: PreparedItem): number {
+  return Math.max(item.imageUrls.length, item.sourceImageCount);
+}
+
+function chunkArray<T>(entries: T[], size = SUPABASE_IN_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < entries.length; index += size) {
+    chunks.push(entries.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function loadRowsByItemIds(supabase: any, table: string, itemIds: string[], columns = "*"): Promise<any[]> {
+  if (!itemIds.length) return [];
+  const rows: any[] = [];
+
+  for (const chunk of chunkArray(itemIds)) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in("item_id", chunk);
+
+    if (error) throw new Error(`Could not load ${table}: ${error.message}`);
+    rows.push(...(data || []));
+  }
+
+  return rows;
+}
+
+async function loadEbayLinks(supabase: any, itemIds: string[]): Promise<any[]> {
+  if (!itemIds.length) return [];
+  const rows: any[] = [];
+
+  for (const chunk of chunkArray(itemIds)) {
+    const { data, error } = await supabase
+      .from("ebay_inventory_links")
+      .select("*")
+      .in("item_type_id", chunk);
+
+    if (error) throw new Error(`Could not load eBay links: ${error.message}`);
+    rows.push(...(data || []));
+  }
+
+  return rows;
+}
+
+async function recordEbayLinkState(supabase: any, payload: {
+  itemTypeId: string;
+  sku: string | null;
+  runId: string | null;
+  mode: string;
+  status: string;
+  publishReady?: boolean | null;
+  warnings?: string[];
+  error?: string | null;
+  categoryId?: string | null;
+  categorySource?: string | null;
+  imageCount?: number | null;
+  quantity?: number | null;
+  price?: string | number | null;
+  offerId?: string | null;
+  listingId?: string | null;
+  syncedAt?: string | null;
+  inventoryHash?: string | null;
+  lastPayload?: JsonRecord | null;
+  lastResponse?: JsonRecord | null;
+  syncDirty?: boolean | null;
+  dirtyReason?: string | null;
+}) {
+  const sku = String(payload.sku || "").trim();
+  if (!payload.itemTypeId || !sku) return;
+
+  await supabase.from("ebay_inventory_links").upsert({
+    item_type_id: payload.itemTypeId,
+    sku,
+    offer_id: payload.offerId || null,
+    listing_id: payload.listingId || null,
+    status: linkStatusForResult(payload.status),
+    last_inventory_hash: payload.inventoryHash || undefined,
+    last_synced_at: payload.syncedAt || undefined,
+    last_error: payload.error || null,
+    last_payload: payload.lastPayload || undefined,
+    last_response: payload.lastResponse || undefined,
+    publish_ready: payload.publishReady ?? null,
+    last_warnings: cleanWarnings(payload.warnings),
+    last_status_detail: payload.status,
+    last_category_id: payload.categoryId || null,
+    last_category_source: payload.categorySource || null,
+    last_image_count: Number.isFinite(Number(payload.imageCount)) ? Number(payload.imageCount) : null,
+    last_quantity: Number.isFinite(Number(payload.quantity)) ? Number(payload.quantity) : null,
+    last_price: payload.price === null || payload.price === undefined ? null : toMoney(payload.price),
+    last_checked_at: new Date().toISOString(),
+    last_run_id: payload.runId || null,
+    last_sync_mode: payload.mode,
+    sync_dirty: typeof payload.syncDirty === "boolean" ? payload.syncDirty : undefined,
+    dirty_reason: typeof payload.syncDirty === "boolean" ? payload.dirtyReason || null : undefined,
+    dirty_at: typeof payload.syncDirty === "boolean" && payload.syncDirty ? new Date().toISOString() : undefined,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "item_type_id" });
 }
 
 Deno.serve(async (req) => {
@@ -491,7 +727,9 @@ Deno.serve(async (req) => {
     const dryRun = body.dryRun !== false;
     const publishRequested = body.publish === true;
     const itemIds = Array.isArray(body.itemIds) ? body.itemIds.map(String).filter(Boolean) : [];
-    const limit = Math.min(Math.max(Number(body.limit || 25), 1), 100);
+    const limit = Math.min(Math.max(Number(body.limit || 25), 1), MAX_SYNC_LIMIT);
+    const dirtyOnly = body.dirtyOnly !== false;
+    const skipUnchanged = body.skipUnchanged !== false;
     const mode = dryRun ? "dry_run" : publishRequested ? "publish" : "sync";
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -528,15 +766,11 @@ Deno.serve(async (req) => {
     if (runError) throw new Error(`Could not create sync run: ${runError.message}`);
     runId = run.id;
 
-    const items = await loadItems(supabase, itemIds, limit);
-    const linksResult = await supabase
-      .from("ebay_inventory_links")
-      .select("*")
-      .in("item_type_id", items.map((item) => item.id));
-    if (linksResult.error) throw new Error(`Could not load eBay links: ${linksResult.error.message}`);
-
-    const linkByItem = new Map<string, any>((linksResult.data || []).map((link: any) => [link.item_type_id, link]));
+    const items = await loadItems(supabase, itemIds, limit, dirtyOnly);
+    const links = await loadEbayLinks(supabase, items.map((item) => item.id));
+    const linkByItem = new Map<string, any>(links.map((link: any) => [link.item_type_id, link]));
     const prepared: PreparedItem[] = [];
+    const ebayWork: PreparedItem[] = [];
     const results: JsonRecord[] = [];
     let skipped = 0;
     let errors = 0;
@@ -547,67 +781,158 @@ Deno.serve(async (req) => {
         const next = await prepareItem(supabase, item, item.quantity, settings, { copyMissingPhotos: !dryRun });
         prepared.push(next);
         if (dryRun) {
+          const status = next.quantity <= 0 ? "out_of_stock" : next.offerPayload ? "ready" : "inventory_only";
+          const warnings = [...next.warnings, ...next.blockingReasons.map((reason) => `Publish readiness: ${reason}.`)];
+          const publishReady = next.blockingReasons.length === 0;
+          await recordEbayLinkState(supabase, {
+            itemTypeId: item.id,
+            sku: next.sku,
+            runId,
+            mode,
+            status,
+            publishReady,
+            warnings,
+            categoryId: next.categoryId,
+            categorySource: next.categorySource,
+            imageCount: preparedImageCount(next),
+            quantity: next.quantity,
+            price: toMoney(item.sale_price),
+          });
           results.push({
             itemTypeId: item.id,
             sku: next.sku,
             title: item.title,
             quantity: next.quantity,
             categoryId: next.categoryId,
+            categorySource: next.categorySource,
             price: toMoney(item.sale_price),
-            imageCount: next.imageUrls.length,
-            status: next.offerPayload ? "ready" : "inventory_only",
-            warnings: next.warnings,
+            imageCount: preparedImageCount(next),
+            status,
+            publishReady,
+            warnings,
           });
+        } else {
+          const link = linkByItem.get(item.id);
+          const isUnchanged = Boolean(
+            skipUnchanged &&
+            link?.last_inventory_hash &&
+            String(link.last_inventory_hash) === next.hash &&
+            link?.sync_dirty !== true &&
+            (!publishRequested || link?.listing_id)
+          );
+
+          if (isUnchanged) {
+            skipped++;
+            await recordEbayLinkState(supabase, {
+              itemTypeId: item.id,
+              sku: next.sku,
+              runId,
+              mode,
+              status: "skipped",
+              publishReady: next.blockingReasons.length === 0,
+              warnings: ["Skipped because the eBay payload is unchanged."],
+              categoryId: next.categoryId,
+              categorySource: next.categorySource,
+              imageCount: preparedImageCount(next),
+              quantity: next.quantity,
+              price: toMoney(item.sale_price),
+              inventoryHash: next.hash,
+              syncDirty: false,
+            });
+            results.push({
+              itemTypeId: item.id,
+              sku: next.sku,
+              title: item.title,
+              quantity: next.quantity,
+              categoryId: next.categoryId,
+              categorySource: next.categorySource,
+              price: toMoney(item.sale_price),
+              imageCount: preparedImageCount(next),
+              status: "skipped",
+              publishReady: next.blockingReasons.length === 0,
+              warnings: ["unchanged"],
+            });
+          } else {
+            ebayWork.push(next);
+          }
         }
       } catch (error) {
         errors++;
+        const message = error instanceof Error ? error.message : "Unknown preparation error";
+        await recordEbayLinkState(supabase, {
+          itemTypeId: item.id,
+          sku: item.barcode,
+          runId,
+          mode,
+          status: "error",
+          publishReady: false,
+          warnings: [message],
+          error: message,
+          quantity: item.quantity,
+          price: toMoney(item.sale_price),
+        });
         results.push({
           itemTypeId: item.id,
           sku: item.barcode,
           title: item.title,
           status: "error",
-          error: error instanceof Error ? error.message : "Unknown preparation error",
+          error: message,
         });
       }
     }
 
-    if (!dryRun && prepared.length) {
+    if (!dryRun && ebayWork.length) {
       const token = await getEbayAccessToken();
 
-      for (let index = 0; index < prepared.length; index += 25) {
-        const chunk = prepared.slice(index, index + 25);
+      for (let index = 0; index < ebayWork.length; index += 25) {
+        const chunk = ebayWork.slice(index, index + 25);
         await ebayRequest(token, "POST", "/sell/inventory/v1/bulk_create_or_replace_inventory_item", {
           requests: chunk.map((entry) => entry.inventoryPayload),
         });
       }
 
-      for (const entry of prepared) {
+      for (const entry of ebayWork) {
         const existingLink = linkByItem.get(entry.item.id);
         const status = entry.quantity <= 0 ? "out_of_stock" : "synced";
 
         try {
-          let offerId = existingLink?.offer_id || null;
+          let offerId = existingLink?.offer_id ? String(existingLink.offer_id) : "";
+          let listingId = existingLink?.listing_id ? String(existingLink.listing_id) : "";
+          let matchedExistingOffer: JsonRecord | null = null;
           let offerResponse: JsonRecord = {};
           let publishResponse: JsonRecord = {};
 
           if (entry.offerPayload) {
+            if (!offerId) {
+              const existingOffer = await findExistingEbayOffer(token, settings, entry.sku);
+              if (existingOffer) {
+                offerId = existingOffer.offerId;
+                listingId = existingOffer.listingId || listingId;
+                matchedExistingOffer = { ...existingOffer };
+              }
+            }
+
             if (offerId) {
-              offerResponse = await ebayRequest(token, "PUT", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, entry.offerPayload);
-            } else {
+              const updateResponse = await ebayRequest(token, "PUT", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, entry.offerPayload);
+              offerResponse = matchedExistingOffer ? { matchedExistingOffer, update: updateResponse } : updateResponse;
+            } else if (entry.quantity > 0) {
               offerResponse = await ebayRequest(token, "POST", "/sell/inventory/v1/offer", entry.offerPayload);
               offerId = String(offerResponse.offerId || "");
             }
 
-            if (publishAllowed && offerId && !existingLink?.listing_id) {
+            if (publishAllowed && offerId && !listingId) {
+              if (entry.blockingReasons.length) {
+                throw new Error(`Item is not ready to publish: ${entry.blockingReasons.join(", ")}`);
+              }
               publishResponse = await ebayRequest(token, "POST", `/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`);
+              listingId = String((publishResponse as any).listingId || listingId || "");
             }
           }
 
-          const listingId = String((publishResponse as any).listingId || existingLink?.listing_id || "");
           await supabase.from("ebay_inventory_links").upsert({
             item_type_id: entry.item.id,
             sku: entry.sku,
-            offer_id: offerId,
+            offer_id: offerId || null,
             listing_id: listingId || null,
             status,
             last_inventory_hash: entry.hash,
@@ -621,6 +946,20 @@ Deno.serve(async (req) => {
               offer: offerResponse,
               publish: publishResponse,
             },
+            publish_ready: entry.blockingReasons.length === 0,
+            last_warnings: entry.blockingReasons,
+            last_status_detail: status,
+            last_category_id: entry.categoryId,
+            last_category_source: entry.categorySource,
+            last_image_count: preparedImageCount(entry),
+            last_quantity: entry.quantity,
+            last_price: toMoney(entry.item.sale_price),
+            last_checked_at: new Date().toISOString(),
+            last_run_id: runId,
+            last_sync_mode: mode,
+            sync_dirty: false,
+            dirty_reason: null,
+            dirty_at: null,
             updated_at: new Date().toISOString(),
           }, { onConflict: "item_type_id" });
 
@@ -629,9 +968,14 @@ Deno.serve(async (req) => {
             itemTypeId: entry.item.id,
             sku: entry.sku,
             status,
-            offerId,
+            categoryId: entry.categoryId,
+            categorySource: entry.categorySource,
+            offerId: offerId || null,
             listingId: listingId || null,
             published: Boolean((publishResponse as any).listingId),
+            matchedExistingListing: Boolean(matchedExistingOffer),
+            publishReady: entry.blockingReasons.length === 0,
+            warnings: entry.blockingReasons,
           });
         } catch (error) {
           errors++;
@@ -645,6 +989,20 @@ Deno.serve(async (req) => {
               inventory: entry.inventoryPayload,
               offer: entry.offerPayload,
             },
+            publish_ready: false,
+            last_warnings: [message],
+            last_status_detail: "error",
+            last_category_id: entry.categoryId,
+            last_category_source: entry.categorySource,
+            last_image_count: preparedImageCount(entry),
+            last_quantity: entry.quantity,
+            last_price: toMoney(entry.item.sale_price),
+            last_checked_at: new Date().toISOString(),
+            last_run_id: runId,
+            last_sync_mode: mode,
+            sync_dirty: true,
+            dirty_reason: "last sync failed",
+            dirty_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           }, { onConflict: "item_type_id" });
           results.push({
@@ -652,7 +1010,8 @@ Deno.serve(async (req) => {
             sku: entry.sku,
             title: entry.item.title,
             categoryId: entry.categoryId,
-            imageCount: entry.imageUrls.length,
+            categorySource: entry.categorySource,
+            imageCount: preparedImageCount(entry),
             status: "error",
             error: message,
           });

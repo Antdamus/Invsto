@@ -241,8 +241,21 @@ body {
   display: grid;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 14px;
   border-radius: 16px;
+}
+
+.team-task-card-head,
+.team-task-event-head {
+  min-width: 0;
+}
+
+.team-task-card-head > div,
+.team-task-event-head > div {
+  min-width: 0;
 }
 
 .team-task-card.is-urgent {
@@ -280,7 +293,9 @@ body {
   display: block;
   color: var(--task-text);
   font-size: 1.05rem;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .team-task-card-head span,
@@ -290,6 +305,10 @@ body {
   color: var(--task-muted);
   font-size: 0.88rem;
   font-weight: 800;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .team-task-meta,
@@ -302,6 +321,7 @@ body {
 
 .team-task-meta span,
 .team-task-photo-links button {
+  max-width: 100%;
   min-height: 30px;
   border-radius: 999px;
   padding: 5px 10px;
@@ -309,6 +329,8 @@ body {
   background: rgba(255, 255, 255, 0.04);
   color: var(--task-muted);
   font-weight: 900;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .team-task-meta .team-task-source {

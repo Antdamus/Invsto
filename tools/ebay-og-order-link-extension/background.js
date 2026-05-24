@@ -7,6 +7,7 @@
   const PENDING_RETURN_PREFIX = "ogPendingReturn:";
   const PENDING_RETURN_MESSAGE_PREFIX = "ogPendingReturnMessage:";
   const PENDING_VIDEO_RECEIPT_PHOTO_PREFIX = "ogPendingVideoReceiptPhoto:";
+  const PENDING_CANCEL_PROOF_PREFIX = "ogPendingCancelProof:";
   const DOWNLOAD_CAPTURE_TIMEOUT_MS = 45000;
   const REPORT_DOWNLOAD_CAPTURE_TIMEOUT_MS = 180000;
   const APP_ACK_TIMEOUT_MS = 300000;
@@ -18,6 +19,7 @@
   const appReturnAcks = new Map();
   const appReturnMessageAcks = new Map();
   const appVideoReceiptPhotoAcks = new Map();
+  const appCancelProofAcks = new Map();
   let pendingPriorityCache = null;
   let pendingPriorityCacheAt = 0;
   const PENDING_PRIORITY_CACHE_TTL_MS = 15000;
@@ -211,6 +213,13 @@
     return `video-receipt-photo:${itemNumber || "item"}:${eventId || "video"}:${Date.now()}`;
   }
 
+  function buildCancelProofTransferId(proofTransfer = {}) {
+    const data = proofTransfer.metadata || {};
+    const orderNumber = String(data.orderNumber || data.orderId || data.omsOrderId || "order").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    const cancelId = String(data.cancelId || "cancel").replace(/[^a-z0-9._-]/gi, "-").slice(0, 60);
+    return `cancel-proof:${orderNumber || "order"}:${cancelId || "cancel"}:${Date.now()}`;
+  }
+
   async function getAppUrl() {
     const stored = await chrome.storage.sync.get(APP_URL_KEY);
     return normalizeUrl(stored[APP_URL_KEY]);
@@ -266,6 +275,16 @@
     });
   }
 
+  async function storePendingCancelProof(transferId, proofTransfer) {
+    await chrome.storage.local.set({
+      [`${PENDING_CANCEL_PROOF_PREFIX}${transferId}`]: {
+        ...proofTransfer,
+        transferId,
+        relayedAt: new Date().toISOString(),
+      },
+    });
+  }
+
   async function getPendingLabel(transferId) {
     const key = `${PENDING_LABEL_PREFIX}${transferId}`;
     const stored = await chrome.storage.local.get(key);
@@ -296,6 +315,12 @@
     return stored[key] || null;
   }
 
+  async function getPendingCancelProof(transferId) {
+    const key = `${PENDING_CANCEL_PROOF_PREFIX}${transferId}`;
+    const stored = await chrome.storage.local.get(key);
+    return stored[key] || null;
+  }
+
   async function removePendingLabel(transferId) {
     await chrome.storage.local.remove(`${PENDING_LABEL_PREFIX}${transferId}`);
   }
@@ -314,6 +339,10 @@
 
   async function removePendingVideoReceiptPhoto(transferId) {
     await chrome.storage.local.remove(`${PENDING_VIDEO_RECEIPT_PHOTO_PREFIX}${transferId}`);
+  }
+
+  async function removePendingCancelProof(transferId) {
+    await chrome.storage.local.remove(`${PENDING_CANCEL_PROOF_PREFIX}${transferId}`);
   }
 
   function waitForAppTransferAck(transferId) {
@@ -421,6 +450,27 @@
     });
   }
 
+  function waitForAppCancelProofAck(transferId) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        appCancelProofAcks.delete(transferId);
+        resolve({
+          ok: false,
+          transferId,
+          error: "OG Pending Orders opened, but did not confirm the cancellation proof within 5 minutes.",
+        });
+      }, APP_ACK_TIMEOUT_MS);
+
+      appCancelProofAcks.set(transferId, {
+        resolve: (status) => {
+          clearTimeout(timer);
+          appCancelProofAcks.delete(transferId);
+          resolve(status);
+        },
+      });
+    });
+  }
+
   async function handleAppTransferStatus(status = {}, sender = null) {
     const transferId = status.transferId || "";
     if (!transferId) return;
@@ -486,7 +536,18 @@
     if (!transferId) return;
     if (status.phase === "started") return;
     if (status.ok) await removePendingVideoReceiptPhoto(transferId);
+    if (status.ok && status.tabId) await focusTab(status.tabId);
     const waiter = appVideoReceiptPhotoAcks.get(transferId);
+    if (waiter) waiter.resolve(status);
+  }
+
+  async function handleAppCancelProofStatus(status = {}) {
+    const transferId = status.transferId || "";
+    if (!transferId) return;
+    if (status.phase === "started") return;
+    if (status.ok) await removePendingCancelProof(transferId);
+    if (status.ok && status.tabId) await focusTab(status.tabId);
+    const waiter = appCancelProofAcks.get(transferId);
     if (waiter) waiter.resolve(status);
   }
 
@@ -830,6 +891,18 @@
     url.searchParams.set("videoReceiptPhotoTransferId", payload.transferId);
     if (payload.metadata?.itemNumber) url.searchParams.set("itemNumber", payload.metadata.itemNumber);
     if (payload.metadata?.orderNumber) url.searchParams.set("orderId", payload.metadata.orderNumber);
+    return url;
+  }
+
+  function buildCancelProofPageUrl(appUrl, payload, pageName = "pending-orders.html") {
+    const url = new URL(appUrl.toString());
+    if (pageName) {
+      url.pathname = url.pathname.replace(/[^/]*$/, pageName);
+    }
+    url.searchParams.set("source", "ebay");
+    url.searchParams.set("cancelProofTransferId", payload.transferId);
+    if (payload.metadata?.orderNumber) url.searchParams.set("orderId", payload.metadata.orderNumber);
+    if (payload.metadata?.cancelId) url.searchParams.set("cancelId", payload.metadata.cancelId);
     return url;
   }
 
@@ -1234,6 +1307,62 @@
     };
   }
 
+  async function deliverCancelProofToTab(tab, payload) {
+    const appAckPromise = waitForAppCancelProofAck(payload.transferId);
+    await chrome.tabs.sendMessage(tab.id, { type: "OG_EBAY_CANCEL_PROOF_TRANSFER", payload });
+    return appAckPromise;
+  }
+
+  async function openCancelProofPageAndWait(appUrl, payload, existingTab = null) {
+    const appAckPromise = waitForAppCancelProofAck(payload.transferId);
+    const url = buildCancelProofPageUrl(appUrl, payload);
+    await openTransferUrl(url, existingTab);
+    return appAckPromise;
+  }
+
+  async function relayCancelProofToApp(proofTransfer) {
+    const appUrl = await getAppUrl();
+    if (!appUrl) throw new Error("Set the OG Pending Orders URL in the extension options first.");
+
+    const transferId = buildCancelProofTransferId(proofTransfer);
+    const payload = { ...proofTransfer, transferId };
+    await storePendingCancelProof(transferId, payload);
+
+    const tabs = await findAppTabs(appUrl);
+    const pendingTab = tabs.find((tab) => {
+      const tabUrl = normalizeUrl(tab?.url);
+      return tabUrl?.origin === appUrl.origin && /\/pending-orders\.html$/i.test(tabUrl.pathname);
+    });
+
+    if (pendingTab?.id) {
+      try {
+        const ack = await deliverCancelProofToTab(pendingTab, payload);
+        if (ack?.ok) await focusTab(pendingTab.id);
+        return { ...ack, transferId, delivered: true, opened: false };
+      } catch (error) {
+        const ack = await openCancelProofPageAndWait(appUrl, payload, pendingTab);
+        return {
+          ...ack,
+          transferId,
+          delivered: false,
+          opened: true,
+          reusedTab: true,
+          recoveredFromMissingBridge: /receiving end|connection/i.test(error?.message || ""),
+        };
+      }
+    }
+
+    const reusableTab = tabs[0] || null;
+    const ack = await openCancelProofPageAndWait(appUrl, payload, reusableTab);
+    return {
+      ...ack,
+      transferId,
+      delivered: false,
+      opened: true,
+      reusedTab: Boolean(reusableTab),
+    };
+  }
+
   async function captureVideoReceiptFrame(payload = {}, sender = null) {
     const tab = sender?.tab;
     if (!tab?.windowId) throw new Error("The video receipt tab was not available for screenshot capture.");
@@ -1256,6 +1385,32 @@
         dataUrl,
         viewport: payload.viewport || null,
         videoRect: payload.videoRect || null,
+        capturedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  async function captureCancelConfirmationFrame(payload = {}, sender = null) {
+    const tab = sender?.tab;
+    if (!tab?.windowId) throw new Error("The eBay cancellation confirmation tab was not available for screenshot capture.");
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    if (!dataUrl) throw new Error("Chrome did not return a screenshot for the cancellation confirmation.");
+    const base64 = String(dataUrl).split(",")[1] || "";
+    if (!base64) throw new Error("The screenshot payload was empty.");
+    return relayCancelProofToApp({
+      metadata: {
+        ...(payload.metadata || {}),
+        source: "ebay-cancel-confirmation",
+        pageUrl: payload.pageUrl || tab.url || "",
+        pageTitle: payload.pageTitle || tab.title || "",
+        capturedAt: new Date().toISOString(),
+      },
+      screenshot: {
+        source: "chrome-visible-tab",
+        mimeType: "image/png",
+        base64,
+        dataUrl,
+        viewport: payload.viewport || null,
         capturedAt: new Date().toISOString(),
       },
     });
@@ -1577,6 +1732,16 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_CANCEL_PROOF_TRANSFER_STATUS") {
+      handleAppCancelProofStatus({
+        ...(message.payload || {}),
+        tabId: _sender?.tab?.id || message.payload?.tabId || null,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_SEND_AWAITING_REPORT") {
       relayAwaitingReportToApp(message.payload)
         .then(sendResponse)
@@ -1614,6 +1779,13 @@
 
     if (message.type === "OG_EBAY_CAPTURE_VIDEO_RECEIPT_FRAME") {
       captureVideoReceiptFrame(message.payload || {}, _sender)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CAPTURE_CANCEL_CONFIRMATION") {
+      captureCancelConfirmationFrame(message.payload || {}, _sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;
@@ -1684,6 +1856,13 @@
       return true;
     }
 
+    if (message.type === "OG_EBAY_GET_PENDING_CANCEL_PROOF") {
+      getPendingCancelProof(message.transferId)
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
     if (message.type === "OG_EBAY_CLEAR_PENDING_LABEL") {
       removePendingLabel(message.transferId)
         .then(() => sendResponse({ ok: true }))
@@ -1714,6 +1893,13 @@
 
     if (message.type === "OG_EBAY_CLEAR_PENDING_VIDEO_RECEIPT_PHOTO") {
       removePendingVideoReceiptPhoto(message.transferId)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+      return true;
+    }
+
+    if (message.type === "OG_EBAY_CLEAR_PENDING_CANCEL_PROOF") {
+      removePendingCancelProof(message.transferId)
         .then(() => sendResponse({ ok: true }))
         .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
       return true;

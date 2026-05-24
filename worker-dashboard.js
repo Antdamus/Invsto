@@ -326,6 +326,7 @@ function getWorkerReturnCase(task = {}) {
     ? task.ebay_return_cases[0] || {}
     : task.ebay_return_cases || {};
   return {
+    ...embedded,
     order_number: task.order_number || embedded.order_number || "",
     ebay_return_id: task.ebay_return_id || embedded.ebay_return_id || "",
     buyer_username: task.buyer_username || embedded.buyer_username || "",
@@ -333,16 +334,67 @@ function getWorkerReturnCase(task = {}) {
   };
 }
 
+function getWorkerReturnPayload(task = {}) {
+  const returnCase = getWorkerReturnCase(task);
+  return {
+    ...(task.metadata || {}),
+    ...(returnCase.raw_payload || {}),
+  };
+}
+
+function firstWorkerReturnValue(...values) {
+  return values.find((value) => String(value || "").trim()) || "";
+}
+
+function getWorkerReturnAmount(task = {}) {
+  const payload = getWorkerReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstWorkerReturnValue(
+    payload.requestAmount,
+    detail.requestAmount,
+    payload.refundText,
+    detail.refundText,
+    payload.onHoldAmount,
+    detail.onHoldAmount
+  );
+}
+
+function getWorkerReturnComment(task = {}) {
+  const payload = getWorkerReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstWorkerReturnValue(
+    payload.buyerComment,
+    detail.buyerComment,
+    payload.comment,
+    payload.buyer_message,
+    task.question,
+    getWorkerReturnCase(task).notes
+  );
+}
+
+function getWorkerReturnItemLabel(task = {}) {
+  const payload = getWorkerReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstWorkerReturnValue(
+    payload.itemTitle,
+    detail.itemTitle,
+    payload.item_title,
+    payload.itemNumber,
+    detail.itemNumber,
+    "No item title captured"
+  );
+}
+
+function getWorkerReturnActionText(task = {}) {
+  const payload = getWorkerReturnPayload(task);
+  const detail = payload.returnDetails || {};
+  return firstWorkerReturnValue(payload.returnAction, detail.returnAction, payload.return_action);
+}
+
 async function fetchWorkerReturnTasks(userId) {
-  const dashboardQuery = await window.supabase
-    .rpc("list_my_ebay_return_tasks", { _limit: 6 });
-
-  if (!dashboardQuery.error) return dashboardQuery.data || [];
-
-  console.warn("Worker return task RPC failed, falling back to direct query:", dashboardQuery.error);
   const { data, error } = await window.supabase
     .from("ebay_return_tasks")
-    .select("id, task_type, title, question, status, priority, due_at, created_at, ebay_return_cases(order_number, ebay_return_id, buyer_username, return_reason)")
+    .select("id, task_type, title, question, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, metadata, ebay_return_cases(id, order_number, ebay_return_id, buyer_username, return_reason, return_tracking_number, status, opened_at, notes, raw_payload, case_type)")
     .eq("assigned_to_user_id", userId)
     .in("status", ["open", "assigned", "in_progress", "blocked", "deferred"])
     .order("created_at", { ascending: true })
@@ -377,20 +429,33 @@ async function loadWorkerReturnTasks(userId) {
 
   container.innerHTML = data.map((task) => {
     const returnCase = getWorkerReturnCase(task);
+    const returnId = returnCase.ebay_return_id || returnCase.id || "Return case";
+    const orderLabel = returnCase.order_number || (returnCase.case_type === "unmatched_legacy" ? "No OG order match" : "No order captured");
+    const amount = getWorkerReturnAmount(task) || "Not captured";
+    const reason = returnCase.return_reason || getWorkerReturnPayload(task).returnReason || "No reason captured";
+    const comment = getWorkerReturnComment(task) || "No buyer comment captured";
+    const itemLabel = getWorkerReturnItemLabel(task);
+    const actionText = getWorkerReturnActionText(task);
     const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
       <a class="urgent-order-card ${urgentClass}" href="ebay-returns.html?returnTaskId=${encodeURIComponent(task.id)}#return-work-queue">
         <div class="urgent-order-top">
           <div>
             <strong>${escapeHtml(returnCase.buyer_username || "eBay return")}</strong>
-            <span>${escapeHtml(returnCase.order_number || returnCase.ebay_return_id || "Return case")}</span>
+            <span>${escapeHtml(orderLabel)} / Return ${escapeHtml(returnId)}</span>
           </div>
           <span class="urgent-order-badge">${escapeHtml(getWorkerReturnTaskLabel(task))}</span>
         </div>
-        <small>${escapeHtml(task.question || task.title || returnCase.return_reason || "Return needs attention")}</small>
+        <div class="urgent-return-facts">
+          <span><small>Value</small><b>${escapeHtml(amount)}</b></span>
+          <span><small>Reason</small><b>${escapeHtml(reason)}</b></span>
+          <span><small>Due</small><b>${escapeHtml(task.due_at ? fmtDate(task.due_at) : "Not set")}</b></span>
+        </div>
+        <small class="urgent-return-comment"><b>Buyer:</b> ${escapeHtml(comment)}</small>
+        <small>${escapeHtml(itemLabel)}</small>
         <div class="urgent-order-meta">
           <span>${escapeHtml(task.status.replace(/_/g, " "))} / ${escapeHtml(task.priority)}</span>
-          <span>Due ${escapeHtml(task.due_at ? fmtDate(task.due_at) : "not set")}</span>
+          ${actionText ? `<span>${escapeHtml(actionText)}</span>` : ""}
         </div>
       </a>
     `;
@@ -495,7 +560,13 @@ async function loadWorkerTeamTasks(userId) {
     return;
   }
 
-  const { data, error } = await window.supabase.rpc("list_my_team_tasks", { _limit: 6 });
+  const { data, error } = await window.supabase
+    .from("team_tasks")
+    .select("id, task_type, title, description, status, priority, assigned_to_email, assigned_to_user_id, due_at, created_at, latest_note, latest_photo_count, created_by_email")
+    .eq("assigned_to_user_id", userId)
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
+    .order("created_at", { ascending: true })
+    .limit(6);
   if (error) {
     console.warn("Failed to load worker team tasks:", error);
     container.innerHTML = `<div class="urgent-orders-empty">Could not load assigned team tasks.</div>`;
