@@ -78,13 +78,21 @@
               <span class="eyebrow">Operational Console</span>
               <h2>Dashboard Basics</h2>
             </div>
-            <button type="button" id="refresh-operational-dashboard" class="secondary-btn">
-              <i data-lucide="refresh-cw"></i>
-              Refresh Dashboard
-            </button>
+            <div class="operational-dashboard-actions">
+              <button type="button" id="toggle-operational-dashboard" class="secondary-btn" aria-expanded="true" aria-controls="operational-dashboard-body">
+                <i data-lucide="chevron-up"></i>
+                Hide Dashboard
+              </button>
+              <button type="button" id="refresh-operational-dashboard" class="secondary-btn">
+                <i data-lucide="refresh-cw"></i>
+                Refresh Dashboard
+              </button>
+            </div>
           </div>
-          <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
-          <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
+          <div id="operational-dashboard-body" class="operational-dashboard-body">
+            <div id="operational-dashboard-status" class="workspace-status operational-dashboard-inline-status">Waiting for admin session.</div>
+            <div id="operational-dashboard" class="operational-dashboard" aria-live="polite"></div>
+          </div>
         </section>
 
         <section id="admin-diagnostics-drawer" class="admin-diagnostics-drawer hidden" aria-label="Admin diagnostics">
@@ -321,6 +329,13 @@
           </div>
           <div id="classification-inbox-shell" class="classification-inbox-shell">
             <aside class="classification-category-sidebar" aria-label="Classification categories">
+              <label class="category-sort-control" for="classification-category-sort">
+                <span>Category sort</span>
+                <select id="classification-category-sort">
+                  <option value="default">Default order</option>
+                  <option value="alphabetical">Alphabetical order</option>
+                </select>
+              </label>
               <div id="classification-category-list" class="classification-category-list"></div>
             </aside>
 

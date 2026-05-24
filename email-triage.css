@@ -123,6 +123,22 @@
   justify-content: space-between;
 }
 
+.operational-dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.operational-dashboard-body {
+  display: grid;
+  gap: 10px;
+}
+
+.operational-dashboard-section.is-collapsed {
+  padding-bottom: 10px;
+}
+
 .operational-dashboard-head h2 {
   margin: 2px 0 0;
   color: rgba(242,243,245,.96);
@@ -878,6 +894,36 @@
   border-right: 1px solid rgba(255,255,255,.08);
   background: rgba(255,255,255,.02);
   padding: 10px;
+}
+
+.category-sort-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.category-sort-control span {
+  color: rgba(242,243,245,.58);
+  font-size: .72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.category-sort-control select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px;
+  background: rgba(7,7,8,.94);
+  color: rgba(242,243,245,.94);
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+.category-sort-control select:focus-visible {
+  outline: 2px solid rgba(214,178,94,.72);
+  outline-offset: 2px;
 }
 
 .classification-category-list {

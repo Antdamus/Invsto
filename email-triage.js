@@ -82,6 +82,9 @@
     CATEGORY_GROUPS,
   } = window.EmailTriageClassifications;
 
+  const DASHBOARD_COLLAPSED_STORAGE_KEY = "og-email-triage-dashboard-collapsed";
+  const CATEGORY_SORT_STORAGE_KEY = "og-email-triage-category-sort";
+
   const els = {
     connect: document.getElementById("connect-outlook"),
     refresh: document.getElementById("refresh-messages"),
@@ -106,10 +109,14 @@
     classificationAdminDebug: document.getElementById("classification-admin-debug"),
     classificationAdminStatus: document.getElementById("classification-admin-status"),
     classificationAdminSummary: document.getElementById("classification-admin-summary"),
+    operationalDashboardSection: document.querySelector(".operational-dashboard-section"),
+    operationalDashboardToggle: document.getElementById("toggle-operational-dashboard"),
+    operationalDashboardBody: document.getElementById("operational-dashboard-body"),
     operationalDashboardRefresh: document.getElementById("refresh-operational-dashboard"),
     operationalDashboardStatus: document.getElementById("operational-dashboard-status"),
     operationalDashboard: document.getElementById("operational-dashboard"),
     classificationSort: document.getElementById("classification-sort"),
+    classificationCategorySort: document.getElementById("classification-category-sort"),
     classificationFiltersToggle: document.getElementById("classification-filters-toggle"),
     classificationFiltersLabel: document.getElementById("classification-filters-label"),
     classificationFilterPanel: document.getElementById("classification-filter-panel"),
@@ -123,9 +130,43 @@
     greeting: document.getElementById("admin-greeting"),
   };
 
+  function getStoredDashboardCollapsed() {
+    try {
+      return window.localStorage?.getItem(DASHBOARD_COLLAPSED_STORAGE_KEY) === "true";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function storeDashboardCollapsed(collapsed) {
+    try {
+      window.localStorage?.setItem(DASHBOARD_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+    } catch (error) {
+      // The toggle still works for this session if local storage is unavailable.
+    }
+  }
+
+  function getStoredCategorySortMode() {
+    try {
+      return window.localStorage?.getItem(CATEGORY_SORT_STORAGE_KEY) === "alphabetical" ? "alphabetical" : "default";
+    } catch (error) {
+      return "default";
+    }
+  }
+
+  function storeCategorySortMode(mode) {
+    try {
+      window.localStorage?.setItem(CATEGORY_SORT_STORAGE_KEY, mode === "alphabetical" ? "alphabetical" : "default");
+    } catch (error) {
+      // Category sorting remains available for the current session.
+    }
+  }
+
   const triageStore = createStore(createInitialState({
     data: normalizeAdminViewPayload({}),
     densityMode: getStoredDensityMode(),
+    categorySortMode: getStoredCategorySortMode(),
+    operationalDashboardCollapsed: getStoredDashboardCollapsed(),
   }));
   let adminClassificationState = triageStore.getState();
   triageStore.subscribe((state) => {
@@ -266,28 +307,70 @@
 
 
   function categoryMatchesGroup(classification, groupId) {
+    if (String(groupId || "").startsWith("category:")) {
+      const category = String(groupId).slice("category:".length);
+      return String(classification?.effective_category || classification?.category || "") === category;
+    }
     return categoryMatchesGroupBase(classification, groupId, CATEGORY_GROUPS);
   }
 
   function filteredClassifications(data, groupId, activeFilters = [], sortMode = "newest") {
+    if (String(groupId || "").startsWith("category:")) {
+      return sortedClassifications(data, sortMode).filter((classification) => (
+        categoryMatchesGroup(classification, groupId)
+        && matchesActiveFilters(classification, activeFilters)
+      ));
+    }
     return filteredClassificationsBase(data, groupId, activeFilters, sortMode, CATEGORY_GROUPS);
+  }
+
+  function getClassificationCategory(classification) {
+    return String(classification?.effective_category || classification?.category || "").trim();
+  }
+
+  function sidebarGroupCount(classifications, group, activeFilters) {
+    if (group.id === "all") {
+      return classifications.filter((classification) => matchesActiveFilters(classification, activeFilters)).length;
+    }
+    return classifications.filter((classification) => (
+      categoryMatchesGroup(classification, group.id)
+      && matchesActiveFilters(classification, activeFilters)
+    )).length;
+  }
+
+  function buildCategorySidebarGroups(data, categorySortMode = "default") {
+    const classifications = data.classifications || [];
+    const representedCategories = [...new Set(classifications.map(getClassificationCategory).filter(Boolean))];
+    const dynamicGroups = representedCategories.map((category) => ({
+      id: `category:${category}`,
+      label: humanizeValue(category),
+      categories: [category],
+      isDynamic: true,
+    }));
+    const groups = [...CATEGORY_GROUPS, ...dynamicGroups];
+
+    if (categorySortMode !== "alphabetical") return groups;
+
+    const allGroup = groups.filter((group) => group.id === "all");
+    const reviewGroup = groups.filter((group) => group.id === "human_review");
+    const sortedGroups = groups
+      .filter((group) => group.id !== "all" && group.id !== "human_review")
+      .sort((left, right) => left.label.localeCompare(right.label));
+    return [...allGroup, ...sortedGroups, ...reviewGroup];
   }
 
   function renderCategorySidebar(state, data) {
     if (!els.classificationCategoryList) return;
 
     const classifications = data.classifications || [];
-    els.classificationCategoryList.innerHTML = CATEGORY_GROUPS.map((group) => {
-      const count = group.id === "all"
-        ? classifications.filter((classification) => matchesActiveFilters(classification, state.activeFilters)).length
-        : classifications.filter((classification) => (
-          categoryMatchesGroup(classification, group.id)
-          && matchesActiveFilters(classification, state.activeFilters)
-        )).length;
+    const groups = buildCategorySidebarGroups(data, state.categorySortMode);
+    els.classificationCategoryList.innerHTML = groups.map((group) => {
+      const count = sidebarGroupCount(classifications, group, state.activeFilters);
       const active = state.selectedCategory === group.id;
+      const dynamicClass = group.isDynamic ? " is-dynamic" : "";
 
       return `
-        <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}" data-category-id="${escapeHtml(group.id)}">
+        <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}${dynamicClass}" data-category-id="${escapeHtml(group.id)}">
           <span>${escapeHtml(group.label)}</span>
           <b>${escapeHtml(count)}</b>
         </button>
@@ -1112,6 +1195,9 @@
     if (els.classificationSort && els.classificationSort.value !== state.sortMode) {
       els.classificationSort.value = state.sortMode;
     }
+    if (els.classificationCategorySort && els.classificationCategorySort.value !== state.categorySortMode) {
+      els.classificationCategorySort.value = state.categorySortMode;
+    }
     const activeFilterCount = state.activeFilters.length;
     const filtersExpanded = state.filtersExpanded === true;
     if (els.classificationFiltersLabel) {
@@ -1159,6 +1245,17 @@
 
   function renderOperationalDashboardPanel(state = triageStore.getState()) {
     if (!els.operationalDashboard) return;
+    const collapsed = state.operationalDashboardCollapsed === true;
+    if (els.operationalDashboardSection) {
+      els.operationalDashboardSection.classList.toggle("is-collapsed", collapsed);
+    }
+    if (els.operationalDashboardBody) {
+      els.operationalDashboardBody.hidden = collapsed;
+    }
+    if (els.operationalDashboardToggle) {
+      els.operationalDashboardToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      els.operationalDashboardToggle.innerHTML = `<i data-lucide="${collapsed ? "chevron-down" : "chevron-up"}"></i> ${collapsed ? "Show Dashboard" : "Hide Dashboard"}`;
+    }
     if (els.operationalDashboardRefresh) {
       els.operationalDashboardRefresh.disabled = state.operationalDashboardLoading === true;
       els.operationalDashboardRefresh.setAttribute("aria-busy", state.operationalDashboardLoading ? "true" : "false");
@@ -1982,6 +2079,12 @@
       }
     });
 
+    els.classificationCategorySort?.addEventListener("change", (event) => {
+      const categorySortMode = event.target.value === "alphabetical" ? "alphabetical" : "default";
+      storeCategorySortMode(categorySortMode);
+      setAdminClassificationState({ categorySortMode });
+    });
+
     els.classificationFiltersToggle?.addEventListener("click", () => {
       setAdminClassificationState({
         filtersExpanded: !adminClassificationState.filtersExpanded,
@@ -2046,6 +2149,11 @@
     });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.operationalDashboardRefresh?.addEventListener("click", () => loadOperationalDashboard(context));
+    els.operationalDashboardToggle?.addEventListener("click", () => {
+      const operationalDashboardCollapsed = !adminClassificationState.operationalDashboardCollapsed;
+      storeDashboardCollapsed(operationalDashboardCollapsed);
+      setOperationalDashboardState({ operationalDashboardCollapsed });
+    });
     els.toggleCategoryPanel?.addEventListener("click", () => {
       setAdminClassificationState({
         categoryPanelCollapsed: !adminClassificationState.categoryPanelCollapsed,
@@ -2059,6 +2167,7 @@
     bindClassificationInboxEvents(context);
 
     handleOutlookQueryNotice();
+    renderOperationalDashboardPanel(adminClassificationState);
     await loadAdminClassificationData(context);
     loadOperationalDashboard(context, { keepPrevious: false });
     loadSelectedDraftView(context);
