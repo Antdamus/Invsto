@@ -150,6 +150,31 @@ body {
   flex-wrap: wrap;
 }
 
+.team-task-view-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--task-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.team-task-view-btn {
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--task-muted);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.team-task-view-btn.is-active {
+  background: rgba(157, 242, 189, 0.12);
+  color: var(--task-green);
+}
+
 .team-task-scope {
   display: inline-flex;
   align-items: center;
@@ -305,6 +330,63 @@ body {
   border: 1px solid rgba(157, 242, 189, 0.16);
   border-radius: 14px;
   background: rgba(157, 242, 189, 0.045);
+}
+
+.order-workflow-panel {
+  border-color: rgba(241, 214, 155, 0.2);
+  background: rgba(241, 214, 155, 0.045);
+}
+
+.order-workflow-list {
+  display: grid;
+  gap: 10px;
+}
+
+.order-workflow-item {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid var(--task-line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.order-workflow-item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.order-workflow-item-head strong {
+  color: var(--task-text);
+  overflow-wrap: anywhere;
+}
+
+.order-workflow-item p {
+  margin: 0;
+  color: var(--task-muted);
+}
+
+.order-workflow-mini-events {
+  display: grid;
+  gap: 6px;
+}
+
+.order-workflow-mini-event {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid var(--task-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.order-workflow-mini-event span {
+  color: var(--task-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .team-task-context-head {
