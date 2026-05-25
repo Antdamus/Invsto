@@ -11,11 +11,12 @@
   }
 
   function safetySummaryItems(data = {}) {
+    const counts = data.classification_counts || {};
     return [
-      { label: "Valid", value: data.validation_diagnostics?.valid_classifications },
-      { label: "Invalid", value: data.validation_diagnostics?.invalid_classifications },
+      { label: "Loaded Current Valid", value: counts.loaded_current_valid ?? data.classifications?.length },
+      { label: "Total Current Valid", value: counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
       { label: "Open Review", value: data.validation_diagnostics?.pending_human_review },
-      { label: "AI Review Flags", value: data.validation_diagnostics?.requires_human_review },
+      { label: "Invalid History", value: data.validation_diagnostics?.invalid_classifications },
     ];
   }
 

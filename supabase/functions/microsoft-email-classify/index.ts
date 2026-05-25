@@ -13,6 +13,7 @@ const VERIFIED_ORDER_CONTEXT_VERSION = "verified-ebay-order-context-v1";
 const HEAD_CHARS = 12000;
 const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
+const ADMIN_CATEGORY_TOTAL_SCAN_LIMIT = 1000;
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
@@ -1751,6 +1752,48 @@ async function countRows(supabase: ServiceClient, table: string, build: (query: 
   return count || 0;
 }
 
+function currentValidClassificationQuery(query: any) {
+  return query
+    .eq("source", "ai")
+    .eq("is_current", true)
+    .eq("validation_status", "valid");
+}
+
+function effectiveCategoryForAdminTotals(row: Record<string, any>) {
+  return String(row.operator_override_category || row.category || "").trim();
+}
+
+async function loadCurrentValidCategoryTotals(supabase: ServiceClient) {
+  const { data, error, count } = await currentValidClassificationQuery(
+    supabase
+      .from("email_message_classifications")
+      .select("category, operator_override_category, requires_human_review", { count: "exact" }),
+  )
+    .order("created_at", { ascending: false })
+    .range(0, ADMIN_CATEGORY_TOTAL_SCAN_LIMIT - 1);
+
+  if (error) throw new ClassifierError("admin_view_category_totals_failed", { phase: "admin_view_category_totals" });
+
+  const rows = (data || []) as Record<string, any>[];
+  const byCategory: Record<string, number> = {};
+  let humanReview = 0;
+  for (const row of rows) {
+    const category = effectiveCategoryForAdminTotals(row);
+    if (category) byCategory[category] = Number(byCategory[category] || 0) + 1;
+    if (row.requires_human_review === true) humanReview += 1;
+  }
+
+  const total = typeof count === "number" ? count : rows.length;
+  return {
+    total,
+    by_category: byCategory,
+    human_review: humanReview,
+    rows_loaded: rows.length,
+    scan_limit: ADMIN_CATEGORY_TOTAL_SCAN_LIMIT,
+    is_exact: typeof count === "number" && total === rows.length,
+  };
+}
+
 function safeMetadata(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[redacted_depth_limit]";
   if (value === null || value === undefined) return value;
@@ -2588,16 +2631,18 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     processingCount,
     succeededCount,
     failedCount,
-    validCount,
+    currentValidCount,
     invalidCount,
     reviewCount,
     pendingReviewCount,
     replayGeneratedCount,
+    categoryTotals,
   ] = await Promise.all([
-    supabase
-      .from("email_message_classifications")
-      .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, classification_run_id, input_version, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
-      .eq("source", "ai")
+    currentValidClassificationQuery(
+      supabase
+        .from("email_message_classifications")
+        .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, is_current, validation_status, classification_run_id, input_version, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at"),
+    )
       .order("created_at", { ascending: false })
       .limit(input.classificationLimit),
     supabase
@@ -2617,11 +2662,12 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "running")),
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "succeeded")),
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "failed")),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "valid")),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid")),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "invalid")),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("requires_human_review", true)),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("requires_human_review", true).eq("classification_review_state", "pending_review")),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid").eq("requires_human_review", true)),
+    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid").eq("requires_human_review", true).eq("classification_review_state", "pending_review")),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").like("input_version", "v1:classification_replay:%")),
+    loadCurrentValidCategoryTotals(supabase),
   ]);
 
   if (classificationsResult.error) throw new ClassifierError("admin_view_classifications_failed", { phase: "admin_view_classifications" });
@@ -2687,6 +2733,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
         recommended_action: row.recommended_action,
         requires_human_review: row.requires_human_review,
         safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
+        is_current: row.is_current === true,
         validation_status: row.validation_status,
         classification_run_id: row.classification_run_id,
         input_version: row.input_version,
@@ -2717,8 +2764,20 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
       succeeded: succeededCount,
       failed: failedCount,
     },
+    classification_counts: {
+      scope: "current_valid",
+      total_current_valid: currentValidCount,
+      loaded_current_valid: (classificationsResult.data || []).length,
+      current_limit_used: input.classificationLimit,
+      result_limited: currentValidCount > (classificationsResult.data || []).length,
+      category_totals: categoryTotals.by_category,
+      human_review_total: categoryTotals.human_review,
+      category_totals_are_exact: categoryTotals.is_exact,
+      category_total_rows_loaded: categoryTotals.rows_loaded,
+      category_total_scan_limit: categoryTotals.scan_limit,
+    },
     validation_diagnostics: {
-      valid_classifications: validCount,
+      valid_classifications: currentValidCount,
       invalid_classifications: invalidCount,
       requires_human_review: reviewCount,
       pending_human_review: pendingReviewCount,

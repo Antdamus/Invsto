@@ -121,6 +121,30 @@
     };
   }
 
+  function normalizeNumberMap(source = {}) {
+    if (!source || typeof source !== "object") return {};
+    return Object.entries(source).reduce((map, [key, value]) => {
+      map[key] = Number(value || 0);
+      return map;
+    }, {});
+  }
+
+  function normalizeClassificationCounts(source = {}, loadedRows = 0) {
+    const counts = source && typeof source === "object" ? source : {};
+    return {
+      scope: counts.scope || "current_valid",
+      total_current_valid: Number(counts.total_current_valid || 0),
+      loaded_current_valid: Number(counts.loaded_current_valid || loadedRows || 0),
+      current_limit_used: Number(counts.current_limit_used || 0),
+      result_limited: counts.result_limited === true,
+      category_totals: normalizeNumberMap(counts.category_totals),
+      human_review_total: Number(counts.human_review_total || 0),
+      category_totals_are_exact: counts.category_totals_are_exact === true,
+      category_total_rows_loaded: Number(counts.category_total_rows_loaded || 0),
+      category_total_scan_limit: Number(counts.category_total_scan_limit || 0),
+    };
+  }
+
   function normalizeSafety(source = {}) {
     const safety = source && typeof source === "object" ? source : {};
     return {
@@ -229,6 +253,10 @@
     const validationDiagnostics = source?.validation_diagnostics && typeof source.validation_diagnostics === "object"
       ? source.validation_diagnostics
       : {};
+    const classificationCounts = normalizeClassificationCounts(
+      source?.classification_counts || { total_current_valid: validationDiagnostics.valid_classifications },
+      classifications.length,
+    );
 
     return {
       classifications,
@@ -240,6 +268,7 @@
         succeeded: Number(queueSummary.succeeded || 0),
         failed: Number(queueSummary.failed || 0),
       },
+      classification_counts: classificationCounts,
       validation_diagnostics: {
         valid_classifications: Number(validationDiagnostics.valid_classifications || 0),
         invalid_classifications: Number(validationDiagnostics.invalid_classifications || 0),

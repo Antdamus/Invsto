@@ -209,7 +209,7 @@
     const classifications = data.classifications || [];
     return buildCategorySidebarGroups(data, state.categorySortMode, state.customCategoryOrder)
       .reduce((counts, group) => {
-        counts[group.id] = sidebarGroupCount(classifications, group, state.activeFilters);
+        counts[group.id] = sidebarGroupDisplayCount(data, classifications, group, state.activeFilters);
         return counts;
       }, {});
   }
@@ -421,6 +421,38 @@
     )).length;
   }
 
+  function exactCategoryTotalsAvailable(data, activeFilters = []) {
+    return activeFilters.length === 0 && data.classification_counts?.category_totals_are_exact === true;
+  }
+
+  function exactSidebarGroupCount(data, group) {
+    const counts = data.classification_counts || {};
+    if (group.id === "all") return Number(counts.total_current_valid || 0);
+    if (group.id === "human_review") return Number(counts.human_review_total || 0);
+
+    const categoryTotals = counts.category_totals || {};
+    const categoryEntries = Object.entries(categoryTotals);
+    const matchesCategory = (category) => {
+      const categoryKey = canonicalCategoryKey(category);
+      if (String(group.id || "").startsWith("category:")) {
+        return canonicalCategoryGroupId(categoryKey) === group.id;
+      }
+      const staticGroup = CATEGORY_GROUPS.find((item) => item.id === group.id);
+      return staticGroup
+        ? staticGroup.categories.map(canonicalCategoryKey).includes(categoryKey)
+        : false;
+    };
+
+    return categoryEntries.reduce((total, [category, value]) => (
+      matchesCategory(category) ? total + Number(value || 0) : total
+    ), 0);
+  }
+
+  function sidebarGroupDisplayCount(data, classifications, group, activeFilters = []) {
+    if (exactCategoryTotalsAvailable(data, activeFilters)) return exactSidebarGroupCount(data, group);
+    return sidebarGroupCount(classifications, group, activeFilters);
+  }
+
   function mergeCustomCategoryOrder(groups, customCategoryOrder = []) {
     const groupIds = new Set(groups.map((group) => group.id));
     const normalizedOrder = normalizeCustomCategoryOrderIds(customCategoryOrder);
@@ -434,7 +466,11 @@
 
   function buildCategorySidebarGroups(data, categorySortMode = "default", customCategoryOrder = []) {
     const classifications = data.classifications || [];
-    const representedCategories = [...new Set(classifications.map(getClassificationCategory).filter(Boolean))];
+    const totalCategories = Object.keys(data.classification_counts?.category_totals || {});
+    const representedCategories = [...new Set([
+      ...classifications.map(getClassificationCategory).filter(Boolean),
+      ...totalCategories.filter(Boolean),
+    ])];
     const mergedStaticAliasKeys = new Set(["return_requests", "shipping_labels", "marketing_or_promotion", "item_not_as_described"]);
     const dynamicGroupById = new Map();
     representedCategories.forEach((category) => {
@@ -585,12 +621,20 @@
       ? state.customCategoryOrderDraft
       : state.customCategoryOrder;
     const groups = buildCategorySidebarGroups(data, state.categorySortMode, activeCustomOrder);
+    const showingExactTotals = exactCategoryTotalsAvailable(data, state.activeFilters);
+    const countNote = showingExactTotals
+      ? "Counts are exact totals for current valid classifications."
+      : "Counts are loaded-view rows for the active filters.";
+    const countTitle = showingExactTotals
+      ? "Exact current valid classifications"
+      : "Loaded rows in the current filtered admin view";
+    const countSuffix = showingExactTotals ? "total" : "loaded";
     els.classificationCategoryList.classList.toggle("is-custom-order", customMode);
     els.classificationCategoryList.classList.toggle("is-editing-order", editingCustomOrder);
     els.classificationCategoryList.innerHTML = `
-      <p class="classification-loaded-count-note">Counts are loaded classification rows in this current admin view, not exact mailbox totals.</p>
+      <p class="classification-loaded-count-note">${escapeHtml(countNote)}</p>
     ` + groups.map((group, index) => {
-      const count = sidebarGroupCount(classifications, group, state.activeFilters);
+      const count = sidebarGroupDisplayCount(data, classifications, group, state.activeFilters);
       const active = canonicalGroupId(state.selectedCategory) === group.id;
       const dynamicClass = group.isDynamic ? " is-dynamic" : "";
       const moveControls = editingCustomOrder ? `
@@ -609,7 +653,7 @@
           ${moveControls}
           <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}${dynamicClass}" data-category-id="${escapeHtml(group.id)}">
             <span>${escapeHtml(group.label)}</span>
-            <b title="Loaded rows in the current admin view">${escapeHtml(count)} loaded</b>
+            <b title="${escapeHtml(countTitle)}">${escapeHtml(count)} ${escapeHtml(countSuffix)}</b>
           </button>
         </div>
       `;
@@ -1399,6 +1443,20 @@
     };
   }
 
+  function classificationAdminReadyStatus(data, emptyResults) {
+    const counts = data.classification_counts || {};
+    const loaded = Number(counts.loaded_current_valid ?? data.classifications?.length ?? 0);
+    const total = Number(counts.total_current_valid ?? 0);
+    if (!loaded && !total && emptyResults) {
+      return "Fetch succeeded. No current valid classifications returned yet.";
+    }
+    if (Number.isFinite(total) && total > 0) {
+      const limitedText = counts.result_limited === true ? " Result is limited by the admin view cap." : "";
+      return `Showing ${loaded} of ${total} current valid classifications.${limitedText}`;
+    }
+    return emptyResults ? "Fetch succeeded. No loaded current valid rows returned yet." : "Fetch succeeded. Browse loaded current valid rows below.";
+  }
+
   function renderAdminClassificationDebug(state) {
     if (!els.classificationAdminDebug) return;
 
@@ -1426,7 +1484,7 @@
     const statusText = {
       idle: "Waiting for admin session.",
       loading: "Fetching admin_view payload.",
-      ready: state.empty_results ? "Fetch succeeded. No loaded classification rows returned yet." : "Fetch succeeded. Browse loaded classification rows below.",
+      ready: classificationAdminReadyStatus(data, state.empty_results),
       fetch_failed: `Fetch failed: ${state.error || "unknown_error"}`,
       unauthorized: "Unauthorized. Sign in again with an active admin account.",
     }[state.status] || "Waiting for admin session.";
