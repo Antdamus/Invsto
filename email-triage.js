@@ -52,7 +52,6 @@
     isOlderThan,
     matchesActiveFilters,
     categoryMatchesGroup: categoryMatchesGroupBase,
-    filteredClassifications: filteredClassificationsBase,
     getClassificationTitle,
     getClassificationSender,
     getClassificationReceivedAt,
@@ -133,9 +132,10 @@
 
   function getStoredDashboardCollapsed() {
     try {
-      return window.localStorage?.getItem(DASHBOARD_COLLAPSED_STORAGE_KEY) === "true";
+      const stored = window.localStorage?.getItem(DASHBOARD_COLLAPSED_STORAGE_KEY);
+      return stored == null ? true : stored === "true";
     } catch (error) {
-      return false;
+      return true;
     }
   }
 
@@ -167,7 +167,7 @@
   function getStoredCustomCategoryOrder() {
     try {
       const parsed = JSON.parse(window.localStorage?.getItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY) || "[]");
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item) : [];
+      return Array.isArray(parsed) ? normalizeCustomCategoryOrderIds(parsed) : [];
     } catch (error) {
       return [];
     }
@@ -175,7 +175,7 @@
 
   function storeCustomCategoryOrder(order) {
     try {
-      window.localStorage?.setItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY, JSON.stringify(order.filter(Boolean)));
+      window.localStorage?.setItem(CUSTOM_CATEGORY_ORDER_STORAGE_KEY, JSON.stringify(normalizeCustomCategoryOrderIds(order)));
     } catch (error) {
       // Custom ordering still works in memory if local storage is unavailable.
     }
@@ -335,21 +335,24 @@
 
 
   function categoryMatchesGroup(classification, groupId) {
-    if (String(groupId || "").startsWith("category:")) {
-      const category = String(groupId).slice("category:".length);
-      return String(classification?.effective_category || classification?.category || "") === category;
+    const id = canonicalGroupId(groupId);
+    if (id === "all") return true;
+    if (id === "human_review") return categoryMatchesGroupBase(classification, id, CATEGORY_GROUPS);
+    if (String(id || "").startsWith("category:")) {
+      const category = getClassificationCategory(classification);
+      return canonicalCategoryGroupId(category) === id;
     }
-    return categoryMatchesGroupBase(classification, groupId, CATEGORY_GROUPS);
+    const group = CATEGORY_GROUPS.find((item) => item.id === id);
+    if (!group) return true;
+    const categoryKey = canonicalCategoryKey(getClassificationCategory(classification));
+    return group.categories.map(canonicalCategoryKey).includes(categoryKey);
   }
 
   function filteredClassifications(data, groupId, activeFilters = [], sortMode = "newest") {
-    if (String(groupId || "").startsWith("category:")) {
-      return sortedClassifications(data, sortMode).filter((classification) => (
-        categoryMatchesGroup(classification, groupId)
-        && matchesActiveFilters(classification, activeFilters)
-      ));
-    }
-    return filteredClassificationsBase(data, groupId, activeFilters, sortMode, CATEGORY_GROUPS);
+    return sortedClassifications(data, sortMode).filter((classification) => (
+      categoryMatchesGroup(classification, groupId)
+      && matchesActiveFilters(classification, activeFilters)
+    ));
   }
 
   function getClassificationCategory(classification) {
@@ -368,9 +371,10 @@
 
   function mergeCustomCategoryOrder(groups, customCategoryOrder = []) {
     const groupIds = new Set(groups.map((group) => group.id));
+    const normalizedOrder = normalizeCustomCategoryOrderIds(customCategoryOrder);
     const orderedIds = [
-      ...customCategoryOrder.filter((id, index, order) => groupIds.has(id) && order.indexOf(id) === index),
-      ...groups.map((group) => group.id).filter((id) => !customCategoryOrder.includes(id)),
+      ...normalizedOrder.filter((id) => groupIds.has(id)),
+      ...groups.map((group) => group.id).filter((id) => !normalizedOrder.includes(id)),
     ];
     const groupById = new Map(groups.map((group) => [group.id, group]));
     return orderedIds.map((id) => groupById.get(id)).filter(Boolean);
@@ -379,12 +383,22 @@
   function buildCategorySidebarGroups(data, categorySortMode = "default", customCategoryOrder = []) {
     const classifications = data.classifications || [];
     const representedCategories = [...new Set(classifications.map(getClassificationCategory).filter(Boolean))];
-    const dynamicGroups = representedCategories.map((category) => ({
-      id: `category:${category}`,
-      label: humanizeValue(category),
-      categories: [category],
-      isDynamic: true,
-    }));
+    const mergedStaticAliasKeys = new Set(["return_requests", "shipping_labels", "marketing_or_promotion", "item_not_as_described"]);
+    const dynamicGroupById = new Map();
+    representedCategories.forEach((category) => {
+      const canonicalKey = canonicalCategoryKey(category);
+      if (mergedStaticAliasKeys.has(canonicalKey)) return;
+      const normalized = categoryDisplayGroup(category);
+      const group = dynamicGroupById.get(normalized.id) || {
+        id: normalized.id,
+        label: normalized.label,
+        categories: [],
+        isDynamic: true,
+      };
+      group.categories.push(category);
+      dynamicGroupById.set(normalized.id, group);
+    });
+    const dynamicGroups = [...dynamicGroupById.values()];
     const groups = [...CATEGORY_GROUPS, ...dynamicGroups];
 
     if (categorySortMode === "custom") return mergeCustomCategoryOrder(groups, customCategoryOrder);
@@ -398,15 +412,86 @@
     return [...allGroup, ...sortedGroups, ...reviewGroup];
   }
 
+  function canonicalCategoryKey(category) {
+    const key = String(category || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[/\s-]+/g, "_")
+      .replace(/_+/g, "_");
+    const aliases = {
+      return_request: "return_requests",
+      return_requests: "return_requests",
+      shipping_label: "shipping_labels",
+      shipping_labels: "shipping_labels",
+      marketing_or_promotion: "marketing_or_promotion",
+      marketing_promotion: "marketing_or_promotion",
+    };
+    return aliases[key] || key;
+  }
+
+  function categoryDisplayGroup(category) {
+    const labels = {
+      return_requests: "Return Requests",
+      shipping_labels: "Shipping Labels",
+      marketing_or_promotion: "Marketing/Promotion",
+    };
+    const canonicalKey = canonicalCategoryKey(category);
+    return {
+      id: `category:${canonicalKey}`,
+      label: labels[canonicalKey] || humanizeValue(canonicalKey),
+    };
+  }
+
+  function canonicalCategoryGroupId(category) {
+    return `category:${canonicalCategoryKey(category)}`;
+  }
+
+  function staticGroupIdForCategoryKey(categoryKey) {
+    const canonicalKey = canonicalCategoryKey(categoryKey);
+    const staticAliasGroupIds = {
+      return_requests: "return_requests",
+      shipping_labels: "shipping_labels",
+      marketing_or_promotion: "marketing_or_promotion",
+      item_not_as_described: "item_not_as_described",
+    };
+    if (staticAliasGroupIds[canonicalKey]) return staticAliasGroupIds[canonicalKey];
+    return "";
+  }
+
+  function canonicalGroupId(groupId) {
+    const id = String(groupId || "").trim();
+    const groupAliases = {
+      marketing_promotion: "marketing_or_promotion",
+    };
+    if (groupAliases[id]) return groupAliases[id];
+    if (!id.startsWith("category:")) return id;
+    const canonicalKey = canonicalCategoryKey(id.slice("category:".length));
+    return staticGroupIdForCategoryKey(canonicalKey) || `category:${canonicalKey}`;
+  }
+
+  function normalizeCustomCategoryOrderIds(order = []) {
+    const seen = new Set();
+    return order
+      .filter((id) => typeof id === "string" && id.trim())
+      .map(canonicalGroupId)
+      .filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+  }
+
   function mergedCustomCategoryOrder(data, customCategoryOrder = []) {
     return buildCategorySidebarGroups(data, "custom", customCategoryOrder).map((group) => group.id);
   }
 
   function preserveHiddenCustomCategoryIds(visibleOrder, customCategoryOrder = []) {
-    const visibleIds = new Set(visibleOrder);
+    const normalizedVisibleOrder = normalizeCustomCategoryOrderIds(visibleOrder);
+    const normalizedCustomOrder = normalizeCustomCategoryOrderIds(customCategoryOrder);
+    const visibleIds = new Set(normalizedVisibleOrder);
     return [
-      ...visibleOrder,
-      ...customCategoryOrder.filter((id) => !visibleIds.has(id)),
+      ...normalizedVisibleOrder,
+      ...normalizedCustomOrder.filter((id) => !visibleIds.has(id)),
     ];
   }
 
@@ -452,7 +537,7 @@
     els.classificationCategoryList.classList.toggle("is-editing-order", editingCustomOrder);
     els.classificationCategoryList.innerHTML = groups.map((group, index) => {
       const count = sidebarGroupCount(classifications, group, state.activeFilters);
-      const active = state.selectedCategory === group.id;
+      const active = canonicalGroupId(state.selectedCategory) === group.id;
       const dynamicClass = group.isDynamic ? " is-dynamic" : "";
       const moveControls = editingCustomOrder ? `
         <span class="category-order-controls" aria-label="Move ${escapeHtml(group.label)}">
@@ -2049,7 +2134,7 @@
       const button = event.target.closest("[data-category-id]");
       if (!button) return;
 
-      const selectedCategory = button.getAttribute("data-category-id") || "all";
+      const selectedCategory = canonicalGroupId(button.getAttribute("data-category-id") || "all");
       const data = adminClassificationState.data || normalizeAdminViewPayload({});
       const firstMatch = filteredClassifications(
         data,

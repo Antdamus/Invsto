@@ -49,7 +49,9 @@
       operationalDashboardError: null,
       operationalDashboardSnapshot: null,
       operationalDashboardUpdatedAt: null,
-      operationalDashboardCollapsed: overrides.operationalDashboardCollapsed === true,
+      operationalDashboardCollapsed: Object.prototype.hasOwnProperty.call(overrides, "operationalDashboardCollapsed")
+        ? overrides.operationalDashboardCollapsed === true
+        : true,
       inboxPreviewLoading: false,
       inboxPreviewError: null,
       inboxPreviewResult: null,
