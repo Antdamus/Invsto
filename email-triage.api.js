@@ -534,6 +534,7 @@
     const timing = pipeline.timing_summary && typeof pipeline.timing_summary === "object" ? pipeline.timing_summary : {};
     const replay = pipeline.replay_summary && typeof pipeline.replay_summary === "object" ? pipeline.replay_summary : {};
     const gaps = pipeline.pipeline_gap_summary && typeof pipeline.pipeline_gap_summary === "object" ? pipeline.pipeline_gap_summary : {};
+    const visibility = pipeline.table_pipeline_visibility_summary && typeof pipeline.table_pipeline_visibility_summary === "object" ? pipeline.table_pipeline_visibility_summary : {};
     const events = Array.isArray(pipeline.recent_operational_events) ? pipeline.recent_operational_events : [];
     const latestByType = (types = []) => events.find((event) => types.includes(String(event.event_type || ""))) || null;
     const latestFailedEvent = events.find((event) => {
@@ -590,6 +591,23 @@
         current_classified_imported_total: Number(gaps.current_classified_imported_total || 0),
         imported_without_processing: Number(gaps.imported_without_processing || 0),
         processed_without_classification: Number(gaps.processed_without_classification || 0),
+      },
+      pipeline_visibility: {
+        source: visibility.source || "email_tables",
+        scope: visibility.scope || "not_reported",
+        is_limited: visibility.is_limited === true,
+        scan_limit: Number(visibility.scan_limit || 0),
+        sampled_imported_count: Number(visibility.sampled_imported_count || 0),
+        active_imported_total: Number(visibility.active_imported_total || 0),
+        fully_processed_imported_count: Number(visibility.fully_processed_imported_count || 0),
+        current_valid_classified_imported_total: Number(visibility.current_valid_classified_imported_total || 0),
+        unclassified_imported_total: Number(visibility.unclassified_imported_total || 0),
+        imported_without_processing_count: Number(visibility.imported_without_processing_count || 0),
+        processed_without_classification_count: Number(visibility.processed_without_classification_count || 0),
+        processing_failed_jobs: Number(visibility.processing_failed_jobs || 0),
+        processing_skipped_jobs: Number(visibility.processing_skipped_jobs || 0),
+        classification_failed_jobs: Number(visibility.classification_failed_jobs || 0),
+        classification_skipped_jobs: Number(visibility.classification_skipped_jobs || 0),
       },
       failures: {
         failed_jobs_total: Number(failures.failed_jobs_total || 0),

@@ -177,6 +177,10 @@
     `).join("");
   }
 
+  function renderOperationalNote(text, utils = window.EmailTriageRenderUtils) {
+    return `<div class="classification-empty operational-empty">${utils.escapeHtml(text)}</div>`;
+  }
+
   function renderOperationalDashboard(state = {}, utils = window.EmailTriageRenderUtils) {
     const snapshot = state.operationalDashboardSnapshot;
     if (state.operationalDashboardLoading && !snapshot) {
@@ -191,9 +195,20 @@
     const failures = snapshot.failures || {};
     const safety = snapshot.safety || {};
     const gaps = snapshot.pipeline_gaps || {};
+    const visibility = snapshot.pipeline_visibility || {};
     const connected = mailbox.connected && String(mailbox.status || "").toLowerCase() !== "disconnected";
-    const gapCount = Number(gaps.imported_without_processing || 0) + Number(gaps.processed_without_classification || 0);
+    const visibleGapCount = Number(visibility.imported_without_processing_count || 0)
+      + Number(visibility.processed_without_classification_count || 0)
+      + Number(visibility.unclassified_imported_total || 0)
+      + Number(visibility.processing_failed_jobs || 0)
+      + Number(visibility.classification_failed_jobs || 0)
+      + Number(visibility.classification_skipped_jobs || 0);
+    const gapCount = visibleGapCount || Number(gaps.imported_without_processing || 0) + Number(gaps.processed_without_classification || 0);
     const blocked = queue.saturated || gapCount > 0 || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
+    const visibilityLimited = visibility.is_limited === true;
+    const visibilityScopeLabel = visibilityLimited
+      ? `sampled ${visibility.sampled_imported_count || 0} of ${visibility.active_imported_total || 0}`
+      : "table-derived";
 
     return `
       <div class="operational-dashboard-status">
@@ -259,20 +274,42 @@
           </div>
         </section>
 
-        <section class="operational-panel">
+        <section class="operational-panel operational-panel-wide">
           <div class="operational-panel-head">
-            <strong>Pipeline Gaps</strong>
-            ${dashboardBadge(gapCount ? "Partial states present" : "Synchronized", gapCount ? "warning" : "success", utils)}
+            <strong>Pipeline Visibility</strong>
+            ${dashboardBadge(gapCount ? "Partial states visible" : "No visible gaps", gapCount ? "warning" : "success", utils)}
           </div>
           <div class="operational-metric-grid">
             ${renderKeyValueGrid([
-              { label: "Approved imports", value: gaps.approved_imported_total },
-              { label: "Fully processed", value: gaps.fully_processed_imported_total },
-              { label: "Current classified", value: gaps.current_classified_imported_total },
-              { label: "Imported, not processed", value: gaps.imported_without_processing },
-              { label: "Processed, not classified", value: gaps.processed_without_classification },
+              { label: "Imported rows (active)", value: visibility.active_imported_total },
+              { label: "Fully processed rows", value: visibility.fully_processed_imported_count },
+              { label: "Current valid AI classified", value: visibility.current_valid_classified_imported_total },
+              { label: "Unclassified imported rows", value: visibility.unclassified_imported_total },
+              { label: "Imported, not fully processed", value: visibility.imported_without_processing_count },
+              { label: "Processed, not classified", value: visibility.processed_without_classification_count },
+              { label: "Processing failed jobs", value: visibility.processing_failed_jobs },
+              { label: "Classification failed/skipped jobs", value: Number(visibility.classification_failed_jobs || 0) + Number(visibility.classification_skipped_jobs || 0) },
             ], utils)}
           </div>
+          ${renderOperationalNote(`${visibilityScopeLabel}. Imports can be complete while processing and classification are still pending; this card does not enqueue work. Live refresh classification can be capped, so remaining rows may stay unclassified.`, utils)}
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Event-Derived Gaps</strong>
+            ${dashboardBadge("Limited by event history", "muted", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Approved imports seen in events", value: gaps.approved_imported_total },
+              { label: "Active event imports", value: gaps.active_imported_total },
+              { label: "Event imports fully processed", value: gaps.fully_processed_imported_total },
+              { label: "Event imports classified", value: gaps.current_classified_imported_total },
+              { label: "Event imports not processed", value: gaps.imported_without_processing },
+              { label: "Event processed not classified", value: gaps.processed_without_classification },
+            ], utils)}
+          </div>
+          ${renderOperationalNote("Event-derived counts can miss imported rows when audit event inserts fail or fall outside the dashboard lookup window.", utils)}
         </section>
 
         <section class="operational-panel">

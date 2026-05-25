@@ -65,6 +65,8 @@ const PROCESS_IMPORTED_DEFAULT_BATCH_SIZE = 10;
 const PROCESS_IMPORTED_MAX_BATCH_SIZE = MAX_PROCESS_BATCH;
 const PROCESS_IMPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
 const PROCESS_IMPORTED_LOCKED_BY = "microsoft-email-sync:process_imported";
+const PIPELINE_VISIBILITY_SCAN_LIMIT = 2000;
+const PIPELINE_VISIBILITY_SCAN_PAGE_SIZE = 500;
 const CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE = 5;
 const CLASSIFY_IMPORTED_MAX_BATCH_SIZE = MAX_CLASSIFICATION_BATCH;
 const NORMALIZED_TEXT_LIMIT = 200000;
@@ -3089,6 +3091,156 @@ async function countActiveApprovedImportedMessages(supabase: ServiceClient, mail
   return total;
 }
 
+async function fetchActiveImportedMessageIds(
+  supabase: ServiceClient,
+  mailboxId: string,
+  scanLimit = PIPELINE_VISIBILITY_SCAN_LIMIT,
+) {
+  const ids: string[] = [];
+  let total: number | null = null;
+
+  for (let offset = 0; offset < scanLimit; offset += PIPELINE_VISIBILITY_SCAN_PAGE_SIZE) {
+    const to = Math.min(offset + PIPELINE_VISIBILITY_SCAN_PAGE_SIZE - 1, scanLimit - 1);
+    const { data, error, count } = await supabase
+      .from("email_messages")
+      .select("id", { count: "exact" })
+      .eq("mailbox_id", mailboxId)
+      .eq("sync_status", "active")
+      .order("received_at", { ascending: false })
+      .range(offset, to);
+
+    if (error) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_visibility_active_messages" });
+    if (total === null) total = count || 0;
+    for (const row of data || []) {
+      if (row.id) ids.push(String(row.id));
+    }
+    if (!data?.length || data.length < PIPELINE_VISIBILITY_SCAN_PAGE_SIZE) break;
+  }
+
+  const activeImportedTotal = total ?? ids.length;
+  return {
+    ids,
+    activeImportedTotal,
+    complete: activeImportedTotal <= scanLimit && ids.length >= activeImportedTotal,
+    scanLimit,
+  };
+}
+
+async function buildTablePipelineVisibilitySummary(supabase: ServiceClient, mailboxId: string) {
+  const activeMessages = await fetchActiveImportedMessageIds(supabase, mailboxId);
+  const [
+    currentValidClassifiedImportedTotal,
+    processingFailedJobs,
+    processingSkippedJobs,
+    classificationFailedJobs,
+    classificationSkippedJobs,
+  ] = await Promise.all([
+    diagnosticCountRows(supabase, "email_message_classifications", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id, sync_status)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("email_messages.sync_status", "active")
+        .eq("source", "ai")
+        .eq("is_current", true)
+        .eq("validation_status", "valid")
+    ),
+    diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+        .eq("status", "failed")
+    ),
+    diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+        .eq("status", "skipped")
+    ),
+    diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("job_type", "classify")
+        .eq("status", "failed")
+    ),
+    diagnosticCountRows(supabase, "email_processing_jobs", (query) =>
+      query
+        .select("id, email_messages!inner(mailbox_id)", { count: "exact", head: true })
+        .eq("email_messages.mailbox_id", mailboxId)
+        .eq("job_type", "classify")
+        .eq("status", "skipped")
+    ),
+  ]);
+
+  const processingByMessage = new Map<string, Set<string>>();
+  const classifiedSampleIds = new Set<string>();
+
+  for (let index = 0; index < activeMessages.ids.length; index += 100) {
+    const chunk = activeMessages.ids.slice(index, index + 100);
+    const { data: processingJobs, error: processingError } = await supabase
+      .from("email_processing_jobs")
+      .select("message_id, job_type, status")
+      .in("message_id", chunk)
+      .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+      .in("status", ["succeeded", "skipped"]);
+    if (processingError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_visibility_processing" });
+
+    for (const job of processingJobs || []) {
+      const messageId = String(job.message_id || "");
+      if (!messageId) continue;
+      const current = processingByMessage.get(messageId) || new Set<string>();
+      current.add(String(job.job_type || ""));
+      processingByMessage.set(messageId, current);
+    }
+
+    const { data: classifications, error: classificationError } = await supabase
+      .from("email_message_classifications")
+      .select("message_id")
+      .in("message_id", chunk)
+      .eq("source", "ai")
+      .eq("is_current", true)
+      .eq("validation_status", "valid");
+    if (classificationError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_visibility_classification" });
+
+    for (const classification of classifications || []) {
+      if (classification.message_id) classifiedSampleIds.add(String(classification.message_id));
+    }
+  }
+
+  let fullyProcessedImportedCount = 0;
+  let processedWithoutClassificationCount = 0;
+  for (const id of activeMessages.ids) {
+    const completedTypes = processingByMessage.get(id) || new Set<string>();
+    const fullyProcessed = PROCESS_IMPORTED_JOB_TYPES.every((jobType) => completedTypes.has(jobType));
+    if (!fullyProcessed) continue;
+    fullyProcessedImportedCount += 1;
+    if (!classifiedSampleIds.has(id)) processedWithoutClassificationCount += 1;
+  }
+
+  const sampledImportedCount = activeMessages.ids.length;
+  const importedWithoutProcessingCount = Math.max(sampledImportedCount - fullyProcessedImportedCount, 0);
+
+  return {
+    source: "email_tables",
+    scope: activeMessages.complete ? "all_active_imported_rows" : "bounded_active_imported_rows",
+    is_limited: !activeMessages.complete,
+    scan_limit: activeMessages.scanLimit,
+    sampled_imported_count: sampledImportedCount,
+    active_imported_total: activeMessages.activeImportedTotal,
+    fully_processed_imported_count: fullyProcessedImportedCount,
+    current_valid_classified_imported_total: currentValidClassifiedImportedTotal,
+    unclassified_imported_total: Math.max(activeMessages.activeImportedTotal - currentValidClassifiedImportedTotal, 0),
+    imported_without_processing_count: importedWithoutProcessingCount,
+    processed_without_classification_count: processedWithoutClassificationCount,
+    processing_failed_jobs: processingFailedJobs,
+    processing_skipped_jobs: processingSkippedJobs,
+    classification_failed_jobs: classificationFailedJobs,
+    classification_skipped_jobs: classificationSkippedJobs,
+  };
+}
+
 async function buildPipelineGapSummary(
   supabase: ServiceClient,
   mailboxId: string,
@@ -3679,7 +3831,10 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   const activeImportedTotal = approvedImportedIds.length
     ? await countActiveApprovedImportedMessages(supabase, mailboxId, approvedImportedIds)
     : 0;
-  const pipelineGapSummary = await buildPipelineGapSummary(supabase, mailboxId, approvedImportedIds, activeImportedTotal);
+  const [pipelineGapSummary, tablePipelineVisibilitySummary] = await Promise.all([
+    buildPipelineGapSummary(supabase, mailboxId, approvedImportedIds, activeImportedTotal),
+    buildTablePipelineVisibilitySummary(supabase, mailboxId),
+  ]);
 
   const importedSummary = {
     approved_imported_total: approvedImportedIds.length,
@@ -3865,6 +4020,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     processing_summary: processingSummary,
     classification_summary: classificationSummary,
     pipeline_gap_summary: pipelineGapSummary,
+    table_pipeline_visibility_summary: tablePipelineVisibilitySummary,
     replay_summary: {
       import_operations: importOperations,
       classify_operations: classifyOperations,
