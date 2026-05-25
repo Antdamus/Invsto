@@ -4,6 +4,8 @@
   let activeBuyer = "";
   let activeRequestId = 0;
   let activeSyncMeta = null;
+  let activeBreakdownSection = "";
+  let activeInsightsData = null;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -146,6 +148,11 @@
         closeModal();
         return;
       }
+      const metricButton = event.target.closest("[data-insight-section]");
+      if (metricButton && modal.contains(metricButton)) {
+        activeBreakdownSection = metricButton.dataset.insightSection || "";
+        if (activeInsightsData) renderInsights(activeInsightsData);
+      }
     });
 
     document.addEventListener("keydown", (event) => {
@@ -162,11 +169,15 @@
     if (!modal) return;
     modal.classList.add("hidden");
     activeBuyer = "";
+    activeBreakdownSection = "";
+    activeInsightsData = null;
   }
 
   function setLoading(buyerUsername) {
     const modal = ensureModal();
     activeSyncMeta = null;
+    activeBreakdownSection = "";
+    activeInsightsData = null;
     modal.classList.remove("hidden");
     modal.querySelector("#buyer-insights-title").textContent = buyerUsername || "Buyer history";
     modal.querySelector("#buyer-insights-subtitle").textContent = "Pulling synced eBay orders, returns, and item mix...";
@@ -184,13 +195,18 @@
     `;
   }
 
-  function metric(label, value, hint = "") {
+  function metric(label, value, hint = "", section = "") {
+    const hints = Array.isArray(hint) ? hint.filter(Boolean) : [hint].filter(Boolean);
+    const tag = section ? "button" : "div";
+    const attrs = section
+      ? ` type="button" data-insight-section="${escapeHtml(section)}" aria-pressed="${activeBreakdownSection === section ? "true" : "false"}"`
+      : "";
     return `
-      <div class="buyer-insights-metric">
+      <${tag} class="buyer-insights-metric ${section ? "is-clickable" : ""} ${section && activeBreakdownSection === section ? "is-active" : ""}"${attrs}>
         <small>${escapeHtml(label)}</small>
         <strong>${escapeHtml(value)}</strong>
-        ${hint ? `<span>${escapeHtml(hint)}</span>` : ""}
-      </div>
+        ${hints.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}
+      </${tag}>
     `;
   }
 
@@ -257,6 +273,294 @@
         ${metric("Prior net buyer value", formatMoney(priorGross), `${formatCount(priorOrders)} prior order${priorOrders === 1 ? "" : "s"} / ${formatCount(priorLines)} line${priorLines === 1 ? "" : "s"}`)}
         ${metric("Net archive value", formatMoney(grossSales), `${formatCount(orderCount)} stored order${orderCount === 1 ? "" : "s"} after returns`)}
       </div>
+    `;
+  }
+
+  function getPurchaseDateRange(rows = [], fallbackFirst = "", fallbackLast = "") {
+    const entries = (rows || [])
+      .map((row) => ({ row, date: new Date(row?.purchaseAt) }))
+      .filter((entry) => !Number.isNaN(entry.date.getTime()));
+    if (!entries.length) {
+      return { firstPurchaseAt: fallbackFirst, lastPurchaseAt: fallbackLast, firstOrderNumber: "", lastOrderNumber: "" };
+    }
+    const fallbackFirstDate = fallbackFirst ? new Date(fallbackFirst) : null;
+    const sorted = entries.sort((a, b) => a.date.getTime() - b.date.getTime());
+    const firstEntry = sorted[0];
+    const lastEntry = sorted[sorted.length - 1];
+    const firstTime = fallbackFirstDate && !Number.isNaN(fallbackFirstDate.getTime())
+      ? Math.min(firstEntry.date.getTime(), fallbackFirstDate.getTime())
+      : firstEntry.date.getTime();
+    return {
+      firstPurchaseAt: new Date(firstTime).toISOString(),
+      lastPurchaseAt: lastEntry.date.toISOString(),
+      firstOrderNumber: firstEntry.row?.orderNumber || "",
+      lastOrderNumber: lastEntry.row?.orderNumber || "",
+    };
+  }
+
+  function getCurrentArchiveValue(recentOrders = [], context = {}, fallback = 0) {
+    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
+    if (!currentOrderNumbers.size) return fallback;
+    const archiveTotal = (recentOrders || []).reduce((total, row) => {
+      const orderNumber = String(row?.orderNumber || "").trim();
+      return currentOrderNumbers.has(orderNumber) ? total + toFiniteNumber(row?.totalPrice, 0) : total;
+    }, 0);
+    return archiveTotal || fallback;
+  }
+
+  function renderBuyerValueMetrics(summary = {}, context = {}, priorRows = [], returnedRows = [], recentOrders = []) {
+    const currentTotal = toFiniteNumber(context.currentOrderTotal, 0);
+    const currentOrderCount = toPositiveInteger(context.currentOrderCount, currentTotal > 0 ? 1 : 0);
+    const currentLineCount = toPositiveInteger(context.currentLineCount, 0);
+    const currentItems = Array.isArray(context.currentItems) ? context.currentItems : [];
+    const currentOrderNumbers = Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers.filter(Boolean) : [];
+    const archiveValue = toFiniteNumber(summary.grossSales, 0);
+    const currentArchiveValue = getCurrentArchiveValue(recentOrders, context, currentTotal);
+    const priorValue = Math.max(0, archiveValue - currentArchiveValue);
+    const totalWithCurrent = priorValue + currentTotal;
+    const returnedOrderCount = returnedRows.length;
+    const returnedLineCount = returnedRows.reduce((total, row) => total + toPositiveInteger(row.lineCount, 0), 0);
+    const returnedOriginalValue = sumOrderTotals(returnedRows);
+    const returnedRetainedValue = returnedRows.reduce((total, row) => total + toFiniteNumber(row.retainedAmount, 0), 0);
+    const returnedAmount = toFiniteNumber(summary.returnAmountTotal, 0);
+    const priorOrderCount = Math.max(0, toPositiveInteger(summary.orderCount, 0) - currentOrderCount) + returnedOrderCount;
+    const priorLineCount = Math.max(0, toPositiveInteger(summary.lineCount, 0) - currentLineCount) + returnedLineCount;
+    const keptPriorValue = Math.max(0, priorValue - returnedRetainedValue);
+    const keptPriorOrderCount = Math.max(0, priorOrderCount - returnedOrderCount);
+    const avgOrderValue = priorOrderCount ? priorValue / priorOrderCount : toFiniteNumber(summary.avgOrderValue, 0);
+    const dateRows = [...(priorRows || []), ...(returnedRows || [])];
+    const dates = getPurchaseDateRange(dateRows, summary.firstPurchaseAt, summary.lastPurchaseAt);
+    const currentLabel = getInsightContextLabel(context);
+    const currentItemLines = currentItems.slice(0, 2).map((row) => {
+      const name = row.itemNumber || row.title || row.orderNumber || "Current item";
+      return `${name}: ${formatMoney(row.grossSales)}`;
+    });
+    const currentBreakdown = [
+      currentOrderNumbers.length ? `Order ${currentOrderNumbers.slice(0, 2).join(", ")}` : "",
+      ...currentItemLines,
+      currentItems.length > 2 ? `+ ${currentItems.length - 2} more current item${currentItems.length - 2 === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
+
+    return `
+      <div class="buyer-insights-metrics">
+        ${metric(currentLabel, formatMoney(currentTotal), [
+          `${formatCount(currentOrderCount)} order${currentOrderCount === 1 ? "" : "s"} / ${formatCount(currentLineCount)} line${currentLineCount === 1 ? "" : "s"}`,
+          ...currentBreakdown,
+        ], "current")}
+        ${metric("Prior store value", formatMoney(priorValue), [
+          `Kept purchases: ${formatMoney(keptPriorValue)} (${formatCount(keptPriorOrderCount)} order${keptPriorOrderCount === 1 ? "" : "s"})`,
+          returnedOrderCount ? `Retained after partial returns: ${formatMoney(returnedRetainedValue)}` : "",
+          `${formatCount(priorOrderCount)} prior order${priorOrderCount === 1 ? "" : "s"} / ${formatCount(priorLineCount)} line${priorLineCount === 1 ? "" : "s"}`,
+        ], "prior")}
+        ${metric("Current + prior value", formatMoney(totalWithCurrent), [
+          `${formatMoney(priorValue)} prior retained value`,
+          `+ ${formatMoney(currentTotal)} current pending`,
+        ], "total")}
+        ${metric("Returns", formatMoney(returnedAmount), [
+          `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"} / ${summary.openReturnCount || 0} open`,
+          returnedOriginalValue ? `${formatMoney(returnedAmount)} returned from ${formatMoney(returnedOriginalValue)} original purchase value` : "",
+          returnedRetainedValue ? `${formatMoney(returnedRetainedValue)} retained by store` : "",
+        ], "returns")}
+        ${metric("Cancellations", formatMoney(summary.cancelledOrderTotal ?? summary.cancelledLineTotal), [
+          `${summary.cancelledOrderCount || 0} cancelled order${Number(summary.cancelledOrderCount || 0) === 1 ? "" : "s"}`,
+          `${summary.cancelledLineCount || 0} cancelled line${Number(summary.cancelledLineCount || 0) === 1 ? "" : "s"}`,
+        ], "cancellations")}
+        ${metric("Average order", formatMoney(avgOrderValue), [
+          `${formatMoney(priorValue)} prior retained value`,
+          `/ ${formatCount(priorOrderCount)} prior order${priorOrderCount === 1 ? "" : "s"}`,
+        ], "average")}
+        ${metric("First prior purchase", formatDate(dates.firstPurchaseAt), dates.firstOrderNumber ? `Order ${dates.firstOrderNumber}` : "", "first")}
+        ${metric("Last prior purchase", formatDate(dates.lastPurchaseAt), dates.lastOrderNumber ? `Order ${dates.lastOrderNumber}` : "", "last")}
+      </div>
+    `;
+  }
+
+  function getLineBreakdownRows(data = {}) {
+    return Array.isArray(data?.lineBreakdown) ? data.lineBreakdown : [];
+  }
+
+  function isCurrentOrderRow(row, context = {}) {
+    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
+    return currentOrderNumbers.has(String(row?.orderNumber || "").trim());
+  }
+
+  function sortDetailRows(rows = []) {
+    return [...rows].sort((a, b) => {
+      const aTime = new Date(a.purchaseAt || 0).getTime();
+      const bTime = new Date(b.purchaseAt || 0).getTime();
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+  }
+
+  function getLineLookupKey(row = {}) {
+    return [row.orderNumber || "", row.itemNumber || "", row.transactionId || "", row.title || ""].join("|").toLowerCase();
+  }
+
+  function makeDetailRow(row = {}, amount = 0, extraDetails = []) {
+    const status = [row.itemState || row.status || "", row.orderStatus || "", row.lineStatus || ""]
+      .filter(Boolean)
+      .join(" / ");
+    return {
+      orderNumber: row.orderNumber || "",
+      purchaseAt: row.purchaseAt || row.shipByDate || "",
+      title: row.title || row.itemTitle || (Array.isArray(row.itemTitles) ? row.itemTitles.filter(Boolean).join(" / ") : "") || "Untitled item",
+      itemNumber: row.itemNumber || "",
+      transactionId: row.transactionId || "",
+      customLabel: row.customLabel || "",
+      quantity: toPositiveInteger(row.quantity, toPositiveInteger(row.unitCount, 0)),
+      status,
+      amount: toFiniteNumber(amount, 0),
+      details: extraDetails.filter(Boolean),
+    };
+  }
+
+  function currentRowsFromContext(context = {}, lineRows = []) {
+    const currentItems = Array.isArray(context.currentItems) ? context.currentItems : [];
+    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
+    if (currentItems.length) {
+      return currentItems.map((item) => {
+        const match = lineRows.find((row) =>
+          String(row.orderNumber || "") === String(item.orderNumber || "")
+          && (!item.itemNumber || String(row.itemNumber || "") === String(item.itemNumber || ""))
+        ) || {};
+        return makeDetailRow({
+          ...match,
+          orderNumber: item.orderNumber || match.orderNumber || "",
+          purchaseAt: match.purchaseAt || item.shipByDate || "",
+          title: item.title || match.title || "",
+          itemNumber: item.itemNumber || match.itemNumber || "",
+          quantity: item.quantity || match.quantity || 0,
+          itemState: "pending",
+          orderStatus: match.orderStatus || "",
+          lineStatus: item.status || match.lineStatus || "",
+        }, item.grossSales, [
+          item.status ? `Current line status: ${item.status}` : "",
+          item.shipByDate ? `Ship by ${formatDate(item.shipByDate)}` : "",
+        ]);
+      });
+    }
+    return lineRows
+      .filter((row) => currentOrderNumbers.has(String(row.orderNumber || "")))
+      .filter((row) => ["pending", "partially_fulfilled"].includes(String(row.lineStatus || "").toLowerCase()))
+      .map((row) => makeDetailRow(row, row.lineTotal, [row.shipByDate ? `Ship by ${formatDate(row.shipByDate)}` : ""]));
+  }
+
+  function priorRowsFromBreakdown(lineRows = [], context = {}) {
+    return lineRows
+      .filter((row) => !isCurrentOrderRow(row, context))
+      .filter((row) => ["successful", "return"].includes(String(row.itemState || "").toLowerCase()))
+      .map((row) => {
+        const isReturn = String(row.itemState || "").toLowerCase() === "return";
+        const amount = isReturn ? row.lineRetainedAmount : row.lineTotal;
+        return makeDetailRow(row, amount, [
+          isReturn ? `${formatMoney(row.lineReturnedAmount)} returned from ${formatMoney(row.lineTotal)} line value` : "",
+          isReturn ? `${formatMoney(row.lineRetainedAmount)} retained on this line` : "",
+        ]);
+      });
+  }
+
+  function returnRowsFromBreakdown(lineRows = [], context = {}) {
+    return lineRows
+      .filter((row) => !isCurrentOrderRow(row, context))
+      .filter((row) => String(row.itemState || "").toLowerCase() === "return")
+      .map((row) => makeDetailRow(row, row.lineReturnedAmount, [
+        `${formatMoney(row.lineReturnedAmount)} returned from ${formatMoney(row.lineTotal)} line value`,
+        `${formatMoney(row.lineRetainedAmount)} retained on this line`,
+        row.returnCount ? `${row.returnCount} return${Number(row.returnCount) === 1 ? "" : "s"} on order` : "",
+      ]));
+  }
+
+  function cancellationRowsFromBreakdown(lineRows = [], context = {}) {
+    return lineRows
+      .filter((row) => !isCurrentOrderRow(row, context))
+      .filter((row) => String(row.itemState || "").toLowerCase() === "cancelled")
+      .map((row) => makeDetailRow(row, row.lineTotal, ["Cancelled value"]));
+  }
+
+  function fallbackPriorRows(priorRows = [], returnedRows = []) {
+    const prior = (priorRows || []).map((row) => makeDetailRow({
+      orderNumber: row.orderNumber,
+      purchaseAt: row.purchaseAt,
+      title: Array.isArray(row.itemTitles) ? row.itemTitles.join(" / ") : "",
+      itemState: row.status || "successful",
+      quantity: row.unitCount,
+    }, row.totalPrice, [`${row.lineCount || 0} lines / ${row.unitCount || 0} units`]));
+    const returned = (returnedRows || []).map((row) => makeDetailRow({
+      orderNumber: row.orderNumber,
+      purchaseAt: row.purchaseAt,
+      title: Array.isArray(row.itemTitles) ? row.itemTitles.join(" / ") : "",
+      itemState: "return",
+      quantity: row.unitCount,
+    }, row.retainedAmount ?? row.totalPrice, [
+      `${formatMoney(row.returnedAmount)} returned from ${formatMoney(row.originalTotal ?? row.totalPrice)} original purchase value`,
+      `${formatMoney(row.retainedAmount ?? row.totalPrice)} retained by store`,
+    ]));
+    return [...prior, ...returned];
+  }
+
+  function renderDetailRows(rows = []) {
+    if (!rows.length) {
+      return `<div class="buyer-insights-empty is-compact">No item lines found for this section.</div>`;
+    }
+    return sortDetailRows(rows).map((row) => `
+      <div class="buyer-insights-list-row buyer-insights-breakdown-row">
+        <div>
+          <strong>${escapeHtml(row.title)}</strong>
+          <span>${escapeHtml(formatDate(row.purchaseAt))} - Order ${escapeHtml(row.orderNumber || "No order")} - Qty ${escapeHtml(row.quantity || 0)}</span>
+          ${row.itemNumber ? `<span>Item ${escapeHtml(row.itemNumber)}${row.transactionId ? ` - Tx ${escapeHtml(row.transactionId)}` : ""}</span>` : ""}
+          ${row.status ? `<em>${escapeHtml(row.status)}</em>` : ""}
+          ${row.details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
+        </div>
+        <b>${escapeHtml(formatMoney(row.amount))}</b>
+      </div>
+    `).join("");
+  }
+
+  function getBoundaryOrderRows(rows = [], boundary = "first") {
+    const datedRows = (rows || [])
+      .map((row) => ({ row, time: new Date(row.purchaseAt || 0).getTime() }))
+      .filter((entry) => Number.isFinite(entry.time));
+    if (!datedRows.length) return [];
+    datedRows.sort((a, b) => boundary === "first" ? a.time - b.time : b.time - a.time);
+    const target = datedRows[0].row;
+    if (!target.orderNumber) return [target];
+    return rows.filter((row) => row.orderNumber === target.orderNumber);
+  }
+
+  function renderMetricBreakdown(section, data = {}, context = {}, priorRows = [], returnedRows = []) {
+    if (!section) return "";
+    const lineRows = getLineBreakdownRows(data);
+    const currentRows = currentRowsFromContext(context, lineRows);
+    const priorDetailRows = lineRows.length
+      ? priorRowsFromBreakdown(lineRows, context)
+      : fallbackPriorRows(priorRows, returnedRows);
+    const returnDetailRows = lineRows.length
+      ? returnRowsFromBreakdown(lineRows, context)
+      : fallbackPriorRows([], returnedRows);
+    const cancellationRows = cancellationRowsFromBreakdown(lineRows, context);
+    const totalRows = [...currentRows, ...priorDetailRows];
+    const firstOrderRows = getBoundaryOrderRows(priorDetailRows, "first");
+    const lastOrderRows = getBoundaryOrderRows(priorDetailRows, "last");
+    const config = {
+      current: { title: "Current Pending Order Lines", rows: currentRows },
+      prior: { title: "Prior Store Value Lines", rows: priorDetailRows },
+      total: { title: "Current + Prior Value Lines", rows: totalRows },
+      returns: { title: "Returned Value Lines", rows: returnDetailRows },
+      cancellations: { title: "Cancelled Lines", rows: cancellationRows },
+      average: { title: "Average Order Inputs", rows: priorDetailRows },
+      first: { title: "First Prior Purchase Lines", rows: firstOrderRows },
+      last: { title: "Last Prior Purchase Lines", rows: lastOrderRows },
+    }[section];
+    if (!config) return "";
+    const total = config.rows.reduce((sum, row) => sum + toFiniteNumber(row.amount, 0), 0);
+    return `
+      <section class="buyer-insights-breakdown">
+        <div class="buyer-insights-breakdown-head">
+          <h3>${escapeHtml(config.title)}</h3>
+          <span>${escapeHtml(`${formatCount(config.rows.length)} line${config.rows.length === 1 ? "" : "s"} / ${formatMoney(total)}`)}</span>
+        </div>
+        ${renderDetailRows(config.rows)}
+      </section>
     `;
   }
 
@@ -449,6 +753,7 @@
 
   function renderInsights(data) {
     const modal = ensureModal();
+    activeInsightsData = data || {};
     const summary = data?.summary || {};
     const context = data?.context || {};
     const recentOrders = data?.recentOrders || [];
@@ -456,12 +761,6 @@
     const returnedRows = Array.isArray(data?.returnedPurchases) && data.returnedPurchases.length
       ? data.returnedPurchases
       : getReturnedOrderRows(recentOrders);
-    const returnedOrderGross = sumOrderTotals(returnedRows);
-    const returnHint = [
-      `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"}`,
-      `${summary.openReturnCount || 0} open`,
-      returnedOrderGross ? `${formatMoney(returnedOrderGross)} original purchase value` : "",
-    ].filter(Boolean).join(" / ");
     const buyerUsername = data?.buyerUsername || activeBuyer || "Buyer";
     const buyerName = data?.buyerName && data.buyerName !== buyerUsername ? data.buyerName : "";
     activeSyncMeta = data?.buyerHistorySync || null;
@@ -474,45 +773,8 @@
     modal.querySelector("#buyer-insights-body").innerHTML = `
       ${renderScanIndicator(activeSyncMeta)}
 
-      ${renderContextMetrics(summary, context, priorRows)}
-
-      <div class="buyer-insights-metrics">
-        ${metric("Archive gross bought", formatMoney(summary.grossSalesBeforeReturns ?? summary.grossSales), `${summary.grossOrderCount ?? summary.orderCount ?? 0} orders before returns`)}
-        ${metric("Store retained after returns", formatMoney(summary.grossSales), "Original sales minus returned amounts")}
-        ${metric("Archive estimated payout", formatMoney(summary.netPayout), `${summary.unitCount || 0} units`)}
-        ${metric("Average order", formatMoney(summary.avgOrderValue), `${summary.lineCount || 0} lines`)}
-        ${metric("Returns", formatMoney(summary.returnAmountTotal), returnHint)}
-        ${metric("Cancellations", formatMoney(summary.cancelledOrderTotal ?? summary.cancelledLineTotal), `${summary.cancelledOrderCount || 0} order${Number(summary.cancelledOrderCount || 0) === 1 ? "" : "s"} / ${summary.cancelledLineCount || 0} line${Number(summary.cancelledLineCount || 0) === 1 ? "" : "s"}`)}
-        ${metric("First purchase", formatDate(summary.firstPurchaseAt))}
-        ${metric("Last purchase", formatDate(summary.lastPurchaseAt))}
-      </div>
-
-      <div class="buyer-insights-grid">
-        <section class="buyer-insights-panel">
-          <h3>What They Buy</h3>
-          ${renderKindRows(data?.itemKinds || [], "Excludes returned, canceled, and archived orders so this reflects kept/current buying behavior.")}
-        </section>
-        <section class="buyer-insights-panel">
-          <h3>${escapeHtml(getCurrentItemsPanelTitle(context))}</h3>
-          ${renderTopItems(data?.topItems || [], context)}
-        </section>
-        <section class="buyer-insights-panel is-wide">
-          <h3>Previous Orders</h3>
-          ${renderRecentOrders(priorRows, context)}
-        </section>
-        <section class="buyer-insights-panel is-wide">
-          <h3>Returned Purchases</h3>
-          ${renderReturnedPurchases(returnedRows, data?.recentReturns || [])}
-        </section>
-        <section class="buyer-insights-panel is-wide">
-          <h3>Recent Returns</h3>
-          ${renderRecentReturns(data?.recentReturns || [], recentOrders)}
-        </section>
-        <section class="buyer-insights-panel is-wide">
-          <h3>Recent Cancellations</h3>
-          ${renderRecentCancellations(data?.recentCancellations || [])}
-        </section>
-      </div>
+      ${renderBuyerValueMetrics(summary, context, priorRows, returnedRows, recentOrders)}
+      ${renderMetricBreakdown(activeBreakdownSection, data, context, priorRows, returnedRows)}
 
       <p class="buyer-insights-note">
         This uses synced OG eBay order and return history. Refresh eBay orders or returns first when you need the newest activity.
@@ -531,12 +793,16 @@
     try {
       await waitForSupabaseReady();
       const buyerKey = buyer.toLowerCase();
-      const [insightsResult, returnValueResult, syncResult] = await Promise.all([
+      const [insightsResult, returnValueResult, lineBreakdownResult, syncResult] = await Promise.all([
         window.supabase.rpc("get_ebay_buyer_insights", {
           _buyer_username: buyer,
           _days_back: options.daysBack ?? null,
         }),
         window.supabase.rpc("get_ebay_buyer_return_value_breakdown", {
+          _buyer_username: buyer,
+          _days_back: options.daysBack ?? null,
+        }),
+        window.supabase.rpc("get_ebay_buyer_value_line_breakdown", {
           _buyer_username: buyer,
           _days_back: options.daysBack ?? null,
         }),
@@ -551,14 +817,19 @@
       if (returnValueResult.error) {
         console.warn("Could not load eBay buyer return value breakdown:", returnValueResult.error);
       }
+      if (lineBreakdownResult.error) {
+        console.warn("Could not load eBay buyer line breakdown:", lineBreakdownResult.error);
+      }
       if (syncResult.error && syncResult.error.code !== "PGRST116") {
         console.warn("Could not load eBay buyer scan metadata:", syncResult.error);
       }
       const insightsData = insightsResult.data || {};
       const returnValueData = returnValueResult.error ? {} : returnValueResult.data || {};
+      const lineBreakdownData = lineBreakdownResult.error ? {} : lineBreakdownResult.data || {};
       renderInsights({
         ...insightsData,
         ...returnValueData,
+        ...lineBreakdownData,
         recentReturns: Array.isArray(returnValueData.recentReturns)
           ? returnValueData.recentReturns
           : insightsData.recentReturns,

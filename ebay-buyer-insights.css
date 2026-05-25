@@ -237,6 +237,23 @@
   background: rgba(255, 255, 255, 0.045);
   padding: 16px;
   min-width: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.buyer-insights-metric {
+  cursor: pointer;
+}
+
+.buyer-insights-metric.is-clickable:hover,
+.buyer-insights-metric.is-clickable:focus-visible,
+.buyer-insights-metric.is-active {
+  border-color: rgba(116, 162, 232, 0.62);
+  background:
+    linear-gradient(140deg, rgba(116, 162, 232, 0.12), rgba(0, 0, 0, 0.08)),
+    rgba(255, 255, 255, 0.06);
+  outline: none;
 }
 
 .buyer-insights-metric small,
@@ -263,6 +280,40 @@
   margin-top: 8px;
   color: rgba(246, 240, 232, 0.62);
   font-weight: 700;
+}
+
+.buyer-insights-breakdown {
+  margin-top: 14px;
+  border: 1px solid rgba(245, 213, 156, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 16px;
+}
+
+.buyer-insights-breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.buyer-insights-breakdown-head h3 {
+  margin: 0;
+  color: #f5d59c;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.buyer-insights-breakdown-head span {
+  color: rgba(246, 240, 232, 0.62);
+  font-weight: 800;
+}
+
+.buyer-insights-breakdown-row b {
+  min-width: 96px;
 }
 
 .buyer-insights-grid {
