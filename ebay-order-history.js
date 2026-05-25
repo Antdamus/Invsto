@@ -6207,6 +6207,7 @@ async function postEbayReturnSyncPayload(payload) {
 
 function buildReturnApiSyncSummary(response = {}) {
   const results = Array.isArray(response.results) ? response.results : [];
+  const skippedAlreadyProcessed = results.filter((entry) => entry?.taskSkipped).length;
   const failedReturns = results
     .filter((entry) => entry?.error)
     .map((entry) => ({
@@ -6231,7 +6232,7 @@ function buildReturnApiSyncSummary(response = {}) {
     importedCreatedCount: Number(response.matched || 0),
     unmatchedCreated: Number(response.unmatched || 0),
     failedCount: Number(response.errors || 0),
-    duplicateResolvedCount: 0,
+    duplicateResolvedCount: skippedAlreadyProcessed,
     messagesImported: Number(response.messagesImported || 0),
     filesSeen: Number(response.filesSeen || 0),
     staleCasesClosed: Number(response.staleCasesClosed || 0),

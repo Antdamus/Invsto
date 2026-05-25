@@ -844,6 +844,14 @@ function localStatusFor(prepared: PreparedReturn, matched: boolean): string {
   return matched ? "open" : "needs_review";
 }
 
+function shouldPreserveLocalReturnStatus(status: unknown): boolean {
+  return ["received", "partially_received", "closed", "cancelled"].includes(toText(status).toLowerCase());
+}
+
+function shouldSkipReturnApiTask(caseRow: any): boolean {
+  return ["received", "partially_received", "closed", "cancelled"].includes(toText(caseRow?.status).toLowerCase());
+}
+
 function taskTypeFor(matched: boolean): string {
   return matched ? "return_intake" : "return_review";
 }
@@ -865,14 +873,20 @@ function questionFor(prepared: PreparedReturn, matched: boolean): string {
 function caseLooksLikeReturn(row: any, prepared: PreparedReturn): boolean {
   const payload = row?.raw_payload || {};
   const details = payload?.returnDetails || {};
+  const rowReturnId = normalizeLookup(row?.ebay_return_id || payload.ebayReturnId || payload.ebay_return_id || details.ebayReturnId || details.ebay_return_id);
   const rowBuyer = normalizeLookup(row?.buyer_username || payload.buyerUsername || payload.buyer_username);
   const rowOrder = normalizeLookup(row?.order_number || payload.orderNumber || payload.order_number);
   const rowItem = normalizeLookup(payload.itemNumber || payload.item_number || details.itemNumber || details.item_number);
+  const rowTransaction = normalizeLookup(payload.transactionId || payload.transaction_id || details.transactionId || details.transaction_id);
+  const returnId = normalizeLookup(prepared.returnId);
   const buyer = normalizeLookup(prepared.buyerUsername);
   const orderNumber = normalizeLookup(prepared.orderNumber);
   const itemNumber = normalizeLookup(prepared.itemNumber);
+  const transactionId = normalizeLookup(prepared.transactionId);
 
-  if (rowOrder && orderNumber && rowOrder === orderNumber) return true;
+  if (rowReturnId && returnId && rowReturnId === returnId) return true;
+  if (rowOrder && orderNumber && rowOrder === orderNumber && rowTransaction && transactionId && rowTransaction === transactionId) return true;
+  if (rowOrder && orderNumber && rowOrder === orderNumber && rowItem && itemNumber && rowItem === itemNumber) return true;
   if (rowItem && itemNumber && rowItem === itemNumber && (!buyer || !rowBuyer || rowBuyer === buyer)) return true;
   return false;
 }
@@ -894,12 +908,13 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
       .from("ebay_return_cases")
       .select("*")
       .eq("order_id", orderId)
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(10);
     if (error) throw error;
-    return data || null;
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared));
+    if (found) return found;
+    const active = (data || []).find((row: any) => !["closed", "cancelled"].includes(toText(row.status).toLowerCase()));
+    if (active) return active;
   }
 
   if (prepared.orderNumber) {
@@ -907,21 +922,21 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
       .from("ebay_return_cases")
       .select("*")
       .eq("order_number", prepared.orderNumber)
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(5);
+      .limit(10);
     if (error) throw error;
-    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared)) || data?.[0];
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared));
     if (found) return found;
+    const active = (data || []).find((row: any) => !["closed", "cancelled"].includes(toText(row.status).toLowerCase()));
+    if (active) return active;
   }
 
   if (prepared.buyerUsername || prepared.itemNumber) {
     let query = supabase
       .from("ebay_return_cases")
       .select("*")
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(10);
+      .limit(20);
     if (prepared.buyerUsername) query = query.eq("buyer_username", prepared.buyerUsername);
     const { data, error } = await query;
     if (error) throw error;
@@ -934,7 +949,9 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
 async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchResult): Promise<{ caseRow: any; created: boolean }> {
   const matched = Boolean(match.order && match.lines.length);
   const existing = await findExistingCase(supabase, prepared, match.order?.id || null);
-  const status = localStatusFor(prepared, matched);
+  const status = existing && shouldPreserveLocalReturnStatus(existing.status)
+    ? existing.status
+    : localStatusFor(prepared, matched);
   const row = {
     order_id: match.order?.id || null,
     order_number: match.order?.order_number || prepared.orderNumber || null,
@@ -1354,6 +1371,8 @@ Deno.serve(async (req) => {
         filesSeen += prepared.files.length;
 
         if (dryRun) {
+          const existingCase = await findExistingCase(supabase, prepared, match.order?.id || null);
+          const taskSkipped = existingCase ? shouldSkipReturnApiTask(existingCase) : false;
           results.push({
             returnId: prepared.returnId,
             orderNumber: prepared.orderNumber,
@@ -1369,7 +1388,10 @@ Deno.serve(async (req) => {
             fileCount: prepared.files.length,
             matched: isMatched,
             matchedLineCount: match.lines.length,
-            wouldCreateTask: !["closed", "cancelled"].includes(localStatusFor(prepared, isMatched)),
+            existingCaseId: existingCase?.id || null,
+            existingCaseStatus: existingCase?.status || null,
+            taskSkipped,
+            wouldCreateTask: !taskSkipped && !["closed", "cancelled"].includes(localStatusFor(prepared, isMatched)),
           });
           continue;
         }
@@ -1378,8 +1400,8 @@ Deno.serve(async (req) => {
         prepared.payload = buildReturnPayload(prepared, uploadedComplaintImages);
         const { caseRow, created: caseCreated } = await upsertCase(supabase, prepared, match);
         await upsertReturnItems(supabase, prepared, caseRow, match);
-        const isClosedReturn = ["closed", "cancelled"].includes(String(caseRow.status || "").toLowerCase());
-        const taskResult = isClosedReturn
+        const skipTaskRefresh = shouldSkipReturnApiTask(caseRow);
+        const taskResult = skipTaskRefresh
           ? { task: null, created: false, updated: false }
           : await upsertTask(supabase, prepared, caseRow, match);
         const importedMessageCount = await importMessages(supabase, prepared, caseRow, match);
@@ -1405,6 +1427,7 @@ Deno.serve(async (req) => {
           caseId: caseRow.id,
           taskId: taskResult.task?.id || null,
           caseCreated,
+          taskSkipped: skipTaskRefresh,
           taskCreated: taskResult.created,
           taskUpdated: taskResult.updated,
           messagesImported: importedMessageCount,
