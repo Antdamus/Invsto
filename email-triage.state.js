@@ -60,6 +60,8 @@
       inboxImportResult: null,
       inboxLiveRefreshLoading: false,
       inboxLiveRefreshResult: null,
+      inboxRematchLoading: false,
+      inboxRematchResult: null,
       inboxLastOperationId: null,
       inboxLastRefreshedAt: null,
       inboxActiveBucketFilter: "likely_ebay",

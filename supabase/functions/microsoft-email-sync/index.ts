@@ -54,7 +54,7 @@ const PREVIEW_MESSAGE_SELECT = [
 const PREVIEW_DEFAULT_LIMIT = 25;
 const PREVIEW_MAX_LIMIT = 100;
 const PREVIEW_MAX_DAYS_BACK = 30;
-const MAX_IMPORT_BATCH = 25;
+const MAX_IMPORT_BATCH = PREVIEW_MAX_LIMIT;
 const MAX_PROCESS_BATCH = 25;
 const MAX_CLASSIFICATION_BATCH = 10;
 const MAX_QUEUED_PROCESSING_JOBS = 100;
@@ -3284,6 +3284,8 @@ async function runLiveRefreshImportStage(
     const result = await upsertMessage(supabase, model.mailbox.id, model.folder.id, fullMessage);
     await replaceRecipients(supabase, result.messageId, fullMessage);
     await upsertBody(supabase, result.messageId, fullMessage);
+    row.already_imported = true;
+    row.existing_message_id = result.messageId;
     importedCount += 1;
     importedMessageIds.push(result.messageId);
     messages.push({
@@ -3323,6 +3325,12 @@ async function runLiveRefreshImportStage(
       likely_ebay_count: bucketSummary.likely_ebay || 0,
       maybe_ebay_count: bucketSummary.maybe_ebay || 0,
       not_ebay_count: bucketSummary.not_ebay || 0,
+      messages_returned: input.bucketMode === "ebay_only"
+        ? rows.filter((row) => row.bucket !== "not_ebay").length
+        : rows.length,
+      messages: input.bucketMode === "ebay_only"
+        ? rows.filter((row) => row.bucket !== "not_ebay")
+        : rows,
     },
     import: {
       imported_count: importedCount,
@@ -3495,6 +3503,9 @@ async function runLiveRefresh(
     operation_id: parentEvent.id,
     mailbox_id: model.mailbox.id,
     live_sync_enabled: true,
+    requested_limit: input.limit,
+    requested_daysBack: input.daysBack,
+    bucketMode: input.bucketMode,
     preview: importStage.preview,
     import: importStage.import,
     processing: {

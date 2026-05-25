@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const PROCESSOR_VERSION = "v1";
 const DEFAULT_JOB_TYPES = ["normalize", "match_order"] as const;
 const SUPPORTED_JOB_TYPES = ["normalize", "match_order"] as const;
-const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message"] as const;
+const SUPPORTED_MODES = ["enqueue_only", "process_queued", "enqueue_and_process", "process_message", "rematch_existing"] as const;
 const MAX_LIMIT = 100;
 const NORMALIZED_TEXT_LIMIT = 200000;
 
@@ -77,6 +77,16 @@ type Counters = {
   jobs_skipped: number;
   links_created: number;
   links_updated: number;
+};
+
+type RematchCounters = {
+  scanned: number;
+  rematched: number;
+  links_created: number;
+  links_updated: number;
+  ambiguous: number;
+  skipped: number;
+  failed: number;
 };
 
 type LinkCandidate = {
@@ -1501,6 +1511,78 @@ async function processQueuedJobs(supabase: ServiceClient, input: ProcessInput, c
   }
 }
 
+async function loadRematchCandidateIds(supabase: ServiceClient, input: ProcessInput) {
+  let query = supabase
+    .from("email_messages")
+    .select("id")
+    .eq("sync_status", "active")
+    .order("received_at", { ascending: false, nullsFirst: false })
+    .limit(input.limit);
+
+  if (input.messageId) query = query.eq("id", input.messageId);
+  const { data, error } = await query;
+  if (error) throw new ProcessError("rematch_failed", { phase: "rematch_message_select", messageId: input.messageId || undefined });
+  return (data || []).map((message: { id: string }) => message.id).filter(Boolean);
+}
+
+async function rematchExistingMessages(supabase: ServiceClient, input: ProcessInput) {
+  const counters: RematchCounters = {
+    scanned: 0,
+    rematched: 0,
+    links_created: 0,
+    links_updated: 0,
+    ambiguous: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  const messageIds = await loadRematchCandidateIds(supabase, input);
+  const failures: Array<Record<string, unknown>> = [];
+
+  for (const messageId of messageIds) {
+    counters.scanned += 1;
+    try {
+      const result = await matchOrder(supabase, messageId);
+      counters.links_created += result.links_created;
+      counters.links_updated += result.links_updated;
+      if (result.skipped) counters.skipped += 1;
+      else counters.rematched += 1;
+
+      const ambiguity = result.metadata?.ambiguity;
+      if (ambiguity && typeof ambiguity === "object" && Object.keys(ambiguity as Record<string, unknown>).length) {
+        counters.ambiguous += 1;
+      }
+    } catch (error) {
+      const safe = safeError(error, { id: "", message_id: messageId, job_type: "match_order", status: "failed", attempt_count: null, max_attempts: null });
+      counters.failed += 1;
+      failures.push({
+        message_id: messageId,
+        error: safe.code,
+        phase: safe.phase,
+      });
+      console.error("[microsoft-email-process] rematch failed", {
+        phase: safe.phase,
+        error: safe.code,
+        message_id: messageId,
+      });
+    }
+  }
+
+  return {
+    ...counters,
+    limit: input.limit,
+    message_ids: messageIds,
+    failures,
+    safety: {
+      outlook_fetch_performed: false,
+      outlook_mutation_performed: false,
+      ebay_mutation_performed: false,
+      classification_triggered: false,
+      drafts_created: 0,
+      automatic_responses_sent: 0,
+    },
+  };
+}
+
 function blankCounters(): Counters {
   return {
     jobs_enqueued: 0,
@@ -1532,6 +1614,15 @@ serve(async (req) => {
     if (!admin.ok) return json(req, admin.status, { ok: false, error: admin.error });
 
     const input = await parseInput(req);
+    if (input.mode === "rematch_existing") {
+      const result = await rematchExistingMessages(supabase, input);
+      return json(req, 200, {
+        ok: true,
+        mode: input.mode,
+        ...result,
+      });
+    }
+
     if (["enqueue_only", "enqueue_and_process", "process_message"].includes(input.mode)) {
       counters.jobs_enqueued = await enqueueJobs(supabase, input);
     }

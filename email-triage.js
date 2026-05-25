@@ -199,6 +199,23 @@
   let adminClassificationState = triageStore.getState();
   triageStore.subscribe((state) => {
     adminClassificationState = state;
+    window.__emailTriageDebugState = {
+      activeView: state.activeView,
+      loading: state.loading,
+      operationInFlight: state.operationInFlight,
+      inboxPreviewLoading: state.inboxPreviewLoading,
+      inboxImportLoading: state.inboxImportLoading,
+      inboxLiveRefreshLoading: state.inboxLiveRefreshLoading,
+      inboxRematchLoading: state.inboxRematchLoading,
+      inboxPreviewError: state.inboxPreviewError,
+      inboxLastOperationId: state.inboxLastOperationId,
+      inboxLastRefreshedAt: state.inboxLastRefreshedAt,
+      inboxPreviewControls: state.inboxPreviewControls,
+      inboxPreviewCounts: state.inboxPreviewResult ? {
+        messages_previewed: state.inboxPreviewResult.messages_previewed,
+        messages_returned: state.inboxPreviewResult.messages_returned,
+      } : null,
+    };
   });
 
   function applyPanelWidths(widths = getStoredPanelWidths()) {
@@ -2401,6 +2418,7 @@
         loadAdminClassificationData(context);
         loadOperationalDashboard(context);
       },
+      onRematchComplete: () => loadOperationalDashboard(context),
     });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.operationalDashboardRefresh?.addEventListener("click", () => loadOperationalDashboard(context));

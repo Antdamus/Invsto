@@ -7,6 +7,7 @@
   const DISCONNECT_FUNCTION = "microsoft-mailbox-disconnect";
   const CLASSIFY_FUNCTION = "microsoft-email-classify";
   const SYNC_FUNCTION = "microsoft-email-sync";
+  const PROCESS_FUNCTION = "microsoft-email-process";
 
   const DEFAULT_LIMITS = {
     classificationLimit: 50,
@@ -23,6 +24,7 @@
     matchContext: 15000,
     inboxPreview: 30000,
     inboxImport: 60000,
+    rematchExisting: 60000,
     operationalDashboard: 30000,
   };
 
@@ -420,6 +422,7 @@
     const processing = source.processing && typeof source.processing === "object" ? source.processing : {};
     const classification = source.classification && typeof source.classification === "object" ? source.classification : {};
     const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    const previewMessages = Array.isArray(preview.messages) ? preview.messages : [];
 
     return {
       ok: source.ok !== false,
@@ -433,6 +436,28 @@
         likely_ebay_count: Number(preview.likely_ebay_count || 0),
         maybe_ebay_count: Number(preview.maybe_ebay_count || 0),
         not_ebay_count: Number(preview.not_ebay_count || 0),
+        messages_returned: Number(preview.messages_returned || previewMessages.length || 0),
+      },
+      preview_result: {
+        ok: true,
+        mode: "sync_preview",
+        limit: Number(source.requested_limit || preview.limit || preview.previewed_count || previewMessages.length || 25),
+        daysBack: source.requested_daysBack ?? null,
+        bucketMode: source.bucketMode || "ebay_only",
+        messages_previewed: Number(preview.previewed_count || previewMessages.length || 0),
+        messages_returned: Number(preview.messages_returned || previewMessages.length || 0),
+        bucket_summary: {
+          likely_ebay: Number(preview.likely_ebay_count || 0),
+          maybe_ebay: Number(preview.maybe_ebay_count || 0),
+          not_ebay: Number(preview.not_ebay_count || 0),
+        },
+        already_imported_summary: {
+          imported: previewMessages.filter((message) => message.already_imported === true).length,
+          not_imported: previewMessages.filter((message) => message.already_imported !== true).length,
+        },
+        sender_domain_summary: {},
+        messages: previewMessages,
+        raw: preview,
       },
       import: {
         imported_count: Number(imported.imported_count || 0),
@@ -460,6 +485,34 @@
         polling_started: safety.polling_started === true,
         scheduler_started: safety.scheduler_started === true,
         realtime_listener_started: safety.realtime_listener_started === true,
+      },
+      raw: source,
+    };
+  }
+
+  function normalizeRematchExistingPayload(payload) {
+    const source = normalizeEnvelope(payload, "rematch_existing").data || {};
+    const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "rematch_existing",
+      limit: Number(source.limit || 0),
+      scanned: Number(source.scanned || 0),
+      rematched: Number(source.rematched || 0),
+      links_created: Number(source.links_created || 0),
+      links_updated: Number(source.links_updated || 0),
+      ambiguous: Number(source.ambiguous || 0),
+      skipped: Number(source.skipped || 0),
+      failed: Number(source.failed || 0),
+      message_ids: Array.isArray(source.message_ids) ? source.message_ids : [],
+      failures: Array.isArray(source.failures) ? source.failures : [],
+      safety: {
+        outlook_fetch_performed: safety.outlook_fetch_performed === true,
+        outlook_mutation_performed: safety.outlook_mutation_performed === true,
+        ebay_mutation_performed: safety.ebay_mutation_performed === true,
+        classification_triggered: safety.classification_triggered === true,
+        drafts_created: Number(safety.drafts_created || 0),
+        automatic_responses_sent: Number(safety.automatic_responses_sent || 0),
       },
       raw: source,
     };
@@ -605,6 +658,22 @@
     return normalizeLiveRefreshPayload(payload);
   }
 
+  async function rematchExistingEmails(context, values = {}) {
+    const session = await currentSession(context, "Rematch existing emails");
+    const body = {
+      mode: "rematch_existing",
+      limit: Number(values.limit || 25),
+      jobTypes: ["match_order"],
+    };
+
+    const payload = await edgeFetchWithTimeout(PROCESS_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, TIMEOUTS.rematchExisting);
+
+    return normalizeRematchExistingPayload(payload);
+  }
+
   async function fetchOperationalDashboard(context) {
     const session = await currentSession(context, "Operational dashboard");
     const [mailboxResult, pipelineResult, liveSyncResult] = await Promise.allSettled([
@@ -633,6 +702,7 @@
       DISCONNECT_FUNCTION,
       CLASSIFY_FUNCTION,
       SYNC_FUNCTION,
+      PROCESS_FUNCTION,
     },
     DEFAULT_LIMITS,
     TIMEOUTS,
@@ -659,10 +729,12 @@
     normalizeInboxPreviewPayload,
     normalizeInboxImportPayload,
     normalizeLiveRefreshPayload,
+    normalizeRematchExistingPayload,
     normalizeOperationalDashboardPayload,
     fetchInboxPreview,
     importApprovedInboxPreview,
     runInboxLiveRefresh,
+    rematchExistingEmails,
     fetchOperationalDashboard,
   };
 })();

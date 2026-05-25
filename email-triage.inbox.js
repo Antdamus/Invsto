@@ -37,6 +37,8 @@
       importSelected: document.getElementById("inbox-import-selected"),
       liveRefresh: document.getElementById("inbox-live-refresh-run"),
       liveRefreshResult: document.getElementById("inbox-live-refresh-result"),
+      rematchExisting: document.getElementById("inbox-rematch-existing-run"),
+      rematchExistingResult: document.getElementById("inbox-rematch-existing-result"),
       clear: document.getElementById("inbox-preview-clear"),
       bucketFilters: document.querySelectorAll("[data-inbox-bucket-filter]"),
       section: document.getElementById("inbox-preview-section"),
@@ -246,6 +248,43 @@
     `;
   }
 
+  function renderRematchExistingResult(state, els, utils = window.EmailTriageRenderUtils) {
+    if (!els.rematchExistingResult) return;
+    const result = state.inboxRematchResult;
+    if (!result) {
+      els.rematchExistingResult.innerHTML = "";
+      return;
+    }
+
+    const safety = result.safety || {};
+    els.rematchExistingResult.innerHTML = `
+      <div class="inbox-live-refresh-head">
+        <strong>Rematch existing emails result</strong>
+        <span>${utils.escapeHtml(result.scanned || 0)} scanned</span>
+      </div>
+      <div class="inbox-live-refresh-grid">
+        ${renderStageCounts("Matching", result, [
+          ["scanned", "Scanned"],
+          ["rematched", "Rematched"],
+          ["ambiguous", "Ambiguous"],
+          ["skipped", "Skipped"],
+          ["failed", "Failed"],
+        ], utils)}
+        ${renderStageCounts("Links", result, [
+          ["links_created", "Created"],
+          ["links_updated", "Updated"],
+        ], utils)}
+      </div>
+      <dl class="inbox-live-refresh-safety">
+        <div><dt>Outlook Fetch</dt><dd>${renderInboxBadge(safety.outlook_fetch_performed ? "true" : "false", safety.outlook_fetch_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Outlook Mutation</dt><dd>${renderInboxBadge(safety.outlook_mutation_performed ? "true" : "false", safety.outlook_mutation_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>eBay Mutation</dt><dd>${renderInboxBadge(safety.ebay_mutation_performed ? "true" : "false", safety.ebay_mutation_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Classification</dt><dd>${renderInboxBadge(safety.classification_triggered ? "true" : "false", safety.classification_triggered ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Drafts Created</dt><dd>${renderInboxBadge(String(safety.drafts_created || 0), safety.drafts_created ? "danger" : "success", utils)}</dd></div>
+      </dl>
+    `;
+  }
+
   function renderInboxRows(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.body) return;
     const rows = Array.isArray(state.inboxPreviewResult?.messages) ? state.inboxPreviewResult.messages : [];
@@ -298,8 +337,8 @@
     if (els.daysBack && String(els.daysBack.value) !== String(controls.daysBack ?? "")) els.daysBack.value = String(controls.daysBack ?? "");
     if (els.bucketMode && els.bucketMode.value !== (controls.bucketMode || "ebay_only")) els.bucketMode.value = controls.bucketMode || "ebay_only";
 
-    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true;
-    [els.run, els.importLikely, els.importSelected, els.liveRefresh, els.clear].forEach((button) => {
+    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
+    [els.run, els.importLikely, els.importSelected, els.liveRefresh, els.rematchExisting, els.clear].forEach((button) => {
       if (!button) return;
       button.setAttribute("aria-busy", loading ? "true" : "false");
     });
@@ -309,12 +348,14 @@
     if (els.importLikely) els.importLikely.disabled = loading || !likelyImportable;
     if (els.importSelected) els.importSelected.disabled = loading || selectedIds(state).length === 0;
     if (els.liveRefresh) els.liveRefresh.disabled = loading;
+    if (els.rematchExisting) els.rematchExisting.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
 
     if (els.status) {
       if (state.inboxPreviewLoading) els.status.textContent = "Loading Outlook preview.";
       else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages.";
       else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
+      else if (state.inboxRematchLoading) els.status.textContent = "Rematching existing imported emails.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
       else if (result) els.status.textContent = `Preview refreshed ${utils.formatDateTime(state.inboxLastRefreshedAt)}. Selected ${selectedIds(state).length} message${selectedIds(state).length === 1 ? "" : "s"}.`;
       else els.status.textContent = "Run preview to inspect recent Outlook emails before importing.";
@@ -332,6 +373,7 @@
     renderInboxSummary(state, els, utils);
     renderImportResult(state, els, utils);
     renderLiveRefreshResult(state, els, utils);
+    renderRematchExistingResult(state, els, utils);
     renderInboxRows(state, els, utils);
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }
@@ -462,6 +504,8 @@
         update({
           inboxLiveRefreshLoading: false,
           inboxLiveRefreshResult: result,
+          inboxPreviewResult: result.preview_result || null,
+          inboxPreviewSelectedProviderMessageIds: [],
           inboxLastOperationId: result.operation_id,
           inboxLastRefreshedAt: new Date().toISOString(),
         });
@@ -476,6 +520,32 @@
       }
     });
 
+    els.rematchExisting?.addEventListener("click", async () => {
+      const controls = previewControlsFromEls(els);
+      update({
+        inboxPreviewControls: controls,
+        inboxRematchLoading: true,
+        inboxPreviewError: null,
+        inboxRematchResult: null,
+      });
+      try {
+        const result = await api.rematchExistingEmails(context, controls);
+        update({
+          inboxRematchLoading: false,
+          inboxRematchResult: result,
+          inboxLastRefreshedAt: new Date().toISOString(),
+        });
+        if (typeof options.onRematchComplete === "function") {
+          options.onRematchComplete(result);
+        }
+      } catch (error) {
+        update({
+          inboxRematchLoading: false,
+          inboxPreviewError: error.code || error.message || "rematch_existing_failed",
+        });
+      }
+    });
+
     els.clear?.addEventListener("click", () => {
       update({
         inboxPreviewLoading: false,
@@ -486,6 +556,8 @@
         inboxImportResult: null,
         inboxLiveRefreshLoading: false,
         inboxLiveRefreshResult: null,
+        inboxRematchLoading: false,
+        inboxRematchResult: null,
         inboxLastOperationId: null,
         inboxLastRefreshedAt: null,
       });
