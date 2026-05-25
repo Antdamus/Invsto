@@ -71,6 +71,9 @@ const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
+const ORDER_HISTORY_PAGE_SIZE = 500;
+const ORDER_HISTORY_MAX_LINES = 5000;
+const ORDER_HISTORY_RELATED_ID_CHUNK_SIZE = 150;
 const ORDER_HISTORY_LINE_SELECT = `
   id,
   order_id,
@@ -196,6 +199,23 @@ function getDateRange() {
     fromIso: from.toISOString(),
     toIso: to.toISOString(),
   };
+}
+
+function chunkArray(items = [], size = 100) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function uniqueById(rows = []) {
+  const byId = new Map();
+  rows.forEach((row) => {
+    const key = row?.id || JSON.stringify(row);
+    if (key && !byId.has(key)) byId.set(key, row);
+  });
+  return [...byId.values()];
 }
 
 function getOrderFromLine(line) {
@@ -1011,6 +1031,77 @@ function setupHistorySearchAutofillGuard() {
   });
 }
 
+function buildClosedOrderHistoryLineQuery(fromIso, toIso) {
+  return supabase
+    .from("ebay_order_lines")
+    .select(ORDER_HISTORY_LINE_SELECT)
+    .in("line_status", ["fulfilled", "cancelled", "skipped"])
+    .gte("fulfilled_at", fromIso)
+    .lte("fulfilled_at", toIso)
+    .order("fulfilled_at", { ascending: false });
+}
+
+async function fetchClosedOrderHistoryLines(fromIso, toIso) {
+  const rows = [];
+
+  for (let start = 0; start < ORDER_HISTORY_MAX_LINES; start += ORDER_HISTORY_PAGE_SIZE) {
+    const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_LINES - 1);
+    const { data, error } = await buildClosedOrderHistoryLineQuery(fromIso, toIso).range(start, end);
+    if (error) return { data: rows, error };
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < ORDER_HISTORY_PAGE_SIZE) {
+      return { data: rows, error: null, capped: false };
+    }
+  }
+
+  return { data: rows, error: null, capped: true };
+}
+
+async function fetchOverlappingRows(tableName, columnName, ids = [], options = {}) {
+  const cleanIds = [...new Set(ids.filter(Boolean))];
+  if (!cleanIds.length) return { data: [], error: null };
+
+  const rows = [];
+  for (const chunk of chunkArray(cleanIds, options.chunkSize || ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    let query = supabase
+      .from(tableName)
+      .select(options.select || "*")
+      .overlaps(columnName, chunk);
+
+    if (options.orderBy) {
+      query = query.order(options.orderBy, { ascending: options.ascending ?? false });
+    }
+
+    const { data, error } = await query.limit(options.limitPerChunk || 500);
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+  }
+
+  return { data: uniqueById(rows), error: null };
+}
+
+async function fetchReturnCasesForOrders(orderIds = []) {
+  const cleanOrderIds = [...new Set(orderIds.filter(Boolean))];
+  if (!cleanOrderIds.length) return { data: [], error: null };
+
+  const rows = [];
+  for (const chunk of chunkArray(cleanOrderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ebay_return_cases")
+      .select("*, ebay_return_items(*)")
+      .in("order_id", chunk)
+      .order("opened_at", { ascending: false })
+      .limit(500);
+
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+  }
+
+  return { data: uniqueById(rows), error: null };
+}
+
 async function loadOrderHistory() {
   state.historyLoaded = false;
   const list = $("history-list");
@@ -1020,14 +1111,7 @@ async function loadOrderHistory() {
 
   const { fromIso, toIso } = getDateRange();
 
-  const linesQuery = supabase
-    .from("ebay_order_lines")
-    .select(ORDER_HISTORY_LINE_SELECT)
-    .in("line_status", ["fulfilled", "cancelled", "skipped"])
-    .gte("fulfilled_at", fromIso)
-    .lte("fulfilled_at", toIso)
-    .order("fulfilled_at", { ascending: false })
-    .limit(600);
+  const linesQuery = fetchClosedOrderHistoryLines(fromIso, toIso);
 
   const adminEventsQuery = supabase
     .from("ebay_order_admin_events")
@@ -1075,6 +1159,10 @@ async function loadOrderHistory() {
     return;
   }
 
+  if (linesResult.capped) {
+    console.warn(`Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`);
+  }
+
   if (adminEventsResult.error) {
     console.warn("Failed to load admin closeout events:", adminEventsResult.error);
   }
@@ -1103,36 +1191,15 @@ async function loadOrderHistory() {
 
   if (closedLineIds.length) {
     const [relatedAdminResult, relatedRevertResult, relatedLabelResult, returnCasesResult, relatedReturnResult, relatedOrderTaskResult] = await Promise.all([
-      supabase
-        .from("ebay_order_admin_events")
-        .select("*")
-        .overlaps("order_line_ids", closedLineIds)
-        .limit(500),
+      fetchOverlappingRows("ebay_order_admin_events", "order_line_ids", closedLineIds),
       isAdminUser()
-        ? supabase
-          .from("ebay_order_revert_events")
-          .select("*")
-          .overlaps("order_line_ids", closedLineIds)
-          .limit(500)
+        ? fetchOverlappingRows("ebay_order_revert_events", "order_line_ids", closedLineIds)
         : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("ebay_order_label_events")
-        .select("*")
-        .overlaps("order_line_ids", closedLineIds)
-        .limit(500),
+      fetchOverlappingRows("ebay_order_label_events", "order_line_ids", closedLineIds),
       closedOrderIds.length
-        ? supabase
-          .from("ebay_return_cases")
-          .select("*, ebay_return_items(*)")
-          .in("order_id", closedOrderIds)
-          .order("opened_at", { ascending: false })
-          .limit(500)
+        ? fetchReturnCasesForOrders(closedOrderIds)
         : Promise.resolve({ data: [], error: null }),
-      supabase
-        .from("ebay_return_events")
-        .select("*")
-        .overlaps("order_line_ids", closedLineIds)
-        .limit(500),
+      fetchOverlappingRows("ebay_return_events", "order_line_ids", closedLineIds),
       loadOrderTaskEventsForLines(closedLineIds)
         .then((data) => ({ data, error: null }))
         .catch((error) => ({ data: [], error })),
@@ -1205,26 +1272,28 @@ async function loadOrderTaskEventsForLines(lineIds = []) {
   const cleanLineIds = [...new Set(lineIds.filter(Boolean))];
   if (!cleanLineIds.length) return [];
 
-  const { data: tasks, error } = await supabase
-    .from("ebay_order_tasks")
-    .select("id, order_id, order_line_ids, title, question, status, priority, created_by_email, created_at")
-    .overlaps("order_line_ids", cleanLineIds)
-    .limit(500);
+  const { data: tasks, error } = await fetchOverlappingRows("ebay_order_tasks", "order_line_ids", cleanLineIds, {
+    select: "id, order_id, order_line_ids, title, question, status, priority, created_by_email, created_at",
+  });
   if (error) throw error;
 
   const taskById = new Map((tasks || []).map((task) => [task.id, task]));
   const taskIds = [...taskById.keys()];
   if (!taskIds.length) return [];
 
-  const { data: events, error: eventError } = await supabase
-    .from("ebay_order_task_events")
-    .select("*")
-    .in("task_id", taskIds)
-    .order("created_at", { ascending: false })
-    .limit(1000);
-  if (eventError) throw eventError;
+  const events = [];
+  for (const chunk of chunkArray(taskIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    const { data, error: eventError } = await supabase
+      .from("ebay_order_task_events")
+      .select("*")
+      .in("task_id", chunk)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    if (eventError) throw eventError;
+    events.push(...(data || []));
+  }
 
-  return (events || []).map((event) => {
+  return uniqueById(events).map((event) => {
     const task = taskById.get(event.task_id) || {};
     return {
       ...event,
