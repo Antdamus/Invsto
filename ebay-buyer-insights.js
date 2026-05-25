@@ -21,8 +21,20 @@
     });
   }
 
+  function parseMoneyAmount(value, fallback = 0) {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : fallback;
+    }
+    const text = String(value ?? "").replace(/,/g, "").trim();
+    if (!text) return fallback;
+    const match = text.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return fallback;
+    const number = Number(match[0]);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
   function formatMoney(value) {
-    const number = Number(value);
+    const number = parseMoneyAmount(value, NaN);
     if (!Number.isFinite(number)) return "$0.00";
     return number.toLocaleString(undefined, { style: "currency", currency: "USD" });
   }
@@ -62,8 +74,7 @@
   }
 
   function toFiniteNumber(value, fallback = 0) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
+    return parseMoneyAmount(value, fallback);
   }
 
   function toPositiveInteger(value, fallback = 0) {
@@ -216,7 +227,11 @@
   }
 
   function sumOrderTotals(rows) {
-    return (rows || []).reduce((total, row) => total + toFiniteNumber(row?.totalPrice, 0), 0);
+    return (rows || []).reduce((total, row) => total + toFiniteNumber(row?.originalTotal ?? row?.totalPrice, 0), 0);
+  }
+
+  function sumReturnAmounts(rows) {
+    return (rows || []).reduce((total, row) => total + toFiniteNumber(row?.requestAmount ?? row?.returnedAmount, 0), 0);
   }
 
   function renderContextMetrics(summary = {}, context = {}, priorRows = []) {
@@ -314,6 +329,11 @@
     return rows.map((row) => {
       const titles = Array.isArray(row.itemTitles) ? row.itemTitles.filter(Boolean).slice(0, 3) : [];
       const matchingReturns = getMatchingReturnsForOrder(row, returns);
+      const originalValue = toFiniteNumber(row.originalTotal ?? row.totalPrice, 0);
+      const returnedAmount = toFiniteNumber(row.returnedAmount, NaN);
+      const totalReturned = Number.isFinite(returnedAmount) ? returnedAmount : sumReturnAmounts(matchingReturns);
+      const retainedAmount = toFiniteNumber(row.retainedAmount, Math.max(0, originalValue - totalReturned));
+      const returnCount = matchingReturns.length || toPositiveInteger(row.returnCount, 0);
       const returnSummary = matchingReturns.map((ret) => {
         const parts = [ret.returnId || "Return", ret.reason || "", ret.requestAmount || ""].filter(Boolean);
         return parts.join(" - ");
@@ -323,12 +343,14 @@
           <div>
             <strong>${escapeHtml(row.orderNumber || "No order number")}</strong>
             <span>${escapeHtml(formatDate(row.purchaseAt))} - returned purchase - ${escapeHtml(`${row.lineCount || 0} lines / ${row.unitCount || 0} units`)}</span>
+            ${originalValue ? `<span>${escapeHtml(`${formatMoney(totalReturned)} returned from original ${formatMoney(originalValue)}`)}</span>` : ""}
+            ${originalValue ? `<span>${escapeHtml(`${formatMoney(retainedAmount)} retained by store`)}</span>` : ""}
             ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
             ${returnSummary ? `<span>${escapeHtml(returnSummary)}</span>` : ""}
           </div>
           <b>
-            ${escapeHtml(formatMoney(row.totalPrice))}
-            ${matchingReturns.length ? `<small>${escapeHtml(`${matchingReturns.length} return${matchingReturns.length === 1 ? "" : "s"}`)}</small>` : ""}
+            ${escapeHtml(formatMoney(retainedAmount || originalValue))}
+            ${returnCount ? `<small>${escapeHtml(`${returnCount} return${returnCount === 1 ? "" : "s"}`)}</small>` : ""}
           </b>
         </div>
       `;
@@ -356,20 +378,25 @@
     if (!rows?.length) return `<div class="buyer-insights-empty is-compact">No synced returns for this buyer.</div>`;
     return rows.map((row) => {
       const matchedOrder = getReturnOrderMatch(row, orders);
-      const titles = Array.isArray(matchedOrder?.itemTitles) ? matchedOrder.itemTitles.filter(Boolean).slice(0, 2) : [];
-      const originalOrderValue = toFiniteNumber(matchedOrder?.totalPrice, 0);
+      const rowTitles = Array.isArray(row.itemTitles) ? row.itemTitles : [];
+      const matchedTitles = Array.isArray(matchedOrder?.itemTitles) ? matchedOrder.itemTitles : [];
+      const titles = (rowTitles.length ? rowTitles : matchedTitles).filter(Boolean).slice(0, 2);
+      const originalOrderValue = toFiniteNumber(row.originalOrderTotal ?? matchedOrder?.totalPrice, 0);
+      const returnedAmount = toFiniteNumber(row.returnedAmount ?? row.requestAmount, 0);
+      const retainedOrderValue = toFiniteNumber(row.retainedOrderValue, Math.max(0, originalOrderValue - returnedAmount));
       return `
         <div class="buyer-insights-list-row">
           <div>
             <strong>${escapeHtml(row.returnId || row.orderNumber || "Return")}</strong>
             <span>${escapeHtml(row.status || "unknown")} - ${escapeHtml(row.reason || "No reason")} - ${escapeHtml(formatDate(row.openedAt))}</span>
-            ${matchedOrder ? `<span>Original purchase ${escapeHtml(matchedOrder.orderNumber || "")}${originalOrderValue ? ` - ${escapeHtml(formatMoney(originalOrderValue))}` : ""}</span>` : ""}
+            ${originalOrderValue ? `<span>${escapeHtml(`${formatMoney(returnedAmount)} returned from original ${formatMoney(originalOrderValue)}`)}</span>` : ""}
+            ${originalOrderValue ? `<span>${escapeHtml(`${formatMoney(retainedOrderValue)} retained by store`)}</span>` : ""}
             ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
             ${row.buyerComment ? `<em>${escapeHtml(row.buyerComment)}</em>` : ""}
           </div>
           <b>
             ${escapeHtml(row.requestAmount || "")}
-            ${originalOrderValue ? `<small>purchase ${escapeHtml(formatMoney(originalOrderValue))}</small>` : ""}
+            ${originalOrderValue ? `<small>${escapeHtml(`${formatMoney(retainedOrderValue)} retained`)}</small>` : ""}
           </b>
         </div>
       `;
@@ -426,7 +453,9 @@
     const context = data?.context || {};
     const recentOrders = data?.recentOrders || [];
     const priorRows = getPriorOrderRows(recentOrders, context);
-    const returnedRows = getReturnedOrderRows(recentOrders);
+    const returnedRows = Array.isArray(data?.returnedPurchases) && data.returnedPurchases.length
+      ? data.returnedPurchases
+      : getReturnedOrderRows(recentOrders);
     const returnedOrderGross = sumOrderTotals(returnedRows);
     const returnHint = [
       `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"}`,
@@ -449,6 +478,7 @@
 
       <div class="buyer-insights-metrics">
         ${metric("Archive gross bought", formatMoney(summary.grossSalesBeforeReturns ?? summary.grossSales), `${summary.grossOrderCount ?? summary.orderCount ?? 0} orders before returns`)}
+        ${metric("Store retained after returns", formatMoney(summary.grossSales), "Original sales minus returned amounts")}
         ${metric("Archive estimated payout", formatMoney(summary.netPayout), `${summary.unitCount || 0} units`)}
         ${metric("Average order", formatMoney(summary.avgOrderValue), `${summary.lineCount || 0} lines`)}
         ${metric("Returns", formatMoney(summary.returnAmountTotal), returnHint)}
@@ -501,8 +531,12 @@
     try {
       await waitForSupabaseReady();
       const buyerKey = buyer.toLowerCase();
-      const [insightsResult, syncResult] = await Promise.all([
+      const [insightsResult, returnValueResult, syncResult] = await Promise.all([
         window.supabase.rpc("get_ebay_buyer_insights", {
+          _buyer_username: buyer,
+          _days_back: options.daysBack ?? null,
+        }),
+        window.supabase.rpc("get_ebay_buyer_return_value_breakdown", {
           _buyer_username: buyer,
           _days_back: options.daysBack ?? null,
         }),
@@ -514,11 +548,20 @@
       ]);
       if (requestId !== activeRequestId) return;
       if (insightsResult.error) throw insightsResult.error;
+      if (returnValueResult.error) {
+        console.warn("Could not load eBay buyer return value breakdown:", returnValueResult.error);
+      }
       if (syncResult.error && syncResult.error.code !== "PGRST116") {
         console.warn("Could not load eBay buyer scan metadata:", syncResult.error);
       }
+      const insightsData = insightsResult.data || {};
+      const returnValueData = returnValueResult.error ? {} : returnValueResult.data || {};
       renderInsights({
-        ...(insightsResult.data || {}),
+        ...insightsData,
+        ...returnValueData,
+        recentReturns: Array.isArray(returnValueData.recentReturns)
+          ? returnValueData.recentReturns
+          : insightsData.recentReturns,
         buyerHistorySync: syncResult.error ? null : syncResult.data,
         context: {
           source: options.source || "",
