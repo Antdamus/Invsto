@@ -61,6 +61,7 @@ type Identifiers = {
   transactionIds: string[];
   labels: string[];
   labelValues: string[];
+  listingIds: string[];
   returnIds: string[];
   trackingNumbers: string[];
   titlePhrases: string[];
@@ -249,6 +250,7 @@ function identifiersSummary(identifiers: Identifiers) {
     item_numbers: identifiers.itemNumbers.length,
     transaction_ids: identifiers.transactionIds.length,
     listing_labels: identifiers.labels.length,
+    listing_ids: identifiers.listingIds.length,
     return_ids: identifiers.returnIds.length,
     tracking_numbers: identifiers.trackingNumbers.length,
     title_phrases: identifiers.titlePhrases.length,
@@ -325,6 +327,9 @@ function extractIdentifiers(context: { message: EmailMessage; body: EmailBody | 
     ...Array.from(text.matchAll(/\b(?:custom\s+label|sku|label)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{2,40})\b/gi), (match) => match[1]),
   ];
   const labelValues = unique([...labels.map((label) => label.replace(/^#/, "")), ...customLabelValues]);
+  const listingIds = unique([
+    ...Array.from(text.matchAll(/\b(?:listing\s+id|listing|offer\s+id|offer)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,40})\b/gi), (match) => match[1]),
+  ]).filter((value) => /\d/.test(value));
   const trackingNumbers = unique([
     ...Array.from(text.matchAll(/\b(?:tracking\s+number|tracking|shipment\s+tracking|shipping\s+barcode|label\s+id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9 -]{7,34})\b/gi), (match) =>
       String(match[1] || "").replace(/\s+/g, "").trim()
@@ -343,6 +348,7 @@ function extractIdentifiers(context: { message: EmailMessage; body: EmailBody | 
     transactionIds: unique(text.match(/\b\d{14}\b/g) || []),
     labels,
     labelValues,
+    listingIds,
     returnIds: unique([
       ...Array.from(text.matchAll(/\b(?:return\s+(?:case\s+)?id|ebay\s+return\s+id|return)\s*[:#-]?\s*([A-Z0-9-]{6,40})\b/gi), (match) => match[1]),
     ]).filter((value) => /\d/.test(value)),
@@ -434,7 +440,7 @@ function orderLineSelect() {
 async function upsertLink(supabase: ServiceClient, candidate: LinkCandidate) {
   let lookup = supabase
     .from("email_message_links")
-    .select("id, confidence, status, match_method")
+    .select("id, confidence, status, match_method, metadata")
     .eq("message_id", candidate.message_id)
     .eq("link_type", candidate.link_type)
     .in("status", ["suggested", "confirmed"]);
@@ -456,8 +462,11 @@ async function upsertLink(supabase: ServiceClient, candidate: LinkCandidate) {
     rows[0] ||
     null;
   if (existing?.id) {
-    const shouldImprove = Number(candidate.confidence) > Number(existing.confidence || 0) ||
-      (existing.status === "suggested" && candidate.status === "confirmed");
+    const existingConfidence = Number(existing.confidence || 0);
+    const metadataChanged = JSON.stringify(existing.metadata || {}) !== JSON.stringify(candidate.metadata || {});
+    const shouldImprove = Number(candidate.confidence) > existingConfidence ||
+      (existing.status === "suggested" && candidate.status === "confirmed") ||
+      (Number(candidate.confidence) >= existingConfidence && metadataChanged);
     if (!shouldImprove) return { created: 0, updated: 0 };
 
     const { error } = await supabase
@@ -480,13 +489,118 @@ async function upsertLink(supabase: ServiceClient, candidate: LinkCandidate) {
   return { created: 1, updated: 0 };
 }
 
+function compactObject(value: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => {
+    if (entry === null || entry === undefined) return false;
+    if (Array.isArray(entry) && entry.length === 0) return false;
+    if (typeof entry === "object" && !Array.isArray(entry) && Object.keys(entry as Record<string, unknown>).length === 0) return false;
+    return true;
+  }));
+}
+
+function daysSince(iso?: string | null) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000));
+}
+
+async function loadSyncFreshness(supabase: ServiceClient, identifiers: Identifiers) {
+  const buyerSyncs: Array<Record<string, unknown>> = [];
+  for (const username of identifiers.buyerUsernames.slice(0, 10)) {
+    const { data, error } = await supabase
+      .from("ebay_buyer_history_syncs")
+      .select("buyer_username, status, last_success_at, last_started_at, updated_at, days_back, scanned_orders, matched_orders")
+      .ilike("buyer_username", username)
+      .limit(1);
+    if (error) throw new ProcessError("matching_failed", { phase: "buyer_history_freshness_lookup" });
+    for (const row of data || []) {
+      const ageDays = daysSince(row.last_success_at || row.updated_at);
+      buyerSyncs.push(compactObject({
+        buyer_username: row.buyer_username,
+        status: row.status,
+        last_success_at: row.last_success_at,
+        age_days: ageDays,
+        days_back: row.days_back,
+        scanned_orders: row.scanned_orders,
+        matched_orders: row.matched_orders,
+        stale: ageDays === null || ageDays > 14 || row.status !== "completed",
+      }));
+    }
+  }
+
+  const { data: accountRuns, error: accountError } = await supabase
+    .from("ebay_account_history_sync_runs")
+    .select("id, status, started_at, finished_at, updated_at, days_back, scanned_orders, matched_orders, buyers_seen")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (accountError) throw new ProcessError("matching_failed", { phase: "account_history_freshness_lookup" });
+
+  const accountRun = accountRuns?.[0] || null;
+  const accountAgeDays = daysSince(accountRun?.finished_at || accountRun?.updated_at);
+  const buyerUsernamesWithSync = new Set(buyerSyncs.map((row) => lowerTrim(String(row.buyer_username || ""))));
+  const missingBuyerHistory = identifiers.buyerUsernames
+    .filter((username) => !buyerUsernamesWithSync.has(lowerTrim(username)))
+    .slice(0, 10);
+  const stale = Boolean(
+    missingBuyerHistory.length ||
+      buyerSyncs.some((row) => row.stale === true) ||
+      !accountRun ||
+      accountAgeDays === null ||
+      accountAgeDays > 14 ||
+      accountRun.status !== "completed",
+  );
+
+  return compactObject({
+    buyer_history: buyerSyncs,
+    missing_buyer_history: missingBuyerHistory,
+    account_history: accountRun
+      ? compactObject({
+        status: accountRun.status,
+        finished_at: accountRun.finished_at,
+        age_days: accountAgeDays,
+        days_back: accountRun.days_back,
+        scanned_orders: accountRun.scanned_orders,
+        matched_orders: accountRun.matched_orders,
+        buyers_seen: accountRun.buyers_seen,
+        stale: accountAgeDays === null || accountAgeDays > 14 || accountRun.status !== "completed",
+      })
+      : { missing: true },
+    stale,
+  });
+}
+
 function linkMetadata(identifiers: Identifiers, matchedBy: string, extra: Record<string, unknown> = {}) {
   return {
     processor_version: PROCESSOR_VERSION,
     matched_by: matchedBy,
     extracted_identifiers: identifiersSummary(identifiers),
+    matched_fields: extra.matched_fields || [matchedBy],
+    data_sources_checked: extra.data_sources_checked || [],
     ...extra,
   };
+}
+
+function returnCaseItemNumbers(row: Record<string, any>) {
+  const payload = row.raw_payload || {};
+  const details = payload.returnDetails || {};
+  return unique([
+    payload.itemNumber,
+    payload.item_number,
+    details.itemNumber,
+    details.item_number,
+    ...(Array.isArray(payload.items) ? payload.items.map((item: Record<string, any>) => item?.itemNumber || item?.item_number) : []),
+  ]);
+}
+
+function returnCaseMatchesClues(row: Record<string, any>, identifiers: Identifiers) {
+  const rowOrder = String(row.order_number || "");
+  const rowBuyer = lowerTrim(row.buyer_username || row.raw_payload?.buyerUsername || row.raw_payload?.buyer_username);
+  const rowItems = new Set(returnCaseItemNumbers(row));
+  const orderMatched = Boolean(rowOrder && identifiers.orderNumbers.includes(rowOrder));
+  const buyerMatched = Boolean(rowBuyer && identifiers.buyerUsernames.includes(rowBuyer));
+  const itemMatched = identifiers.itemNumbers.some((itemNumber) => rowItems.has(itemNumber));
+  return { orderMatched, buyerMatched, itemMatched };
 }
 
 async function matchOrder(supabase: ServiceClient, messageId: string) {
@@ -495,6 +609,19 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
   const counters = { links_created: 0, links_updated: 0 };
   const candidates: LinkCandidate[] = [];
   const ambiguity: Record<string, unknown> = {};
+  const dataSourcesChecked = new Set<string>([
+    "ebay_orders",
+    "ebay_order_lines",
+    "ebay_buyer_history_syncs",
+    "ebay_account_history_sync_runs",
+  ]);
+  const syncFreshness = await loadSyncFreshness(supabase, identifiers);
+  const buildMetadata = (matchedBy: string, extra: Record<string, unknown> = {}) => linkMetadata(identifiers, matchedBy, compactObject({
+    data_sources_checked: unique([...dataSourcesChecked, ...(Array.isArray(extra.data_sources_checked) ? extra.data_sources_checked as string[] : [])]),
+    sync_freshness: syncFreshness,
+    stale_context_warning: (syncFreshness as Record<string, unknown>).stale === true,
+    ...extra,
+  }));
 
   if (identifiers.orderNumbers.length) {
     const orders = await queryByChunks(identifiers.orderNumbers, async (chunk) => {
@@ -515,12 +642,13 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         match_method: "order_number_exact",
         confidence: 1.0,
         status: "confirmed",
-        metadata: linkMetadata(identifiers, "order_number_exact"),
+        metadata: buildMetadata("order_number_exact"),
       });
     }
   }
 
   if (identifiers.returnIds.length) {
+    dataSourcesChecked.add("ebay_return_cases");
     const returnCases = await queryByChunks(identifiers.returnIds, async (chunk) => {
       const { data, error } = await supabase
         .from("ebay_return_cases")
@@ -543,7 +671,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         match_method: "return_id_exact",
         confidence: 1.0,
         status: "confirmed",
-        metadata: linkMetadata(identifiers, "return_id_exact", {
+        metadata: buildMetadata("return_id_exact", {
           return_case_id: returnCase.id,
           return_status: returnCase.status,
         }),
@@ -551,7 +679,82 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
     }
   }
 
+  if (
+    !identifiers.returnIds.length &&
+    (identifiers.orderNumbers.length || identifiers.buyerUsernames.length) &&
+    (identifiers.itemNumbers.length || identifiers.titlePhrases.length)
+  ) {
+    dataSourcesChecked.add("ebay_return_cases");
+    const returnRows = new Map<string, Record<string, any>>();
+
+    if (identifiers.orderNumbers.length) {
+      const byOrder = await queryByChunks(identifiers.orderNumbers, async (chunk) => {
+        const { data, error } = await supabase
+          .from("ebay_return_cases")
+          .select("id, order_id, order_number, ebay_return_id, buyer_username, status, opened_at, raw_payload")
+          .in("order_number", chunk)
+          .not("status", "in", "(closed,cancelled)")
+          .order("opened_at", { ascending: false })
+          .limit(20);
+        if (error) throw new ProcessError("matching_failed", { phase: "return_order_context_lookup", messageId });
+        return data || [];
+      });
+      for (const row of byOrder as Array<Record<string, any>>) returnRows.set(String(row.id), row);
+    }
+
+    for (const username of identifiers.buyerUsernames.slice(0, 10)) {
+      const { data, error } = await supabase
+        .from("ebay_return_cases")
+        .select("id, order_id, order_number, ebay_return_id, buyer_username, status, opened_at, raw_payload")
+        .eq("buyer_username", username)
+        .not("status", "in", "(closed,cancelled)")
+        .order("opened_at", { ascending: false })
+        .limit(20);
+      if (error) throw new ProcessError("matching_failed", { phase: "return_buyer_context_lookup", messageId });
+      for (const row of data || []) returnRows.set(String(row.id), row);
+    }
+
+    const correlatedReturns = [...returnRows.values()].filter((row) => {
+      const clues = returnCaseMatchesClues(row, identifiers);
+      return clues.orderMatched && (clues.buyerMatched || clues.itemMatched);
+    });
+
+    if (correlatedReturns.length === 1) {
+      const returnCase = correlatedReturns[0];
+      if (returnCase.order_id) {
+        const clues = returnCaseMatchesClues(returnCase, identifiers);
+        const exactOrderLinked = Boolean(clues.orderMatched && returnCase.order_id && (clues.buyerMatched || clues.itemMatched));
+        candidates.push({
+          message_id: messageId,
+          link_type: "ebay_order",
+          ebay_order_id: String(returnCase.order_id),
+          matched_value: String(returnCase.ebay_return_id || returnCase.order_number || returnCase.id),
+          match_method: exactOrderLinked ? "return_context_order_buyer_item" : "return_context_inferred",
+          confidence: exactOrderLinked ? 0.92 : 0.62,
+          status: exactOrderLinked ? "confirmed" : "suggested",
+          metadata: buildMetadata(exactOrderLinked ? "return_context_order_buyer_item" : "return_context_inferred", {
+            matched_fields: [
+              ...(clues.orderMatched ? ["order_number"] : []),
+              ...(clues.buyerMatched ? ["buyer_username"] : []),
+              ...(clues.itemMatched ? ["item_number"] : []),
+            ],
+            return_case_id: returnCase.id,
+            return_status: returnCase.status,
+            return_context_only: true,
+            return_reason_buyer_stated_only: true,
+            refund_approval_not_verified: true,
+          }),
+        });
+      } else {
+        ambiguity[`return_context:${returnCase.id}`] = "return_case_has_no_order_link";
+      }
+    } else if (correlatedReturns.length > 1) {
+      ambiguity.return_context_inferred = correlatedReturns.length;
+    }
+  }
+
   if (identifiers.trackingNumbers.length) {
+    dataSourcesChecked.add("ebay_order_label_events");
     for (const trackingNumber of identifiers.trackingNumbers.slice(0, 20)) {
       const orderRows = new Map<string, Record<string, any>>();
       const lookups = await Promise.all([
@@ -582,6 +785,57 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         for (const order of result.data || []) orderRows.set(String(order.id), order);
       }
 
+      const labelEventLookups = await Promise.all([
+        supabase
+          .from("ebay_order_label_events")
+          .select("id, order_ids, order_numbers, shipment_id, label_metadata, created_at")
+          .contains("label_metadata", { trackingNumber })
+          .limit(10),
+        supabase
+          .from("ebay_order_label_events")
+          .select("id, order_ids, order_numbers, shipment_id, label_metadata, created_at")
+          .contains("label_metadata", { shippingBarcodeNumber: trackingNumber })
+          .limit(10),
+        supabase
+          .from("ebay_order_label_events")
+          .select("id, order_ids, order_numbers, shipment_id, label_metadata, created_at")
+          .contains("label_metadata", { labelId: trackingNumber })
+          .limit(10),
+        supabase
+          .from("ebay_order_label_events")
+          .select("id, order_ids, order_numbers, shipment_id, label_metadata, created_at")
+          .eq("shipment_id", trackingNumber)
+          .limit(10),
+      ]);
+
+      const labelEvents = new Map<string, Record<string, any>>();
+      for (const result of labelEventLookups) {
+        if (result.error) throw new ProcessError("matching_failed", { phase: "label_event_tracking_lookup", messageId });
+        for (const event of result.data || []) labelEvents.set(String(event.id), event);
+      }
+
+      const eventOrderNumbers = new Set<string>();
+      for (const event of labelEvents.values()) {
+        for (const orderId of event.order_ids || []) {
+          if (orderId) orderRows.set(String(orderId), { id: String(orderId), label_event_id: event.id });
+        }
+        for (const orderNumber of event.order_numbers || []) {
+          if (orderNumber) eventOrderNumbers.add(String(orderNumber));
+        }
+      }
+
+      if (eventOrderNumbers.size) {
+        const eventOrders = await queryByChunks([...eventOrderNumbers], async (chunk) => {
+          const { data, error } = await supabase
+            .from("ebay_orders")
+            .select("id, order_number")
+            .in("order_number", chunk);
+          if (error) throw new ProcessError("matching_failed", { phase: "label_event_order_lookup", messageId });
+          return data || [];
+        });
+        for (const order of eventOrders as Array<Record<string, any>>) orderRows.set(String(order.id), order);
+      }
+
       const orders = [...orderRows.values()];
       if (orders.length === 1) {
         const order = orders[0];
@@ -593,8 +847,10 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "tracking_or_label_exact",
           confidence: 0.9,
           status: "confirmed",
-          metadata: linkMetadata(identifiers, "tracking_or_label_exact", {
+          metadata: buildMetadata("tracking_or_label_exact", {
             unique_order: true,
+            matched_fields: ["tracking_number"],
+            label_event_count: labelEvents.size,
             safe_label_metadata_keys: ["trackingNumber", "shippingBarcodeNumber", "labelId"],
           }),
         });
@@ -629,7 +885,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         match_method: "item_transaction_exact",
         confidence: 1.0,
         status: "confirmed",
-        metadata: linkMetadata(identifiers, "item_transaction_exact"),
+        metadata: buildMetadata("item_transaction_exact"),
       });
     }
   }
@@ -671,7 +927,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "item_number_exact",
           confidence: 0.8,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "item_number_exact"),
+          metadata: buildMetadata("item_number_exact"),
         });
       } else if (matchedLines.length > 1) {
         ambiguity[`item_number:${itemNumber}`] = matchedLines.length;
@@ -692,7 +948,12 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
 
     const orderNumberHints = new Set(identifiers.orderNumbers);
     const itemHints = new Set(identifiers.itemNumbers);
-    const hasStrongContext = orderNumberHints.size > 0 || itemHints.size > 0 || identifiers.labelValues.length > 0 || identifiers.trackingNumbers.length > 0 || identifiers.returnIds.length > 0;
+    const hasStrongContext = orderNumberHints.size > 0 ||
+      itemHints.size > 0 ||
+      identifiers.labelValues.length > 0 ||
+      identifiers.listingIds.length > 0 ||
+      identifiers.trackingNumbers.length > 0 ||
+      identifiers.returnIds.length > 0;
     if (hasStrongContext) {
       for (const order of orders as Array<{ id: string; order_number: string; buyer_username: string }>) {
         const alreadyLinked = candidates.some((candidate) => candidate.ebay_order_id === order.id);
@@ -705,7 +966,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "buyer_username_plus_strong_clue",
           confidence: 0.65,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "buyer_username_plus_strong_clue", { guarded_by_context: true }),
+          metadata: buildMetadata("buyer_username_plus_strong_clue", { guarded_by_context: true }),
         });
       }
     } else if (orders.length === 1) {
@@ -718,7 +979,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
         match_method: "buyer_username_alone_unique",
         confidence: 0.45,
         status: "suggested",
-        metadata: linkMetadata(identifiers, "buyer_username_alone_unique", { buyer_username_only: true }),
+        metadata: buildMetadata("buyer_username_alone_unique", { buyer_username_only: true }),
       });
     } else if (orders.length) {
       ambiguity.buyer_username_context_required = true;
@@ -730,6 +991,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
     const hasStrongContext = identifiers.orderNumbers.length > 0 ||
       identifiers.itemNumbers.length > 0 ||
       identifiers.labelValues.length > 0 ||
+      identifiers.listingIds.length > 0 ||
       identifiers.trackingNumbers.length > 0 ||
       identifiers.returnIds.length > 0;
     if (usableEmails.length && hasStrongContext) {
@@ -753,11 +1015,88 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "buyer_email_plus_strong_clue",
           confidence: 0.65,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "buyer_email_plus_strong_clue", { masked_email_excluded: true }),
+          metadata: buildMetadata("buyer_email_plus_strong_clue", { masked_email_excluded: true }),
         });
       }
     } else if (identifiers.buyerEmails.some(isMaskedBuyerEmail)) {
       ambiguity.buyer_email_masked_or_unreliable = true;
+    }
+  }
+
+  const inventoryLookupValues = unique([
+    ...identifiers.labels,
+    ...identifiers.labelValues,
+    ...identifiers.listingIds,
+    ...identifiers.itemNumbers,
+  ]);
+  if (inventoryLookupValues.length) {
+    dataSourcesChecked.add("ebay_inventory_links");
+    const inventoryLinks = await queryByChunks(inventoryLookupValues, async (chunk) => {
+      const [skuResult, listingResult, offerResult] = await Promise.all([
+        supabase
+          .from("ebay_inventory_links")
+          .select("item_type_id, sku, offer_id, listing_id, status, last_synced_at, updated_at")
+          .in("sku", chunk),
+        supabase
+          .from("ebay_inventory_links")
+          .select("item_type_id, sku, offer_id, listing_id, status, last_synced_at, updated_at")
+          .in("listing_id", chunk),
+        supabase
+          .from("ebay_inventory_links")
+          .select("item_type_id, sku, offer_id, listing_id, status, last_synced_at, updated_at")
+          .in("offer_id", chunk),
+      ]);
+      if (skuResult.error || listingResult.error || offerResult.error) {
+        throw new ProcessError("matching_failed", { phase: "ebay_inventory_link_lookup", messageId });
+      }
+      const byItem = new Map<string, Record<string, any>>();
+      for (const link of [...(skuResult.data || []), ...(listingResult.data || []), ...(offerResult.data || [])] as Array<Record<string, any>>) {
+        byItem.set(String(link.item_type_id), link);
+      }
+      return [...byItem.values()];
+    });
+
+    const byMatchedValue = new Map<string, Array<Record<string, any>>>();
+    for (const link of inventoryLinks as Array<Record<string, any>>) {
+      const matches = [
+        { field: "sku", value: link.sku, confidence: 0.52 },
+        { field: "listing_id", value: link.listing_id, confidence: 0.42 },
+        { field: "offer_id", value: link.offer_id, confidence: 0.42 },
+      ].filter((entry) => entry.value && inventoryLookupValues.includes(String(entry.value)));
+      for (const match of matches) {
+        const key = `${match.field}:${match.value}`;
+        byMatchedValue.set(key, [
+          ...(byMatchedValue.get(key) || []),
+          { ...link, matched_field: match.field, matched_value: match.value, confidence: match.confidence },
+        ]);
+      }
+    }
+
+    for (const [key, links] of byMatchedValue) {
+      if (links.length === 1) {
+        const link = links[0];
+        candidates.push({
+          message_id: messageId,
+          link_type: "inventory_item",
+          item_id: String(link.item_type_id),
+          matched_value: String(link.matched_value || ""),
+          match_method: link.matched_field === "sku" ? "ebay_inventory_sku_exact" : "ebay_inventory_listing_bridge_exact",
+          confidence: Number(link.confidence || 0.42),
+          status: "suggested",
+          metadata: buildMetadata(link.matched_field === "sku" ? "ebay_inventory_sku_exact" : "ebay_inventory_listing_bridge_exact", {
+            matched_fields: [String(link.matched_field)],
+            inventory_context_only: true,
+            inventory_availability_not_verified: true,
+            listing_id_alone_not_order_verified: link.matched_field !== "sku",
+            inventory_link: compactObject({
+              last_synced_at: link.last_synced_at,
+              updated_at: link.updated_at,
+            }),
+          }),
+        });
+      } else if (links.length > 1) {
+        ambiguity[`ebay_inventory_link:${key}`] = links.length;
+      }
     }
   }
 
@@ -792,7 +1131,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "internal_label_custom_label_exact",
           confidence: 0.78,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "internal_label_custom_label_exact"),
+          metadata: buildMetadata("internal_label_custom_label_exact"),
         });
       } else if (lines.length > 1) {
         ambiguity[`custom_label:${label}`] = lines.length;
@@ -837,7 +1176,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "internal_label_inventory_exact",
           confidence: 0.5,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "internal_label_inventory_exact"),
+          metadata: buildMetadata("internal_label_inventory_exact"),
         });
       } else if (items.length > 1) {
         ambiguity[`inventory_label:${label}`] = items.length;
@@ -879,7 +1218,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "internal_label_item_title_contains",
           confidence: 0.55,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "internal_label_item_title_contains"),
+          metadata: buildMetadata("internal_label_item_title_contains"),
         });
       } else if (lineTitleMatches.length > 1) {
         ambiguity[`item_title_contains:${label}`] = lineTitleMatches.length;
@@ -896,7 +1235,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "internal_label_inventory_title_contains",
           confidence: 0.5,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "internal_label_inventory_title_contains"),
+          metadata: buildMetadata("internal_label_inventory_title_contains"),
         });
       } else if (itemTitleMatches.length > 1) {
         ambiguity[`inventory_title_contains:${label}`] = itemTitleMatches.length;
@@ -929,7 +1268,7 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
           match_method: "item_title_unique_contains",
           confidence: 0.5,
           status: "suggested",
-          metadata: linkMetadata(identifiers, "item_title_unique_contains", { title_only: true }),
+          metadata: buildMetadata("item_title_unique_contains", { title_only: true }),
         });
       } else if (lineTitleMatches.length > 1) {
         ambiguity[`item_title_phrase:${phrase}`] = lineTitleMatches.length;
@@ -948,7 +1287,38 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
       candidate.status,
     ].join(":");
     const existing = deduped.get(key);
-    if (!existing || candidate.confidence > existing.confidence) deduped.set(key, candidate);
+    if (!existing) {
+      deduped.set(key, candidate);
+      continue;
+    }
+    if (candidate.confidence > existing.confidence) {
+      candidate.metadata = {
+        ...candidate.metadata,
+        supplemental_matches: [
+          ...((candidate.metadata.supplemental_matches as unknown[]) || []),
+          compactObject({
+            match_method: existing.match_method,
+            matched_value: existing.matched_value,
+            confidence: existing.confidence,
+            return_case_id: existing.metadata.return_case_id,
+          }),
+        ],
+      };
+      deduped.set(key, candidate);
+      continue;
+    }
+    existing.metadata = {
+      ...existing.metadata,
+      supplemental_matches: [
+        ...((existing.metadata.supplemental_matches as unknown[]) || []),
+        compactObject({
+          match_method: candidate.match_method,
+          matched_value: candidate.matched_value,
+          confidence: candidate.confidence,
+          return_case_id: candidate.metadata.return_case_id,
+        }),
+      ],
+    };
   }
 
   for (const candidate of deduped.values()) {
@@ -967,6 +1337,9 @@ async function matchOrder(supabase: ServiceClient, messageId: string) {
       identifiers_found: identifiersSummary(identifiers),
       links_created: counters.links_created,
       links_updated: counters.links_updated,
+      data_sources_checked: [...dataSourcesChecked],
+      sync_freshness: syncFreshness,
+      stale_context_warning: (syncFreshness as Record<string, unknown>).stale === true,
       ambiguity,
     },
   };
