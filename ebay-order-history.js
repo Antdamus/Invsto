@@ -3029,7 +3029,10 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         ${group.lines.map((line) => `
           <div class="history-line-row">
             <div>
-              <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+              <div class="history-line-title-row">
+                <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+                <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
+              </div>
               <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>

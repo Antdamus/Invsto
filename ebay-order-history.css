@@ -774,6 +774,25 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.history-line-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.history-line-title-row strong {
+  flex: 1 1 auto;
+}
+
+.history-line-title-row b {
+  flex: 0 0 auto;
+  color: #f8dfaa;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
 .history-worker-row {
   margin-top: 5px;
   font-size: 0.84rem;

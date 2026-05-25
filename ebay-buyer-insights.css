@@ -287,6 +287,13 @@
   margin: 0 0 14px;
 }
 
+.buyer-insights-panel-note {
+  margin: -4px 0 10px;
+  color: rgba(246, 240, 232, 0.56);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
 .buyer-kind-row,
 .buyer-insights-list-row {
   display: grid;
@@ -323,6 +330,27 @@
 .buyer-insights-list-row b {
   color: #f8dfaa;
   white-space: nowrap;
+}
+
+.buyer-insights-list-row b small {
+  display: block;
+  margin-top: 4px;
+  color: rgba(246, 240, 232, 0.5);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.buyer-insights-list-row.is-returned-order {
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid rgba(248, 223, 170, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 223, 170, 0.05);
+}
+
+.buyer-insights-list-row.is-returned-order:first-of-type {
+  border-top: 1px solid rgba(248, 223, 170, 0.16);
 }
 
 .buyer-insights-empty,

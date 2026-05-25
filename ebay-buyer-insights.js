@@ -192,6 +192,33 @@
     });
   }
 
+  function normalizeOrderNumber(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function getReturnedOrderRows(rows) {
+    return (rows || []).filter((row) => {
+      const status = String(row.status || "").toLowerCase();
+      return row?.hasReturn && status !== "cancelled" && status !== "archived";
+    });
+  }
+
+  function getReturnOrderMatch(returnRow, orders) {
+    const returnOrderNumber = normalizeOrderNumber(returnRow?.orderNumber);
+    if (!returnOrderNumber) return null;
+    return (orders || []).find((order) => normalizeOrderNumber(order?.orderNumber) === returnOrderNumber) || null;
+  }
+
+  function getMatchingReturnsForOrder(orderRow, returns = []) {
+    const orderNumber = normalizeOrderNumber(orderRow?.orderNumber);
+    if (!orderNumber) return [];
+    return (returns || []).filter((row) => normalizeOrderNumber(row?.orderNumber) === orderNumber);
+  }
+
+  function sumOrderTotals(rows) {
+    return (rows || []).reduce((total, row) => total + toFiniteNumber(row?.totalPrice, 0), 0);
+  }
+
   function renderContextMetrics(summary = {}, context = {}, priorRows = []) {
     const currentTotal = toFiniteNumber(context.currentOrderTotal, 0);
     const currentOrderCount = toPositiveInteger(context.currentOrderCount, currentTotal > 0 ? 1 : 0);
@@ -218,15 +245,16 @@
     `;
   }
 
-  function renderKindRows(rows) {
-    if (!rows?.length) return `<div class="buyer-insights-empty is-compact">No item mix captured yet.</div>`;
-    return rows.map((row) => `
+  function renderKindRows(rows, note = "") {
+    const noteMarkup = note ? `<p class="buyer-insights-panel-note">${escapeHtml(note)}</p>` : "";
+    if (!rows?.length) return `${noteMarkup}<div class="buyer-insights-empty is-compact">No item mix captured yet.</div>`;
+    return `${noteMarkup}${rows.map((row) => `
       <div class="buyer-kind-row">
         <strong>${escapeHtml(row.label || "Other")}</strong>
         <span>${escapeHtml(`${row.unitCount || 0} units`)}</span>
         <b>${escapeHtml(formatMoney(row.grossSales))}</b>
       </div>
-    `).join("");
+    `).join("")}`;
   }
 
   function renderTopItems(rows, context = {}) {
@@ -263,8 +291,8 @@
     `).join("");
   }
 
-  function renderRecentOrders(rows, context = {}) {
-    const priorRows = getPriorOrderRows(rows, context);
+  function renderRecentOrders(rows) {
+    const priorRows = rows || [];
     if (!priorRows.length) return `<div class="buyer-insights-empty is-compact">No previous orders found for this buyer.</div>`;
     return priorRows.map((row) => {
       const titles = Array.isArray(row.itemTitles) ? row.itemTitles.filter(Boolean).slice(0, 3) : [];
@@ -276,6 +304,32 @@
             ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
           </div>
           <b>${escapeHtml(formatMoney(row.totalPrice))}</b>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderReturnedPurchases(rows, returns = []) {
+    if (!rows?.length) return `<div class="buyer-insights-empty is-compact">No returned purchases found for this buyer.</div>`;
+    return rows.map((row) => {
+      const titles = Array.isArray(row.itemTitles) ? row.itemTitles.filter(Boolean).slice(0, 3) : [];
+      const matchingReturns = getMatchingReturnsForOrder(row, returns);
+      const returnSummary = matchingReturns.map((ret) => {
+        const parts = [ret.returnId || "Return", ret.reason || "", ret.requestAmount || ""].filter(Boolean);
+        return parts.join(" - ");
+      }).join(" / ");
+      return `
+        <div class="buyer-insights-list-row is-returned-order">
+          <div>
+            <strong>${escapeHtml(row.orderNumber || "No order number")}</strong>
+            <span>${escapeHtml(formatDate(row.purchaseAt))} - returned purchase - ${escapeHtml(`${row.lineCount || 0} lines / ${row.unitCount || 0} units`)}</span>
+            ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
+            ${returnSummary ? `<span>${escapeHtml(returnSummary)}</span>` : ""}
+          </div>
+          <b>
+            ${escapeHtml(formatMoney(row.totalPrice))}
+            ${matchingReturns.length ? `<small>${escapeHtml(`${matchingReturns.length} return${matchingReturns.length === 1 ? "" : "s"}`)}</small>` : ""}
+          </b>
         </div>
       `;
     }).join("");
@@ -298,18 +352,28 @@
     }).join("");
   }
 
-  function renderRecentReturns(rows) {
+  function renderRecentReturns(rows, orders = []) {
     if (!rows?.length) return `<div class="buyer-insights-empty is-compact">No synced returns for this buyer.</div>`;
-    return rows.map((row) => `
-      <div class="buyer-insights-list-row">
-        <div>
-          <strong>${escapeHtml(row.returnId || row.orderNumber || "Return")}</strong>
-          <span>${escapeHtml(row.status || "unknown")} - ${escapeHtml(row.reason || "No reason")} - ${escapeHtml(formatDate(row.openedAt))}</span>
-          ${row.buyerComment ? `<em>${escapeHtml(row.buyerComment)}</em>` : ""}
+    return rows.map((row) => {
+      const matchedOrder = getReturnOrderMatch(row, orders);
+      const titles = Array.isArray(matchedOrder?.itemTitles) ? matchedOrder.itemTitles.filter(Boolean).slice(0, 2) : [];
+      const originalOrderValue = toFiniteNumber(matchedOrder?.totalPrice, 0);
+      return `
+        <div class="buyer-insights-list-row">
+          <div>
+            <strong>${escapeHtml(row.returnId || row.orderNumber || "Return")}</strong>
+            <span>${escapeHtml(row.status || "unknown")} - ${escapeHtml(row.reason || "No reason")} - ${escapeHtml(formatDate(row.openedAt))}</span>
+            ${matchedOrder ? `<span>Original purchase ${escapeHtml(matchedOrder.orderNumber || "")}${originalOrderValue ? ` - ${escapeHtml(formatMoney(originalOrderValue))}` : ""}</span>` : ""}
+            ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
+            ${row.buyerComment ? `<em>${escapeHtml(row.buyerComment)}</em>` : ""}
+          </div>
+          <b>
+            ${escapeHtml(row.requestAmount || "")}
+            ${originalOrderValue ? `<small>purchase ${escapeHtml(formatMoney(originalOrderValue))}</small>` : ""}
+          </b>
         </div>
-        <b>${escapeHtml(row.requestAmount || "")}</b>
-      </div>
-    `).join("");
+      `;
+    }).join("");
   }
 
   function renderScanIndicator(meta) {
@@ -360,7 +424,15 @@
     const modal = ensureModal();
     const summary = data?.summary || {};
     const context = data?.context || {};
-    const priorRows = getPriorOrderRows(data?.recentOrders || [], context);
+    const recentOrders = data?.recentOrders || [];
+    const priorRows = getPriorOrderRows(recentOrders, context);
+    const returnedRows = getReturnedOrderRows(recentOrders);
+    const returnedOrderGross = sumOrderTotals(returnedRows);
+    const returnHint = [
+      `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"}`,
+      `${summary.openReturnCount || 0} open`,
+      returnedOrderGross ? `${formatMoney(returnedOrderGross)} original purchase value` : "",
+    ].filter(Boolean).join(" / ");
     const buyerUsername = data?.buyerUsername || activeBuyer || "Buyer";
     const buyerName = data?.buyerName && data.buyerName !== buyerUsername ? data.buyerName : "";
     activeSyncMeta = data?.buyerHistorySync || null;
@@ -379,7 +451,7 @@
         ${metric("Archive gross bought", formatMoney(summary.grossSalesBeforeReturns ?? summary.grossSales), `${summary.grossOrderCount ?? summary.orderCount ?? 0} orders before returns`)}
         ${metric("Archive estimated payout", formatMoney(summary.netPayout), `${summary.unitCount || 0} units`)}
         ${metric("Average order", formatMoney(summary.avgOrderValue), `${summary.lineCount || 0} lines`)}
-        ${metric("Returns", formatMoney(summary.returnAmountTotal), `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"} / ${summary.openReturnCount || 0} open`)}
+        ${metric("Returns", formatMoney(summary.returnAmountTotal), returnHint)}
         ${metric("Cancellations", formatMoney(summary.cancelledOrderTotal ?? summary.cancelledLineTotal), `${summary.cancelledOrderCount || 0} order${Number(summary.cancelledOrderCount || 0) === 1 ? "" : "s"} / ${summary.cancelledLineCount || 0} line${Number(summary.cancelledLineCount || 0) === 1 ? "" : "s"}`)}
         ${metric("First purchase", formatDate(summary.firstPurchaseAt))}
         ${metric("Last purchase", formatDate(summary.lastPurchaseAt))}
@@ -388,7 +460,7 @@
       <div class="buyer-insights-grid">
         <section class="buyer-insights-panel">
           <h3>What They Buy</h3>
-          ${renderKindRows(data?.itemKinds || [])}
+          ${renderKindRows(data?.itemKinds || [], "Excludes returned, canceled, and archived orders so this reflects kept/current buying behavior.")}
         </section>
         <section class="buyer-insights-panel">
           <h3>${escapeHtml(getCurrentItemsPanelTitle(context))}</h3>
@@ -399,8 +471,12 @@
           ${renderRecentOrders(priorRows, context)}
         </section>
         <section class="buyer-insights-panel is-wide">
+          <h3>Returned Purchases</h3>
+          ${renderReturnedPurchases(returnedRows, data?.recentReturns || [])}
+        </section>
+        <section class="buyer-insights-panel is-wide">
           <h3>Recent Returns</h3>
-          ${renderRecentReturns(data?.recentReturns || [])}
+          ${renderRecentReturns(data?.recentReturns || [], recentOrders)}
         </section>
         <section class="buyer-insights-panel is-wide">
           <h3>Recent Cancellations</h3>
