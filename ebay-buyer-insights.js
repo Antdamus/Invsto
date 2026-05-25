@@ -4,7 +4,6 @@
   let activeBuyer = "";
   let activeRequestId = 0;
   let activeSyncMeta = null;
-  let deepSyncBusy = false;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -67,12 +66,6 @@
     return meta[camelName] ?? meta[snakeName || camelName] ?? null;
   }
 
-  function getDeepSyncButtonLabel() {
-    return getSyncMetaValue(activeSyncMeta, "lastSuccessAt", "last_success_at")
-      ? "Refresh 2-year scan"
-      : "Scan 2 years";
-  }
-
   function ensureModal() {
     let modal = document.getElementById(MODAL_ID);
     if (modal) return modal;
@@ -94,12 +87,9 @@
           </div>
           <div class="buyer-insights-actions">
             <a id="buyer-insights-history-link" class="buyer-insights-history-link" href="ebay-order-history.html">Open history</a>
-            <button id="buyer-insights-deep-sync" class="buyer-insights-deep-sync" type="button">
-              Scan 2 years
-            </button>
+            <span class="buyer-insights-archive-pill">Covered by account archive</span>
           </div>
         </div>
-        <div id="buyer-insights-sync-status" class="buyer-insights-sync-status hidden"></div>
         <div id="buyer-insights-body" class="buyer-insights-body">
           <div class="buyer-insights-empty">Loading...</div>
         </div>
@@ -111,10 +101,6 @@
       if (event.target === modal || event.target.closest(".buyer-insights-close")) {
         closeModal();
         return;
-      }
-      if (event.target.closest("#buyer-insights-deep-sync")) {
-        event.preventDefault();
-        runDeepBuyerSync();
       }
     });
 
@@ -134,37 +120,6 @@
     activeBuyer = "";
   }
 
-  function getBuyerHistorySyncUrl() {
-    const projectRef = String(window.SUPABASE_URL || "")
-      .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
-    return `https://${projectRef}.functions.supabase.co/ebay-buyer-history-sync`;
-  }
-
-  function setDeepSyncBusy(busy) {
-    deepSyncBusy = busy;
-    const button = document.getElementById("buyer-insights-deep-sync");
-    if (!button) return;
-    button.disabled = busy;
-    button.textContent = busy ? "Scanning eBay..." : getDeepSyncButtonLabel();
-  }
-
-  function setDeepSyncStatus(message, tone = "") {
-    const status = document.getElementById("buyer-insights-sync-status");
-    if (!status) return;
-    status.className = `buyer-insights-sync-status${tone ? ` ${tone}` : ""}`;
-    status.textContent = message || "";
-    status.classList.toggle("hidden", !message);
-  }
-
-  function summarizeDeepSyncResult(result) {
-    if (!result?.ok) return result?.error || "Could not scan eBay buyer history.";
-    const skippedOpen = Number(result.skippedNewOpenOrders || 0);
-    const skippedText = skippedOpen
-      ? ` ${skippedOpen.toLocaleString()} new open order(s) were left for the pending-order sync.`
-      : "";
-    return `Scanned ${Number(result.scannedOrders || 0).toLocaleString()} eBay order(s), matched ${Number(result.matchedOrders || 0).toLocaleString()} for this buyer, and saved ${Number(result.ordersUpserted || 0).toLocaleString()} order(s) / ${Number(result.linesUpserted || 0).toLocaleString()} line(s).${skippedText}`;
-  }
-
   function setLoading(buyerUsername) {
     const modal = ensureModal();
     activeSyncMeta = null;
@@ -172,8 +127,6 @@
     modal.querySelector("#buyer-insights-title").textContent = buyerUsername || "Buyer history";
     modal.querySelector("#buyer-insights-subtitle").textContent = "Pulling synced eBay orders, returns, and item mix...";
     modal.querySelector("#buyer-insights-history-link").href = `ebay-order-history.html?buyer=${encodeURIComponent(buyerUsername || "")}`;
-    setDeepSyncBusy(false);
-    setDeepSyncStatus("");
     modal.querySelector("#buyer-insights-body").innerHTML = `
       <div class="buyer-insights-empty">Loading buyer history...</div>
     `;
@@ -264,8 +217,8 @@
     if (status === "running") {
       return `
         <div class="buyer-insights-scan-indicator is-running">
-          <strong>2-year API scan is running</strong>
-          <span>Started ${escapeHtml(formatDateTime(lastStartedAt))}. Refresh this buyer in a moment to see the updated history.</span>
+          <strong>Account archive is refreshing</strong>
+          <span>Started ${escapeHtml(formatDateTime(lastStartedAt))}. Refresh this buyer in a moment to see updated archive coverage.</span>
         </div>
       `;
     }
@@ -273,8 +226,8 @@
     if (status === "failed") {
       return `
         <div class="buyer-insights-scan-indicator is-failed">
-          <strong>Last 2-year API scan failed</strong>
-          <span>${escapeHtml(lastError || "Run the scan again when eBay is responding.")}</span>
+          <strong>Account archive needs attention</strong>
+          <span>${escapeHtml(lastError || "The last account archive refresh did not finish cleanly.")}</span>
         </div>
       `;
     }
@@ -282,16 +235,16 @@
     if (lastSuccessAt) {
       return `
         <div class="buyer-insights-scan-indicator is-complete">
-          <strong>${escapeHtml(`${daysBack}-day API scan collected`)}</strong>
-          <span>${escapeHtml(formatDateTime(lastSuccessAt))} · ${escapeHtml(formatCount(scanned))} eBay orders scanned · ${escapeHtml(formatCount(matched))} matched this buyer.</span>
+          <strong>Covered by account archive</strong>
+          <span>${escapeHtml(`${daysBack} days through ${formatDateTime(lastSuccessAt)} - ${formatCount(scanned)} eBay orders scanned - ${formatCount(matched)} matched this buyer.`)}</span>
         </div>
       `;
     }
 
     return `
-      <div class="buyer-insights-scan-indicator is-empty">
-        <strong>No deep API scan yet</strong>
-        <span>This view is using already-synced OG history. Use Scan 2 years only when you want a fuller buyer profile.</span>
+      <div class="buyer-insights-scan-indicator is-complete">
+        <strong>Covered by account archive</strong>
+        <span>Using synced OG and eBay history. Run the account archive from Order History when you need a full refresh.</span>
       </div>
     `;
   }
@@ -307,7 +260,6 @@
       ? `${buyerName} - synced eBay buyer history`
       : "Synced eBay buyer history";
     modal.querySelector("#buyer-insights-history-link").href = `ebay-order-history.html?buyer=${encodeURIComponent(buyerUsername)}`;
-    setDeepSyncBusy(deepSyncBusy);
 
     modal.querySelector("#buyer-insights-body").innerHTML = `
       ${renderScanIndicator(activeSyncMeta)}
@@ -381,44 +333,6 @@
       if (requestId !== activeRequestId) return;
       console.warn("Failed to load eBay buyer insights:", error);
       setError(error?.message || "Failed to load buyer insights.");
-    }
-  }
-
-  async function runDeepBuyerSync() {
-    const buyer = String(activeBuyer || "").trim();
-    if (!buyer || deepSyncBusy) return;
-
-    setDeepSyncBusy(true);
-    setDeepSyncStatus("Scanning eBay order history for this buyer only. This can take a little bit...", "info");
-
-    try {
-      const response = await fetch(getBuyerHistorySyncUrl(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          buyerUsername: buyer,
-          daysBack: 730,
-          maxScannedOrders: 2500,
-          dryRun: false,
-        }),
-      });
-      const text = await response.text();
-      let result;
-      try {
-        result = text ? JSON.parse(text) : {};
-      } catch {
-        result = { ok: false, error: text || `HTTP ${response.status}` };
-      }
-      if (!response.ok && !result.error) result.error = `HTTP ${response.status}`;
-      if (!result?.ok) throw new Error(result?.error || "Could not scan eBay buyer history.");
-
-      await openBuyerInsights(buyer, { daysBack: null });
-      setDeepSyncStatus(summarizeDeepSyncResult(result), "success");
-    } catch (error) {
-      console.warn("Failed to deep-scan eBay buyer history:", error);
-      setDeepSyncStatus(error?.message || "Could not scan eBay buyer history.", "error");
-    } finally {
-      setDeepSyncBusy(false);
     }
   }
 

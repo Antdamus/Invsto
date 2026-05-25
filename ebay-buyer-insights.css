@@ -126,7 +126,7 @@
 }
 
 .buyer-insights-history-link,
-.buyer-insights-deep-sync {
+.buyer-insights-archive-pill {
   border: 1px solid rgba(116, 154, 213, 0.55);
   border-radius: 999px;
   background: transparent;
@@ -139,53 +139,17 @@
   cursor: pointer;
 }
 
-.buyer-insights-deep-sync {
-  border-color: rgba(245, 213, 156, 0.46);
-  color: #f8dfaa;
+.buyer-insights-archive-pill {
+  border-color: rgba(116, 232, 164, 0.38);
+  background: rgba(116, 232, 164, 0.08);
+  color: #bff7d4;
+  cursor: default;
 }
 
 .buyer-insights-history-link:hover,
-.buyer-insights-history-link:focus-visible,
-.buyer-insights-deep-sync:hover,
-.buyer-insights-deep-sync:focus-visible {
+.buyer-insights-history-link:focus-visible {
   background: rgba(116, 154, 213, 0.14);
   outline: none;
-}
-
-.buyer-insights-deep-sync:hover,
-.buyer-insights-deep-sync:focus-visible {
-  background: rgba(245, 213, 156, 0.12);
-}
-
-.buyer-insights-deep-sync:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.buyer-insights-sync-status {
-  margin-top: 16px;
-  border: 1px solid rgba(116, 154, 213, 0.35);
-  border-radius: 8px;
-  background: rgba(116, 154, 213, 0.1);
-  color: #d7e6ff;
-  padding: 12px 14px;
-  font-weight: 800;
-}
-
-.buyer-insights-sync-status.success {
-  border-color: rgba(116, 232, 164, 0.42);
-  background: rgba(116, 232, 164, 0.1);
-  color: #c8f7d8;
-}
-
-.buyer-insights-sync-status.error {
-  border-color: rgba(255, 117, 117, 0.5);
-  background: rgba(255, 117, 117, 0.1);
-  color: #ffb6b6;
-}
-
-.buyer-insights-sync-status.hidden {
-  display: none;
 }
 
 .buyer-insights-body {
