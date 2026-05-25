@@ -1447,6 +1447,47 @@ async function updateRunLiveRefreshOperationalEvent(
   }
 }
 
+async function insertProcessImportedOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    messageIds: string[];
+    jobIds: string[];
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "process_imported",
+      mailbox_id: values.mailboxId,
+      message_ids: values.messageIds,
+      job_ids: values.jobIds,
+      new_job_ids: values.jobIds,
+      job_types: PROCESS_IMPORTED_JOB_TYPES as unknown as string[],
+      reason: "Controlled processing gate for approved imported Outlook emails. No Outlook mutation, classification, draft generation, or checkpoint update is performed.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      processor_version: IMPORT_PROCESSOR_VERSION,
+      replay_source: "process_imported",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] process_imported audit insert failed", {
+      phase: "process_imported_audit",
+      mailbox_id: values.mailboxId,
+    });
+    return null;
+  }
+
+  return data as { id: string; created_at: string };
+}
+
 async function findExistingMessage(supabase: ServiceClient, mailboxId: string, message: GraphMessage) {
   const { data, error } = await supabase
     .from("email_messages")
@@ -2505,6 +2546,8 @@ async function processImportedEmails(
   supabase: ServiceClient,
   mailboxId: string,
   input: ProcessImportedInput,
+  admin: { userId: string; email: string | null },
+  telemetry: { parentOperationId?: string | null } = {},
 ) {
   const counters = importedProcessingCounters();
   const approvedMessageIds = await loadApprovedImportedMessageIds(supabase);
@@ -2558,6 +2601,45 @@ async function processImportedEmails(
   }
 
   const queueSummary = await buildImportedQueueSummary(supabase, approvedMessageIds);
+  const jobIds = await loadProcessImportedJobIds(supabase, candidateMessageIds);
+  const eventPayload = {
+    mode: "process_imported",
+    parent_operation_id: telemetry.parentOperationId || null,
+    batch_size: input.batchSize,
+    candidate_count: candidateMessageIds.length,
+    approved_imported_message_count: approvedMessageIds.length,
+    queued_count: counters.queued_count,
+    processed_count: counters.processed_count,
+    skipped_count: counters.skipped_count,
+    failed_count: counters.failed_count,
+    already_processed_count: counters.already_processed_count,
+    currently_processing_count: counters.currently_processing_count,
+    permanently_failed_count: counters.permanently_failed_count,
+    jobs_enqueued: counters.jobs_enqueued,
+    jobs_processed: counters.jobs_processed,
+    jobs_succeeded: counters.jobs_succeeded,
+    jobs_failed: counters.jobs_failed,
+    jobs_skipped: counters.jobs_skipped,
+    links_created: counters.links_created,
+    links_updated: counters.links_updated,
+    processing_reasons: processingReasons,
+    deterministic_result_count: deterministicResults.length,
+    outlook_mutation_performed: false,
+    ebay_mutation_performed: false,
+    classification_triggered: false,
+    sync_checkpoint_updated: false,
+    attachments_fetched: 0,
+    automatic_responses_sent: 0,
+    drafts_created: 0,
+  };
+  const auditEvent = await insertProcessImportedOperationalEvent(supabase, {
+    mailboxId,
+    messageIds: candidateMessageIds,
+    jobIds,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    payload: eventPayload,
+  });
   return {
     ...counters,
     approved_imported_message_count: approvedMessageIds.length,
@@ -2565,7 +2647,27 @@ async function processImportedEmails(
     processing_reasons: processingReasons,
     deterministic_results: deterministicResults,
     queue_summary: queueSummary,
+    replay_operation_references: {
+      operation_event_id: auditEvent?.id || null,
+      operation_event_created_at: auditEvent?.created_at || null,
+      job_ids: jobIds,
+    },
   };
+}
+
+async function loadProcessImportedJobIds(supabase: ServiceClient, messageIds: string[]) {
+  if (!messageIds.length) return [];
+  const { data, error } = await supabase
+    .from("email_processing_jobs")
+    .select("id")
+    .in("message_id", messageIds)
+    .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+    .eq("input_version", IMPORT_PROCESSOR_VERSION)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) throw new SyncError("process_imported_job_reference_failed", { phase: "process_imported_job_reference" });
+  return (data || []).map((row: { id: string }) => row.id);
 }
 
 function classifyImportedCounters(): ClassifyImportedCounters {
@@ -3695,7 +3797,7 @@ async function runLiveRefresh(
     mode: "process_imported",
     folder: "inbox",
     batchSize: input.processBatchSize,
-  });
+  }, admin, { parentOperationId: parentEvent.id });
   const queueAfterProcessing = await assertQueueHasCapacity(supabase, model.mailbox.id);
   if (queueAfterProcessing.queue_saturated) {
     const blockedResult = {
@@ -3717,6 +3819,7 @@ async function runLiveRefresh(
       queue_limits: queueAfterProcessing.queue_limits,
       child_operations: {
         import_operation_id: importStage.child_operation_id,
+        process_operation_id: processingResult.replay_operation_references?.operation_event_id || null,
       },
       duration_ms: Date.now() - startedAt,
       safety: baseSafety,
@@ -3760,7 +3863,7 @@ async function runLiveRefresh(
     queue_limits: finalQueue.queue_limits,
     child_operations: {
       import_operation_id: importStage.child_operation_id,
-      process_operation_id: null,
+      process_operation_id: processingResult.replay_operation_references?.operation_event_id || null,
       classify_operation_id: classificationResult.replay_operation_references?.operation_event_id || null,
     },
     duration_ms: Date.now() - startedAt,
@@ -3964,6 +4067,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
 
   const latestImportEvent = (events || []).find((event) => String(event.event_type || "") === "sync_import_approved");
   const latestLiveRefreshEvent = (events || []).find((event) => String(event.event_type || "") === "run_live_refresh");
+  const latestProcessEvent = (events || []).find((event) => String(event.event_type || "") === "process_imported");
   const latestRematchEvent = (events || []).find((event) => String(event.event_type || "") === "rematch_existing");
   const recentOperationalEvents = (events || []).slice(0, 25).map((event: Record<string, any>) => {
     const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
@@ -3971,6 +4075,15 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     const imported = payload.import && typeof payload.import === "object" ? payload.import as Record<string, any> : {};
     const processing = payload.processing && typeof payload.processing === "object" ? payload.processing as Record<string, any> : {};
     const classification = payload.classification && typeof payload.classification === "object" ? payload.classification as Record<string, any> : {};
+    const safety = payload.safety && typeof payload.safety === "object"
+      ? payload.safety as Record<string, any>
+      : {
+        outlook_fetch_performed: payload.outlook_fetch_performed,
+        outlook_mutation_performed: payload.outlook_mutation_performed,
+        ebay_mutation_performed: payload.ebay_mutation_performed,
+        classification_triggered: payload.classification_triggered,
+        drafts_created: payload.drafts_created,
+      };
     return {
       id: event.id,
       event_type: event.event_type,
@@ -3997,7 +4110,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
         jobs_enqueued: numberFromPayload(payload, ["jobs_enqueued"]),
         duration_ms: numberFromPayload(payload, ["duration_ms"]),
       },
-      safety: payload.safety && typeof payload.safety === "object" ? payload.safety : {},
+      safety,
       child_operations: payload.child_operations && typeof payload.child_operations === "object" ? payload.child_operations : {},
       status: payload.status || null,
     };
@@ -4005,6 +4118,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   const timingSummary = {
     latest_import_at: latestImportEvent?.created_at || null,
     latest_live_refresh_at: latestLiveRefreshEvent?.created_at || null,
+    latest_process_operation_at: latestProcessEvent?.created_at || null,
     latest_rematch_at: latestRematchEvent?.created_at || null,
     latest_processing_at: latestProcessingAt,
     latest_classification_at: latestClassificationAt,
@@ -4231,6 +4345,32 @@ serve(async (req) => {
       folderId = processingModel.folder.id;
       const saturation = await assertQueueHasCapacity(supabase, mailboxId);
       if (saturation.queue_saturated) {
+        const auditEvent = await insertProcessImportedOperationalEvent(supabase, {
+          mailboxId,
+          messageIds: [],
+          jobIds: [],
+          initiatedBy: admin.userId,
+          initiatedByEmail: admin.email,
+          payload: {
+            mode: "process_imported",
+            status: "skipped_queue_saturated",
+            batch_size: input.batchSize,
+            processed_count: 0,
+            skipped_count: 0,
+            failed_count: 0,
+            jobs_enqueued: 0,
+            jobs_processed: 0,
+            queue_saturated: true,
+            queue_saturation_reason: saturation.queue_saturation_reason,
+            outlook_mutation_performed: false,
+            ebay_mutation_performed: false,
+            classification_triggered: false,
+            sync_checkpoint_updated: false,
+            attachments_fetched: 0,
+            automatic_responses_sent: 0,
+            drafts_created: 0,
+          },
+        });
         return json(req, 200, {
           ok: true,
           mode: "process_imported",
@@ -4247,9 +4387,14 @@ serve(async (req) => {
           sync_checkpoint_updated: false,
           attachments_fetched: 0,
           automatic_responses_sent: 0,
+          replay_operation_references: {
+            operation_event_id: auditEvent?.id || null,
+            operation_event_created_at: auditEvent?.created_at || null,
+            job_ids: [],
+          },
         });
       }
-      const result = await processImportedEmails(supabase, mailboxId, input);
+      const result = await processImportedEmails(supabase, mailboxId, input, admin);
       console.log("[microsoft-email-sync] process_imported completed", {
         phase: "process_imported_complete",
         mailbox_id: mailboxId,

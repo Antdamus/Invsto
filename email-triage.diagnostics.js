@@ -87,6 +87,7 @@
     const rows = [
       ["Latest live refresh", activity.latest_live_refresh, activity.timing?.latest_live_refresh_at],
       ["Latest import", activity.latest_import, activity.timing?.latest_import_at],
+      ["Latest processing", activity.latest_processing, activity.timing?.latest_process_operation_at || activity.timing?.latest_processing_at],
       ["Latest classification", activity.latest_classification, activity.timing?.latest_classification_at],
       ["Latest rematch", activity.latest_rematch, activity.timing?.latest_rematch_at],
       ["Latest replay", activity.latest_replay, snapshot.replay?.latest_operation_at],
@@ -127,6 +128,7 @@
         Number(counters.imported_count || 0) ? `${counters.imported_count} imported` : "",
         Number(counters.already_imported_count || 0) ? `${counters.already_imported_count} already` : "",
         Number(counters.processed_count || 0) ? `${counters.processed_count} processed` : "",
+        Number(counters.jobs_enqueued || 0) ? `${counters.jobs_enqueued} jobs enqueued` : "",
         Number(counters.classified_count || 0) ? `${counters.classified_count} classified` : "",
         Number(counters.rematched_count || 0) ? `${counters.rematched_count} rematched` : "",
         Number(counters.links_created || 0) ? `${counters.links_created} links created` : "",

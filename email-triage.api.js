@@ -468,6 +468,8 @@
         processed_count: Number(processing.processed_count || 0),
         failed_count: Number(processing.failed_count || 0),
         skipped_count: Number(processing.skipped_count || 0),
+        jobs_enqueued: Number(processing.jobs_enqueued || 0),
+        jobs_processed: Number(processing.jobs_processed || 0),
       },
       classification: {
         classified_count: Number(classification.classified_count || 0),
@@ -568,6 +570,7 @@
       activity: {
         latest_live_refresh: latestByType(["run_live_refresh"]),
         latest_import: latestByType(["sync_import_approved"]),
+        latest_processing: latestByType(["process_imported"]),
         latest_classification: latestByType(["classify_imported", "classification_replay"]),
         latest_rematch: latestByType(["rematch_existing"]),
         latest_replay: latestByType(["classification_replay", "processing_replay", "processing_requeue", "sync_replay"]),

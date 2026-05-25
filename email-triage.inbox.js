@@ -298,6 +298,8 @@
         ], utils)}
         ${renderStageCounts("Processing", result.processing, [
           ["processed_count", "Processed"],
+          ["jobs_enqueued", "Jobs enqueued"],
+          ["jobs_processed", "Jobs processed"],
           ["failed_count", "Failed"],
           ["skipped_count", "Skipped"],
         ], utils)}
