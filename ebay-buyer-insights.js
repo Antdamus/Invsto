@@ -107,6 +107,10 @@
     return "Current Items";
   }
 
+  function usesPassedCurrentContext(context = {}) {
+    return String(context.source || "").trim() !== "order-history";
+  }
+
   function getSyncMetaValue(meta, camelName, snakeName = "") {
     if (!meta || typeof meta !== "object") return null;
     return meta[camelName] ?? meta[snakeName || camelName] ?? null;
@@ -211,7 +215,9 @@
   }
 
   function getPriorOrderRows(rows, context = {}) {
-    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
+    const currentOrderNumbers = new Set(usesPassedCurrentContext(context) && Array.isArray(context.currentOrderNumbers)
+      ? context.currentOrderNumbers
+      : []);
     return (rows || []).filter((row) => {
       const orderNumber = String(row.orderNumber || "").trim();
       const status = String(row.status || "").toLowerCase();
@@ -308,37 +314,102 @@
     return archiveTotal || fallback;
   }
 
-  function renderBuyerValueMetrics(summary = {}, context = {}, priorRows = [], returnedRows = [], recentOrders = []) {
-    const currentTotal = toFiniteNumber(context.currentOrderTotal, 0);
-    const currentOrderCount = toPositiveInteger(context.currentOrderCount, currentTotal > 0 ? 1 : 0);
-    const currentLineCount = toPositiveInteger(context.currentLineCount, 0);
-    const currentItems = Array.isArray(context.currentItems) ? context.currentItems : [];
-    const currentOrderNumbers = Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers.filter(Boolean) : [];
+  function sumDetailAmounts(rows = []) {
+    return (rows || []).reduce((total, row) => total + toFiniteNumber(row.amount, 0), 0);
+  }
+
+  function countUniqueOrders(rows = []) {
+    return new Set((rows || []).map((row) => String(row.orderNumber || "").trim()).filter(Boolean)).size;
+  }
+
+  function getUniqueOrderNumbersFromRows(rows = []) {
+    return [...new Set((rows || []).map((row) => String(row.orderNumber || "").trim()).filter(Boolean))];
+  }
+
+  function sumUniqueOrderField(rows = [], fieldName = "") {
+    const seen = new Set();
+    return (rows || []).reduce((total, row) => {
+      const key = String(row.orderNumber || "").trim();
+      if (!key || seen.has(key)) return total;
+      seen.add(key);
+      return total + toPositiveInteger(row[fieldName], 0);
+    }, 0);
+  }
+
+  function renderBuyerValueMetrics(summary = {}, context = {}, priorRows = [], returnedRows = [], recentOrders = [], lineRows = []) {
+    const hasLineBreakdown = Array.isArray(lineRows) && lineRows.length > 0;
+    const useContextCurrent = !hasLineBreakdown && usesPassedCurrentContext(context);
+    const pendingDetailRows = hasLineBreakdown ? pendingRowsFromBreakdown(lineRows) : [];
+    const contextCurrentTotal = useContextCurrent ? toFiniteNumber(context.currentOrderTotal, 0) : 0;
+    const currentTotal = hasLineBreakdown ? sumDetailAmounts(pendingDetailRows) : contextCurrentTotal;
+    const currentOrderCount = hasLineBreakdown
+      ? countUniqueOrders(pendingDetailRows)
+      : useContextCurrent ? toPositiveInteger(context.currentOrderCount, currentTotal > 0 ? 1 : 0) : 0;
+    const currentLineCount = hasLineBreakdown ? pendingDetailRows.length : useContextCurrent ? toPositiveInteger(context.currentLineCount, 0) : 0;
+    const contextCurrentItems = useContextCurrent && Array.isArray(context.currentItems) ? context.currentItems : [];
+    const currentOrderNumbers = hasLineBreakdown
+      ? getUniqueOrderNumbersFromRows(pendingDetailRows)
+      : useContextCurrent && Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers.filter(Boolean) : [];
     const archiveValue = toFiniteNumber(summary.grossSales, 0);
-    const currentArchiveValue = getCurrentArchiveValue(recentOrders, context, currentTotal);
-    const priorValue = Math.max(0, archiveValue - currentArchiveValue);
+    const currentArchiveValue = useContextCurrent ? getCurrentArchiveValue(recentOrders, context, contextCurrentTotal) : 0;
+    const priorDetailRows = hasLineBreakdown ? priorRowsFromBreakdown(lineRows) : [];
+    const returnDetailRows = hasLineBreakdown ? returnRowsFromBreakdown(lineRows) : [];
+    const returnLineRows = hasLineBreakdown
+      ? lineRows
+        .filter((row) => String(row.itemState || "").toLowerCase() === "return")
+      : [];
+    const cancellationDetailRows = hasLineBreakdown ? cancellationRowsFromBreakdown(lineRows) : [];
+    const cancelledOrderCount = hasLineBreakdown ? countUniqueOrders(cancellationDetailRows) : toPositiveInteger(summary.cancelledOrderCount, 0);
+    const cancelledLineCount = hasLineBreakdown ? cancellationDetailRows.length : toPositiveInteger(summary.cancelledLineCount, 0);
+    const cancelledTotal = hasLineBreakdown ? sumDetailAmounts(cancellationDetailRows) : summary.cancelledOrderTotal ?? summary.cancelledLineTotal;
+    const priorValue = hasLineBreakdown ? sumDetailAmounts(priorDetailRows) : Math.max(0, archiveValue - currentArchiveValue);
     const totalWithCurrent = priorValue + currentTotal;
-    const returnedOrderCount = returnedRows.length;
-    const returnedLineCount = returnedRows.reduce((total, row) => total + toPositiveInteger(row.lineCount, 0), 0);
-    const returnedOriginalValue = sumOrderTotals(returnedRows);
-    const returnedRetainedValue = returnedRows.reduce((total, row) => total + toFiniteNumber(row.retainedAmount, 0), 0);
-    const returnedAmount = toFiniteNumber(summary.returnAmountTotal, 0);
-    const priorOrderCount = Math.max(0, toPositiveInteger(summary.orderCount, 0) - currentOrderCount) + returnedOrderCount;
-    const priorLineCount = Math.max(0, toPositiveInteger(summary.lineCount, 0) - currentLineCount) + returnedLineCount;
+    const returnedOrderCount = hasLineBreakdown ? countUniqueOrders(returnDetailRows) : returnedRows.length;
+    const returnedLineCount = hasLineBreakdown
+      ? returnDetailRows.length
+      : returnedRows.reduce((total, row) => total + toPositiveInteger(row.lineCount, 0), 0);
+    const returnedOriginalValue = hasLineBreakdown
+      ? returnLineRows.reduce((total, row) => total + toFiniteNumber(row.lineTotal, 0), 0)
+      : sumOrderTotals(returnedRows);
+    const returnedRetainedValue = hasLineBreakdown
+      ? returnLineRows.reduce((total, row) => total + toFiniteNumber(row.lineRetainedAmount, 0), 0)
+      : returnedRows.reduce((total, row) => total + toFiniteNumber(row.retainedAmount, 0), 0);
+    const returnedAmount = hasLineBreakdown ? sumDetailAmounts(returnDetailRows) : toFiniteNumber(summary.returnAmountTotal, 0);
+    const returnCount = hasLineBreakdown ? sumUniqueOrderField(returnLineRows, "returnCount") : toPositiveInteger(summary.returnCount, 0);
+    const openReturnCount = hasLineBreakdown ? sumUniqueOrderField(returnLineRows, "openReturnCount") : toPositiveInteger(summary.openReturnCount, 0);
+    const priorOrderCount = hasLineBreakdown
+      ? countUniqueOrders(priorDetailRows)
+      : Math.max(0, toPositiveInteger(summary.orderCount, 0) - currentOrderCount) + returnedOrderCount;
+    const priorLineCount = hasLineBreakdown
+      ? priorDetailRows.length
+      : Math.max(0, toPositiveInteger(summary.lineCount, 0) - currentLineCount) + returnedLineCount;
     const keptPriorValue = Math.max(0, priorValue - returnedRetainedValue);
     const keptPriorOrderCount = Math.max(0, priorOrderCount - returnedOrderCount);
-    const avgOrderValue = priorOrderCount ? priorValue / priorOrderCount : toFiniteNumber(summary.avgOrderValue, 0);
-    const dateRows = [...(priorRows || []), ...(returnedRows || [])];
-    const dates = getPurchaseDateRange(dateRows, summary.firstPurchaseAt, summary.lastPurchaseAt);
-    const currentLabel = getInsightContextLabel(context);
-    const currentItemLines = currentItems.slice(0, 2).map((row) => {
+    const avgOrderValue = priorOrderCount ? priorValue / priorOrderCount : (hasLineBreakdown ? 0 : toFiniteNumber(summary.avgOrderValue, 0));
+    const dateRows = hasLineBreakdown ? priorDetailRows : [...(priorRows || []), ...(returnedRows || [])];
+    const dates = getPurchaseDateRange(
+      dateRows,
+      hasLineBreakdown ? "" : summary.firstPurchaseAt,
+      hasLineBreakdown ? "" : summary.lastPurchaseAt
+    );
+    const currentLabel = hasLineBreakdown || !useContextCurrent ? "Current pending order(s)" : getInsightContextLabel(context);
+    const currentValueLabel = "current pending";
+    const currentPreviewRows = hasLineBreakdown
+      ? pendingDetailRows.map((row) => ({
+        itemNumber: row.itemNumber,
+        title: row.title,
+        orderNumber: row.orderNumber,
+        grossSales: row.amount,
+      }))
+      : contextCurrentItems;
+    const currentItemLines = currentPreviewRows.slice(0, 2).map((row) => {
       const name = row.itemNumber || row.title || row.orderNumber || "Current item";
       return `${name}: ${formatMoney(row.grossSales)}`;
     });
     const currentBreakdown = [
       currentOrderNumbers.length ? `Order ${currentOrderNumbers.slice(0, 2).join(", ")}` : "",
       ...currentItemLines,
-      currentItems.length > 2 ? `+ ${currentItems.length - 2} more current item${currentItems.length - 2 === 1 ? "" : "s"}` : "",
+      currentPreviewRows.length > 2 ? `+ ${currentPreviewRows.length - 2} more current item${currentPreviewRows.length - 2 === 1 ? "" : "s"}` : "",
     ].filter(Boolean);
 
     return `
@@ -354,16 +425,16 @@
         ], "prior")}
         ${metric("Current + prior value", formatMoney(totalWithCurrent), [
           `${formatMoney(priorValue)} prior retained value`,
-          `+ ${formatMoney(currentTotal)} current pending`,
+          `+ ${formatMoney(currentTotal)} ${currentValueLabel}`,
         ], "total")}
         ${metric("Returns", formatMoney(returnedAmount), [
-          `${summary.returnCount || 0} return${Number(summary.returnCount || 0) === 1 ? "" : "s"} / ${summary.openReturnCount || 0} open`,
+          `${returnCount} return${returnCount === 1 ? "" : "s"} / ${openReturnCount} open`,
           returnedOriginalValue ? `${formatMoney(returnedAmount)} returned from ${formatMoney(returnedOriginalValue)} original purchase value` : "",
           returnedRetainedValue ? `${formatMoney(returnedRetainedValue)} retained by store` : "",
         ], "returns")}
-        ${metric("Cancellations", formatMoney(summary.cancelledOrderTotal ?? summary.cancelledLineTotal), [
-          `${summary.cancelledOrderCount || 0} cancelled order${Number(summary.cancelledOrderCount || 0) === 1 ? "" : "s"}`,
-          `${summary.cancelledLineCount || 0} cancelled line${Number(summary.cancelledLineCount || 0) === 1 ? "" : "s"}`,
+        ${metric("Cancellations", formatMoney(cancelledTotal), [
+          `${cancelledOrderCount} cancelled order${cancelledOrderCount === 1 ? "" : "s"}`,
+          `${cancelledLineCount} cancelled line${cancelledLineCount === 1 ? "" : "s"}`,
         ], "cancellations")}
         ${metric("Average order", formatMoney(avgOrderValue), [
           `${formatMoney(priorValue)} prior retained value`,
@@ -377,11 +448,6 @@
 
   function getLineBreakdownRows(data = {}) {
     return Array.isArray(data?.lineBreakdown) ? data.lineBreakdown : [];
-  }
-
-  function isCurrentOrderRow(row, context = {}) {
-    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
-    return currentOrderNumbers.has(String(row?.orderNumber || "").trim());
   }
 
   function sortDetailRows(rows = []) {
@@ -414,7 +480,18 @@
     };
   }
 
+  function pendingRowsFromBreakdown(lineRows = []) {
+    return lineRows
+      .filter((row) => String(row.itemState || "").toLowerCase() === "pending")
+      .map((row) => makeDetailRow(row, row.lineTotal, [
+        row.shipByDate ? `Ship by ${formatDate(row.shipByDate)}` : "",
+      ]));
+  }
+
   function currentRowsFromContext(context = {}, lineRows = []) {
+    if (lineRows.length) return pendingRowsFromBreakdown(lineRows);
+    if (!usesPassedCurrentContext(context)) return [];
+
     const currentItems = Array.isArray(context.currentItems) ? context.currentItems : [];
     const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
     if (currentItems.length) {
@@ -445,9 +522,8 @@
       .map((row) => makeDetailRow(row, row.lineTotal, [row.shipByDate ? `Ship by ${formatDate(row.shipByDate)}` : ""]));
   }
 
-  function priorRowsFromBreakdown(lineRows = [], context = {}) {
+  function priorRowsFromBreakdown(lineRows = []) {
     return lineRows
-      .filter((row) => !isCurrentOrderRow(row, context))
       .filter((row) => ["successful", "return"].includes(String(row.itemState || "").toLowerCase()))
       .map((row) => {
         const isReturn = String(row.itemState || "").toLowerCase() === "return";
@@ -459,9 +535,8 @@
       });
   }
 
-  function returnRowsFromBreakdown(lineRows = [], context = {}) {
+  function returnRowsFromBreakdown(lineRows = []) {
     return lineRows
-      .filter((row) => !isCurrentOrderRow(row, context))
       .filter((row) => String(row.itemState || "").toLowerCase() === "return")
       .map((row) => makeDetailRow(row, row.lineReturnedAmount, [
         `${formatMoney(row.lineReturnedAmount)} returned from ${formatMoney(row.lineTotal)} line value`,
@@ -470,9 +545,8 @@
       ]));
   }
 
-  function cancellationRowsFromBreakdown(lineRows = [], context = {}) {
+  function cancellationRowsFromBreakdown(lineRows = []) {
     return lineRows
-      .filter((row) => !isCurrentOrderRow(row, context))
       .filter((row) => String(row.itemState || "").toLowerCase() === "cancelled")
       .map((row) => makeDetailRow(row, row.lineTotal, ["Cancelled value"]));
   }
@@ -761,6 +835,7 @@
     const returnedRows = Array.isArray(data?.returnedPurchases) && data.returnedPurchases.length
       ? data.returnedPurchases
       : getReturnedOrderRows(recentOrders);
+    const lineRows = getLineBreakdownRows(data);
     const buyerUsername = data?.buyerUsername || activeBuyer || "Buyer";
     const buyerName = data?.buyerName && data.buyerName !== buyerUsername ? data.buyerName : "";
     activeSyncMeta = data?.buyerHistorySync || null;
@@ -773,7 +848,7 @@
     modal.querySelector("#buyer-insights-body").innerHTML = `
       ${renderScanIndicator(activeSyncMeta)}
 
-      ${renderBuyerValueMetrics(summary, context, priorRows, returnedRows, recentOrders)}
+      ${renderBuyerValueMetrics(summary, context, priorRows, returnedRows, recentOrders, lineRows)}
       ${renderMetricBreakdown(activeBreakdownSection, data, context, priorRows, returnedRows)}
 
       <p class="buyer-insights-note">
