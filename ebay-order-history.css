@@ -164,6 +164,40 @@ textarea {
   box-shadow: 0 0 0 4px rgba(227, 189, 119, 0.1);
 }
 
+.history-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 66px;
+  padding: 11px 12px;
+  border: 1px solid var(--history-line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
+.history-filter-toggle input {
+  width: 20px;
+  min-height: 20px;
+  accent-color: var(--history-gold);
+  flex: 0 0 auto;
+}
+
+.history-filter-toggle span {
+  display: grid;
+  gap: 3px;
+  color: var(--history-text);
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.history-filter-toggle small {
+  color: var(--history-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .history-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

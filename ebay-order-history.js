@@ -51,6 +51,7 @@ const state = {
 };
 
 let evidencePhotoViewerReturnFocus = null;
+let historyBuyerAllDatesSearchTimer = null;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -73,6 +74,7 @@ const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 const ORDER_HISTORY_PAGE_SIZE = 500;
 const ORDER_HISTORY_MAX_LINES = 5000;
+const ORDER_HISTORY_MAX_BUYER_ORDERS = 2500;
 const ORDER_HISTORY_RELATED_ID_CHUNK_SIZE = 150;
 const ORDER_HISTORY_LINE_SELECT = `
   id,
@@ -1059,6 +1061,53 @@ async function fetchClosedOrderHistoryLines(fromIso, toIso) {
   return { data: rows, error: null, capped: true };
 }
 
+async function fetchBuyerAllDateOrderHistoryLines(searchTerm) {
+  const buyerTerm = String(searchTerm || "").trim();
+  if (!buyerTerm) return { data: [], error: null, capped: false };
+
+  const buyerPattern = `%${buyerTerm.replace(/[%]/g, "")}%`;
+  const orders = [];
+  for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
+    const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
+    const { data, error } = await supabase
+      .from("ebay_orders")
+      .select("id")
+      .ilike("buyer_username", buyerPattern)
+      .order("sale_date", { ascending: false, nullsFirst: false })
+      .range(start, end);
+
+    if (error) return { data: [], error };
+    const page = data || [];
+    orders.push(...page);
+    if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+  }
+
+  const orderIds = [...new Set(orders.map((order) => order.id).filter(Boolean))];
+  if (!orderIds.length) return { data: [], error: null, capped: false };
+
+  const rows = [];
+  for (const chunk of chunkArray(orderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select(ORDER_HISTORY_LINE_SELECT)
+      .in("line_status", ["fulfilled", "cancelled", "skipped"])
+      .in("order_id", chunk)
+      .order("fulfilled_at", { ascending: false, nullsFirst: false })
+      .limit(ORDER_HISTORY_PAGE_SIZE);
+
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+    if (rows.length >= ORDER_HISTORY_MAX_LINES) break;
+  }
+
+  rows.sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0));
+  return {
+    data: rows.slice(0, ORDER_HISTORY_MAX_LINES),
+    error: null,
+    capped: rows.length >= ORDER_HISTORY_MAX_LINES || orders.length >= ORDER_HISTORY_MAX_BUYER_ORDERS,
+  };
+}
+
 async function fetchOverlappingRows(tableName, columnName, ids = [], options = {}) {
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return { data: [], error: null };
@@ -1110,8 +1159,15 @@ async function loadOrderHistory() {
   if (eventList) eventList.innerHTML = `<div class="history-empty">Loading proof events...</div>`;
 
   const { fromIso, toIso } = getDateRange();
+  const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
+  const searchTerm = String($("history-search")?.value || "").trim();
+  if (buyerAllDates && searchTerm && list) {
+    list.innerHTML = `<div class="history-empty">Searching all stored history for buyer "${escapeHtml(searchTerm)}"...</div>`;
+  }
 
-  const linesQuery = fetchClosedOrderHistoryLines(fromIso, toIso);
+  const linesQuery = buyerAllDates && searchTerm
+    ? fetchBuyerAllDateOrderHistoryLines(searchTerm)
+    : fetchClosedOrderHistoryLines(fromIso, toIso);
 
   const adminEventsQuery = supabase
     .from("ebay_order_admin_events")
@@ -1160,7 +1216,11 @@ async function loadOrderHistory() {
   }
 
   if (linesResult.capped) {
-    console.warn(`Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`);
+    console.warn(
+      buyerAllDates && searchTerm
+        ? `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for buyer search "${searchTerm}". Use a more exact username if you need fewer rows.`
+        : `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`
+    );
   }
 
   if (adminEventsResult.error) {
@@ -6920,9 +6980,31 @@ function setupListeners() {
   ["history-from", "history-to"].forEach((id) => {
     $(id)?.addEventListener("change", loadOrderHistory);
   });
-  ["history-worker", "history-status", "history-label-filter", "history-sort", "history-search"].forEach((id) => {
+  ["history-worker", "history-status", "history-label-filter", "history-sort"].forEach((id) => {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
+  });
+  $("history-search")?.addEventListener("input", () => {
+    if ($("history-buyer-all-dates")?.checked) {
+      window.clearTimeout(historyBuyerAllDatesSearchTimer);
+      historyBuyerAllDatesSearchTimer = window.setTimeout(loadOrderHistory, 450);
+      return;
+    }
+    applyFilters();
+  });
+  $("history-search")?.addEventListener("change", () => {
+    if ($("history-buyer-all-dates")?.checked) {
+      loadOrderHistory();
+      return;
+    }
+    applyFilters();
+  });
+  $("history-buyer-all-dates")?.addEventListener("change", () => {
+    if (String($("history-search")?.value || "").trim()) {
+      loadOrderHistory();
+      return;
+    }
+    applyFilters();
   });
   ["return-task-status-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
     $(id)?.addEventListener("input", renderReturnQueue);
