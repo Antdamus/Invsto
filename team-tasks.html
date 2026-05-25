@@ -42,6 +42,22 @@
             <p>See assigned pending-order tasks, return follow-ups, and independent team work in one place.</p>
           </div>
           <div class="team-task-actions">
+            <div class="team-task-notifications" id="team-task-notifications">
+              <button id="team-task-notification-toggle" type="button" class="secondary-btn team-task-notification-toggle" aria-expanded="false" aria-controls="team-task-notification-panel">
+                <i data-lucide="bell"></i>
+                Notifications
+                <span id="team-task-notification-count" class="team-task-notification-count hidden">0</span>
+              </button>
+              <div id="team-task-notification-panel" class="team-task-notification-panel hidden">
+                <div class="team-task-notification-head">
+                  <strong>Task Notifications</strong>
+                  <button id="team-task-mark-notifications-read" type="button" class="secondary-btn">Mark read</button>
+                </div>
+                <div id="team-task-notification-list" class="team-task-notification-list">
+                  <div class="empty-state">No notifications yet.</div>
+                </div>
+              </div>
+            </div>
             <button id="new-team-task" type="button" class="primary-btn">
               <i data-lucide="plus"></i>
               New Task
@@ -71,6 +87,16 @@
                 <select id="team-task-scope">
                   <option value="mine">My tasks</option>
                   <option value="all">Everyone's tasks</option>
+                  <option value="canceled">Canceled tasks</option>
+                </select>
+              </label>
+              <label id="team-task-history-sort-control" class="team-task-sort hidden">
+                Sort
+                <select id="team-task-history-sort">
+                  <option value="recent">Most recent</option>
+                  <option value="user">By user</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="az">A to Z</option>
                 </select>
               </label>
               <span id="team-task-count" class="team-task-count">0 tasks</span>
@@ -79,6 +105,16 @@
           <div id="team-task-list" class="team-task-list">
             <div class="empty-state">Loading tasks...</div>
           </div>
+          <section id="team-task-canceled-section" class="team-task-canceled-section hidden" aria-label="Canceled tasks">
+            <div class="team-task-canceled-head">
+              <div>
+                <span class="eyebrow">Admin Only</span>
+                <h3>Canceled Tasks</h3>
+              </div>
+              <span id="team-task-canceled-count" class="team-task-count">0 tasks</span>
+            </div>
+            <div id="team-task-canceled-list" class="team-task-list"></div>
+          </section>
         </section>
       </main>
     </div>
@@ -182,6 +218,11 @@
       <button id="close-team-task-photo-viewer" class="modal-close-btn" type="button" aria-label="Close">x</button>
       <span class="eyebrow">Task Evidence</span>
       <h2 id="team-task-photo-viewer-title">Task evidence photo</h2>
+      <div class="team-task-photo-viewer-tools" aria-label="Photo zoom controls">
+        <button id="team-task-photo-zoom-out" type="button" class="secondary-btn">Zoom Out</button>
+        <button id="team-task-photo-reset" type="button" class="secondary-btn">Reset</button>
+        <button id="team-task-photo-zoom-in" type="button" class="secondary-btn">Zoom In</button>
+      </div>
       <div class="team-task-photo-viewer-frame">
         <img id="team-task-photo-viewer-image" alt="Task evidence photo" />
       </div>

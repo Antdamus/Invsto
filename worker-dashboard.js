@@ -463,6 +463,9 @@ async function loadWorkerReturnTasks(userId) {
 }
 
 function getWorkerOrderTaskLabel(task = {}) {
+  if (task.task_type === "pending_subtask") return "Subtask";
+  if (task.task_type === "pending_shipping") return "Shipping Task";
+  if (task.task_type === "pending_packaging") return "Packaging Task";
   if (task.task_type === "admin_review") return "Admin";
   if (task.task_type === "worker_follow_up") return "Worker";
   if (task.task_type === "special_order") return "Special";
@@ -478,7 +481,7 @@ async function fetchWorkerOrderTasks(userId) {
     .from("ebay_order_tasks")
     .select("id, task_type, title, question, status, priority, assigned_to_email, due_at, created_at, latest_note, latest_photo_count, ebay_orders(order_number, buyer_username, ship_by_date)")
     .eq("assigned_to_user_id", userId)
-    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred"])
+    .in("status", ["open", "assigned", "in_progress", "waiting_on_admin", "waiting_on_worker", "blocked", "deferred", "assigned_for_shipping"])
     .order("created_at", { ascending: true })
     .limit(6);
 
@@ -521,7 +524,7 @@ async function loadWorkerOrderTasks(userId) {
     const shipBy = task.ship_by_date || order.ship_by_date || "";
     const urgentClass = task.priority === "urgent" || task.priority === "high" || ["blocked", "deferred", "waiting_on_worker"].includes(task.status) ? "is-overdue" : "is-soon";
     return `
-      <a class="urgent-order-card ${urgentClass}" href="pending-orders.html?orderTaskId=${encodeURIComponent(task.id)}#order-task-panel">
+      <a class="urgent-order-card ${urgentClass}" href="team-tasks.html?taskId=${encodeURIComponent(task.id)}">
         <div class="urgent-order-top">
           <div>
             <strong>${escapeHtml(buyer)}</strong>

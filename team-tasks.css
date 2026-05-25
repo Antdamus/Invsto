@@ -74,6 +74,91 @@ body {
   flex-wrap: wrap;
 }
 
+.team-task-notifications {
+  position: relative;
+}
+
+.team-task-notification-toggle {
+  position: relative;
+}
+
+.team-task-notification-count {
+  min-width: 22px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(255, 157, 157, 0.2);
+  color: var(--task-red);
+  border: 1px solid rgba(255, 157, 157, 0.4);
+  font-size: 0.75rem;
+}
+
+.team-task-notification-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 30;
+  width: min(420px, calc(100vw - 36px));
+  max-height: min(520px, calc(100vh - 160px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--task-line);
+  border-radius: 16px;
+  background: #151312;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
+.team-task-notification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.team-task-notification-head .secondary-btn {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.team-task-notification-list {
+  display: grid;
+  gap: 8px;
+}
+
+.team-task-notification-item {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--task-line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--task-text);
+  cursor: pointer;
+}
+
+.team-task-notification-item.is-unread {
+  border-color: rgba(241, 214, 155, 0.45);
+  background: rgba(241, 214, 155, 0.1);
+}
+
+.team-task-notification-item strong,
+.team-task-notification-item span,
+.team-task-notification-item small {
+  display: block;
+}
+
+.team-task-notification-item span,
+.team-task-notification-item small {
+  color: var(--task-muted);
+  font-weight: 800;
+}
+
 .primary-btn,
 .secondary-btn {
   min-height: 44px;
@@ -97,6 +182,11 @@ body {
   border: 1px solid var(--task-line);
   background: rgba(255, 255, 255, 0.05);
   color: var(--task-text);
+}
+
+.secondary-btn.danger-btn {
+  border-color: rgba(255, 157, 157, 0.36);
+  color: var(--task-red);
 }
 
 .primary-btn:disabled,
@@ -175,7 +265,8 @@ body {
   color: var(--task-green);
 }
 
-.team-task-scope {
+.team-task-scope,
+.team-task-sort {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -184,20 +275,50 @@ body {
   font-weight: 900;
 }
 
-.team-task-scope select {
+.team-task-scope select,
+.team-task-sort select {
   min-height: 38px;
   border: 1px solid var(--task-line);
   border-radius: 999px;
   padding: 6px 34px 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: #151312;
   color: var(--task-text);
   font-weight: 900;
+  color-scheme: dark;
+}
+
+.team-task-scope select option,
+.team-task-sort select option {
+  background: #151312;
+  color: var(--task-text);
 }
 
 .team-task-list,
 .team-task-events {
   display: grid;
   gap: 12px;
+}
+
+.team-task-canceled-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 157, 157, 0.22);
+}
+
+.team-task-canceled-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.team-task-canceled-head h3 {
+  margin: 0;
+  color: var(--task-red);
+  font-size: 1.05rem;
 }
 
 .team-task-card,
@@ -231,6 +352,25 @@ body {
 
 .team-task-card.is-resolved {
   border-color: rgba(157, 242, 189, 0.3);
+}
+
+.team-task-admin-notice {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0;
+  padding: 12px;
+  border: 1px solid rgba(227, 189, 119, 0.35);
+  border-radius: 8px;
+  background: rgba(227, 189, 119, 0.09);
+}
+
+.team-task-admin-notice strong {
+  color: var(--task-gold);
+}
+
+.team-task-admin-notice span,
+.team-task-admin-notice small {
+  color: var(--task-muted);
 }
 
 .team-task-card-head strong,
@@ -459,10 +599,90 @@ body {
   gap: 8px;
 }
 
+.team-task-line-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.team-task-line-head em {
+  font-style: normal;
+  color: var(--task-green);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.team-task-line-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.team-task-line-facts span {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .team-task-line span {
   display: block;
   color: var(--task-muted);
   font-weight: 800;
+}
+
+.team-task-line-receipt {
+  margin-top: 8px;
+}
+
+.team-task-line-receipt a,
+.team-task-line-receipt span {
+  color: var(--task-gold);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.team-task-video-receipt-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.team-task-video-receipt-thumb {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: min(320px, 100%);
+  min-height: 62px;
+  padding: 7px;
+  border: 1px solid rgba(241, 214, 155, 0.5);
+  border-radius: 10px;
+  background: rgba(241, 214, 155, 0.08);
+  color: var(--task-text);
+  cursor: zoom-in;
+  text-align: left;
+}
+
+.team-task-video-receipt-thumb img {
+  width: 54px;
+  height: 46px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.36);
+}
+
+.team-task-video-receipt-thumb span {
+  color: var(--task-muted);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .team-task-more,
@@ -582,6 +802,14 @@ body.modal-open {
   width: min(1100px, 100%);
 }
 
+.team-task-photo-viewer-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .team-task-photo-viewer-frame {
   display: grid;
   place-items: center;
@@ -597,6 +825,10 @@ body.modal-open {
   max-width: 100%;
   max-height: min(68vh, 760px);
   object-fit: contain;
+  touch-action: none;
+  transform-origin: center center;
+  transition: transform 120ms ease;
+  user-select: none;
 }
 
 .team-task-photo-viewer-caption {
@@ -733,5 +965,20 @@ body.modal-open {
 
   .team-task-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .team-task-notifications,
+  .team-task-notification-toggle {
+    width: 100%;
+  }
+
+  .team-task-notification-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-height: min(560px, calc(100vh - 80px));
   }
 }
