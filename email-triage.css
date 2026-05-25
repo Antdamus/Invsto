@@ -495,8 +495,17 @@
 .secondary-btn:disabled,
 .danger-btn:disabled {
   opacity: .58;
-  cursor: wait;
+  cursor: not-allowed;
   transform: none;
+}
+
+.primary-btn[aria-busy="true"],
+.secondary-btn[aria-busy="true"],
+.danger-btn[aria-busy="true"],
+.primary-btn.is-loading,
+.secondary-btn.is-loading,
+.danger-btn.is-loading {
+  cursor: progress;
 }
 
 .hidden {
@@ -945,6 +954,14 @@
   gap: 6px;
 }
 
+.classification-loaded-count-note {
+  color: rgba(242,243,245,.54);
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+
 .classification-category-item {
   display: flex;
   align-items: stretch;
@@ -1104,7 +1121,7 @@
 
 .classification-category-button b {
   flex: 0 0 auto;
-  min-width: 28px;
+  min-width: 52px;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 999px;
   background: rgba(255,255,255,.05);
@@ -2076,6 +2093,15 @@
   gap: 8px;
 }
 
+.inbox-operator-note {
+  flex: 1 1 100%;
+  color: rgba(242,243,245,.62);
+  font-size: .76rem;
+  font-weight: 800;
+  line-height: 1.35;
+  margin: 0;
+}
+
 .inbox-preview-toolbar label {
   display: flex;
   flex: 0 0 150px;
@@ -2146,7 +2172,8 @@
 }
 
 .inbox-domain-list,
-.inbox-skipped-reasons {
+.inbox-skipped-reasons,
+.inbox-message-id-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -2154,7 +2181,8 @@
 }
 
 .inbox-domain-list b,
-.inbox-skipped-reasons b {
+.inbox-skipped-reasons b,
+.inbox-message-id-list b {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2168,9 +2196,31 @@
 }
 
 .inbox-domain-list em,
-.inbox-skipped-reasons em {
+.inbox-skipped-reasons em,
+.inbox-message-id-list em {
   color: var(--gold-2);
   font-style: normal;
+}
+
+.inbox-result-note {
+  color: rgba(242,243,245,.7);
+  font-size: .8rem;
+  font-weight: 750;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.inbox-result-details {
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 8px;
+}
+
+.inbox-result-details summary {
+  color: rgba(242,243,245,.72);
+  cursor: pointer;
+  font-size: .76rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .inbox-preview-actions {

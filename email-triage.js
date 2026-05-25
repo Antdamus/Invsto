@@ -348,6 +348,7 @@
       if (!button) return;
       button.disabled = isLoading;
       button.setAttribute("aria-busy", isLoading ? "true" : "false");
+      button.classList.toggle("is-loading", isLoading);
     });
   }
 
@@ -586,7 +587,9 @@
     const groups = buildCategorySidebarGroups(data, state.categorySortMode, activeCustomOrder);
     els.classificationCategoryList.classList.toggle("is-custom-order", customMode);
     els.classificationCategoryList.classList.toggle("is-editing-order", editingCustomOrder);
-    els.classificationCategoryList.innerHTML = groups.map((group, index) => {
+    els.classificationCategoryList.innerHTML = `
+      <p class="classification-loaded-count-note">Counts are loaded classification rows in this current admin view, not exact mailbox totals.</p>
+    ` + groups.map((group, index) => {
       const count = sidebarGroupCount(classifications, group, state.activeFilters);
       const active = canonicalGroupId(state.selectedCategory) === group.id;
       const dynamicClass = group.isDynamic ? " is-dynamic" : "";
@@ -606,7 +609,7 @@
           ${moveControls}
           <button type="button" class="classification-category-button${active ? " is-active" : ""}${group.id === "human_review" ? " is-review" : ""}${dynamicClass}" data-category-id="${escapeHtml(group.id)}">
             <span>${escapeHtml(group.label)}</span>
-            <b>${escapeHtml(count)}</b>
+            <b title="Loaded rows in the current admin view">${escapeHtml(count)} loaded</b>
           </button>
         </div>
       `;
@@ -1405,6 +1408,7 @@
     if (els.refreshClassificationAdmin) {
       els.refreshClassificationAdmin.disabled = state.loading;
       els.refreshClassificationAdmin.setAttribute("aria-busy", state.loading ? "true" : "false");
+      els.refreshClassificationAdmin.classList.toggle("is-loading", state.loading === true);
     }
 
     const data = state.data || normalizeAdminViewPayload({});
@@ -1422,7 +1426,7 @@
     const statusText = {
       idle: "Waiting for admin session.",
       loading: "Fetching admin_view payload.",
-      ready: state.empty_results ? "Fetch succeeded. No classification operations returned yet." : "Fetch succeeded. Browse classifications below.",
+      ready: state.empty_results ? "Fetch succeeded. No loaded classification rows returned yet." : "Fetch succeeded. Browse loaded classification rows below.",
       fetch_failed: `Fetch failed: ${state.error || "unknown_error"}`,
       unauthorized: "Unauthorized. Sign in again with an active admin account.",
     }[state.status] || "Waiting for admin session.";
@@ -1495,6 +1499,7 @@
     if (els.operationalDashboardRefresh) {
       els.operationalDashboardRefresh.disabled = state.operationalDashboardLoading === true;
       els.operationalDashboardRefresh.setAttribute("aria-busy", state.operationalDashboardLoading ? "true" : "false");
+      els.operationalDashboardRefresh.classList.toggle("is-loading", state.operationalDashboardLoading === true);
     }
     if (els.operationalDashboardStatus) {
       if (state.operationalDashboardLoading) {

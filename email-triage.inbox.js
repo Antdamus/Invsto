@@ -192,9 +192,10 @@
     const skippedReasons = Object.entries(result.skipped_reasons || {});
     els.importResult.innerHTML = `
       <div class="inbox-import-result-head">
-        <strong>Approved import result</strong>
+        <strong>Approved import-only result</strong>
         ${result.operation_event_id ? `<span>Operation event ${utils.escapeHtml(result.operation_event_id)}</span>` : "<span>No operation event id returned</span>"}
       </div>
+      <p class="inbox-result-note">Messages were persisted only. Processing, classification, rematch, draft generation, and sending are not started by this action.</p>
       <dl>
         <div><dt>Imported</dt><dd>${utils.escapeHtml(result.imported_count)}</dd></div>
         <div><dt>Already Imported</dt><dd>${utils.escapeHtml(result.already_imported_count)}</dd></div>
@@ -209,6 +210,28 @@
         ${skippedReasons.length ? skippedReasons.map(([reason, count]) => `<b>${utils.escapeHtml(reason)} <em>${utils.escapeHtml(count)}</em></b>`).join("") : "<b>None</b>"}
       </div>
     `;
+  }
+
+  function renderCompactIdList(ids = [], emptyLabel = "None", utils = window.EmailTriageRenderUtils) {
+    const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
+    if (!list.length) return `<b>${utils.escapeHtml(emptyLabel)}</b>`;
+    const visible = list.slice(0, 20);
+    const overflow = list.length - visible.length;
+    return `
+      ${visible.map((id) => `<b title="${utils.escapeHtml(id)}">${utils.escapeHtml(utils.compactId(id))}</b>`).join("")}
+      ${overflow > 0 ? `<b><em>+${utils.escapeHtml(overflow)}</em> more</b>` : ""}
+    `;
+  }
+
+  function renderRematchFailures(failures = [], utils = window.EmailTriageRenderUtils) {
+    const list = Array.isArray(failures) ? failures : [];
+    if (!list.length) return `<b>None</b>`;
+    return list.slice(0, 12).map((failure) => {
+      const messageId = failure?.message_id || failure?.messageId || "unknown";
+      const reason = failure?.error || failure?.code || failure?.reason || "failed";
+      const phase = failure?.phase ? ` (${failure.phase})` : "";
+      return `<b title="${utils.escapeHtml(messageId)}">${utils.escapeHtml(utils.compactId(messageId))} <em>${utils.escapeHtml(`${reason}${phase}`)}</em></b>`;
+    }).join("") + (list.length > 12 ? `<b><em>+${utils.escapeHtml(list.length - 12)}</em> more</b>` : "");
   }
 
   function renderStageCounts(title, counts = {}, fields = [], utils = window.EmailTriageRenderUtils) {
@@ -309,11 +332,18 @@
     }
 
     const safety = result.safety || {};
+    const changedLinkCount = Number(result.links_created || 0) + Number(result.links_updated || 0);
+    const scannedIds = Array.isArray(result.message_ids) ? result.message_ids : [];
+    const failures = Array.isArray(result.failures) ? result.failures : [];
     els.rematchExistingResult.innerHTML = `
       <div class="inbox-live-refresh-head">
         <strong>Rematch existing emails result</strong>
-        <span>${utils.escapeHtml(result.scanned || 0)} scanned</span>
+        <span>${utils.escapeHtml(result.scanned || 0)} scanned · ${utils.escapeHtml(changedLinkCount)} link changes</span>
       </div>
+      <p class="inbox-result-note">
+        Rematch recalculates deterministic links only. Classifications and drafts are not recomputed here.
+        ${changedLinkCount ? "Created or updated links are counted below." : "No link records changed; candidates may still have been scanned."}
+      </p>
       <div class="inbox-live-refresh-grid">
         ${renderStageCounts("Matching", result, [
           ["scanned", "Scanned"],
@@ -334,6 +364,17 @@
         <div><dt>Classification</dt><dd>${renderInboxBadge(safety.classification_triggered ? "true" : "false", safety.classification_triggered ? "danger" : "success", utils)}</dd></div>
         <div><dt>Drafts Created</dt><dd>${renderInboxBadge(String(safety.drafts_created || 0), safety.drafts_created ? "danger" : "success", utils)}</dd></div>
       </dl>
+      <details class="inbox-result-details">
+        <summary>Message IDs and failures</summary>
+        <div class="inbox-skipped-reasons">
+          <span>Scanned Message IDs</span>
+          <div class="inbox-message-id-list">${renderCompactIdList(scannedIds, "No message ids returned", utils)}</div>
+        </div>
+        <div class="inbox-skipped-reasons">
+          <span>Failures</span>
+          <div class="inbox-message-id-list">${renderRematchFailures(failures, utils)}</div>
+        </div>
+      </details>
     `;
   }
 
@@ -391,10 +432,18 @@
 
     const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
     const importability = previewImportability(state);
-    [els.run, els.importLikely, els.importSelected, els.liveRefresh, els.rematchExisting, els.clear].forEach((button) => {
+    const buttonLoadingStates = new Map([
+      [els.run, state.inboxPreviewLoading === true],
+      [els.importLikely, state.inboxImportLoading === true],
+      [els.importSelected, state.inboxImportLoading === true],
+      [els.liveRefresh, state.inboxLiveRefreshLoading === true],
+      [els.rematchExisting, state.inboxRematchLoading === true],
+      [els.clear, false],
+    ]);
+    buttonLoadingStates.forEach((isBusy, button) => {
       if (!button) return;
-      button.setAttribute("aria-busy", loading ? "true" : "false");
-      button.classList.toggle("is-loading", loading);
+      button.setAttribute("aria-busy", isBusy ? "true" : "false");
+      button.classList.toggle("is-loading", isBusy);
     });
 
     if (els.run) els.run.disabled = loading;
@@ -406,7 +455,7 @@
 
     if (els.status) {
       if (state.inboxPreviewLoading) els.status.textContent = "Loading Outlook preview.";
-      else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages.";
+      else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages only.";
       else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
       else if (state.inboxRematchLoading) els.status.textContent = "Rematching existing imported emails.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
