@@ -18,6 +18,9 @@ const state = {
   taskHistorySort: "recent",
   childTasksByParent: new Map(),
   orderVideoReceiptPhotosByLineId: new Map(),
+  notifications: [],
+  notificationChannel: null,
+  notificationsOpen: false,
   photoViewerReturnFocus: null,
   photoViewerZoom: 1,
   photoViewerOffsetX: 0,
@@ -399,6 +402,129 @@ async function loadTasks() {
     const card = document.querySelector(`[data-team-task-card="${CSS.escape(requested)}"]`);
     card?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
+}
+
+function getTaskNotificationHref(notification = {}) {
+  if (notification.source === "order") {
+    return `pending-orders.html?orderTaskId=${encodeURIComponent(notification.task_id || "")}#order-task-panel`;
+  }
+  if (notification.source === "return") {
+    return `ebay-returns.html?returnTaskId=${encodeURIComponent(notification.task_id || "")}#return-work-queue`;
+  }
+  return `team-tasks.html?taskId=${encodeURIComponent(notification.task_id || "")}`;
+}
+
+function getTaskNotificationTypeLabel(type = "") {
+  const labels = {
+    task_assigned: "Task assigned",
+    subtask_assigned: "Subtask assigned",
+    shipment_assigned: "Shipment assigned",
+    packaging_assigned: "Packaging assigned",
+    return_task_assigned: "Return task assigned",
+    subtask_completed: "Subtask completed",
+  };
+  return labels[type] || "Task notification";
+}
+
+async function loadTaskNotifications({ silent = false } = {}) {
+  if (!state.user?.id) return;
+  try {
+    const { data, error } = await supabase
+      .from("task_notifications")
+      .select("*")
+      .eq("recipient_user_id", state.user.id)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    state.notifications = Array.isArray(data) ? data : [];
+    renderTaskNotifications();
+  } catch (error) {
+    if (!silent) console.warn("Could not load task notifications:", error);
+    state.notifications = [];
+    renderTaskNotifications();
+  }
+}
+
+function renderTaskNotifications() {
+  const count = $("team-task-notification-count");
+  const list = $("team-task-notification-list");
+  const unreadCount = state.notifications.filter((entry) => !entry.read_at).length;
+  if (count) {
+    count.textContent = String(unreadCount);
+    count.classList.toggle("hidden", unreadCount === 0);
+  }
+  if (!list) return;
+
+  if (!state.notifications.length) {
+    list.innerHTML = `<div class="empty-state">No notifications yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = state.notifications.map((entry) => `
+    <button
+      type="button"
+      class="team-task-notification-item ${entry.read_at ? "" : "is-unread"}"
+      data-task-notification-id="${escapeHtml(entry.id)}"
+      data-task-notification-href="${escapeHtml(getTaskNotificationHref(entry))}"
+    >
+      <strong>${escapeHtml(entry.title || getTaskNotificationTypeLabel(entry.notification_type))}</strong>
+      <span>${escapeHtml(entry.body || "")}</span>
+      <small>${escapeHtml(getTaskNotificationTypeLabel(entry.notification_type))} - ${escapeHtml(formatDate(entry.created_at))}</small>
+    </button>
+  `).join("");
+
+  list.querySelectorAll("[data-task-notification-id]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await markTaskNotificationsRead([button.dataset.taskNotificationId]);
+      window.location.href = button.dataset.taskNotificationHref || "team-tasks.html";
+    });
+  });
+}
+
+async function markTaskNotificationsRead(ids = null) {
+  const selectedIds = Array.isArray(ids)
+    ? ids.filter(Boolean)
+    : state.notifications.filter((entry) => !entry.read_at).map((entry) => entry.id);
+  if (!selectedIds.length) return;
+
+  const readAt = new Date().toISOString();
+  const { error } = await supabase
+    .from("task_notifications")
+    .update({ read_at: readAt })
+    .in("id", selectedIds);
+  if (error) {
+    console.warn("Could not mark task notifications read:", error);
+    return;
+  }
+  state.notifications = state.notifications.map((entry) => (
+    selectedIds.includes(entry.id) ? { ...entry, read_at: entry.read_at || readAt } : entry
+  ));
+  renderTaskNotifications();
+}
+
+function setTaskNotificationPanelOpen(open) {
+  state.notificationsOpen = Boolean(open);
+  $("team-task-notification-panel")?.classList.toggle("hidden", !state.notificationsOpen);
+  $("team-task-notification-toggle")?.setAttribute("aria-expanded", state.notificationsOpen ? "true" : "false");
+}
+
+function setupTaskNotificationRealtime() {
+  if (!state.user?.id || typeof supabase.channel !== "function") return;
+  if (state.notificationChannel) supabase.removeChannel(state.notificationChannel);
+  state.notificationChannel = supabase
+    .channel(`task-notifications-${state.user.id}`)
+    .on("postgres_changes", {
+      event: "INSERT",
+      schema: "public",
+      table: "task_notifications",
+      filter: `recipient_user_id=eq.${state.user.id}`,
+    }, (payload) => {
+      const notification = payload.new || {};
+      state.notifications = [notification, ...state.notifications.filter((entry) => entry.id !== notification.id)].slice(0, 30);
+      renderTaskNotifications();
+      if (!state.notificationsOpen && notification.title) setStatus(notification.title, "success");
+    })
+    .subscribe();
 }
 
 async function loadTeamTaskRecords() {
@@ -2892,6 +3018,12 @@ async function openTaskPhoto(bucket, path) {
 function setupListeners() {
   $("new-team-task")?.addEventListener("click", () => openTaskModal());
   $("refresh-team-tasks")?.addEventListener("click", loadTasks);
+  $("team-task-notification-toggle")?.addEventListener("click", () => {
+    setTaskNotificationPanelOpen(!state.notificationsOpen);
+  });
+  $("team-task-mark-notifications-read")?.addEventListener("click", () => {
+    markTaskNotificationsRead();
+  });
   document.querySelectorAll("[data-task-view]").forEach((button) => {
     button.addEventListener("click", async () => {
       state.taskView = button.dataset.taskView === "history" ? "history" : "active";
@@ -2931,8 +3063,18 @@ function setupListeners() {
   $("team-task-modal")?.addEventListener("click", (event) => {
     if (event.target.id === "team-task-modal") closeModal();
   });
+  document.addEventListener("click", (event) => {
+    if (!state.notificationsOpen) return;
+    if ($("team-task-notifications")?.contains(event.target)) return;
+    setTaskNotificationPanelOpen(false);
+  });
 
   document.addEventListener("keydown", (event) => {
+    if (state.notificationsOpen && event.key === "Escape") {
+      event.preventDefault();
+      setTaskNotificationPanelOpen(false);
+      return;
+    }
     if (!$("team-task-photo-viewer-modal")?.classList.contains("hidden") && event.key === "Escape") {
       event.preventDefault();
       closeTaskPhotoViewer();
@@ -2955,6 +3097,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!ok) return;
   setupListeners();
   await loadAssignees();
+  await loadTaskNotifications({ silent: true });
+  setupTaskNotificationRealtime();
   await loadTasks();
   if (window.lucide) window.lucide.createIcons();
 });

@@ -74,6 +74,91 @@ body {
   flex-wrap: wrap;
 }
 
+.team-task-notifications {
+  position: relative;
+}
+
+.team-task-notification-toggle {
+  position: relative;
+}
+
+.team-task-notification-count {
+  min-width: 22px;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(255, 157, 157, 0.2);
+  color: var(--task-red);
+  border: 1px solid rgba(255, 157, 157, 0.4);
+  font-size: 0.75rem;
+}
+
+.team-task-notification-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 30;
+  width: min(420px, calc(100vw - 36px));
+  max-height: min(520px, calc(100vh - 160px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--task-line);
+  border-radius: 16px;
+  background: #151312;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
+.team-task-notification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.team-task-notification-head .secondary-btn {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.team-task-notification-list {
+  display: grid;
+  gap: 8px;
+}
+
+.team-task-notification-item {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--task-line);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--task-text);
+  cursor: pointer;
+}
+
+.team-task-notification-item.is-unread {
+  border-color: rgba(241, 214, 155, 0.45);
+  background: rgba(241, 214, 155, 0.1);
+}
+
+.team-task-notification-item strong,
+.team-task-notification-item span,
+.team-task-notification-item small {
+  display: block;
+}
+
+.team-task-notification-item span,
+.team-task-notification-item small {
+  color: var(--task-muted);
+  font-weight: 800;
+}
+
 .primary-btn,
 .secondary-btn {
   min-height: 44px;
@@ -880,5 +965,20 @@ body.modal-open {
 
   .team-task-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .team-task-notifications,
+  .team-task-notification-toggle {
+    width: 100%;
+  }
+
+  .team-task-notification-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-height: min(560px, calc(100vh - 80px));
   }
 }

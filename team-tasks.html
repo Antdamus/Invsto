@@ -42,6 +42,22 @@
             <p>See assigned pending-order tasks, return follow-ups, and independent team work in one place.</p>
           </div>
           <div class="team-task-actions">
+            <div class="team-task-notifications" id="team-task-notifications">
+              <button id="team-task-notification-toggle" type="button" class="secondary-btn team-task-notification-toggle" aria-expanded="false" aria-controls="team-task-notification-panel">
+                <i data-lucide="bell"></i>
+                Notifications
+                <span id="team-task-notification-count" class="team-task-notification-count hidden">0</span>
+              </button>
+              <div id="team-task-notification-panel" class="team-task-notification-panel hidden">
+                <div class="team-task-notification-head">
+                  <strong>Task Notifications</strong>
+                  <button id="team-task-mark-notifications-read" type="button" class="secondary-btn">Mark read</button>
+                </div>
+                <div id="team-task-notification-list" class="team-task-notification-list">
+                  <div class="empty-state">No notifications yet.</div>
+                </div>
+              </div>
+            </div>
             <button id="new-team-task" type="button" class="primary-btn">
               <i data-lucide="plus"></i>
               New Task
