@@ -197,8 +197,34 @@
     operationalDashboardCollapsed: getStoredDashboardCollapsed(),
   }));
   let adminClassificationState = triageStore.getState();
+  function safePreviewImportability(state) {
+    if (window.EmailTriageInbox?.previewImportability) {
+      return window.EmailTriageInbox.previewImportability(state);
+    }
+    return { previewRowsCount: 0, importableLikelyCount: 0, selectedImportableCount: 0 };
+  }
+
+  function debugCategoryCounts(state) {
+    const data = state.data || normalizeAdminViewPayload({});
+    const classifications = data.classifications || [];
+    return buildCategorySidebarGroups(data, state.categorySortMode, state.customCategoryOrder)
+      .reduce((counts, group) => {
+        counts[group.id] = sidebarGroupCount(classifications, group, state.activeFilters);
+        return counts;
+      }, {});
+  }
+
+  function selectedEmailHasLinks(state) {
+    const selected = (state.data?.classifications || []).find((classification) => classification.id === state.selectedClassificationId) || null;
+    const messageId = state.selectedMessageId || selected?.message_id || "";
+    if (!messageId) return false;
+    const context = state.matchContextsByMessageId?.[messageId];
+    return Array.isArray(context?.matches) && context.matches.length > 0;
+  }
+
   triageStore.subscribe((state) => {
     adminClassificationState = state;
+    const importability = safePreviewImportability(state);
     window.__emailTriageDebugState = {
       activeView: state.activeView,
       loading: state.loading,
@@ -207,14 +233,22 @@
       inboxImportLoading: state.inboxImportLoading,
       inboxLiveRefreshLoading: state.inboxLiveRefreshLoading,
       inboxRematchLoading: state.inboxRematchLoading,
-      inboxPreviewError: state.inboxPreviewError,
-      inboxLastOperationId: state.inboxLastOperationId,
-      inboxLastRefreshedAt: state.inboxLastRefreshedAt,
-      inboxPreviewControls: state.inboxPreviewControls,
       inboxPreviewCounts: state.inboxPreviewResult ? {
         messages_previewed: state.inboxPreviewResult.messages_previewed,
         messages_returned: state.inboxPreviewResult.messages_returned,
       } : null,
+      previewRowsCount: importability.previewRowsCount,
+      importableLikelyCount: importability.importableLikelyCount,
+      selectedImportableCount: importability.selectedImportableCount,
+      categoryCounts: debugCategoryCounts(state),
+      selectedEmailId: state.selectedMessageId || selectedClassificationById(state.selectedClassificationId)?.message_id || null,
+      selectedEmailHasLinks: selectedEmailHasLinks(state),
+      lastOperationSummary: state.lastOperationSummary || null,
+      dashboardLastLoadedAt: state.operationalDashboardUpdatedAt || null,
+      inboxPreviewError: state.inboxPreviewError,
+      inboxLastOperationId: state.inboxLastOperationId,
+      inboxLastRefreshedAt: state.inboxLastRefreshedAt,
+      inboxPreviewControls: state.inboxPreviewControls,
     };
   });
 
@@ -2413,12 +2447,21 @@
     });
     bindPanelResizeEvents();
     bindInboxPreviewImport(context, triageStore, {
-      onImportComplete: () => loadOperationalDashboard(context),
-      onLiveRefreshComplete: () => {
+      onImportComplete: () => {
         loadAdminClassificationData(context);
         loadOperationalDashboard(context);
       },
-      onRematchComplete: () => loadOperationalDashboard(context),
+      onLiveRefreshComplete: () => {
+        loadAdminClassificationData(context);
+        loadOperationalDashboard(context);
+        loadSelectedMatchContext(context, { force: true });
+        loadSelectedDraftView(context, { force: true });
+      },
+      onRematchComplete: () => {
+        loadAdminClassificationData(context);
+        loadOperationalDashboard(context);
+        loadSelectedMatchContext(context, { force: true });
+      },
     });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));
     els.operationalDashboardRefresh?.addEventListener("click", () => loadOperationalDashboard(context));

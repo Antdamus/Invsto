@@ -3089,6 +3089,80 @@ async function countActiveApprovedImportedMessages(supabase: ServiceClient, mail
   return total;
 }
 
+async function buildPipelineGapSummary(
+  supabase: ServiceClient,
+  mailboxId: string,
+  approvedImportedIds: string[],
+  activeImportedTotal: number,
+) {
+  if (!approvedImportedIds.length) {
+    return {
+      approved_imported_total: 0,
+      active_imported_total: 0,
+      fully_processed_imported_total: 0,
+      current_classified_imported_total: 0,
+      imported_without_processing: 0,
+      processed_without_classification: 0,
+    };
+  }
+
+  const processingByMessage = new Map<string, Set<string>>();
+  const classifiedImportedIds = new Set<string>();
+
+  for (let index = 0; index < approvedImportedIds.length; index += 100) {
+    const chunk = approvedImportedIds.slice(index, index + 100);
+    const { data: processingJobs, error: processingError } = await supabase
+      .from("email_processing_jobs")
+      .select("message_id, job_type, status, email_messages!inner(mailbox_id)")
+      .eq("email_messages.mailbox_id", mailboxId)
+      .in("message_id", chunk)
+      .in("job_type", PROCESS_IMPORTED_JOB_TYPES as unknown as string[])
+      .in("status", ["succeeded", "skipped"]);
+    if (processingError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_gap_processing" });
+
+    for (const job of processingJobs || []) {
+      const messageId = String(job.message_id || "");
+      if (!messageId) continue;
+      const current = processingByMessage.get(messageId) || new Set<string>();
+      current.add(String(job.job_type || ""));
+      processingByMessage.set(messageId, current);
+    }
+
+    const { data: classifications, error: classificationError } = await supabase
+      .from("email_message_classifications")
+      .select("message_id, email_messages!inner(mailbox_id)")
+      .eq("email_messages.mailbox_id", mailboxId)
+      .in("message_id", chunk)
+      .eq("source", "ai")
+      .eq("is_current", true)
+      .eq("validation_status", "valid");
+    if (classificationError) throw new SyncError("pipeline_diagnostics_failed", { phase: "pipeline_diagnostics_gap_classification" });
+
+    for (const classification of classifications || []) {
+      if (classification.message_id) classifiedImportedIds.add(String(classification.message_id));
+    }
+  }
+
+  let fullyProcessedImportedTotal = 0;
+  let processedWithoutClassification = 0;
+  for (const id of approvedImportedIds) {
+    const completedTypes = processingByMessage.get(id) || new Set<string>();
+    const fullyProcessed = PROCESS_IMPORTED_JOB_TYPES.every((jobType) => completedTypes.has(jobType));
+    if (!fullyProcessed) continue;
+    fullyProcessedImportedTotal += 1;
+    if (!classifiedImportedIds.has(id)) processedWithoutClassification += 1;
+  }
+
+  return {
+    approved_imported_total: approvedImportedIds.length,
+    active_imported_total: activeImportedTotal,
+    fully_processed_imported_total: fullyProcessedImportedTotal,
+    current_classified_imported_total: classifiedImportedIds.size,
+    imported_without_processing: Math.max(activeImportedTotal - fullyProcessedImportedTotal, 0),
+    processed_without_classification: processedWithoutClassification,
+  };
+}
+
 async function getMailboxLiveSyncEnabled(supabase: ServiceClient, mailboxId: string) {
   const { data: mailbox, error: mailboxError } = await supabase
     .from("email_mailboxes")
@@ -3191,6 +3265,7 @@ async function runLiveRefreshImportStage(
   input: RunLiveRefreshInput,
   admin: { userId: string; email: string | null },
 ) {
+  const operationStartedAt = Date.now();
   let refreshToken = "";
   try {
     refreshToken = await decryptRefreshToken(model.secret);
@@ -3314,6 +3389,7 @@ async function runLiveRefreshImportStage(
       skipped_reasons: skippedReasons,
       classification_created: 0,
       drafts_created: 0,
+      duration_ms: Date.now() - operationStartedAt,
       outlook_mutation_performed: false,
       sync_checkpoint_updated: false,
     },
@@ -3349,6 +3425,7 @@ async function runLiveRefresh(
   input: RunLiveRefreshInput,
   admin: { userId: string; email: string | null },
 ) {
+  const startedAt = Date.now();
   const model = await loadModel(supabase);
   const liveSyncModel = await loadLiveSyncModel(supabase);
   const queueState = await assertQueueHasCapacity(supabase, model.mailbox.id);
@@ -3383,6 +3460,7 @@ async function runLiveRefresh(
       queue_state: queueState.queue_state,
       queue_limits: queueState.queue_limits,
       child_operations: {},
+      duration_ms: Date.now() - startedAt,
       safety: baseSafety,
     };
     await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_live_sync_disabled" });
@@ -3409,6 +3487,7 @@ async function runLiveRefresh(
       queue_state: queueState.queue_state,
       queue_limits: queueState.queue_limits,
       child_operations: {},
+      duration_ms: Date.now() - startedAt,
       safety: baseSafety,
     };
     await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_rollout_disabled" });
@@ -3427,6 +3506,7 @@ async function runLiveRefresh(
       queue_state: queueState.queue_state,
       queue_limits: queueState.queue_limits,
       child_operations: {},
+      duration_ms: Date.now() - startedAt,
       safety: baseSafety,
     };
     await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_queue_saturated" });
@@ -3452,6 +3532,7 @@ async function runLiveRefresh(
       child_operations: {
         import_operation_id: importStage.child_operation_id,
       },
+      duration_ms: Date.now() - startedAt,
       safety: baseSafety,
     };
     await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_after_import" });
@@ -3485,6 +3566,7 @@ async function runLiveRefresh(
       child_operations: {
         import_operation_id: importStage.child_operation_id,
       },
+      duration_ms: Date.now() - startedAt,
       safety: baseSafety,
     };
     await updateRunLiveRefreshOperationalEvent(supabase, parentEvent.id, { ...blockedResult, status: "blocked_after_processing" });
@@ -3529,6 +3611,7 @@ async function runLiveRefresh(
       process_operation_id: null,
       classify_operation_id: classificationResult.replay_operation_references?.operation_event_id || null,
     },
+    duration_ms: Date.now() - startedAt,
     safety: liveRefreshSafety({
       drafts_created: Number(classificationResult.drafts_created || 0),
     }),
@@ -3558,6 +3641,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   let classifyOperations = 0;
   let processOperations = 0;
   let liveRefreshOperations = 0;
+  let rematchOperations = 0;
 
   for (const event of events || []) {
     const eventType = String(event.event_type || "unknown");
@@ -3570,6 +3654,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     if (["classify_imported", "classification_replay"].includes(eventType)) classifyOperations += 1;
     if (["processing_requeue", "processing_replay", "process_imported"].includes(eventType)) processOperations += 1;
     if (eventType === "run_live_refresh") liveRefreshOperations += 1;
+    if (eventType === "rematch_existing") rematchOperations += 1;
 
     const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
     if (eventType === "sync_import_approved") {
@@ -3594,6 +3679,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   const activeImportedTotal = approvedImportedIds.length
     ? await countActiveApprovedImportedMessages(supabase, mailboxId, approvedImportedIds)
     : 0;
+  const pipelineGapSummary = await buildPipelineGapSummary(supabase, mailboxId, approvedImportedIds, activeImportedTotal);
 
   const importedSummary = {
     approved_imported_total: approvedImportedIds.length,
@@ -3723,8 +3809,13 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
 
   const latestImportEvent = (events || []).find((event) => String(event.event_type || "") === "sync_import_approved");
   const latestLiveRefreshEvent = (events || []).find((event) => String(event.event_type || "") === "run_live_refresh");
+  const latestRematchEvent = (events || []).find((event) => String(event.event_type || "") === "rematch_existing");
   const recentOperationalEvents = (events || []).slice(0, 25).map((event: Record<string, any>) => {
     const payload = event.payload && typeof event.payload === "object" ? event.payload as Record<string, any> : {};
+    const preview = payload.preview && typeof payload.preview === "object" ? payload.preview as Record<string, any> : {};
+    const imported = payload.import && typeof payload.import === "object" ? payload.import as Record<string, any> : {};
+    const processing = payload.processing && typeof payload.processing === "object" ? payload.processing as Record<string, any> : {};
+    const classification = payload.classification && typeof payload.classification === "object" ? payload.classification as Record<string, any> : {};
     return {
       id: event.id,
       event_type: event.event_type,
@@ -3737,12 +3828,21 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
       new_job_count: Array.isArray(event.new_job_ids) ? event.new_job_ids.length : 0,
       job_types: Array.isArray(event.job_types) ? event.job_types : [],
       counters: {
-        imported_count: numberFromPayload(payload, ["imported_count"]),
-        processed_count: numberFromPayload(payload, ["processed_count"]),
-        classified_count: numberFromPayload(payload, ["classified_count"]),
-        failed_count: numberFromPayload(payload, ["failed_count"]),
+        previewed_count: numberFromPayload(payload, ["previewed_count"]) + numberFromPayload(preview, ["previewed_count"]),
+        imported_count: numberFromPayload(payload, ["imported_count"]) + numberFromPayload(imported, ["imported_count"]),
+        already_imported_count: numberFromPayload(payload, ["already_imported_count", "skipped_already_imported_count"]) + numberFromPayload(imported, ["already_imported_count"]),
+        processed_count: numberFromPayload(payload, ["processed_count"]) + numberFromPayload(processing, ["processed_count"]),
+        classified_count: numberFromPayload(payload, ["classified_count"]) + numberFromPayload(classification, ["classified_count"]),
+        rematched_count: numberFromPayload(payload, ["rematched"]),
+        links_created: numberFromPayload(payload, ["links_created"]),
+        links_updated: numberFromPayload(payload, ["links_updated"]),
+        ambiguous_count: numberFromPayload(payload, ["ambiguous"]),
+        skipped_count: numberFromPayload(payload, ["skipped_count", "skipped"]) + numberFromPayload(imported, ["skipped_count"]) + numberFromPayload(processing, ["skipped_count"]) + numberFromPayload(classification, ["skipped_count"]),
+        failed_count: numberFromPayload(payload, ["failed_count", "failed"]) + numberFromPayload(processing, ["failed_count"]) + numberFromPayload(classification, ["failed_count"]),
         jobs_enqueued: numberFromPayload(payload, ["jobs_enqueued"]),
+        duration_ms: numberFromPayload(payload, ["duration_ms"]),
       },
+      safety: payload.safety && typeof payload.safety === "object" ? payload.safety : {},
       child_operations: payload.child_operations && typeof payload.child_operations === "object" ? payload.child_operations : {},
       status: payload.status || null,
     };
@@ -3750,6 +3850,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
   const timingSummary = {
     latest_import_at: latestImportEvent?.created_at || null,
     latest_live_refresh_at: latestLiveRefreshEvent?.created_at || null,
+    latest_rematch_at: latestRematchEvent?.created_at || null,
     latest_processing_at: latestProcessingAt,
     latest_classification_at: latestClassificationAt,
   };
@@ -3763,11 +3864,13 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
     imported_summary: importedSummary,
     processing_summary: processingSummary,
     classification_summary: classificationSummary,
+    pipeline_gap_summary: pipelineGapSummary,
     replay_summary: {
       import_operations: importOperations,
       classify_operations: classifyOperations,
       process_operations: processOperations,
       live_refresh_operations: liveRefreshOperations,
+      rematch_operations: rematchOperations,
       latest_operation_at: latestOperationAt,
       latest_operation_type: latestOperationType,
       replay_safe: true,
@@ -4099,6 +4202,7 @@ serve(async (req) => {
     previousErrorCount = Number(model.syncState.consecutive_error_count || 0);
 
     if (input.mode === "sync_preview" || input.mode === "sync_import_approved") {
+      const operationStartedAt = Date.now();
       if (input.mode === "sync_import_approved" && input.confirmImport !== IMPORT_APPROVAL_CONFIRMATION) {
         return json(req, 400, {
           ok: false,
@@ -4320,6 +4424,7 @@ serve(async (req) => {
         skipped_reasons: skippedReasons,
         classification_created: 0,
         drafts_created: 0,
+        duration_ms: Date.now() - operationStartedAt,
         outlook_mutation_performed: false,
         sync_checkpoint_updated: false,
       };

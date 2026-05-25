@@ -1,5 +1,5 @@
--- Allow Step 4E.7 controlled classification gate operations to reuse the
--- existing service-role-only operational audit table.
+-- Step 4F.4C: promote deterministic rematch runs into first-class
+-- operational events. This only extends the audit event allow-list.
 
 do $$
 declare
@@ -23,6 +23,9 @@ begin
       'sync_replay',
       'classification_replay',
       'sync_import_approved',
-      'classify_imported'
+      'classify_imported',
+      'set_live_sync',
+      'run_live_refresh',
+      'rematch_existing'
     ));
 end $$;

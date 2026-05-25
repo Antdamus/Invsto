@@ -84,6 +84,58 @@
     return rows.filter((row) => providerIdFor(row) && row.already_imported !== true && bucketFor(row) !== "not_ebay");
   }
 
+  function likelyImportableRows(state) {
+    const rows = Array.isArray(state.inboxPreviewResult?.messages) ? state.inboxPreviewResult.messages : [];
+    return rows.filter((row) => providerIdFor(row) && row.already_imported !== true && bucketFor(row) === "likely_ebay");
+  }
+
+  function selectedImportableIds(state) {
+    const allowed = new Set(selectableRows(state).map(providerIdFor));
+    return selectedIds(state).filter((id) => allowed.has(id));
+  }
+
+  function previewImportability(state) {
+    const rows = Array.isArray(state.inboxPreviewResult?.messages) ? state.inboxPreviewResult.messages : [];
+    return {
+      previewRowsCount: rows.length,
+      importableLikelyCount: likelyImportableRows(state).length,
+      selectedImportableCount: selectedImportableIds(state).length,
+    };
+  }
+
+  function previewResultAfterImport(state, result) {
+    const preview = state.inboxPreviewResult;
+    const rows = Array.isArray(preview?.messages) ? preview.messages : [];
+    const importedMessages = Array.isArray(result?.messages) ? result.messages : [];
+    if (!preview || !rows.length || !importedMessages.length) return preview || null;
+
+    const importedByProviderId = new Map(
+      importedMessages
+        .filter((message) => message?.provider_message_id && ["imported", "already_imported"].includes(String(message.import_status || "")))
+        .map((message) => [String(message.provider_message_id), message]),
+    );
+    if (!importedByProviderId.size) return preview;
+
+    const nextRows = rows.map((row) => {
+      const imported = importedByProviderId.get(providerIdFor(row));
+      if (!imported) return row;
+      return {
+        ...row,
+        already_imported: true,
+        existing_message_id: imported.message_id || row.existing_message_id || null,
+      };
+    });
+    const importedCount = nextRows.filter((row) => row.already_imported === true).length;
+    return {
+      ...preview,
+      already_imported_summary: {
+        imported: importedCount,
+        not_imported: Math.max(nextRows.length - importedCount, 0),
+      },
+      messages: nextRows,
+    };
+  }
+
   function importControlsFromState(state) {
     const controls = state.inboxPreviewControls || {};
     return {
@@ -338,15 +390,16 @@
     if (els.bucketMode && els.bucketMode.value !== (controls.bucketMode || "ebay_only")) els.bucketMode.value = controls.bucketMode || "ebay_only";
 
     const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
+    const importability = previewImportability(state);
     [els.run, els.importLikely, els.importSelected, els.liveRefresh, els.rematchExisting, els.clear].forEach((button) => {
       if (!button) return;
       button.setAttribute("aria-busy", loading ? "true" : "false");
+      button.classList.toggle("is-loading", loading);
     });
 
     if (els.run) els.run.disabled = loading;
-    const likelyImportable = (result?.messages || []).some((row) => bucketFor(row) === "likely_ebay" && row.already_imported !== true);
-    if (els.importLikely) els.importLikely.disabled = loading || !likelyImportable;
-    if (els.importSelected) els.importSelected.disabled = loading || selectedIds(state).length === 0;
+    if (els.importLikely) els.importLikely.disabled = loading || importability.importableLikelyCount === 0;
+    if (els.importSelected) els.importSelected.disabled = loading || importability.selectedImportableCount === 0;
     if (els.liveRefresh) els.liveRefresh.disabled = loading;
     if (els.rematchExisting) els.rematchExisting.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
@@ -401,6 +454,7 @@
         inboxPreviewError: null,
         inboxImportResult: null,
         inboxPreviewSelectedProviderMessageIds: [],
+        operationInFlight: "sync_preview",
       });
       try {
         const result = await api.fetchInboxPreview(context, controls);
@@ -409,11 +463,18 @@
           inboxPreviewResult: result,
           inboxLastRefreshedAt: new Date().toISOString(),
           inboxPreviewSelectedProviderMessageIds: [],
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "sync_preview",
+            previewed_count: result.messages_previewed,
+            returned_count: result.messages_returned,
+          },
         });
       } catch (error) {
         update({
           inboxPreviewLoading: false,
           inboxPreviewError: error.code || error.message || "sync_preview_failed",
+          operationInFlight: null,
         });
       }
     });
@@ -437,7 +498,7 @@
     els.importLikely?.addEventListener("click", async () => {
       const state = store.getState();
       const controls = importControlsFromState(state);
-      update({ inboxImportLoading: true, inboxPreviewError: null });
+      update({ inboxImportLoading: true, inboxPreviewError: null, operationInFlight: "sync_import_approved" });
       try {
         const result = await api.importApprovedInboxPreview(context, {
           ...controls,
@@ -446,7 +507,17 @@
         update({
           inboxImportLoading: false,
           inboxImportResult: result,
+          inboxPreviewResult: previewResultAfterImport(store.getState(), result),
           inboxLastOperationId: result.operation_event_id,
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "sync_import_approved",
+            imported_count: result.imported_count,
+            already_imported_count: result.already_imported_count,
+            skipped_count: result.skipped_count,
+            classification_created: result.classification_created,
+            drafts_created: result.drafts_created,
+          },
         });
         if (typeof options.onImportComplete === "function") {
           options.onImportComplete(result);
@@ -455,6 +526,7 @@
         update({
           inboxImportLoading: false,
           inboxPreviewError: error.code || error.message || "sync_import_approved_failed",
+          operationInFlight: null,
         });
       }
     });
@@ -467,7 +539,7 @@
       const safeIds = ids.filter((id) => allowed.has(id));
       if (!safeIds.length) return;
       const controls = importControlsFromState(state);
-      update({ inboxImportLoading: true, inboxPreviewError: null });
+      update({ inboxImportLoading: true, inboxPreviewError: null, operationInFlight: "sync_import_approved" });
       try {
         const result = await api.importApprovedInboxPreview(context, {
           ...controls,
@@ -477,8 +549,18 @@
         update({
           inboxImportLoading: false,
           inboxImportResult: result,
+          inboxPreviewResult: previewResultAfterImport(store.getState(), result),
           inboxLastOperationId: result.operation_event_id,
           inboxPreviewSelectedProviderMessageIds: [],
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "sync_import_approved",
+            imported_count: result.imported_count,
+            already_imported_count: result.already_imported_count,
+            skipped_count: result.skipped_count,
+            classification_created: result.classification_created,
+            drafts_created: result.drafts_created,
+          },
         });
         if (typeof options.onImportComplete === "function") {
           options.onImportComplete(result);
@@ -487,6 +569,7 @@
         update({
           inboxImportLoading: false,
           inboxPreviewError: error.code || error.message || "sync_import_approved_failed",
+          operationInFlight: null,
         });
       }
     });
@@ -498,6 +581,7 @@
         inboxLiveRefreshLoading: true,
         inboxPreviewError: null,
         inboxLiveRefreshResult: null,
+        operationInFlight: "run_live_refresh",
       });
       try {
         const result = await api.runInboxLiveRefresh(context, controls);
@@ -508,6 +592,15 @@
           inboxPreviewSelectedProviderMessageIds: [],
           inboxLastOperationId: result.operation_id,
           inboxLastRefreshedAt: new Date().toISOString(),
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "run_live_refresh",
+            operation_id: result.operation_id,
+            previewed_count: result.preview?.previewed_count || 0,
+            imported_count: result.import?.imported_count || 0,
+            processed_count: result.processing?.processed_count || 0,
+            classified_count: result.classification?.classified_count || 0,
+          },
         });
         if (typeof options.onLiveRefreshComplete === "function") {
           options.onLiveRefreshComplete(result);
@@ -516,6 +609,7 @@
         update({
           inboxLiveRefreshLoading: false,
           inboxPreviewError: error.code || error.message || "run_live_refresh_failed",
+          operationInFlight: null,
         });
       }
     });
@@ -527,13 +621,27 @@
         inboxRematchLoading: true,
         inboxPreviewError: null,
         inboxRematchResult: null,
+        operationInFlight: "rematch_existing",
       });
       try {
         const result = await api.rematchExistingEmails(context, controls);
         update({
           inboxRematchLoading: false,
           inboxRematchResult: result,
+          inboxLastOperationId: result.operation_event_id || null,
           inboxLastRefreshedAt: new Date().toISOString(),
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "rematch_existing",
+            operation_event_id: result.operation_event_id || null,
+            scanned: result.scanned,
+            rematched: result.rematched,
+            links_created: result.links_created,
+            links_updated: result.links_updated,
+            ambiguous: result.ambiguous,
+            skipped: result.skipped,
+            failed: result.failed,
+          },
         });
         if (typeof options.onRematchComplete === "function") {
           options.onRematchComplete(result);
@@ -542,6 +650,7 @@
         update({
           inboxRematchLoading: false,
           inboxPreviewError: error.code || error.message || "rematch_existing_failed",
+          operationInFlight: null,
         });
       }
     });
@@ -560,6 +669,7 @@
         inboxRematchResult: null,
         inboxLastOperationId: null,
         inboxLastRefreshedAt: null,
+        operationInFlight: null,
       });
     });
   }
@@ -568,5 +678,6 @@
     renderMessageRows,
     renderInboxPreviewImport,
     bindInboxPreviewImport,
+    previewImportability,
   };
 })();

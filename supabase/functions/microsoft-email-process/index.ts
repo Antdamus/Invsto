@@ -184,7 +184,7 @@ async function requireAdmin(req: Request) {
     return { ok: false as const, status: 403, error: "admin_required" };
   }
 
-  return { ok: true as const, userId: user.id };
+  return { ok: true as const, userId: user.id, email: user.email || null };
 }
 
 async function parseInput(req: Request): Promise<ProcessInput> {
@@ -1514,7 +1514,7 @@ async function processQueuedJobs(supabase: ServiceClient, input: ProcessInput, c
 async function loadRematchCandidateIds(supabase: ServiceClient, input: ProcessInput) {
   let query = supabase
     .from("email_messages")
-    .select("id")
+    .select("id, mailbox_id")
     .eq("sync_status", "active")
     .order("received_at", { ascending: false, nullsFirst: false })
     .limit(input.limit);
@@ -1522,10 +1522,55 @@ async function loadRematchCandidateIds(supabase: ServiceClient, input: ProcessIn
   if (input.messageId) query = query.eq("id", input.messageId);
   const { data, error } = await query;
   if (error) throw new ProcessError("rematch_failed", { phase: "rematch_message_select", messageId: input.messageId || undefined });
-  return (data || []).map((message: { id: string }) => message.id).filter(Boolean);
+  return (data || []).map((message: { id: string; mailbox_id?: string | null }) => ({
+    id: message.id,
+    mailbox_id: message.mailbox_id || null,
+  })).filter((message) => Boolean(message.id));
 }
 
-async function rematchExistingMessages(supabase: ServiceClient, input: ProcessInput) {
+async function insertRematchOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string | null;
+    messageIds: string[];
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "rematch_existing",
+      mailbox_id: values.mailboxId,
+      message_ids: values.messageIds,
+      job_types: ["match_order"],
+      reason: "Operator-triggered deterministic rematch of existing imported emails. No Outlook fetch, Outlook mutation, eBay mutation, classification, draft generation, or sending is performed.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      replay_source: "rematch_existing",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-process] rematch audit insert failed", {
+      phase: "rematch_existing_audit",
+      mailbox_id: values.mailboxId,
+    });
+    throw new ProcessError("rematch_event_failed", { phase: "rematch_existing_audit" });
+  }
+
+  return data as { id: string; created_at: string };
+}
+
+async function rematchExistingMessages(
+  supabase: ServiceClient,
+  input: ProcessInput,
+  admin: { userId: string; email: string | null },
+) {
+  const startedAt = Date.now();
   const counters: RematchCounters = {
     scanned: 0,
     rematched: 0,
@@ -1535,7 +1580,9 @@ async function rematchExistingMessages(supabase: ServiceClient, input: ProcessIn
     skipped: 0,
     failed: 0,
   };
-  const messageIds = await loadRematchCandidateIds(supabase, input);
+  const candidates = await loadRematchCandidateIds(supabase, input);
+  const messageIds = candidates.map((message) => message.id);
+  const mailboxId = candidates.find((message) => message.mailbox_id)?.mailbox_id || null;
   const failures: Array<Record<string, unknown>> = [];
 
   for (const messageId of messageIds) {
@@ -1567,19 +1614,46 @@ async function rematchExistingMessages(supabase: ServiceClient, input: ProcessIn
     }
   }
 
+  const safety = {
+    outlook_fetch_performed: false,
+    outlook_mutation_performed: false,
+    ebay_mutation_performed: false,
+    classification_triggered: false,
+    drafts_created: 0,
+    automatic_responses_sent: 0,
+  };
+  const auditEvent = await insertRematchOperationalEvent(supabase, {
+    mailboxId,
+    messageIds,
+    initiatedBy: admin.userId,
+    initiatedByEmail: admin.email,
+    payload: {
+      mode: "rematch_existing",
+      limit: input.limit,
+      scanned: counters.scanned,
+      rematched: counters.rematched,
+      links_created: counters.links_created,
+      links_updated: counters.links_updated,
+      ambiguous: counters.ambiguous,
+      skipped: counters.skipped,
+      failed: counters.failed,
+      duration_ms: Date.now() - startedAt,
+      status: counters.failed > 0 ? "completed_with_failures" : "completed",
+      safety,
+    },
+  });
+
   return {
     ...counters,
     limit: input.limit,
     message_ids: messageIds,
     failures,
-    safety: {
-      outlook_fetch_performed: false,
-      outlook_mutation_performed: false,
-      ebay_mutation_performed: false,
-      classification_triggered: false,
-      drafts_created: 0,
-      automatic_responses_sent: 0,
+    operation_event_id: auditEvent.id,
+    replay_operation_reference: {
+      operation_event_id: auditEvent.id,
+      operation_event_created_at: auditEvent.created_at,
     },
+    safety,
   };
 }
 
@@ -1615,7 +1689,7 @@ serve(async (req) => {
 
     const input = await parseInput(req);
     if (input.mode === "rematch_existing") {
-      const result = await rematchExistingMessages(supabase, input);
+      const result = await rematchExistingMessages(supabase, input, admin);
       return json(req, 200, {
         ok: true,
         mode: input.mode,

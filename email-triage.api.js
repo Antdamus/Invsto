@@ -10,7 +10,7 @@
   const PROCESS_FUNCTION = "microsoft-email-process";
 
   const DEFAULT_LIMITS = {
-    classificationLimit: 50,
+    classificationLimit: 100,
     replayLimit: 20,
     failedJobLimit: 20,
   };
@@ -496,6 +496,7 @@
     return {
       ok: source.ok !== false,
       mode: source.mode || "rematch_existing",
+      operation_event_id: source.operation_event_id || source.operationEventId || source.replay_operation_reference?.operation_event_id || null,
       limit: Number(source.limit || 0),
       scanned: Number(source.scanned || 0),
       rematched: Number(source.rematched || 0),
@@ -532,6 +533,7 @@
     const failures = pipeline.failure_summary && typeof pipeline.failure_summary === "object" ? pipeline.failure_summary : {};
     const timing = pipeline.timing_summary && typeof pipeline.timing_summary === "object" ? pipeline.timing_summary : {};
     const replay = pipeline.replay_summary && typeof pipeline.replay_summary === "object" ? pipeline.replay_summary : {};
+    const gaps = pipeline.pipeline_gap_summary && typeof pipeline.pipeline_gap_summary === "object" ? pipeline.pipeline_gap_summary : {};
     const events = Array.isArray(pipeline.recent_operational_events) ? pipeline.recent_operational_events : [];
     const latestByType = (types = []) => events.find((event) => types.includes(String(event.event_type || ""))) || null;
     const latestFailedEvent = events.find((event) => {
@@ -566,6 +568,7 @@
         latest_live_refresh: latestByType(["run_live_refresh"]),
         latest_import: latestByType(["sync_import_approved"]),
         latest_classification: latestByType(["classify_imported", "classification_replay"]),
+        latest_rematch: latestByType(["rematch_existing"]),
         latest_replay: latestByType(["classification_replay", "processing_replay", "processing_requeue", "sync_replay"]),
         latest_failed_operation: latestFailedEvent,
         timing,
@@ -575,9 +578,18 @@
         classify_operations: Number(replay.classify_operations || 0),
         process_operations: Number(replay.process_operations || 0),
         live_refresh_operations: Number(replay.live_refresh_operations || 0),
+        rematch_operations: Number(replay.rematch_operations || 0),
         latest_operation_at: replay.latest_operation_at || null,
         latest_operation_type: replay.latest_operation_type || null,
         replay_safe: replay.replay_safe === true,
+      },
+      pipeline_gaps: {
+        approved_imported_total: Number(gaps.approved_imported_total || 0),
+        active_imported_total: Number(gaps.active_imported_total || 0),
+        fully_processed_imported_total: Number(gaps.fully_processed_imported_total || 0),
+        current_classified_imported_total: Number(gaps.current_classified_imported_total || 0),
+        imported_without_processing: Number(gaps.imported_without_processing || 0),
+        processed_without_classification: Number(gaps.processed_without_classification || 0),
       },
       failures: {
         failed_jobs_total: Number(failures.failed_jobs_total || 0),

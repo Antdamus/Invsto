@@ -88,6 +88,7 @@
       ["Latest live refresh", activity.latest_live_refresh, activity.timing?.latest_live_refresh_at],
       ["Latest import", activity.latest_import, activity.timing?.latest_import_at],
       ["Latest classification", activity.latest_classification, activity.timing?.latest_classification_at],
+      ["Latest rematch", activity.latest_rematch, activity.timing?.latest_rematch_at],
       ["Latest replay", activity.latest_replay, snapshot.replay?.latest_operation_at],
       ["Latest failed operation", activity.latest_failed_operation, null],
     ];
@@ -118,16 +119,32 @@
 
     return events.slice(0, 12).map((event) => {
       const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+      const safety = event.safety && typeof event.safety === "object" ? event.safety : {};
       const countParts = [
+        Number(counters.previewed_count || 0) ? `${counters.previewed_count} previewed` : "",
         Number(event.message_count || 0) ? `${event.message_count} messages` : "",
         Number(event.new_job_count || 0) ? `${event.new_job_count} new jobs` : "",
         Number(counters.imported_count || 0) ? `${counters.imported_count} imported` : "",
+        Number(counters.already_imported_count || 0) ? `${counters.already_imported_count} already` : "",
         Number(counters.processed_count || 0) ? `${counters.processed_count} processed` : "",
         Number(counters.classified_count || 0) ? `${counters.classified_count} classified` : "",
+        Number(counters.rematched_count || 0) ? `${counters.rematched_count} rematched` : "",
+        Number(counters.links_created || 0) ? `${counters.links_created} links created` : "",
+        Number(counters.links_updated || 0) ? `${counters.links_updated} links updated` : "",
+        Number(counters.ambiguous_count || 0) ? `${counters.ambiguous_count} ambiguous` : "",
+        Number(counters.skipped_count || 0) ? `${counters.skipped_count} skipped` : "",
         Number(counters.failed_count || 0) ? `${counters.failed_count} failed` : "",
+        Number(counters.duration_ms || 0) ? `${Math.round(Number(counters.duration_ms || 0) / 1000)}s` : "",
       ].filter(Boolean);
       const isReplay = String(event.event_type || "").includes("replay") || String(event.event_type || "").includes("requeue");
       const isFailure = String(event.status || "").includes("fail") || Number(counters.failed_count || 0) > 0;
+      const safetyParts = [
+        safety.outlook_fetch_performed === false ? "Outlook fetch false" : "",
+        safety.outlook_mutation_performed === false ? "Outlook mutation false" : "",
+        safety.ebay_mutation_performed === false ? "eBay mutation false" : "",
+        safety.classification_triggered === false ? "Classification false" : "",
+        Number(safety.drafts_created || 0) === 0 && Object.prototype.hasOwnProperty.call(safety, "drafts_created") ? "Drafts 0" : "",
+      ].filter(Boolean);
 
       return `
         <article class="operational-event-row${isReplay ? " is-replay" : ""}${isFailure ? " is-failure" : ""}">
@@ -139,6 +156,7 @@
           <div class="operational-event-counts">
             ${countParts.length ? countParts.map((part) => dashboardBadge(part, part.includes("failed") ? "danger" : "muted", utils)).join("") : dashboardBadge("No counts", "muted", utils)}
             ${event.status ? dashboardBadge(utils.humanizeValue(event.status), isFailure ? "danger" : "success", utils) : ""}
+            ${safetyParts.map((part) => dashboardBadge(part, "success", utils)).join("")}
           </div>
           ${renderChildOperations(event, utils)}
         </article>
@@ -172,8 +190,10 @@
     const queue = snapshot.queue || {};
     const failures = snapshot.failures || {};
     const safety = snapshot.safety || {};
+    const gaps = snapshot.pipeline_gaps || {};
     const connected = mailbox.connected && String(mailbox.status || "").toLowerCase() !== "disconnected";
-    const blocked = queue.saturated || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
+    const gapCount = Number(gaps.imported_without_processing || 0) + Number(gaps.processed_without_classification || 0);
+    const blocked = queue.saturated || gapCount > 0 || safety.outlook_mutation_performed || safety.automatic_responses_sent > 0 || safety.polling_started || safety.scheduler_started || safety.realtime_listener_started;
 
     return `
       <div class="operational-dashboard-status">
@@ -234,6 +254,23 @@
               { label: "Classify operations", value: snapshot.replay?.classify_operations },
               { label: "Process operations", value: snapshot.replay?.process_operations },
               { label: "Live refresh operations", value: snapshot.replay?.live_refresh_operations },
+              { label: "Rematch operations", value: snapshot.replay?.rematch_operations },
+            ], utils)}
+          </div>
+        </section>
+
+        <section class="operational-panel">
+          <div class="operational-panel-head">
+            <strong>Pipeline Gaps</strong>
+            ${dashboardBadge(gapCount ? "Partial states present" : "Synchronized", gapCount ? "warning" : "success", utils)}
+          </div>
+          <div class="operational-metric-grid">
+            ${renderKeyValueGrid([
+              { label: "Approved imports", value: gaps.approved_imported_total },
+              { label: "Fully processed", value: gaps.fully_processed_imported_total },
+              { label: "Current classified", value: gaps.current_classified_imported_total },
+              { label: "Imported, not processed", value: gaps.imported_without_processing },
+              { label: "Processed, not classified", value: gaps.processed_without_classification },
             ], utils)}
           </div>
         </section>
