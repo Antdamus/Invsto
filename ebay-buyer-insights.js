@@ -183,7 +183,16 @@
     `;
   }
 
-  function renderContextMetrics(summary = {}, context = {}) {
+  function getPriorOrderRows(rows, context = {}) {
+    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
+    return (rows || []).filter((row) => {
+      const orderNumber = String(row.orderNumber || "").trim();
+      const status = String(row.status || "").toLowerCase();
+      return !currentOrderNumbers.has(orderNumber) && status !== "cancelled" && status !== "archived" && !row.hasReturn;
+    });
+  }
+
+  function renderContextMetrics(summary = {}, context = {}, priorRows = []) {
     const currentTotal = toFiniteNumber(context.currentOrderTotal, 0);
     const currentOrderCount = toPositiveInteger(context.currentOrderCount, currentTotal > 0 ? 1 : 0);
     const currentLineCount = toPositiveInteger(context.currentLineCount, 0);
@@ -192,9 +201,12 @@
     const grossSales = toFiniteNumber(summary.grossSales, 0);
     const orderCount = toPositiveInteger(summary.orderCount, 0);
     const lineCount = toPositiveInteger(summary.lineCount, 0);
-    const priorGross = Math.max(0, grossSales - currentTotal);
-    const priorOrders = Math.max(0, orderCount - currentOrderCount);
-    const priorLines = Math.max(0, lineCount - currentLineCount);
+    const visiblePriorGross = priorRows.reduce((total, row) => total + toFiniteNumber(row.totalPrice, 0), 0);
+    const visiblePriorLines = priorRows.reduce((total, row) => total + toPositiveInteger(row.lineCount, 0), 0);
+    const fallbackPriorGross = Math.max(0, grossSales - currentTotal);
+    const priorGross = priorRows.length ? visiblePriorGross : fallbackPriorGross;
+    const priorOrders = priorRows.length ? priorRows.length : Math.max(0, orderCount - currentOrderCount);
+    const priorLines = priorRows.length ? visiblePriorLines : Math.max(0, lineCount - currentLineCount);
     const currentLabel = getInsightContextLabel(context);
 
     return `
@@ -252,12 +264,7 @@
   }
 
   function renderRecentOrders(rows, context = {}) {
-    const currentOrderNumbers = new Set(Array.isArray(context.currentOrderNumbers) ? context.currentOrderNumbers : []);
-    const priorRows = (rows || []).filter((row) => {
-      const orderNumber = String(row.orderNumber || "").trim();
-      const status = String(row.status || "").toLowerCase();
-      return !currentOrderNumbers.has(orderNumber) && status !== "cancelled" && status !== "archived" && !row.hasReturn;
-    });
+    const priorRows = getPriorOrderRows(rows, context);
     if (!priorRows.length) return `<div class="buyer-insights-empty is-compact">No previous orders found for this buyer.</div>`;
     return priorRows.map((row) => {
       const titles = Array.isArray(row.itemTitles) ? row.itemTitles.filter(Boolean).slice(0, 3) : [];
@@ -353,6 +360,7 @@
     const modal = ensureModal();
     const summary = data?.summary || {};
     const context = data?.context || {};
+    const priorRows = getPriorOrderRows(data?.recentOrders || [], context);
     const buyerUsername = data?.buyerUsername || activeBuyer || "Buyer";
     const buyerName = data?.buyerName && data.buyerName !== buyerUsername ? data.buyerName : "";
     activeSyncMeta = data?.buyerHistorySync || null;
@@ -365,7 +373,7 @@
     modal.querySelector("#buyer-insights-body").innerHTML = `
       ${renderScanIndicator(activeSyncMeta)}
 
-      ${renderContextMetrics(summary, context)}
+      ${renderContextMetrics(summary, context, priorRows)}
 
       <div class="buyer-insights-metrics">
         ${metric("Archive gross bought", formatMoney(summary.grossSalesBeforeReturns ?? summary.grossSales), `${summary.grossOrderCount ?? summary.orderCount ?? 0} orders before returns`)}
@@ -388,7 +396,7 @@
         </section>
         <section class="buyer-insights-panel is-wide">
           <h3>Previous Orders</h3>
-          ${renderRecentOrders(data?.recentOrders || [], context)}
+          ${renderRecentOrders(priorRows, context)}
         </section>
         <section class="buyer-insights-panel is-wide">
           <h3>Recent Returns</h3>
