@@ -1231,6 +1231,10 @@
   text-transform: uppercase;
 }
 
+.classification-row-alert.is-stale {
+  color: #ffcf66;
+}
+
 .classification-row-preview {
   color: rgba(242,243,245,.72);
   font-size: .84rem;
@@ -1986,6 +1990,16 @@
   border-color: rgba(255,193,7,.24);
   background: rgba(255,193,7,.08);
   color: #ffd978;
+}
+
+.classification-notice.stale-context-notice {
+  border-color: rgba(255,193,7,.4);
+  background: rgba(255,193,7,.13);
+}
+
+.classification-notice.stale-context-notice strong,
+.classification-notice.stale-context-notice span {
+  display: block;
 }
 
 .classification-notice.is-error {

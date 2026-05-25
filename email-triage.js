@@ -593,6 +593,39 @@
     return preserveHiddenCustomCategoryIds(nextOrder, customCategoryOrder);
   }
 
+  function stalenessState(record) {
+    const staleness = record?.staleness && typeof record.staleness === "object" ? record.staleness : {};
+    return {
+      status: String(staleness.status || ""),
+      isStale: staleness.is_stale === true || staleness.status === "stale",
+      message: String(staleness.message || ""),
+      reasonCode: String(staleness.reason_code || ""),
+      checkedAt: staleness.checked_at || null,
+    };
+  }
+
+  function renderStaleClassificationWarning(classification) {
+    const stale = stalenessState(classification);
+    if (!stale.isStale) return "";
+    return `
+      <div class="classification-notice is-warning stale-context-notice">
+        <strong>Classification may be stale.</strong>
+        <span>${escapeHtml(stale.message || "Deterministic context changed after this classification was generated. Reclassify before trusting it.")}</span>
+      </div>
+    `;
+  }
+
+  function renderStaleDraftWarning(draftOrPayload) {
+    const stale = stalenessState(draftOrPayload?.staleness ? draftOrPayload : { staleness: draftOrPayload });
+    if (!stale.isStale) return "";
+    return `
+      <div class="classification-notice is-warning stale-context-notice">
+        <strong>Draft may be stale.</strong>
+        <span>${escapeHtml(stale.message || "This draft was generated before current context changed. Regenerate after reclassification or context confirmation.")}</span>
+      </div>
+    `;
+  }
+
   function renderCustomCategoryOrderActions(state) {
     if (state.categorySortMode !== "custom") return "";
     if (state.customCategoryOrderEditing === true) {
@@ -683,6 +716,7 @@
       const ageLabel = receivedAt ? formatCompactEmailAge(receivedAt) : formatCompactEmailAge(classification.created_at);
       const rowMeta = renderWorkflowMetaText(classification, ageLabel, { includeCategory: true });
       const compactRowMeta = renderWorkflowMetaText(classification, "", { includeCategory: true });
+      const stale = stalenessState(classification);
 
       if (compactMode) {
         return `
@@ -693,6 +727,7 @@
             </span>
             <span class="classification-compact-badges">
               ${compactRowMeta}
+              ${stale.isStale ? renderBadge("Stale context", "warning") : ""}
             </span>
             <span class="classification-compact-time">${escapeHtml(ageLabel)}</span>
           </button>
@@ -715,6 +750,7 @@
           </span>
           <span class="classification-row-preview">${escapeHtml(getClassificationPreview(classification))}</span>
           ${humanReview ? `<span class="classification-row-alert">Human review</span>` : ""}
+          ${stale.isStale ? `<span class="classification-row-alert is-stale">Stale context</span>` : ""}
         </button>
       `;
     }).join("");
@@ -972,6 +1008,7 @@
           <div class="draft-history-row">
             <strong>v${escapeHtml(draft.draft_version || "--")}</strong>
             <span>${draft.is_current ? "Current" : "Non-current"}</span>
+            ${stalenessState(draft).isStale ? renderBadge("Stale", "warning") : ""}
             ${renderBadge(humanizeValue(draft.draft_status || "Unknown"), statusBadgeVariant(draft.draft_status))}
             ${renderBadge(humanizeValue(draft.validation_status || "Unknown"), statusBadgeVariant(draft.validation_status))}
             <time>${escapeHtml(formatDateTime(draft.created_at))}</time>
@@ -1041,6 +1078,7 @@
         ${error ? `<div class="classification-notice is-error">Could not load draft view: ${escapeHtml(error)}</div>` : ""}
         ${actionError ? `<div class="classification-notice is-error">Draft action failed: ${escapeHtml(actionError)}</div>` : ""}
         ${actionMessage ? `<div class="classification-notice is-success">${escapeHtml(actionMessage)}</div>` : ""}
+        ${currentDraft ? renderStaleDraftWarning(currentDraft) : renderStaleDraftWarning(payload)}
         ${fallbackUsed ? `
           <div class="classification-notice is-warning draft-fallback-notice">
             <strong>Conservative safe draft available.</strong>
@@ -1323,6 +1361,8 @@
           ${renderWorkflowMetaText(selected, "", { includeCategory: true })}
         </div>
       </div>
+
+      ${renderStaleClassificationWarning(selected)}
 
       <div class="detail-panel-actions" aria-label="Detail section controls">
         <button type="button" class="secondary-btn" data-detail-sections-action="expand">
@@ -1922,7 +1962,9 @@
           [selected.message_id]: labels[result.mode] || "Match review saved.",
         },
       });
+      await loadAdminClassificationData(context);
       await loadMatchContext(context, selected, { force: true });
+      await loadDraftView(context, selected, { force: true });
     } catch (error) {
       const code = error.code || error.message || "match_review_failed";
       setAdminClassificationState({
@@ -1980,6 +2022,10 @@
           classifications,
         },
       });
+      const selected = classifications.find((classification) => classification.id === classificationId);
+      if (selected?.message_id) {
+        await loadDraftView(context, selected, { force: true });
+      }
     } catch (error) {
       const code = error.code || error.message || "review_save_failed";
       setAdminClassificationState({
@@ -2524,6 +2570,7 @@
         loadAdminClassificationData(context);
         loadOperationalDashboard(context);
         loadSelectedMatchContext(context, { force: true });
+        loadSelectedDraftView(context, { force: true });
       },
     });
     els.refreshClassificationAdmin?.addEventListener("click", () => loadAdminClassificationData(context));

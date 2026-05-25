@@ -1436,6 +1436,167 @@ function classifierInputVersion(promptHash: string) {
   return `${CLASSIFIER_VERSION}:prompt:${promptHash.slice(0, 12)}:${TRUNCATION_VERSION}:${LINK_CONTEXT_VERSION}`;
 }
 
+async function currentClassificationInputHash(
+  supabase: ServiceClient,
+  messageId: string,
+  promptHash: string,
+  inputVersion: string,
+  promptVersionValue: string,
+) {
+  const classifierInput = await loadClassifierInput(supabase, messageId, promptVersionValue);
+  return sha256Hex(stableStringify({
+    classifier_name: CLASSIFIER_NAME,
+    classifier_version: CLASSIFIER_VERSION,
+    taxonomy_version: TAXONOMY_VERSION,
+    prompt_hash: promptHash,
+    input_version: inputVersion,
+    input: classifierInput,
+  }));
+}
+
+async function currentResponseDraftInputHash(
+  supabase: ServiceClient,
+  input: Input,
+  promptHash: string,
+  promptVersionValue: string,
+) {
+  const draftInput = await loadResponseDraftInput(supabase, input, promptVersionValue);
+  return sha256Hex(stableStringify({
+    generator_name: RESPONSE_DRAFT_GENERATOR_NAME,
+    generator_version: RESPONSE_DRAFT_GENERATOR_VERSION,
+    taxonomy_version: TAXONOMY_VERSION,
+    prompt_hash: promptHash,
+    input: draftInput,
+  }));
+}
+
+function hashPrefix(value: unknown) {
+  const text = String(value || "");
+  return text ? text.slice(0, 12) : null;
+}
+
+function staleStatus(values: {
+  kind: "classification" | "draft";
+  storedInputHash: string | null;
+  currentInputHash: string | null;
+  generatedAt?: string | null;
+  errorCode?: string | null;
+}) {
+  const checkedAt = new Date().toISOString();
+  if (!values.storedInputHash || !values.currentInputHash) {
+    return {
+      status: "unknown",
+      is_stale: false,
+      reason_code: values.errorCode || "input_hash_unavailable",
+      message: values.kind === "classification"
+        ? "Classification staleness could not be verified because input hash metadata is unavailable."
+        : "Draft staleness could not be verified because input hash metadata is unavailable.",
+      generated_at: values.generatedAt || null,
+      checked_at: checkedAt,
+      stored_input_hash_prefix: hashPrefix(values.storedInputHash),
+      current_input_hash_prefix: hashPrefix(values.currentInputHash),
+    };
+  }
+
+  const isStale = values.storedInputHash !== values.currentInputHash;
+  return {
+    status: isStale ? "stale" : "current",
+    is_stale: isStale,
+    reason_code: isStale ? "deterministic_context_changed" : "input_hash_matches_current_context",
+    message: isStale
+      ? values.kind === "classification"
+        ? "Deterministic context changed after this classification was generated. Reclassify before trusting it."
+        : "Current context differs from the context used for this draft. Regenerate after reclassification or context confirmation."
+      : values.kind === "classification"
+        ? "Classification input still matches the current deterministic context."
+        : "Draft input still matches the current classification and deterministic context.",
+    generated_at: values.generatedAt || null,
+    checked_at: checkedAt,
+    stored_input_hash_prefix: hashPrefix(values.storedInputHash),
+    current_input_hash_prefix: hashPrefix(values.currentInputHash),
+  };
+}
+
+async function classificationStalenessForRow(supabase: ServiceClient, row: Record<string, any>) {
+  try {
+    const storedInputHash = row.input_hash ? String(row.input_hash) : null;
+    const promptHash = row.prompt_hash ? String(row.prompt_hash) : null;
+    if (!storedInputHash || !promptHash) {
+      return staleStatus({
+        kind: "classification",
+        storedInputHash,
+        currentInputHash: null,
+        generatedAt: row.created_at || row.classified_at || null,
+      });
+    }
+
+    const currentInputHash = await currentClassificationInputHash(
+      supabase,
+      String(row.message_id),
+      promptHash,
+      String(row.input_version || classifierInputVersion(promptHash)),
+      String(row.prompt_version || promptVersion()),
+    );
+    return staleStatus({
+      kind: "classification",
+      storedInputHash,
+      currentInputHash,
+      generatedAt: row.created_at || row.classified_at || null,
+    });
+  } catch (error) {
+    const safe = safeError(error);
+    return staleStatus({
+      kind: "classification",
+      storedInputHash: row.input_hash ? String(row.input_hash) : null,
+      currentInputHash: null,
+      generatedAt: row.created_at || row.classified_at || null,
+      errorCode: safe.code,
+    });
+  }
+}
+
+async function draftStalenessForRow(supabase: ServiceClient, row: Record<string, any>) {
+  try {
+    const storedInputHash = row.input_hash ? String(row.input_hash) : null;
+    const promptHash = row.prompt_hash ? String(row.prompt_hash) : null;
+    if (!storedInputHash || !promptHash || !row.message_id) {
+      return staleStatus({
+        kind: "draft",
+        storedInputHash,
+        currentInputHash: null,
+        generatedAt: row.created_at || null,
+      });
+    }
+
+    const currentInputHash = await currentResponseDraftInputHash(
+      supabase,
+      {
+        mode: "admin_draft_view",
+        messageId: String(row.message_id),
+        classificationId: row.classification_id ? String(row.classification_id) : null,
+        draftId: row.id ? String(row.id) : null,
+      } as Input,
+      promptHash,
+      String(row.prompt_version || responseDraftPromptVersion()),
+    );
+    return staleStatus({
+      kind: "draft",
+      storedInputHash,
+      currentInputHash,
+      generatedAt: row.created_at || null,
+    });
+  } catch (error) {
+    const safe = safeError(error);
+    return staleStatus({
+      kind: "draft",
+      storedInputHash: row.input_hash ? String(row.input_hash) : null,
+      currentInputHash: null,
+      generatedAt: row.created_at || null,
+      errorCode: safe.code,
+    });
+  }
+}
+
 async function enqueueJobs(supabase: ServiceClient, input: Input, promptHash: string) {
   let query = supabase
     .from("email_messages")
@@ -2641,7 +2802,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     currentValidClassificationQuery(
       supabase
         .from("email_message_classifications")
-        .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, is_current, validation_status, classification_run_id, input_version, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at"),
+        .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, is_current, validation_status, classification_run_id, input_version, prompt_version, prompt_hash, input_hash, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at"),
     )
       .order("created_at", { ascending: false })
       .limit(input.classificationLimit),
@@ -2674,8 +2835,9 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   if (replayResult.error) throw new ClassifierError("admin_view_replay_failed", { phase: "admin_view_replay" });
   if (failedJobsResult.error) throw new ClassifierError("admin_view_failed_jobs_failed", { phase: "admin_view_failed_jobs" });
 
+  const classificationRows = (classificationsResult.data || []) as Record<string, any>[];
   const messageIds = uniqueStrings(
-    (classificationsResult.data || []).map((row: Record<string, any>) => row.message_id),
+    classificationRows.map((row: Record<string, any>) => row.message_id),
     input.classificationLimit,
   );
   const messageMetadataById = new Map<string, Record<string, any>>();
@@ -2690,6 +2852,10 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
       messageMetadataById.set(String(message.id), message as Record<string, any>);
     }
   }
+  const classificationStalenessEntries = await Promise.all(
+    classificationRows.map(async (row) => [String(row.id), await classificationStalenessForRow(supabase, row)] as const),
+  );
+  const classificationStalenessById = new Map(classificationStalenessEntries);
 
   const replayOperations = (replayResult.data || []).map((event: Record<string, any>) => ({
     id: event.id,
@@ -2705,7 +2871,7 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   return {
     ok: true,
     mode: "admin_view",
-    classifications: (classificationsResult.data || []).map((row: Record<string, any>) => {
+    classifications: classificationRows.map((row: Record<string, any>) => {
       const message = messageMetadataById.get(String(row.message_id)) || {};
       return {
         id: row.id,
@@ -2737,6 +2903,8 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
         validation_status: row.validation_status,
         classification_run_id: row.classification_run_id,
         input_version: row.input_version,
+        prompt_version: row.prompt_version || null,
+        staleness: classificationStalenessById.get(String(row.id)) || null,
         created_at: row.created_at,
         classification_review_state: reviewStateForRow(row),
         operator_override_category: row.operator_override_category || null,
@@ -2806,7 +2974,7 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       .maybeSingle(),
     supabase
       .from("email_message_classifications")
-      .select("id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
+      .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, validation_status, input_version, prompt_version, prompt_hash, input_hash, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at")
       .eq("message_id", input.messageId)
       .eq("source", "ai")
       .order("created_at", { ascending: false })
@@ -2829,6 +2997,9 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
   const bodySource = body?.normalized_text ? "normalized_text" : body?.body_text ? "body_text" : message.body_preview ? "body_preview" : "none";
   const cappedBody = capMessageDetailBody(sourceText);
   const classification = Array.isArray(classificationResult.data) ? classificationResult.data[0] : null;
+  const classificationStaleness = classification
+    ? await classificationStalenessForRow(supabase, classification as Record<string, any>)
+    : null;
 
   return {
     ok: true,
@@ -2872,6 +3043,9 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
       requires_human_review: classification.requires_human_review,
       safety_flags: Array.isArray(classification.safety_flags) ? classification.safety_flags : [],
       validation_status: classification.validation_status,
+      input_version: classification.input_version || null,
+      prompt_version: classification.prompt_version || null,
+      staleness: classificationStaleness,
       created_at: classification.created_at,
       classification_review_state: reviewStateForRow(classification),
       operator_override_category: classification.operator_override_category || null,
@@ -4411,7 +4585,15 @@ async function adminDraftView(supabase: ServiceClient, input: Input) {
     throw new ClassifierError("response_draft_not_found", { status: 404, phase: "admin_draft_view" });
   }
 
-  const drafts = (data || []).map((row: Record<string, any>) => safeDraftSummary(row, input.includeDraftBody));
+  const draftRows = (data || []) as Record<string, any>[];
+  const draftStalenessEntries = await Promise.all(
+    draftRows.map(async (row) => [String(row.id), await draftStalenessForRow(supabase, row)] as const),
+  );
+  const draftStalenessById = new Map(draftStalenessEntries);
+  const drafts = draftRows.map((row: Record<string, any>) => ({
+    ...safeDraftSummary(row, input.includeDraftBody),
+    staleness: draftStalenessById.get(String(row.id)) || null,
+  }));
   const currentDraft = drafts.find((draft: Record<string, any>) => draft.is_current === true) || drafts[0] || null;
   const currentDraftClassificationId = currentDraft?.classification_id ? String(currentDraft.classification_id) : null;
   const selectedClassificationId = input.classificationId || null;
@@ -4425,6 +4607,7 @@ async function adminDraftView(supabase: ServiceClient, input: Input) {
     mode: "admin_draft_view",
     drafts,
     draft_count: drafts.length,
+    staleness: currentDraft?.staleness || null,
     classification_mismatch: classificationMismatch,
     selected_classification_id: selectedClassificationId,
     current_draft_classification_id: currentDraftClassificationId,
