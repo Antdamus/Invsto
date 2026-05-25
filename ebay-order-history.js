@@ -2380,15 +2380,19 @@ function getUniqueEventsFromGroups(groups = []) {
   return [...events.values()];
 }
 
+function setSummaryCardLabel(valueId, label) {
+  const value = $(valueId);
+  const labelNode = value?.closest(".history-summary-card")?.querySelector("span");
+  if (labelNode) labelNode.textContent = label;
+}
+
 function renderSummary(groups = getVisibleHistoryGroups()) {
   const visibleLines = getUniqueLinesFromGroups(groups);
   const visibleEvents = getUniqueEventsFromGroups(groups);
-  const shippedLines = visibleLines.filter((line) => line.line_status === "fulfilled");
-  const shippedGroups = groups.filter((group) =>
-    (group.lines || []).some((line) => line.line_status === "fulfilled")
-  );
-  const gross = shippedLines.reduce((sum, line) => sum + getLineGross(line), 0);
-  const payout = shippedLines.reduce((sum, line) => sum + getLinePayout(line), 0);
+  const visibleOrders = getUniqueOrdersFromLines(visibleLines);
+  const status = $("history-status")?.value || "all";
+  const gross = visibleLines.reduce((sum, line) => sum + getLineGross(line), 0);
+  const payout = visibleLines.reduce((sum, line) => sum + getLinePayout(line), 0);
   const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
   const closeouts = closeoutEvents.length || visibleLines.filter(isAdminCloseoutLine).length;
   const cancelled = visibleLines.filter((line) => line.line_status === "cancelled").length;
@@ -2397,8 +2401,18 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
     .filter((event) => event.category === "revert")
     .reduce((sum, event) => sum + Number(event.payload?.reverted_lines || event.order_line_ids?.length || 1), 0);
 
-  $("summary-shipped-orders").textContent = String(shippedGroups.length);
-  $("summary-shipped-lines").textContent = String(shippedLines.length);
+  const primaryLabels = {
+    all: ["Closed Orders", "Closed Lines"],
+    fulfilled: ["Orders Shipped", "Lines Shipped"],
+    cancelled: ["Canceled Orders", "Canceled Lines"],
+    admin_closeout: ["No-Inventory Orders", "No-Inventory Lines"],
+    returns: ["Return Orders", "Return Lines"],
+  }[status] || ["Visible Orders", "Visible Lines"];
+
+  setSummaryCardLabel("summary-shipped-orders", primaryLabels[0]);
+  setSummaryCardLabel("summary-shipped-lines", primaryLabels[1]);
+  $("summary-shipped-orders").textContent = String(visibleOrders.length || groups.length);
+  $("summary-shipped-lines").textContent = String(visibleLines.length);
   $("summary-gross").textContent = formatMoney(gross);
   $("summary-payout").textContent = formatMoney(payout);
   $("summary-admin-closeouts").textContent = String(closeouts);
