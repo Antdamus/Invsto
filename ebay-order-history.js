@@ -246,6 +246,65 @@ function getEbayHistoryApiSourceLabel(line = {}) {
   return "";
 }
 
+function isEbayApiHistoryLine(line = {}) {
+  const order = getOrderFromLine(line);
+  const source = String(line?.raw_payload?.source || order?.raw_payload?.source || "").trim();
+  return source === "ebay_account_history_sync" || source === "ebay_buyer_history_sync";
+}
+
+function getValidDateValue(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) return text;
+  }
+  return "";
+}
+
+function getHistoryLineTimelineAt(line = {}) {
+  const order = getOrderFromLine(line);
+  const apiOrder = order?.raw_payload?.order || {};
+  if (isEbayApiHistoryLine(line)) {
+    if (line.line_status === "cancelled") {
+      return getValidDateValue(
+        apiOrder?.cancelStatus?.cancelCloseDate,
+        apiOrder?.cancelStatus?.cancelCompletedDate,
+        apiOrder?.cancelStatus?.cancelRequestDate,
+        apiOrder?.cancelStatus?.cancelDate,
+        order.paid_on_date,
+        order.sale_date,
+        apiOrder?.creationDate,
+        line.fulfilled_at
+      );
+    }
+    return getValidDateValue(
+      order.paid_on_date,
+      order.sale_date,
+      apiOrder?.paymentSummary?.payments?.[0]?.paymentDate,
+      apiOrder?.creationDate,
+      line.fulfilled_at
+    );
+  }
+  return getValidDateValue(line.fulfilled_at, order.shipped_on_date, order.paid_on_date, order.sale_date);
+}
+
+function getHistoryLineTimelineText(line = {}) {
+  const dateText = formatDateTime(getHistoryLineTimelineAt(line));
+  if (isEbayApiHistoryLine(line)) {
+    if (line.line_status === "cancelled") return `eBay cancel date ${dateText}`;
+    return `eBay archive date ${dateText}`;
+  }
+  return dateText;
+}
+
+function getHistoryGroupTimelineText(group = {}) {
+  const allApi = (group.lines || []).length > 0 && (group.lines || []).every(isEbayApiHistoryLine);
+  const dateText = formatDateTime(group.latestAt);
+  if (allApi) return `eBay archive date ${dateText}`;
+  return `Closed ${dateText}`;
+}
+
 function unique(values) {
   return [...new Set((values || []).filter(Boolean).map(String))];
 }
@@ -384,6 +443,7 @@ function getLinePayout(line) {
 
 function getLineStatusLabel(line) {
   if (line.line_status === "cancelled") return "Canceled";
+  if (line.line_status === "skipped" && isEbayApiHistoryLine(line)) return "Archived";
   if (isAdminCloseoutLine(line)) return "No-inventory completion";
   if (line.line_status === "fulfilled") return "Shipped";
   return line.line_status || "Closed";
@@ -2357,6 +2417,7 @@ function getHistoryGroupStatus(group) {
   if (getReturnCasesForLineIds((group.lines || []).map((line) => line.id)).length) return "Returned";
   if (group.events.some((event) => event.category === "revert")) return "Has reversal";
   if (group.lines.some((line) => line.line_status === "cancelled")) return "Canceled";
+  if ((group.lines || []).length && group.lines.every(isEbayApiHistoryLine)) return "Archived sale";
   if (group.events.some((event) => event.action === "fulfilled_no_inventory") || group.lines.some(isAdminCloseoutLine)) {
     return "No-inventory completion";
   }
@@ -2404,10 +2465,11 @@ function groupLinesByOrder(lines) {
     group.lines.push(line);
     group.gross += getLineGross(line);
     group.payout += getLinePayout(line);
-    const fulfilledAt = line.fulfilled_at ? new Date(line.fulfilled_at) : null;
+    const historyAt = getHistoryLineTimelineAt(line);
+    const fulfilledAt = historyAt ? new Date(historyAt) : null;
     if (fulfilledAt && !Number.isNaN(fulfilledAt.getTime())) {
       const current = group.latestAt ? new Date(group.latestAt) : null;
-      if (!current || fulfilledAt > current) group.latestAt = line.fulfilled_at;
+      if (!current || fulfilledAt > current) group.latestAt = historyAt;
     }
   });
 
@@ -2470,10 +2532,11 @@ function buildHistoryGroups(lines) {
     group.lines.push(line);
     group.gross += getLineGross(line);
     group.payout += getLinePayout(line);
-    const fulfilledAt = line.fulfilled_at ? new Date(line.fulfilled_at) : null;
+    const historyAt = getHistoryLineTimelineAt(line);
+    const fulfilledAt = historyAt ? new Date(historyAt) : null;
     if (fulfilledAt && !Number.isNaN(fulfilledAt.getTime())) {
       const current = group.latestAt ? new Date(group.latestAt) : null;
-      if (!current || fulfilledAt > current) group.latestAt = line.fulfilled_at;
+      if (!current || fulfilledAt > current) group.latestAt = historyAt;
     }
   });
 
@@ -2746,6 +2809,9 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
     const hasReturns = getReturnCasesForLineIds(lineIds).length > 0;
     const groupApiSourceLabel = unique(group.lines.map(getEbayHistoryApiSourceLabel).filter(Boolean))[0] || "";
+    const completedByText = groupApiSourceLabel && !workers.length
+      ? `Source: ${groupApiSourceLabel}`
+      : `Completed by: ${workers.join(", ") || "Unknown"}`;
 
     const card = document.createElement("article");
     card.className = "history-order-card";
@@ -2763,14 +2829,14 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           </h3>
           <div class="history-card-meta">
             <span>${group.lines.length} line(s)</span>
-            <span>Closed ${escapeHtml(formatDateTime(group.latestAt))}</span>
+            <span>${escapeHtml(getHistoryGroupTimelineText(group))}</span>
             <span class="history-status ${statusClass}">${escapeHtml(primaryStatus)}</span>
           </div>
           <div class="history-worker-row">
             <span>${escapeHtml(group.subtitle || "No order details")}</span>
           </div>
           <div class="history-worker-row">
-            <span>Completed by: ${escapeHtml(workers.join(", ") || "Unknown")}</span>
+            <span>${escapeHtml(completedByText)}</span>
           </div>
           ${hasAttachedLabel ? `<span class="history-label-pill">Label attached</span>` : ""}
           ${hasReturns ? `<span class="history-return-pill">Return recorded</span>` : ""}
@@ -2803,8 +2869,8 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>
-                <span>${escapeHtml(line.fulfilled_by_email || "Unknown worker")}</span>
-                <span>${escapeHtml(formatDateTime(line.fulfilled_at))}</span>
+                <span>${escapeHtml(isEbayApiHistoryLine(line) ? getEbayHistoryApiSourceLabel(line) : line.fulfilled_by_email || "Unknown worker")}</span>
+                <span>${escapeHtml(getHistoryLineTimelineText(line))}</span>
               </div>
               ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
               ${renderHistoryLineVideoReceiptPhotos(line, group.events)}

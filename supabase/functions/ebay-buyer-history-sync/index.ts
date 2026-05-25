@@ -167,9 +167,23 @@ function extractShipByDate(order: any): string | null {
 }
 
 function extractShippedDate(order: any): string | null {
-  const fulfillments = Array.isArray(order?.fulfillmentHrefs) ? order.fulfillmentHrefs : [];
-  if (fulfillments.length) return toIsoDate(order?.lastModifiedDate);
-  return toIsoDate(order?.lastModifiedDate || order?.creationDate);
+  const lineItems = Array.isArray(order?.lineItems) ? order.lineItems : [];
+  const lineDates = lineItems.flatMap((line: any) => [
+    line?.lineItemFulfillmentInstructions?.shippedDate,
+    line?.fulfillmentInstructions?.shippedDate,
+    line?.shippedDate,
+  ]);
+  const fulfillmentDates = Array.isArray(order?.fulfillments)
+    ? order.fulfillments.map((fulfillment: any) => fulfillment?.shippedDate || fulfillment?.date)
+    : [];
+  return [
+    order?.fulfillmentSummary?.shippedDate,
+    order?.fulfillmentStatus?.shippedDate,
+    order?.shippingFulfillment?.shippedDate,
+    order?.shippedDate,
+    ...fulfillmentDates,
+    ...lineDates,
+  ].map(toIsoDate).filter(Boolean).sort()[0] || null;
 }
 
 function extractLineSku(line: any): string {
@@ -410,6 +424,13 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
   const keepLocalClosed = ["fulfilled", "cancelled", "archived"].includes(String(existingOrder?.status || "").toLowerCase());
   const orderStatus = keepLocalClosed ? existingOrder.status : inferredStatus;
   const shippedOnDate = inferredStatus === "fulfilled" ? extractShippedDate(order) : null;
+  const purchasedAt = toIsoDate(payment?.paymentDate || order?.creationDate);
+  const cancelledAt = toIsoDate(
+    order?.cancelStatus?.cancelCloseDate
+      || order?.cancelStatus?.cancelCompletedDate
+      || order?.cancelStatus?.cancelRequestDate
+      || order?.cancelStatus?.cancelDate
+  );
 
   const lines = lineItems.map((line: any, index: number) => {
     const sku = extractLineSku(line);
@@ -420,9 +441,11 @@ function prepareOrder(order: any, itemBySku: Map<string, any>, existingOrder: an
     const lineTotal = toMoney(line?.total || line?.lineItemCost);
     const lineStatus = inferLineStatus(order);
     const fulfilledQuantity = ["fulfilled", "cancelled", "skipped"].includes(lineStatus) ? quantity : 0;
-    const closedAt = toIsoDate(order?.lastModifiedDate || order?.cancelStatus?.cancelCloseDate || order?.creationDate);
+    const closedAt = lineStatus === "cancelled"
+      ? cancelledAt || purchasedAt
+      : shippedOnDate || purchasedAt;
     const fulfilledAt = ["fulfilled", "cancelled", "skipped"].includes(lineStatus)
-      ? shippedOnDate || closedAt
+      ? closedAt
       : null;
 
     return {
