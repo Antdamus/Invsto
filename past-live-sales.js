@@ -151,6 +151,36 @@ function firstItemPhoto(item) {
   return photos.find(Boolean) || item?.photo_url || "";
 }
 
+function normalizeManualLiveSaleItem(row = {}) {
+  const category = String(row.item_category || "General").trim() || "General";
+  const description = String(row.item_description || "").trim();
+  return {
+    ...row,
+    is_manual: true,
+    item_id: null,
+    source_stock_location_row_id: null,
+    source_location_id: null,
+    scanned_at: row.created_at,
+    scanned_by: row.created_by,
+    scanned_by_email: row.created_by_email,
+    item: {
+      id: "",
+      title: description || category,
+      description,
+      barcode: "Manual",
+      photos: [],
+      photo_url: "",
+    },
+    source_location: {
+      id: "",
+      location_name: "Manual entry",
+      location_code: category,
+      location_role: "manual",
+      type: "manual",
+    },
+  };
+}
+
 async function resolvePhotoUrl(path) {
   if (!path) return "";
   if (/^https?:\/\//i.test(path)) return path;
@@ -163,6 +193,37 @@ async function resolvePhotoUrl(path) {
 function groupLotItems(lotId) {
   const groups = new Map();
   getItemsForLot(lotId).forEach((entry) => {
+    if (entry.is_manual) {
+      const category = String(entry.item_category || entry.source_location?.location_code || "General").trim() || "General";
+      const description = String(entry.item_description || entry.item?.description || entry.item?.title || "").trim();
+      const status = entry.status || "reserved";
+      const key = `manual::${category.toLowerCase()}::${description.toLowerCase()}::${status}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          isManual: true,
+          manualCategory: category,
+          manualDescription: description,
+          item: entry.item || {},
+          sourceLocation: entry.source_location || {},
+          status,
+          quantity: 0,
+          showElapsedSeconds: entry.show_elapsed_seconds,
+          scannedBy: entry.scanned_by_email,
+          scannedAt: entry.scanned_at || entry.created_at,
+        });
+      }
+      const group = groups.get(key);
+      group.quantity += Number(entry.quantity || 0);
+      if (entry.show_elapsed_seconds != null) {
+        group.showElapsedSeconds = Math.min(
+          Number(group.showElapsedSeconds ?? entry.show_elapsed_seconds),
+          Number(entry.show_elapsed_seconds),
+        );
+      }
+      return;
+    }
+
     const itemId = entry.item_id || entry.item?.id || "";
     const sourceRowId = entry.source_stock_location_row_id || "";
     const status = entry.status || "reserved";
@@ -232,7 +293,10 @@ function sessionMatchesSearch(session, term) {
     getStoreName(session.store_id),
     ...lots.flatMap((lot) => [lot.auction_number, lot.lot_code, lot.status, lot.notes, lot.label_path]),
     ...relatedItems.flatMap((entry) => [
+      entry.item_category,
+      entry.item_description,
       entry.item?.title,
+      entry.item?.description,
       entry.item?.barcode,
       entry.source_location?.location_name,
       entry.source_location?.location_code,
@@ -337,10 +401,11 @@ async function loadPastLiveSales({ keepSelection = true } = {}) {
     const sessionIds = (sessionRows || []).map((session) => session.id);
     let lots = [];
     let items = [];
+    let manualItems = [];
     let events = [];
 
     if (sessionIds.length) {
-      const [lotsResult, itemsResult, eventsResult] = await Promise.all([
+      const [lotsResult, itemsResult, manualItemsResult, eventsResult] = await Promise.all([
         supabase
           .from("live_sale_lots")
           .select("*")
@@ -356,6 +421,11 @@ async function loadPastLiveSales({ keepSelection = true } = {}) {
           .in("session_id", sessionIds)
           .order("scanned_at", { ascending: true }),
         supabase
+          .from("live_sale_manual_lot_items")
+          .select("*")
+          .in("session_id", sessionIds)
+          .order("created_at", { ascending: true }),
+        supabase
           .from("live_sale_events")
           .select("*")
           .in("session_id", sessionIds)
@@ -363,14 +433,19 @@ async function loadPastLiveSales({ keepSelection = true } = {}) {
       ]);
       if (lotsResult.error) throw lotsResult.error;
       if (itemsResult.error) throw itemsResult.error;
+      if (manualItemsResult.error) throw manualItemsResult.error;
       if (eventsResult.error) throw eventsResult.error;
       lots = lotsResult.data || [];
       items = itemsResult.data || [];
+      manualItems = manualItemsResult.data || [];
       events = eventsResult.data || [];
     }
 
     state.lots = lots;
-    state.lotItems = items;
+    state.lotItems = [
+      ...items,
+      ...manualItems.map(normalizeManualLiveSaleItem),
+    ].sort((a, b) => new Date(a.scanned_at || a.created_at || 0) - new Date(b.scanned_at || b.created_at || 0));
     state.events = events;
     state.sessions = (sessionRows || []).filter((session) => sessionMatchesSearch(session, filters.search));
 
@@ -555,18 +630,27 @@ function renderBagList(session) {
 function renderBagItem(container, group) {
   const item = group.item || {};
   const source = group.sourceLocation || {};
+  const isManual = Boolean(group.isManual);
+  const title = isManual
+    ? group.manualDescription || group.manualCategory || item.title || "Manual item"
+    : item.title || "Untitled item";
+  const sourceLine = isManual
+    ? `Manual entry - ${group.manualCategory || "General"}`
+    : `${item.barcode || "-"} - ${source.location_name || "Unknown source"} ${source.location_code ? `(${source.location_code})` : ""}`;
   const row = document.createElement("article");
-  row.className = "bag-item";
+  row.className = `bag-item${isManual ? " is-manual" : ""}`;
   row.innerHTML = `
-    <div class="item-thumb"><span>No photo</span></div>
+    <div class="item-thumb"><span>${isManual ? "Manual" : "No photo"}</span></div>
     <div class="item-copy">
-      <strong title="${escapeHtml(item.title || "Untitled item")}">${escapeHtml(item.title || "Untitled item")}</strong>
-      <span>${escapeHtml(item.barcode || "-")} - ${escapeHtml(source.location_name || "Unknown source")} ${source.location_code ? `(${escapeHtml(source.location_code)})` : ""}</span>
+      <strong title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
+      <span>${escapeHtml(sourceLine)}</span>
       <small>Live minute ${escapeHtml(formatElapsed(group.showElapsedSeconds))} - ${escapeHtml(statusLabel(group.status))} - ${escapeHtml(group.scannedBy || "unknown")}</small>
     </div>
     <div class="qty-pill">Qty ${Number(group.quantity || 0).toLocaleString()}</div>
   `;
   container.appendChild(row);
+
+  if (isManual) return;
 
   resolvePhotoUrl(firstItemPhoto(item)).then((url) => {
     if (!url || !row.isConnected) return;

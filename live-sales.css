@@ -197,6 +197,21 @@ body.live-label-step #current-lot-card {
   font-weight: 800;
 }
 
+.live-panel label small {
+  color: var(--live-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.session-start-auction-field {
+  grid-column: 1 / -1;
+}
+
+.session-start-auction-field input {
+  max-width: 280px;
+}
+
 .live-panel input,
 .live-panel select,
 .live-panel textarea {
@@ -214,6 +229,25 @@ body.live-label-step #current-lot-card {
 .live-panel select option {
   color: #121212;
   background: #ffffff;
+}
+
+.live-panel select[multiple] {
+  min-height: 118px;
+  padding: 8px;
+}
+
+.live-panel select[multiple] option {
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.bag-owner-field {
+  margin: 0 0 14px;
+}
+
+.bag-owner-field select,
+#label-bag-owner-select {
+  max-width: 420px;
 }
 
 .live-panel input:focus,
@@ -368,6 +402,53 @@ body.live-label-step #current-lot-card {
   color: var(--live-gold);
 }
 
+.manual-live-item-box {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 14px;
+  border: 1px solid rgba(167, 139, 250, 0.24);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(167, 139, 250, 0.12), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.03);
+}
+
+.manual-live-item-head,
+.manual-live-item-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.manual-live-item-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.manual-live-item-head strong {
+  display: block;
+  color: var(--live-text);
+  font-size: 1.05rem;
+}
+
+.manual-live-item-head > span {
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  border-radius: 999px;
+  color: #ddd6fe;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.manual-live-item-grid {
+  grid-template-columns: minmax(0, 1fr) 110px;
+}
+
+.manual-live-item-add {
+  justify-self: start;
+}
+
 .primary-btn,
 .secondary-btn {
   display: inline-flex;
@@ -479,6 +560,20 @@ body.live-label-step #current-lot-card {
   border-color: rgba(96, 165, 250, 0.3);
   background: rgba(96, 165, 250, 0.12);
   color: #bfdbfe;
+}
+
+.source-kind-badge.is-manual {
+  border-color: rgba(167, 139, 250, 0.34);
+  background: rgba(167, 139, 250, 0.14);
+  color: #ddd6fe;
+}
+
+.manifest-item.is-manual,
+.bag-detail-item.is-manual {
+  border-color: rgba(167, 139, 250, 0.24);
+  background:
+    linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(255, 255, 255, 0.035);
 }
 
 .session-btn small,
@@ -600,6 +695,26 @@ body.live-label-step #current-lot-card {
   max-height: 680px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.manifest-bag-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+
+.manifest-bag-meta span {
+  border: 1px solid rgba(231, 192, 114, 0.2);
+  border-radius: 999px;
+  background: rgba(231, 192, 114, 0.08);
+  color: var(--live-muted);
+  padding: 7px 10px;
+  font-weight: 800;
+}
+
+.manifest-bag-meta b {
+  color: var(--live-gold);
 }
 
 .manifest-item {
@@ -1245,6 +1360,7 @@ body.live-label-step #current-lot-card {
 }
 
 .live-edit-dialog input,
+.live-edit-dialog select,
 .live-edit-dialog textarea {
   width: 100%;
   min-width: 0;
@@ -1258,9 +1374,15 @@ body.live-label-step #current-lot-card {
 }
 
 .live-edit-dialog input:focus,
+.live-edit-dialog select:focus,
 .live-edit-dialog textarea:focus {
   border-color: var(--live-border-strong);
   box-shadow: 0 0 0 4px rgba(231, 192, 114, 0.12);
+}
+
+.live-edit-dialog select option {
+  color: #121212;
+  background: #fff;
 }
 
 .live-edit-close {
@@ -1487,8 +1609,14 @@ body.live-label-step #current-lot-card {
 
   .form-grid,
   .scan-row,
+  .manual-live-item-head,
+  .manual-live-item-grid,
   .edit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .manual-live-item-add {
+    width: 100%;
   }
 
   .manifest-item {

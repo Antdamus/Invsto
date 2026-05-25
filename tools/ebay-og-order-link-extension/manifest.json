@@ -5,10 +5,13 @@
   "version": "1.0.0",
   "permissions": [
     "storage",
+    "activeTab",
     "tabs",
-    "downloads"
+    "downloads",
+    "unlimitedStorage"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://www.ebay.com/*",
     "https://*/*",
     "http://localhost/*",

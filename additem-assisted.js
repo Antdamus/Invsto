@@ -91,6 +91,7 @@
     isAutoBlackProcessing: false,
     autoStraightenBackground: false,
     autoBlackProcessedSourcePaths: new Set(),
+    backgroundCutoutCache: new Map(),
     hasLoadedImagesOnce: false,
     activeCaptureJobId: "",
     captureStations: [],
@@ -1255,7 +1256,10 @@
     updateSaveSelectionSummary(elements);
     renderUploadedImages(elements);
     if (options.autoProcess !== false) {
-      autoProcessBlackBackgroundImages(elements, normalizedImages);
+      autoProcessBlackBackgroundImages(elements, normalizedImages, {
+        preferredPath: nextAIPath,
+        maxCount: 1,
+      });
     }
   }
 
@@ -1715,7 +1719,10 @@
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
       if (options.autoProcess === true) {
-        autoProcessBlackBackgroundImages(elements, normalizedImages);
+        autoProcessBlackBackgroundImages(elements, normalizedImages, {
+          preferredPath: nextAIPath,
+          maxCount: 1,
+        });
       }
 
       if (!normalizedImages.length) {
@@ -2052,6 +2059,23 @@
     }
   }
 
+  function getBackgroundCutoutCacheKey(selectedImage) {
+    const bucket = asTrimmedString(selectedImage?.storageBucket);
+    const path = asTrimmedString(selectedImage?.path);
+    if (!bucket || !path) return "";
+    return `${bucket}:${path}:side-${BACKGROUND_PROCESSING_MAX_SOURCE_SIDE}`;
+  }
+
+  function rememberBackgroundCutout(cacheKey, cutoutBlob) {
+    if (!cacheKey || !cutoutBlob) return;
+    state.backgroundCutoutCache.set(cacheKey, cutoutBlob);
+    while (state.backgroundCutoutCache.size > 6) {
+      const firstKey = state.backgroundCutoutCache.keys().next().value;
+      if (!firstKey) break;
+      state.backgroundCutoutCache.delete(firstKey);
+    }
+  }
+
   function normalizeRadians(value) {
     let angle = value;
     while (angle > Math.PI / 2) angle -= Math.PI;
@@ -2208,28 +2232,40 @@
       "is-waiting"
     );
 
-    const sourceBlob = await createScaledSourceBlobForBackgroundRemoval(selectedImage);
-    const removeBackground = await loadBackgroundRemoval();
+    const cacheKey = getBackgroundCutoutCacheKey(selectedImage);
+    let cutoutBlob = cacheKey ? state.backgroundCutoutCache.get(cacheKey) : null;
 
-    setInlineStatus(
-      elements.bgStatus,
-      "Removing only the background and keeping the original object pixels...",
-      "is-waiting"
-    );
+    if (cutoutBlob) {
+      setInlineStatus(
+        elements.bgStatus,
+        "Using the already prepared object cutout...",
+        "is-waiting"
+      );
+    } else {
+      const sourceBlob = await createScaledSourceBlobForBackgroundRemoval(selectedImage);
+      const removeBackground = await loadBackgroundRemoval();
 
-    const cutoutBlob = await removeBackground(sourceBlob, {
-      model: "isnet_fp16",
-      output: {
-        format: "image/png",
-        quality: 0.95,
-        type: "foreground",
-      },
-      progress: (key, current, total) => {
-        if (!total) return;
-        const percent = Math.round((current / total) * 100);
-        setInlineStatus(elements.bgStatus, `Loading background removal assets: ${percent}%`, "is-waiting");
-      },
-    });
+      setInlineStatus(
+        elements.bgStatus,
+        "Removing only the background and keeping the original object pixels...",
+        "is-waiting"
+      );
+
+      cutoutBlob = await removeBackground(sourceBlob, {
+        model: "isnet_fp16",
+        output: {
+          format: "image/png",
+          quality: 0.95,
+          type: "foreground",
+        },
+        progress: (key, current, total) => {
+          if (!total) return;
+          const percent = Math.round((current / total) * 100);
+          setInlineStatus(elements.bgStatus, `Loading background removal assets: ${percent}%`, "is-waiting");
+        },
+      });
+      rememberBackgroundCutout(cacheKey, cutoutBlob);
+    }
 
     const processedBlob = await createCompositedBackgroundBlob(cutoutBlob, background, {
       autoStraighten: Boolean(options.autoStraighten),
@@ -2344,12 +2380,21 @@
     }
   }
 
-  async function autoProcessBlackBackgroundImages(elements, images = []) {
+  async function autoProcessBlackBackgroundImages(elements, images = [], options = {}) {
     if (state.isAutoBlackProcessing) return;
 
+    const preferredPath = asTrimmedString(options.preferredPath);
+    const maxCount = Math.max(1, Number(options.maxCount || 1));
     const candidates = (Array.isArray(images) ? images : [])
       .filter(shouldAutoProcessBlackBackground)
-      .filter((image) => !state.autoBlackProcessedSourcePaths.has(image.path));
+      .filter((image) => !state.autoBlackProcessedSourcePaths.has(image.path))
+      .sort((a, b) => {
+        if (!preferredPath) return 0;
+        if (a.path === preferredPath) return -1;
+        if (b.path === preferredPath) return 1;
+        return 0;
+      })
+      .slice(0, maxCount);
 
     if (!candidates.length) return;
 
@@ -2364,7 +2409,9 @@
         await processImageBackgroundForImage(elements, image, "black", {
           showBusy: false,
           selectResult: true,
-          statusMessage: `Auto-processing black background ${index + 1} of ${candidates.length}...`,
+          statusMessage: candidates.length === 1
+            ? "Auto-processing black background for the selected AI image..."
+            : `Auto-processing black background ${index + 1} of ${candidates.length}...`,
         });
       }
     } finally {
@@ -2820,7 +2867,10 @@
       });
       updateSaveSelectionSummary(elements);
       renderUploadedImages(elements);
-      autoProcessBlackBackgroundImages(elements, [uploadedImage]);
+      autoProcessBlackBackgroundImages(elements, [uploadedImage], {
+        preferredPath: uploadedImage.path,
+        maxCount: 1,
+      });
       setInlineStatus(
         elements.imageStatus,
         "Document image uploaded. A black-background version is being prepared automatically.",
@@ -3219,6 +3269,10 @@
       getSelectedUploadedImagesForSave,
       getSelectedUploadedImagePathsForSave,
       getAISelectedUploadedImagePath: () => state.aiSelectedUploadedImagePath,
+      getSelectedMaterialPurity: () => ({
+        material: asTrimmedString(elements.materialSelect?.value),
+        purity: asTrimmedString(elements.puritySelect?.value),
+      }),
       refreshUploadedImages: () => reloadCompletedCapturePhotos(elements, {
         refreshNotice: true,
         autoProcess: false,

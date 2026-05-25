@@ -33,7 +33,9 @@
       <a href="stock.html">Stock</a>
       <a href="live-sales.html">Live Sales</a>
       <a href="pending-orders.html">Pending Orders</a>
+      <a href="ebay-returns.html">Returns</a>
       <a href="locations.html">Locations</a>
+      <a href="team-responsibilities.html">Responsibilities</a>
       <a href="dashboard.html">Admin Dashboard (Admins only)</a>
       <a href="#" id="logout-mobile">Logout</a>
     </nav>
@@ -73,8 +75,16 @@
             <i class="ti ti-truck-delivery"></i><span class="link-text">Pending Orders</span>
           </a>
 
+          <a class="nav-link" href="ebay-returns.html">
+            <i class="ti ti-rotate-clockwise"></i><span class="link-text">Returns</span>
+          </a>
+
           <a class="nav-link" href="locations.html">
             <i class="ti ti-map-pin"></i><span class="link-text">Locations</span>
+          </a>
+
+          <a class="nav-link" href="team-responsibilities.html">
+            <i class="ti ti-clipboard-list"></i><span class="link-text">Responsibilities</span>
           </a>
 
           <a class="nav-link" href="dashboard.html" title="Admins only">
@@ -117,6 +127,45 @@
           </div>
           <div id="worker-store-transfer-alerts-container" class="urgent-orders-grid">
             <div class="urgent-orders-empty">Loading store transfers...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Assigned Returns</h3>
+              <div class="section-sub">Return intake, review questions, and follow-ups assigned to you</div>
+            </div>
+            <a class="urgent-orders-link" href="ebay-returns.html">Open Returns</a>
+          </div>
+          <div id="worker-return-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading return tasks...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Assigned Order Tasks</h3>
+              <div class="section-sub">Pending order questions, admin replies, and special handling handoffs</div>
+            </div>
+            <a class="urgent-orders-link" href="pending-orders.html#order-task-panel">Open Orders</a>
+          </div>
+          <div id="worker-order-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading order tasks...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Assigned Tasks</h3>
+              <div class="section-sub">Independent task preview; open Tasks for all assigned order, return, and team work</div>
+            </div>
+            <a class="urgent-orders-link" href="team-tasks.html">Open Tasks</a>
+          </div>
+          <div id="worker-team-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading team tasks...</div>
           </div>
         </section>
 
@@ -214,10 +263,22 @@
               <span>Pack eBay orders, scan the exact item and tray, then sign the inventory removal.</span>
             </a>
 
+            <a class="worker-action-card" href="team-tasks.html">
+              <span class="worker-action-kicker">Team Coordination</span>
+              <strong>Tasks</strong>
+              <span>Review assigned work, send notes/photos back, and mark independent work completed.</span>
+            </a>
+
             <a class="worker-action-card" href="locations.html">
               <span class="worker-action-kicker">Location Setup</span>
               <strong>Create Locations</strong>
               <span>Create barcode-ready fixed locations, bags/containers, and mobile trays for inventory placement.</span>
+            </a>
+
+            <a class="worker-action-card" href="team-responsibilities.html">
+              <span class="worker-action-kicker">Team Standards</span>
+              <strong>Responsibilities</strong>
+              <span>Review sales, verification, packing, supply, and handoff expectations for every show.</span>
             </a>
           </div>
         </section>

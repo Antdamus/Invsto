@@ -536,6 +536,36 @@
           </div>
         </section>
 
+        <section class="form-section">
+          <div class="form-section-head">
+            <p class="section-kicker">eBay Sync</p>
+            <h2 class="section-title">Marketplace Readiness</h2>
+            <p class="section-copy">
+              Store categories stay internal. Choose the eBay category here so this item can sync cleanly when it reaches the eBay pipeline.
+            </p>
+          </div>
+
+          <div class="form-grid form-grid-2 ebay-readiness-grid">
+            <label class="form-field form-field-toggle ebay-sync-toggle" for="ebay-sync-enabled">
+              <span class="form-label">Automatic eBay Sync</span>
+              <span class="auto-cost-toggle">
+                <input type="checkbox" id="ebay-sync-enabled" checked />
+                <span>Include this item in eBay sync</span>
+              </span>
+            </label>
+
+            <label class="form-field" for="ebay-category-id">
+              <span class="form-label">eBay Category</span>
+              <select id="ebay-category-id" class="add-input"></select>
+              <span class="field-helper">Use the eBay category, not your internal store category.</span>
+            </label>
+
+            <div class="form-field form-field-wide ebay-readiness-summary" id="ebay-readiness-summary" aria-live="polite">
+              eBay readiness will update as you complete the item.
+            </div>
+          </div>
+        </section>
+
         <section class="form-section form-section-final">
           <div class="form-section-head">
             <p class="section-kicker">Final Action</p>

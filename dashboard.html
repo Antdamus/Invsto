@@ -37,6 +37,7 @@
       <a href="pending-orders.html">Pending Orders</a>
       <a href="ebay-order-history.html">Order History</a>
       <a href="timeclock.html">Timesheet</a>
+      <a href="team-responsibilities.html">Responsibilities</a>
       <a href="admin.html">Admin</a>
       <a href="#" id="logout-mobile">Logout</a>
     </nav>
@@ -104,6 +105,11 @@
             <span class="link-text">Timesheet</span>
           </a>
 
+          <a class="nav-link" href="team-responsibilities.html">
+            <i class="ti ti-clipboard-list"></i>
+            <span class="link-text">Responsibilities</span>
+          </a>
+
           <a class="nav-link" href="#" id="logout">
             <i class="ti ti-logout"></i>
             <span class="link-text">Logout</span>
@@ -149,12 +155,67 @@
           <div class="section-head">
             <div>
               <h3 class="section-title">Store Transfers</h3>
-              <div class="section-sub">Inter-store custody handoffs waiting for receipt or exception review</div>
+              <div class="section-sub">Inter-store custody handoffs assigned to you for receipt or exception review</div>
             </div>
             <a class="urgent-orders-link" href="store-transfers.html">Open Store Transfers</a>
           </div>
           <div id="store-transfer-alerts-container" class="urgent-orders-grid">
             <div class="urgent-orders-empty">Loading store transfers...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Order Tasks</h3>
+              <div class="section-sub">Pending packing questions, special handling requests, and handoffs assigned to you</div>
+            </div>
+            <a class="urgent-orders-link" href="pending-orders.html#order-task-panel">Open Pending Orders</a>
+          </div>
+          <div id="admin-order-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading order tasks...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Tasks</h3>
+              <div class="section-sub">Independent task preview for work assigned to you</div>
+            </div>
+            <a class="urgent-orders-link" href="team-tasks.html">Open Tasks</a>
+          </div>
+          <div id="admin-team-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading team tasks...</div>
+          </div>
+        </section>
+
+        <section class="section urgent-orders-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Return Tasks</h3>
+              <div class="section-sub">Pending eBay return intake, review questions, and follow-ups assigned to you</div>
+            </div>
+            <a class="urgent-orders-link" href="ebay-returns.html">Open Returns</a>
+          </div>
+          <div id="admin-return-tasks-container" class="urgent-orders-grid">
+            <div class="urgent-orders-empty">Loading return tasks...</div>
+          </div>
+        </section>
+
+        <section class="section buyer-profit-section">
+          <div class="section-head">
+            <div>
+              <h3 class="section-title">Buyer Profitability</h3>
+              <div class="section-sub">Top eBay buyers by synced order value, payout, returns, and recency</div>
+            </div>
+            <a class="urgent-orders-link" href="ebay-order-history.html">Open Order History</a>
+          </div>
+          <div id="buyer-profitability-summary" class="buyer-profit-summary">
+            <span>Loading buyer totals...</span>
+          </div>
+          <div id="buyer-profitability-container" class="buyer-profit-grid">
+            <div class="urgent-orders-empty">Loading buyer profitability...</div>
           </div>
         </section>
 
@@ -176,6 +237,11 @@
               <strong>Pending Orders</strong>
               <small>Scan and confirm eBay bundles</small>
             </a>
+            <a class="dashboard-directory-card" href="team-tasks.html">
+              <span>Assign</span>
+              <strong>Tasks</strong>
+              <small>Assigned order, return, and independent work trails</small>
+            </a>
             <a class="dashboard-directory-card" href="store-transfers.html">
               <span>Move</span>
               <strong>Store Transfers</strong>
@@ -186,10 +252,20 @@
               <strong>Order History</strong>
               <small>Shipped totals, cancellations, admin closeouts, and reversals</small>
             </a>
+            <a class="dashboard-directory-card" href="ebay-returns.html">
+              <span>Review</span>
+              <strong>Returns</strong>
+              <small>Return intake, unmatched refunds, worker questions, and evidence photos</small>
+            </a>
             <a class="dashboard-directory-card" href="admin.html">
               <span>Audit</span>
               <strong>Changes</strong>
               <small>Review inventory edits and corrections</small>
+            </a>
+            <a class="dashboard-directory-card" href="team-responsibilities.html">
+              <span>Guide</span>
+              <strong>Team Responsibilities</strong>
+              <small>Sales, verification, shipping, and packing standards</small>
             </a>
           </div>
         </section>

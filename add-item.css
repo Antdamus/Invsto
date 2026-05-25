@@ -469,6 +469,7 @@ input[type="file"].add-input::file-selector-button {
 .auto-cost-toggle {
   display: flex;
   align-items: center;
+  gap: 10px;
   min-height: 54px;
   padding: 0 16px;
   border-radius: var(--radius-md);
@@ -487,6 +488,44 @@ input[type="file"].add-input::file-selector-button {
 
 .toggle-label input {
   accent-color: var(--gold);
+}
+
+.ebay-readiness-grid {
+  align-items: start;
+}
+
+.ebay-sync-toggle .auto-cost-toggle {
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.ebay-sync-toggle input {
+  accent-color: var(--gold);
+}
+
+.ebay-readiness-summary {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(247, 227, 190, 0.14);
+  background: rgba(255, 251, 245, 0.045);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.ebay-readiness-summary.is-ready {
+  border-color: rgba(184, 217, 186, 0.28);
+  background: rgba(184, 217, 186, 0.08);
+  color: var(--success);
+}
+
+.ebay-readiness-summary.is-warning {
+  border-color: rgba(240, 201, 143, 0.34);
+  background: rgba(216, 180, 122, 0.08);
+  color: var(--gold-strong);
+}
+
+.ebay-readiness-summary.is-muted {
+  color: var(--text-muted);
 }
 
 .barcode-shell {

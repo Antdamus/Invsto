@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070708" />
+  <title>OG Jewelry - Responsabilidades del Equipo</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="team-responsibilities.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+  <header class="policy-topbar">
+    <a class="brand-lockup" href="dashboard.html" aria-label="Volver al dashboard">
+      <span class="brand-mark">OG</span>
+      <span>
+        <strong>OG Jewelry</strong>
+        <small>Responsabilidades operativas</small>
+      </span>
+    </a>
+
+    <nav class="top-actions" aria-label="Accesos principales">
+      <a href="worker-dashboard.html">Worker</a>
+      <a href="dashboard.html">Dashboard</a>
+      <a href="pending-orders.html">Pending Orders</a>
+      <button id="print-policy" type="button">
+        <i data-lucide="printer" aria-hidden="true"></i>
+        Imprimir
+      </button>
+    </nav>
+  </header>
+
+  <main class="policy-page">
+    <section class="hero" aria-labelledby="policy-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Guía interna del equipo</p>
+        <h1 id="policy-title">Responsabilidades de ventas, verificación de envíos y embalaje</h1>
+        <p>
+          Este documento organiza el flujo principal después de cada en vivo: preparar mercancía,
+          verificar órdenes, empacar correctamente, cuidar suministros y mantener comunicación clara
+          entre los equipos.
+        </p>
+      </div>
+
+      <aside class="hero-card" aria-label="Principio operativo">
+        <span class="card-kicker">Meta principal</span>
+        <strong>Orden, velocidad y evidencia</strong>
+        <p>Evitar atrasos, pérdidas de mercancía y confusiones después de los shows.</p>
+      </aside>
+    </section>
+
+    <nav class="policy-index" aria-label="Secciones de responsabilidades">
+      <a href="#ventas">
+        <span>01</span>
+        <strong>Equipo de ventas</strong>
+        <small>Preparación, show y entrega de mercancía.</small>
+      </a>
+      <a href="#verificacion">
+        <span>02</span>
+        <strong>Verificación de envíos</strong>
+        <small>Órdenes, labels, evidencia y dudas.</small>
+      </a>
+      <a href="#embalaje">
+        <span>03</span>
+        <strong>Embalaje</strong>
+        <small>Materiales, limpieza, FedEx y suministros.</small>
+      </a>
+      <a href="#coordinacion">
+        <span>04</span>
+        <strong>Coordinación</strong>
+        <small>Reparaciones, supervisión y apoyo.</small>
+      </a>
+    </nav>
+
+    <section id="ventas" class="policy-section team-sales" aria-labelledby="ventas-title">
+      <div class="section-heading">
+        <p class="eyebrow">Equipo principal 1</p>
+        <h2 id="ventas-title">Responsabilidades del Equipo de Ventas</h2>
+        <p>El equipo de ventas deja el show listo para que verificación y embalaje puedan trabajar sin adivinar.</p>
+      </div>
+
+      <div class="responsibility-grid">
+        <article class="responsibility-card">
+          <i data-lucide="sparkles" aria-hidden="true"></i>
+          <h3>Preparación antes del show</h3>
+          <ul>
+            <li>Mantener el área de trabajo limpia, organizada y lista para cada en vivo.</li>
+            <li>Preparar los ítems antes del show.</li>
+            <li>Tener la mercancía lista antes de comenzar, con un plan claro de las piezas que se van a vender esa noche o ese día.</li>
+          </ul>
+        </article>
+
+        <article class="responsibility-card">
+          <i data-lucide="radio-tower" aria-hidden="true"></i>
+          <h3>Durante y despues del en vivo</h3>
+          <ul>
+            <li>Mantener el área ordenada durante el show y al finalizar.</li>
+            <li>Después de terminar el en vivo, llevar la mercancía a la persona encargada de los empaques.</li>
+            <li>Si los empaques se están realizando en Doral, la mercancía debe llevarse a la tienda de Doral al finalizar el show.</li>
+          </ul>
+        </article>
+
+        <article class="responsibility-card">
+          <i data-lucide="route" aria-hidden="true"></i>
+          <h3>Excepciones y seguridad</h3>
+          <ul>
+            <li>Esta responsabilidad puede ajustarse en ocasiones especiales, por ejemplo si la jornada se extendió más de 10 a 12 horas y manejar puede ser peligroso.</li>
+            <li>Si el área de empaque está atrasada, llevar o coordinar piezas puede recaer temporalmente sobre el equipo de ventas.</li>
+            <li>Esta organización es temporal hasta que contemos con más personal.</li>
+          </ul>
+        </article>
+
+        <article class="responsibility-card">
+          <i data-lucide="gem" aria-hidden="true"></i>
+          <h3>Certificación, reparación y revisión</h3>
+          <ul>
+            <li>Notificar cualquier pieza que requiera certificación, reparación o revisión especial después del show.</li>
+            <li>Idealmente, habrá un día específico de la semana para llevar todas las piezas que requieran certificación o reparación.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="verificacion" class="policy-section team-shipping" aria-labelledby="verificacion-title">
+      <div class="section-heading">
+        <p class="eyebrow">Equipo principal 2</p>
+        <h2 id="verificacion-title">Verificación de Órdenes y Envíos</h2>
+        <p>Este equipo confirma que cada orden sea correcta antes de preparar cualquier envío.</p>
+      </div>
+
+      <div class="workflow-strip" aria-label="Flujo de verificación">
+        <div>
+          <span>1</span>
+          <strong>Revisar eBay</strong>
+          <small>Entrar al sistema y revisar las órdenes que dejó ventas.</small>
+        </div>
+        <div>
+          <span>2</span>
+          <strong>Confirmar</strong>
+          <small>Validar con el en vivo antes de preparar el envío.</small>
+        </div>
+        <div>
+          <span>3</span>
+          <strong>Imprimir labels</strong>
+          <small>Organizar cada orden correctamente.</small>
+        </div>
+        <div>
+          <span>4</span>
+          <strong>Subir evidencia</strong>
+          <small>Foto, shipping label e información completa.</small>
+        </div>
+      </div>
+
+      <div class="responsibility-grid two-column">
+        <article class="responsibility-card">
+          <i data-lucide="clipboard-check" aria-hidden="true"></i>
+          <h3>Órdenes y labels</h3>
+          <ul>
+            <li>Entrar al sistema y revisar las órdenes en eBay que dejó el equipo de ventas.</li>
+            <li>Confirmar con el en vivo que las órdenes sean correctas antes de preparar cualquier envío.</li>
+            <li>Imprimir los shipping labels y organizar cada orden correctamente.</li>
+            <li>Cada orden debe quedar preparada y lista para ser embalada o enviada.</li>
+          </ul>
+        </article>
+
+        <article class="responsibility-card">
+          <i data-lucide="image-up" aria-hidden="true"></i>
+          <h3>Información en el web app</h3>
+          <ul>
+            <li>Subir la foto de la mercancía que se va a enviar.</li>
+            <li>Subir el shipping label correspondiente.</li>
+            <li>Completar la información de la orden.</li>
+            <li>Si algo no cuadra, comunicarse directamente con la persona de ventas que realizó esa venta.</li>
+          </ul>
+        </article>
+      </div>
+
+      <aside class="callout">
+        <strong>Regla de aclaración</strong>
+        <p>La persona que realizó la venta es responsable de aclarar cualquier duda relacionada con esa orden.</p>
+      </aside>
+    </section>
+
+    <section id="embalaje" class="policy-section team-packing" aria-labelledby="embalaje-title">
+      <div class="section-heading">
+        <p class="eyebrow">Área crítica</p>
+        <h2 id="embalaje-title">Limpieza, Organización y Embalaje</h2>
+        <p>El área de trabajo debe mantenerse extremadamente limpia para evitar pérdidas y retrasos.</p>
+      </div>
+
+      <div class="split-layout">
+        <article class="feature-panel">
+          <span class="panel-number">01</span>
+          <h3>Limpieza del área</h3>
+          <ul>
+            <li>El área de trabajo debe mantenerse extremadamente limpia y organizada en todo momento.</li>
+            <li>No puede haber desorden, cajas tiradas, materiales fuera de lugar ni artículos sueltos.</li>
+            <li>Mantener el área limpia es fundamental para evitar que se pierdan ítems por accidente.</li>
+          </ul>
+        </article>
+
+        <article class="feature-panel">
+          <span class="panel-number">02</span>
+          <h3>Materiales preparados</h3>
+          <ul>
+            <li>Cajas.</li>
+            <li>Cajas especiales.</li>
+            <li>Plástico de burbujas.</li>
+            <li>Wraps.</li>
+            <li>Materiales de protección.</li>
+            <li>Cualquier otro material necesario para el envío.</li>
+          </ul>
+        </article>
+
+        <article class="feature-panel">
+          <span class="panel-number">03</span>
+          <h3>Proceso diario</h3>
+          <ul>
+            <li>Preparar, cortar o acomodar materiales antes de comenzar el proceso de embalaje.</li>
+            <li>Idealmente, esta preparación debe hacerse el día anterior al día de embalaje.</li>
+            <li>Después de terminar los envíos del día, llevar los paquetes a FedEx.</li>
+            <li>Dejar preparados los materiales necesarios para el próximo día de embalaje.</li>
+          </ul>
+        </article>
+
+        <article class="feature-panel warning-panel">
+          <span class="panel-number">04</span>
+          <h3>Suministros</h3>
+          <ul>
+            <li>Informar a la administración cuando algún suministro esté por acabarse.</li>
+            <li>Notificarlo con al menos una semana de anticipación.</li>
+            <li>Esto incluye cajas, cajas especiales, plástico de burbujas, wraps o cualquier otro material necesario.</li>
+            <li>Si los materiales se acaban y eso causa retrasos, la responsabilidad recaerá sobre el equipo de embalaje.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="coordinacion" class="policy-section coordination" aria-labelledby="coordinacion-title">
+      <div class="section-heading">
+        <p class="eyebrow">Coordinación entre equipos</p>
+        <h2 id="coordinacion-title">Certificaciones, Supervisión y Apoyo</h2>
+        <p>Cuando una etapa se atrasa, la comunicación temprana evita que el atraso se convierta en pérdida.</p>
+      </div>
+
+      <div class="timeline">
+        <article>
+          <span></span>
+          <h3>Certificaciones y reparaciones</h3>
+          <p>La persona encargada de verificación debe reservar un día para llevar los artículos que requieran certificación o reparación a los lugares correspondientes.</p>
+          <p>Si hay retrasos importantes con los envíos y no es posible encargarse de esto, debe notificar al equipo de ventas para que ellos coordinen.</p>
+        </article>
+
+        <article>
+          <span></span>
+          <h3>Supervisión del embalaje</h3>
+          <p>Las personas encargadas de embalar están bajo la supervisión de la persona encargada de verificación de envíos.</p>
+          <p>Si verificación sabía de antemano que había órdenes pendientes, debe asegurarse de que haya alguien disponible para embalar.</p>
+        </article>
+
+        <article>
+          <span></span>
+          <h3>Escalación a administración</h3>
+          <p>Si la persona de embalaje no está presente y las órdenes no se terminan ese día, verificación debe haber informado a administración con tiempo.</p>
+          <p>También debe dejar claro que se contactó a la persona encargada de embalaje y que hacía falta personal para completar las órdenes.</p>
+        </article>
+
+        <article>
+          <span></span>
+          <h3>Apoyo en otras áreas</h3>
+          <p>Si verificación ya no tiene más paquetes por verificar, su rol podrá ser utilizado en otras áreas según la necesidad.</p>
+          <p>Esto puede incluir creación de inventario, mantenimiento de inventario o apoyo al equipo de ventas cuando haya disponibilidad.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="closing-note" aria-label="Nota importante">
+      <p class="eyebrow">Importante</p>
+      <h2>Todos trabajamos con una sola cadena de custodia.</h2>
+      <p>
+        La meta es que cada pieza, cada orden y cada evidencia quede clara para evitar atrasos,
+        pérdidas de mercancía o confusiones después de los shows.
+      </p>
+    </section>
+  </main>
+
+  <script src="team-responsibilities.js"></script>
+</body>
+</html>
