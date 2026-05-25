@@ -2709,6 +2709,22 @@ function getUniqueOrdersFromLines(lines = []) {
   return [...orders.values()];
 }
 
+function buildBuyerInsightCurrentItems(lines = []) {
+  return (lines || []).map((line) => ({
+    title: line.item_title || "Untitled eBay item",
+    itemNumber: line.item_number || "",
+    orderNumber: line.order?.order_number || "",
+    quantity: Number(line.fulfilled_quantity || line.quantity || 0),
+    grossSales: getLineGross(line),
+    status: getLineStatusLabel(line),
+    shipByDate: line.order?.ship_by_date || null,
+  }));
+}
+
+function buyerInsightCurrentItemsAttribute(lines = []) {
+  return escapeHtml(JSON.stringify(buildBuyerInsightCurrentItems(lines)));
+}
+
 function getOrderNumbersFromOrders(orders = []) {
   return [...new Set(orders
     .map((order) => normalizeEbayOrderNumber(order?.order_number))
@@ -2968,6 +2984,11 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               class="buyer-insight-link history-buyer-insight-link"
               data-buyer-insights="${escapeHtml(group.buyer)}"
               data-buyer-context="order-history"
+              data-current-order-total="${escapeHtml(group.gross)}"
+              data-current-order-count="${escapeHtml(groupOrders.length || 1)}"
+              data-current-line-count="${escapeHtml(group.lines.length)}"
+              data-current-order-numbers="${escapeHtml(groupOrders.map((order) => order.order_number).filter(Boolean).join(","))}"
+              data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
           </h3>
           <div class="history-card-meta">

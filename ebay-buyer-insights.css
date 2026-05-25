@@ -212,6 +212,24 @@
   gap: 12px;
 }
 
+.buyer-insights-context-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.buyer-insights-context-metrics .buyer-insights-metric {
+  border-color: rgba(116, 232, 164, 0.3);
+  background:
+    linear-gradient(140deg, rgba(116, 232, 164, 0.09), rgba(0, 0, 0, 0.12)),
+    rgba(255, 255, 255, 0.045);
+}
+
+.buyer-insights-context-metrics .buyer-insights-metric small {
+  color: #bff7d4;
+}
+
 .buyer-insights-metric {
   min-height: 126px;
   border: 1px solid rgba(245, 213, 156, 0.16);
@@ -347,6 +365,7 @@
   }
 
   .buyer-insights-metrics,
+  .buyer-insights-context-metrics,
   .buyer-insights-grid {
     grid-template-columns: 1fr;
   }
@@ -357,7 +376,8 @@
 }
 
 @media (min-width: 861px) and (max-width: 1120px) {
-  .buyer-insights-metrics {
+  .buyer-insights-metrics,
+  .buyer-insights-context-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

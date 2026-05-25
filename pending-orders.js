@@ -1698,6 +1698,22 @@ function groupLinesByBuyer(lines) {
   return sortBuyerGroups([...groups.values()]);
 }
 
+function buildBuyerInsightCurrentItems(lines = []) {
+  return (lines || []).map((line) => ({
+    title: line.item_title || "Untitled eBay item",
+    itemNumber: line.item_number || "",
+    orderNumber: line.order?.order_number || "",
+    quantity: Number(line.quantity || 0),
+    grossSales: Number(line.total_price || line.sold_for || 0),
+    status: line.line_status || "",
+    shipByDate: line.order?.ship_by_date || null,
+  }));
+}
+
+function buyerInsightCurrentItemsAttribute(lines = []) {
+  return escapeHtml(JSON.stringify(buildBuyerInsightCurrentItems(lines)));
+}
+
 function sortBuyerGroups(groups) {
   const sort = $("order-sort")?.value || state.orderSort || "due_asc";
   state.orderSort = sort;
@@ -1959,6 +1975,11 @@ function renderOrders() {
             class="buyer-insight-link buyer-card-buyer-name"
             data-buyer-insights="${escapeHtml(group.buyer)}"
             data-buyer-context="pending-orders"
+            data-current-order-total="${escapeHtml(group.totalValue)}"
+            data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
+            data-current-line-count="${escapeHtml(group.lines.length)}"
+            data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
+            data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
           >${escapeHtml(group.buyer)}</button>
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
