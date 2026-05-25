@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="ebay-order-history.css" />
+  <link rel="stylesheet" href="ebay-buyer-insights.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -136,7 +137,12 @@
               <i data-lucide="scan-barcode"></i>
               Backfill Label Tracking
             </button>
+            <button id="sync-ebay-account-history" type="button" class="secondary-btn" data-admin-only="true">
+              <i data-lucide="cloud-download"></i>
+              Sync 2-Year eBay History
+            </button>
           </div>
+          <div id="account-history-sync-status" class="history-label-status hidden" data-admin-only="true"></div>
         </section>
 
         <section class="history-filters" aria-label="Order history filters">
@@ -456,6 +462,7 @@
   <script src="pdf.min.js"></script>
   <script src="initSupabase.js"></script>
   <script src="admin-nav.js"></script>
+  <script src="ebay-buyer-insights.js"></script>
   <script src="ebay-order-history.js"></script>
 </body>
 </html>

@@ -707,7 +707,7 @@ async function ebayOptionalRequest(token: string, path: string): Promise<{ ok: t
 
 async function fetchReturnSummaries(token: string, body: JsonRecord): Promise<ReturnSummaryFetch> {
   const limit = Math.min(Math.max(1, Math.trunc(Number(body.limit || 100))), MAX_RETURN_LIMIT);
-  const daysBack = Math.min(Math.max(1, Math.trunc(Number(body.daysBack || DEFAULT_DAYS_BACK))), 540);
+  const daysBack = Math.min(Math.max(1, Math.trunc(Number(body.daysBack || DEFAULT_DAYS_BACK))), 730);
   const includeClosed = body.includeClosed === true;
   const from = toIsoDate(body.from) || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
   const to = toIsoDate(body.to) || new Date().toISOString();
@@ -1369,7 +1369,7 @@ Deno.serve(async (req) => {
             fileCount: prepared.files.length,
             matched: isMatched,
             matchedLineCount: match.lines.length,
-            wouldCreateTask: true,
+            wouldCreateTask: !["closed", "cancelled"].includes(localStatusFor(prepared, isMatched)),
           });
           continue;
         }
@@ -1378,7 +1378,10 @@ Deno.serve(async (req) => {
         prepared.payload = buildReturnPayload(prepared, uploadedComplaintImages);
         const { caseRow, created: caseCreated } = await upsertCase(supabase, prepared, match);
         await upsertReturnItems(supabase, prepared, caseRow, match);
-        const taskResult = await upsertTask(supabase, prepared, caseRow, match);
+        const isClosedReturn = ["closed", "cancelled"].includes(String(caseRow.status || "").toLowerCase());
+        const taskResult = isClosedReturn
+          ? { task: null, created: false, updated: false }
+          : await upsertTask(supabase, prepared, caseRow, match);
         const importedMessageCount = await importMessages(supabase, prepared, caseRow, match);
         if (taskResult.created) tasksCreated += 1;
         if (taskResult.updated) tasksUpdated += 1;

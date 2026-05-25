@@ -979,6 +979,28 @@ textarea {
   color: var(--history-green);
 }
 
+.history-label-status.hidden {
+  display: none;
+}
+
+.history-api-source-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(155, 213, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(155, 213, 255, 0.08);
+  color: #cfe5ff;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.history-api-source-pill.is-line {
+  margin-top: 10px;
+}
+
 .history-extra-label-photo-panel {
   display: grid;
   gap: 10px;

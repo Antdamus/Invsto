@@ -1947,7 +1947,12 @@ function renderOrders() {
       <div class="buyer-card-head">
         <div>
           <span class="buyer-kicker">Buyer username</span>
-          <strong>${escapeHtml(group.buyer)}</strong>
+          <button
+            type="button"
+            class="buyer-insight-link buyer-card-buyer-name"
+            data-buyer-insights="${escapeHtml(group.buyer)}"
+            data-buyer-context="pending-orders"
+          >${escapeHtml(group.buyer)}</button>
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
         <div class="buyer-card-alerts">

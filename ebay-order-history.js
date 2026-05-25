@@ -45,6 +45,7 @@ const state = {
   handledLabelTransferIds: new Set(),
   labelBusy: false,
   labelBackfillBusy: false,
+  accountHistorySyncBusy: false,
   historySearchUserEdited: false,
   busy: false,
 };
@@ -90,6 +91,7 @@ const ORDER_HISTORY_LINE_SELECT = `
   fulfilled_by,
   fulfilled_by_email,
   fulfilled_at,
+  raw_payload,
   sale_id,
   sale_item_id,
   stock_transaction_id,
@@ -110,7 +112,8 @@ const ORDER_HISTORY_LINE_SELECT = `
     label_storage_bucket,
     label_file_path,
     label_uploaded_at,
-    label_metadata
+    label_metadata,
+    raw_payload
   )
 `;
 
@@ -203,6 +206,7 @@ function getOrderFromLine(line) {
 function normalizeLine(row) {
   const order = getOrderFromLine(row);
   const labelSearchText = getLabelMetadataSearchText(row.label_metadata, order.label_metadata);
+  const apiSourceLabel = getEbayHistoryApiSourceLabel(row);
   return {
     ...row,
     order,
@@ -227,9 +231,19 @@ function normalizeLine(row) {
       order.paid_on_date,
       order.ship_by_date,
       order.status,
+      apiSourceLabel,
       labelSearchText,
     ].filter(Boolean).join(" ").toLowerCase(),
   };
+}
+
+function getEbayHistoryApiSourceLabel(line = {}) {
+  const order = getOrderFromLine(line);
+  const source = String(line?.raw_payload?.source || order?.raw_payload?.source || "").trim();
+  if (source === "ebay_account_history_sync") return "Synced from eBay API archive";
+  if (source === "ebay_buyer_history_sync") return "Synced from eBay API buyer scan";
+  if (source.includes("ebay")) return "Synced from eBay API";
+  return "";
 }
 
 function unique(values) {
@@ -1945,7 +1959,14 @@ function renderReturnQueue() {
             <div class="return-task-meta">
               <span>Return ${escapeHtml(returnCase.ebay_return_id || returnCase.id || "-")}</span>
               <span>Order ${escapeHtml(orderLabel)}</span>
-              <span>${escapeHtml(returnCase.buyer_username || "No buyer")}</span>
+              <span>${returnCase.buyer_username ? `
+                <button
+                  type="button"
+                  class="buyer-insight-link compact"
+                  data-buyer-insights="${escapeHtml(returnCase.buyer_username)}"
+                  data-buyer-context="returns"
+                >${escapeHtml(returnCase.buyer_username)}</button>
+              ` : "No buyer"}</span>
             </div>
             <div class="return-task-facts">
               <span>
@@ -2724,6 +2745,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
     const groupOrders = getUniqueOrdersFromLines(group.lines);
     const hasAttachedLabel = groupOrders.some((order) => order.label_file_path);
     const hasReturns = getReturnCasesForLineIds(lineIds).length > 0;
+    const groupApiSourceLabel = unique(group.lines.map(getEbayHistoryApiSourceLabel).filter(Boolean))[0] || "";
 
     const card = document.createElement("article");
     card.className = "history-order-card";
@@ -2731,7 +2753,14 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
       <div class="history-order-top">
         <div>
           <span class="eyebrow">${group.kind === "event" ? "Grouped Completion" : "Buyer Group"}</span>
-          <h3>${escapeHtml(group.buyer)}</h3>
+          <h3>
+            <button
+              type="button"
+              class="buyer-insight-link history-buyer-insight-link"
+              data-buyer-insights="${escapeHtml(group.buyer)}"
+              data-buyer-context="order-history"
+            >${escapeHtml(group.buyer)}</button>
+          </h3>
           <div class="history-card-meta">
             <span>${group.lines.length} line(s)</span>
             <span>Closed ${escapeHtml(formatDateTime(group.latestAt))}</span>
@@ -2745,6 +2774,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
           </div>
           ${hasAttachedLabel ? `<span class="history-label-pill">Label attached</span>` : ""}
           ${hasReturns ? `<span class="history-return-pill">Return recorded</span>` : ""}
+          ${groupApiSourceLabel ? `<span class="history-api-source-pill">${escapeHtml(groupApiSourceLabel)}</span>` : ""}
         </div>
         <div>
           <div class="history-money-row">
@@ -2776,6 +2806,7 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
                 <span>${escapeHtml(line.fulfilled_by_email || "Unknown worker")}</span>
                 <span>${escapeHtml(formatDateTime(line.fulfilled_at))}</span>
               </div>
+              ${getEbayHistoryApiSourceLabel(line) ? `<span class="history-api-source-pill is-line">${escapeHtml(getEbayHistoryApiSourceLabel(line))}</span>` : ""}
               ${renderHistoryLineVideoReceiptPhotos(line, group.events)}
             </div>
             <div class="history-line-actions">
@@ -5633,6 +5664,284 @@ function setLastReturnImportSummary(summary) {
   renderReturnImportSummary(state.lastReturnImportSummary);
 }
 
+function getEbayBuyerHistorySyncUrl() {
+  const projectRef = String(window.SUPABASE_URL || "")
+    .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
+  return `https://${projectRef}.functions.supabase.co/ebay-buyer-history-sync`;
+}
+
+function setAccountHistorySyncStatus(message, tone = "info") {
+  const panel = $("account-history-sync-status");
+  if (!panel) return;
+  panel.classList.remove("hidden", "is-error", "is-success");
+  if (tone === "error") panel.classList.add("is-error");
+  if (tone === "success") panel.classList.add("is-success");
+  panel.textContent = message || "";
+  if (!message) panel.classList.add("hidden");
+}
+
+function setAccountHistorySyncBusy(isBusy) {
+  state.accountHistorySyncBusy = isBusy;
+  const button = $("sync-ebay-account-history");
+  if (button) button.disabled = isBusy;
+}
+
+async function postEbayBuyerHistorySyncPayload(payload) {
+  const response = await fetch(getEbayBuyerHistorySyncUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { ok: false, error: text || `HTTP ${response.status}` };
+  }
+  if (!response.ok && !data.error) data.error = `HTTP ${response.status}`;
+  return data;
+}
+
+function formatAccountHistorySyncSummary(response = {}) {
+  return [
+    `${Number(response.scannedOrders || 0).toLocaleString()} scanned`,
+    `${Number(response.matchedOrders || 0).toLocaleString()} eligible orders`,
+    `${Number(response.buyersSeen || 0).toLocaleString()} buyers`,
+    `${Number(response.lineCount || response.linesUpserted || 0).toLocaleString()} lines`,
+    `${Number(response.skippedNewOpenOrders || 0).toLocaleString()} active pending skipped`,
+  ].join(" - ");
+}
+
+const EBAY_ORDER_ARCHIVE_DAYS = 720;
+
+function createAccountHistoryArchiveChunks(daysBack = EBAY_ORDER_ARCHIVE_DAYS, chunkDays = 30) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const chunkMs = chunkDays * dayMs;
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
+  const chunks = [];
+  for (let chunkStart = new Date(start); chunkStart < end;) {
+    const nextBucketBoundary = Math.ceil((chunkStart.getTime() + 1) / chunkMs) * chunkMs;
+    const chunkEnd = new Date(Math.min(end.getTime(), nextBucketBoundary));
+    chunks.push({
+      from: chunkStart.toISOString(),
+      to: chunkEnd.toISOString(),
+      key: `${chunkStart.toISOString().slice(0, 10)}_${chunkEnd.toISOString().slice(0, 10)}`,
+    });
+    chunkStart = chunkEnd;
+  }
+  return chunks;
+}
+
+function isArchiveChunkCovered(chunk, completedRanges = []) {
+  const chunkFrom = new Date(chunk.from).getTime();
+  const chunkTo = new Date(chunk.to).getTime();
+  if (!Number.isFinite(chunkFrom) || !Number.isFinite(chunkTo)) return false;
+  return completedRanges.some((range) => {
+    if (range.key && chunk.key && range.key === chunk.key) return true;
+    const rangeFrom = new Date(range.from).getTime();
+    const rangeTo = new Date(range.to).getTime();
+    return Number.isFinite(rangeFrom)
+      && Number.isFinite(rangeTo)
+      && rangeFrom <= chunkFrom
+      && rangeTo >= chunkTo;
+  });
+}
+
+async function loadCompletedAccountHistoryArchiveRanges() {
+  try {
+    const { data, error } = await supabase
+      .from("ebay_account_history_sync_runs")
+      .select("raw_payload,finished_at")
+      .eq("status", "completed")
+      .order("finished_at", { ascending: false })
+      .limit(1000);
+    if (error) throw error;
+    return (data || []).map((row) => ({
+      key: row?.raw_payload?.chunkKey || "",
+      from: row?.raw_payload?.requestedFrom || "",
+      to: row?.raw_payload?.requestedTo || "",
+    })).filter((range) => range.key || (range.from && range.to));
+  } catch (error) {
+    console.warn("Could not load completed eBay archive sync ranges:", error);
+    return [];
+  }
+}
+
+function mergeAccountHistorySyncTotals(total = {}, next = {}) {
+  const buyerKeys = new Set([
+    ...(Array.isArray(total.buyerKeys) ? total.buyerKeys : []),
+    ...(Array.isArray(next.buyerKeys) ? next.buyerKeys : []),
+  ]);
+  return {
+    scannedOrders: Number(total.scannedOrders || 0) + Number(next.scannedOrders || 0),
+    matchedOrders: Number(total.matchedOrders || 0) + Number(next.matchedOrders || 0),
+    buyersSeen: buyerKeys.size || Math.max(Number(total.buyersSeen || 0), Number(next.buyersSeen || 0)),
+    buyerKeys: [...buyerKeys],
+    lineCount: Number(total.lineCount || 0) + Number(next.lineCount || 0),
+    linesUpserted: Number(total.linesUpserted || 0) + Number(next.linesUpserted || 0),
+    ordersUpserted: Number(total.ordersUpserted || 0) + Number(next.ordersUpserted || 0),
+    skippedNewOpenOrders: Number(total.skippedNewOpenOrders || 0) + Number(next.skippedNewOpenOrders || 0),
+    fulfilledLines: Number(total.fulfilledLines || 0) + Number(next.fulfilledLines || 0),
+    cancelledLines: Number(total.cancelledLines || 0) + Number(next.cancelledLines || 0),
+  };
+}
+
+async function runAccountHistorySyncChunks(chunks, dryRun, completedRanges = []) {
+  let totals = {};
+  const label = dryRun ? "Checking" : "Importing";
+  let skippedCompleted = 0;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    if (!dryRun && isArchiveChunkCovered(chunk, completedRanges)) {
+      skippedCompleted += 1;
+      setAccountHistorySyncStatus(
+        `Skipping already imported eBay archive window ${index + 1} of ${chunks.length} (${formatDateOnly(chunk.from)} to ${formatDateOnly(chunk.to)}).`,
+        "info"
+      );
+      continue;
+    }
+    setAccountHistorySyncStatus(
+      `${label} eBay archive window ${index + 1} of ${chunks.length} (${formatDateOnly(chunk.from)} to ${formatDateOnly(chunk.to)})...`,
+      "info"
+    );
+    const response = await postEbayBuyerHistorySyncPayload({
+      scanAllBuyers: true,
+      dryRun,
+      from: chunk.from,
+      to: chunk.to,
+      chunkKey: chunk.key,
+      daysBack: EBAY_ORDER_ARCHIVE_DAYS,
+      windowDays: 14,
+      maxScannedOrders: 2500,
+    });
+    if (!response.ok) {
+      throw new Error(response.error || `eBay archive ${dryRun ? "check" : "import"} failed for window ${index + 1}.`);
+    }
+    totals = mergeAccountHistorySyncTotals(totals, response);
+    setAccountHistorySyncStatus(
+      `${label} eBay archive window ${index + 1} of ${chunks.length}: ${formatAccountHistorySyncSummary(totals)}`,
+      "info"
+    );
+  }
+  totals.skippedCompletedWindows = skippedCompleted;
+  return totals;
+}
+
+function mergeReturnApiSyncTotals(total = {}, next = {}) {
+  return {
+    ok: total.ok !== false && next.ok !== false,
+    runId: next.runId || total.runId || null,
+    dryRun: next.dryRun === true,
+    total: Number(total.total || 0) + Number(next.total || 0),
+    matched: Number(total.matched || 0) + Number(next.matched || 0),
+    unmatched: Number(total.unmatched || 0) + Number(next.unmatched || 0),
+    tasksCreated: Number(total.tasksCreated || 0) + Number(next.tasksCreated || 0),
+    tasksUpdated: Number(total.tasksUpdated || 0) + Number(next.tasksUpdated || 0),
+    messagesImported: Number(total.messagesImported || 0) + Number(next.messagesImported || 0),
+    filesSeen: Number(total.filesSeen || 0) + Number(next.filesSeen || 0),
+    errors: Number(total.errors || 0) + Number(next.errors || 0),
+    warnings: [
+      ...(Array.isArray(total.warnings) ? total.warnings : []),
+      ...(Array.isArray(next.warnings) ? next.warnings : []),
+    ],
+    results: [
+      ...(Array.isArray(total.results) ? total.results : []),
+      ...(Array.isArray(next.results) ? next.results : []),
+    ],
+  };
+}
+
+function formatReturnArchiveSyncSummary(response = {}) {
+  return [
+    `${Number(response.total || 0).toLocaleString()} returns checked`,
+    `${Number(response.tasksCreated || 0).toLocaleString()} tasks created`,
+    `${Number(response.tasksUpdated || 0).toLocaleString()} refreshed`,
+    `${Number(response.messagesImported || 0).toLocaleString()} messages`,
+    `${Number(response.filesSeen || 0).toLocaleString()} files seen`,
+    `${Number(response.errors || 0).toLocaleString()} errors`,
+  ].join(" - ");
+}
+
+async function runReturnArchiveSyncChunks(chunks) {
+  let totals = { ok: true };
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    setAccountHistorySyncStatus(
+      `Syncing eBay returns window ${index + 1} of ${chunks.length} (${formatDateOnly(chunk.from)} to ${formatDateOnly(chunk.to)})...`,
+      "info"
+    );
+    const response = await postEbayReturnSyncPayload({
+      dryRun: false,
+      limit: 100,
+      from: chunk.from,
+      to: chunk.to,
+      daysBack: EBAY_ORDER_ARCHIVE_DAYS,
+      includeClosed: true,
+    });
+    if (response.error) {
+      throw new Error(`Return sync failed for window ${index + 1} (${formatDateOnly(chunk.from)} to ${formatDateOnly(chunk.to)}): ${response.error}`);
+    }
+    totals = mergeReturnApiSyncTotals(totals, response);
+    setAccountHistorySyncStatus(
+      `Syncing eBay returns window ${index + 1} of ${chunks.length}: ${formatReturnArchiveSyncSummary(totals)}`,
+      "info"
+    );
+  }
+  totals.ok = Number(totals.errors || 0) === 0;
+  return totals;
+}
+
+async function runEbayAccountHistoryArchiveSync() {
+  if (!isAdminUser()) {
+    alert("Only admins can sync the 2-year eBay archive.");
+    return;
+  }
+  if (state.accountHistorySyncBusy) return;
+
+  const chunks = createAccountHistoryArchiveChunks(EBAY_ORDER_ARCHIVE_DAYS, 14);
+
+  setAccountHistorySyncBusy(true);
+  setAccountHistorySyncStatus(`Checking the last 2 years of eBay order history in ${chunks.length} smaller windows...`, "info");
+  try {
+    const completedRanges = await loadCompletedAccountHistoryArchiveRanges();
+    const dryRun = await runAccountHistorySyncChunks(chunks, true);
+
+    const drySummary = formatAccountHistorySyncSummary(dryRun);
+    const confirmed = window.confirm(
+      `2-year eBay archive check complete:\n\n${drySummary}\n\nAlready imported windows found: ${completedRanges.length.toLocaleString()}.\n\nImport the missing closed/cancelled/fulfilled records into OG history now? Active pending orders that are not already in OG will stay out of the packing queue.`
+    );
+    if (!confirmed) {
+      setAccountHistorySyncStatus(`Archive check only: ${drySummary}`, "success");
+      return;
+    }
+
+    setAccountHistorySyncStatus(`Importing the 2-year eBay order archive in ${chunks.length} smaller windows...`, "info");
+    const orderSync = await runAccountHistorySyncChunks(chunks, false, completedRanges);
+
+    setAccountHistorySyncStatus("Orders imported. Syncing eBay returns in smaller archive windows...", "info");
+    const returnSync = await runReturnArchiveSyncChunks(chunks);
+    const returnSummary = buildReturnApiSyncSummary(returnSync);
+    setLastReturnImportSummary(returnSummary);
+    if (Number(returnSync.errors || 0) > 0) {
+      throw new Error(`Orders imported, but ${Number(returnSync.errors || 0).toLocaleString()} return record${Number(returnSync.errors || 0) === 1 ? "" : "s"} had an issue. Open the return sync report for details.`);
+    }
+
+    await loadOrderHistory();
+    setAccountHistorySyncStatus(
+      `2-year archive saved: ${formatAccountHistorySyncSummary(orderSync)}. ${formatReturnArchiveSyncSummary(returnSync)}.`,
+      "success"
+    );
+  } catch (error) {
+    console.error("eBay account history archive sync failed:", error);
+    setAccountHistorySyncStatus(error.message || "Could not sync the 2-year eBay archive.", "error");
+  } finally {
+    setAccountHistorySyncBusy(false);
+  }
+}
+
 function getEbayReturnSyncUrl() {
   const projectRef = String(window.SUPABASE_URL || "")
     .match(/^https:\/\/([^.]+)\.supabase\.co/i)?.[1] || "byhytmarmigalvawkedi";
@@ -6447,6 +6756,7 @@ function setupListeners() {
   $("clean-ebay-return-api-sync")?.addEventListener("click", runEbayReturnApiCleanup);
   $("open-proof-trail")?.addEventListener("click", openProofTrailModal);
   $("backfill-label-tracking")?.addEventListener("click", openLabelBackfillModal);
+  $("sync-ebay-account-history")?.addEventListener("click", runEbayAccountHistoryArchiveSync);
   $("clear-return-test-imports")?.addEventListener("click", clearReturnImportTestData);
   $("start-label-backfill")?.addEventListener("click", startLabelTrackingBackfill);
   $("done-label-backfill")?.addEventListener("click", closeLabelBackfillModal);
