@@ -159,6 +159,28 @@
 
               <div id="inbox-preview-status" class="workspace-status inbox-preview-status">Run preview to inspect recent Outlook emails before importing.</div>
               <div id="inbox-preview-summary" class="inbox-preview-summary"></div>
+              <div class="inbox-mailbox-import-panel" aria-label="Mailbox import progress">
+                <div class="inbox-mailbox-import-controls">
+                  <label>
+                    <span>Mailbox Target</span>
+                    <select id="inbox-mailbox-import-target">
+                      <option value="25">25</option>
+                      <option value="100" selected>100</option>
+                      <option value="300">300</option>
+                      <option value="1000">1000</option>
+                    </select>
+                  </label>
+                  <button type="button" id="inbox-mailbox-import-start" class="primary-btn">
+                    <i data-lucide="inbox"></i>
+                    Import Mailbox
+                  </button>
+                  <button type="button" id="inbox-mailbox-import-continue" class="secondary-btn" disabled>
+                    <i data-lucide="step-forward"></i>
+                    Continue Import
+                  </button>
+                </div>
+                <div id="inbox-mailbox-import-result" class="inbox-import-result"></div>
+              </div>
               <div id="inbox-preview-import-result" class="inbox-import-result"></div>
 
               <div class="inbox-preview-actions">

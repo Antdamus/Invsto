@@ -24,6 +24,7 @@
     matchContext: 15000,
     inboxPreview: 30000,
     inboxImport: 60000,
+    mailboxImport: 60000,
     rematchExisting: 60000,
     operationalDashboard: 30000,
   };
@@ -444,6 +445,64 @@
     };
   }
 
+  function normalizeMailboxImportPayload(payload) {
+    const source = normalizeEnvelope(payload, "mailbox_import").data || {};
+    const progress = source.progress && typeof source.progress === "object" ? source.progress : {};
+    const batch = source.batch && typeof source.batch === "object" ? source.batch : {};
+    const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "mailbox_import",
+      action: source.action || null,
+      operation_event_id: source.operation_event_id || source.operationEventId || null,
+      sync_run_id: source.sync_run_id || source.syncRunId || null,
+      target_count: Number(source.target_count || progress.target_count || 0),
+      imported_total: Number(source.imported_total || progress.imported_total || 0),
+      already_imported_total: Number(source.already_imported_total || progress.already_imported_total || 0),
+      failed_total: Number(source.failed_total || progress.failed_total || 0),
+      remaining_estimate: Number(source.remaining_estimate || progress.remaining_estimate || 0),
+      has_more: source.has_more === true || progress.has_more === true,
+      continuation_available: source.continuation_available === true || progress.continuation_available === true,
+      progress: {
+        status: progress.status || source.status || "not_started",
+        target_count: Number(progress.target_count || source.target_count || 0),
+        imported_total: Number(progress.imported_total || source.imported_total || 0),
+        already_imported_total: Number(progress.already_imported_total || source.already_imported_total || 0),
+        failed_total: Number(progress.failed_total || source.failed_total || 0),
+        messages_seen_total: Number(progress.messages_seen_total || 0),
+        deleted_total: Number(progress.deleted_total || 0),
+        completed_total: Number(progress.completed_total || 0),
+        remaining_estimate: Number(progress.remaining_estimate || source.remaining_estimate || 0),
+        has_more: progress.has_more === true || source.has_more === true,
+        continuation_available: progress.continuation_available === true || source.continuation_available === true,
+        started_at: progress.started_at || null,
+        updated_at: progress.updated_at || null,
+        completed_at: progress.completed_at || null,
+        remaining_to_process: progress.remaining_to_process ?? source.remaining_to_process ?? null,
+        remaining_to_classify: progress.remaining_to_classify ?? source.remaining_to_classify ?? null,
+      },
+      batch: {
+        pages_fetched: Number(batch.pages_fetched || 0),
+        messages_seen: Number(batch.messages_seen || 0),
+        imported_count: Number(batch.imported_count || 0),
+        already_imported_count: Number(batch.already_imported_count || 0),
+        deleted_count: Number(batch.deleted_count || 0),
+        failed_count: Number(batch.failed_count || 0),
+      },
+      failures: Array.isArray(source.failures) ? source.failures : [],
+      safety: {
+        outlook_mutation_performed: safety.outlook_mutation_performed === true,
+        automatic_responses_sent: Number(safety.automatic_responses_sent || 0),
+        drafts_created: Number(safety.drafts_created || 0),
+        attachments_fetched: Number(safety.attachments_fetched || 0),
+        sync_checkpoint_updated: safety.sync_checkpoint_updated === true,
+        processing_triggered: safety.processing_triggered === true,
+        classification_triggered: safety.classification_triggered === true,
+      },
+      raw: source,
+    };
+  }
+
   function normalizeLiveRefreshPayload(payload) {
     const source = normalizeEnvelope(payload, "run_live_refresh").data || {};
     const preview = source.preview && typeof source.preview === "object" ? source.preview : {};
@@ -703,6 +762,34 @@
     return normalizeInboxImportPayload(payload);
   }
 
+  async function runMailboxImport(context, values = {}) {
+    const session = await currentSession(context, "Mailbox import");
+    const body = {
+      mode: "mailbox_import",
+      action: values.action === "continue" ? "continue" : "start",
+      targetCount: Number(values.targetCount || values.target_count || 100),
+      pageSize: Number(values.pageSize || 50),
+      maxPages: Number(values.maxPages || 3),
+    };
+
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }, TIMEOUTS.mailboxImport);
+
+    return normalizeMailboxImportPayload(payload);
+  }
+
+  async function fetchMailboxImportStatus(context) {
+    const session = await currentSession(context, "Mailbox import status");
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({ mode: "mailbox_import_status" }),
+    }, TIMEOUTS.operationalDashboard);
+
+    return normalizeMailboxImportPayload(payload);
+  }
+
   async function runInboxLiveRefresh(context, values = {}) {
     const session = await currentSession(context, "Inbox live refresh");
     const body = {
@@ -790,11 +877,14 @@
     saveClassificationReview,
     normalizeInboxPreviewPayload,
     normalizeInboxImportPayload,
+    normalizeMailboxImportPayload,
     normalizeLiveRefreshPayload,
     normalizeRematchExistingPayload,
     normalizeOperationalDashboardPayload,
     fetchInboxPreview,
     importApprovedInboxPreview,
+    runMailboxImport,
+    fetchMailboxImportStatus,
     runInboxLiveRefresh,
     rematchExistingEmails,
     fetchOperationalDashboard,

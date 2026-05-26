@@ -56,6 +56,12 @@ const PREVIEW_DEFAULT_LIMIT = 25;
 const PREVIEW_MAX_LIMIT = 100;
 const PREVIEW_MAX_DAYS_BACK = 30;
 const MAX_IMPORT_BATCH = PREVIEW_MAX_LIMIT;
+const MAILBOX_IMPORT_TARGETS = [25, 100, 300, 1000] as const;
+const MAILBOX_IMPORT_DEFAULT_TARGET = 100;
+const MAILBOX_IMPORT_DEFAULT_PAGE_SIZE = 50;
+const MAILBOX_IMPORT_MAX_PAGE_SIZE = 50;
+const MAILBOX_IMPORT_DEFAULT_MAX_PAGES = 3;
+const MAILBOX_IMPORT_MAX_PAGES = 5;
 const MAX_PROCESS_BATCH = 25;
 const MAX_CLASSIFICATION_BATCH = 10;
 const MAX_QUEUED_PROCESSING_JOBS = 100;
@@ -139,6 +145,20 @@ type ImportApprovedInput = {
   confirmImport: string | null;
 };
 
+type MailboxImportInput = {
+  mode: "mailbox_import";
+  folder: "inbox";
+  action: "start" | "continue";
+  targetCount: typeof MAILBOX_IMPORT_TARGETS[number];
+  pageSize: number;
+  maxPages: number;
+};
+
+type MailboxImportStatusInput = {
+  mode: "mailbox_import_status";
+  folder: "inbox";
+};
+
 type ProcessImportedInput = {
   mode: "process_imported";
   folder: "inbox";
@@ -186,6 +206,8 @@ type RequestInput =
   | SyncInput
   | PreviewInput
   | ImportApprovedInput
+  | MailboxImportInput
+  | MailboxImportStatusInput
   | ProcessImportedInput
   | ClassifyImportedInput
   | RunLiveRefreshInput
@@ -488,6 +510,12 @@ function clampBatchSize(value: unknown, fallback: number, maximum: number) {
   );
 }
 
+function mailboxImportTarget(value: unknown) {
+  const raw = Number(value);
+  const target = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : MAILBOX_IMPORT_DEFAULT_TARGET;
+  return (MAILBOX_IMPORT_TARGETS as readonly number[]).includes(target) ? target as typeof MAILBOX_IMPORT_TARGETS[number] : MAILBOX_IMPORT_DEFAULT_TARGET;
+}
+
 async function parseInput(req: Request): Promise<RequestInput> {
   const body = await req.json().catch(() => ({}));
   const requestedMode = typeof body?.mode === "string" ? body.mode : "";
@@ -534,6 +562,21 @@ async function parseInput(req: Request): Promise<RequestInput> {
       bucketMode,
       confirmImport: graphText(body?.confirmImport),
     };
+  }
+
+  if (requestedMode === "mailbox_import") {
+    return {
+      mode: "mailbox_import",
+      folder: "inbox",
+      action: String(body?.action || "start") === "continue" ? "continue" : "start",
+      targetCount: mailboxImportTarget(body?.targetCount ?? body?.target_count),
+      pageSize: clampBatchSize(body?.pageSize ?? body?.page_size, MAILBOX_IMPORT_DEFAULT_PAGE_SIZE, MAILBOX_IMPORT_MAX_PAGE_SIZE),
+      maxPages: clampBatchSize(body?.maxPages ?? body?.max_pages, MAILBOX_IMPORT_DEFAULT_MAX_PAGES, MAILBOX_IMPORT_MAX_PAGES),
+    };
+  }
+
+  if (requestedMode === "mailbox_import_status") {
+    return { mode: "mailbox_import_status", folder: "inbox" };
   }
 
   if (requestedMode === "process_imported") {
@@ -673,6 +716,52 @@ function withoutContinuation(metadata: Record<string, unknown> | null | undefine
   delete next.more_pages_available;
   delete next.delta_checkpoint_saved;
   return next;
+}
+
+function mailboxImportMetadata(metadata: Record<string, unknown> | null | undefined) {
+  const raw = metadata?.mailbox_import;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+}
+
+function numberFromMetadata(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
+function mailboxImportProgress(
+  metadata: Record<string, unknown> | null | undefined,
+  override: Record<string, unknown> = {},
+) {
+  const raw = { ...(mailboxImportMetadata(metadata) || {}), ...override };
+  const targetCount = mailboxImportTarget(raw.target_count ?? raw.targetCount);
+  const importedTotal = numberFromMetadata(raw.imported_total);
+  const alreadyImportedTotal = numberFromMetadata(raw.already_imported_total);
+  const failedTotal = numberFromMetadata(raw.failed_total);
+  const messagesSeenTotal = numberFromMetadata(raw.messages_seen_total);
+  const deletedTotal = numberFromMetadata(raw.deleted_total);
+  const completedTotal = importedTotal + alreadyImportedTotal;
+  const remainingEstimate = Math.max(targetCount - completedTotal, 0);
+  const continuationAvailable = Boolean(raw.continuation_available) || Boolean(continuationLink(metadata));
+  const status = String(raw.status || (completedTotal >= targetCount ? "target_reached" : continuationAvailable ? "paused" : "not_started"));
+
+  return {
+    target_count: targetCount,
+    imported_total: importedTotal,
+    already_imported_total: alreadyImportedTotal,
+    failed_total: failedTotal,
+    messages_seen_total: messagesSeenTotal,
+    deleted_total: deletedTotal,
+    completed_total: completedTotal,
+    remaining_estimate: remainingEstimate,
+    has_more: continuationAvailable && remainingEstimate > 0 && status !== "complete",
+    continuation_available: continuationAvailable,
+    status,
+    started_at: typeof raw.started_at === "string" ? raw.started_at : null,
+    updated_at: typeof raw.updated_at === "string" ? raw.updated_at : null,
+    completed_at: typeof raw.completed_at === "string" ? raw.completed_at : null,
+    remaining_to_process: null,
+    remaining_to_classify: null,
+  };
 }
 
 function stripHtml(html: string) {
@@ -1321,6 +1410,42 @@ async function insertImportOperationalEvent(
   return data as { id: string; created_at: string };
 }
 
+async function insertMailboxImportOperationalEvent(
+  supabase: ServiceClient,
+  values: {
+    mailboxId: string;
+    messageIds: string[];
+    initiatedBy: string;
+    initiatedByEmail: string | null;
+    payload: Record<string, unknown>;
+  },
+) {
+  const { data, error } = await supabase
+    .from("email_operational_events")
+    .insert({
+      event_type: "mailbox_import",
+      mailbox_id: values.mailboxId,
+      message_ids: values.messageIds,
+      reason: "Operator-triggered bounded mailbox import/backfill. No processing, classification, draft generation, sending, or Outlook mutation is performed.",
+      initiated_by: values.initiatedBy,
+      initiated_by_email: values.initiatedByEmail,
+      replay_source: "mailbox_import",
+      payload: values.payload,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !data?.id) {
+    console.error("[microsoft-email-sync] mailbox import audit insert failed", {
+      phase: "mailbox_import_audit",
+      mailbox_id: values.mailboxId,
+    });
+    return null;
+  }
+
+  return data as { id: string; created_at: string };
+}
+
 async function insertSetLiveSyncOperationalEvent(
   supabase: ServiceClient,
   values: {
@@ -1670,12 +1795,12 @@ async function processGraphMessage(
   message: GraphMessage,
   counters: SyncCounters,
 ) {
-  if (!message.id) return;
+  if (!message.id) return null;
   counters.messages_seen += 1;
 
   if (message["@removed"]) {
     if (await markMessageDeleted(supabase, mailboxId, message.id)) counters.messages_deleted += 1;
-    return;
+    return { messageId: null, inserted: false, deleted: true };
   }
 
   const result = await upsertMessage(supabase, mailboxId, folderId, message);
@@ -1685,6 +1810,7 @@ async function processGraphMessage(
   if (message.hasAttachments === true) counters.attachments_seen += 1;
   await replaceRecipients(supabase, result.messageId, message);
   await upsertBody(supabase, result.messageId, message);
+  return { messageId: result.messageId, inserted: result.inserted, deleted: false };
 }
 
 function normalizeImportedText(value: string) {
@@ -3697,6 +3823,369 @@ function blankCounters(): SyncCounters {
   };
 }
 
+async function runMailboxImport(
+  req: Request,
+  supabase: ServiceClient,
+  model: Awaited<ReturnType<typeof loadModel>>,
+  input: MailboxImportInput,
+  admin: { userId: string; email: string | null },
+) {
+  const mailboxId = model.mailbox.id;
+  const folderId = model.folder.id;
+  const syncStateId = model.syncState.id;
+  const connectionId = model.connection.id;
+  const previousErrorCount = Number(model.syncState.consecutive_error_count || 0);
+  const counters = blankCounters();
+  const operationStartedAt = Date.now();
+  let syncRunId = "";
+
+  try {
+    syncRunId = await createSyncRun(supabase, {
+      mailboxId,
+      folderId,
+      syncStateId,
+      mode: "initial_backfill",
+      startedBy: admin.userId,
+    });
+
+    await updateSyncState(supabase, syncStateId, {
+      status: "syncing",
+      last_attempted_sync_at: new Date().toISOString(),
+      last_error_code: null,
+      last_error_at: null,
+    });
+
+    let refreshToken = "";
+    try {
+      refreshToken = await decryptRefreshToken(model.secret);
+    } catch {
+      await markConnectionFailure(supabase, connectionId, "reconnect_required", "token_refresh_failed");
+      throw new SyncError("token_refresh_failed", {
+        phase: "token_decrypt",
+        connectionId,
+        mailboxId,
+        folderId,
+        syncRunId,
+        status: 401,
+      });
+    }
+
+    let refreshedToken: TokenRefreshResult;
+    try {
+      refreshedToken = await exchangeRefreshToken(refreshToken, connectionId);
+    } catch (error) {
+      const safe = safeError(error);
+      await markConnectionFailure(supabase, connectionId, "reconnect_required", safe.code);
+      throw safe;
+    }
+
+    if (refreshedToken.refreshToken) {
+      await rotateRefreshToken(supabase, connectionId, refreshedToken.refreshToken, refreshedToken.refreshTokenExpiresIn);
+    }
+
+    await updateConnectionHealth(supabase, connectionId, {
+      status: "connected",
+      access_token_expires_at: accessTokenExpiry(refreshedToken.expiresIn),
+      last_error_code: null,
+      last_error_at: null,
+    });
+
+    const existingProgress = input.action === "continue" ? mailboxImportProgress(model.syncState.metadata) : null;
+    const startedAt = existingProgress?.started_at || new Date().toISOString();
+    const targetCount = input.action === "continue" && existingProgress
+      ? Math.max(existingProgress.target_count, input.targetCount)
+      : input.targetCount;
+    let importedTotal = input.action === "continue" && existingProgress ? existingProgress.imported_total : 0;
+    let alreadyImportedTotal = input.action === "continue" && existingProgress ? existingProgress.already_imported_total : 0;
+    let failedTotal = input.action === "continue" && existingProgress ? existingProgress.failed_total : 0;
+    let messagesSeenTotal = input.action === "continue" && existingProgress ? existingProgress.messages_seen_total : 0;
+    let deletedTotal = input.action === "continue" && existingProgress ? existingProgress.deleted_total : 0;
+    const savedContinuationLink = continuationLink(model.syncState.metadata);
+    const initialPageSize = Math.min(input.pageSize, Math.max(targetCount - importedTotal - alreadyImportedTotal, 1));
+    let nextUrl = savedContinuationLink || initialDeltaUrl(model.folder.provider_folder_id, initialPageSize);
+    let finalDeltaLink: string | null = null;
+    let failedPageUrl: string | null = null;
+    const messageIds: string[] = [];
+    const failures: Array<{ provider_message_id: string | null; error: string; phase: string | null }> = [];
+
+    for (let page = 0; page < input.maxPages && nextUrl && importedTotal + alreadyImportedTotal < targetCount; page += 1) {
+      const currentPageUrl = nextUrl;
+      await updateSyncState(supabase, syncStateId, { last_page_started_at: new Date().toISOString() });
+      const pagePayload = await fetchDeltaPage(currentPageUrl, refreshedToken.accessToken, {
+        connectionId,
+        mailboxId,
+        folderId,
+      });
+      counters.graph_request_count += 1;
+      counters.pages_fetched += 1;
+
+      for (const message of pagePayload.value || []) {
+        try {
+          const result = await processGraphMessage(supabase, mailboxId, folderId, message, counters);
+          if (!result) continue;
+          messagesSeenTotal += 1;
+          if (result.deleted) {
+            deletedTotal += 1;
+            continue;
+          }
+          if (result.messageId) messageIds.push(result.messageId);
+          if (result.inserted) importedTotal += 1;
+          else alreadyImportedTotal += 1;
+        } catch (error) {
+          const safe = safeError(error);
+          failedTotal += 1;
+          failures.push({
+            provider_message_id: graphText(message.id),
+            error: safe.code,
+            phase: safe.phase || null,
+          });
+          failedPageUrl = currentPageUrl;
+          break;
+        }
+      }
+
+      await updateSyncState(supabase, syncStateId, { last_page_completed_at: new Date().toISOString() });
+      await updateSyncRun(supabase, syncRunId, counters);
+      if (failedPageUrl) {
+        nextUrl = failedPageUrl;
+        break;
+      }
+
+      finalDeltaLink = pagePayload["@odata.deltaLink"] || null;
+      nextUrl = finalDeltaLink ? "" : pagePayload["@odata.nextLink"] || "";
+    }
+
+    const targetReached = importedTotal + alreadyImportedTotal >= targetCount;
+    const deltaCheckpointSaved = Boolean(finalDeltaLink);
+    const continuationUrl = targetReached && nextUrl ? nextUrl : failedPageUrl || nextUrl;
+    const continuationAvailable = Boolean(continuationUrl && !finalDeltaLink);
+    const nowIso = new Date().toISOString();
+    const status = failedPageUrl
+      ? "paused_after_failure"
+      : targetReached
+        ? "target_reached"
+        : deltaCheckpointSaved
+          ? "complete"
+          : continuationAvailable
+            ? "paused"
+            : "paused_no_continuation";
+    const progress = mailboxImportProgress(model.syncState.metadata, {
+      target_count: targetCount,
+      imported_total: importedTotal,
+      already_imported_total: alreadyImportedTotal,
+      failed_total: failedTotal,
+      messages_seen_total: messagesSeenTotal,
+      deleted_total: deletedTotal,
+      continuation_available: continuationAvailable,
+      status,
+      started_at: startedAt,
+      updated_at: nowIso,
+      completed_at: status === "complete" || status === "target_reached" ? nowIso : null,
+    });
+    const nextMetadata = {
+      ...withoutContinuation(model.syncState.metadata),
+      mailbox_import: progress,
+      last_mailbox_import_at: nowIso,
+    };
+
+    if (finalDeltaLink) {
+      await updateSyncState(supabase, syncStateId, {
+        delta_link: finalDeltaLink,
+        delta_token_hash: await sha256Hex(finalDeltaLink),
+        last_successful_sync_at: nowIso,
+        status: "idle",
+        consecutive_error_count: 0,
+        last_error_code: null,
+        last_error_at: null,
+        metadata: {
+          ...nextMetadata,
+          last_delta_checkpoint_saved_at: nowIso,
+          resumed_from_continuation: Boolean(savedContinuationLink),
+        },
+      });
+    } else {
+      await updateSyncState(supabase, syncStateId, {
+        status: "syncing",
+        ...(model.syncState.delta_link ? {} : { last_successful_sync_at: null }),
+        last_error_code: failedPageUrl ? "mailbox_import_paused_after_failure" : null,
+        last_error_at: failedPageUrl ? nowIso : null,
+        metadata: {
+          ...nextMetadata,
+          partial_sync: true,
+          continuation_link: continuationUrl,
+          continuation_saved_at: nowIso,
+          pages_fetched_before_pause: counters.pages_fetched,
+          more_pages_available: continuationAvailable,
+          delta_checkpoint_saved: false,
+          resumed_from_continuation: Boolean(savedContinuationLink),
+          mailbox_import_pause_reason: failedPageUrl ? "message_import_failure" : targetReached ? "target_reached" : "page_budget_reached",
+        },
+      });
+    }
+
+    await supabase
+      .from("email_mailboxes")
+      .update({
+        ...(finalDeltaLink ? { last_sync_at: nowIso } : {}),
+        status: "active",
+        last_error_code: null,
+        last_error_at: null,
+      })
+      .eq("id", mailboxId);
+
+    await updateConnectionHealth(supabase, connectionId, {
+      last_successful_check_at: nowIso,
+      last_error_code: null,
+      last_error_at: null,
+    });
+
+    const uniqueMessageIds = Array.from(new Set(messageIds));
+    const eventPayload = {
+      mode: "mailbox_import",
+      action: input.action,
+      target_count: targetCount,
+      page_size: input.pageSize,
+      max_pages: input.maxPages,
+      batch: {
+        pages_fetched: counters.pages_fetched,
+        messages_seen: counters.messages_seen,
+        imported_count: counters.messages_inserted,
+        already_imported_count: counters.messages_updated,
+        deleted_count: counters.messages_deleted,
+        failed_count: failures.length,
+      },
+      progress,
+      failures,
+      duration_ms: Date.now() - operationStartedAt,
+      outlook_mutation_performed: false,
+      classification_created: 0,
+      drafts_created: 0,
+      sync_checkpoint_updated: deltaCheckpointSaved,
+    };
+    const auditEvent = await insertMailboxImportOperationalEvent(supabase, {
+      mailboxId,
+      messageIds: uniqueMessageIds,
+      initiatedBy: admin.userId,
+      initiatedByEmail: admin.email,
+      payload: eventPayload,
+    });
+
+    await updateSyncRun(supabase, syncRunId, {
+      ...counters,
+      status: failures.length ? "failed" : "succeeded",
+      completed_at: nowIso,
+      last_error_code: failures.length ? "mailbox_import_message_failures" : null,
+      last_error_message: failures.length ? "mailbox_import_message_failures" : null,
+      metadata: {
+        function: "microsoft-email-sync",
+        operator_mode: "mailbox_import",
+        mailbox_import_status: status,
+        delta_checkpoint_saved: deltaCheckpointSaved,
+        partial_sync: !deltaCheckpointSaved,
+        more_pages_available: continuationAvailable,
+        page_cap_reached: continuationAvailable && !targetReached,
+        target_reached: targetReached,
+        resumed_from_continuation: Boolean(savedContinuationLink),
+      },
+    });
+
+    console.log("[microsoft-email-sync] mailbox_import completed", {
+      phase: "mailbox_import_complete",
+      mailbox_id: mailboxId,
+      folder_id: folderId,
+      sync_run_id: syncRunId,
+      target_count: targetCount,
+      imported_total: progress.imported_total,
+      already_imported_total: progress.already_imported_total,
+      failed_total: progress.failed_total,
+      has_more: progress.has_more,
+    });
+
+    return json(req, 200, {
+      ok: true,
+      mode: "mailbox_import",
+      mailbox_id: mailboxId,
+      folder_id: folderId,
+      sync_run_id: syncRunId,
+      operation_event_id: auditEvent?.id || null,
+      action: input.action,
+      target_count: progress.target_count,
+      imported_total: progress.imported_total,
+      already_imported_total: progress.already_imported_total,
+      failed_total: progress.failed_total,
+      remaining_estimate: progress.remaining_estimate,
+      has_more: progress.has_more,
+      continuation_available: progress.continuation_available,
+      progress,
+      batch: {
+        pages_fetched: counters.pages_fetched,
+        messages_seen: counters.messages_seen,
+        imported_count: counters.messages_inserted,
+        already_imported_count: counters.messages_updated,
+        deleted_count: counters.messages_deleted,
+        failed_count: failures.length,
+      },
+      failures,
+      caps: {
+        target_options: MAILBOX_IMPORT_TARGETS,
+        max_page_size: MAILBOX_IMPORT_MAX_PAGE_SIZE,
+        max_pages: MAILBOX_IMPORT_MAX_PAGES,
+      },
+      safety: {
+        outlook_mutation_performed: false,
+        automatic_responses_sent: 0,
+        drafts_created: 0,
+        attachments_fetched: 0,
+        sync_checkpoint_updated: deltaCheckpointSaved,
+        processing_triggered: false,
+        classification_triggered: false,
+      },
+      remaining_to_process: null,
+      remaining_to_classify: null,
+    });
+  } catch (error) {
+    const safe = safeError(error);
+    const statusForState = safe.code === "graph_delta_expired" ? "reset_required" : "error";
+    console.error("[microsoft-email-sync] mailbox_import failed", safeLog(safe, counters));
+
+    await supabase
+      .from("email_sync_states")
+      .update({
+        status: statusForState,
+        last_error_code: safe.code === "graph_delta_expired" ? "delta_reset_required" : safe.code,
+        last_error_at: new Date().toISOString(),
+        consecutive_error_count: previousErrorCount + 1,
+      })
+      .eq("id", syncStateId);
+
+    if (syncRunId) {
+      await updateSyncRun(supabase, syncRunId, {
+        ...counters,
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        last_error_code: safe.code === "graph_delta_expired" ? "delta_reset_required" : safe.code,
+        last_error_message: safe.code === "graph_delta_expired" ? "delta_reset_required" : safe.code,
+      });
+    }
+
+    await supabase
+      .from("email_mailboxes")
+      .update({
+        last_error_code: safe.code,
+        last_error_at: new Date().toISOString(),
+      })
+      .eq("id", mailboxId);
+
+    if (["token_refresh_failed", "missing_connection_secret"].includes(safe.code)) {
+      await markConnectionFailure(supabase, connectionId, "reconnect_required", safe.code);
+    } else if (["graph_delta_failed", "graph_delta_expired"].includes(safe.code)) {
+      await markConnectionFailure(supabase, connectionId, "error", safe.code);
+    }
+
+    throw safe;
+  }
+}
+
 function safeError(error: unknown) {
   if (error instanceof SyncError) return error;
   if (error instanceof DeterministicMatcherError) {
@@ -3746,6 +4235,7 @@ serve(async (req) => {
     const input = await parseInput(req);
     isPreview = input.mode === "sync_preview" ||
       input.mode === "sync_import_approved" ||
+      input.mode === "mailbox_import_status" ||
       input.mode === "process_imported" ||
       input.mode === "classify_imported" ||
       input.mode === "run_live_refresh" ||
@@ -3756,6 +4246,9 @@ serve(async (req) => {
 
     const controls = rolloutControls();
     if (input.mode === "sync_import_approved" && !controls.imports_enabled) {
+      return json(req, 200, { ok: false, disabled: true, reason: "imports_disabled" });
+    }
+    if (input.mode === "mailbox_import" && !controls.imports_enabled) {
       return json(req, 200, { ok: false, disabled: true, reason: "imports_disabled" });
     }
     if (input.mode === "process_imported" && !controls.processing_enabled) {
@@ -4008,6 +4501,44 @@ serve(async (req) => {
     syncStateId = model.syncState.id;
     connectionId = model.connection.id;
     previousErrorCount = Number(model.syncState.consecutive_error_count || 0);
+
+    if (input.mode === "mailbox_import_status") {
+      const progress = mailboxImportProgress(model.syncState.metadata);
+      return json(req, 200, {
+        ok: true,
+        mode: "mailbox_import_status",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        target_count: progress.target_count,
+        imported_total: progress.imported_total,
+        already_imported_total: progress.already_imported_total,
+        failed_total: progress.failed_total,
+        remaining_estimate: progress.remaining_estimate,
+        has_more: progress.has_more,
+        continuation_available: progress.continuation_available,
+        progress,
+        caps: {
+          target_options: MAILBOX_IMPORT_TARGETS,
+          max_page_size: MAILBOX_IMPORT_MAX_PAGE_SIZE,
+          max_pages: MAILBOX_IMPORT_MAX_PAGES,
+        },
+        safety: {
+          outlook_mutation_performed: false,
+          automatic_responses_sent: 0,
+          drafts_created: 0,
+          attachments_fetched: 0,
+          sync_checkpoint_updated: false,
+          processing_triggered: false,
+          classification_triggered: false,
+        },
+        remaining_to_process: null,
+        remaining_to_classify: null,
+      });
+    }
+
+    if (input.mode === "mailbox_import") {
+      return await runMailboxImport(req, supabase, model, input, admin);
+    }
 
     if (input.mode === "sync_preview" || input.mode === "sync_import_approved") {
       const operationStartedAt = Date.now();

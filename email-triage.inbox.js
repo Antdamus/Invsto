@@ -32,6 +32,10 @@
       countPill: document.getElementById("inbox-preview-count-pill"),
       summary: document.getElementById("inbox-preview-summary"),
       importResult: document.getElementById("inbox-preview-import-result"),
+      mailboxImportTarget: document.getElementById("inbox-mailbox-import-target"),
+      mailboxImportStart: document.getElementById("inbox-mailbox-import-start"),
+      mailboxImportContinue: document.getElementById("inbox-mailbox-import-continue"),
+      mailboxImportResult: document.getElementById("inbox-mailbox-import-result"),
       body: document.getElementById("inbox-preview-body"),
       importLikely: document.getElementById("inbox-import-likely"),
       importSelected: document.getElementById("inbox-import-selected"),
@@ -209,6 +213,53 @@
         <span>Skipped Reasons</span>
         ${skippedReasons.length ? skippedReasons.map(([reason, count]) => `<b>${utils.escapeHtml(reason)} <em>${utils.escapeHtml(count)}</em></b>`).join("") : "<b>None</b>"}
       </div>
+    `;
+  }
+
+  function renderMailboxImportResult(state, els, utils = window.EmailTriageRenderUtils) {
+    if (!els.mailboxImportResult) return;
+    const result = state.inboxMailboxImportResult;
+    if (!result) {
+      els.mailboxImportResult.innerHTML = "";
+      return;
+    }
+
+    const progress = result.progress || {};
+    const batch = result.batch || {};
+    const safety = result.safety || {};
+    const completed = Number(progress.completed_total || 0);
+    const target = Number(progress.target_count || result.target_count || 0);
+    const percent = target > 0 ? Math.min(Math.round((completed / target) * 100), 100) : 0;
+    els.mailboxImportResult.innerHTML = `
+      <div class="inbox-import-result-head">
+        <strong>Mailbox import progress</strong>
+        <span>${utils.escapeHtml(progress.status || "not_started")}${result.operation_event_id ? ` · operation ${utils.escapeHtml(result.operation_event_id)}` : ""}</span>
+      </div>
+      <p class="inbox-result-note">Bounded mailbox import persists messages in batches. Processing, classification, draft generation, sending, and Outlook mutation are not started here.</p>
+      <dl>
+        <div><dt>Target</dt><dd>${utils.escapeHtml(target || "--")}</dd></div>
+        <div><dt>Progress</dt><dd>${utils.escapeHtml(`${completed}/${target || "--"} (${percent}%)`)}</dd></div>
+        <div><dt>Imported</dt><dd>${utils.escapeHtml(progress.imported_total || 0)}</dd></div>
+        <div><dt>Already Imported</dt><dd>${utils.escapeHtml(progress.already_imported_total || 0)}</dd></div>
+        <div><dt>Failed</dt><dd>${utils.escapeHtml(progress.failed_total || 0)}</dd></div>
+        <div><dt>Remaining</dt><dd>${utils.escapeHtml(progress.remaining_estimate || 0)}</dd></div>
+        <div><dt>Has More</dt><dd>${renderInboxBadge(progress.has_more ? "true" : "false", progress.has_more ? "warning" : "success", utils)}</dd></div>
+        <div><dt>Continuation</dt><dd>${renderInboxBadge(progress.continuation_available ? "available" : "none", progress.continuation_available ? "warning" : "muted", utils)}</dd></div>
+      </dl>
+      <div class="inbox-skipped-reasons">
+        <span>Last Batch</span>
+        <b>pages <em>${utils.escapeHtml(batch.pages_fetched || 0)}</em></b>
+        <b>seen <em>${utils.escapeHtml(batch.messages_seen || 0)}</em></b>
+        <b>new <em>${utils.escapeHtml(batch.imported_count || 0)}</em></b>
+        <b>already <em>${utils.escapeHtml(batch.already_imported_count || 0)}</em></b>
+        <b>failed <em>${utils.escapeHtml(batch.failed_count || 0)}</em></b>
+      </div>
+      <dl class="inbox-live-refresh-safety">
+        <div><dt>Outlook Mutation</dt><dd>${renderInboxBadge(safety.outlook_mutation_performed ? "true" : "false", safety.outlook_mutation_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Processing</dt><dd>${renderInboxBadge(safety.processing_triggered ? "true" : "false", safety.processing_triggered ? "danger" : "muted", utils)}</dd></div>
+        <div><dt>Classification</dt><dd>${renderInboxBadge(safety.classification_triggered ? "true" : "false", safety.classification_triggered ? "danger" : "muted", utils)}</dd></div>
+        <div><dt>Checkpoint Updated</dt><dd>${renderInboxBadge(safety.sync_checkpoint_updated ? "true" : "false", safety.sync_checkpoint_updated ? "success" : "muted", utils)}</dd></div>
+      </dl>
     `;
   }
 
@@ -431,13 +482,22 @@
     if (els.limit && String(els.limit.value) !== String(controls.limit || 25)) els.limit.value = String(controls.limit || 25);
     if (els.daysBack && String(els.daysBack.value) !== String(controls.daysBack ?? "")) els.daysBack.value = String(controls.daysBack ?? "");
     if (els.bucketMode && els.bucketMode.value !== (controls.bucketMode || "ebay_only")) els.bucketMode.value = controls.bucketMode || "ebay_only";
+    if (els.mailboxImportTarget && String(els.mailboxImportTarget.value) !== String(state.inboxMailboxImportTarget || 100)) {
+      els.mailboxImportTarget.value = String(state.inboxMailboxImportTarget || 100);
+    }
 
-    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
+    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxMailboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
     const importability = previewImportability(state);
+    const mailboxProgress = state.inboxMailboxImportResult?.progress || {};
+    const selectedMailboxTarget = Number(state.inboxMailboxImportTarget || els.mailboxImportTarget?.value || 100);
+    const mailboxCompleted = Number(mailboxProgress.completed_total || 0);
+    const canContinueMailboxImport = mailboxProgress.continuation_available === true && selectedMailboxTarget > mailboxCompleted;
     const buttonLoadingStates = new Map([
       [els.run, state.inboxPreviewLoading === true],
       [els.importLikely, state.inboxImportLoading === true],
       [els.importSelected, state.inboxImportLoading === true],
+      [els.mailboxImportStart, state.inboxMailboxImportLoading === true],
+      [els.mailboxImportContinue, state.inboxMailboxImportLoading === true],
       [els.liveRefresh, state.inboxLiveRefreshLoading === true],
       [els.rematchExisting, state.inboxRematchLoading === true],
       [els.clear, false],
@@ -451,6 +511,8 @@
     if (els.run) els.run.disabled = loading;
     if (els.importLikely) els.importLikely.disabled = loading || importability.importableLikelyCount === 0;
     if (els.importSelected) els.importSelected.disabled = loading || importability.selectedImportableCount === 0;
+    if (els.mailboxImportStart) els.mailboxImportStart.disabled = loading;
+    if (els.mailboxImportContinue) els.mailboxImportContinue.disabled = loading || !canContinueMailboxImport;
     if (els.liveRefresh) els.liveRefresh.disabled = loading;
     if (els.rematchExisting) els.rematchExisting.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
@@ -458,6 +520,7 @@
     if (els.status) {
       if (state.inboxPreviewLoading) els.status.textContent = "Loading Outlook preview.";
       else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages only.";
+      else if (state.inboxMailboxImportLoading) els.status.textContent = "Importing mailbox batch.";
       else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
       else if (state.inboxRematchLoading) els.status.textContent = "Rematching existing imported emails.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
@@ -475,6 +538,7 @@
     });
 
     renderInboxSummary(state, els, utils);
+    renderMailboxImportResult(state, els, utils);
     renderImportResult(state, els, utils);
     renderLiveRefreshResult(state, els, utils);
     renderRematchExistingResult(state, els, utils);
@@ -496,6 +560,15 @@
     const update = createInboxDispatcher(store, renderInboxPreviewImport, els);
 
     renderInboxPreviewImport(store.getState(), els);
+
+    api.fetchMailboxImportStatus?.(context)
+      .then((result) => {
+        update({
+          inboxMailboxImportResult: result,
+          inboxMailboxImportTarget: result.target_count || store.getState().inboxMailboxImportTarget || 100,
+        });
+      })
+      .catch(() => {});
 
     els.run?.addEventListener("click", async () => {
       const controls = previewControlsFromEls(els);
@@ -528,6 +601,61 @@
           operationInFlight: null,
         });
       }
+    });
+
+    async function runMailboxImportAction(action) {
+      const targetCount = Number(els.mailboxImportTarget?.value || store.getState().inboxMailboxImportTarget || 100);
+      update({
+        inboxMailboxImportLoading: true,
+        inboxMailboxImportTarget: targetCount,
+        inboxPreviewError: null,
+        operationInFlight: "mailbox_import",
+      });
+      try {
+        const result = await api.runMailboxImport(context, {
+          action,
+          targetCount,
+          pageSize: 50,
+          maxPages: 3,
+        });
+        update({
+          inboxMailboxImportLoading: false,
+          inboxMailboxImportResult: result,
+          inboxMailboxImportTarget: result.target_count || targetCount,
+          inboxLastOperationId: result.operation_event_id,
+          inboxLastRefreshedAt: new Date().toISOString(),
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "mailbox_import",
+            action,
+            imported_total: result.imported_total,
+            already_imported_total: result.already_imported_total,
+            failed_total: result.failed_total,
+            has_more: result.has_more,
+          },
+        });
+        if (typeof options.onMailboxImportComplete === "function") {
+          options.onMailboxImportComplete(result);
+        }
+      } catch (error) {
+        update({
+          inboxMailboxImportLoading: false,
+          inboxPreviewError: error.code || error.message || "mailbox_import_failed",
+          operationInFlight: null,
+        });
+      }
+    }
+
+    els.mailboxImportTarget?.addEventListener("change", () => {
+      update({ inboxMailboxImportTarget: Number(els.mailboxImportTarget.value || 100) });
+    });
+
+    els.mailboxImportStart?.addEventListener("click", () => {
+      runMailboxImportAction("start");
+    });
+
+    els.mailboxImportContinue?.addEventListener("click", () => {
+      runMailboxImportAction("continue");
     });
 
     els.body?.addEventListener("change", (event) => {
@@ -714,6 +842,7 @@
         inboxPreviewSelectedProviderMessageIds: [],
         inboxImportLoading: false,
         inboxImportResult: null,
+        inboxMailboxImportLoading: false,
         inboxLiveRefreshLoading: false,
         inboxLiveRefreshResult: null,
         inboxRematchLoading: false,
