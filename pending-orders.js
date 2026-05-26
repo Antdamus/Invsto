@@ -1605,12 +1605,22 @@ function clearOrderCreatedDateFilter({ apply = true } = {}) {
   if (apply) applyOrderFilters();
 }
 
+function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
+  if (!term) return lines;
+  const matchingBuyerKeys = new Set(
+    lines
+      .filter((line) => (line.searchText || "").includes(term))
+      .map(getBuyerKey)
+      .filter(Boolean)
+  );
+  if (!matchingBuyerKeys.size) return [];
+  return lines.filter((line) => matchingBuyerKeys.has(getBuyerKey(line)));
+}
+
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
   const createdDate = $("order-created-date-filter")?.value || "";
-  let filtered = term
-    ? state.orders.filter((line) => line.searchText.includes(term))
-    : [...state.orders];
+  let filtered = [...state.orders];
 
   if (createdDate) {
     filtered = filtered.filter((line) => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
@@ -1625,6 +1635,8 @@ function applyOrderFilters() {
   } else if (state.ebayLaunchOrderNumbers.size) {
     filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
   }
+
+  filtered = expandSearchMatchesToBuyerBundles(filtered, term);
 
   state.filteredOrders = filtered;
   renderOrders();
