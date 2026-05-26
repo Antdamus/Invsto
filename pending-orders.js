@@ -90,6 +90,7 @@ const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
+const PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF = true;
 
 function $(id) {
   return document.getElementById(id);
@@ -403,8 +404,12 @@ function canImportOrders() {
   return Boolean(state.employee && state.employee.active !== false);
 }
 
-function isAdminUser() {
+function isRealAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
+}
+
+function isAdminUser() {
+  return isRealAdminUser() || (PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF && canImportOrders());
 }
 
 function setupImportVisibility() {
