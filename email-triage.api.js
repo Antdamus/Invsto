@@ -721,16 +721,38 @@
       ok: source.ok !== false,
       mode: source.mode || "rematch_existing",
       operation_event_id: source.operation_event_id || source.operationEventId || source.replay_operation_reference?.operation_event_id || null,
+      scope: source.scope || null,
       limit: Number(source.limit || 0),
+      cursor: source.cursor || null,
       scanned: Number(source.scanned || 0),
       rematched: Number(source.rematched || 0),
+      unchanged: Number(source.unchanged || 0),
+      changed_link_count: Number(source.changed_link_count || 0),
       links_created: Number(source.links_created || 0),
       links_updated: Number(source.links_updated || 0),
+      order_link_changes: Number(source.order_link_changes || 0),
+      item_link_changes: Number(source.item_link_changes || 0),
+      inventory_link_changes: Number(source.inventory_link_changes || 0),
+      buyer_link_changes: Number(source.buyer_link_changes || 0),
+      tracking_label_link_changes: Number(source.tracking_label_link_changes || 0),
       ambiguous: Number(source.ambiguous || 0),
       skipped: Number(source.skipped || 0),
       failed: Number(source.failed || 0),
       message_ids: Array.isArray(source.message_ids) ? source.message_ids : [],
+      message_ids_changed: Array.isArray(source.message_ids_changed) ? source.message_ids_changed : [],
       failures: Array.isArray(source.failures) ? source.failures : [],
+      continuation: source.continuation && typeof source.continuation === "object"
+        ? {
+          has_more: source.continuation.has_more === true,
+          next_cursor: source.continuation.next_cursor || null,
+          total: Number(source.continuation.total || 0),
+          offset: Number(source.continuation.offset || 0),
+          chunk_limit: Number(source.continuation.chunk_limit || 0),
+        }
+        : { has_more: source.has_more === true, next_cursor: source.next_cursor || null, total: 0, offset: 0, chunk_limit: 0 },
+      has_more: source.has_more === true || source.continuation?.has_more === true,
+      next_cursor: source.next_cursor || source.continuation?.next_cursor || null,
+      mailbox_query: source.mailbox_query && typeof source.mailbox_query === "object" ? source.mailbox_query : null,
       safety: {
         outlook_fetch_performed: safety.outlook_fetch_performed === true,
         outlook_mutation_performed: safety.outlook_mutation_performed === true,
@@ -959,7 +981,12 @@
     const session = await currentSession(context, "Rematch existing emails");
     const body = {
       mode: "rematch_existing",
-      limit: Number(values.limit || 25),
+      scope: values.scope,
+      messageId: values.messageId || null,
+      messageIds: Array.isArray(values.messageIds) ? values.messageIds : [],
+      limit: Number(values.limit || 50),
+      cursor: values.cursor || null,
+      mailboxQuery: values.mailboxQuery && typeof values.mailboxQuery === "object" ? values.mailboxQuery : undefined,
       jobTypes: ["match_order"],
     };
 

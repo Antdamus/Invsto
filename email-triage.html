@@ -192,6 +192,32 @@
               </div>
               <div id="inbox-preview-import-result" class="inbox-import-result"></div>
 
+              <div class="inbox-rematch-panel" aria-label="Rematch deterministic links">
+                <div class="inbox-rematch-controls">
+                  <label>
+                    <span>Rematch Scope</span>
+                    <select id="inbox-rematch-scope">
+                      <option value="selected" selected>Selected email</option>
+                      <option value="current_page">Current loaded page</option>
+                      <option value="current_filter">Current category/filter</option>
+                      <option value="latest_25">Latest 25 imported emails</option>
+                      <option value="latest_100">Latest 100 imported emails</option>
+                      <option value="all_imported">All imported emails, chunked</option>
+                    </select>
+                  </label>
+                  <button type="button" id="inbox-rematch-existing-run" class="secondary-btn">
+                    <i data-lucide="link"></i>
+                    Run Rematch
+                  </button>
+                  <button type="button" id="inbox-rematch-existing-continue" class="secondary-btn" disabled>
+                    <i data-lucide="step-forward"></i>
+                    Continue Rematch
+                  </button>
+                </div>
+                <p class="inbox-operator-note">Rematch updates deterministic eBay links only. It does not reclassify emails, regenerate drafts, send replies, or mutate Outlook/eBay. Changed links can make existing classifications or drafts stale.</p>
+                <div id="inbox-rematch-existing-result" class="inbox-live-refresh-result"></div>
+              </div>
+
               <div class="inbox-preview-actions">
                 <div class="inbox-bucket-tabs" aria-label="Preview bucket filter">
                   <button type="button" data-inbox-bucket-filter="likely_ebay" class="is-active">Likely eBay</button>
@@ -203,10 +229,6 @@
                   <button type="button" id="inbox-live-refresh-run" class="primary-btn">
                     <i data-lucide="refresh-cw"></i>
                     Run Live Refresh
-                  </button>
-                  <button type="button" id="inbox-rematch-existing-run" class="secondary-btn">
-                    <i data-lucide="link"></i>
-                    Rematch Existing Emails
                   </button>
                   <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
                     <i data-lucide="download"></i>
@@ -225,7 +247,6 @@
               </div>
 
               <div id="inbox-live-refresh-result" class="inbox-live-refresh-result"></div>
-              <div id="inbox-rematch-existing-result" class="inbox-live-refresh-result"></div>
 
               <div class="inbox-preview-table-wrap">
                 <table class="inbox-preview-table">

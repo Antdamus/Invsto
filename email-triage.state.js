@@ -77,6 +77,7 @@
       inboxLiveRefreshResult: null,
       inboxRematchLoading: false,
       inboxRematchResult: null,
+      inboxRematchScope: "selected",
       inboxLastOperationId: null,
       inboxLastRefreshedAt: null,
       inboxActiveBucketFilter: "likely_ebay",

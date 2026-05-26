@@ -45,6 +45,8 @@
       liveRefresh: document.getElementById("inbox-live-refresh-run"),
       liveRefreshResult: document.getElementById("inbox-live-refresh-result"),
       rematchExisting: document.getElementById("inbox-rematch-existing-run"),
+      rematchContinue: document.getElementById("inbox-rematch-existing-continue"),
+      rematchScope: document.getElementById("inbox-rematch-scope"),
       rematchExistingResult: document.getElementById("inbox-rematch-existing-result"),
       clear: document.getElementById("inbox-preview-clear"),
       bucketFilters: document.querySelectorAll("[data-inbox-bucket-filter]"),
@@ -58,6 +60,91 @@
       daysBack: els.daysBack?.value || "",
       bucketMode: els.bucketMode?.value || "ebay_only",
     };
+  }
+
+  function selectedMailboxMessageId(state) {
+    if (state.selectedMessageId) return String(state.selectedMessageId);
+    const selected = state.selectedClassificationsById?.[state.selectedClassificationId];
+    return selected?.message_id ? String(selected.message_id) : "";
+  }
+
+  function currentPageMessageIds(state) {
+    const rows = Array.isArray(state.data?.classifications) ? state.data.classifications : [];
+    return [...new Set(rows.map((row) => String(row?.message_id || "").trim()).filter(Boolean))];
+  }
+
+  function mailboxQueryFromState(state) {
+    const pagination = state.pagination || {};
+    return {
+      page: Number(pagination.page || 1),
+      pageSize: Number(pagination.pageSize || pagination.limit || 25),
+      sort: pagination.sort || state.sortMode || "newest",
+      category: state.selectedCategory || pagination.filters?.category || "all",
+      priority: state.priorityFilter || pagination.filters?.priority || "all",
+      status: state.statusFilter || pagination.filters?.status || "all",
+      filters: Array.isArray(state.activeFilters) ? state.activeFilters : [],
+    };
+  }
+
+  function rematchPayloadFromState(state, els, options = {}) {
+    const uiScope = options.scope || els.rematchScope?.value || state.inboxRematchScope || "selected";
+    const continuation = options.continuation || null;
+    const payload = {
+      scope: uiScope,
+      limit: 50,
+      cursor: continuation?.next_cursor || null,
+      messageIds: [],
+    };
+
+    if (uiScope === "selected") {
+      payload.scope = "selected";
+      payload.limit = 1;
+      payload.messageId = selectedMailboxMessageId(state);
+    } else if (uiScope === "current_page") {
+      payload.scope = "current_page";
+      payload.messageIds = currentPageMessageIds(state);
+      payload.limit = payload.messageIds.length || Number((state.pagination || {}).pageSize || 25);
+    } else if (uiScope === "current_filter") {
+      payload.scope = "current_filter";
+      payload.limit = 50;
+      payload.mailboxQuery = continuation?.mailbox_query || mailboxQueryFromState(state);
+    } else if (uiScope === "latest_100") {
+      payload.scope = "latest";
+      payload.limit = 100;
+    } else if (uiScope === "all_imported") {
+      payload.scope = "all_imported";
+      payload.limit = 50;
+    } else {
+      payload.scope = "latest";
+      payload.limit = 25;
+    }
+
+    return payload;
+  }
+
+  function rematchRunLabel(scope) {
+    const labels = {
+      selected: "Run Selected Rematch",
+      current_page: "Run Page Rematch",
+      current_filter: "Run Filter Rematch",
+      latest_25: "Run Latest 25 Rematch",
+      latest_100: "Run Latest 100 Rematch",
+      all_imported: "Run Chunked Rematch",
+    };
+    return labels[scope] || "Run Rematch";
+  }
+
+  function rematchScopeLabel(scope) {
+    const labels = {
+      selected: "Selected email",
+      current_page: "Current loaded page",
+      current_filter: "Current category/filter",
+      latest: "Latest imported emails",
+      latest_25: "Latest 25 imported emails",
+      latest_100: "Latest 100 imported emails",
+      all_imported: "All imported emails, chunked",
+    };
+    return labels[scope] || "Explicit scope";
   }
 
   function providerIdFor(row) {
@@ -447,31 +534,44 @@
     }
 
     const safety = result.safety || {};
-    const changedLinkCount = Number(result.links_created || 0) + Number(result.links_updated || 0);
+    const changedLinkCount = Number(result.changed_link_count || 0) || Number(result.links_created || 0) + Number(result.links_updated || 0);
     const scannedIds = Array.isArray(result.message_ids) ? result.message_ids : [];
+    const changedIds = Array.isArray(result.message_ids_changed) ? result.message_ids_changed : [];
     const failures = Array.isArray(result.failures) ? result.failures : [];
+    const continuation = result.continuation || {};
+    const hasMore = result.has_more === true || continuation.has_more === true;
     els.rematchExistingResult.innerHTML = `
       <div class="inbox-live-refresh-head">
-        <strong>Rematch existing emails result</strong>
-        <span>${utils.escapeHtml(result.scanned || 0)} scanned · ${utils.escapeHtml(changedLinkCount)} link changes</span>
+        <strong>Rematch result: ${utils.escapeHtml(rematchScopeLabel(result.scope))}</strong>
+        <span>${utils.escapeHtml(result.scanned || 0)} scanned · ${utils.escapeHtml(changedLinkCount)} link changes${hasMore ? " · more available" : ""}</span>
       </div>
       <p class="inbox-result-note">
-        Rematch recalculates deterministic links only. Classifications and drafts are not recomputed here.
-        ${changedLinkCount ? "Created or updated links are counted below." : "No link records changed; candidates may still have been scanned."}
+        Rematch recalculates deterministic eBay links only. Classifications and drafts were not recomputed, and nothing was sent.
+        ${changedLinkCount ? "Changed context may make existing classifications or drafts stale; reloads are triggered after this operation." : "No link records changed; candidates may still have been scanned."}
       </p>
       <div class="inbox-live-refresh-grid">
         ${renderStageCounts("Matching", result, [
           ["scanned", "Scanned"],
           ["rematched", "Rematched"],
+          ["unchanged", "Unchanged"],
           ["ambiguous", "Ambiguous"],
           ["skipped", "Skipped"],
           ["failed", "Failed"],
         ], utils)}
         ${renderStageCounts("Links", result, [
+          ["changed_link_count", "Changed"],
           ["links_created", "Created"],
           ["links_updated", "Updated"],
         ], utils)}
+        ${renderStageCounts("Link Types", result, [
+          ["order_link_changes", "Order"],
+          ["item_link_changes", "Item"],
+          ["inventory_link_changes", "Inventory"],
+          ["buyer_link_changes", "Buyer"],
+          ["tracking_label_link_changes", "Tracking/label"],
+        ], utils)}
       </div>
+      ${hasMore ? `<p class="inbox-result-note">This scope is chunked. Continue from ${utils.escapeHtml(Number(continuation.offset || 0) + Number(result.scanned || 0))} of ${utils.escapeHtml(continuation.total || "unknown")} with Continue Rematch.</p>` : ""}
       <dl class="inbox-live-refresh-safety">
         <div><dt>Outlook Fetch</dt><dd>${renderInboxBadge(safety.outlook_fetch_performed ? "true" : "false", safety.outlook_fetch_performed ? "danger" : "success", utils)}</dd></div>
         <div><dt>Outlook Mutation</dt><dd>${renderInboxBadge(safety.outlook_mutation_performed ? "true" : "false", safety.outlook_mutation_performed ? "danger" : "success", utils)}</dd></div>
@@ -484,6 +584,10 @@
         <div class="inbox-skipped-reasons">
           <span>Scanned Message IDs</span>
           <div class="inbox-message-id-list">${renderCompactIdList(scannedIds, "No message ids returned", utils)}</div>
+        </div>
+        <div class="inbox-skipped-reasons">
+          <span>Changed Message IDs</span>
+          <div class="inbox-message-id-list">${renderCompactIdList(changedIds, "No changed message ids", utils)}</div>
         </div>
         <div class="inbox-skipped-reasons">
           <span>Failures</span>
@@ -547,9 +651,21 @@
     if (els.mailboxImportTarget && String(els.mailboxImportTarget.value) !== String(state.inboxMailboxImportTarget || 100)) {
       els.mailboxImportTarget.value = String(state.inboxMailboxImportTarget || 100);
     }
+    if (els.rematchScope && els.rematchScope.value !== (state.inboxRematchScope || "selected")) {
+      els.rematchScope.value = state.inboxRematchScope || "selected";
+    }
 
     const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxMailboxImportLoading === true || state.inboxPrepareLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
     const importability = previewImportability(state);
+    const rematchScope = state.inboxRematchScope || els.rematchScope?.value || "selected";
+    const selectedMessageId = selectedMailboxMessageId(state);
+    const pageMessageIds = currentPageMessageIds(state);
+    const canRunRematch = !loading
+      && (rematchScope !== "selected" || Boolean(selectedMessageId))
+      && (rematchScope !== "current_page" || pageMessageIds.length > 0);
+    const canContinueRematch = !loading
+      && state.inboxRematchResult?.continuation?.has_more === true
+      && ["current_filter", "all_imported"].includes(state.inboxRematchResult?.scope);
     const mailboxProgress = state.inboxMailboxImportResult?.progress || {};
     const prepareProgress = state.inboxPrepareResult?.progress || {};
     const selectedMailboxTarget = Number(state.inboxMailboxImportTarget || els.mailboxImportTarget?.value || 100);
@@ -566,6 +682,7 @@
       [els.prepareMailboxContinue, state.inboxPrepareLoading === true],
       [els.liveRefresh, state.inboxLiveRefreshLoading === true],
       [els.rematchExisting, state.inboxRematchLoading === true],
+      [els.rematchContinue, state.inboxRematchLoading === true],
       [els.clear, false],
     ]);
     buttonLoadingStates.forEach((isBusy, button) => {
@@ -582,7 +699,14 @@
     if (els.prepareMailboxRun) els.prepareMailboxRun.disabled = loading;
     if (els.prepareMailboxContinue) els.prepareMailboxContinue.disabled = loading || !canContinuePreparing;
     if (els.liveRefresh) els.liveRefresh.disabled = loading;
-    if (els.rematchExisting) els.rematchExisting.disabled = loading;
+    if (els.rematchExisting) {
+      els.rematchExisting.disabled = !canRunRematch;
+      const icon = els.rematchExisting.querySelector("i");
+      els.rematchExisting.textContent = rematchRunLabel(rematchScope);
+      if (icon) els.rematchExisting.prepend(icon);
+    }
+    if (els.rematchContinue) els.rematchContinue.disabled = !canContinueRematch;
+    if (els.rematchScope) els.rematchScope.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
 
     if (els.status) {
@@ -591,7 +715,7 @@
       else if (state.inboxMailboxImportLoading) els.status.textContent = "Importing mailbox batch.";
       else if (state.inboxPrepareLoading) els.status.textContent = "Preparing mailbox rows for classification.";
       else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
-      else if (state.inboxRematchLoading) els.status.textContent = "Rematching existing imported emails.";
+      else if (state.inboxRematchLoading) els.status.textContent = "Rematching deterministic links for an explicit scope.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
       else if (result) els.status.textContent = `Preview refreshed ${utils.formatDateTime(state.inboxLastRefreshedAt)}. Selected ${selectedIds(state).length} message${selectedIds(state).length === 1 ? "" : "s"}.`;
       else els.status.textContent = "Run preview to inspect recent Outlook emails before importing.";
@@ -930,17 +1054,19 @@
       }
     });
 
-    els.rematchExisting?.addEventListener("click", async () => {
-      const controls = previewControlsFromEls(els);
+    async function executeRematch(optionsForRun = {}) {
+      const currentState = store.getState();
+      const payload = optionsForRun.payload || rematchPayloadFromState(currentState, els, optionsForRun);
+      const uiScope = optionsForRun.uiScope || els.rematchScope?.value || currentState.inboxRematchScope || "selected";
       update({
-        inboxPreviewControls: controls,
+        inboxRematchScope: uiScope,
         inboxRematchLoading: true,
         inboxPreviewError: null,
-        inboxRematchResult: null,
+        inboxRematchResult: optionsForRun.append ? currentState.inboxRematchResult : null,
         operationInFlight: "rematch_existing",
       });
       try {
-        const result = await api.rematchExistingEmails(context, controls);
+        const result = await api.rematchExistingEmails(context, payload);
         update({
           inboxRematchLoading: false,
           inboxRematchResult: result,
@@ -950,8 +1076,11 @@
           lastOperationSummary: {
             mode: "rematch_existing",
             operation_event_id: result.operation_event_id || null,
+            scope: result.scope,
             scanned: result.scanned,
             rematched: result.rematched,
+            unchanged: result.unchanged,
+            changed_link_count: result.changed_link_count,
             links_created: result.links_created,
             links_updated: result.links_updated,
             ambiguous: result.ambiguous,
@@ -969,6 +1098,33 @@
           operationInFlight: null,
         });
       }
+    }
+
+    els.rematchScope?.addEventListener("change", () => {
+      update({
+        inboxRematchScope: els.rematchScope.value || "selected",
+        inboxRematchResult: null,
+      });
+    });
+
+    els.rematchExisting?.addEventListener("click", async () => {
+      await executeRematch();
+    });
+
+    els.rematchContinue?.addEventListener("click", async () => {
+      const currentState = store.getState();
+      const result = currentState.inboxRematchResult || {};
+      const continuation = result.continuation || {};
+      if (!continuation.has_more || !continuation.next_cursor) return;
+      const scope = result.scope === "current_filter" ? "current_filter" : "all_imported";
+      const payload = rematchPayloadFromState(currentState, els, {
+        scope,
+        continuation: {
+          next_cursor: continuation.next_cursor,
+          mailbox_query: result.mailbox_query || null,
+        },
+      });
+      await executeRematch({ payload, append: true, uiScope: scope === "current_filter" ? "current_filter" : "all_imported" });
     });
 
     els.clear?.addEventListener("click", () => {

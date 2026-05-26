@@ -2162,12 +2162,14 @@
   gap: 8px;
 }
 
-.inbox-mailbox-import-panel {
+.inbox-mailbox-import-panel,
+.inbox-rematch-panel {
   display: grid;
   gap: 8px;
 }
 
-.inbox-mailbox-import-controls {
+.inbox-mailbox-import-controls,
+.inbox-rematch-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -2184,7 +2186,8 @@
 }
 
 .inbox-preview-toolbar label,
-.inbox-mailbox-import-controls label {
+.inbox-mailbox-import-controls label,
+.inbox-rematch-controls label {
   display: flex;
   flex: 0 0 150px;
   flex-direction: column;
@@ -2193,6 +2196,7 @@
 
 .inbox-preview-toolbar label span,
 .inbox-mailbox-import-controls label span,
+.inbox-rematch-controls label span,
 .inbox-skipped-reasons span {
   color: rgba(242,243,245,.58);
   font-size: .74rem;
@@ -2201,7 +2205,8 @@
 }
 
 .inbox-preview-toolbar select,
-.inbox-mailbox-import-controls select {
+.inbox-mailbox-import-controls select,
+.inbox-rematch-controls select {
   min-height: 34px;
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 8px;
@@ -2522,12 +2527,14 @@
 
   .inbox-preview-toolbar,
   .inbox-preview-actions,
-  .inbox-import-actions {
+  .inbox-import-actions,
+  .inbox-rematch-controls {
     align-items: stretch;
     flex-direction: column;
   }
 
   .inbox-preview-toolbar label,
+  .inbox-rematch-controls label,
   .inbox-bucket-tabs,
   .inbox-import-result dl,
   .inbox-live-refresh-safety {
