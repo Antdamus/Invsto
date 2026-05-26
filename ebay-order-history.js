@@ -111,6 +111,10 @@ const ORDER_HISTORY_LINE_SELECT = `
     paid_on_date,
     ship_by_date,
     status,
+    shipping_and_handling,
+    seller_collected_tax,
+    ebay_collected_tax,
+    ebay_collected_charges,
     total_price,
     net_payout,
     ebay_shipment_id,
@@ -459,9 +463,54 @@ function getLineGross(line) {
   return Number(line.sold_for || 0) * Math.max(Number(line.fulfilled_quantity || line.quantity || 1), 1);
 }
 
+function roundMoney(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? Number(number.toFixed(2)) : 0;
+}
+
+function getLinePayoutSource(line) {
+  if (line?.line_status === "cancelled") return "none";
+  if (Number(line?.net_payout || 0) > 0) return "line";
+
+  const order = getOrderFromLine(line);
+  const lineGross = getLineGross(line);
+  if (lineGross <= 0) return "none";
+
+  const orderTotal = Number(order.total_price || 0);
+  if (Number(order.net_payout || 0) > 0 && orderTotal > 0) return "order";
+
+  const orderDeductions = Number(order.ebay_collected_tax || 0)
+    + Number(order.ebay_collected_charges || 0)
+    + Number(order.seller_collected_tax || 0);
+  if (orderDeductions > 0 && orderTotal > 0) return "deduction_estimate";
+
+  return "gross_estimate";
+}
+
 function getLinePayout(line) {
-  const payout = Number(line.net_payout || 0);
-  return Number.isFinite(payout) ? payout : 0;
+  if (line?.line_status === "cancelled") return 0;
+
+  const directPayout = Number(line?.net_payout || 0);
+  if (directPayout > 0) return roundMoney(directPayout);
+
+  const order = getOrderFromLine(line);
+  const lineGross = getLineGross(line);
+  if (lineGross <= 0) return 0;
+
+  const orderTotal = Number(order.total_price || 0);
+  const orderPayout = Number(order.net_payout || 0);
+  if (orderPayout > 0 && orderTotal > 0) {
+    return roundMoney(orderPayout * (lineGross / orderTotal));
+  }
+
+  const orderDeductions = Number(order.ebay_collected_tax || 0)
+    + Number(order.ebay_collected_charges || 0)
+    + Number(order.seller_collected_tax || 0);
+  if (orderDeductions > 0 && orderTotal > 0) {
+    return roundMoney(Math.max(0, lineGross - (orderDeductions * (lineGross / orderTotal))));
+  }
+
+  return roundMoney(lineGross);
 }
 
 function getLineStatusLabel(line) {
@@ -480,7 +529,7 @@ function getLineStatusClass(line) {
 
 function isAdminCloseoutLine(line) {
   return state.adminCloseoutLineIds.has(line.id)
-    || (line.line_status === "fulfilled" && !line.stock_transaction_id);
+    || (line.line_status === "fulfilled" && !line.stock_transaction_id && !isEbayApiHistoryLine(line));
 }
 
 function isAdminUser() {
@@ -2480,8 +2529,19 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   const status = $("history-status")?.value || "all";
   const gross = visibleLines.reduce((sum, line) => sum + getLineGross(line), 0);
   const payout = visibleLines.reduce((sum, line) => sum + getLinePayout(line), 0);
+  const payoutSourceCounts = visibleLines.reduce((counts, line) => {
+    const source = getLinePayoutSource(line);
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, {});
+  const estimatedPayoutLines = (payoutSourceCounts.deduction_estimate || 0) + (payoutSourceCounts.gross_estimate || 0);
   const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
-  const closeouts = closeoutEvents.length || visibleLines.filter(isAdminCloseoutLine).length;
+  const closeouts = visibleLines.filter(isAdminCloseoutLine).length;
+  const closeoutProofDetail = closeoutEvents.length
+    ? `${closeoutEvents.length.toLocaleString()} proof event${closeoutEvents.length === 1 ? "" : "s"}`
+    : closeouts
+    ? "No saved proof event"
+    : "";
   const cancelled = visibleLines.filter((line) => line.line_status === "cancelled").length;
   const returnCount = new Set(getReturnCasesForLineIds(visibleLines.map((line) => line.id)).map((entry) => entry.id)).size;
   const reverted = visibleEvents
@@ -2502,7 +2562,15 @@ function renderSummary(groups = getVisibleHistoryGroups()) {
   $("summary-shipped-lines").textContent = String(visibleLines.length);
   $("summary-gross").textContent = formatMoney(gross);
   $("summary-payout").textContent = formatMoney(payout);
+  const payoutDetail = $("summary-payout-detail");
+  if (payoutDetail) {
+    payoutDetail.textContent = estimatedPayoutLines
+      ? `${estimatedPayoutLines.toLocaleString()} line${estimatedPayoutLines === 1 ? "" : "s"} estimated from gross`
+      : "";
+  }
   $("summary-admin-closeouts").textContent = String(closeouts);
+  const closeoutDetail = $("summary-admin-closeouts-detail");
+  if (closeoutDetail) closeoutDetail.textContent = closeoutProofDetail;
   $("summary-cancelled").textContent = String(cancelled);
   $("summary-returns").textContent = String(returnCount);
   $("summary-reversals").textContent = String(reverted);

@@ -225,6 +225,14 @@ textarea {
   line-height: 1;
 }
 
+.history-summary-card small {
+  display: block;
+  margin-top: 7px;
+  color: var(--history-muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
 .history-worker-proof-mode [data-admin-only="true"] {
   display: none;
 }
