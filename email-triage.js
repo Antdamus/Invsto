@@ -2560,6 +2560,15 @@
         loadAdminClassificationData(context);
         loadOperationalDashboard(context);
       },
+      onMailboxImportComplete: () => {
+        loadOperationalDashboard(context);
+      },
+      onPrepareComplete: () => {
+        loadAdminClassificationData(context);
+        loadOperationalDashboard(context);
+        loadSelectedMatchContext(context, { force: true });
+        loadSelectedDraftView(context, { force: true });
+      },
       onLiveRefreshComplete: () => {
         loadAdminClassificationData(context);
         loadOperationalDashboard(context);

@@ -36,6 +36,9 @@
       mailboxImportStart: document.getElementById("inbox-mailbox-import-start"),
       mailboxImportContinue: document.getElementById("inbox-mailbox-import-continue"),
       mailboxImportResult: document.getElementById("inbox-mailbox-import-result"),
+      prepareMailboxRun: document.getElementById("inbox-prepare-mailbox-run"),
+      prepareMailboxContinue: document.getElementById("inbox-prepare-mailbox-continue"),
+      prepareMailboxResult: document.getElementById("inbox-prepare-mailbox-result"),
       body: document.getElementById("inbox-preview-body"),
       importLikely: document.getElementById("inbox-import-likely"),
       importSelected: document.getElementById("inbox-import-selected"),
@@ -199,7 +202,7 @@
         <strong>Approved import-only result</strong>
         ${result.operation_event_id ? `<span>Operation event ${utils.escapeHtml(result.operation_event_id)}</span>` : "<span>No operation event id returned</span>"}
       </div>
-      <p class="inbox-result-note">Messages were persisted only. Processing, classification, rematch, draft generation, and sending are not started by this action.</p>
+      <p class="inbox-result-note">Messages were persisted, then mailbox preparation was requested. Preparation is bounded, so continue if remaining work is shown.</p>
       <dl>
         <div><dt>Imported</dt><dd>${utils.escapeHtml(result.imported_count)}</dd></div>
         <div><dt>Already Imported</dt><dd>${utils.escapeHtml(result.already_imported_count)}</dd></div>
@@ -235,7 +238,7 @@
         <strong>Mailbox import progress</strong>
         <span>${utils.escapeHtml(progress.status || "not_started")}${result.operation_event_id ? ` · operation ${utils.escapeHtml(result.operation_event_id)}` : ""}</span>
       </div>
-      <p class="inbox-result-note">Bounded mailbox import persists messages in batches. Processing, classification, draft generation, sending, and Outlook mutation are not started here.</p>
+      <p class="inbox-result-note">Bounded mailbox import persists messages in batches. This screen can prepare imported rows afterward without drafts, sending, or Outlook mutation.</p>
       <dl>
         <div><dt>Target</dt><dd>${utils.escapeHtml(target || "--")}</dd></div>
         <div><dt>Progress</dt><dd>${utils.escapeHtml(`${completed}/${target || "--"} (${percent}%)`)}</dd></div>
@@ -259,6 +262,65 @@
         <div><dt>Processing</dt><dd>${renderInboxBadge(safety.processing_triggered ? "true" : "false", safety.processing_triggered ? "danger" : "muted", utils)}</dd></div>
         <div><dt>Classification</dt><dd>${renderInboxBadge(safety.classification_triggered ? "true" : "false", safety.classification_triggered ? "danger" : "muted", utils)}</dd></div>
         <div><dt>Checkpoint Updated</dt><dd>${renderInboxBadge(safety.sync_checkpoint_updated ? "true" : "false", safety.sync_checkpoint_updated ? "success" : "muted", utils)}</dd></div>
+      </dl>
+    `;
+  }
+
+  function renderPrepareMailboxResult(state, els, utils = window.EmailTriageRenderUtils) {
+    if (!els.prepareMailboxResult) return;
+    const result = state.inboxPrepareResult;
+    if (!result) {
+      els.prepareMailboxResult.innerHTML = "";
+      return;
+    }
+
+    const progress = result.progress || {};
+    const processing = result.processing || {};
+    const classification = result.classification || {};
+    const safety = result.safety || {};
+    const status = result.disabled
+      ? `Paused: ${result.reason || "disabled"}`
+      : progress.has_more
+      ? "More preparation available"
+      : progress.only_failures_remain
+      ? "Only failures remain"
+      : "Mailbox ready";
+
+    els.prepareMailboxResult.innerHTML = `
+      <div class="inbox-import-result-head">
+        <strong>Mailbox preparation progress</strong>
+        <span>${utils.escapeHtml(status)}</span>
+      </div>
+      <p class="inbox-result-note">Preparation normalizes messages, matches local eBay context, and classifies eligible emails in bounded batches. Drafts and sending stay manual.</p>
+      <dl>
+        <div><dt>Imported Active</dt><dd>${utils.escapeHtml(progress.imported_active || 0)}</dd></div>
+        <div><dt>Processed</dt><dd>${utils.escapeHtml(progress.processed_total || 0)}</dd></div>
+        <div><dt>Classified</dt><dd>${utils.escapeHtml(progress.classified_total || 0)}</dd></div>
+        <div><dt>Remaining To Process</dt><dd>${utils.escapeHtml(progress.remaining_to_process || 0)}</dd></div>
+        <div><dt>Remaining To Classify</dt><dd>${utils.escapeHtml(progress.remaining_to_classify || 0)}</dd></div>
+        <div><dt>Processing Failed</dt><dd>${utils.escapeHtml(progress.processing_failed || 0)}</dd></div>
+        <div><dt>Classification Failed/Skipped</dt><dd>${utils.escapeHtml(Number(progress.classification_failed || 0) + Number(progress.classification_skipped || 0))}</dd></div>
+        <div><dt>Has More</dt><dd>${renderInboxBadge(progress.has_more ? "yes" : "no", progress.has_more ? "warning" : "success", utils)}</dd></div>
+      </dl>
+      <div class="inbox-live-refresh-grid">
+        ${renderStageCounts("This Processing Pass", processing, [
+          ["candidate_count", "Candidates"],
+          ["jobs_enqueued", "Jobs enqueued"],
+          ["jobs_processed", "Jobs processed"],
+          ["failed_count", "Failed"],
+        ], utils)}
+        ${renderStageCounts("This Classification Pass", classification, [
+          ["candidate_count", "Candidates"],
+          ["classified_count", "Classified"],
+          ["failed_count", "Failed"],
+          ["skipped_count", "Skipped"],
+        ], utils)}
+      </div>
+      <dl class="inbox-live-refresh-safety">
+        <div><dt>Outlook Mutation</dt><dd>${renderInboxBadge(safety.outlook_mutation_performed ? "true" : "false", safety.outlook_mutation_performed ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Drafts Created</dt><dd>${renderInboxBadge(String(safety.drafts_created || 0), safety.drafts_created ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Emails Sent</dt><dd>${renderInboxBadge(String(safety.automatic_responses_sent || 0), safety.automatic_responses_sent ? "danger" : "success", utils)}</dd></div>
+        <div><dt>Source</dt><dd>${utils.escapeHtml(progress.source || "email_tables")}</dd></div>
       </dl>
     `;
   }
@@ -486,18 +548,22 @@
       els.mailboxImportTarget.value = String(state.inboxMailboxImportTarget || 100);
     }
 
-    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxMailboxImportLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
+    const loading = state.inboxPreviewLoading === true || state.inboxImportLoading === true || state.inboxMailboxImportLoading === true || state.inboxPrepareLoading === true || state.inboxLiveRefreshLoading === true || state.inboxRematchLoading === true;
     const importability = previewImportability(state);
     const mailboxProgress = state.inboxMailboxImportResult?.progress || {};
+    const prepareProgress = state.inboxPrepareResult?.progress || {};
     const selectedMailboxTarget = Number(state.inboxMailboxImportTarget || els.mailboxImportTarget?.value || 100);
     const mailboxCompleted = Number(mailboxProgress.completed_total || 0);
     const canContinueMailboxImport = mailboxProgress.continuation_available === true && selectedMailboxTarget > mailboxCompleted;
+    const canContinuePreparing = prepareProgress.has_more === true;
     const buttonLoadingStates = new Map([
       [els.run, state.inboxPreviewLoading === true],
       [els.importLikely, state.inboxImportLoading === true],
       [els.importSelected, state.inboxImportLoading === true],
       [els.mailboxImportStart, state.inboxMailboxImportLoading === true],
       [els.mailboxImportContinue, state.inboxMailboxImportLoading === true],
+      [els.prepareMailboxRun, state.inboxPrepareLoading === true],
+      [els.prepareMailboxContinue, state.inboxPrepareLoading === true],
       [els.liveRefresh, state.inboxLiveRefreshLoading === true],
       [els.rematchExisting, state.inboxRematchLoading === true],
       [els.clear, false],
@@ -513,6 +579,8 @@
     if (els.importSelected) els.importSelected.disabled = loading || importability.selectedImportableCount === 0;
     if (els.mailboxImportStart) els.mailboxImportStart.disabled = loading;
     if (els.mailboxImportContinue) els.mailboxImportContinue.disabled = loading || !canContinueMailboxImport;
+    if (els.prepareMailboxRun) els.prepareMailboxRun.disabled = loading;
+    if (els.prepareMailboxContinue) els.prepareMailboxContinue.disabled = loading || !canContinuePreparing;
     if (els.liveRefresh) els.liveRefresh.disabled = loading;
     if (els.rematchExisting) els.rematchExisting.disabled = loading;
     if (els.clear) els.clear.disabled = loading || !result;
@@ -521,6 +589,7 @@
       if (state.inboxPreviewLoading) els.status.textContent = "Loading Outlook preview.";
       else if (state.inboxImportLoading) els.status.textContent = "Importing approved messages only.";
       else if (state.inboxMailboxImportLoading) els.status.textContent = "Importing mailbox batch.";
+      else if (state.inboxPrepareLoading) els.status.textContent = "Preparing mailbox rows for classification.";
       else if (state.inboxLiveRefreshLoading) els.status.textContent = "Running bounded live refresh.";
       else if (state.inboxRematchLoading) els.status.textContent = "Rematching existing imported emails.";
       else if (state.inboxPreviewError) els.status.textContent = `Preview failed: ${state.inboxPreviewError}`;
@@ -539,6 +608,7 @@
 
     renderInboxSummary(state, els, utils);
     renderMailboxImportResult(state, els, utils);
+    renderPrepareMailboxResult(state, els, utils);
     renderImportResult(state, els, utils);
     renderLiveRefreshResult(state, els, utils);
     renderRematchExistingResult(state, els, utils);
@@ -563,9 +633,26 @@
 
     api.fetchMailboxImportStatus?.(context)
       .then((result) => {
+        const preparationProgress = result.preparation_progress || null;
         update({
           inboxMailboxImportResult: result,
           inboxMailboxImportTarget: result.target_count || store.getState().inboxMailboxImportTarget || 100,
+          inboxPrepareResult: preparationProgress ? {
+            ok: true,
+            mode: "prepare_mailbox",
+            progress: preparationProgress,
+            processing: {},
+            classification: {},
+            safety: {
+              outlook_mutation_performed: false,
+              automatic_responses_sent: 0,
+              drafts_created: 0,
+              attachments_fetched: 0,
+              sync_checkpoint_updated: false,
+              processing_triggered: false,
+              classification_triggered: false,
+            },
+          } : store.getState().inboxPrepareResult,
         });
       })
       .catch(() => {});
@@ -637,10 +724,50 @@
         if (typeof options.onMailboxImportComplete === "function") {
           options.onMailboxImportComplete(result);
         }
+        await runPrepareMailboxAction("after_import");
       } catch (error) {
         update({
           inboxMailboxImportLoading: false,
           inboxPreviewError: error.code || error.message || "mailbox_import_failed",
+          operationInFlight: null,
+        });
+      }
+    }
+
+    async function runPrepareMailboxAction(source = "manual") {
+      update({
+        inboxPrepareLoading: true,
+        inboxPreviewError: null,
+        operationInFlight: "prepare_mailbox",
+      });
+      try {
+        const result = await api.prepareMailbox(context, {
+          processBatchSize: 25,
+          classifyBatchSize: 10,
+        });
+        update({
+          inboxPrepareLoading: false,
+          inboxPrepareResult: result,
+          inboxLastRefreshedAt: new Date().toISOString(),
+          operationInFlight: null,
+          lastOperationSummary: {
+            mode: "prepare_mailbox",
+            source,
+            imported_active: result.progress?.imported_active || 0,
+            processed_total: result.progress?.processed_total || 0,
+            classified_total: result.progress?.classified_total || 0,
+            remaining_to_process: result.progress?.remaining_to_process || 0,
+            remaining_to_classify: result.progress?.remaining_to_classify || 0,
+            has_more: result.progress?.has_more === true,
+          },
+        });
+        if (typeof options.onPrepareComplete === "function") {
+          options.onPrepareComplete(result);
+        }
+      } catch (error) {
+        update({
+          inboxPrepareLoading: false,
+          inboxPreviewError: error.code || error.message || "prepare_mailbox_failed",
           operationInFlight: null,
         });
       }
@@ -656,6 +783,14 @@
 
     els.mailboxImportContinue?.addEventListener("click", () => {
       runMailboxImportAction("continue");
+    });
+
+    els.prepareMailboxRun?.addEventListener("click", () => {
+      runPrepareMailboxAction("manual");
+    });
+
+    els.prepareMailboxContinue?.addEventListener("click", () => {
+      runPrepareMailboxAction("continue");
     });
 
     els.body?.addEventListener("change", (event) => {
@@ -701,6 +836,7 @@
         if (typeof options.onImportComplete === "function") {
           options.onImportComplete(result);
         }
+        await runPrepareMailboxAction("after_import_likely");
       } catch (error) {
         update({
           inboxImportLoading: false,
@@ -744,6 +880,7 @@
         if (typeof options.onImportComplete === "function") {
           options.onImportComplete(result);
         }
+        await runPrepareMailboxAction("after_import_selected");
       } catch (error) {
         update({
           inboxImportLoading: false,
@@ -843,6 +980,8 @@
         inboxImportLoading: false,
         inboxImportResult: null,
         inboxMailboxImportLoading: false,
+        inboxPrepareLoading: false,
+        inboxPrepareResult: null,
         inboxLiveRefreshLoading: false,
         inboxLiveRefreshResult: null,
         inboxRematchLoading: false,

@@ -25,6 +25,7 @@
     inboxPreview: 30000,
     inboxImport: 60000,
     mailboxImport: 60000,
+    mailboxPrepare: 60000,
     rematchExisting: 60000,
     operationalDashboard: 30000,
   };
@@ -450,6 +451,7 @@
     const progress = source.progress && typeof source.progress === "object" ? source.progress : {};
     const batch = source.batch && typeof source.batch === "object" ? source.batch : {};
     const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    const preparationProgress = source.preparation_progress && typeof source.preparation_progress === "object" ? source.preparation_progress : null;
     return {
       ok: source.ok !== false,
       mode: source.mode || "mailbox_import",
@@ -481,6 +483,25 @@
         remaining_to_process: progress.remaining_to_process ?? source.remaining_to_process ?? null,
         remaining_to_classify: progress.remaining_to_classify ?? source.remaining_to_classify ?? null,
       },
+      preparation_progress: preparationProgress ? {
+        imported_active: Number(preparationProgress.imported_active || 0),
+        processed_total: Number(preparationProgress.processed_total || 0),
+        classified_total: Number(preparationProgress.classified_total || 0),
+        remaining_to_process: Number(preparationProgress.remaining_to_process || 0),
+        remaining_to_classify: Number(preparationProgress.remaining_to_classify || 0),
+        processing_failed: Number(preparationProgress.processing_failed || 0),
+        processing_skipped: Number(preparationProgress.processing_skipped || 0),
+        classification_failed: Number(preparationProgress.classification_failed || 0),
+        classification_skipped: Number(preparationProgress.classification_skipped || 0),
+        actionable_remaining_to_process: Number(preparationProgress.actionable_remaining_to_process || 0),
+        actionable_remaining_to_classify: Number(preparationProgress.actionable_remaining_to_classify || 0),
+        queued_or_running: Number(preparationProgress.queued_or_running || 0),
+        only_failures_remain: preparationProgress.only_failures_remain === true,
+        has_more: preparationProgress.has_more === true,
+        source: preparationProgress.source || "email_tables",
+        scope: preparationProgress.scope || "not_reported",
+        is_limited: preparationProgress.is_limited === true,
+      } : null,
       batch: {
         pages_fetched: Number(batch.pages_fetched || 0),
         messages_seen: Number(batch.messages_seen || 0),
@@ -490,6 +511,84 @@
         failed_count: Number(batch.failed_count || 0),
       },
       failures: Array.isArray(source.failures) ? source.failures : [],
+      safety: {
+        outlook_mutation_performed: safety.outlook_mutation_performed === true,
+        automatic_responses_sent: Number(safety.automatic_responses_sent || 0),
+        drafts_created: Number(safety.drafts_created || 0),
+        attachments_fetched: Number(safety.attachments_fetched || 0),
+        sync_checkpoint_updated: safety.sync_checkpoint_updated === true,
+        processing_triggered: safety.processing_triggered === true,
+        classification_triggered: safety.classification_triggered === true,
+      },
+      raw: source,
+    };
+  }
+
+  function normalizeMailboxPreparePayload(payload) {
+    const source = normalizeEnvelope(payload, "prepare_mailbox").data || {};
+    const progress = source.progress && typeof source.progress === "object" ? source.progress : {};
+    const before = source.before && typeof source.before === "object" ? source.before : {};
+    const processing = source.processing && typeof source.processing === "object" ? source.processing : {};
+    const classification = source.classification && typeof source.classification === "object" ? source.classification : {};
+    const safety = source.safety && typeof source.safety === "object" ? source.safety : {};
+    return {
+      ok: source.ok !== false,
+      mode: source.mode || "prepare_mailbox",
+      mailbox_id: source.mailbox_id || null,
+      disabled: source.disabled === true,
+      reason: source.reason || null,
+      process_batch_size: Number(source.process_batch_size || 0),
+      classify_batch_size: Number(source.classify_batch_size || 0),
+      progress: {
+        imported_active: Number(progress.imported_active || 0),
+        processed_total: Number(progress.processed_total || 0),
+        classified_total: Number(progress.classified_total || 0),
+        remaining_to_process: Number(progress.remaining_to_process || 0),
+        remaining_to_classify: Number(progress.remaining_to_classify || 0),
+        processing_failed: Number(progress.processing_failed || 0),
+        processing_skipped: Number(progress.processing_skipped || 0),
+        classification_failed: Number(progress.classification_failed || 0),
+        classification_skipped: Number(progress.classification_skipped || 0),
+        actionable_remaining_to_process: Number(progress.actionable_remaining_to_process || 0),
+        actionable_remaining_to_classify: Number(progress.actionable_remaining_to_classify || 0),
+        queued_or_running: Number(progress.queued_or_running || 0),
+        only_failures_remain: progress.only_failures_remain === true,
+        has_more: progress.has_more === true,
+        source: progress.source || "email_tables",
+        scope: progress.scope || "not_reported",
+        is_limited: progress.is_limited === true,
+      },
+      before,
+      processing: {
+        candidate_source: processing.candidate_source || null,
+        candidate_count: Number(processing.candidate_count || 0),
+        processed_count: Number(processing.processed_count || 0),
+        failed_count: Number(processing.failed_count || 0),
+        skipped_count: Number(processing.skipped_count || 0),
+        jobs_enqueued: Number(processing.jobs_enqueued || 0),
+        jobs_processed: Number(processing.jobs_processed || 0),
+        already_processed_count: Number(processing.already_processed_count || 0),
+        currently_processing_count: Number(processing.currently_processing_count || 0),
+        permanently_failed_count: Number(processing.permanently_failed_count || 0),
+      },
+      classification: {
+        candidate_source: classification.candidate_source || null,
+        candidate_count: Number(classification.candidate_count || 0),
+        classified_count: Number(classification.classified_count || 0),
+        failed_count: Number(classification.failed_count || 0),
+        skipped_count: Number(classification.skipped_count || 0),
+        jobs_enqueued: Number(classification.jobs_enqueued || 0),
+        jobs_processed: Number(classification.jobs_processed || 0),
+        already_classified_count: Number(classification.already_classified_count || 0),
+        currently_classifying_count: Number(classification.currently_classifying_count || 0),
+        permanently_failed_count: Number(classification.permanently_failed_count || 0),
+        processing_incomplete_count: Number(classification.processing_incomplete_count || 0),
+        processing_failed_count: Number(classification.processing_failed_count || 0),
+      },
+      queue_saturated_after_processing: source.queue_saturated_after_processing === true,
+      queue_saturation_reason: source.queue_saturation_reason || null,
+      queue_state: source.queue_state && typeof source.queue_state === "object" ? source.queue_state : {},
+      child_operations: source.child_operations && typeof source.child_operations === "object" ? source.child_operations : {},
       safety: {
         outlook_mutation_performed: safety.outlook_mutation_performed === true,
         automatic_responses_sent: Number(safety.automatic_responses_sent || 0),
@@ -790,6 +889,20 @@
     return normalizeMailboxImportPayload(payload);
   }
 
+  async function prepareMailbox(context, values = {}) {
+    const session = await currentSession(context, "Prepare mailbox");
+    const payload = await edgeFetchWithTimeout(SYNC_FUNCTION, session, {
+      method: "POST",
+      body: JSON.stringify({
+        mode: "prepare_mailbox",
+        processBatchSize: Number(values.processBatchSize || 25),
+        classifyBatchSize: Number(values.classifyBatchSize || 10),
+      }),
+    }, TIMEOUTS.mailboxPrepare);
+
+    return normalizeMailboxPreparePayload(payload);
+  }
+
   async function runInboxLiveRefresh(context, values = {}) {
     const session = await currentSession(context, "Inbox live refresh");
     const body = {
@@ -878,6 +991,7 @@
     normalizeInboxPreviewPayload,
     normalizeInboxImportPayload,
     normalizeMailboxImportPayload,
+    normalizeMailboxPreparePayload,
     normalizeLiveRefreshPayload,
     normalizeRematchExistingPayload,
     normalizeOperationalDashboardPayload,
@@ -885,6 +999,7 @@
     importApprovedInboxPreview,
     runMailboxImport,
     fetchMailboxImportStatus,
+    prepareMailbox,
     runInboxLiveRefresh,
     rematchExistingEmails,
     fetchOperationalDashboard,

@@ -61,6 +61,8 @@
       inboxMailboxImportLoading: false,
       inboxMailboxImportResult: null,
       inboxMailboxImportTarget: 100,
+      inboxPrepareLoading: false,
+      inboxPrepareResult: null,
       inboxLiveRefreshLoading: false,
       inboxLiveRefreshResult: null,
       inboxRematchLoading: false,

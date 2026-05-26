@@ -172,14 +172,23 @@
                   </label>
                   <button type="button" id="inbox-mailbox-import-start" class="primary-btn">
                     <i data-lucide="inbox"></i>
-                    Import Mailbox
+                    Import + Prepare
                   </button>
                   <button type="button" id="inbox-mailbox-import-continue" class="secondary-btn" disabled>
                     <i data-lucide="step-forward"></i>
                     Continue Import
                   </button>
+                  <button type="button" id="inbox-prepare-mailbox-run" class="secondary-btn">
+                    <i data-lucide="list-checks"></i>
+                    Prepare Mailbox
+                  </button>
+                  <button type="button" id="inbox-prepare-mailbox-continue" class="secondary-btn" disabled>
+                    <i data-lucide="play"></i>
+                    Continue Preparing
+                  </button>
                 </div>
                 <div id="inbox-mailbox-import-result" class="inbox-import-result"></div>
+                <div id="inbox-prepare-mailbox-result" class="inbox-import-result"></div>
               </div>
               <div id="inbox-preview-import-result" class="inbox-import-result"></div>
 
@@ -201,17 +210,17 @@
                   </button>
                   <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
                     <i data-lucide="download"></i>
-                    Import Likely Only
+                    Import Likely + Prepare
                   </button>
                   <button type="button" id="inbox-import-selected" class="secondary-btn" disabled>
                     <i data-lucide="check-square"></i>
-                    Import Selected Only
+                    Import Selected + Prepare
                   </button>
                   <button type="button" id="inbox-preview-clear" class="secondary-btn" disabled>
                     <i data-lucide="x"></i>
                     Clear Preview
                   </button>
-                  <p class="inbox-operator-note">Import buttons persist emails only. They do not process, classify, rematch, draft, or send.</p>
+                  <p class="inbox-operator-note">Import + Prepare persists emails, prepares mailbox rows, and classifies bounded batches. It never drafts, sends, or mutates Outlook.</p>
                 </div>
               </div>
 

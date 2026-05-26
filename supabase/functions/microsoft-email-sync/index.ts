@@ -76,6 +76,8 @@ const PIPELINE_VISIBILITY_SCAN_LIMIT = 2000;
 const PIPELINE_VISIBILITY_SCAN_PAGE_SIZE = 500;
 const CLASSIFY_IMPORTED_DEFAULT_BATCH_SIZE = 5;
 const CLASSIFY_IMPORTED_MAX_BATCH_SIZE = MAX_CLASSIFICATION_BATCH;
+const PREPARE_MAILBOX_DEFAULT_PROCESS_BATCH_SIZE = MAX_PROCESS_BATCH;
+const PREPARE_MAILBOX_DEFAULT_CLASSIFY_BATCH_SIZE = MAX_CLASSIFICATION_BATCH;
 const NORMALIZED_TEXT_LIMIT = 200000;
 
 type ServiceClient = ReturnType<typeof createClient>;
@@ -159,6 +161,13 @@ type MailboxImportStatusInput = {
   folder: "inbox";
 };
 
+type PrepareMailboxInput = {
+  mode: "prepare_mailbox";
+  folder: "inbox";
+  processBatchSize: number;
+  classifyBatchSize: number;
+};
+
 type ProcessImportedInput = {
   mode: "process_imported";
   folder: "inbox";
@@ -208,6 +217,7 @@ type RequestInput =
   | ImportApprovedInput
   | MailboxImportInput
   | MailboxImportStatusInput
+  | PrepareMailboxInput
   | ProcessImportedInput
   | ClassifyImportedInput
   | RunLiveRefreshInput
@@ -357,6 +367,8 @@ type ProcessImportedCounters = {
   links_created: number;
   links_updated: number;
 };
+
+type ImportedCandidateSource = "operational_events" | "email_tables";
 
 type ClassifyImportedCounters = {
   classified_count: number;
@@ -577,6 +589,20 @@ async function parseInput(req: Request): Promise<RequestInput> {
 
   if (requestedMode === "mailbox_import_status") {
     return { mode: "mailbox_import_status", folder: "inbox" };
+  }
+
+  if (requestedMode === "prepare_mailbox") {
+    const processBatchSize = clampBatchSize(
+      body?.processBatchSize ?? body?.process_batch_size ?? body?.batchSize ?? body?.limit,
+      PREPARE_MAILBOX_DEFAULT_PROCESS_BATCH_SIZE,
+      PROCESS_IMPORTED_MAX_BATCH_SIZE,
+    );
+    const classifyBatchSize = clampBatchSize(
+      body?.classifyBatchSize ?? body?.classify_batch_size ?? body?.batchSize ?? body?.limit,
+      PREPARE_MAILBOX_DEFAULT_CLASSIFY_BATCH_SIZE,
+      CLASSIFY_IMPORTED_MAX_BATCH_SIZE,
+    );
+    return { mode: "prepare_mailbox", folder: "inbox", processBatchSize, classifyBatchSize };
   }
 
   if (requestedMode === "process_imported") {
@@ -1848,12 +1874,25 @@ async function loadApprovedImportedMessageIds(supabase: ServiceClient) {
   return [...new Set((data || []).flatMap((row: { message_ids?: string[] | null }) => row.message_ids || []))];
 }
 
+async function loadImportedCandidatePoolIds(
+  supabase: ServiceClient,
+  mailboxId: string,
+  source: ImportedCandidateSource,
+) {
+  if (source === "email_tables") {
+    return (await fetchActiveImportedMessageIds(supabase, mailboxId)).ids;
+  }
+
+  return await loadApprovedImportedMessageIds(supabase);
+}
+
 async function loadImportedCandidateIds(
   supabase: ServiceClient,
   mailboxId: string,
   approvedMessageIds: string[],
   batchSize: number,
   counters: ProcessImportedCounters,
+  scanLimit = Math.max(batchSize * 4, batchSize),
 ) {
   if (!approvedMessageIds.length) return [];
   const { data: messages, error: messageError } = await supabase
@@ -1863,7 +1902,7 @@ async function loadImportedCandidateIds(
     .eq("sync_status", "active")
     .in("id", approvedMessageIds)
     .order("received_at", { ascending: false, nullsFirst: false })
-    .limit(Math.max(batchSize * 4, batchSize));
+    .limit(scanLimit);
 
   if (messageError) throw new SyncError("process_imported_message_lookup_failed", { phase: "process_imported_message_lookup", mailboxId });
   const ids = (messages || []).map((message: { id: string }) => message.id);
@@ -1916,6 +1955,31 @@ async function loadImportedCandidateIds(
   }
 
   return candidates;
+}
+
+async function selectImportedProcessingCandidates(
+  supabase: ServiceClient,
+  mailboxId: string,
+  source: ImportedCandidateSource,
+  batchSize: number,
+  counters: ProcessImportedCounters,
+) {
+  const poolIds = await loadImportedCandidatePoolIds(supabase, mailboxId, source);
+  if (source !== "email_tables") {
+    return {
+      poolIds,
+      candidateIds: await loadImportedCandidateIds(supabase, mailboxId, poolIds, batchSize, counters),
+    };
+  }
+
+  const candidateIds: string[] = [];
+  for (let index = 0; index < poolIds.length && candidateIds.length < batchSize; index += 100) {
+    const chunk = poolIds.slice(index, index + 100);
+    const remaining = batchSize - candidateIds.length;
+    const chunkCandidates = await loadImportedCandidateIds(supabase, mailboxId, chunk, remaining, counters, chunk.length);
+    candidateIds.push(...chunkCandidates.slice(0, remaining));
+  }
+  return { poolIds, candidateIds };
 }
 
 async function enqueueImportedProcessingJobs(supabase: ServiceClient, messageIds: string[]) {
@@ -2174,11 +2238,17 @@ async function processImportedEmails(
   mailboxId: string,
   input: ProcessImportedInput,
   admin: { userId: string; email: string | null },
-  telemetry: { parentOperationId?: string | null } = {},
+  telemetry: { parentOperationId?: string | null; candidateSource?: ImportedCandidateSource } = {},
 ) {
   const counters = importedProcessingCounters();
-  const approvedMessageIds = await loadApprovedImportedMessageIds(supabase);
-  const candidateMessageIds = await loadImportedCandidateIds(supabase, mailboxId, approvedMessageIds, input.batchSize, counters);
+  const candidateSource = telemetry.candidateSource || "operational_events";
+  const { poolIds: approvedMessageIds, candidateIds: candidateMessageIds } = await selectImportedProcessingCandidates(
+    supabase,
+    mailboxId,
+    candidateSource,
+    input.batchSize,
+    counters,
+  );
   counters.queued_count = candidateMessageIds.length;
   counters.jobs_enqueued = await enqueueImportedProcessingJobs(supabase, candidateMessageIds);
 
@@ -2232,6 +2302,7 @@ async function processImportedEmails(
   const eventPayload = {
     mode: "process_imported",
     parent_operation_id: telemetry.parentOperationId || null,
+    candidate_source: candidateSource,
     batch_size: input.batchSize,
     candidate_count: candidateMessageIds.length,
     approved_imported_message_count: approvedMessageIds.length,
@@ -2270,6 +2341,7 @@ async function processImportedEmails(
   return {
     ...counters,
     approved_imported_message_count: approvedMessageIds.length,
+    candidate_source: candidateSource,
     candidate_message_ids: candidateMessageIds,
     processing_reasons: processingReasons,
     deterministic_results: deterministicResults,
@@ -2325,6 +2397,7 @@ async function loadClassifyImportedCandidateIds(
   approvedMessageIds: string[],
   batchSize: number,
   counters: ClassifyImportedCounters,
+  scanLimit = Math.max(batchSize * 8, batchSize),
 ) {
   if (!approvedMessageIds.length) return [];
   const { data: messages, error: messageError } = await supabase
@@ -2334,7 +2407,7 @@ async function loadClassifyImportedCandidateIds(
     .eq("sync_status", "active")
     .in("id", approvedMessageIds)
     .order("received_at", { ascending: false, nullsFirst: false })
-    .limit(Math.max(batchSize * 8, batchSize));
+    .limit(scanLimit);
 
   if (messageError) throw new SyncError("classify_imported_message_lookup_failed", { phase: "classify_imported_message_lookup", mailboxId });
   const ids = (messages || []).map((message: { id: string }) => message.id);
@@ -2381,7 +2454,7 @@ async function loadClassifyImportedCandidateIds(
   const classified = new Set<string>();
   for (const row of classifications || []) {
     const validationStatus = String(row.validation_status || "");
-    if (!validationStatus || validationStatus === "valid") classified.add(String(row.message_id));
+    if (validationStatus === "valid") classified.add(String(row.message_id));
   }
 
   const candidates: string[] = [];
@@ -2424,6 +2497,31 @@ async function loadClassifyImportedCandidateIds(
   }
 
   return candidates;
+}
+
+async function selectClassifyImportedCandidates(
+  supabase: ServiceClient,
+  mailboxId: string,
+  source: ImportedCandidateSource,
+  batchSize: number,
+  counters: ClassifyImportedCounters,
+) {
+  const poolIds = await loadImportedCandidatePoolIds(supabase, mailboxId, source);
+  if (source !== "email_tables") {
+    return {
+      poolIds,
+      candidateIds: await loadClassifyImportedCandidateIds(supabase, mailboxId, poolIds, batchSize, counters),
+    };
+  }
+
+  const candidateIds: string[] = [];
+  for (let index = 0; index < poolIds.length && candidateIds.length < batchSize; index += 100) {
+    const chunk = poolIds.slice(index, index + 100);
+    const remaining = batchSize - candidateIds.length;
+    const chunkCandidates = await loadClassifyImportedCandidateIds(supabase, mailboxId, chunk, remaining, counters, chunk.length);
+    candidateIds.push(...chunkCandidates.slice(0, remaining));
+  }
+  return { poolIds, candidateIds };
 }
 
 async function countRows(supabase: ServiceClient, table: string, build: (query: any) => any) {
@@ -2692,10 +2790,17 @@ async function classifyImportedEmails(
   mailboxId: string,
   input: ClassifyImportedInput,
   admin: { userId: string; email: string | null },
+  telemetry: { parentOperationId?: string | null; candidateSource?: ImportedCandidateSource } = {},
 ) {
   const counters = classifyImportedCounters();
-  const approvedMessageIds = await loadApprovedImportedMessageIds(supabase);
-  const candidateMessageIds = await loadClassifyImportedCandidateIds(supabase, mailboxId, approvedMessageIds, input.batchSize, counters);
+  const candidateSource = telemetry.candidateSource || "operational_events";
+  const { poolIds: approvedMessageIds, candidateIds: candidateMessageIds } = await selectClassifyImportedCandidates(
+    supabase,
+    mailboxId,
+    candidateSource,
+    input.batchSize,
+    counters,
+  );
   const draftsBefore = await countResponseDrafts(supabase, candidateMessageIds);
   const classificationResults: Array<Record<string, unknown>> = [];
 
@@ -2744,6 +2849,8 @@ async function classifyImportedEmails(
   const jobIds = await loadClassifyImportedJobIds(supabase, candidateMessageIds);
   const eventPayload = {
     mode: "classify_imported",
+    parent_operation_id: telemetry.parentOperationId || null,
+    candidate_source: candidateSource,
     batch_size: input.batchSize,
     candidate_count: candidateMessageIds.length,
     approved_imported_message_count: approvedMessageIds.length,
@@ -2772,6 +2879,7 @@ async function classifyImportedEmails(
     ...counters,
     classification_created: counters.classified_count,
     approved_imported_message_count: approvedMessageIds.length,
+    candidate_source: candidateSource,
     candidate_message_ids: candidateMessageIds,
     classification_results: classificationResults,
     queue_summary: queueSummary,
@@ -2967,6 +3075,171 @@ async function buildTablePipelineVisibilitySummary(supabase: ServiceClient, mail
     processing_skipped_jobs: processingSkippedJobs,
     classification_failed_jobs: classificationFailedJobs,
     classification_skipped_jobs: classificationSkippedJobs,
+  };
+}
+
+function mailboxPreparationProgress(
+  visibility: Awaited<ReturnType<typeof buildTablePipelineVisibilitySummary>>,
+  queueState: { queued?: number; running?: number } = {},
+) {
+  const importedActive = Number(visibility.active_imported_total || 0);
+  const processedTotal = Number(visibility.fully_processed_imported_count || 0);
+  const classifiedTotal = Number(visibility.current_valid_classified_imported_total || 0);
+  const remainingToProcess = Number(visibility.imported_without_processing_count || 0);
+  const remainingToClassify = Number(visibility.processed_without_classification_count || 0);
+  const processingFailed = Number(visibility.processing_failed_jobs || 0);
+  const processingSkipped = Number(visibility.processing_skipped_jobs || 0);
+  const classificationFailed = Number(visibility.classification_failed_jobs || 0);
+  const classificationSkipped = Number(visibility.classification_skipped_jobs || 0);
+  const actionableToProcess = Math.max(remainingToProcess - processingFailed, 0);
+  const actionableToClassify = Math.max(remainingToClassify - classificationFailed - classificationSkipped, 0);
+  const queuedOrRunning = Number(queueState.queued || 0) + Number(queueState.running || 0);
+  const hasMore = actionableToProcess > 0 || actionableToClassify > 0 || queuedOrRunning > 0 || visibility.is_limited === true;
+
+  return {
+    imported_active: importedActive,
+    processed_total: processedTotal,
+    classified_total: classifiedTotal,
+    remaining_to_process: remainingToProcess,
+    remaining_to_classify: remainingToClassify,
+    processing_failed: processingFailed,
+    processing_skipped: processingSkipped,
+    classification_failed: classificationFailed,
+    classification_skipped: classificationSkipped,
+    actionable_remaining_to_process: actionableToProcess,
+    actionable_remaining_to_classify: actionableToClassify,
+    queued_or_running: queuedOrRunning,
+    only_failures_remain: !hasMore && (remainingToProcess > 0 || remainingToClassify > 0),
+    has_more: hasMore,
+    source: visibility.source,
+    scope: visibility.scope,
+    is_limited: visibility.is_limited,
+    scan_limit: visibility.scan_limit,
+  };
+}
+
+async function prepareMailbox(
+  req: Request,
+  supabase: ServiceClient,
+  mailboxId: string,
+  folderId: string,
+  input: PrepareMailboxInput,
+  admin: { userId: string; email: string | null },
+) {
+  const startedAt = Date.now();
+  const controls = rolloutControls();
+  const initialQueue = await assertQueueHasCapacity(supabase, mailboxId);
+  const beforeVisibility = await buildTablePipelineVisibilitySummary(supabase, mailboxId);
+  const beforeProgress = mailboxPreparationProgress(beforeVisibility, initialQueue.queue_state);
+
+  if (!controls.processing_enabled || !controls.classification_enabled) {
+    return {
+      ok: true,
+      mode: "prepare_mailbox",
+      mailbox_id: mailboxId,
+      folder_id: folderId,
+      disabled: true,
+      reason: !controls.processing_enabled ? "processing_disabled" : "classification_disabled",
+      progress: beforeProgress,
+      before: beforeProgress,
+      processing: { processed_count: 0, failed_count: 0, skipped_count: 0, jobs_enqueued: 0, jobs_processed: 0 },
+      classification: { classified_count: 0, failed_count: 0, skipped_count: 0, jobs_enqueued: 0, jobs_processed: 0 },
+      queue_state: initialQueue.queue_state,
+      queue_limits: initialQueue.queue_limits,
+      duration_ms: Date.now() - startedAt,
+      safety: liveRefreshSafety({ processing_triggered: false, classification_triggered: false }),
+    };
+  }
+
+  if (initialQueue.queue_saturated) {
+    return {
+      ok: true,
+      mode: "prepare_mailbox",
+      mailbox_id: mailboxId,
+      folder_id: folderId,
+      queue_saturated: true,
+      queue_saturation_reason: initialQueue.queue_saturation_reason,
+      progress: beforeProgress,
+      before: beforeProgress,
+      processing: { processed_count: 0, failed_count: 0, skipped_count: 0, jobs_enqueued: 0, jobs_processed: 0 },
+      classification: { classified_count: 0, failed_count: 0, skipped_count: 0, jobs_enqueued: 0, jobs_processed: 0 },
+      queue_state: initialQueue.queue_state,
+      queue_limits: initialQueue.queue_limits,
+      duration_ms: Date.now() - startedAt,
+      safety: liveRefreshSafety({ processing_triggered: false, classification_triggered: false }),
+    };
+  }
+
+  const processingResult = await processImportedEmails(supabase, mailboxId, {
+    mode: "process_imported",
+    folder: input.folder,
+    batchSize: input.processBatchSize,
+  }, admin, { candidateSource: "email_tables" });
+
+  const queueAfterProcessing = await assertQueueHasCapacity(supabase, mailboxId);
+  let classificationResult: Awaited<ReturnType<typeof classifyImportedEmails>> | null = null;
+  if (!queueAfterProcessing.queue_saturated) {
+    classificationResult = await classifyImportedEmails(req, supabase, mailboxId, {
+      mode: "classify_imported",
+      folder: input.folder,
+      batchSize: input.classifyBatchSize,
+    }, admin, { candidateSource: "email_tables" });
+  }
+
+  const finalQueue = await buildRolloutQueueState(supabase, mailboxId);
+  const afterVisibility = await buildTablePipelineVisibilitySummary(supabase, mailboxId);
+  const afterProgress = mailboxPreparationProgress(afterVisibility, finalQueue);
+  const childOperations = {
+    process_operation_id: processingResult.replay_operation_references?.operation_event_id || null,
+    classify_operation_id: classificationResult?.replay_operation_references?.operation_event_id || null,
+  };
+
+  return {
+    ok: true,
+    mode: "prepare_mailbox",
+    mailbox_id: mailboxId,
+    folder_id: folderId,
+    process_batch_size: input.processBatchSize,
+    classify_batch_size: input.classifyBatchSize,
+    progress: afterProgress,
+    before: beforeProgress,
+    processing: {
+      candidate_source: processingResult.candidate_source,
+      candidate_count: processingResult.candidate_message_ids.length,
+      processed_count: Number(processingResult.processed_count || 0),
+      failed_count: Number(processingResult.failed_count || 0),
+      skipped_count: Number(processingResult.skipped_count || 0),
+      jobs_enqueued: Number(processingResult.jobs_enqueued || 0),
+      jobs_processed: Number(processingResult.jobs_processed || 0),
+      already_processed_count: Number(processingResult.already_processed_count || 0),
+      currently_processing_count: Number(processingResult.currently_processing_count || 0),
+      permanently_failed_count: Number(processingResult.permanently_failed_count || 0),
+    },
+    classification: {
+      candidate_source: classificationResult?.candidate_source || "email_tables",
+      candidate_count: classificationResult?.candidate_message_ids.length || 0,
+      classified_count: Number(classificationResult?.classified_count || 0),
+      failed_count: Number(classificationResult?.failed_count || 0),
+      skipped_count: Number(classificationResult?.skipped_count || 0),
+      jobs_enqueued: Number(classificationResult?.jobs_enqueued || 0),
+      jobs_processed: Number(classificationResult?.jobs_processed || 0),
+      already_classified_count: Number(classificationResult?.already_classified_count || 0),
+      currently_classifying_count: Number(classificationResult?.currently_classifying_count || 0),
+      permanently_failed_count: Number(classificationResult?.permanently_failed_count || 0),
+      processing_incomplete_count: Number(classificationResult?.processing_incomplete_count || 0),
+      processing_failed_count: Number(classificationResult?.processing_failed_count || 0),
+    },
+    queue_saturated_after_processing: queueAfterProcessing.queue_saturated,
+    queue_saturation_reason: queueAfterProcessing.queue_saturation_reason || null,
+    queue_state: finalQueue,
+    queue_limits: rolloutQueueLimits(),
+    child_operations: childOperations,
+    duration_ms: Date.now() - startedAt,
+    safety: liveRefreshSafety({
+      processing_triggered: true,
+      classification_triggered: Boolean(classificationResult),
+      drafts_created: Number(classificationResult?.drafts_created || 0),
+    }),
   };
 }
 
@@ -4236,6 +4509,7 @@ serve(async (req) => {
     isPreview = input.mode === "sync_preview" ||
       input.mode === "sync_import_approved" ||
       input.mode === "mailbox_import_status" ||
+      input.mode === "prepare_mailbox" ||
       input.mode === "process_imported" ||
       input.mode === "classify_imported" ||
       input.mode === "run_live_refresh" ||
@@ -4334,6 +4608,24 @@ serve(async (req) => {
         operation_id: resultLog.operation_id,
         ok: result.ok,
         queue_saturated: resultLog.queue_saturated === true,
+      });
+
+      return json(req, 200, result);
+    }
+
+    if (input.mode === "prepare_mailbox") {
+      const processingModel = await loadProcessingModel(supabase);
+      mailboxId = processingModel.mailbox.id;
+      folderId = processingModel.folder.id;
+      const result = await prepareMailbox(req, supabase, mailboxId, folderId, input, admin);
+      console.log("[microsoft-email-sync] prepare_mailbox completed", {
+        phase: "prepare_mailbox_complete",
+        mailbox_id: mailboxId,
+        folder_id: folderId,
+        ok: result.ok,
+        remaining_to_process: result.progress?.remaining_to_process,
+        remaining_to_classify: result.progress?.remaining_to_classify,
+        has_more: result.progress?.has_more,
       });
 
       return json(req, 200, result);
@@ -4504,6 +4796,9 @@ serve(async (req) => {
 
     if (input.mode === "mailbox_import_status") {
       const progress = mailboxImportProgress(model.syncState.metadata);
+      const preparationVisibility = await buildTablePipelineVisibilitySummary(supabase, mailboxId);
+      const preparationQueue = await buildRolloutQueueState(supabase, mailboxId);
+      const preparationProgress = mailboxPreparationProgress(preparationVisibility, preparationQueue);
       return json(req, 200, {
         ok: true,
         mode: "mailbox_import_status",
@@ -4531,8 +4826,9 @@ serve(async (req) => {
           processing_triggered: false,
           classification_triggered: false,
         },
-        remaining_to_process: null,
-        remaining_to_classify: null,
+        preparation_progress: preparationProgress,
+        remaining_to_process: preparationProgress.remaining_to_process,
+        remaining_to_classify: preparationProgress.remaining_to_classify,
       });
     }
 
