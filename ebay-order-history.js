@@ -2130,6 +2130,7 @@ function renderReturnQueue() {
     const lineIds = getReturnTaskLineIds(task);
     const dueInfo = getReturnTaskDueInfo(task);
     const requestedLabel = getReturnTaskRequestedLabel(task);
+    const complaintDetail = getReturnComplaintDetails(task);
     const orderLabel = returnCase.order_number || (
       returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
     );
@@ -2174,7 +2175,8 @@ function renderReturnQueue() {
             ${renderReturnMessageLog(task)}
           </div>
           <div class="return-task-buttons">
-            ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+            ${task.task_type === "return_intake" && lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+            ${task.task_type === "return_review" && complaintDetail.detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(complaintDetail.detailsUrl)}" target="_blank" rel="noopener">Open eBay</a>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
@@ -4086,13 +4088,13 @@ function renderReturnLineList() {
               <option value="wrong_item">Wrong item</option>
               <option value="refund_only">Refund only / no item</option>
               <option value="missing">Missing from return package</option>
-              <option value="admin_review">Needs admin review</option>
+              <option value="admin_review">Dispute with eBay / admin review</option>
             </select>
           </label>
         </div>
         <label class="return-line-note">
           Item note
-          <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Optional note for this returned item" />
+          <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Condition note for this returned item" />
         </label>
       </article>
     `;
@@ -4103,6 +4105,18 @@ function renderReturnLineList() {
       if (checkbox.checked) state.returnSelectedLineIds.add(checkbox.dataset.returnLineSelect);
       else state.returnSelectedLineIds.delete(checkbox.dataset.returnLineSelect);
       renderReturnLineList();
+    });
+  });
+  list.querySelectorAll("[data-return-condition]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const lineId = select.getAttribute("data-return-condition");
+      const disposition = getReturnLineField("data-return-disposition", lineId);
+      if (!disposition) return;
+      if (select.value === "wrong_item") {
+        disposition.value = "wrong_item";
+      } else if (["damaged", "missing_parts"].includes(select.value) && !["wrong_item", "missing"].includes(disposition.value)) {
+        disposition.value = "admin_review";
+      }
     });
   });
 }
@@ -5845,7 +5859,8 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
   const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
   const failed = Number(summary.failedCount || 0);
   const duplicate = Number(summary.duplicateResolvedCount || 0);
-  const processed = Number(summary.processedCount || matched + unmatched + duplicate);
+  const heldOpen = Number(summary.staleCasesHeldOpen || 0);
+  const processed = Number(summary.processedCount || matched + unmatched + duplicate + heldOpen);
   const missing = Math.max(0, requested - processed - failed);
   const failedReturns = Array.isArray(summary.failedReturns) ? summary.failedReturns : [];
   const unmatchedReturns = Array.isArray(summary.unmatchedReturns) ? summary.unmatchedReturns : [];
@@ -5868,6 +5883,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <span><small>Missing OG match</small><b>${unmatched.toLocaleString()}</b></span>
       <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
       <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
+      ${heldOpen ? `<span><small>Needs local action</small><b>${heldOpen.toLocaleString()}</b></span>` : ""}
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
       ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
       ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
@@ -6237,6 +6253,7 @@ function buildReturnApiSyncSummary(response = {}) {
     filesSeen: Number(response.filesSeen || 0),
     staleCasesClosed: Number(response.staleCasesClosed || 0),
     staleTasksResolved: Number(response.staleTasksResolved || 0),
+    staleCasesHeldOpen: Number(response.staleCasesHeldOpen || 0),
     importedReturns: results.filter((entry) => entry?.matched === true),
     unmatchedReturns,
     failedReturns,
@@ -6244,8 +6261,8 @@ function buildReturnApiSyncSummary(response = {}) {
       ? response.error
       : response.cleanupClosed
         ? (response.dryRun
-          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would be hidden from the open queue.`
-          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} and resolved ${Number(response.staleTasksResolved || 0).toLocaleString()} task${Number(response.staleTasksResolved || 0) === 1 ? "" : "s"}.`)
+          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would close and ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} would stay open for local action.`
+          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} and kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open for local action.`)
       : response.dryRun
         ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
         : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
@@ -6294,7 +6311,7 @@ async function runEbayReturnApiCleanup() {
     alert("Only admins can clean eBay returns from the API.");
     return;
   }
-  const confirmed = window.confirm("Clean the return queue so only returns still open on eBay remain pending? This closes local return cases and resolves tasks that no longer appear in eBay's open-return list.");
+  const confirmed = window.confirm("Check eBay for returns that are no longer open, store the eBay closure details, and close local cases only when no local action is still open?");
   if (!confirmed) return;
 
   setReturnApiSyncButtonsDisabled(true);
@@ -6312,7 +6329,7 @@ async function runEbayReturnApiCleanup() {
     await loadReturnQueue();
     setReturnTaskSaveStatus(
       response.ok
-        ? "Closed eBay returns cleaned from the pending queue."
+        ? "eBay closure details synced; local-action cases stayed open."
         : "Cleaner finished with issues. Review the audit panel.",
       response.ok ? "success" : "error"
     );

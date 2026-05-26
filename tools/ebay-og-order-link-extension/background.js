@@ -510,10 +510,7 @@
   async function handleAppReturnStatus(status = {}) {
     const transferId = status.transferId || "";
     if (!transferId) return;
-    if (status.phase === "started" && status.tabId) {
-      focusTab(status.tabId);
-      return;
-    }
+    if (status.phase === "started") return;
     if (status.ok) await removePendingReturn(transferId);
     const waiter = appReturnAcks.get(transferId);
     if (waiter) waiter.resolve(status);
@@ -522,10 +519,7 @@
   async function handleAppReturnMessageStatus(status = {}) {
     const transferId = status.transferId || "";
     if (!transferId) return;
-    if (status.phase === "started" && status.tabId) {
-      focusTab(status.tabId);
-      return;
-    }
+    if (status.phase === "started") return;
     if (status.ok) await removePendingReturnMessage(transferId);
     const waiter = appReturnMessageAcks.get(transferId);
     if (waiter) waiter.resolve(status);

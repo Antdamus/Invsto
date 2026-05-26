@@ -517,3 +517,8 @@ entrypoint = "./functions/ebay-oauth-callback/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-publishing-setup/index.ts"
+
+[functions.ebay-return-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-return-sync/index.ts"
