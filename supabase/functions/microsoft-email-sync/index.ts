@@ -4011,6 +4011,7 @@ async function buildPipelineDiagnostics(supabase: ServiceClient, mailboxId: stri
         duration_ms: numberFromPayload(payload, ["duration_ms"]),
       },
       safety,
+      payload,
       child_operations: payload.child_operations && typeof payload.child_operations === "object" ? payload.child_operations : {},
       status: payload.status || null,
     };

@@ -1730,6 +1730,53 @@
     }
   }
 
+  function operationalEventById(id, state = triageStore.getState()) {
+    const events = Array.isArray(state.operationalDashboardSnapshot?.recent_operational_events)
+      ? state.operationalDashboardSnapshot.recent_operational_events
+      : [];
+    return events.find((event) => String(event.id || "") === String(id || "")) || null;
+  }
+
+  function closeOperationalEventDetail() {
+    setOperationalDashboardState({
+      operationalEventDetailOpen: false,
+      selectedOperationalEventId: null,
+      selectedOperationalEventDetail: null,
+    });
+  }
+
+  function openOperationalEventDetail(id) {
+    const event = operationalEventById(id);
+    if (!event) return;
+    setOperationalDashboardState({
+      operationalEventDetailOpen: true,
+      selectedOperationalEventId: event.id || id,
+      selectedOperationalEventDetail: event,
+    });
+  }
+
+  function handleOperationalDashboardClick(event) {
+    if (event.target.closest("[data-operational-event-close]")) {
+      closeOperationalEventDetail();
+      return;
+    }
+    const row = event.target.closest("[data-operational-event-id]");
+    if (!row) return;
+    openOperationalEventDetail(row.getAttribute("data-operational-event-id"));
+  }
+
+  function handleOperationalDashboardKeydown(event) {
+    if (event.key === "Escape" && triageStore.getState().operationalEventDetailOpen) {
+      closeOperationalEventDetail();
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("[data-operational-event-id]");
+    if (!row) return;
+    event.preventDefault();
+    openOperationalEventDetail(row.getAttribute("data-operational-event-id"));
+  }
+
   async function loadAdminClassificationData(context, options = {}) {
     const currentState = triageStore.getState();
     const mailboxQuery = mailboxQueryFromState(currentState, options.mailboxQuery || {});
@@ -2703,6 +2750,8 @@
       storeDashboardCollapsed(operationalDashboardCollapsed);
       setOperationalDashboardState({ operationalDashboardCollapsed });
     });
+    els.operationalDashboard?.addEventListener("click", handleOperationalDashboardClick);
+    els.operationalDashboard?.addEventListener("keydown", handleOperationalDashboardKeydown);
     els.toggleCategoryPanel?.addEventListener("click", () => {
       setAdminClassificationState({
         categoryPanelCollapsed: !adminClassificationState.categoryPanelCollapsed,

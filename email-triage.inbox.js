@@ -50,7 +50,7 @@
       rematchExistingResult: document.getElementById("inbox-rematch-existing-result"),
       clear: document.getElementById("inbox-preview-clear"),
       bucketFilters: document.querySelectorAll("[data-inbox-bucket-filter]"),
-      section: document.getElementById("inbox-preview-section"),
+      section: document.getElementById("admin-diagnostics-drawer"),
     };
   }
 
@@ -279,7 +279,7 @@
   function renderImportResult(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.importResult) return;
     const result = state.inboxImportResult;
-    if (!result) {
+    if (!result || state.inboxImportResultCleared) {
       els.importResult.innerHTML = "";
       return;
     }
@@ -287,7 +287,8 @@
     els.importResult.innerHTML = `
       <div class="inbox-import-result-head">
         <strong>Approved import-only result</strong>
-        ${result.operation_event_id ? `<span>Operation event ${utils.escapeHtml(result.operation_event_id)}</span>` : "<span>No operation event id returned</span>"}
+        <span>${result.operation_event_id ? `Operation event ${utils.escapeHtml(result.operation_event_id)}` : "No operation event id returned"}</span>
+        <button type="button" class="secondary-btn inbox-result-clear-btn" data-inbox-clear-result="import">Clear Import Result</button>
       </div>
       <p class="inbox-result-note">Messages were persisted, then mailbox preparation was requested. Preparation is bounded, so continue if remaining work is shown.</p>
       <dl>
@@ -309,7 +310,7 @@
   function renderMailboxImportResult(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.mailboxImportResult) return;
     const result = state.inboxMailboxImportResult;
-    if (!result) {
+    if (!result || state.inboxMailboxImportResultCleared) {
       els.mailboxImportResult.innerHTML = "";
       return;
     }
@@ -324,6 +325,7 @@
       <div class="inbox-import-result-head">
         <strong>Mailbox import progress</strong>
         <span>${utils.escapeHtml(progress.status || "not_started")}${result.operation_event_id ? ` · operation ${utils.escapeHtml(result.operation_event_id)}` : ""}</span>
+        <button type="button" class="secondary-btn inbox-result-clear-btn" data-inbox-clear-result="mailbox_import">Clear Import Result</button>
       </div>
       <p class="inbox-result-note">Bounded mailbox import persists messages in batches. This screen can prepare imported rows afterward without drafts, sending, or Outlook mutation.</p>
       <dl>
@@ -356,7 +358,7 @@
   function renderPrepareMailboxResult(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.prepareMailboxResult) return;
     const result = state.inboxPrepareResult;
-    if (!result) {
+    if (!result || state.inboxPrepareResultCleared) {
       els.prepareMailboxResult.innerHTML = "";
       return;
     }
@@ -377,6 +379,7 @@
       <div class="inbox-import-result-head">
         <strong>Mailbox preparation progress</strong>
         <span>${utils.escapeHtml(status)}</span>
+        <button type="button" class="secondary-btn inbox-result-clear-btn" data-inbox-clear-result="prepare">Clear Preparation Result</button>
       </div>
       <p class="inbox-result-note">Preparation normalizes messages, matches local eBay context, and classifies eligible emails in bounded batches. Drafts and sending stay manual.</p>
       <dl>
@@ -450,7 +453,7 @@
   function renderLiveRefreshResult(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.liveRefreshResult) return;
     const result = state.inboxLiveRefreshResult;
-    if (!result) {
+    if (!result || state.inboxLiveRefreshResultCleared) {
       els.liveRefreshResult.innerHTML = "";
       return;
     }
@@ -462,6 +465,7 @@
       <div class="inbox-live-refresh-head">
         <strong>Live refresh result</strong>
         <span>${result.operation_id ? `Operation ${utils.escapeHtml(result.operation_id)}` : "No parent operation id returned"}</span>
+        <button type="button" class="secondary-btn inbox-result-clear-btn" data-inbox-clear-result="live_refresh">Clear Operation Result</button>
       </div>
       ${result.blocked ? `<div class="workspace-status inbox-preview-status">Live refresh blocked safely: ${utils.escapeHtml(result.reason || "blocked")}</div>` : ""}
       <div class="inbox-live-refresh-scope">
@@ -528,7 +532,7 @@
   function renderRematchExistingResult(state, els, utils = window.EmailTriageRenderUtils) {
     if (!els.rematchExistingResult) return;
     const result = state.inboxRematchResult;
-    if (!result) {
+    if (!result || state.inboxRematchResultCleared) {
       els.rematchExistingResult.innerHTML = "";
       return;
     }
@@ -544,6 +548,7 @@
       <div class="inbox-live-refresh-head">
         <strong>Rematch result: ${utils.escapeHtml(rematchScopeLabel(result.scope))}</strong>
         <span>${utils.escapeHtml(result.scanned || 0)} scanned · ${utils.escapeHtml(changedLinkCount)} link changes${hasMore ? " · more available" : ""}</span>
+        <button type="button" class="secondary-btn inbox-result-clear-btn" data-inbox-clear-result="rematch">Clear Rematch Result</button>
       </div>
       <p class="inbox-result-note">
         Rematch recalculates deterministic eBay links only. Classifications and drafts were not recomputed, and nothing was sent.
@@ -788,6 +793,7 @@
         inboxPreviewLoading: true,
         inboxPreviewError: null,
         inboxImportResult: null,
+        inboxImportResultCleared: false,
         inboxPreviewSelectedProviderMessageIds: [],
         operationInFlight: "sync_preview",
       });
@@ -819,6 +825,8 @@
       update({
         inboxMailboxImportLoading: true,
         inboxMailboxImportTarget: targetCount,
+        inboxMailboxImportResultCleared: false,
+        inboxPrepareResultCleared: false,
         inboxPreviewError: null,
         operationInFlight: "mailbox_import",
       });
@@ -861,6 +869,7 @@
     async function runPrepareMailboxAction(source = "manual") {
       update({
         inboxPrepareLoading: true,
+        inboxPrepareResultCleared: false,
         inboxPreviewError: null,
         operationInFlight: "prepare_mailbox",
       });
@@ -936,7 +945,13 @@
     els.importLikely?.addEventListener("click", async () => {
       const state = store.getState();
       const controls = importControlsFromState(state);
-      update({ inboxImportLoading: true, inboxPreviewError: null, operationInFlight: "sync_import_approved" });
+      update({
+        inboxImportLoading: true,
+        inboxImportResultCleared: false,
+        inboxPrepareResultCleared: false,
+        inboxPreviewError: null,
+        operationInFlight: "sync_import_approved",
+      });
       try {
         const result = await api.importApprovedInboxPreview(context, {
           ...controls,
@@ -978,7 +993,13 @@
       const safeIds = ids.filter((id) => allowed.has(id));
       if (!safeIds.length) return;
       const controls = importControlsFromState(state);
-      update({ inboxImportLoading: true, inboxPreviewError: null, operationInFlight: "sync_import_approved" });
+      update({
+        inboxImportLoading: true,
+        inboxImportResultCleared: false,
+        inboxPrepareResultCleared: false,
+        inboxPreviewError: null,
+        operationInFlight: "sync_import_approved",
+      });
       try {
         const result = await api.importApprovedInboxPreview(context, {
           ...controls,
@@ -1021,6 +1042,7 @@
         inboxLiveRefreshLoading: true,
         inboxPreviewError: null,
         inboxLiveRefreshResult: null,
+        inboxLiveRefreshResultCleared: false,
         operationInFlight: "run_live_refresh",
       });
       try {
@@ -1063,6 +1085,7 @@
         inboxRematchLoading: true,
         inboxPreviewError: null,
         inboxRematchResult: optionsForRun.append ? currentState.inboxRematchResult : null,
+        inboxRematchResultCleared: false,
         operationInFlight: "rematch_existing",
       });
       try {
@@ -1127,24 +1150,30 @@
       await executeRematch({ payload, append: true, uiScope: scope === "current_filter" ? "current_filter" : "all_imported" });
     });
 
+    els.section?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-inbox-clear-result]");
+      if (!button) return;
+      const target = button.getAttribute("data-inbox-clear-result");
+      if (target === "mailbox_import") {
+        update({ inboxMailboxImportResultCleared: true });
+      } else if (target === "prepare") {
+        update({ inboxPrepareResultCleared: true });
+      } else if (target === "import") {
+        update({ inboxImportResultCleared: true });
+      } else if (target === "live_refresh") {
+        update({ inboxLiveRefreshResultCleared: true });
+      } else if (target === "rematch") {
+        update({ inboxRematchResultCleared: true });
+      }
+    });
+
     els.clear?.addEventListener("click", () => {
       update({
         inboxPreviewLoading: false,
         inboxPreviewError: null,
         inboxPreviewResult: null,
         inboxPreviewSelectedProviderMessageIds: [],
-        inboxImportLoading: false,
-        inboxImportResult: null,
-        inboxMailboxImportLoading: false,
-        inboxPrepareLoading: false,
-        inboxPrepareResult: null,
-        inboxLiveRefreshLoading: false,
-        inboxLiveRefreshResult: null,
-        inboxRematchLoading: false,
-        inboxRematchResult: null,
-        inboxLastOperationId: null,
         inboxLastRefreshedAt: null,
-        operationInFlight: null,
       });
     });
   }

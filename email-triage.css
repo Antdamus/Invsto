@@ -254,6 +254,16 @@
   border-radius: 8px;
   background: rgba(0,0,0,.12);
   padding: 9px;
+  cursor: pointer;
+  transition: border-color .18s var(--ease), background .18s var(--ease), transform .18s var(--ease);
+}
+
+.operational-event-row:hover,
+.operational-event-row:focus-visible {
+  border-color: rgba(214,178,94,.3);
+  background: rgba(214,178,94,.055);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .operational-event-row.is-replay {
@@ -284,6 +294,20 @@
 
 .operational-event-row p {
   margin: 0;
+}
+
+.operational-event-main,
+.operational-event-summary {
+  min-width: 0;
+}
+
+.operational-safety-line {
+  display: block;
+  margin-top: 6px;
+  color: rgba(242,243,245,.54);
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .operational-child-refs {
@@ -329,6 +353,133 @@
   border: 1px dashed rgba(255,255,255,.1);
   border-radius: 8px;
   padding: 10px;
+}
+
+.operational-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0,0,0,.56);
+  backdrop-filter: blur(3px);
+}
+
+.operational-detail-drawer {
+  position: fixed;
+  z-index: 71;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  width: min(560px, 100vw);
+  overflow-y: auto;
+  border-left: 1px solid rgba(214,178,94,.22);
+  background: rgba(10,10,12,.98);
+  box-shadow: -18px 0 40px rgba(0,0,0,.38);
+  padding: 18px;
+}
+
+.operational-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.operational-detail-header h3 {
+  margin: 4px 0 6px;
+  color: rgba(242,243,245,.96);
+  font-size: 1.24rem;
+  letter-spacing: 0;
+}
+
+.operational-detail-header p {
+  margin: 0;
+  color: rgba(242,243,245,.64);
+  font-size: .84rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.operational-detail-meta,
+.operational-detail-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.operational-detail-metric,
+.operational-detail-safety,
+.operational-raw-payload {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  padding: 10px;
+}
+
+.operational-detail-metric span {
+  display: block;
+  color: rgba(242,243,245,.56);
+  font-size: .7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.operational-detail-metric strong {
+  display: block;
+  margin-top: 4px;
+  color: rgba(242,243,245,.94);
+  font-size: .92rem;
+  overflow-wrap: anywhere;
+}
+
+.operational-detail-metric em {
+  display: block;
+  margin-top: 4px;
+  color: rgba(242,243,245,.54);
+  font-size: .72rem;
+  font-style: normal;
+}
+
+.operational-detail-safety {
+  display: grid;
+  gap: 8px;
+}
+
+.operational-detail-safety strong {
+  color: rgba(242,243,245,.9);
+  font-size: .84rem;
+}
+
+.operational-detail-safety div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.operational-raw-payload summary {
+  color: rgba(242,243,245,.72);
+  cursor: pointer;
+  font-size: .76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.operational-raw-payload pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 10px 0 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(0,0,0,.28);
+  color: rgba(242,243,245,.82);
+  font-size: .74rem;
+  line-height: 1.45;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .admin-diagnostics-drawer {
@@ -2147,7 +2298,9 @@
   color: var(--muted);
 }
 
-.inbox-preview-section > section {
+.inbox-preview-section > section,
+.inbox-mailbox-import-section > section,
+.inbox-rematch-section > section {
   display: grid;
   gap: 12px;
   padding: 0 14px 14px;
@@ -2438,8 +2591,16 @@
 .inbox-live-refresh-head {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.inbox-result-clear-btn {
+  min-height: 30px;
+  border-radius: 8px;
+  padding: 0 9px;
+  font-size: .72rem;
 }
 
 .inbox-import-result-head strong,
@@ -2528,12 +2689,14 @@
   .inbox-preview-toolbar,
   .inbox-preview-actions,
   .inbox-import-actions,
+  .inbox-mailbox-import-controls,
   .inbox-rematch-controls {
     align-items: stretch;
     flex-direction: column;
   }
 
   .inbox-preview-toolbar label,
+  .inbox-mailbox-import-controls label,
   .inbox-rematch-controls label,
   .inbox-bucket-tabs,
   .inbox-import-result dl,
@@ -2568,6 +2731,21 @@
   .operational-activity-list,
   .operational-event-row {
     grid-template-columns: 1fr;
+  }
+
+  .operational-detail-drawer {
+    width: 100vw;
+    padding: 14px;
+  }
+
+  .operational-detail-header,
+  .operational-detail-meta,
+  .operational-detail-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operational-detail-header {
+    flex-direction: column;
   }
 
   .operational-panel-wide,

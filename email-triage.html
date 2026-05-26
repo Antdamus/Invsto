@@ -122,11 +122,11 @@
 
           <details id="inbox-preview-section" class="triage-disclosure inbox-preview-section" open>
             <summary>
-              <span>Outlook Preview / Mailbox Import</span>
+              <span>Outlook Preview</span>
               <span id="inbox-preview-count-pill" class="email-count-pill">No preview</span>
               <i data-lucide="chevron-down"></i>
             </summary>
-            <section aria-label="Inbox preview and approved import">
+            <section aria-label="Outlook inbox preview">
               <div class="inbox-preview-toolbar">
                 <button type="button" id="inbox-preview-run" class="primary-btn">
                   <i data-lucide="mail-search"></i>
@@ -159,6 +159,50 @@
 
               <div id="inbox-preview-status" class="workspace-status inbox-preview-status">Run preview to inspect recent Outlook emails before importing.</div>
               <div id="inbox-preview-summary" class="inbox-preview-summary"></div>
+              <div class="inbox-preview-actions">
+                <div class="inbox-bucket-tabs" aria-label="Preview bucket filter">
+                  <button type="button" data-inbox-bucket-filter="likely_ebay" class="is-active">Likely eBay</button>
+                  <button type="button" data-inbox-bucket-filter="maybe_ebay">Maybe eBay</button>
+                  <button type="button" data-inbox-bucket-filter="not_ebay">Not eBay</button>
+                  <button type="button" data-inbox-bucket-filter="all">All</button>
+                </div>
+                <button type="button" id="inbox-preview-clear" class="secondary-btn" disabled>
+                  <i data-lucide="x"></i>
+                  Clear Preview
+                </button>
+              </div>
+
+              <div class="inbox-preview-table-wrap">
+                <table class="inbox-preview-table">
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>Sender</th>
+                      <th>Subject</th>
+                      <th>Received</th>
+                      <th>Preview</th>
+                      <th>Bucket</th>
+                      <th>Score</th>
+                      <th>Reason Codes</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inbox-preview-body">
+                    <tr>
+                      <td colspan="9">No inbox preview loaded.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </details>
+
+          <details id="inbox-mailbox-import-section" class="triage-disclosure inbox-mailbox-import-section" open>
+            <summary>
+              <span>Mailbox Import / Prepare</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <section aria-label="Mailbox import and preparation">
               <div class="inbox-mailbox-import-panel" aria-label="Mailbox import progress">
                 <div class="inbox-mailbox-import-controls">
                   <label>
@@ -191,7 +235,34 @@
                 <div id="inbox-prepare-mailbox-result" class="inbox-import-result"></div>
               </div>
               <div id="inbox-preview-import-result" class="inbox-import-result"></div>
+              <div class="inbox-preview-actions">
+                <div class="inbox-import-actions">
+                  <button type="button" id="inbox-live-refresh-run" class="primary-btn">
+                    <i data-lucide="refresh-cw"></i>
+                    Run Live Refresh
+                  </button>
+                  <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
+                    <i data-lucide="download"></i>
+                    Import Likely + Prepare
+                  </button>
+                  <button type="button" id="inbox-import-selected" class="secondary-btn" disabled>
+                    <i data-lucide="check-square"></i>
+                    Import Selected + Prepare
+                  </button>
+                  <p class="inbox-operator-note">Outlook preview rows are temporary. Import + Prepare persists selected emails into the local mailbox, then prepares bounded batches. It never drafts, sends, or mutates Outlook.</p>
+                </div>
+              </div>
 
+              <div id="inbox-live-refresh-result" class="inbox-live-refresh-result"></div>
+            </section>
+          </details>
+
+          <details id="inbox-rematch-section" class="triage-disclosure inbox-rematch-section">
+            <summary>
+              <span>Rematch Tools</span>
+              <i data-lucide="chevron-down"></i>
+            </summary>
+            <section aria-label="Rematch deterministic links">
               <div class="inbox-rematch-panel" aria-label="Rematch deterministic links">
                 <div class="inbox-rematch-controls">
                   <label>
@@ -214,61 +285,8 @@
                     Continue Rematch
                   </button>
                 </div>
-                <p class="inbox-operator-note">Rematch updates deterministic eBay links only. It does not reclassify emails, regenerate drafts, send replies, or mutate Outlook/eBay. Changed links can make existing classifications or drafts stale.</p>
+                <p class="inbox-operator-note">Rematch updates deterministic eBay links only. It does not reclassify, regenerate drafts, send replies, or mutate Outlook/eBay.</p>
                 <div id="inbox-rematch-existing-result" class="inbox-live-refresh-result"></div>
-              </div>
-
-              <div class="inbox-preview-actions">
-                <div class="inbox-bucket-tabs" aria-label="Preview bucket filter">
-                  <button type="button" data-inbox-bucket-filter="likely_ebay" class="is-active">Likely eBay</button>
-                  <button type="button" data-inbox-bucket-filter="maybe_ebay">Maybe eBay</button>
-                  <button type="button" data-inbox-bucket-filter="not_ebay">Not eBay</button>
-                  <button type="button" data-inbox-bucket-filter="all">All</button>
-                </div>
-                <div class="inbox-import-actions">
-                  <button type="button" id="inbox-live-refresh-run" class="primary-btn">
-                    <i data-lucide="refresh-cw"></i>
-                    Run Live Refresh
-                  </button>
-                  <button type="button" id="inbox-import-likely" class="primary-btn" disabled>
-                    <i data-lucide="download"></i>
-                    Import Likely + Prepare
-                  </button>
-                  <button type="button" id="inbox-import-selected" class="secondary-btn" disabled>
-                    <i data-lucide="check-square"></i>
-                    Import Selected + Prepare
-                  </button>
-                  <button type="button" id="inbox-preview-clear" class="secondary-btn" disabled>
-                    <i data-lucide="x"></i>
-                    Clear Preview
-                  </button>
-                  <p class="inbox-operator-note">Outlook preview rows are temporary. Import + Prepare persists selected emails into the local mailbox, then prepares bounded batches. It never drafts, sends, or mutates Outlook.</p>
-                </div>
-              </div>
-
-              <div id="inbox-live-refresh-result" class="inbox-live-refresh-result"></div>
-
-              <div class="inbox-preview-table-wrap">
-                <table class="inbox-preview-table">
-                  <thead>
-                    <tr>
-                      <th>Select</th>
-                      <th>Sender</th>
-                      <th>Subject</th>
-                      <th>Received</th>
-                      <th>Preview</th>
-                      <th>Bucket</th>
-                      <th>Score</th>
-                      <th>Reason Codes</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="inbox-preview-body">
-                    <tr>
-                      <td colspan="9">No inbox preview loaded.</td>
-                    </tr>
-                  </tbody>
-                </table>
               </div>
             </section>
           </details>

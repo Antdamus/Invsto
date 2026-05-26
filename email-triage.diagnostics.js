@@ -116,52 +116,310 @@
     `;
   }
 
+  function eventPayload(event = {}) {
+    return event.payload && typeof event.payload === "object" ? event.payload : {};
+  }
+
+  function numberMetric(source = {}, keys = []) {
+    for (const key of keys) {
+      const value = Number(source?.[key]);
+      if (Number.isFinite(value) && value !== 0) return value;
+    }
+    return 0;
+  }
+
+  function metricText(value, suffix) {
+    const number = Number(value || 0);
+    return `${number} ${suffix}`;
+  }
+
+  function eventStatusVariant(event = {}) {
+    const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+    const failed = String(event.status || "").toLowerCase().includes("fail") || Number(counters.failed_count || 0) > 0 || Number(eventPayload(event).failed || 0) > 0;
+    if (failed) return "danger";
+    if (String(event.status || "").toLowerCase().includes("complete")) return "success";
+    return "muted";
+  }
+
+  function summarizeOperationalEvent(event = {}, utils = window.EmailTriageRenderUtils) {
+    const payload = eventPayload(event);
+    const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+    const eventType = String(event.event_type || "");
+    const title = operationTitle(event, utils);
+    const status = event.status || payload.status || "recorded";
+    const description = firstValue([
+      event.reason,
+      payload.reason,
+      event.replay_source ? `Replay source: ${event.replay_source}` : "",
+      eventType === "rematch_existing" ? "Deterministic link rematch completed for an explicit scope." : "",
+      eventType === "sync_import_approved" ? "Approved Outlook messages were imported into the local mailbox." : "",
+      eventType === "run_live_refresh" ? "Bounded preview, import, processing, and classification pass." : "",
+      eventType === "classify_imported" ? "Imported messages were considered for classification." : "",
+      eventType === "process_imported" ? "Imported messages were considered for processing and matching." : "",
+      "Operational event recorded.",
+    ]);
+    const rematchChanges = numberMetric(payload, ["changed_link_count"]) || Number(counters.links_created || 0) + Number(counters.links_updated || 0);
+    const metricsByType = {
+      rematch_existing: [
+        metricText(numberMetric(payload, ["scanned"]), "scanned"),
+        metricText(numberMetric(payload, ["rematched"]) || counters.rematched_count, "rematched"),
+        metricText(rematchChanges, "link changes"),
+        metricText(numberMetric(payload, ["failed"]) || counters.failed_count, "failed"),
+      ],
+      sync_import_approved: [
+        metricText(numberMetric(payload, ["target_count", "limit"]), "target"),
+        metricText(numberMetric(payload, ["imported_count"]) || counters.imported_count, "imported"),
+        metricText(numberMetric(payload, ["already_imported_count", "skipped_already_imported_count"]) || counters.already_imported_count, "already"),
+        metricText(numberMetric(payload, ["failed_count"]) || counters.failed_count, "failed"),
+      ],
+      mailbox_import: [
+        metricText(numberMetric(payload.progress || payload, ["target_count"]) || numberMetric(payload, ["target_count"]), "target"),
+        metricText(numberMetric(payload.progress || payload, ["imported_total", "imported_count"]) || counters.imported_count, "imported"),
+        metricText(numberMetric(payload.progress || payload, ["already_imported_total", "already_imported_count"]) || counters.already_imported_count, "already"),
+        metricText(numberMetric(payload.progress || payload, ["failed_total", "failed_count"]) || counters.failed_count, "failed"),
+      ],
+      classify_imported: [
+        metricText(numberMetric(payload, ["candidate_count"]), "candidates"),
+        metricText(numberMetric(payload, ["classified_count"]) || counters.classified_count, "classified"),
+        metricText(numberMetric(payload, ["skipped_count"]) || counters.skipped_count, "skipped"),
+        metricText(numberMetric(payload, ["failed_count"]) || counters.failed_count, "failed"),
+      ],
+      process_imported: [
+        metricText(numberMetric(payload, ["candidate_count", "queued_count"]), "candidates"),
+        metricText(numberMetric(payload, ["jobs_enqueued"]) || counters.jobs_enqueued, "jobs enqueued"),
+        metricText(numberMetric(payload, ["processed_count"]) || counters.processed_count, "processed"),
+        metricText(numberMetric(payload, ["failed_count"]) || counters.failed_count, "failed"),
+      ],
+      run_live_refresh: [
+        metricText(numberMetric(payload.preview || {}, ["previewed_count"]) || counters.previewed_count, "previewed"),
+        metricText(numberMetric(payload.import || {}, ["imported_count"]) || counters.imported_count, "imported"),
+        metricText(numberMetric(payload.processing || {}, ["processed_count"]) || counters.processed_count, "processed"),
+        metricText(numberMetric(payload.classification || {}, ["classified_count"]) || counters.classified_count, "classified"),
+      ],
+    };
+    const genericMetrics = [
+      counters.imported_count ? metricText(counters.imported_count, "imported") : "",
+      counters.processed_count ? metricText(counters.processed_count, "processed") : "",
+      counters.classified_count ? metricText(counters.classified_count, "classified") : "",
+      counters.skipped_count ? metricText(counters.skipped_count, "skipped") : "",
+      counters.failed_count ? metricText(counters.failed_count, "failed") : "",
+    ].filter(Boolean).slice(0, 4);
+
+    return {
+      title,
+      status,
+      description,
+      metrics: (metricsByType[eventType] || genericMetrics).filter(Boolean).slice(0, 4),
+    };
+  }
+
+  function extractOperationalEventMetrics(event = {}, utils = window.EmailTriageRenderUtils) {
+    return summarizeOperationalEvent(event, utils).metrics;
+  }
+
+  function renderSafetySummary(payload = {}, utils = window.EmailTriageRenderUtils) {
+    const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : payload;
+    const outlookMutation = safety.outlook_mutation_performed === true;
+    const ebayMutation = safety.ebay_mutation_performed === true;
+    const sends = Number(safety.automatic_responses_sent || safety.emails_sent || 0);
+    const parts = [
+      outlookMutation ? "Outlook mutation: true" : "no Outlook mutation",
+      ebayMutation ? "eBay mutation: true" : "no eBay mutation",
+      sends ? `${sends} sends` : "no sends",
+    ];
+    return `${outlookMutation || ebayMutation || sends ? "Safety" : "Safe"}: ${parts.join(" · ")}`;
+  }
+
+  function renderMetricCard(label, value, note = "", utils = window.EmailTriageRenderUtils) {
+    const displayValue = value === undefined || value === null || value === "" ? "Not recorded for this event" : value;
+    return `
+      <div class="operational-detail-metric">
+        <span>${utils.escapeHtml(label)}</span>
+        <strong>${utils.escapeHtml(displayValue)}</strong>
+        ${note ? `<em>${utils.escapeHtml(note)}</em>` : ""}
+      </div>
+    `;
+  }
+
+  function metricValue(sources = [], keys = []) {
+    for (const source of sources) {
+      if (!source || typeof source !== "object") continue;
+      for (const key of keys) {
+        if (source[key] !== undefined && source[key] !== null && source[key] !== "") return source[key];
+      }
+    }
+    return null;
+  }
+
+  function detailMetricItems(event = {}) {
+    const payload = eventPayload(event);
+    const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
+    const progress = payload.progress && typeof payload.progress === "object" ? payload.progress : {};
+    const batch = payload.batch && typeof payload.batch === "object" ? payload.batch : {};
+    const processing = payload.processing && typeof payload.processing === "object" ? payload.processing : {};
+    const classification = payload.classification && typeof payload.classification === "object" ? payload.classification : {};
+    const preview = payload.preview && typeof payload.preview === "object" ? payload.preview : {};
+    const imported = payload.import && typeof payload.import === "object" ? payload.import : {};
+    const eventType = String(event.event_type || "");
+
+    if (eventType === "rematch_existing") {
+      return [
+        ["Scanned", metricValue([payload, counters], ["scanned", "previewed_count"])],
+        ["Rematched", metricValue([payload, counters], ["rematched", "rematched_count"])],
+        ["Unchanged", metricValue([payload], ["unchanged"])],
+        ["Ambiguous", metricValue([payload, counters], ["ambiguous", "ambiguous_count"])],
+        ["Skipped", metricValue([payload, counters], ["skipped", "skipped_count"])],
+        ["Failed", metricValue([payload, counters], ["failed", "failed_count"])],
+        ["Link changes", metricValue([payload], ["changed_link_count"]) ?? Number(counters.links_created || 0) + Number(counters.links_updated || 0)],
+        ["Created links", metricValue([payload, counters], ["links_created"])],
+        ["Updated links", metricValue([payload, counters], ["links_updated"])],
+        ["Order links", metricValue([payload], ["order_link_changes"])],
+        ["Item links", metricValue([payload], ["item_link_changes"])],
+        ["Inventory links", metricValue([payload], ["inventory_link_changes"])],
+        ["Buyer links", metricValue([payload], ["buyer_link_changes"])],
+        ["Tracking/label links", metricValue([payload], ["tracking_label_link_changes"])],
+      ];
+    }
+
+    if (eventType === "sync_import_approved" || eventType === "mailbox_import") {
+      return [
+        ["Target", metricValue([progress, payload], ["target_count", "limit"])],
+        ["Imported", metricValue([progress, batch, payload, imported, counters], ["imported_total", "imported_count"])],
+        ["Already imported", metricValue([progress, batch, payload, imported, counters], ["already_imported_total", "already_imported_count", "skipped_already_imported_count"])],
+        ["Failed", metricValue([progress, batch, payload, imported, counters], ["failed_total", "failed_count"])],
+        ["Skipped", metricValue([batch, payload, imported, counters], ["skipped_count"])],
+        ["Pages", metricValue([batch, payload], ["pages_fetched"])],
+        ["Seen", metricValue([batch, payload], ["messages_seen"])],
+        ["Has more", metricValue([progress, payload], ["has_more"])],
+        ["Continuation", metricValue([progress, payload], ["continuation_available"])],
+        ["Checkpoint updated", metricValue([payload.safety || {}, payload], ["sync_checkpoint_updated"])],
+      ];
+    }
+
+    return [
+      ["Candidates", metricValue([progress, processing, classification, payload], ["candidate_count", "queued_count"])],
+      ["Jobs enqueued", metricValue([processing, classification, payload, counters], ["jobs_enqueued"])],
+      ["Jobs processed", metricValue([processing, classification, payload], ["jobs_processed"])],
+      ["Processed", metricValue([processing, payload, counters], ["processed_count"])],
+      ["Classified", metricValue([classification, payload, counters], ["classified_count"])],
+      ["Skipped", metricValue([classification, processing, payload, counters], ["skipped_count"])],
+      ["Failed", metricValue([classification, processing, payload, counters], ["failed_count"])],
+      ["Remaining", metricValue([progress, payload], ["remaining_to_process", "remaining_to_classify", "remaining_estimate"])],
+      ["Drafts created", metricValue([payload.safety || {}, payload], ["drafts_created"])],
+      ["Emails sent", metricValue([payload.safety || {}, payload], ["automatic_responses_sent", "emails_sent"])],
+      ["Previewed", metricValue([preview, payload, counters], ["previewed_count"])],
+      ["Imported", metricValue([imported, payload, counters], ["imported_count"])],
+    ];
+  }
+
+  function sanitizeOperationalPayload(value, key = "", depth = 0) {
+    const sensitiveKey = /(body|html|content|draft|reply|normalized_text|raw_text|message_text)/i.test(key);
+    if (value === null || value === undefined) return value;
+    if (typeof value === "string") {
+      if (sensitiveKey) return `[omitted ${key || "text"}]`;
+      return value.length > 240 ? `${value.slice(0, 240)}... [truncated]` : value;
+    }
+    if (typeof value !== "object") return value;
+    if (depth > 6) return "[omitted nested payload]";
+    if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizeOperationalPayload(item, key, depth + 1));
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
+      childKey,
+      sanitizeOperationalPayload(childValue, childKey, depth + 1),
+    ]));
+  }
+
+  function renderOperationalEventDetail(event = null, utils = window.EmailTriageRenderUtils) {
+    if (!event) {
+      return `<div class="classification-empty operational-empty">Select an operational event to inspect details.</div>`;
+    }
+    const payload = eventPayload(event);
+    const summary = summarizeOperationalEvent(event, utils);
+    const safety = payload.safety && typeof payload.safety === "object" ? payload.safety : event.safety || {};
+    const safetyFlags = [
+      ["Outlook fetch", metricValue([safety, payload], ["outlook_fetch_performed"])],
+      ["Outlook mutation", metricValue([safety, payload], ["outlook_mutation_performed"])],
+      ["eBay mutation", metricValue([safety, payload], ["ebay_mutation_performed"])],
+      ["Classification", metricValue([safety, payload], ["classification_triggered"])],
+      ["Drafts created", metricValue([safety, payload], ["drafts_created"])],
+      ["Emails sent", metricValue([safety, payload], ["automatic_responses_sent", "emails_sent"])],
+    ];
+    const rawPayload = Object.keys(payload).length ? payload : event;
+    const rawJson = JSON.stringify(sanitizeOperationalPayload(rawPayload), null, 2);
+
+    return `
+      <div class="operational-detail-header">
+        <div>
+          <span class="eyebrow">Operational Event</span>
+          <h3>${utils.escapeHtml(summary.title)}</h3>
+          <p>${utils.escapeHtml(summary.description)}</p>
+        </div>
+        <button type="button" class="secondary-btn" data-operational-event-close>
+          <i data-lucide="x"></i>
+          Close
+        </button>
+      </div>
+      <div class="operational-detail-meta">
+        ${renderMetricCard("Event id", event.id || "Not recorded for this event", "", utils)}
+        ${renderMetricCard("Timestamp", event.created_at ? utils.formatDateTime(event.created_at) : null, "", utils)}
+        ${renderMetricCard("Actor", event.initiated_by || "Not recorded for this event", "", utils)}
+        ${renderMetricCard("Status", summary.status, "", utils)}
+      </div>
+      <div class="operational-detail-metric-grid">
+        ${detailMetricItems(event).map(([label, value]) => renderMetricCard(label, value, "", utils)).join("")}
+      </div>
+      <div class="operational-detail-safety">
+        <strong>${utils.escapeHtml(renderSafetySummary({ ...payload, safety }, utils))}</strong>
+        <div>
+          ${safetyFlags.map(([label, value]) => dashboardBadge(`${label}: ${value === null ? "not recorded" : String(value)}`, value === true && !/fetch/i.test(label) ? "danger" : "muted", utils)).join("")}
+        </div>
+      </div>
+      ${renderChildOperations(event, utils)}
+      <details class="operational-raw-payload">
+        <summary>Raw payload JSON</summary>
+        <pre>${utils.escapeHtml(rawJson)}</pre>
+      </details>
+    `;
+  }
+
+  function renderOperationalEventDetailDrawer(state = {}, snapshot = {}, utils = window.EmailTriageRenderUtils) {
+    if (state.operationalEventDetailOpen !== true) return "";
+    const events = Array.isArray(snapshot.recent_operational_events) ? snapshot.recent_operational_events : [];
+    const selectedId = state.selectedOperationalEventId;
+    const selected = events.find((event) => String(event.id || "") === String(selectedId || ""))
+      || state.selectedOperationalEventDetail
+      || null;
+    return `
+      <div class="operational-detail-backdrop" data-operational-event-close></div>
+      <aside class="operational-detail-drawer" role="dialog" aria-modal="true" aria-label="Operational event detail">
+        ${renderOperationalEventDetail(selected, utils)}
+      </aside>
+    `;
+  }
+
   function renderOperationalEventRows(events = [], utils = window.EmailTriageRenderUtils) {
     if (!events.length) {
       return `<div class="classification-empty operational-empty">No operational events returned yet.</div>`;
     }
 
     return events.slice(0, 12).map((event) => {
-      const counters = event.counters && typeof event.counters === "object" ? event.counters : {};
-      const safety = event.safety && typeof event.safety === "object" ? event.safety : {};
-      const countParts = [
-        Number(counters.previewed_count || 0) ? `${counters.previewed_count} previewed` : "",
-        Number(event.message_count || 0) ? `${event.message_count} messages` : "",
-        Number(event.new_job_count || 0) ? `${event.new_job_count} new jobs` : "",
-        Number(counters.imported_count || 0) ? `${counters.imported_count} imported` : "",
-        Number(counters.already_imported_count || 0) ? `${counters.already_imported_count} already` : "",
-        Number(counters.processed_count || 0) ? `${counters.processed_count} processed` : "",
-        Number(counters.jobs_enqueued || 0) ? `${counters.jobs_enqueued} jobs enqueued` : "",
-        Number(counters.classified_count || 0) ? `${counters.classified_count} classified` : "",
-        Number(counters.rematched_count || 0) ? `${counters.rematched_count} rematched` : "",
-        Number(counters.links_created || 0) ? `${counters.links_created} links created` : "",
-        Number(counters.links_updated || 0) ? `${counters.links_updated} links updated` : "",
-        Number(counters.ambiguous_count || 0) ? `${counters.ambiguous_count} ambiguous` : "",
-        Number(counters.skipped_count || 0) ? `${counters.skipped_count} skipped` : "",
-        Number(counters.failed_count || 0) ? `${counters.failed_count} failed` : "",
-        Number(counters.duration_ms || 0) ? `${Math.round(Number(counters.duration_ms || 0) / 1000)}s` : "",
-      ].filter(Boolean);
+      const payload = eventPayload(event);
+      const summary = summarizeOperationalEvent(event, utils);
       const isReplay = String(event.event_type || "").includes("replay") || String(event.event_type || "").includes("requeue");
-      const isFailure = String(event.status || "").includes("fail") || Number(counters.failed_count || 0) > 0;
-      const safetyParts = [
-        safety.outlook_fetch_performed === false ? "Outlook fetch false" : "",
-        safety.outlook_mutation_performed === false ? "Outlook mutation false" : "",
-        safety.ebay_mutation_performed === false ? "eBay mutation false" : "",
-        safety.classification_triggered === false ? "Classification false" : "",
-        Number(safety.drafts_created || 0) === 0 && Object.prototype.hasOwnProperty.call(safety, "drafts_created") ? "Drafts 0" : "",
-      ].filter(Boolean);
+      const isFailure = eventStatusVariant(event) === "danger";
 
       return `
-        <article class="operational-event-row${isReplay ? " is-replay" : ""}${isFailure ? " is-failure" : ""}">
-          <div>
-            <strong>${utils.escapeHtml(operationTitle(event, utils))}</strong>
+        <article class="operational-event-row${isReplay ? " is-replay" : ""}${isFailure ? " is-failure" : ""}" role="button" tabindex="0" data-operational-event-id="${utils.escapeHtml(event.id || "")}">
+          <div class="operational-event-main">
+            <strong>${utils.escapeHtml(summary.title)}</strong>
             <span>${utils.escapeHtml(operationMeta(event, utils))}</span>
           </div>
-          <p>${utils.escapeHtml(firstValue([event.reason, event.replay_source, "No reason recorded"]))}</p>
-          <div class="operational-event-counts">
-            ${countParts.length ? countParts.map((part) => dashboardBadge(part, part.includes("failed") ? "danger" : "muted", utils)).join("") : dashboardBadge("No counts", "muted", utils)}
-            ${event.status ? dashboardBadge(utils.humanizeValue(event.status), isFailure ? "danger" : "success", utils) : ""}
-            ${safetyParts.map((part) => dashboardBadge(part, "success", utils)).join("")}
+          <p>${utils.escapeHtml(summary.description)}</p>
+          <div class="operational-event-summary">
+            <div class="operational-event-counts">
+              ${summary.metrics.length ? summary.metrics.map((part) => dashboardBadge(part, part.includes("failed") ? "danger" : "muted", utils)).join("") : dashboardBadge("No counts", "muted", utils)}
+              ${dashboardBadge(utils.humanizeValue(summary.status), eventStatusVariant(event), utils)}
+            </div>
+            <span class="operational-safety-line">${utils.escapeHtml(renderSafetySummary({ ...payload, safety: event.safety || payload.safety || {} }, utils))}</span>
           </div>
           ${renderChildOperations(event, utils)}
         </article>
@@ -360,6 +618,7 @@
           </div>
         </section>
       </div>
+      ${renderOperationalEventDetailDrawer(state, snapshot, utils)}
     `;
   }
 
@@ -369,6 +628,12 @@
     replaySummaryItems,
     renderSummaryItems,
     renderAdminSummary,
+    summarizeOperationalEvent,
+    extractOperationalEventMetrics,
+    renderOperationalEventRow: renderOperationalEventRows,
+    renderOperationalEventDetail,
+    renderSafetySummary,
+    renderMetricCard,
     renderOperationalDashboard,
   };
 })();
