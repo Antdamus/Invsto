@@ -13,7 +13,7 @@ const state = {
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
-  orderSort: "due_asc",
+  orderSort: "created_asc",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -129,6 +129,14 @@ function formatDate(value) {
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function toLocalDateInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+}
+
 function toDateTimeLocalValue(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -210,6 +218,26 @@ function startOfLocalDay(value = new Date()) {
 }
 
 function getShipTimestamp(value) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const date = new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+}
+
+function getOrderCreatedAt(line) {
+  const order = line?.order || getOrderFromLine(line);
+  return order?.sale_date || order?.paid_on_date || order?.imported_at || line?.created_at || "";
+}
+
+function getOrderCreatedLabel(line) {
+  const order = line?.order || getOrderFromLine(line);
+  if (order?.sale_date) return "Sale date";
+  if (order?.paid_on_date) return "Paid date";
+  if (order?.imported_at || line?.created_at) return "Pending created";
+  return "Order date";
+}
+
+function getOrderCreatedTimestamp(value) {
   if (!value) return Number.MAX_SAFE_INTEGER;
   const date = new Date(value);
   const time = date.getTime();
@@ -394,8 +422,10 @@ function setupOrderSortOptions() {
   const select = $("order-sort");
   if (!select) return;
 
-  const current = select.value || state.orderSort || "due_asc";
+  const current = select.value || state.orderSort || "created_asc";
   const options = [
+    ["created_asc", "Sale date oldest first"],
+    ["created_desc", "Sale date newest first"],
     ["due_asc", "Due date soonest"],
     ["buyer_asc", "Username A to Z"],
     ["buyer_desc", "Username Z to A"],
@@ -410,7 +440,7 @@ function setupOrderSortOptions() {
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
     .join("");
 
-  state.orderSort = options.some(([value]) => value === current) ? current : "due_asc";
+  state.orderSort = options.some(([value]) => value === current) ? current : "created_asc";
   select.value = state.orderSort;
 }
 
@@ -539,14 +569,17 @@ function normalizeLine(line) {
   const order = getOrderFromLine(line);
   const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
   const videoReceiptUrl = getOrderVideoReceiptUrl({ ...line, order });
+  const orderCreatedAt = getOrderCreatedAt({ ...line, order });
   return {
     ...line,
     order,
+    orderCreatedAt,
     videoReceiptUrl,
     searchText: [
       order.order_number,
       order.sales_record_number,
       order.buyer_username,
+      formatDate(orderCreatedAt),
       line.item_number,
       line.transaction_id,
       line.item_title,
@@ -1426,6 +1459,7 @@ function buildOrderLineQueueQuery(status, admin) {
       quantity,
       ${moneyLineFields}
       line_status,
+      created_at,
       internal_item_id,
       fulfilled_quantity,
       fulfilled_at,
@@ -1438,6 +1472,7 @@ function buildOrderLineQueueQuery(status, admin) {
         buyer_username,
         sale_date,
         paid_on_date,
+        imported_at,
         ship_by_date,
         ${moneyOrderFields}
         status,
@@ -1558,11 +1593,23 @@ function clearOrderSearch({ apply = true } = {}) {
   if (apply) applyOrderFilters();
 }
 
+function clearOrderCreatedDateFilter({ apply = true } = {}) {
+  const input = $("order-created-date-filter");
+  if (!input || !input.value) return;
+  input.value = "";
+  if (apply) applyOrderFilters();
+}
+
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
+  const createdDate = $("order-created-date-filter")?.value || "";
   let filtered = term
     ? state.orders.filter((line) => line.searchText.includes(term))
     : [...state.orders];
+
+  if (createdDate) {
+    filtered = filtered.filter((line) => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
+  }
 
   if (state.selectedLiveLot) {
     filtered = filtered.filter((line) => state.liveLotMatchedLineIds.has(line.id));
@@ -1678,6 +1725,7 @@ function groupLinesByBuyer(lines) {
         totalQuantity: 0,
         totalValue: 0,
         nextShipBy: null,
+        earliestPendingOrderCreatedAt: null,
       });
     }
 
@@ -1693,6 +1741,28 @@ function groupLinesByBuyer(lines) {
       const current = group.nextShipBy ? new Date(group.nextShipBy) : null;
       if (!current || shipBy < current) group.nextShipBy = line.order.ship_by_date;
     }
+
+    if (isOpenOrderLine(line)) {
+      const createdAt = line.orderCreatedAt || getOrderCreatedAt(line);
+      const createdTime = getOrderCreatedTimestamp(createdAt);
+      const currentTime = getOrderCreatedTimestamp(group.earliestPendingOrderCreatedAt);
+      if (createdTime < currentTime) group.earliestPendingOrderCreatedAt = createdAt;
+    }
+  });
+
+  groups.forEach((group) => {
+    if (!group.earliestPendingOrderCreatedAt && group.lines.length) {
+      group.earliestPendingOrderCreatedAt = group.lines
+        .map((line) => line.orderCreatedAt || getOrderCreatedAt(line))
+        .filter(Boolean)
+        .sort((a, b) => getOrderCreatedTimestamp(a) - getOrderCreatedTimestamp(b))[0] || null;
+    }
+    group.lines.sort((a, b) =>
+      getOrderCreatedTimestamp(a.orderCreatedAt || getOrderCreatedAt(a))
+      - getOrderCreatedTimestamp(b.orderCreatedAt || getOrderCreatedAt(b))
+      || getShipTimestamp(a.order?.ship_by_date) - getShipTimestamp(b.order?.ship_by_date)
+      || String(a.item_title || "").localeCompare(String(b.item_title || ""), undefined, { sensitivity: "base" })
+    );
   });
 
   return sortBuyerGroups([...groups.values()]);
@@ -1715,14 +1785,17 @@ function buyerInsightCurrentItemsAttribute(lines = []) {
 }
 
 function sortBuyerGroups(groups) {
-  const sort = $("order-sort")?.value || state.orderSort || "due_asc";
+  const sort = $("order-sort")?.value || state.orderSort || "created_asc";
   state.orderSort = sort;
 
   const byBuyer = (a, b) => a.buyer.localeCompare(b.buyer, undefined, { sensitivity: "base" });
   const byDue = (a, b) => getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy);
+  const byCreated = (a, b) => getOrderCreatedTimestamp(a.earliestPendingOrderCreatedAt) - getOrderCreatedTimestamp(b.earliestPendingOrderCreatedAt);
   const byTotal = (a, b) => Number(a.totalValue || 0) - Number(b.totalValue || 0);
 
   return groups.sort((a, b) => {
+    if (sort === "created_asc") return byCreated(a, b) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "created_desc") return byCreated(b, a) || byDue(a, b) || byBuyer(a, b);
     if (sort === "buyer_asc") return byBuyer(a, b) || byDue(a, b);
     if (sort === "buyer_desc") return byBuyer(b, a) || byDue(a, b);
     if (sort === "total_desc" && isAdminUser()) return byTotal(b, a) || byDue(a, b) || byBuyer(a, b);
@@ -1999,6 +2072,7 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
+        <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
         ${isAdminUser() ? `<span>Order value ${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
       </div>
@@ -2079,6 +2153,7 @@ function renderOrders() {
         : order.ship_by_date
           ? `Due ${formatDate(order.ship_by_date)}`
           : "No ship-by date";
+      const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
         ? `${lineUrgency.label} - ${formatDate(order.ship_by_date)}`
@@ -2097,6 +2172,7 @@ function renderOrders() {
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
             <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
             <span class="buyer-line-meta-row">
+              <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
               <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">
                 ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
                 ${escapeHtml(visibleLineDueLabel)}
@@ -2253,7 +2329,7 @@ function renderSelectedOrder() {
   if (!line) return;
   const order = line.order || {};
   $("selected-order-title").textContent = order.order_number || "eBay order";
-  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
+  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
   renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
@@ -7418,6 +7494,7 @@ function setupListeners() {
   $("refresh-orders")?.addEventListener("click", async () => {
     clearEbayLaunchFilter({ apply: false });
     clearOrderSearch({ apply: false });
+    clearOrderCreatedDateFilter({ apply: false });
     await loadOrders();
   });
   $("close-mobile-order-detail")?.addEventListener("click", closeMobileOrderDetail);
@@ -7434,6 +7511,10 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("order-created-date-filter")?.addEventListener("change", () => {
+    clearEbayLaunchFilter({ apply: false });
+    applyOrderFilters();
+  });
   $("order-sort")?.addEventListener("change", (event) => {
     state.orderSort = event.target.value;
     applyOrderFilters();
@@ -7738,6 +7819,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   state.launchOrderTaskId = getRequestedOrderTaskId();
   loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
   clearOrderSearch({ apply: false });
+  clearOrderCreatedDateFilter({ apply: false });
   await loadOrders();
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) applyEbayLaunchOrderSelection();

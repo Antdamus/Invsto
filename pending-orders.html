@@ -276,7 +276,16 @@
               <option value="all">All open</option>
               <option value="fulfilled">Fulfilled</option>
             </select>
+            <input
+              id="order-created-date-filter"
+              name="pending-orders-created-date"
+              type="date"
+              autocomplete="off"
+              aria-label="Order created date"
+            />
             <select id="order-sort" aria-label="Order queue sort">
+              <option value="created_asc">Sale date oldest first</option>
+              <option value="created_desc">Sale date newest first</option>
               <option value="due_asc">Due date soonest</option>
               <option value="buyer_asc">Username A to Z</option>
               <option value="buyer_desc">Username Z to A</option>
