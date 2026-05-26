@@ -336,6 +336,12 @@
     }, 0);
   }
 
+  function formatOpenReturnProcessingNote(openReturnCount) {
+    const count = toPositiveInteger(openReturnCount, 0);
+    if (!count) return "";
+    return `${formatCount(count)} open return${count === 1 ? "" : "s"} still need${count === 1 ? "s" : ""} processing`;
+  }
+
   function renderBuyerValueMetrics(summary = {}, context = {}, priorRows = [], returnedRows = [], recentOrders = [], lineRows = []) {
     const hasLineBreakdown = Array.isArray(lineRows) && lineRows.length > 0;
     const useContextCurrent = !hasLineBreakdown && usesPassedCurrentContext(context);
@@ -377,6 +383,7 @@
     const returnedAmount = hasLineBreakdown ? sumDetailAmounts(returnDetailRows) : toFiniteNumber(summary.returnAmountTotal, 0);
     const returnCount = hasLineBreakdown ? sumUniqueOrderField(returnLineRows, "returnCount") : toPositiveInteger(summary.returnCount, 0);
     const openReturnCount = hasLineBreakdown ? sumUniqueOrderField(returnLineRows, "openReturnCount") : toPositiveInteger(summary.openReturnCount, 0);
+    const openReturnProcessingNote = formatOpenReturnProcessingNote(openReturnCount);
     const priorOrderCount = hasLineBreakdown
       ? countUniqueOrders(priorDetailRows)
       : Math.max(0, toPositiveInteger(summary.orderCount, 0) - currentOrderCount) + returnedOrderCount;
@@ -421,6 +428,7 @@
         ${metric("Prior store value", formatMoney(priorValue), [
           `Kept purchases: ${formatMoney(keptPriorValue)} (${formatCount(keptPriorOrderCount)} order${keptPriorOrderCount === 1 ? "" : "s"})`,
           returnedOrderCount ? `Retained after partial returns: ${formatMoney(returnedRetainedValue)}` : "",
+          openReturnProcessingNote,
           `${formatCount(priorOrderCount)} prior order${priorOrderCount === 1 ? "" : "s"} / ${formatCount(priorLineCount)} line${priorLineCount === 1 ? "" : "s"}`,
         ], "prior")}
         ${metric("Current + prior value", formatMoney(totalWithCurrent), [
@@ -429,6 +437,7 @@
         ], "total")}
         ${metric("Returns", formatMoney(returnedAmount), [
           `${returnCount} return${returnCount === 1 ? "" : "s"} / ${openReturnCount} open`,
+          openReturnProcessingNote,
           returnedOriginalValue ? `${formatMoney(returnedAmount)} returned from ${formatMoney(returnedOriginalValue)} original purchase value` : "",
           returnedRetainedValue ? `${formatMoney(returnedRetainedValue)} retained by store` : "",
         ], "returns")}
@@ -528,9 +537,11 @@
       .map((row) => {
         const isReturn = String(row.itemState || "").toLowerCase() === "return";
         const amount = isReturn ? row.lineRetainedAmount : row.lineTotal;
+        const openReturnNote = isReturn ? formatOpenReturnProcessingNote(row.openReturnCount) : "";
         return makeDetailRow(row, amount, [
           isReturn ? `${formatMoney(row.lineReturnedAmount)} returned from ${formatMoney(row.lineTotal)} line value` : "",
           isReturn ? `${formatMoney(row.lineRetainedAmount)} retained on this line` : "",
+          openReturnNote,
         ]);
       });
   }
@@ -541,6 +552,7 @@
       .map((row) => makeDetailRow(row, row.lineReturnedAmount, [
         `${formatMoney(row.lineReturnedAmount)} returned from ${formatMoney(row.lineTotal)} line value`,
         `${formatMoney(row.lineRetainedAmount)} retained on this line`,
+        formatOpenReturnProcessingNote(row.openReturnCount),
         row.returnCount ? `${row.returnCount} return${Number(row.returnCount) === 1 ? "" : "s"} on order` : "",
       ]));
   }
@@ -568,6 +580,7 @@
     }, row.retainedAmount ?? row.totalPrice, [
       `${formatMoney(row.returnedAmount)} returned from ${formatMoney(row.originalTotal ?? row.totalPrice)} original purchase value`,
       `${formatMoney(row.retainedAmount ?? row.totalPrice)} retained by store`,
+      formatOpenReturnProcessingNote(row.openReturnCount),
     ]));
     return [...prior, ...returned];
   }
@@ -712,6 +725,10 @@
       const totalReturned = Number.isFinite(returnedAmount) ? returnedAmount : sumReturnAmounts(matchingReturns);
       const retainedAmount = toFiniteNumber(row.retainedAmount, Math.max(0, originalValue - totalReturned));
       const returnCount = matchingReturns.length || toPositiveInteger(row.returnCount, 0);
+      const openReturnCount = toPositiveInteger(
+        row.openReturnCount,
+        matchingReturns.filter((ret) => !["closed", "cancelled"].includes(String(ret.status || "").toLowerCase())).length
+      );
       const returnSummary = matchingReturns.map((ret) => {
         const parts = [ret.returnId || "Return", ret.reason || "", ret.requestAmount || ""].filter(Boolean);
         return parts.join(" - ");
@@ -723,6 +740,7 @@
             <span>${escapeHtml(formatDate(row.purchaseAt))} - returned purchase - ${escapeHtml(`${row.lineCount || 0} lines / ${row.unitCount || 0} units`)}</span>
             ${originalValue ? `<span>${escapeHtml(`${formatMoney(totalReturned)} returned from original ${formatMoney(originalValue)}`)}</span>` : ""}
             ${originalValue ? `<span>${escapeHtml(`${formatMoney(retainedAmount)} retained by store`)}</span>` : ""}
+            ${openReturnCount ? `<span>${escapeHtml(formatOpenReturnProcessingNote(openReturnCount))}</span>` : ""}
             ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
             ${returnSummary ? `<span>${escapeHtml(returnSummary)}</span>` : ""}
           </div>
@@ -762,6 +780,7 @@
       const originalOrderValue = toFiniteNumber(row.originalOrderTotal ?? matchedOrder?.totalPrice, 0);
       const returnedAmount = toFiniteNumber(row.returnedAmount ?? row.requestAmount, 0);
       const retainedOrderValue = toFiniteNumber(row.retainedOrderValue, Math.max(0, originalOrderValue - returnedAmount));
+      const stillOpen = !["closed", "cancelled"].includes(String(row.status || "").toLowerCase());
       return `
         <div class="buyer-insights-list-row">
           <div>
@@ -769,6 +788,7 @@
             <span>${escapeHtml(row.status || "unknown")} - ${escapeHtml(row.reason || "No reason")} - ${escapeHtml(formatDate(row.openedAt))}</span>
             ${originalOrderValue ? `<span>${escapeHtml(`${formatMoney(returnedAmount)} returned from original ${formatMoney(originalOrderValue)}`)}</span>` : ""}
             ${originalOrderValue ? `<span>${escapeHtml(`${formatMoney(retainedOrderValue)} retained by store`)}</span>` : ""}
+            ${stillOpen ? `<span>${escapeHtml(formatOpenReturnProcessingNote(1))}</span>` : ""}
             ${titles.length ? `<em>${titles.map(escapeHtml).join(" / ")}</em>` : ""}
             ${row.buyerComment ? `<em>${escapeHtml(row.buyerComment)}</em>` : ""}
           </div>
