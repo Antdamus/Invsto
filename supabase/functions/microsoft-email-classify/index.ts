@@ -13,7 +13,9 @@ const VERIFIED_ORDER_CONTEXT_VERSION = "verified-ebay-order-context-v1";
 const HEAD_CHARS = 12000;
 const TAIL_CHARS = 2000;
 const MAX_LIMIT = 50;
+const ADMIN_VIEW_MAX_PAGE_SIZE = 100;
 const ADMIN_CATEGORY_TOTAL_SCAN_LIMIT = 1000;
+const ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN = "email_messages(received_at)";
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
 const MAX_DRAFT_BODY_CHARS = 5000;
@@ -338,6 +340,19 @@ type Input = {
   draftBodyText: string | null;
   dryRun: boolean;
   confirmApply: string | null;
+  mailboxQuery: MailboxQuery;
+};
+
+type MailboxSort = "newest" | "oldest" | "confidence_high" | "confidence_low" | "human_review";
+type MailboxQuery = {
+  page: number;
+  pageSize: number;
+  offset: number;
+  sort: MailboxSort;
+  category: string;
+  priority: string;
+  status: string;
+  filters: string[];
 };
 
 class ClassifierError extends Error {
@@ -488,6 +503,7 @@ async function parseInput(req: Request): Promise<Input> {
   const confirmApply = typeof body?.confirmApply === "string" && body.confirmApply.trim()
     ? body.confirmApply.trim()
     : null;
+  const mailboxQuery = parseMailboxQuery(body);
   if (mode === "process_message" && !messageId) {
     throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
   }
@@ -563,7 +579,38 @@ async function parseInput(req: Request): Promise<Input> {
     draftBodyText,
     dryRun,
     confirmApply,
+    mailboxQuery,
   };
+}
+
+function parseMailboxQuery(body: Record<string, any>): MailboxQuery {
+  const source = body?.mailboxQuery && typeof body.mailboxQuery === "object" ? body.mailboxQuery : body || {};
+  const rawPageSize = Number(source.pageSize || source.page_size || source.limit || body?.classificationLimit || 25);
+  const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? Math.floor(rawPageSize) : 25, 1), ADMIN_VIEW_MAX_PAGE_SIZE);
+  const rawPage = Number(source.page || 1);
+  const page = Math.max(Number.isFinite(rawPage) ? Math.floor(rawPage) : 1, 1);
+  const sort = normalizeMailboxSort(source.sort || source.sortMode || "newest");
+  const filters = Array.isArray(source.filters || source.activeFilters)
+    ? (source.filters || source.activeFilters).map((item: unknown) => shortText(item, 80)).filter(Boolean).slice(0, 20)
+    : [];
+  return {
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize,
+    sort,
+    category: shortText(source.category || source.selectedCategory || "all", 120) || "all",
+    priority: shortText(source.priority || source.priorityFilter || "all", 40) || "all",
+    status: shortText(source.status || source.statusFilter || "all", 80) || "all",
+    filters,
+  };
+}
+
+function normalizeMailboxSort(value: unknown): MailboxSort {
+  const sort = String(value || "newest");
+  if (["oldest", "confidence_high", "confidence_low", "human_review"].includes(sort)) {
+    return sort as MailboxSort;
+  }
+  return "newest";
 }
 
 async function sha256Hex(value: string) {
@@ -1920,38 +1967,166 @@ function currentValidClassificationQuery(query: any) {
     .eq("validation_status", "valid");
 }
 
-function effectiveCategoryForAdminTotals(row: Record<string, any>) {
-  return String(row.operator_override_category || row.category || "").trim();
+const ADMIN_CATEGORY_GROUPS: Record<string, string[]> = {
+  return_requests: ["return_request", "refund_request", "cancellation_request"],
+  item_not_as_described: ["item_not_as_described"],
+  shipping_labels: ["shipping_label", "shipping_issue", "item_not_received"],
+  marketing_or_promotion: ["marketing_or_promotion"],
+  internal_other: [
+    "internal_or_other",
+    "spam_or_noise",
+    "platform_notice",
+    "buyer_message",
+    "order_paid",
+    "payment_issue",
+    "offer_or_negotiation",
+    "inventory_question",
+    "authenticity_or_condition_question",
+    "account_security",
+  ],
+};
+
+function canonicalAdminCategoryKey(value: unknown) {
+  const key = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[/\s-]+/g, "_")
+    .replace(/_+/g, "_");
+  const aliases: Record<string, string> = {
+    return_request: "return_requests",
+    return_requests: "return_requests",
+    shipping_label: "shipping_labels",
+    shipping_labels: "shipping_labels",
+    marketing_promotion: "marketing_or_promotion",
+    marketing_or_promotion: "marketing_or_promotion",
+  };
+  return aliases[key] || key;
 }
 
-async function loadCurrentValidCategoryTotals(supabase: ServiceClient) {
-  const { data, error, count } = await currentValidClassificationQuery(
-    supabase
-      .from("email_message_classifications")
-      .select("category, operator_override_category, requires_human_review", { count: "exact" }),
-  )
-    .order("created_at", { ascending: false })
-    .range(0, ADMIN_CATEGORY_TOTAL_SCAN_LIMIT - 1);
+function categoryValuesForAdminFilter(category: string) {
+  const raw = String(category || "all");
+  if (!raw || raw === "all" || raw === "human_review") return [];
+  const key = canonicalAdminCategoryKey(raw.startsWith("category:") ? raw.slice("category:".length) : raw);
+  if (ADMIN_CATEGORY_GROUPS[key]) return ADMIN_CATEGORY_GROUPS[key];
+  const direct = CATEGORIES.find((item) => canonicalAdminCategoryKey(item) === key || item === key);
+  return direct ? [direct] : [];
+}
 
-  if (error) throw new ClassifierError("admin_view_category_totals_failed", { phase: "admin_view_category_totals" });
+function effectiveFieldEquals(column: string, overrideColumn: string, value: string) {
+  return `${overrideColumn}.eq.${value},and(${overrideColumn}.is.null,${column}.eq.${value})`;
+}
 
-  const rows = (data || []) as Record<string, any>[];
-  const byCategory: Record<string, number> = {};
-  let humanReview = 0;
-  for (const row of rows) {
-    const category = effectiveCategoryForAdminTotals(row);
-    if (category) byCategory[category] = Number(byCategory[category] || 0) + 1;
-    if (row.requires_human_review === true) humanReview += 1;
+function effectiveFieldIn(column: string, overrideColumn: string, values: string[]) {
+  const safeValues = values.filter(Boolean);
+  if (!safeValues.length) return "";
+  return `${overrideColumn}.in.(${safeValues.join(",")}),and(${overrideColumn}.is.null,${column}.in.(${safeValues.join(",")}))`;
+}
+
+function applyAdminViewFilters(query: any, mailboxQuery: MailboxQuery, options: { includeCategory?: boolean } = {}) {
+  let next = query;
+  const includeCategory = options.includeCategory !== false;
+  const filters = new Set(mailboxQuery.filters || []);
+
+  if (includeCategory) {
+    if (mailboxQuery.category === "human_review") {
+      next = next.or("requires_human_review.eq.true,confidence.lt.0.75");
+    } else {
+      const categoryValues = categoryValuesForAdminFilter(mailboxQuery.category);
+      const categoryFilter = effectiveFieldIn("category", "operator_override_category", categoryValues);
+      if (categoryFilter) next = next.or(categoryFilter);
+    }
   }
 
-  const total = typeof count === "number" ? count : rows.length;
+  if (mailboxQuery.priority && mailboxQuery.priority !== "all") {
+    next = next.or(effectiveFieldEquals("priority", "operator_override_priority", mailboxQuery.priority));
+  }
+
+  if (mailboxQuery.status && mailboxQuery.status !== "all") {
+    if (mailboxQuery.status === "needs_review") next = next.or("requires_human_review.eq.true,confidence.lt.0.75");
+    else if (REVIEW_STATES.includes(mailboxQuery.status as typeof REVIEW_STATES[number])) next = next.eq("classification_review_state", mailboxQuery.status);
+  }
+
+  if (filters.has("needs_review")) next = next.or("requires_human_review.eq.true,confidence.lt.0.75");
+  if (filters.has("low_confidence")) next = next.lt("confidence", 0.75);
+  if (filters.has("safety_flags")) next = next.not("safety_flags", "eq", "{}");
+  if (filters.has("older_24h")) next = next.lt("email_messages.received_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  if (filters.has("older_3d")) next = next.lt("email_messages.received_at", new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString());
+  if (filters.has("critical_priority")) next = next.or(effectiveFieldEquals("priority", "operator_override_priority", "critical"));
+  if (filters.has("high_priority")) next = next.or(effectiveFieldEquals("priority", "operator_override_priority", "high"));
+  if (filters.has("immediate_attention")) next = next.or("operator_override_urgency.eq.immediate,and(operator_override_urgency.is.null,urgency.eq.immediate),response_timing.eq.immediate_attention");
+  if (filters.has("needs_response_today")) {
+    next = next
+      .eq("response_needed", true)
+      .or("operator_override_urgency.in.(today,immediate),and(operator_override_urgency.is.null,urgency.in.(today,immediate)),response_timing.in.(within_24_hours,immediate_attention)");
+  }
+  if (filters.has("refund_risk")) next = next.eq("refund_risk", true);
+  if (filters.has("chargeback_risk")) next = next.eq("chargeback_risk", true);
+
+  return next;
+}
+
+function applyAdminViewSort(query: any, sort: MailboxSort) {
+  if (sort === "oldest") {
+    return query
+      .order(ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN, { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+  }
+  if (sort === "confidence_high") {
+    return query
+      .order("confidence", { ascending: false, nullsFirst: false })
+      .order(ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN, { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false });
+  }
+  if (sort === "confidence_low") {
+    return query
+      .order("confidence", { ascending: true, nullsFirst: false })
+      .order(ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN, { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false });
+  }
+  if (sort === "human_review") {
+    return query
+      .order("requires_human_review", { ascending: false })
+      .order("confidence", { ascending: true, nullsFirst: false })
+      .order(ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN, { ascending: false, nullsFirst: false })
+      .order("id", { ascending: false });
+  }
+  return query
+    .order(ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN, { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+}
+
+async function countCurrentValidClassifications(supabase: ServiceClient, mailboxQuery: MailboxQuery, options: { includeCategory?: boolean } = {}) {
+  const { count, error } = await applyAdminViewFilters(
+    currentValidClassificationQuery(
+      supabase
+        .from("email_message_classifications")
+        .select("id, email_messages!inner(id, sync_status, received_at)", { count: "exact", head: true })
+        .eq("email_messages.sync_status", "active"),
+    ),
+    mailboxQuery,
+    options,
+  );
+  if (error) throw new ClassifierError("admin_view_count_failed", { phase: "admin_view_filtered_count" });
+  return count || 0;
+}
+
+async function countEffectiveCategory(supabase: ServiceClient, mailboxQuery: MailboxQuery, category: string) {
+  const queryForCategory = { ...mailboxQuery, category };
+  return await countCurrentValidClassifications(supabase, queryForCategory, { includeCategory: true });
+}
+
+async function loadCurrentValidCategoryTotals(supabase: ServiceClient, mailboxQuery: MailboxQuery) {
+  const countQuery = { ...mailboxQuery, category: "all" };
+  const entries = await Promise.all(CATEGORIES.map(async (category) => [category, await countEffectiveCategory(supabase, countQuery, category)] as const));
+  const humanReview = await countCurrentValidClassifications(supabase, { ...countQuery, category: "human_review" }, { includeCategory: true });
   return {
-    total,
-    by_category: byCategory,
+    by_category: Object.fromEntries(entries.filter(([, count]) => count > 0)),
     human_review: humanReview,
-    rows_loaded: rows.length,
+    rows_loaded: entries.reduce((total, [, count]) => total + count, 0),
     scan_limit: ADMIN_CATEGORY_TOTAL_SCAN_LIMIT,
-    is_exact: typeof count === "number" && total === rows.length,
+    is_exact: true,
   };
 }
 
@@ -1988,6 +2163,247 @@ function effectiveClassification(row: Record<string, any>) {
     effective_priority: row.operator_override_priority || row.priority,
     effective_urgency: row.operator_override_urgency || row.urgency,
     has_operator_override: Boolean(row.operator_override_category || row.operator_override_priority || row.operator_override_urgency),
+  };
+}
+
+function adminViewTimestampMs(value: unknown) {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function adminViewNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compareNullableAdminNumber(left: number | null, right: number | null, direction: "asc" | "desc") {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return direction === "asc" ? left - right : right - left;
+}
+
+function compareNullableAdminText(left: unknown, right: unknown, direction: "asc" | "desc") {
+  const leftValue = String(left || "");
+  const rightValue = String(right || "");
+  if (!leftValue && !rightValue) return 0;
+  if (!leftValue) return 1;
+  if (!rightValue) return -1;
+  return direction === "asc" ? leftValue.localeCompare(rightValue) : rightValue.localeCompare(leftValue);
+}
+
+function compareAdminReceivedAt(left: Record<string, any>, right: Record<string, any>, direction: "asc" | "desc") {
+  return compareNullableAdminNumber(
+    adminViewTimestampMs(left.message_received_at),
+    adminViewTimestampMs(right.message_received_at),
+    direction,
+  );
+}
+
+function compareAdminCreatedAt(left: Record<string, any>, right: Record<string, any>, direction: "asc" | "desc") {
+  return compareNullableAdminNumber(
+    adminViewTimestampMs(left.created_at),
+    adminViewTimestampMs(right.created_at),
+    direction,
+  );
+}
+
+function adminViewNeedsHumanReview(row: Record<string, any>) {
+  const confidence = adminViewNumber(row.confidence);
+  return row.requires_human_review === true || (confidence !== null && confidence < 0.75);
+}
+
+function adminViewEffectiveCategory(row: Record<string, any>) {
+  return String(row.effective_category || row.operator_override_category || row.category || "");
+}
+
+function adminViewEffectivePriority(row: Record<string, any>) {
+  return String(row.effective_priority || row.operator_override_priority || row.priority || "");
+}
+
+function adminViewEffectiveUrgency(row: Record<string, any>) {
+  return String(row.effective_urgency || row.operator_override_urgency || row.urgency || "");
+}
+
+function compareAdminRowsForSort(left: Record<string, any>, right: Record<string, any>, sort: MailboxSort) {
+  if (sort === "oldest") {
+    return compareAdminReceivedAt(left, right, "asc")
+      || compareAdminCreatedAt(left, right, "asc")
+      || compareNullableAdminText(left.id, right.id, "asc");
+  }
+  if (sort === "confidence_high") {
+    return compareNullableAdminNumber(adminViewNumber(left.confidence), adminViewNumber(right.confidence), "desc")
+      || compareAdminReceivedAt(left, right, "desc")
+      || compareNullableAdminText(left.id, right.id, "desc");
+  }
+  if (sort === "confidence_low") {
+    return compareNullableAdminNumber(adminViewNumber(left.confidence), adminViewNumber(right.confidence), "asc")
+      || compareAdminReceivedAt(left, right, "desc")
+      || compareNullableAdminText(left.id, right.id, "desc");
+  }
+  return compareAdminReceivedAt(left, right, "desc")
+    || compareAdminCreatedAt(left, right, "desc")
+    || compareNullableAdminText(left.id, right.id, "desc");
+}
+
+function firstAdminSortValues(rows: Record<string, any>[], sort: MailboxSort) {
+  return rows.slice(0, 10).map((row) => {
+    if (sort === "confidence_high" || sort === "confidence_low") return row.confidence === null ? null : Number(row.confidence);
+    if (sort === "human_review") {
+      return {
+        needs_human_review: adminViewNeedsHumanReview(row),
+        requires_human_review: row.requires_human_review === true,
+        confidence: row.confidence === null ? null : Number(row.confidence),
+        message_received_at: row.message_received_at || null,
+      };
+    }
+    return row.message_received_at || null;
+  });
+}
+
+function verifyAdminViewSortRows(rows: Record<string, any>[], sort: MailboxSort) {
+  if (sort === "human_review") {
+    let violationIndex: number | null = null;
+    let seenNonReview = false;
+    rows.forEach((row, index) => {
+      const needsReview = adminViewNeedsHumanReview(row);
+      if (needsReview && seenNonReview && violationIndex === null) violationIndex = index;
+      if (!needsReview) seenNonReview = true;
+    });
+    return {
+      sort,
+      checked_rows: rows.length,
+      passed: violationIndex === null,
+      expected: "requires_human_review true or confidence below 0.75 before other rows",
+      violation_index: violationIndex,
+      first_values: firstAdminSortValues(rows, sort),
+    };
+  }
+
+  let violationIndex: number | null = null;
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    if (compareAdminRowsForSort(rows[index], rows[index + 1], sort) > 0) {
+      violationIndex = index;
+      break;
+    }
+  }
+
+  const expected = sort === "oldest"
+    ? "message_received_at ascending"
+    : sort === "confidence_high"
+      ? "confidence descending, then message_received_at descending"
+      : sort === "confidence_low"
+        ? "confidence ascending, then message_received_at descending"
+        : "message_received_at descending";
+
+  return {
+    sort,
+    checked_rows: rows.length,
+    passed: violationIndex === null,
+    expected,
+    violation_index: violationIndex,
+    first_values: firstAdminSortValues(rows, sort),
+  };
+}
+
+function verifyAdminViewRule(rows: Record<string, any>[], name: string, expected: string, matches: (row: Record<string, any>) => boolean) {
+  const violationIndex = rows.findIndex((row) => !matches(row));
+  return {
+    name,
+    expected,
+    checked_rows: rows.length,
+    passed: violationIndex === -1,
+    violation_index: violationIndex === -1 ? null : violationIndex,
+  };
+}
+
+function verifyAdminViewFilterRows(rows: Record<string, any>[], mailboxQuery: MailboxQuery) {
+  const checks = [];
+  if (mailboxQuery.category && mailboxQuery.category !== "all") {
+    if (mailboxQuery.category === "human_review") {
+      checks.push(verifyAdminViewRule(rows, "category", "human_review rows require review or confidence below 0.75", adminViewNeedsHumanReview));
+    } else {
+      const categoryValues = categoryValuesForAdminFilter(mailboxQuery.category);
+      checks.push(verifyAdminViewRule(
+        rows,
+        "category",
+        `effective_category in ${categoryValues.join(",") || mailboxQuery.category}`,
+        (row) => categoryValues.includes(adminViewEffectiveCategory(row)),
+      ));
+    }
+  }
+
+  if (mailboxQuery.priority && mailboxQuery.priority !== "all") {
+    checks.push(verifyAdminViewRule(
+      rows,
+      "priority",
+      `effective_priority equals ${mailboxQuery.priority}`,
+      (row) => adminViewEffectivePriority(row) === mailboxQuery.priority,
+    ));
+  }
+
+  if (mailboxQuery.status && mailboxQuery.status !== "all") {
+    if (mailboxQuery.status === "needs_review") {
+      checks.push(verifyAdminViewRule(rows, "status", "requires_human_review true or confidence below 0.75", adminViewNeedsHumanReview));
+    } else {
+      checks.push(verifyAdminViewRule(
+        rows,
+        "status",
+        `classification_review_state equals ${mailboxQuery.status}`,
+        (row) => String(row.classification_review_state || "pending_review") === mailboxQuery.status,
+      ));
+    }
+  }
+
+  const filterChecks: Record<string, [string, (row: Record<string, any>) => boolean]> = {
+    needs_review: ["requires_human_review true or confidence below 0.75", adminViewNeedsHumanReview],
+    low_confidence: ["confidence below 0.75", (row) => {
+      const confidence = adminViewNumber(row.confidence);
+      return confidence !== null && confidence < 0.75;
+    }],
+    safety_flags: ["safety_flags non-empty", (row) => Array.isArray(row.safety_flags) && row.safety_flags.length > 0],
+    older_24h: ["message_received_at older than 24 hours", (row) => {
+      const receivedAt = adminViewTimestampMs(row.message_received_at);
+      return receivedAt !== null && receivedAt < Date.now() - 24 * 60 * 60 * 1000;
+    }],
+    older_3d: ["message_received_at older than 72 hours", (row) => {
+      const receivedAt = adminViewTimestampMs(row.message_received_at);
+      return receivedAt !== null && receivedAt < Date.now() - 3 * 24 * 60 * 60 * 1000;
+    }],
+    critical_priority: ["effective_priority equals critical", (row) => adminViewEffectivePriority(row) === "critical"],
+    high_priority: ["effective_priority equals high", (row) => adminViewEffectivePriority(row) === "high"],
+    immediate_attention: ["effective_urgency immediate or response_timing immediate_attention", (row) => (
+      adminViewEffectiveUrgency(row) === "immediate" || row.response_timing === "immediate_attention"
+    )],
+    needs_response_today: ["response_needed true and timing/urgency today or immediate", (row) => (
+      row.response_needed === true
+      && (
+        ["today", "immediate"].includes(adminViewEffectiveUrgency(row))
+        || ["within_24_hours", "immediate_attention"].includes(String(row.response_timing || ""))
+      )
+    )],
+    refund_risk: ["refund_risk true", (row) => row.refund_risk === true],
+    chargeback_risk: ["chargeback_risk true", (row) => row.chargeback_risk === true],
+  };
+
+  for (const filter of mailboxQuery.filters || []) {
+    const check = filterChecks[filter];
+    if (check) checks.push(verifyAdminViewRule(rows, `filter:${filter}`, check[0], check[1]));
+  }
+
+  return checks;
+}
+
+function verifyAdminViewRows(rows: Record<string, any>[], mailboxQuery: MailboxQuery) {
+  const sort = verifyAdminViewSortRows(rows, mailboxQuery.sort);
+  const filters = verifyAdminViewFilterRows(rows, mailboxQuery);
+  return {
+    checked_rows: rows.length,
+    passed: sort.passed && filters.every((check) => check.passed),
+    sort,
+    filters,
   };
 }
 
@@ -2784,6 +3200,24 @@ async function saveClassificationReview(
 }
 
 async function adminClassificationView(supabase: ServiceClient, input: Input) {
+  const mailboxQuery = input.mailboxQuery;
+  const allMailboxQuery = { ...mailboxQuery, category: "all", priority: "all", status: "all", filters: [] };
+  const pageFrom = mailboxQuery.offset;
+  const pageTo = mailboxQuery.offset + mailboxQuery.pageSize - 1;
+  const classificationsQuery = applyAdminViewSort(
+    applyAdminViewFilters(
+      currentValidClassificationQuery(
+        supabase
+          .from("email_message_classifications")
+          .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, is_current, validation_status, classification_run_id, input_version, prompt_version, prompt_hash, input_hash, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at, email_messages!inner(id, subject, from_name, from_email, sender_name, sender_email, received_at, body_preview, sync_status)", { count: "exact" })
+          .eq("email_messages.sync_status", "active"),
+      ),
+      mailboxQuery,
+      { includeCategory: true },
+    ),
+    mailboxQuery.sort,
+  ).range(pageFrom, pageTo);
+
   const [
     classificationsResult,
     replayResult,
@@ -2798,14 +3232,9 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     pendingReviewCount,
     replayGeneratedCount,
     categoryTotals,
+    totalMailboxRows,
   ] = await Promise.all([
-    currentValidClassificationQuery(
-      supabase
-        .from("email_message_classifications")
-        .select("id, message_id, category, subcategory, confidence, priority, urgency, priority_level, urgency_level, response_timing, customer_risk, refund_risk, chargeback_risk, response_needed, summary, reasoning_summary, recommended_action, requires_human_review, safety_flags, is_current, validation_status, classification_run_id, input_version, prompt_version, prompt_hash, input_hash, created_at, classification_review_state, operator_override_category, operator_override_priority, operator_override_urgency, operator_notes, reviewed_by, reviewed_at"),
-    )
-      .order("created_at", { ascending: false })
-      .limit(input.classificationLimit),
+    classificationsQuery,
     supabase
       .from("email_operational_events")
       .select("id, reason, idempotency_key, new_job_ids, payload, created_at")
@@ -2823,12 +3252,13 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "running")),
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "succeeded")),
     countRows(supabase, "email_processing_jobs", (query) => query.eq("job_type", "classify").eq("status", "failed")),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid")),
+    countCurrentValidClassifications(supabase, allMailboxQuery, { includeCategory: false }),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("validation_status", "invalid")),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid").eq("requires_human_review", true)),
-    countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").eq("is_current", true).eq("validation_status", "valid").eq("requires_human_review", true).eq("classification_review_state", "pending_review")),
+    countCurrentValidClassifications(supabase, { ...allMailboxQuery, status: "needs_review" }, { includeCategory: true }),
+    countCurrentValidClassifications(supabase, { ...allMailboxQuery, status: "pending_review" }, { includeCategory: true }),
     countRows(supabase, "email_message_classifications", (query) => query.eq("source", "ai").like("input_version", "v1:classification_replay:%")),
-    loadCurrentValidCategoryTotals(supabase),
+    loadCurrentValidCategoryTotals(supabase, mailboxQuery),
+    countRows(supabase, "email_messages", (query) => query.eq("sync_status", "active")),
   ]);
 
   if (classificationsResult.error) throw new ClassifierError("admin_view_classifications_failed", { phase: "admin_view_classifications" });
@@ -2836,9 +3266,11 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
   if (failedJobsResult.error) throw new ClassifierError("admin_view_failed_jobs_failed", { phase: "admin_view_failed_jobs" });
 
   const classificationRows = (classificationsResult.data || []) as Record<string, any>[];
+  const filteredRows = typeof classificationsResult.count === "number" ? classificationsResult.count : classificationRows.length;
+  const totalPages = Math.max(Math.ceil(filteredRows / mailboxQuery.pageSize), 1);
   const messageIds = uniqueStrings(
     classificationRows.map((row: Record<string, any>) => row.message_id),
-    input.classificationLimit,
+    mailboxQuery.pageSize,
   );
   const messageMetadataById = new Map<string, Record<string, any>>();
   if (messageIds.length) {
@@ -2868,53 +3300,56 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     created_at: event.created_at,
   }));
 
+  const classifications = classificationRows.map((row: Record<string, any>) => {
+    const message = messageMetadataById.get(String(row.message_id)) || {};
+    return {
+      id: row.id,
+      message_id: row.message_id,
+      message_subject: shortText(message.subject, 300) || null,
+      message_sender_name: shortText(message.from_name || message.sender_name, 120) || null,
+      message_sender_email: shortText(message.from_email || message.sender_email, 180).toLowerCase() || null,
+      message_received_at: message.received_at || null,
+      message_body_preview: shortText(message.body_preview, 800) || null,
+      category: row.category,
+      subcategory: row.subcategory,
+      confidence: row.confidence === null ? null : Number(row.confidence),
+      priority: row.priority,
+      urgency: row.urgency,
+      ...effectiveClassification(row),
+      priority_level: row.priority_level,
+      urgency_level: row.urgency_level,
+      response_timing: row.response_timing,
+      customer_risk: row.customer_risk,
+      refund_risk: row.refund_risk === true,
+      chargeback_risk: row.chargeback_risk === true,
+      response_needed: row.response_needed,
+      summary: row.summary,
+      reasoning_summary: row.reasoning_summary,
+      recommended_action: row.recommended_action,
+      requires_human_review: row.requires_human_review,
+      safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
+      is_current: row.is_current === true,
+      validation_status: row.validation_status,
+      classification_run_id: row.classification_run_id,
+      input_version: row.input_version,
+      prompt_version: row.prompt_version || null,
+      staleness: classificationStalenessById.get(String(row.id)) || null,
+      created_at: row.created_at,
+      classification_review_state: reviewStateForRow(row),
+      operator_override_category: row.operator_override_category || null,
+      operator_override_priority: row.operator_override_priority || null,
+      operator_override_urgency: row.operator_override_urgency || null,
+      operator_notes: row.operator_notes || null,
+      reviewed_by: row.reviewed_by || null,
+      reviewed_at: row.reviewed_at || null,
+    };
+  });
+  const mailboxQueryVerification = verifyAdminViewRows(classifications, mailboxQuery);
+
   return {
     ok: true,
     mode: "admin_view",
-    classifications: classificationRows.map((row: Record<string, any>) => {
-      const message = messageMetadataById.get(String(row.message_id)) || {};
-      return {
-        id: row.id,
-        message_id: row.message_id,
-        message_subject: shortText(message.subject, 300) || null,
-        message_sender_name: shortText(message.from_name || message.sender_name, 120) || null,
-        message_sender_email: shortText(message.from_email || message.sender_email, 180).toLowerCase() || null,
-        message_received_at: message.received_at || null,
-        message_body_preview: shortText(message.body_preview, 800) || null,
-        category: row.category,
-        subcategory: row.subcategory,
-        confidence: row.confidence === null ? null : Number(row.confidence),
-        priority: row.priority,
-        urgency: row.urgency,
-        ...effectiveClassification(row),
-        priority_level: row.priority_level,
-        urgency_level: row.urgency_level,
-        response_timing: row.response_timing,
-        customer_risk: row.customer_risk,
-        refund_risk: row.refund_risk === true,
-        chargeback_risk: row.chargeback_risk === true,
-        response_needed: row.response_needed,
-        summary: row.summary,
-        reasoning_summary: row.reasoning_summary,
-        recommended_action: row.recommended_action,
-        requires_human_review: row.requires_human_review,
-        safety_flags: Array.isArray(row.safety_flags) ? row.safety_flags : [],
-        is_current: row.is_current === true,
-        validation_status: row.validation_status,
-        classification_run_id: row.classification_run_id,
-        input_version: row.input_version,
-        prompt_version: row.prompt_version || null,
-        staleness: classificationStalenessById.get(String(row.id)) || null,
-        created_at: row.created_at,
-        classification_review_state: reviewStateForRow(row),
-        operator_override_category: row.operator_override_category || null,
-        operator_override_priority: row.operator_override_priority || null,
-        operator_override_urgency: row.operator_override_urgency || null,
-        operator_notes: row.operator_notes || null,
-        reviewed_by: row.reviewed_by || null,
-        reviewed_at: row.reviewed_at || null,
-      };
-    }),
+    classifications,
     replay_operations: replayOperations,
     failed_jobs: (failedJobsResult.data || []).map((job: Record<string, any>) => ({
       id: job.id,
@@ -2935,14 +3370,41 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
     classification_counts: {
       scope: "current_valid",
       total_current_valid: currentValidCount,
-      loaded_current_valid: (classificationsResult.data || []).length,
-      current_limit_used: input.classificationLimit,
-      result_limited: currentValidCount > (classificationsResult.data || []).length,
+      loaded_current_valid: classifications.length,
+      current_limit_used: mailboxQuery.pageSize,
+      result_limited: filteredRows > classifications.length,
+      filtered_current_valid: filteredRows,
+      visible_rows: classifications.length,
+      total_mailbox_rows: totalMailboxRows,
       category_totals: categoryTotals.by_category,
       human_review_total: categoryTotals.human_review,
       category_totals_are_exact: categoryTotals.is_exact,
       category_total_rows_loaded: categoryTotals.rows_loaded,
       category_total_scan_limit: categoryTotals.scan_limit,
+      page: mailboxQuery.page,
+      page_size: mailboxQuery.pageSize,
+      page_offset: mailboxQuery.offset,
+      total_pages: totalPages,
+      has_next_page: mailboxQuery.page < totalPages,
+      has_previous_page: mailboxQuery.page > 1,
+    },
+    mailbox_query: {
+      page: mailboxQuery.page,
+      page_size: mailboxQuery.pageSize,
+      offset: mailboxQuery.offset,
+      sort: mailboxQuery.sort,
+      category: mailboxQuery.category,
+      priority: mailboxQuery.priority,
+      status: mailboxQuery.status,
+      filters: mailboxQuery.filters,
+      visible_rows: classifications.length,
+      filtered_rows: filteredRows,
+      total_pages: totalPages,
+      total_mailbox_rows: totalMailboxRows,
+      total_classified_rows: currentValidCount,
+      has_next_page: mailboxQuery.page < totalPages,
+      has_previous_page: mailboxQuery.page > 1,
+      verification: mailboxQueryVerification,
     },
     validation_diagnostics: {
       valid_classifications: currentValidCount,

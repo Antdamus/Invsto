@@ -864,6 +864,61 @@
   min-width: 0;
 }
 
+.classification-page-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.classification-page-summary div {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  padding: 8px 10px;
+}
+
+.classification-page-summary strong,
+.classification-page-summary span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.classification-page-summary strong {
+  color: rgba(242,243,245,.92);
+  font-size: .76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.classification-page-summary span {
+  margin-top: 2px;
+  color: rgba(242,243,245,.58);
+  font-size: .74rem;
+  font-weight: 760;
+}
+
+.classification-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.classification-pagination span {
+  flex: 1 1 auto;
+  color: rgba(242,243,245,.62);
+  font-size: .76rem;
+  font-weight: 850;
+  text-align: center;
+}
+
 .panel-resize-handle {
   position: relative;
   width: 7px;

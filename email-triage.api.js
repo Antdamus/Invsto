@@ -10,7 +10,7 @@
   const PROCESS_FUNCTION = "microsoft-email-process";
 
   const DEFAULT_LIMITS = {
-    classificationLimit: 100,
+    classificationLimit: 25,
     replayLimit: 20,
     failedJobLimit: 20,
   };
@@ -114,12 +114,23 @@
   }
 
   function normalizePage(source = {}) {
+    const pageSource = source.page && typeof source.page === "object" ? source.page : {};
+    const querySource = source.mailbox_query && typeof source.mailbox_query === "object" ? source.mailbox_query : {};
     return {
-      limit: Number(source.limit || source.page?.limit || 0) || null,
-      cursor: source.cursor || source.page?.cursor || null,
-      has_more: Boolean(source.has_more || source.hasMore || source.page?.has_more || source.page?.hasMore),
-      filters: source.filters || source.page?.filters || {},
-      sort: source.sort || source.page?.sort || null,
+      page: Number(querySource.page || pageSource.page || source.page_number || 1) || 1,
+      pageSize: Number(querySource.page_size || querySource.pageSize || pageSource.page_size || pageSource.pageSize || source.limit || 0) || null,
+      limit: Number(querySource.page_size || querySource.pageSize || pageSource.limit || source.limit || 0) || null,
+      offset: Number(querySource.offset || pageSource.offset || 0) || 0,
+      cursor: source.cursor || pageSource.cursor || null,
+      has_more: Boolean(querySource.has_next_page || source.has_more || source.hasMore || pageSource.has_more || pageSource.hasMore),
+      has_previous_page: Boolean(querySource.has_previous_page || pageSource.has_previous_page),
+      total_pages: Number(querySource.total_pages || pageSource.total_pages || 1) || 1,
+      filtered_rows: Number(querySource.filtered_rows || pageSource.filtered_rows || 0) || 0,
+      total_mailbox_rows: Number(querySource.total_mailbox_rows || pageSource.total_mailbox_rows || 0) || 0,
+      total_classified_rows: Number(querySource.total_classified_rows || pageSource.total_classified_rows || 0) || 0,
+      visible_rows: Number(querySource.visible_rows || pageSource.visible_rows || 0) || 0,
+      filters: querySource.filters || source.filters || pageSource.filters || {},
+      sort: querySource.sort || source.sort || pageSource.sort || null,
     };
   }
 
@@ -139,11 +150,20 @@
       loaded_current_valid: Number(counts.loaded_current_valid || loadedRows || 0),
       current_limit_used: Number(counts.current_limit_used || 0),
       result_limited: counts.result_limited === true,
+      filtered_current_valid: Number(counts.filtered_current_valid || 0),
+      visible_rows: Number(counts.visible_rows || loadedRows || 0),
+      total_mailbox_rows: Number(counts.total_mailbox_rows || 0),
       category_totals: normalizeNumberMap(counts.category_totals),
       human_review_total: Number(counts.human_review_total || 0),
       category_totals_are_exact: counts.category_totals_are_exact === true,
       category_total_rows_loaded: Number(counts.category_total_rows_loaded || 0),
       category_total_scan_limit: Number(counts.category_total_scan_limit || 0),
+      page: Number(counts.page || 1),
+      page_size: Number(counts.page_size || counts.current_limit_used || 0),
+      page_offset: Number(counts.page_offset || 0),
+      total_pages: Number(counts.total_pages || 1),
+      has_next_page: counts.has_next_page === true,
+      has_previous_page: counts.has_previous_page === true,
     };
   }
 
@@ -264,6 +284,10 @@
       classifications,
       replay_operations: replayOperations,
       failed_jobs: failedJobs,
+      mailbox_query: source?.mailbox_query && typeof source.mailbox_query === "object"
+        ? source.mailbox_query
+        : {},
+      page: normalizePage(source || {}),
       queue_summary: {
         queued: Number(queueSummary.queued || 0),
         processing: Number(queueSummary.processing || 0),
@@ -291,13 +315,24 @@
 
   async function fetchAdminClassificationView(context, limits = DEFAULT_LIMITS) {
     const session = await currentSession(context, "Classification admin");
+    const mailboxQuery = limits.mailboxQuery && typeof limits.mailboxQuery === "object" ? limits.mailboxQuery : {};
+    const pageSize = Number(mailboxQuery.pageSize || limits.classificationLimit || DEFAULT_LIMITS.classificationLimit);
     const payload = await edgeFetchWithTimeout(CLASSIFY_FUNCTION, session, {
       method: "POST",
       body: JSON.stringify({
         mode: "admin_view",
-        classificationLimit: limits.classificationLimit || DEFAULT_LIMITS.classificationLimit,
+        classificationLimit: pageSize,
         replayLimit: limits.replayLimit || DEFAULT_LIMITS.replayLimit,
         failedJobLimit: limits.failedJobLimit || DEFAULT_LIMITS.failedJobLimit,
+        mailboxQuery: {
+          page: Number(mailboxQuery.page || 1),
+          pageSize,
+          sort: mailboxQuery.sort || "newest",
+          category: mailboxQuery.category || "all",
+          priority: mailboxQuery.priority || "all",
+          status: mailboxQuery.status || "all",
+          filters: Array.isArray(mailboxQuery.filters) ? mailboxQuery.filters : [],
+        },
       }),
     }, TIMEOUTS.adminView);
 

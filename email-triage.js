@@ -116,6 +116,9 @@
     operationalDashboardStatus: document.getElementById("operational-dashboard-status"),
     operationalDashboard: document.getElementById("operational-dashboard"),
     classificationSort: document.getElementById("classification-sort"),
+    classificationPageSize: document.getElementById("classification-page-size"),
+    classificationPriorityFilter: document.getElementById("classification-priority-filter"),
+    classificationStatusFilter: document.getElementById("classification-status-filter"),
     classificationCategorySort: document.getElementById("classification-category-sort"),
     classificationFiltersToggle: document.getElementById("classification-filters-toggle"),
     classificationFiltersLabel: document.getElementById("classification-filters-label"),
@@ -125,6 +128,10 @@
     classificationInboxShell: document.getElementById("classification-inbox-shell"),
     panelResizeHandles: document.querySelectorAll("[data-panel-resize]"),
     classificationCategoryList: document.getElementById("classification-category-list"),
+    classificationPageSummary: document.getElementById("classification-page-summary"),
+    classificationPrevPage: document.getElementById("classification-prev-page"),
+    classificationNextPage: document.getElementById("classification-next-page"),
+    classificationPageIndicator: document.getElementById("classification-page-indicator"),
     classificationList: document.getElementById("classification-list"),
     classificationDetail: document.getElementById("classification-detail"),
     greeting: document.getElementById("admin-greeting"),
@@ -220,6 +227,45 @@
     if (!messageId) return false;
     const context = state.matchContextsByMessageId?.[messageId];
     return Array.isArray(context?.matches) && context.matches.length > 0;
+  }
+
+  function pageInfoFromData(data = {}) {
+    const counts = data.classification_counts || {};
+    const page = data.page || {};
+    return {
+      page: Number(page.page || counts.page || 1) || 1,
+      pageSize: Number(page.pageSize || counts.page_size || counts.current_limit_used || 25) || 25,
+      offset: Number(page.offset || counts.page_offset || 0) || 0,
+      totalPages: Math.max(Number(page.total_pages || counts.total_pages || 1) || 1, 1),
+      filteredRows: Number(page.filtered_rows || counts.filtered_current_valid || counts.total_current_valid || 0) || 0,
+      visibleRows: Number(page.visible_rows || counts.visible_rows || data.classifications?.length || 0) || 0,
+      totalMailboxRows: Number(page.total_mailbox_rows || counts.total_mailbox_rows || 0) || 0,
+      totalClassifiedRows: Number(page.total_classified_rows || counts.total_current_valid || 0) || 0,
+      hasNextPage: page.has_more === true || counts.has_next_page === true,
+      hasPreviousPage: page.has_previous_page === true || counts.has_previous_page === true,
+    };
+  }
+
+  function mailboxQueryFromState(state, overrides = {}) {
+    const pagination = state.pagination || {};
+    const pageSize = Number(overrides.pageSize || pagination.pageSize || pagination.limit || 25);
+    return {
+      page: Math.max(Number(overrides.page || pagination.page || 1) || 1, 1),
+      pageSize: Math.min(Math.max(pageSize || 25, 1), 100),
+      sort: overrides.sort || state.sortMode || "newest",
+      category: overrides.category || state.selectedCategory || "all",
+      priority: overrides.priority || state.priorityFilter || "all",
+      status: overrides.status || state.statusFilter || "all",
+      filters: Array.isArray(overrides.filters) ? overrides.filters : (state.activeFilters || []),
+    };
+  }
+
+  function mergeSelectedClassificationCache(state, classifications = []) {
+    const next = { ...(state.selectedClassificationsById || {}) };
+    classifications.forEach((classification) => {
+      if (classification?.id) next[classification.id] = classification;
+    });
+    return next;
   }
 
   triageStore.subscribe((state) => {
@@ -422,7 +468,7 @@
   }
 
   function exactCategoryTotalsAvailable(data, activeFilters = []) {
-    return activeFilters.length === 0 && data.classification_counts?.category_totals_are_exact === true;
+    return data.classification_counts?.category_totals_are_exact === true;
   }
 
   function exactSidebarGroupCount(data, group) {
@@ -656,7 +702,7 @@
     const groups = buildCategorySidebarGroups(data, state.categorySortMode, activeCustomOrder);
     const showingExactTotals = exactCategoryTotalsAvailable(data, state.activeFilters);
     const countNote = showingExactTotals
-      ? "Counts are exact totals for current valid classifications."
+      ? "Counts are exact totals for the current mailbox query."
       : "Counts are loaded-view rows for the active filters.";
     const countTitle = showingExactTotals
       ? "Exact current valid classifications"
@@ -697,11 +743,11 @@
   function renderClassificationList(state, data) {
     if (!els.classificationList) return;
 
-    const rows = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode);
+    const rows = data.classifications || [];
     if (!rows.length) {
       const emptyText = data.classifications.length
-        ? "No classifications match these filters."
-        : "No classified emails returned yet.";
+        ? "No classifications are on this page."
+        : "No durable mailbox rows match the current query.";
       els.classificationList.innerHTML = `<div class="classification-empty">${escapeHtml(emptyText)}</div>`;
       return;
     }
@@ -1326,7 +1372,8 @@
   function renderClassificationDetail(state, data) {
     if (!els.classificationDetail) return;
 
-    const selected = (data.classifications || []).find((classification) => classification.id === state.selectedClassificationId);
+    const selected = selectedClassificationById(state.selectedClassificationId);
+    const selectedOnPage = (data.classifications || []).some((classification) => classification.id === state.selectedClassificationId);
     if (!selected) {
       els.classificationDetail.innerHTML = `
         <div class="classification-empty">
@@ -1363,6 +1410,12 @@
       </div>
 
       ${renderStaleClassificationWarning(selected)}
+
+      ${!selectedOnPage ? `
+        <div class="classification-notice is-warning">
+          Selected email is outside the current page or filter slice. Selection is preserved; change filters or refresh details deliberately.
+        </div>
+      ` : ""}
 
       <div class="detail-panel-actions" aria-label="Detail section controls">
         <button type="button" class="secondary-btn" data-detail-sections-action="expand">
@@ -1487,14 +1540,47 @@
     const counts = data.classification_counts || {};
     const loaded = Number(counts.loaded_current_valid ?? data.classifications?.length ?? 0);
     const total = Number(counts.total_current_valid ?? 0);
+    const filtered = Number(counts.filtered_current_valid ?? total);
+    const totalMailbox = Number(counts.total_mailbox_rows || 0);
     if (!loaded && !total && emptyResults) {
       return "Fetch succeeded. No current valid classifications returned yet.";
     }
+    if (filtered !== total && total > 0) {
+      return `Showing ${loaded} visible rows from ${filtered} filtered classifications. Mailbox has ${totalMailbox} imported rows.`;
+    }
     if (Number.isFinite(total) && total > 0) {
-      const limitedText = counts.result_limited === true ? " Result is limited by the admin view cap." : "";
-      return `Showing ${loaded} of ${total} current valid classifications.${limitedText}`;
+      return `Showing ${loaded} visible rows from ${total} current valid classifications. Mailbox has ${totalMailbox} imported rows.`;
     }
     return emptyResults ? "Fetch succeeded. No loaded current valid rows returned yet." : "Fetch succeeded. Browse loaded current valid rows below.";
+  }
+
+  function renderMailboxPageControls(state, data) {
+    const page = pageInfoFromData(data);
+    const prepareProgress = state.inboxPrepareResult?.progress || state.inboxMailboxImportResult?.preparation_progress || {};
+    const preparedRows = Number(prepareProgress.processed_total || 0);
+    if (els.classificationPageSummary) {
+      const activeParts = [
+        state.selectedCategory && state.selectedCategory !== "all" ? `category ${humanizeValue(state.selectedCategory.replace(/^category:/, ""))}` : "",
+        state.priorityFilter && state.priorityFilter !== "all" ? `${humanizeValue(state.priorityFilter)} priority` : "",
+        state.statusFilter && state.statusFilter !== "all" ? humanizeValue(state.statusFilter) : "",
+        state.activeFilters?.length ? `${state.activeFilters.length} advanced filter${state.activeFilters.length === 1 ? "" : "s"}` : "",
+      ].filter(Boolean);
+      els.classificationPageSummary.innerHTML = `
+        <div>
+          <strong>Mailbox</strong>
+          <span>${escapeHtml(page.totalMailboxRows)} imported · ${escapeHtml(preparedRows)} prepared · ${escapeHtml(page.totalClassifiedRows)} classified · ${escapeHtml(page.filteredRows)} filtered · ${escapeHtml(page.visibleRows)} visible</span>
+        </div>
+        <div>
+          <strong>Page</strong>
+          <span>${escapeHtml(page.page)} of ${escapeHtml(page.totalPages)} · ${escapeHtml(page.pageSize)} per page${activeParts.length ? ` · ${escapeHtml(activeParts.join(" · "))}` : ""}</span>
+        </div>
+      `;
+    }
+    if (els.classificationPrevPage) els.classificationPrevPage.disabled = state.loading || !page.hasPreviousPage;
+    if (els.classificationNextPage) els.classificationNextPage.disabled = state.loading || !page.hasNextPage;
+    if (els.classificationPageIndicator) {
+      els.classificationPageIndicator.textContent = `Page ${page.page} of ${page.totalPages}`;
+    }
   }
 
   function renderAdminClassificationDebug(state) {
@@ -1510,17 +1596,6 @@
     }
 
     const data = state.data || normalizeAdminViewPayload({});
-    if (!state.selectedClassificationId && data.classifications.length) {
-      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
-      state.selectedClassificationId = selected?.id || null;
-    } else if (state.selectedClassificationId && !data.classifications.some((classification) => classification.id === state.selectedClassificationId)) {
-      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
-      state.selectedClassificationId = selected?.id || null;
-    } else if (state.selectedClassificationId && !filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode).some((classification) => classification.id === state.selectedClassificationId)) {
-      const selected = filteredClassifications(data, state.selectedCategory, state.activeFilters, state.sortMode)[0];
-      state.selectedClassificationId = selected?.id || null;
-    }
-
     const statusText = {
       idle: "Waiting for admin session.",
       loading: "Fetching admin_view payload.",
@@ -1532,6 +1607,15 @@
     if (els.classificationAdminStatus) els.classificationAdminStatus.textContent = statusText;
     if (els.classificationSort && els.classificationSort.value !== state.sortMode) {
       els.classificationSort.value = state.sortMode;
+    }
+    if (els.classificationPageSize && Number(els.classificationPageSize.value) !== Number(state.pagination?.pageSize || 25)) {
+      els.classificationPageSize.value = String(state.pagination?.pageSize || 25);
+    }
+    if (els.classificationPriorityFilter && els.classificationPriorityFilter.value !== (state.priorityFilter || "all")) {
+      els.classificationPriorityFilter.value = state.priorityFilter || "all";
+    }
+    if (els.classificationStatusFilter && els.classificationStatusFilter.value !== (state.statusFilter || "all")) {
+      els.classificationStatusFilter.value = state.statusFilter || "all";
     }
     if (els.classificationCategorySort && els.classificationCategorySort.value !== state.categorySortMode) {
       els.classificationCategorySort.value = state.categorySortMode;
@@ -1577,6 +1661,7 @@
     }
 
     renderCategorySidebar(state, data);
+    renderMailboxPageControls(state, data);
     renderClassificationList(state, data);
     renderClassificationDetail(state, data);
   }
@@ -1645,7 +1730,9 @@
     }
   }
 
-  async function loadAdminClassificationData(context) {
+  async function loadAdminClassificationData(context, options = {}) {
+    const currentState = triageStore.getState();
+    const mailboxQuery = mailboxQueryFromState(currentState, options.mailboxQuery || {});
     setAdminClassificationState({
       status: "loading",
       loading: true,
@@ -1656,8 +1743,10 @@
     });
 
     try {
-      const data = await fetchAdminClassificationView(context);
+      const data = await fetchAdminClassificationView(context, { mailboxQuery });
       const empty = isAdminViewEmpty(data);
+      const page = pageInfoFromData(data);
+      const selectedClassificationId = currentState.selectedClassificationId || data.classifications?.[0]?.id || null;
       setAdminClassificationState({
         status: "ready",
         loading: false,
@@ -1666,6 +1755,28 @@
         empty_results: empty,
         error: null,
         data,
+        selectedClassificationId,
+        selectedClassificationsById: mergeSelectedClassificationCache(currentState, data.classifications || []),
+        pagination: {
+          ...currentState.pagination,
+          page: page.page,
+          pageSize: page.pageSize,
+          limit: page.pageSize,
+          offset: page.offset,
+          has_more: page.hasNextPage,
+          has_previous_page: page.hasPreviousPage,
+          total_pages: page.totalPages,
+          filtered_rows: page.filteredRows,
+          total_mailbox_rows: page.totalMailboxRows,
+          total_classified_rows: page.totalClassifiedRows,
+          filters: {
+            category: mailboxQuery.category,
+            priority: mailboxQuery.priority,
+            status: mailboxQuery.status,
+            activeFilters: mailboxQuery.filters,
+          },
+          sort: mailboxQuery.sort,
+        },
         updatedAt: new Date().toISOString(),
       });
       console.log("[email-triage] admin_view classification data", data);
@@ -1682,6 +1793,31 @@
         updatedAt: new Date().toISOString(),
       });
       console.error("[email-triage] admin_view classification fetch failed:", error);
+    }
+  }
+
+  async function updateMailboxQueryAndLoad(context, overrides = {}) {
+    const current = triageStore.getState();
+    const query = mailboxQueryFromState(current, overrides);
+    setAdminClassificationState({
+      selectedCategory: query.category,
+      sortMode: query.sort,
+      priorityFilter: query.priority,
+      statusFilter: query.status,
+      activeFilters: query.filters,
+      pagination: {
+        ...current.pagination,
+        page: query.page,
+        pageSize: query.pageSize,
+        limit: query.pageSize,
+        offset: (query.page - 1) * query.pageSize,
+      },
+    });
+    await loadAdminClassificationData(context, { mailboxQuery: query });
+    const selected = selectedClassificationById(triageStore.getState().selectedClassificationId);
+    if (selected) {
+      loadDraftView(context, selected);
+      loadMatchContext(context, selected);
     }
   }
 
@@ -1813,8 +1949,11 @@
   }
 
   function selectedClassificationById(classificationId) {
+    if (!classificationId) return null;
     const data = adminClassificationState.data || normalizeAdminViewPayload({});
-    return (data.classifications || []).find((classification) => classification.id === classificationId) || null;
+    return (data.classifications || []).find((classification) => classification.id === classificationId)
+      || adminClassificationState.selectedClassificationsById?.[classificationId]
+      || null;
   }
 
   function selectedClassificationForDraft(messageId, classificationId) {
@@ -2295,23 +2434,7 @@
       if (!button) return;
 
       const selectedCategory = canonicalGroupId(button.getAttribute("data-category-id") || "all");
-      const data = adminClassificationState.data || normalizeAdminViewPayload({});
-      const firstMatch = filteredClassifications(
-        data,
-        selectedCategory,
-        adminClassificationState.activeFilters,
-        adminClassificationState.sortMode,
-      )[0] || null;
-
-      setAdminClassificationState({
-        selectedCategory,
-        selectedClassificationId: firstMatch?.id || null,
-        ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
-      });
-      if (firstMatch) {
-        loadDraftView(context, firstMatch);
-        loadMatchContext(context, firstMatch);
-      }
+      updateMailboxQueryAndLoad(context, { category: selectedCategory, page: 1 });
     });
 
     els.classificationList?.addEventListener("click", (event) => {
@@ -2464,23 +2587,30 @@
 
     els.classificationSort?.addEventListener("change", (event) => {
       const sortMode = event.target.value || "newest";
-      const data = adminClassificationState.data || normalizeAdminViewPayload({});
-      const firstMatch = filteredClassifications(
-        data,
-        adminClassificationState.selectedCategory,
-        adminClassificationState.activeFilters,
-        sortMode,
-      )[0] || null;
+      updateMailboxQueryAndLoad(context, { sort: sortMode, page: 1 });
+    });
 
-      setAdminClassificationState({
-        sortMode,
-        selectedClassificationId: firstMatch?.id || null,
-        ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
-      });
-      if (firstMatch) {
-        loadDraftView(context, firstMatch);
-        loadMatchContext(context, firstMatch);
-      }
+    els.classificationPageSize?.addEventListener("change", (event) => {
+      updateMailboxQueryAndLoad(context, { pageSize: Number(event.target.value || 25), page: 1 });
+    });
+
+    els.classificationPriorityFilter?.addEventListener("change", (event) => {
+      updateMailboxQueryAndLoad(context, { priority: event.target.value || "all", page: 1 });
+    });
+
+    els.classificationStatusFilter?.addEventListener("change", (event) => {
+      updateMailboxQueryAndLoad(context, { status: event.target.value || "all", page: 1 });
+    });
+
+    els.classificationPrevPage?.addEventListener("click", () => {
+      const currentPage = Number(adminClassificationState.pagination?.page || 1);
+      if (currentPage <= 1) return;
+      updateMailboxQueryAndLoad(context, { page: currentPage - 1 });
+    });
+
+    els.classificationNextPage?.addEventListener("click", () => {
+      const currentPage = Number(adminClassificationState.pagination?.page || 1);
+      updateMailboxQueryAndLoad(context, { page: currentPage + 1 });
     });
 
     els.classificationCategorySort?.addEventListener("change", (event) => {
@@ -2521,23 +2651,7 @@
           .filter((item) => item.checked)
           .map((item) => item.getAttribute("data-classification-filter"))
           .filter(Boolean);
-        const data = adminClassificationState.data || normalizeAdminViewPayload({});
-        const firstMatch = filteredClassifications(
-          data,
-          adminClassificationState.selectedCategory,
-          activeFilters,
-          adminClassificationState.sortMode,
-        )[0] || null;
-
-        setAdminClassificationState({
-          activeFilters,
-          selectedClassificationId: firstMatch?.id || null,
-          ...clearDraftActionStateForMessage(firstMatch?.message_id || ""),
-        });
-        if (firstMatch) {
-          loadDraftView(context, firstMatch);
-          loadMatchContext(context, firstMatch);
-        }
+        updateMailboxQueryAndLoad(context, { filters: activeFilters, page: 1 });
       });
     });
   }

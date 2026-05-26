@@ -2,9 +2,17 @@
   "use strict";
 
   const DEFAULT_PAGE = {
-    limit: 50,
+    page: 1,
+    pageSize: 25,
+    limit: 25,
+    offset: 0,
     cursor: null,
     has_more: false,
+    has_previous_page: false,
+    total_pages: 1,
+    filtered_rows: 0,
+    total_mailbox_rows: 0,
+    total_classified_rows: 0,
     filters: {},
     sort: "newest",
   };
@@ -36,6 +44,8 @@
       categoryPanelCollapsed: false,
       detailPanelCollapsed: false,
       activeFilters: [],
+      priorityFilter: "all",
+      statusFilter: "all",
       filtersExpanded: false,
       sortMode: "newest",
       pagination: { ...DEFAULT_PAGE },
@@ -81,6 +91,7 @@
       customCategoryOrderEditing: overrides.customCategoryOrderEditing === true,
       customCategoryOrderDraft: Array.isArray(overrides.customCategoryOrderDraft) ? overrides.customCategoryOrderDraft : null,
       messageDetailsById: {},
+      selectedClassificationsById: {},
       messageDetailLoadingId: null,
       messageDetailErrorsById: {},
       expandedMessageIds: {},

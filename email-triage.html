@@ -122,7 +122,7 @@
 
           <details id="inbox-preview-section" class="triage-disclosure inbox-preview-section" open>
             <summary>
-              <span>Inbox Preview / Import</span>
+              <span>Outlook Preview / Mailbox Import</span>
               <span id="inbox-preview-count-pill" class="email-count-pill">No preview</span>
               <i data-lucide="chevron-down"></i>
             </summary>
@@ -220,7 +220,7 @@
                     <i data-lucide="x"></i>
                     Clear Preview
                   </button>
-                  <p class="inbox-operator-note">Import + Prepare persists emails, prepares mailbox rows, and classifies bounded batches. It never drafts, sends, or mutates Outlook.</p>
+                  <p class="inbox-operator-note">Outlook preview rows are temporary. Import + Prepare persists selected emails into the local mailbox, then prepares bounded batches. It never drafts, sends, or mutates Outlook.</p>
                 </div>
               </div>
 
@@ -307,11 +307,36 @@
                   <option value="confidence_high">Highest confidence</option>
                   <option value="confidence_low">Lowest confidence</option>
                   <option value="human_review">Human review first</option>
-                  <option value="priority_high">Priority High → Low</option>
-                  <option value="priority_low">Priority Low → High</option>
-                  <option value="urgency_first">Urgency First</option>
-                  <option value="immediate_attention">Immediate Attention First</option>
-                  <option value="oldest_urgent">Oldest Urgent First</option>
+                </select>
+              </label>
+              <label class="classification-sort-control" for="classification-page-size">
+                <span>Page size</span>
+                <select id="classification-page-size">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <label class="classification-sort-control" for="classification-priority-filter">
+                <span>Priority</span>
+                <select id="classification-priority-filter">
+                  <option value="all" selected>All priorities</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label class="classification-sort-control" for="classification-status-filter">
+                <span>Status</span>
+                <select id="classification-status-filter">
+                  <option value="all" selected>All statuses</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="pending_review">Pending review</option>
+                  <option value="approved">Approved</option>
+                  <option value="corrected">Corrected</option>
+                  <option value="dismissed">Dismissed</option>
                 </select>
               </label>
               <button type="button" id="classification-filters-toggle" class="classification-filters-toggle" aria-expanded="false" aria-controls="classification-filter-panel">
@@ -352,7 +377,6 @@
                 <label><input type="checkbox" data-classification-filter="needs_review" /> Needs Human Review</label>
                 <label><input type="checkbox" data-classification-filter="low_confidence" /> Low Confidence</label>
                 <label><input type="checkbox" data-classification-filter="safety_flags" /> Safety Flags</label>
-                <label><input type="checkbox" data-classification-filter="invalid" /> Invalid Classifications</label>
                 <label><input type="checkbox" data-classification-filter="older_24h" /> Older Than 24 Hours</label>
                 <label><input type="checkbox" data-classification-filter="older_3d" /> Older Than 3 Days</label>
                 <label><input type="checkbox" data-classification-filter="critical_priority" /> Critical Priority</label>
@@ -379,8 +403,20 @@
 
             <button type="button" class="panel-resize-handle category-resize-handle" data-panel-resize="category" aria-label="Resize category panel"></button>
 
-            <div class="classification-list-panel" aria-label="Classified emails">
+            <div class="classification-list-panel" aria-label="Durable mailbox emails">
+              <div id="classification-page-summary" class="classification-page-summary"></div>
               <div id="classification-list" class="classification-list"></div>
+              <div class="classification-pagination" aria-label="Mailbox pagination">
+                <button type="button" id="classification-prev-page" class="secondary-btn" disabled>
+                  <i data-lucide="chevron-left"></i>
+                  Previous
+                </button>
+                <span id="classification-page-indicator">Page 1 of 1</span>
+                <button type="button" id="classification-next-page" class="secondary-btn" disabled>
+                  Next
+                  <i data-lucide="chevron-right"></i>
+                </button>
+              </div>
             </div>
 
             <button type="button" class="panel-resize-handle detail-resize-handle" data-panel-resize="detail" aria-label="Resize detail panel"></button>

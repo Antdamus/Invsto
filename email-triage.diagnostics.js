@@ -13,8 +13,10 @@
   function safetySummaryItems(data = {}) {
     const counts = data.classification_counts || {};
     return [
-      { label: "Loaded Current Valid", value: counts.loaded_current_valid ?? data.classifications?.length },
-      { label: "Total Current Valid", value: counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
+      { label: "Visible Rows", value: counts.visible_rows ?? counts.loaded_current_valid ?? data.classifications?.length },
+      { label: "Filtered Rows", value: counts.filtered_current_valid ?? counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
+      { label: "Mailbox Rows", value: counts.total_mailbox_rows ?? 0 },
+      { label: "Classified Rows", value: counts.total_current_valid ?? data.validation_diagnostics?.valid_classifications },
       { label: "Open Review", value: data.validation_diagnostics?.pending_human_review },
       { label: "Invalid History", value: data.validation_diagnostics?.invalid_classifications },
     ];
