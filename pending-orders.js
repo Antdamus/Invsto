@@ -13,7 +13,7 @@ const state = {
   stagedFulfillments: new Map(),
   adminSelectedLineIds: new Set(),
   adminCloseoutAction: "",
-  orderSort: "due_asc",
+  orderSort: "created_asc",
   pendingItemCandidate: null,
   itemSearchTimer: null,
   locationSearchTimer: null,
@@ -47,6 +47,12 @@ const state = {
   handledEbayReportTransferIds: new Set(),
   handledVideoReceiptPhotoTransferIds: new Set(),
   handledEbayCancelProofTransferIds: new Set(),
+  queuedEbayLabelTransfers: [],
+  queuedEbayReportTransfers: [],
+  queuedVideoReceiptPhotoTransfers: [],
+  queuedEbayCancelProofTransfers: [],
+  ebayTransferReceiverReady: false,
+  ebayTransferReceiverSetup: false,
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
@@ -90,6 +96,7 @@ const EBAY_BULK_LABEL_BASE_URL = "https://www.ebay.com/ship/bulk";
 const ORDER_QUEUE_PAGE_SIZE = 1000;
 const EBAY_ORDER_NUMBER_PATTERN = /^\d{2}-\d{5}-\d{5}$/;
 const CLOSED_EBAY_IMPORT_STATUSES = new Set(["fulfilled", "cancelled", "archived"]);
+const PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF = true;
 
 function $(id) {
   return document.getElementById(id);
@@ -127,6 +134,14 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function toLocalDateInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
 }
 
 function toDateTimeLocalValue(value) {
@@ -210,6 +225,26 @@ function startOfLocalDay(value = new Date()) {
 }
 
 function getShipTimestamp(value) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const date = new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+}
+
+function getOrderCreatedAt(line) {
+  const order = line?.order || getOrderFromLine(line);
+  return order?.sale_date || order?.paid_on_date || order?.imported_at || line?.created_at || "";
+}
+
+function getOrderCreatedLabel(line) {
+  const order = line?.order || getOrderFromLine(line);
+  if (order?.sale_date) return "Sale date";
+  if (order?.paid_on_date) return "Paid date";
+  if (order?.imported_at || line?.created_at) return "Pending created";
+  return "Order date";
+}
+
+function getOrderCreatedTimestamp(value) {
   if (!value) return Number.MAX_SAFE_INTEGER;
   const date = new Date(value);
   const time = date.getTime();
@@ -375,8 +410,12 @@ function canImportOrders() {
   return Boolean(state.employee && state.employee.active !== false);
 }
 
-function isAdminUser() {
+function isRealAdminUser() {
   return String(state.employee?.role || "").toLowerCase() === "admin";
+}
+
+function isAdminUser() {
+  return isRealAdminUser() || (PENDING_ORDERS_FULL_ACCESS_FOR_ACTIVE_STAFF && canImportOrders());
 }
 
 function setupImportVisibility() {
@@ -394,8 +433,10 @@ function setupOrderSortOptions() {
   const select = $("order-sort");
   if (!select) return;
 
-  const current = select.value || state.orderSort || "due_asc";
+  const current = select.value || state.orderSort || "created_asc";
   const options = [
+    ["created_asc", "Sale date oldest first"],
+    ["created_desc", "Sale date newest first"],
     ["due_asc", "Due date soonest"],
     ["buyer_asc", "Username A to Z"],
     ["buyer_desc", "Username Z to A"],
@@ -410,7 +451,7 @@ function setupOrderSortOptions() {
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
     .join("");
 
-  state.orderSort = options.some(([value]) => value === current) ? current : "due_asc";
+  state.orderSort = options.some(([value]) => value === current) ? current : "created_asc";
   select.value = state.orderSort;
 }
 
@@ -539,14 +580,17 @@ function normalizeLine(line) {
   const order = getOrderFromLine(line);
   const labelSearchText = getLabelMetadataSearchText(line.label_metadata, order.label_metadata);
   const videoReceiptUrl = getOrderVideoReceiptUrl({ ...line, order });
+  const orderCreatedAt = getOrderCreatedAt({ ...line, order });
   return {
     ...line,
     order,
+    orderCreatedAt,
     videoReceiptUrl,
     searchText: [
       order.order_number,
       order.sales_record_number,
       order.buyer_username,
+      formatDate(orderCreatedAt),
       line.item_number,
       line.transaction_id,
       line.item_title,
@@ -1426,6 +1470,7 @@ function buildOrderLineQueueQuery(status, admin) {
       quantity,
       ${moneyLineFields}
       line_status,
+      created_at,
       internal_item_id,
       fulfilled_quantity,
       fulfilled_at,
@@ -1438,6 +1483,7 @@ function buildOrderLineQueueQuery(status, admin) {
         buyer_username,
         sale_date,
         paid_on_date,
+        imported_at,
         ship_by_date,
         ${moneyOrderFields}
         status,
@@ -1558,11 +1604,33 @@ function clearOrderSearch({ apply = true } = {}) {
   if (apply) applyOrderFilters();
 }
 
+function clearOrderCreatedDateFilter({ apply = true } = {}) {
+  const input = $("order-created-date-filter");
+  if (!input || !input.value) return;
+  input.value = "";
+  if (apply) applyOrderFilters();
+}
+
+function expandSearchMatchesToBuyerBundles(lines = [], term = "") {
+  if (!term) return lines;
+  const matchingBuyerKeys = new Set(
+    lines
+      .filter((line) => (line.searchText || "").includes(term))
+      .map(getBuyerKey)
+      .filter(Boolean)
+  );
+  if (!matchingBuyerKeys.size) return [];
+  return lines.filter((line) => matchingBuyerKeys.has(getBuyerKey(line)));
+}
+
 function applyOrderFilters() {
   const term = String($("order-search")?.value || "").trim().toLowerCase();
-  let filtered = term
-    ? state.orders.filter((line) => line.searchText.includes(term))
-    : [...state.orders];
+  const createdDate = $("order-created-date-filter")?.value || "";
+  let filtered = [...state.orders];
+
+  if (createdDate) {
+    filtered = filtered.filter((line) => toLocalDateInputValue(line.orderCreatedAt || getOrderCreatedAt(line)) === createdDate);
+  }
 
   if (state.selectedLiveLot) {
     filtered = filtered.filter((line) => state.liveLotMatchedLineIds.has(line.id));
@@ -1573,6 +1641,8 @@ function applyOrderFilters() {
   } else if (state.ebayLaunchOrderNumbers.size) {
     filtered = filtered.filter((line) => state.ebayLaunchOrderNumbers.has(String(line.order?.order_number || "")));
   }
+
+  filtered = expandSearchMatchesToBuyerBundles(filtered, term);
 
   state.filteredOrders = filtered;
   renderOrders();
@@ -1678,6 +1748,7 @@ function groupLinesByBuyer(lines) {
         totalQuantity: 0,
         totalValue: 0,
         nextShipBy: null,
+        earliestPendingOrderCreatedAt: null,
       });
     }
 
@@ -1693,20 +1764,61 @@ function groupLinesByBuyer(lines) {
       const current = group.nextShipBy ? new Date(group.nextShipBy) : null;
       if (!current || shipBy < current) group.nextShipBy = line.order.ship_by_date;
     }
+
+    if (isOpenOrderLine(line)) {
+      const createdAt = line.orderCreatedAt || getOrderCreatedAt(line);
+      const createdTime = getOrderCreatedTimestamp(createdAt);
+      const currentTime = getOrderCreatedTimestamp(group.earliestPendingOrderCreatedAt);
+      if (createdTime < currentTime) group.earliestPendingOrderCreatedAt = createdAt;
+    }
+  });
+
+  groups.forEach((group) => {
+    if (!group.earliestPendingOrderCreatedAt && group.lines.length) {
+      group.earliestPendingOrderCreatedAt = group.lines
+        .map((line) => line.orderCreatedAt || getOrderCreatedAt(line))
+        .filter(Boolean)
+        .sort((a, b) => getOrderCreatedTimestamp(a) - getOrderCreatedTimestamp(b))[0] || null;
+    }
+    group.lines.sort((a, b) =>
+      getOrderCreatedTimestamp(a.orderCreatedAt || getOrderCreatedAt(a))
+      - getOrderCreatedTimestamp(b.orderCreatedAt || getOrderCreatedAt(b))
+      || getShipTimestamp(a.order?.ship_by_date) - getShipTimestamp(b.order?.ship_by_date)
+      || String(a.item_title || "").localeCompare(String(b.item_title || ""), undefined, { sensitivity: "base" })
+    );
   });
 
   return sortBuyerGroups([...groups.values()]);
 }
 
+function buildBuyerInsightCurrentItems(lines = []) {
+  return (lines || []).map((line) => ({
+    title: line.item_title || "Untitled eBay item",
+    itemNumber: line.item_number || "",
+    orderNumber: line.order?.order_number || "",
+    quantity: Number(line.quantity || 0),
+    grossSales: Number(line.total_price || line.sold_for || 0),
+    status: line.line_status || "",
+    shipByDate: line.order?.ship_by_date || null,
+  }));
+}
+
+function buyerInsightCurrentItemsAttribute(lines = []) {
+  return escapeHtml(JSON.stringify(buildBuyerInsightCurrentItems(lines)));
+}
+
 function sortBuyerGroups(groups) {
-  const sort = $("order-sort")?.value || state.orderSort || "due_asc";
+  const sort = $("order-sort")?.value || state.orderSort || "created_asc";
   state.orderSort = sort;
 
   const byBuyer = (a, b) => a.buyer.localeCompare(b.buyer, undefined, { sensitivity: "base" });
   const byDue = (a, b) => getShipTimestamp(a.nextShipBy) - getShipTimestamp(b.nextShipBy);
+  const byCreated = (a, b) => getOrderCreatedTimestamp(a.earliestPendingOrderCreatedAt) - getOrderCreatedTimestamp(b.earliestPendingOrderCreatedAt);
   const byTotal = (a, b) => Number(a.totalValue || 0) - Number(b.totalValue || 0);
 
   return groups.sort((a, b) => {
+    if (sort === "created_asc") return byCreated(a, b) || byDue(a, b) || byBuyer(a, b);
+    if (sort === "created_desc") return byCreated(b, a) || byDue(a, b) || byBuyer(a, b);
     if (sort === "buyer_asc") return byBuyer(a, b) || byDue(a, b);
     if (sort === "buyer_desc") return byBuyer(b, a) || byDue(a, b);
     if (sort === "total_desc" && isAdminUser()) return byTotal(b, a) || byDue(a, b) || byBuyer(a, b);
@@ -1959,6 +2071,11 @@ function renderOrders() {
             class="buyer-insight-link buyer-card-buyer-name"
             data-buyer-insights="${escapeHtml(group.buyer)}"
             data-buyer-context="pending-orders"
+            data-current-order-total="${escapeHtml(group.totalValue)}"
+            data-current-order-count="${escapeHtml(group.orderNumbers.size)}"
+            data-current-line-count="${escapeHtml(group.lines.length)}"
+            data-current-order-numbers="${escapeHtml([...group.orderNumbers].join(","))}"
+            data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
           >${escapeHtml(group.buyer)}</button>
           <small>${group.orderNumbers.size} order(s) - ${group.lines.length} line(s) - Qty ${group.totalQuantity}</small>
         </div>
@@ -1978,6 +2095,7 @@ function renderOrders() {
         </div>
       </div>
       <div class="buyer-card-meta">
+        <span>Earliest sale ${escapeHtml(formatDate(group.earliestPendingOrderCreatedAt))}</span>
         <span>Ship by ${escapeHtml(formatDate(group.nextShipBy))}</span>
         ${isAdminUser() ? `<span>Order value ${formatMoney(group.totalValue)}</span>` : `<span>Ready to pack</span>`}
       </div>
@@ -2058,6 +2176,7 @@ function renderOrders() {
         : order.ship_by_date
           ? `Due ${formatDate(order.ship_by_date)}`
           : "No ship-by date";
+      const lineCreatedLabel = `${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))}`;
       const isAdminSelected = state.adminSelectedLineIds.has(line.id);
       const visibleLineDueLabel = lineUrgency
         ? `${lineUrgency.label} - ${formatDate(order.ship_by_date)}`
@@ -2076,6 +2195,7 @@ function renderOrders() {
             <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
             <small>${escapeHtml(order.order_number || "No order number")} - ${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.quantity || 1)}</small>
             <span class="buyer-line-meta-row">
+              <span class="buyer-line-created">${escapeHtml(lineCreatedLabel)}</span>
               <span class="buyer-line-due is-${escapeHtml(lineDueTone)}">
                 ${lineUrgency ? `<i data-lucide="${lineUrgency.icon}"></i>` : ""}
                 ${escapeHtml(visibleLineDueLabel)}
@@ -2232,7 +2352,7 @@ function renderSelectedOrder() {
   if (!line) return;
   const order = line.order || {};
   $("selected-order-title").textContent = order.order_number || "eBay order";
-  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
+  $("selected-order-subtitle").textContent = `${line.item_title || "Untitled item"} - Buyer: ${order.buyer_username || "unknown"} - ${getOrderCreatedLabel(line)} ${formatDate(line.orderCreatedAt || getOrderCreatedAt(line))} - Remaining: ${getRemainingLineQuantity(line)} of ${Number(line.quantity || 0)} - Ship by ${formatDate(order.ship_by_date)}`;
   $("selected-order-status").textContent = line.line_status || "pending";
   renderSelectedOrderTaskAssignment();
   $("cancel-pending-order")?.toggleAttribute("disabled", !isOpenOrderLine(line));
@@ -2689,6 +2809,25 @@ function renderOrderTaskAssigneeSelect() {
   select.value = state.orderTaskAssignees.some((employee) => employee.user_id === currentValue)
     ? currentValue
     : "";
+}
+
+function setOrderTaskFieldVisible(inputId, visible) {
+  const input = $(inputId);
+  input?.closest(".modal-field")?.classList.toggle("hidden", !visible);
+}
+
+function configureOrderTaskStatusOptionsForProgress(progressMode = false) {
+  const select = $("order-task-status");
+  if (!select) return;
+  ["resolved", "cancelled"].forEach((value) => {
+    const option = [...select.options].find((entry) => entry.value === value);
+    if (!option) return;
+    option.hidden = progressMode;
+    option.disabled = progressMode;
+  });
+  if (progressMode && ["resolved", "cancelled"].includes(select.value)) {
+    select.value = "deferred";
+  }
 }
 
 async function loadOrderTaskAssignees() {
@@ -3429,7 +3568,7 @@ async function openOrderTaskModal(options = {}) {
   const taskId = options.taskId || "";
   const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) : null;
   state.activeOrderTaskId = task?.id || "";
-  state.orderTaskMode = task ? "reply" : "create";
+  state.orderTaskMode = task ? options.progress ? "progress" : "reply" : "create";
   resetOrderTaskPhotos();
   setOrderTaskError("");
   setOrderTaskPhotoStatus("");
@@ -3450,7 +3589,11 @@ async function openOrderTaskModal(options = {}) {
     : "Write exactly what needs review, a decision, or special coordination.";
   $("order-task-priority").value = task?.priority || "normal";
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
+  configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
   $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
+  setOrderTaskFieldVisible("order-task-assignee", !options.progress);
+  setOrderTaskFieldVisible("order-task-priority", !options.progress);
+  setOrderTaskFieldVisible("order-task-due-at", true);
   $("order-task-context").innerHTML = `
     <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
     <span>${escapeHtml(line.item_title || "Untitled item")}</span>
@@ -3486,11 +3629,12 @@ async function submitOrderTask() {
   try {
     const lineIds = getOrderTaskLineIdsForSelectedOrder();
     const photos = await persistOrderTaskPhotos(lineIds);
-    const assigneeUserId = $("order-task-assignee")?.value || null;
-    const priority = $("order-task-priority")?.value || "normal";
+    const isProgressUpdate = state.orderTaskMode === "progress";
+    const assigneeUserId = isProgressUpdate ? null : $("order-task-assignee")?.value || null;
+    const priority = isProgressUpdate ? null : $("order-task-priority")?.value || "normal";
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
 
-    if (state.orderTaskMode === "reply" && state.activeOrderTaskId) {
+    if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
       const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
         _task_id: state.activeOrderTaskId,
         _note: note,
@@ -6504,6 +6648,30 @@ function postEbayPendingQueueChanged(payload = {}) {
   }, window.location.origin);
 }
 
+function queueEbayTransfer(queueName, payload) {
+  const queue = state[queueName];
+  if (!Array.isArray(queue)) return;
+  const transferId = payload?.transferId || "";
+  if (transferId && queue.some((entry) => entry?.transferId === transferId)) return;
+  queue.push(payload);
+}
+
+function drainQueuedEbayTransfers(queueName, handler) {
+  const queue = state[queueName];
+  if (!Array.isArray(queue) || !queue.length) return;
+  const queued = [...queue];
+  state[queueName] = [];
+  queued.forEach((payload) => handler(payload));
+}
+
+function markEbayTransferReceiverReady() {
+  state.ebayTransferReceiverReady = true;
+  drainQueuedEbayTransfers("queuedEbayLabelTransfers", handleEbayLabelTransfer);
+  drainQueuedEbayTransfers("queuedEbayReportTransfers", handleEbayAwaitingReportTransfer);
+  drainQueuedEbayTransfers("queuedVideoReceiptPhotoTransfers", handleVideoReceiptPhotoTransfer);
+  drainQueuedEbayTransfers("queuedEbayCancelProofTransfers", handleEbayCancelProofTransfer);
+}
+
 function postEbayLabelExitReturnToQueue(reason = "pending-label-session-exit") {
   const context = state.ebayLabelReturnContext;
   if (!context) return false;
@@ -6771,6 +6939,10 @@ async function attachEbayLabelToOrder(transferPayload) {
 
 async function handleEbayLabelTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayLabelTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayLabelTransferIds.has(transferId)) return;
   if (state.ebayLabelBusy) return;
   if (transferId) state.handledEbayLabelTransferIds.add(transferId);
@@ -6830,6 +7002,10 @@ async function importAwaitingReportTransfer(payload) {
 
 async function handleEbayAwaitingReportTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayReportTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayReportTransferIds.has(transferId)) return;
   if (state.ebayReportBusy) return;
   if (transferId) state.handledEbayReportTransferIds.add(transferId);
@@ -7089,6 +7265,10 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
 
 async function handleVideoReceiptPhotoTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedVideoReceiptPhotoTransfers", payload);
+    return;
+  }
   if (transferId && state.handledVideoReceiptPhotoTransferIds.has(transferId)) return;
   if (transferId) state.handledVideoReceiptPhotoTransferIds.add(transferId);
   setVideoReceiptPhotoTransferStatus("Saving video receipt photo to OG...");
@@ -7219,6 +7399,10 @@ async function attachEbayCancelProofToWorkerModal(payload = {}) {
 
 async function handleEbayCancelProofTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayCancelProofTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayCancelProofTransferIds.has(transferId)) return;
   if (transferId) state.handledEbayCancelProofTransferIds.add(transferId);
   setEbayCancelProofTransferStatus("Attaching eBay cancellation proof...");
@@ -7255,6 +7439,7 @@ function getPendingLabelReceiverState() {
     selectedOrderNumber,
     hasOpenSession: Boolean(selectedOrderNumber),
     noInventoryModalOpen: isWorkerNoInventoryModalOpen(),
+    receiverReady: state.ebayTransferReceiverReady,
     canAutoRoute: !selectedOrderNumber,
   };
 }
@@ -7349,6 +7534,8 @@ function buildEbayPendingPriorityPayload() {
 }
 
 function setupEbayLabelReceiver() {
+  if (state.ebayTransferReceiverSetup) return;
+  state.ebayTransferReceiverSetup = true;
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
     if (event.data?.type === "OG_EBAY_LABEL_RECEIVER_STATE_REQUEST") {
@@ -7397,6 +7584,7 @@ function setupListeners() {
   $("refresh-orders")?.addEventListener("click", async () => {
     clearEbayLaunchFilter({ apply: false });
     clearOrderSearch({ apply: false });
+    clearOrderCreatedDateFilter({ apply: false });
     await loadOrders();
   });
   $("close-mobile-order-detail")?.addEventListener("click", closeMobileOrderDetail);
@@ -7413,6 +7601,10 @@ function setupListeners() {
     applyOrderFilters();
   });
   $("order-status-filter")?.addEventListener("change", loadOrders);
+  $("order-created-date-filter")?.addEventListener("change", () => {
+    clearEbayLaunchFilter({ apply: false });
+    applyOrderFilters();
+  });
   $("order-sort")?.addEventListener("change", (event) => {
     state.orderSort = event.target.value;
     applyOrderFilters();
@@ -7706,10 +7898,10 @@ function setupListeners() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupEbayLabelReceiver();
   await waitForSupabaseReady();
   const ok = await loadCurrentWorker();
   if (!ok) return;
-  setupEbayLabelReceiver();
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
@@ -7717,8 +7909,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   state.launchOrderTaskId = getRequestedOrderTaskId();
   loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
   clearOrderSearch({ apply: false });
+  clearOrderCreatedDateFilter({ apply: false });
   await loadOrders();
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) applyEbayLaunchOrderSelection();
+  markEbayTransferReceiverReady();
   if (window.lucide) window.lucide.createIcons();
 });

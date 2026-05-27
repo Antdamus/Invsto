@@ -18,6 +18,12 @@ type PreparedReturn = {
   status: string;
   state: string;
   actionDue: string;
+  sellerActionDue: string;
+  buyerActionDue: string;
+  sellerOptionTypes: string[];
+  buyerOptionTypes: string[];
+  lifecycleStage: string;
+  classificationReason: string;
   dueAt: string | null;
   requestedAt: string | null;
   buyerComment: string;
@@ -522,14 +528,67 @@ function getItemImageUrl(detail: any, summary: any): string {
   return firstText(...images);
 }
 
-function extractTracking(detail: any): string {
+const TRACKING_KEY_PATTERN = /(tracking|shipment|package|carrier)/i;
+const TRACKING_NUMBER_PATTERN = /\b(?:1Z[A-Z0-9]{16}|[A-Z]{2}\d{9}[A-Z]{2}|\d{18,34})\b/i;
+const TRACKING_NUMBER_KEYED_PATTERN = /\b(?:1Z[A-Z0-9]{16}|[A-Z]{2}\d{9}[A-Z]{2}|\d{12,34})\b/i;
+
+function trackingTextFromValue(value: unknown, keyed = false): string {
+  const text = toText(value);
+  if (!text || text === "[object Object]") return "";
+  const match = text.match(keyed ? TRACKING_NUMBER_KEYED_PATTERN : TRACKING_NUMBER_PATTERN);
+  return match?.[0] || "";
+}
+
+function collectTrackingNumbers(value: unknown, depth = 0, keyed = false, seen = new Set<object>()): string[] {
+  if (value === null || value === undefined || depth > 6) return [];
+  const direct = trackingTextFromValue(value, keyed);
+  if (direct) return [direct];
+  if (typeof value !== "object") return [];
+  if (seen.has(value)) return [];
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return unique(value.slice(0, 100).flatMap((entry) => collectTrackingNumbers(entry, depth + 1, keyed, seen)));
+  }
+
+  const values: string[] = [];
+  for (const [key, entry] of Object.entries(value as JsonRecord)) {
+    const childKeyed = keyed || TRACKING_KEY_PATTERN.test(key);
+    const childDirect = trackingTextFromValue(entry, childKeyed);
+    if (childDirect) values.push(childDirect);
+    if (typeof entry === "object" && entry !== null) {
+      values.push(...collectTrackingNumbers(entry, depth + 1, childKeyed, seen));
+    }
+  }
+  return unique(values);
+}
+
+function firstTrackingText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = trackingTextFromValue(value, true) || toText(value);
+    if (text && text !== "[object Object]") return text;
+  }
+  return "";
+}
+
+function extractTracking(detail: any, summary: any = {}): string {
   const history = Array.isArray(detail?.responseHistory) ? detail.responseHistory : [];
-  return firstText(
+  const direct = firstTrackingText(
     detail?.buyerReturnShipmentInfo?.shipmentTracking?.trackingNumber,
     detail?.buyerReturnShipmentInfo?.trackingNumber,
+    detail?.returnShipmentInfo?.shipmentTracking?.trackingNumber,
+    detail?.returnShipmentInfo?.trackingNumber,
+    detail?.shipmentTracking?.trackingNumber,
     detail?.replacementShipmentInfo?.shipmentTracking?.trackingNumber,
+    summary?.buyerReturnShipmentInfo?.shipmentTracking?.trackingNumber,
+    summary?.buyerReturnShipmentInfo?.trackingNumber,
+    summary?.returnShipmentInfo?.shipmentTracking?.trackingNumber,
+    summary?.returnShipmentInfo?.trackingNumber,
+    summary?.shipmentTracking?.trackingNumber,
     ...history.map((entry: any) => entry?.attributes?.updatedTrackingNumber),
   );
+  if (direct) return direct;
+  return firstText(...collectTrackingNumbers(detail), ...collectTrackingNumbers(summary));
 }
 
 function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedComplaintImages: any[] = []): JsonRecord {
@@ -550,6 +609,12 @@ function buildReturnPayload(prepared: Omit<PreparedReturn, "payload">, uploadedC
     returnStatus: prepared.status,
     returnState: prepared.state,
     returnAction: prepared.actionDue,
+    sellerActionDue: prepared.sellerActionDue,
+    buyerActionDue: prepared.buyerActionDue,
+    sellerOptionTypes: prepared.sellerOptionTypes,
+    buyerOptionTypes: prepared.buyerOptionTypes,
+    returnLifecycleStage: prepared.lifecycleStage,
+    returnClassificationReason: prepared.classificationReason,
     returnInitiated: prepared.requestedAt,
     refundText: prepared.requestAmount,
     detailsUrl: prepared.detailsUrl,
@@ -590,6 +655,16 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
   const item = creation?.item || detail?.itemDetail || {};
   const sellerDue = mergedSummary?.sellerResponseDue || detail?.sellerResponseDue || {};
   const buyerDue = mergedSummary?.buyerResponseDue || detail?.buyerResponseDue || {};
+  const sellerOptionTypes = unique([
+    ...(Array.isArray(mergedSummary?.sellerAvailableOptions) ? mergedSummary.sellerAvailableOptions : []),
+    ...(Array.isArray(detail?.sellerAvailableOptions) ? detail.sellerAvailableOptions : []),
+  ].map((option: any) => firstText(option?.actionType)).filter(Boolean));
+  const buyerOptionTypes = unique([
+    ...(Array.isArray(mergedSummary?.buyerAvailableOptions) ? mergedSummary.buyerAvailableOptions : []),
+    ...(Array.isArray(detail?.buyerAvailableOptions) ? detail.buyerAvailableOptions : []),
+  ].map((option: any) => firstText(option?.actionType)).filter(Boolean));
+  const sellerActionDue = firstText(sellerDue?.activityDue);
+  const buyerActionDue = firstText(buyerDue?.activityDue);
   const refundContainer = getAmountContainer(
     mergedSummary?.sellerTotalRefund,
     mergedSummary?.buyerTotalRefund,
@@ -621,7 +696,11 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
     reason: firstText(creation?.reason, detail?.returnReason, detail?.buyerReturnReason),
     status: firstText(mergedSummary?.status, detail?.status),
     state: firstText(mergedSummary?.state, detail?.state),
-    actionDue: firstText(sellerDue?.activityDue, buyerDue?.activityDue, mergedSummary?.sellerAvailableOptions?.[0]?.actionType),
+    actionDue: firstText(sellerActionDue, buyerActionDue, sellerOptionTypes[0]),
+    sellerActionDue,
+    buyerActionDue,
+    sellerOptionTypes,
+    buyerOptionTypes,
     dueAt: firstDate(sellerDue?.respondByDate?.value, sellerDue?.respondByDate, buyerDue?.respondByDate?.value, mergedSummary?.timeoutDate?.value),
     requestedAt: firstDate(creation?.creationDate?.value, creation?.creationDate, mergedSummary?.creationDate?.value),
     buyerComment: commentText(creation?.comments?.content, creation?.comments, detail?.comments?.content, detail?.comments),
@@ -629,14 +708,21 @@ function prepareReturn(summary: any, detailPayload: any, filesPayload: any): Pre
     onHoldAmount: moneyText(holdContainer),
     detailsUrl: getActionUrl(mergedSummary),
     itemImageUrl: getItemImageUrl(detail, mergedSummary),
-    trackingNumber: extractTracking(detail),
+    trackingNumber: extractTracking(detail, mergedSummary),
     fileIds,
     files,
   };
+  const lifecycleStage = returnLifecycleStage(preparedBase as PreparedReturn);
+  const classificationReason = returnClassificationReason(preparedBase as PreparedReturn, lifecycleStage);
+  const preparedWithClassification = {
+    ...preparedBase,
+    lifecycleStage,
+    classificationReason,
+  };
 
   return {
-    ...preparedBase,
-    payload: buildReturnPayload(preparedBase),
+    ...preparedWithClassification,
+    payload: buildReturnPayload(preparedWithClassification),
   };
 }
 
@@ -844,8 +930,299 @@ function localStatusFor(prepared: PreparedReturn, matched: boolean): string {
   return matched ? "open" : "needs_review";
 }
 
-function taskTypeFor(matched: boolean): string {
-  return matched ? "return_intake" : "return_review";
+function isFinalReturnStatus(status: unknown): boolean {
+  return ["closed", "cancelled"].includes(toText(status).toLowerCase());
+}
+
+function needsLocalReturnActionStatus(status: unknown): boolean {
+  return ["needs_review", "partially_received"].includes(toText(status).toLowerCase());
+}
+
+function shouldPreserveLocalReturnStatus(status: unknown, proposedStatus: unknown): boolean {
+  const local = toText(status).toLowerCase();
+  if (isFinalReturnStatus(local) || needsLocalReturnActionStatus(local)) return true;
+  return local === "received" && !isFinalReturnStatus(proposedStatus);
+}
+
+function shouldSkipReturnApiTask(caseRow: any): boolean {
+  return ["received", "partially_received", "closed", "cancelled"].includes(toText(caseRow?.status).toLowerCase());
+}
+
+function closureDateFor(prepared: PreparedReturn): string {
+  return firstDate(
+    prepared.detail?.closeDate?.value,
+    prepared.detail?.closeDate,
+    prepared.detail?.closedDate?.value,
+    prepared.detail?.closedDate,
+    prepared.detail?.lastModifiedDate?.value,
+    prepared.detail?.lastModifiedDate,
+    prepared.summary?.lastModifiedDate?.value,
+    prepared.summary?.lastModifiedDate,
+    prepared.requestedAt,
+  ) || new Date().toISOString();
+}
+
+function buildEbayClosurePayload(prepared: PreparedReturn, details: JsonRecord = {}): JsonRecord {
+  return {
+    source: "ebay_return_api",
+    detectedAt: new Date().toISOString(),
+    closedAt: closureDateFor(prepared),
+    returnId: prepared.returnId,
+    orderNumber: prepared.orderNumber,
+    buyerUsername: prepared.buyerUsername,
+    itemNumber: prepared.itemNumber,
+    transactionId: prepared.transactionId,
+    status: prepared.status,
+    state: prepared.state,
+    actionDue: prepared.actionDue,
+    reason: prepared.reason,
+    requestAmount: prepared.requestAmount,
+    onHoldAmount: prepared.onHoldAmount,
+    trackingNumber: prepared.trackingNumber,
+    detailsUrl: prepared.detailsUrl,
+    ...details,
+  };
+}
+
+function buildClosurePayloadFromDetail(returnId: string, payload: any, reason = "not_open_on_ebay"): JsonRecord {
+  const detail = payload?.detail || payload || {};
+  const summary = payload?.summary || {};
+  const status = firstText(summary?.status, detail?.status);
+  const state = firstText(summary?.state, detail?.state);
+  const closureDate = firstDate(
+    detail?.closeDate?.value,
+    detail?.closeDate,
+    detail?.closedDate?.value,
+    detail?.closedDate,
+    detail?.lastModifiedDate?.value,
+    detail?.lastModifiedDate,
+    summary?.lastModifiedDate?.value,
+    summary?.lastModifiedDate,
+  );
+  return {
+    source: "ebay_return_api_cleanup",
+    reason,
+    detectedAt: new Date().toISOString(),
+    closedAt: closureDate || new Date().toISOString(),
+    returnId,
+    status,
+    state,
+    requestAmount: moneyText(
+      summary?.sellerTotalRefund,
+      summary?.buyerTotalRefund,
+      detail?.refundInfo?.actualRefundAmount,
+      detail?.refundInfo?.estimatedRefundAmount,
+      detail?.moneyMovementInfo?.[0]?.amount,
+    ),
+    detail: stripLargeEbayFields(payload),
+  };
+}
+
+function closureStatusFromPayload(payload: JsonRecord): string {
+  const state = `${payload?.status || ""} ${payload?.state || ""}`.toUpperCase();
+  if (state.includes("CANCEL")) return "cancelled";
+  if (state.includes("CLOSED")) return "closed";
+  return "";
+}
+
+function closureImpliesPhysicalReturn(payload: JsonRecord): boolean {
+  const text = normalizeApiToken([
+    payload?.status,
+    payload?.state,
+    payload?.actionDue,
+    payload?.trackingNumber,
+    (payload?.detail as JsonRecord | undefined)?.status,
+    (payload?.detail as JsonRecord | undefined)?.state,
+    compactReturnStatusText(payload?.detail),
+  ].map((value) => toText(value)).filter(Boolean).join(" "));
+  if (!text || text.includes("CANCEL") || text.includes("NO_RETURN") || text.includes("REFUND_ONLY")) return false;
+  return [
+    "ITEM_SHIPPED",
+    "RETURN_SHIPPED",
+    "BUYER_SHIPPED",
+    "IN_TRANSIT",
+    "ITEM_DELIVERED",
+    "DELIVERED",
+    "SELLER_MARK_AS_RECEIVED",
+    "RECEIVED_BY_SELLER",
+  ].some((marker) => text.includes(marker));
+}
+
+function isAutoResolvableClosedReturnTask(task: any): boolean {
+  const taskType = toText(task?.task_type);
+  return ["return_review", "return_intake"].includes(taskType);
+}
+
+function preparedExpectsPhysicalReturn(prepared: PreparedReturn, matched: boolean): boolean {
+  if (!matched) return false;
+  if (Math.max(0, Math.trunc(Number(prepared.quantity || 0))) <= 0) return false;
+  const text = `${prepared.status || ""} ${prepared.state || ""} ${prepared.actionDue || ""}`.toUpperCase();
+  if (text.includes("CANCEL")) return false;
+  if (text.includes("NO_RETURN") || text.includes("REFUND_ONLY")) return false;
+  return true;
+}
+
+const RETURN_DELIVERED_MARKERS = [
+  "ITEM_DELIVERED",
+  "RETURN_DELIVERED",
+  "DELIVERED",
+  "RECEIVED_BY_SELLER",
+  "SELLER_MARK_AS_RECEIVED",
+];
+
+const RETURN_SHIPMENT_STARTED_MARKERS = [
+  "BUYER_SHIPPED",
+  "RETURN_SHIPPED",
+  "ITEM_SHIPPED",
+  "SHIPPED",
+  "IN_TRANSIT",
+  "ON_ITS_WAY",
+  "ITEM_ON_THE_WAY",
+  "ITEM_DELIVERED",
+  "DELIVERED",
+  "MARK_AS_RECEIVED",
+  "RECEIVED_BY_SELLER",
+];
+
+const RETURN_READY_TO_SHIP_MARKERS = [
+  "READY_FOR_SHIPPING",
+  "ITEM_READY_TO_SHIP",
+  "RETURN_READY_TO_SHIP",
+  "READY_TO_SHIP",
+];
+
+const SELLER_DECISION_DUE_MARKERS = [
+  "SELLER_APPROVE_REQUEST",
+  "SELLER_DECLINE_REQUEST",
+  "SELLER_OFFER_PARTIAL_REFUND",
+  "SELLER_OFFER_REPLACEMENT",
+  "SELLER_ACCEPT",
+  "SELLER_DECIDE",
+  "SELLER_RESPOND",
+  "SELLER_UPLOAD",
+];
+
+const SELLER_INTAKE_DUE_MARKERS = [
+  "SELLER_MARK_AS_RECEIVED",
+  "SELLER_RECEIVE_ITEM",
+  "SELLER_CONFIRM_RECEIPT",
+];
+
+function normalizeApiToken(value: unknown): string {
+  return toText(value).toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function compactReturnStatusText(value: unknown, depth = 0, seen = new Set<object>()): string {
+  if (value === null || value === undefined || depth > 4) return "";
+  if (typeof value !== "object") return toText(value);
+  if (seen.has(value)) return "";
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((entry) => compactReturnStatusText(entry, depth + 1, seen)).filter(Boolean).join(" ");
+  }
+
+  const parts: string[] = [];
+  for (const [key, entry] of Object.entries(value as JsonRecord)) {
+    if (!/(trackingNumber|deliveryStatus|shipmentStatus|status|state|activity|action)/i.test(key)) continue;
+    parts.push(compactReturnStatusText(entry, depth + 1, seen));
+  }
+  return parts.filter(Boolean).join(" ");
+}
+
+function rawSellerDecisionRequiredByEbay(prepared: PreparedReturn): boolean {
+  const sellerDue = normalizeApiToken(prepared.sellerActionDue || prepared.actionDue);
+  if (!sellerDue.includes("SELLER_")) return false;
+  if (SELLER_INTAKE_DUE_MARKERS.some((marker) => sellerDue.includes(marker))) return false;
+  return SELLER_DECISION_DUE_MARKERS.some((marker) => sellerDue.includes(marker));
+}
+
+function returnShipmentEvidenceText(prepared: PreparedReturn): string {
+  return [
+    prepared.trackingNumber,
+    prepared.status,
+    prepared.state,
+    prepared.buyerActionDue,
+    compactReturnStatusText(prepared.detail?.buyerReturnShipmentInfo),
+    compactReturnStatusText(prepared.detail?.returnShipmentInfo),
+    compactReturnStatusText(prepared.detail?.shipmentTracking),
+    compactReturnStatusText(prepared.detail?.returnShipmentTracking),
+    compactReturnStatusText(prepared.summary?.buyerReturnShipmentInfo),
+    compactReturnStatusText(prepared.summary?.returnShipmentInfo),
+    compactReturnStatusText(prepared.summary?.shipmentTracking),
+    compactReturnStatusText(prepared.summary?.returnShipmentTracking),
+  ].filter(Boolean).join(" ").toUpperCase();
+}
+
+function returnLifecycleStage(prepared: PreparedReturn): string {
+  const stateText = normalizeApiToken(`${prepared.status || ""} ${prepared.state || ""}`);
+  if (stateText.includes("CANCEL")) return "cancelled";
+  if (stateText.includes("CLOSED")) return "closed";
+
+  const text = normalizeApiToken(returnShipmentEvidenceText(prepared));
+  if (RETURN_DELIVERED_MARKERS.some((marker) => text.includes(marker))) return "delivered";
+  if (prepared.trackingNumber || RETURN_SHIPMENT_STARTED_MARKERS.some((marker) => text.includes(marker))) return "shipped";
+  if (RETURN_READY_TO_SHIP_MARKERS.some((marker) => text.includes(marker))) return "ready_to_ship";
+  if (rawSellerDecisionRequiredByEbay(prepared)) return "decision";
+  return "requested";
+}
+
+function returnClassificationReason(prepared: PreparedReturn, stage = returnLifecycleStage(prepared)): string {
+  if (stage === "closed" || stage === "cancelled") return `eBay status/state is ${prepared.status || prepared.state || stage}.`;
+  if (stage === "delivered") return "eBay indicates the returned item was delivered or marked received.";
+  if (stage === "shipped") return prepared.trackingNumber
+    ? `eBay return tracking ${prepared.trackingNumber} is attached.`
+    : "eBay status/history indicates the buyer shipped the item back.";
+  if (stage === "ready_to_ship") return "eBay indicates the return is approved/ready for buyer shipment.";
+  if (stage === "decision") return `${prepared.sellerActionDue || prepared.actionDue || "Seller response"} is due on eBay.`;
+  return "eBay return is requested but no shipment/closure signal is confirmed.";
+}
+
+function sellerDecisionRequiredByEbay(prepared: PreparedReturn): boolean {
+  return returnLifecycleStage(prepared) === "decision";
+}
+
+function returnShipmentStarted(prepared: PreparedReturn, matched: boolean): boolean {
+  if (!matched || !preparedExpectsPhysicalReturn(prepared, matched)) return false;
+  return ["delivered", "shipped"].includes(returnLifecycleStage(prepared));
+}
+
+function returnReadyForShipment(prepared: PreparedReturn, matched: boolean): boolean {
+  if (!matched || !preparedExpectsPhysicalReturn(prepared, matched)) return false;
+  return returnLifecycleStage(prepared) === "ready_to_ship";
+}
+
+function returnItemsNeedPhysicalIntake(row: any, items: any[]): boolean {
+  if (!row?.order_id || isFinalReturnStatus(row.status)) return false;
+  const localStatus = toText(row.status).toLowerCase();
+  if (localStatus === "received") return false;
+  if (!items.length) return true;
+  return items.some((item: any) => {
+    const disposition = toText(item.disposition).toLowerCase();
+    if (["missing", "refund_only"].includes(disposition)) return false;
+    const expected = Math.max(0, Number(item.expected_quantity || 0));
+    const received = Math.max(0, Number(item.received_quantity || 0));
+    return expected > received;
+  });
+}
+
+function needsSellerDecision(prepared: PreparedReturn, matched: boolean): boolean {
+  if (!matched) return false;
+  return sellerDecisionRequiredByEbay(prepared);
+}
+
+function taskTypeFor(prepared: PreparedReturn, matched: boolean): string {
+  if (!matched || needsSellerDecision(prepared, matched)) return "return_review";
+  return "return_intake";
+}
+
+function taskTitleFor(prepared: PreparedReturn, matched: boolean): string {
+  if (!matched) return "Review unmatched eBay return/refund";
+  if (needsSellerDecision(prepared, matched)) return "Decide eBay return request";
+  if (returnLifecycleStage(prepared) === "delivered") return "Inspect returned eBay item";
+  if (returnShipmentStarted(prepared, matched)) return "Receive returned eBay item";
+  if (returnReadyForShipment(prepared, matched)) return "Monitor eBay return shipment";
+  return "Complete eBay return intake";
 }
 
 function priorityFor(prepared: PreparedReturn, matched: boolean): string {
@@ -859,20 +1236,39 @@ function questionFor(prepared: PreparedReturn, matched: boolean): string {
   if (!matched) {
     return "No matching OG order history was found. Review the eBay buyer, item, reason, refund value, and return details before deciding the next step.";
   }
-  return "Inspect the returned item, attach evidence photos, choose the disposition, and save the return.";
+  if (needsSellerDecision(prepared, matched)) {
+    return "Open the eBay return and decide how to proceed before intake. Approve, decline, refund, message, or dispute on eBay as needed; keep OG open until the next action is clear.";
+  }
+  if (returnShipmentStarted(prepared, matched)) {
+    const trackingNote = prepared.trackingNumber ? ` Return tracking ${prepared.trackingNumber} is attached.` : "";
+    if (returnLifecycleStage(prepared) === "delivered") {
+      return `eBay shows the return was delivered or is ready for seller receipt.${trackingNote} Inspect the item, attach evidence photos, add condition notes, choose a disposition/location, then refund or dispute on eBay as appropriate.`;
+    }
+    return `eBay shows the buyer has shipped the item back.${trackingNote} Keep this open until arrival, then mark it received in eBay, inspect it, attach evidence photos, add condition notes, choose a disposition/location, or route it to dispute/admin review.`;
+  }
+  if (returnReadyForShipment(prepared, matched)) {
+    return "eBay shows the return is approved or ready for buyer shipment. Keep OG open, monitor eBay for tracking/arrival, then inspect and assign location when the item comes back.";
+  }
+  return "When the item arrives, inspect it, attach evidence photos, add condition notes, choose a disposition/location, or route it to dispute/admin review.";
 }
 
 function caseLooksLikeReturn(row: any, prepared: PreparedReturn): boolean {
   const payload = row?.raw_payload || {};
   const details = payload?.returnDetails || {};
+  const rowReturnId = normalizeLookup(row?.ebay_return_id || payload.ebayReturnId || payload.ebay_return_id || details.ebayReturnId || details.ebay_return_id);
   const rowBuyer = normalizeLookup(row?.buyer_username || payload.buyerUsername || payload.buyer_username);
   const rowOrder = normalizeLookup(row?.order_number || payload.orderNumber || payload.order_number);
   const rowItem = normalizeLookup(payload.itemNumber || payload.item_number || details.itemNumber || details.item_number);
+  const rowTransaction = normalizeLookup(payload.transactionId || payload.transaction_id || details.transactionId || details.transaction_id);
+  const returnId = normalizeLookup(prepared.returnId);
   const buyer = normalizeLookup(prepared.buyerUsername);
   const orderNumber = normalizeLookup(prepared.orderNumber);
   const itemNumber = normalizeLookup(prepared.itemNumber);
+  const transactionId = normalizeLookup(prepared.transactionId);
 
-  if (rowOrder && orderNumber && rowOrder === orderNumber) return true;
+  if (rowReturnId && returnId && rowReturnId === returnId) return true;
+  if (rowOrder && orderNumber && rowOrder === orderNumber && rowTransaction && transactionId && rowTransaction === transactionId) return true;
+  if (rowOrder && orderNumber && rowOrder === orderNumber && rowItem && itemNumber && rowItem === itemNumber) return true;
   if (rowItem && itemNumber && rowItem === itemNumber && (!buyer || !rowBuyer || rowBuyer === buyer)) return true;
   return false;
 }
@@ -894,12 +1290,13 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
       .from("ebay_return_cases")
       .select("*")
       .eq("order_id", orderId)
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(10);
     if (error) throw error;
-    return data || null;
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared));
+    if (found) return found;
+    const active = (data || []).find((row: any) => !["closed", "cancelled"].includes(toText(row.status).toLowerCase()));
+    if (active) return active;
   }
 
   if (prepared.orderNumber) {
@@ -907,21 +1304,21 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
       .from("ebay_return_cases")
       .select("*")
       .eq("order_number", prepared.orderNumber)
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(5);
+      .limit(10);
     if (error) throw error;
-    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared)) || data?.[0];
+    const found = (data || []).find((row: any) => caseLooksLikeReturn(row, prepared));
     if (found) return found;
+    const active = (data || []).find((row: any) => !["closed", "cancelled"].includes(toText(row.status).toLowerCase()));
+    if (active) return active;
   }
 
   if (prepared.buyerUsername || prepared.itemNumber) {
     let query = supabase
       .from("ebay_return_cases")
       .select("*")
-      .not("status", "in", "(closed,cancelled)")
       .order("opened_at", { ascending: false })
-      .limit(10);
+      .limit(20);
     if (prepared.buyerUsername) query = query.eq("buyer_username", prepared.buyerUsername);
     const { data, error } = await query;
     if (error) throw error;
@@ -931,10 +1328,73 @@ async function findExistingCase(supabase: any, prepared: PreparedReturn, orderId
   return null;
 }
 
-async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchResult): Promise<{ caseRow: any; created: boolean }> {
+async function getBlockingLocalReturnTasks(supabase: any, caseRow: any): Promise<any[]> {
+  if (!caseRow?.id) return [];
+  const { data, error } = await supabase
+    .from("ebay_return_tasks")
+    .select("id,task_type,status,title,question,assigned_to_email,assigned_to_user_id")
+    .eq("return_case_id", caseRow.id)
+    .not("status", "in", "(resolved,cancelled)")
+    .limit(50);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getLocalClosureBlock(supabase: any, caseRow: any): Promise<{ blocked: boolean; tasks: any[]; reason: string }> {
+  if (!caseRow) return { blocked: false, tasks: [], reason: "" };
+  const tasks = await getBlockingLocalReturnTasks(supabase, caseRow);
+  if (needsLocalReturnActionStatus(caseRow.status)) {
+    return { blocked: true, tasks, reason: `Local case status is ${caseRow.status}` };
+  }
+  if (tasks.length) {
+    return { blocked: true, tasks, reason: `${tasks.length} unresolved local return task${tasks.length === 1 ? "" : "s"}` };
+  }
+  return { blocked: false, tasks, reason: "" };
+}
+
+async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchResult): Promise<{
+  caseRow: any;
+  created: boolean;
+  closureBlocked: boolean;
+  closureBlockReason: string;
+  blockingTaskCount: number;
+}> {
   const matched = Boolean(match.order && match.lines.length);
   const existing = await findExistingCase(supabase, prepared, match.order?.id || null);
-  const status = localStatusFor(prepared, matched);
+  const proposedStatus = localStatusFor(prepared, matched);
+  const ebayClosure = isFinalReturnStatus(proposedStatus)
+    ? buildEbayClosurePayload(prepared)
+    : null;
+  const physicalReturnExpected = Boolean(ebayClosure && preparedExpectsPhysicalReturn(prepared, matched));
+  const physicalIntakeRequired = physicalReturnExpected
+    && !["received", "closed", "cancelled"].includes(toText(existing?.status).toLowerCase());
+  const closureBlock = existing && ebayClosure
+    ? await getLocalClosureBlock(supabase, existing)
+    : { blocked: false, tasks: [], reason: "" };
+  const closureBlocked = closureBlock.blocked || physicalIntakeRequired;
+  const closureBlockReason = closureBlock.blocked
+    ? closureBlock.reason
+    : physicalIntakeRequired
+    ? "Returned item still needs OG intake, condition notes, and location assignment."
+    : "";
+  const status = closureBlocked
+    ? existing?.status || "open"
+    : existing && shouldPreserveLocalReturnStatus(existing.status, proposedStatus)
+    ? existing.status
+    : proposedStatus;
+  const closedAt = isFinalReturnStatus(status)
+    ? existing?.closed_at || ebayClosure?.closedAt || new Date().toISOString()
+    : existing?.closed_at || null;
+  const closurePayload = ebayClosure
+    ? {
+      ...ebayClosure,
+      physicalReturnExpected,
+      physicalReturnIntakeRequired: physicalIntakeRequired,
+      localClosureBlocked: closureBlocked,
+      localClosureBlockReason: closureBlockReason,
+      blockingTaskCount: closureBlock.tasks.length,
+    }
+    : null;
   const row = {
     order_id: match.order?.id || null,
     order_number: match.order?.order_number || prepared.orderNumber || null,
@@ -944,6 +1404,7 @@ async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchR
     return_reason: prepared.reason || null,
     return_tracking_number: prepared.trackingNumber || null,
     status,
+    closed_at: closedAt,
     opened_at: prepared.requestedAt || new Date().toISOString(),
     notes: existing?.notes || "Synced from eBay Return API.",
     raw_payload: {
@@ -951,6 +1412,10 @@ async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchR
       ...prepared.payload,
       caseType: matched ? "matched_order" : "unmatched_legacy",
       unmatchedReason: matched ? null : "No matching fulfilled OG order line was found.",
+      ...(closurePayload ? {
+        ebayClosure: closurePayload,
+        ebayClosedOnEbay: true,
+      } : {}),
     },
     updated_at: new Date().toISOString(),
   };
@@ -963,7 +1428,13 @@ async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchR
       .select("*")
       .single();
     if (error) throw error;
-    return { caseRow: data, created: false };
+    return {
+      caseRow: data,
+      created: false,
+      closureBlocked,
+      closureBlockReason,
+      blockingTaskCount: closureBlock.tasks.length,
+    };
   }
 
   const { data, error } = await supabase
@@ -972,7 +1443,13 @@ async function upsertCase(supabase: any, prepared: PreparedReturn, match: MatchR
     .select("*")
     .single();
   if (error) throw error;
-  return { caseRow: data, created: true };
+  return {
+    caseRow: data,
+    created: true,
+    closureBlocked: physicalIntakeRequired,
+    closureBlockReason,
+    blockingTaskCount: 0,
+  };
 }
 
 async function upsertReturnItems(supabase: any, prepared: PreparedReturn, caseRow: any, match: MatchResult): Promise<number> {
@@ -1000,22 +1477,95 @@ async function upsertReturnItems(supabase: any, prepared: PreparedReturn, caseRo
   return (data || []).length;
 }
 
+async function resolveSupersededReturnTasks(
+  supabase: any,
+  caseId: string,
+  keepTaskId: string,
+  existingTasks: any[],
+  metadata: JsonRecord,
+): Promise<number> {
+  const now = new Date().toISOString();
+  const duplicateIds = (existingTasks || [])
+    .filter((task: any) => {
+      const status = toText(task.status).toLowerCase();
+      const type = toText(task.task_type);
+      return task.id
+        && task.id !== keepTaskId
+        && ["return_intake", "return_review"].includes(type)
+        && !["resolved", "cancelled"].includes(status);
+    })
+    .map((task: any) => task.id);
+  if (!duplicateIds.length) return 0;
+
+  const { data: resolvedTasks, error } = await supabase
+    .from("ebay_return_tasks")
+    .update({
+      status: "resolved",
+      resolved_at: now,
+      resolved_by_email: "ebay-return-sync",
+      resolution_notes: "Resolved automatically because a newer eBay return API task superseded this duplicate.",
+      updated_at: now,
+    })
+    .in("id", duplicateIds)
+    .select("id,return_case_id,status");
+  if (error) throw error;
+
+  const events = (resolvedTasks || []).map((task: any) => ({
+    task_id: task.id,
+    return_case_id: caseId,
+    action: "resolved",
+    old_status: null,
+    new_status: "resolved",
+    notes: "Resolved automatically because a newer eBay return API task superseded this duplicate.",
+    signed_by_email: "ebay-return-sync",
+    payload: {
+      supersededByReturnTaskId: keepTaskId,
+      latestReturnClassification: {
+        ebayReturnId: metadata.ebayReturnId,
+        orderNumber: metadata.orderNumber,
+        returnStatus: metadata.returnStatus,
+        returnState: metadata.returnState,
+        returnAction: metadata.returnAction,
+        sellerActionDue: metadata.sellerActionDue,
+        buyerActionDue: metadata.buyerActionDue,
+        returnLifecycleStage: metadata.returnLifecycleStage,
+        returnClassificationReason: metadata.returnClassificationReason,
+      },
+    },
+  }));
+  if (events.length) {
+    const { error: eventError } = await supabase
+      .from("ebay_return_task_events")
+      .insert(events);
+    if (eventError) throw eventError;
+  }
+  return (resolvedTasks || []).length;
+}
+
 async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any, match: MatchResult): Promise<{ task: any | null; created: boolean; updated: boolean }> {
   const matched = Boolean(match.order && match.lines.length);
-  const taskType = taskTypeFor(matched);
+  const taskType = taskTypeFor(prepared, matched);
   const { data: existingTasks, error: taskError } = await supabase
     .from("ebay_return_tasks")
     .select("*")
     .eq("return_case_id", caseRow.id)
-    .eq("task_type", taskType)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(10);
   if (taskError) throw taskError;
-  const existing = existingTasks?.[0] || null;
+  const activeReturnTask = (existingTasks || []).find((task: any) => {
+    const status = toText(task.status).toLowerCase();
+    return ["return_intake", "return_review"].includes(toText(task.task_type))
+      && !["resolved", "cancelled"].includes(status);
+  });
+  const sameTypeTask = (existingTasks || []).find((task: any) => task.task_type === taskType) || null;
+  const existing = activeReturnTask || sameTypeTask || null;
   const metadata = {
     ...(existing?.metadata || {}),
     ...prepared.payload,
     caseType: matched ? "matched_order" : "unmatched_legacy",
+    sellerDecisionRequired: needsSellerDecision(prepared, matched),
+    returnShipmentStarted: returnShipmentStarted(prepared, matched),
+    physicalReturnExpected: preparedExpectsPhysicalReturn(prepared, matched),
   };
   const active = !existing || !["resolved", "cancelled"].includes(String(existing.status || ""));
 
@@ -1038,7 +1588,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
     order_id: match.order?.id || null,
     order_line_ids: match.lines.map((line: any) => line.id),
     task_type: taskType,
-    title: matched ? "Complete eBay return intake" : "Review unmatched eBay return/refund",
+    title: taskTitleFor(prepared, matched),
     question: questionFor(prepared, matched),
     status: existing?.status || "open",
     priority: existing?.priority && ["high", "urgent"].includes(existing.priority) ? existing.priority : priorityFor(prepared, matched),
@@ -1055,6 +1605,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
       .select("*")
       .single();
     if (error) throw error;
+    await resolveSupersededReturnTasks(supabase, caseRow.id, data.id, existingTasks || [], metadata);
     return { task: data, created: false, updated: true };
   }
 
@@ -1064,6 +1615,7 @@ async function upsertTask(supabase: any, prepared: PreparedReturn, caseRow: any,
     .select("*")
     .single();
   if (error) throw error;
+  await resolveSupersededReturnTasks(supabase, caseRow.id, data.id, existingTasks || [], metadata);
 
   await supabase
     .from("ebay_return_task_events")
@@ -1195,95 +1747,212 @@ async function importMessages(supabase: any, prepared: PreparedReturn, caseRow: 
 
 async function cleanupClosedReturnCases(
   supabase: any,
+  token: string,
   openReturnIds: Set<string>,
   dryRun: boolean,
-): Promise<{ casesClosed: number; tasksResolved: number; results: any[] }> {
+  cleanupLimit = 50,
+): Promise<{ casesClosed: number; tasksResolved: number; casesHeldOpen: number; casesRemaining: number; results: any[] }> {
   const { data: cases, error: caseError } = await supabase
     .from("ebay_return_cases")
-    .select("id,ebay_return_id,order_number,buyer_username,status,raw_payload")
+    .select("id,order_id,ebay_return_id,order_number,buyer_username,status,closed_at,raw_payload,updated_at")
     .not("ebay_return_id", "is", null)
+    .order("updated_at", { ascending: true })
     .limit(1000);
   if (caseError) throw caseError;
 
-  const staleCases = (cases || []).filter((row: any) => {
+  const staleCandidates = (cases || []).filter((row: any) => {
     const returnId = toText(row.ebay_return_id || row.raw_payload?.ebayReturnId);
-    return returnId && !openReturnIds.has(returnId);
+    return returnId
+      && !openReturnIds.has(returnId)
+      && (!isFinalReturnStatus(row.status) || !row.raw_payload?.ebayClosure);
   });
-  if (!staleCases.length) return { casesClosed: 0, tasksResolved: 0, results: [] };
+  const normalizedLimit = Math.min(Math.max(1, Math.trunc(Number(cleanupLimit || 50))), 200);
+  const staleCases = staleCandidates.slice(0, normalizedLimit);
+  const casesRemaining = Math.max(0, staleCandidates.length - staleCases.length);
+  if (!staleCases.length) return { casesClosed: 0, tasksResolved: 0, casesHeldOpen: 0, casesRemaining, results: [] };
 
   const staleCaseIds = staleCases.map((row: any) => row.id).filter(Boolean);
-  const casesToClose = staleCases.filter((row: any) => !["closed", "cancelled"].includes(toText(row.status)));
-  const caseIdsToClose = casesToClose.map((row: any) => row.id).filter(Boolean);
   const { data: tasks, error: taskError } = await supabase
     .from("ebay_return_tasks")
-    .select("id,return_case_id,status")
+    .select("id,return_case_id,status,task_type,title")
     .in("return_case_id", staleCaseIds)
     .not("status", "in", "(resolved,cancelled)");
   if (taskError) throw taskError;
 
+  const { data: items, error: itemError } = await supabase
+    .from("ebay_return_items")
+    .select("return_case_id,expected_quantity,received_quantity,disposition")
+    .in("return_case_id", staleCaseIds);
+  if (itemError) throw itemError;
+
   const staleTasks = tasks || [];
-  const cleanupResults = staleCases.map((row: any) => ({
-    returnId: row.ebay_return_id || row.raw_payload?.ebayReturnId || "",
-    orderNumber: row.order_number || "",
-    buyerUsername: row.buyer_username || "",
-    status: ["closed", "cancelled"].includes(toText(row.status))
+  const tasksByCase = new Map<string, any[]>();
+  staleTasks.forEach((task: any) => {
+    const caseId = toText(task.return_case_id);
+    tasksByCase.set(caseId, [...(tasksByCase.get(caseId) || []), task]);
+  });
+  const itemsByCase = new Map<string, any[]>();
+  (items || []).forEach((item: any) => {
+    const caseId = toText(item.return_case_id);
+    itemsByCase.set(caseId, [...(itemsByCase.get(caseId) || []), item]);
+  });
+
+  async function closurePayloadFor(row: any): Promise<JsonRecord> {
+    if (row.raw_payload?.ebayClosedOnEbay && row.raw_payload?.ebayClosure) {
+      return row.raw_payload.ebayClosure;
+    }
+    const returnId = toText(row.ebay_return_id || row.raw_payload?.ebayReturnId);
+    const detailResult = returnId
+      ? await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}?fieldgroups=FULL`)
+      : { ok: false as const, error: "Missing eBay return id" };
+    if (detailResult.ok) return buildClosurePayloadFromDetail(returnId, detailResult.payload);
+    return {
+      source: "ebay_return_api_cleanup",
+      reason: "not_open_on_ebay",
+      detectedAt: new Date().toISOString(),
+      closedAt: new Date().toISOString(),
+      returnId,
+      detailFetchError: detailResult.error,
+    };
+  }
+
+  const closureRows = [];
+  for (const row of staleCases) {
+    const activeTasks = tasksByCase.get(toText(row.id)) || [];
+    const blockingTasks = activeTasks.filter((task) => !isAutoResolvableClosedReturnTask(task));
+    const returnItems = itemsByCase.get(toText(row.id)) || [];
+    const closurePayload = await closurePayloadFor(row);
+    const missingClosureDetails = Boolean(closurePayload.detailFetchError);
+    const physicalIntakeRequired = closureImpliesPhysicalReturn(closurePayload)
+      && returnItemsNeedPhysicalIntake(row, returnItems);
+    const localActionRequired = !isFinalReturnStatus(row.status)
+      && (needsLocalReturnActionStatus(row.status) || blockingTasks.length > 0 || missingClosureDetails || physicalIntakeRequired);
+    closureRows.push({ row, activeTasks, blockingTasks, returnItems, localActionRequired, physicalIntakeRequired, closurePayload });
+  }
+
+  const casesToClose = closureRows.filter((entry) => !isFinalReturnStatus(entry.row.status) && !entry.localActionRequired);
+  const casesHeldOpen = closureRows.filter((entry) => !isFinalReturnStatus(entry.row.status) && entry.localActionRequired);
+  function closureBlockReasonFor(entry: any): string {
+    if (!entry.localActionRequired) return "";
+    if (entry.closurePayload.detailFetchError) {
+      return `Could not fetch eBay closure details: ${entry.closurePayload.detailFetchError}`;
+    }
+    if (entry.physicalIntakeRequired) {
+      return "Returned item still needs OG intake, condition notes, and location assignment.";
+    }
+    if (needsLocalReturnActionStatus(entry.row.status)) return `Local case status is ${entry.row.status}`;
+    if (entry.blockingTasks.length) {
+      return `${entry.blockingTasks.length} unresolved local follow-up task${entry.blockingTasks.length === 1 ? "" : "s"}`;
+    }
+    return "Local return case still needs review";
+  }
+  const cleanupResults = closureRows.map((entry) => ({
+    returnId: entry.row.ebay_return_id || entry.row.raw_payload?.ebayReturnId || "",
+    orderNumber: entry.row.order_number || "",
+    buyerUsername: entry.row.buyer_username || "",
+    status: isFinalReturnStatus(entry.row.status)
       ? "already_closed"
-      : dryRun ? "would_close" : "closed",
-    caseId: row.id,
-    previousStatus: row.status,
-    staleTaskCount: staleTasks.filter((task: any) => task.return_case_id === row.id).length,
+      : entry.localActionRequired
+        ? "local_action_required"
+        : dryRun ? "would_close" : "closed",
+    caseId: entry.row.id,
+    previousStatus: entry.row.status,
+    staleTaskCount: entry.activeTasks.length,
+    blockingTaskCount: entry.blockingTasks.length,
+    autoResolvableTaskCount: entry.activeTasks.filter(isAutoResolvableClosedReturnTask).length,
+    closureBlockReason: closureBlockReasonFor(entry),
+    closureDetailsStored: !dryRun,
   }));
 
   if (dryRun) {
-    return { casesClosed: casesToClose.length, tasksResolved: staleTasks.length, results: cleanupResults };
+    return {
+      casesClosed: casesToClose.length,
+      tasksResolved: 0,
+      casesHeldOpen: casesHeldOpen.length,
+      casesRemaining,
+      results: cleanupResults,
+    };
   }
 
   const now = new Date().toISOString();
-  if (caseIdsToClose.length) {
+  let resolvedTaskCount = 0;
+  for (const entry of closureRows) {
+    const closurePayload = {
+      ...entry.closurePayload,
+      localClosureBlocked: entry.localActionRequired,
+      localClosureBlockReason: closureBlockReasonFor(entry),
+      blockingTaskCount: entry.blockingTasks.length,
+      physicalReturnExpected: entry.physicalIntakeRequired,
+      physicalReturnIntakeRequired: entry.physicalIntakeRequired,
+    };
+    const isClosingLocally = casesToClose.some((candidate) => candidate.row.id === entry.row.id);
+    const nextStatus = isClosingLocally
+      ? closureStatusFromPayload(closurePayload) || "closed"
+      : entry.row.status;
     const { error: closeError } = await supabase
       .from("ebay_return_cases")
       .update({
-        status: "closed",
-        closed_at: now,
-        updated_at: now,
-      })
-      .in("id", caseIdsToClose);
-    if (closeError) throw closeError;
-  }
-
-  const staleTaskIds = staleTasks.map((task: any) => task.id).filter(Boolean);
-  if (staleTaskIds.length) {
-    const { error: resolveError } = await supabase
-      .from("ebay_return_tasks")
-      .update({
-        status: "resolved",
-        resolved_at: now,
-        resolved_by_email: "ebay-return-sync",
-        resolution_notes: "Resolved by eBay return cleaner because this return is no longer open on eBay.",
-        updated_at: now,
-      })
-      .in("id", staleTaskIds);
-    if (resolveError) throw resolveError;
-
-    const { error: eventError } = await supabase
-      .from("ebay_return_task_events")
-      .insert(staleTasks.map((task: any) => ({
-        task_id: task.id,
-        return_case_id: task.return_case_id,
-        action: "resolved",
-        old_status: task.status,
-        new_status: "resolved",
-        notes: "Auto-resolved by eBay return cleaner: return no longer appears in eBay open returns.",
-        signed_by_email: "ebay-return-sync",
-        payload: {
-          source: "ebay_return_api_cleanup",
-          cleanedAt: now,
+        status: nextStatus,
+        closed_at: isFinalReturnStatus(nextStatus) ? entry.row.closed_at || closurePayload.closedAt || now : entry.row.closed_at || null,
+        raw_payload: {
+          ...(entry.row.raw_payload || {}),
+          ebayClosure: closurePayload,
+          ebayClosedOnEbay: true,
         },
-      })));
-    if (eventError) throw eventError;
+        updated_at: now,
+      })
+      .eq("id", entry.row.id);
+    if (closeError) throw closeError;
+
+    if (isClosingLocally) {
+      const autoResolvableTaskIds = entry.activeTasks
+        .filter(isAutoResolvableClosedReturnTask)
+        .map((task: any) => task.id)
+        .filter(Boolean);
+      if (autoResolvableTaskIds.length) {
+        const { data: resolvedTasks, error: resolveTaskError } = await supabase
+          .from("ebay_return_tasks")
+          .update({
+            status: "resolved",
+            resolved_at: now,
+            resolved_by_email: "ebay-return-sync",
+            resolution_notes: "Resolved automatically because eBay closed this return.",
+            updated_at: now,
+          })
+          .in("id", autoResolvableTaskIds)
+          .select("id");
+        if (resolveTaskError) throw resolveTaskError;
+        resolvedTaskCount += (resolvedTasks || []).length;
+      }
+
+      const { error: eventError } = await supabase
+        .from("ebay_return_events")
+        .insert({
+          return_case_id: entry.row.id,
+          action: nextStatus === "cancelled" ? "cancelled" : "closed",
+          order_id: entry.row.order_id || null,
+          notes: "Closed automatically from eBay return status.",
+          signed_by_email: "ebay-return-sync",
+          payload: {
+            source: "ebay_return_api_cleanup",
+            previous_status: entry.row.status,
+            status: nextStatus,
+            closed_at: closurePayload.closedAt || now,
+            ebay_return_id: entry.row.ebay_return_id || entry.row.raw_payload?.ebayReturnId || "",
+            ebay_closure: closurePayload,
+          },
+        });
+      if (eventError) throw eventError;
+    }
   }
 
-  return { casesClosed: casesToClose.length, tasksResolved: staleTasks.length, results: cleanupResults };
+  return {
+    casesClosed: casesToClose.length,
+    tasksResolved: resolvedTaskCount,
+    casesHeldOpen: casesHeldOpen.length,
+    casesRemaining,
+    results: cleanupResults,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -1301,6 +1970,20 @@ Deno.serve(async (req) => {
     body = await req.json().catch(() => ({}));
     const dryRun = body.dryRun !== false;
     const cleanupClosed = body.cleanupClosed === true;
+    const cleanupOnly = body.cleanupOnly === true;
+    const cleanupLimit = Math.min(Math.max(1, Math.trunc(Number(body.cleanupLimit || (cleanupOnly ? 50 : 15)))), 200);
+    const staleRunCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    await supabase
+      .from("ebay_return_sync_runs")
+      .update({
+        status: "failed",
+        errors: 1,
+        warnings: [{ reason: "marked_failed_after_stale_running_state", detectedAt: new Date().toISOString() }],
+        finished_at: new Date().toISOString(),
+      })
+      .eq("status", "running")
+      .is("finished_at", null)
+      .lt("started_at", staleRunCutoff);
     const { data: run, error: runError } = await supabase
       .from("ebay_return_sync_runs")
       .insert({ dry_run: dryRun, status: "running" })
@@ -1312,6 +1995,9 @@ Deno.serve(async (req) => {
     const token = await getEbayAccessToken();
     const fetchResult = await fetchReturnSummaries(token, body);
     const summaries = fetchResult.summaries;
+    const openReturnIdsFromSearch = new Set(
+      summaries.map((summary: any) => firstText(summary?.returnId, summary?.summary?.returnId)).filter(Boolean),
+    );
     const preparedReturns: PreparedReturn[] = [];
     const warnings: any[] = [];
 
@@ -1321,6 +2007,7 @@ Deno.serve(async (req) => {
         warnings.push({ reason: "missing_return_id", summary });
         continue;
       }
+      if (cleanupOnly) continue;
       const detailResult = await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}?fieldgroups=FULL`);
       const filesResult = await ebayOptionalRequest(token, `/post-order/v2/return/${encodeURIComponent(returnId)}/files`);
       if (!detailResult.ok) warnings.push({ returnId, request: "detail", error: detailResult.error });
@@ -1344,6 +2031,8 @@ Deno.serve(async (req) => {
     let errors = 0;
     let staleCasesClosed = 0;
     let staleTasksResolved = 0;
+    let staleCasesHeldOpen = 0;
+    let staleCasesRemaining = 0;
 
     for (const prepared of preparedReturns) {
       try {
@@ -1354,6 +2043,8 @@ Deno.serve(async (req) => {
         filesSeen += prepared.files.length;
 
         if (dryRun) {
+          const existingCase = await findExistingCase(supabase, prepared, match.order?.id || null);
+          const taskSkipped = existingCase ? shouldSkipReturnApiTask(existingCase) : false;
           results.push({
             returnId: prepared.returnId,
             orderNumber: prepared.orderNumber,
@@ -1369,17 +2060,26 @@ Deno.serve(async (req) => {
             fileCount: prepared.files.length,
             matched: isMatched,
             matchedLineCount: match.lines.length,
-            wouldCreateTask: !["closed", "cancelled"].includes(localStatusFor(prepared, isMatched)),
+            existingCaseId: existingCase?.id || null,
+            existingCaseStatus: existingCase?.status || null,
+            taskSkipped,
+            wouldCreateTask: !taskSkipped && !["closed", "cancelled"].includes(localStatusFor(prepared, isMatched)),
           });
           continue;
         }
 
         const uploadedComplaintImages = await uploadEbayReturnFiles(supabase, prepared);
         prepared.payload = buildReturnPayload(prepared, uploadedComplaintImages);
-        const { caseRow, created: caseCreated } = await upsertCase(supabase, prepared, match);
+        const {
+          caseRow,
+          created: caseCreated,
+          closureBlocked,
+          closureBlockReason,
+          blockingTaskCount,
+        } = await upsertCase(supabase, prepared, match);
         await upsertReturnItems(supabase, prepared, caseRow, match);
-        const isClosedReturn = ["closed", "cancelled"].includes(String(caseRow.status || "").toLowerCase());
-        const taskResult = isClosedReturn
+        const skipTaskRefresh = shouldSkipReturnApiTask(caseRow);
+        const taskResult = skipTaskRefresh
           ? { task: null, created: false, updated: false }
           : await upsertTask(supabase, prepared, caseRow, match);
         const importedMessageCount = await importMessages(supabase, prepared, caseRow, match);
@@ -1405,6 +2105,10 @@ Deno.serve(async (req) => {
           caseId: caseRow.id,
           taskId: taskResult.task?.id || null,
           caseCreated,
+          closureBlocked,
+          closureBlockReason,
+          blockingTaskCount,
+          taskSkipped: skipTaskRefresh,
           taskCreated: taskResult.created,
           taskUpdated: taskResult.updated,
           messagesImported: importedMessageCount,
@@ -1428,17 +2132,21 @@ Deno.serve(async (req) => {
         warnings.push({
           reason: "cleanup_skipped_truncated_open_return_search",
           totalEntries: fetchResult.totalEntries,
-          fetched: preparedReturns.length,
+          fetched: openReturnIdsFromSearch.size,
         });
       } else {
         try {
           const cleanup = await cleanupClosedReturnCases(
             supabase,
-            new Set(preparedReturns.map((entry) => entry.returnId).filter(Boolean)),
+            token,
+            openReturnIdsFromSearch,
             dryRun,
+            cleanupLimit,
           );
           staleCasesClosed = cleanup.casesClosed;
           staleTasksResolved = cleanup.tasksResolved;
+          staleCasesHeldOpen = cleanup.casesHeldOpen;
+          staleCasesRemaining = cleanup.casesRemaining;
           results.push(...cleanup.results.map((entry) => ({
             ...entry,
             cleanup: true,
@@ -1481,8 +2189,12 @@ Deno.serve(async (req) => {
       messagesImported,
       filesSeen,
       cleanupClosed,
+      cleanupOnly,
+      cleanupLimit,
       staleCasesClosed,
       staleTasksResolved,
+      staleCasesHeldOpen,
+      staleCasesRemaining,
       errors,
       warnings,
       results,

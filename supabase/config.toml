@@ -518,6 +518,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/ebay-publishing-setup/index.ts"
 
+[functions.ebay-return-sync]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/ebay-return-sync/index.ts"
+
 [functions.microsoft-auth-callback]
 enabled = true
 verify_jwt = false

@@ -211,6 +211,13 @@
               inputmode="search"
             />
           </label>
+          <label class="history-filter-toggle">
+            <input id="history-buyer-all-dates" type="checkbox" />
+            <span>
+              <strong>Buyer all dates</strong>
+              <small>Search username across stored history</small>
+            </span>
+          </label>
         </section>
 
         <section class="history-summary-grid" aria-label="Order history totals">
@@ -229,10 +236,12 @@
           <div class="history-summary-card" data-admin-only="true">
             <span>Estimated Payout</span>
             <strong id="summary-payout">$0.00</strong>
+            <small id="summary-payout-detail"></small>
           </div>
           <div class="history-summary-card">
-            <span>No-Inventory Proofs</span>
+            <span>No-Inventory Lines</span>
             <strong id="summary-admin-closeouts">0</strong>
+            <small id="summary-admin-closeouts-detail"></small>
           </div>
           <div class="history-summary-card">
             <span>Canceled Lines</span>

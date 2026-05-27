@@ -51,6 +51,7 @@ const state = {
 };
 
 let evidencePhotoViewerReturnFocus = null;
+let historyBuyerAllDatesSearchTimer = null;
 const evidencePhotoViewerState = {
   zoom: 1,
   panX: 0,
@@ -69,10 +70,12 @@ const RETURN_CAPTURE_POLL_INTERVAL_MS = 1500;
 const RETURN_CAPTURE_PHOTO_SETTLE_MS = 3000;
 const RETURN_EVIDENCE_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const RETURN_THUMBNAIL_TRANSFORM = { width: 260, height: 260, resize: "contain", quality: 60 };
+const RETURN_EXTERNAL_NAV_RESTORE_KEY = "ogReturnExternalNavigationRestore";
 const TRACKING_NUMBER_PATTERN = /\b\d{20,30}\b/g;
 const FORMATTED_TRACKING_NUMBER_PATTERN = /\b\d{2,4}(?:[\s-]+\d{2,4}){4,8}\b/g;
 const ORDER_HISTORY_PAGE_SIZE = 500;
 const ORDER_HISTORY_MAX_LINES = 5000;
+const ORDER_HISTORY_MAX_BUYER_ORDERS = 2500;
 const ORDER_HISTORY_RELATED_ID_CHUNK_SIZE = 150;
 const ORDER_HISTORY_LINE_SELECT = `
   id,
@@ -108,6 +111,10 @@ const ORDER_HISTORY_LINE_SELECT = `
     paid_on_date,
     ship_by_date,
     status,
+    shipping_and_handling,
+    seller_collected_tax,
+    ebay_collected_tax,
+    ebay_collected_charges,
     total_price,
     net_payout,
     ebay_shipment_id,
@@ -456,9 +463,54 @@ function getLineGross(line) {
   return Number(line.sold_for || 0) * Math.max(Number(line.fulfilled_quantity || line.quantity || 1), 1);
 }
 
+function roundMoney(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? Number(number.toFixed(2)) : 0;
+}
+
+function getLinePayoutSource(line) {
+  if (line?.line_status === "cancelled") return "none";
+  if (Number(line?.net_payout || 0) > 0) return "line";
+
+  const order = getOrderFromLine(line);
+  const lineGross = getLineGross(line);
+  if (lineGross <= 0) return "none";
+
+  const orderTotal = Number(order.total_price || 0);
+  if (Number(order.net_payout || 0) > 0 && orderTotal > 0) return "order";
+
+  const orderDeductions = Number(order.ebay_collected_tax || 0)
+    + Number(order.ebay_collected_charges || 0)
+    + Number(order.seller_collected_tax || 0);
+  if (orderDeductions > 0 && orderTotal > 0) return "deduction_estimate";
+
+  return "gross_estimate";
+}
+
 function getLinePayout(line) {
-  const payout = Number(line.net_payout || 0);
-  return Number.isFinite(payout) ? payout : 0;
+  if (line?.line_status === "cancelled") return 0;
+
+  const directPayout = Number(line?.net_payout || 0);
+  if (directPayout > 0) return roundMoney(directPayout);
+
+  const order = getOrderFromLine(line);
+  const lineGross = getLineGross(line);
+  if (lineGross <= 0) return 0;
+
+  const orderTotal = Number(order.total_price || 0);
+  const orderPayout = Number(order.net_payout || 0);
+  if (orderPayout > 0 && orderTotal > 0) {
+    return roundMoney(orderPayout * (lineGross / orderTotal));
+  }
+
+  const orderDeductions = Number(order.ebay_collected_tax || 0)
+    + Number(order.ebay_collected_charges || 0)
+    + Number(order.seller_collected_tax || 0);
+  if (orderDeductions > 0 && orderTotal > 0) {
+    return roundMoney(Math.max(0, lineGross - (orderDeductions * (lineGross / orderTotal))));
+  }
+
+  return roundMoney(lineGross);
 }
 
 function getLineStatusLabel(line) {
@@ -477,7 +529,7 @@ function getLineStatusClass(line) {
 
 function isAdminCloseoutLine(line) {
   return state.adminCloseoutLineIds.has(line.id)
-    || (line.line_status === "fulfilled" && !line.stock_transaction_id);
+    || (line.line_status === "fulfilled" && !line.stock_transaction_id && !isEbayApiHistoryLine(line));
 }
 
 function isAdminUser() {
@@ -1059,6 +1111,53 @@ async function fetchClosedOrderHistoryLines(fromIso, toIso) {
   return { data: rows, error: null, capped: true };
 }
 
+async function fetchBuyerAllDateOrderHistoryLines(searchTerm) {
+  const buyerTerm = String(searchTerm || "").trim();
+  if (!buyerTerm) return { data: [], error: null, capped: false };
+
+  const buyerPattern = `%${buyerTerm.replace(/[%]/g, "")}%`;
+  const orders = [];
+  for (let start = 0; start < ORDER_HISTORY_MAX_BUYER_ORDERS; start += ORDER_HISTORY_PAGE_SIZE) {
+    const end = Math.min(start + ORDER_HISTORY_PAGE_SIZE - 1, ORDER_HISTORY_MAX_BUYER_ORDERS - 1);
+    const { data, error } = await supabase
+      .from("ebay_orders")
+      .select("id")
+      .ilike("buyer_username", buyerPattern)
+      .order("sale_date", { ascending: false, nullsFirst: false })
+      .range(start, end);
+
+    if (error) return { data: [], error };
+    const page = data || [];
+    orders.push(...page);
+    if (page.length < ORDER_HISTORY_PAGE_SIZE) break;
+  }
+
+  const orderIds = [...new Set(orders.map((order) => order.id).filter(Boolean))];
+  if (!orderIds.length) return { data: [], error: null, capped: false };
+
+  const rows = [];
+  for (const chunk of chunkArray(orderIds, ORDER_HISTORY_RELATED_ID_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("ebay_order_lines")
+      .select(ORDER_HISTORY_LINE_SELECT)
+      .in("line_status", ["fulfilled", "cancelled", "skipped"])
+      .in("order_id", chunk)
+      .order("fulfilled_at", { ascending: false, nullsFirst: false })
+      .limit(ORDER_HISTORY_PAGE_SIZE);
+
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+    if (rows.length >= ORDER_HISTORY_MAX_LINES) break;
+  }
+
+  rows.sort((a, b) => new Date(b.fulfilled_at || 0) - new Date(a.fulfilled_at || 0));
+  return {
+    data: rows.slice(0, ORDER_HISTORY_MAX_LINES),
+    error: null,
+    capped: rows.length >= ORDER_HISTORY_MAX_LINES || orders.length >= ORDER_HISTORY_MAX_BUYER_ORDERS,
+  };
+}
+
 async function fetchOverlappingRows(tableName, columnName, ids = [], options = {}) {
   const cleanIds = [...new Set(ids.filter(Boolean))];
   if (!cleanIds.length) return { data: [], error: null };
@@ -1110,8 +1209,15 @@ async function loadOrderHistory() {
   if (eventList) eventList.innerHTML = `<div class="history-empty">Loading proof events...</div>`;
 
   const { fromIso, toIso } = getDateRange();
+  const buyerAllDates = Boolean($("history-buyer-all-dates")?.checked);
+  const searchTerm = String($("history-search")?.value || "").trim();
+  if (buyerAllDates && searchTerm && list) {
+    list.innerHTML = `<div class="history-empty">Searching all stored history for buyer "${escapeHtml(searchTerm)}"...</div>`;
+  }
 
-  const linesQuery = fetchClosedOrderHistoryLines(fromIso, toIso);
+  const linesQuery = buyerAllDates && searchTerm
+    ? fetchBuyerAllDateOrderHistoryLines(searchTerm)
+    : fetchClosedOrderHistoryLines(fromIso, toIso);
 
   const adminEventsQuery = supabase
     .from("ebay_order_admin_events")
@@ -1160,7 +1266,11 @@ async function loadOrderHistory() {
   }
 
   if (linesResult.capped) {
-    console.warn(`Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`);
+    console.warn(
+      buyerAllDates && searchTerm
+        ? `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for buyer search "${searchTerm}". Use a more exact username if you need fewer rows.`
+        : `Order History loaded the first ${ORDER_HISTORY_MAX_LINES} closed lines for this date range. Narrow the dates if you need older rows.`
+    );
   }
 
   if (adminEventsResult.error) {
@@ -1604,6 +1714,7 @@ function getReturnComplaintDetails(task = {}) {
     buyerComment: metadata.buyerComment || detail.buyerComment || "",
     requestAmount: metadata.requestAmount || detail.requestAmount || "",
     onHoldAmount: metadata.onHoldAmount || detail.onHoldAmount || "",
+    trackingNumber: getReturnTaskTrackingNumber(task),
     orderDetailsUrl: metadata.orderDetailsUrl || detail.orderDetailsUrl || "",
     videoReceiptUrl: metadata.videoReceiptUrl || detail.videoReceiptUrl || "",
     detailsUrl: metadata.detailsUrl || detail.detailsUrl || getReturnTaskPayload(task).pageUrl || "",
@@ -1998,6 +2109,14 @@ function renderReturnMessageLog(task = {}) {
 
 function renderReturnComplaintDetails(task = {}) {
   const detail = getReturnComplaintDetails(task);
+  const returnCase = getReturnTaskCase(task);
+  const externalLinkAttrs = [
+    `data-return-external-link="${escapeHtml(task.id || "")}"`,
+    `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
+    `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
+    `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
+    `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
+  ].join(" ");
   const hasDetails = Boolean(
     detail.buyerComment
     || detail.requestAmount
@@ -2016,9 +2135,9 @@ function renderReturnComplaintDetails(task = {}) {
       <div class="return-complaint-header">
         <span class="eyebrow">eBay Complaint Detail</span>
         <div>
-          ${detail.detailsUrl ? `<a href="${escapeHtml(detail.detailsUrl)}" target="_blank" rel="noopener">Open eBay return</a>` : ""}
-          ${detail.orderDetailsUrl ? `<a href="${escapeHtml(detail.orderDetailsUrl)}" target="_blank" rel="noopener">Order details</a>` : ""}
-          ${detail.videoReceiptUrl ? `<a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener">Video receipt</a>` : ""}
+          ${detail.detailsUrl ? `<a href="${escapeHtml(detail.detailsUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Open eBay return</a>` : ""}
+          ${detail.orderDetailsUrl ? `<a href="${escapeHtml(detail.orderDetailsUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Order details</a>` : ""}
+          ${detail.videoReceiptUrl ? `<a href="${escapeHtml(detail.videoReceiptUrl)}" target="_blank" rel="noopener" ${externalLinkAttrs}>Video receipt</a>` : ""}
         </div>
       </div>
       ${detail.buyerComment ? `
@@ -2030,6 +2149,7 @@ function renderReturnComplaintDetails(task = {}) {
       <div class="return-complaint-grid">
         ${detail.requestAmount ? `<span><small>Request amount</small><b>${escapeHtml(detail.requestAmount)}</b></span>` : ""}
         ${detail.onHoldAmount ? `<span><small>On hold</small><b>${escapeHtml(detail.onHoldAmount)}</b></span>` : ""}
+        ${detail.trackingNumber ? `<span><small>Return tracking</small><b>${escapeHtml(detail.trackingNumber)}</b></span>` : ""}
         ${detail.datePurchased ? `<span><small>Date purchased</small><b>${escapeHtml(detail.datePurchased)}</b></span>` : ""}
         ${photoCount ? `<span><small>Buyer photos</small><b>${escapeHtml(`${photoCount} captured reference${photoCount === 1 ? "" : "s"}`)}</b></span>` : ""}
       </div>
@@ -2070,6 +2190,18 @@ function renderReturnQueue() {
     const lineIds = getReturnTaskLineIds(task);
     const dueInfo = getReturnTaskDueInfo(task);
     const requestedLabel = getReturnTaskRequestedLabel(task);
+    const complaintDetail = getReturnComplaintDetails(task);
+    const displayInfo = getReturnTaskDisplayInfo(task);
+    const displayTaskType = displayInfo.taskType;
+    const displayTitle = displayInfo.title;
+    const displayQuestion = displayInfo.question;
+    const taskExternalLinkAttrs = [
+      `data-return-external-link="${escapeHtml(task.id || "")}"`,
+      `data-return-external-return-id="${escapeHtml(returnCase.ebay_return_id || "")}"`,
+      `data-return-external-order-number="${escapeHtml(returnCase.order_number || "")}"`,
+      `data-return-external-buyer="${escapeHtml(returnCase.buyer_username || "")}"`,
+      `data-return-external-item-number="${escapeHtml((getReturnTaskPayload(task).itemNumber || getReturnTaskPayload(task).item_number || ""))}"`,
+    ].join(" ");
     const orderLabel = returnCase.order_number || (
       returnCase.case_type === "unmatched_legacy" ? "Legacy / no OG match" : "-"
     );
@@ -2077,9 +2209,9 @@ function renderReturnQueue() {
       <article class="return-task-card is-${escapeHtml(task.status || "open")} priority-${escapeHtml(task.priority || "normal")}" data-return-task-id="${escapeHtml(task.id)}">
         <div class="return-task-main">
           <div>
-            <span class="eyebrow">${escapeHtml(getReturnTaskTypeLabel(task.task_type))}</span>
-            <h3>${escapeHtml(task.title || "Return task")}</h3>
-            <p>${escapeHtml(task.question || "No question recorded.")}</p>
+            <span class="eyebrow">${escapeHtml(getReturnTaskTypeLabel(displayTaskType))}</span>
+            <h3>${escapeHtml(displayTitle)}</h3>
+            <p>${escapeHtml(displayQuestion)}</p>
             <div class="return-task-meta">
               <span>${escapeHtml(getReturnTaskStatusLabel(task.status))}</span>
               <span>${escapeHtml(getReturnTaskPriorityLabel(task.priority))}</span>
@@ -2114,7 +2246,8 @@ function renderReturnQueue() {
             ${renderReturnMessageLog(task)}
           </div>
           <div class="return-task-buttons">
-            ${lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+            ${displayTaskType === "return_intake" && lineIds.length ? `<button type="button" class="secondary-btn" data-return-task-open="${escapeHtml(task.id)}">Open Intake</button>` : ""}
+            ${displayTaskType === "return_review" && complaintDetail.detailsUrl ? `<a class="secondary-btn" href="${escapeHtml(complaintDetail.detailsUrl)}" target="_blank" rel="noopener" ${taskExternalLinkAttrs}>Open eBay</a>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-start="${escapeHtml(task.id)}">Start</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="secondary-btn" data-return-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>` : ""}
             ${pending && canWorkTask ? `<button type="button" class="primary-btn" data-return-task-resolve="${escapeHtml(task.id)}">Resolve</button>` : ""}
@@ -2315,6 +2448,9 @@ async function updateReturnTaskProgress(taskId) {
 }
 
 function bindReturnQueueActions() {
+  document.querySelectorAll("[data-return-external-link]").forEach((link) => {
+    link.addEventListener("click", () => rememberReturnExternalNavigation(link));
+  });
   document.querySelectorAll("[data-return-task-open]").forEach((button) => {
     button.addEventListener("click", () => openReturnTaskIntake(button.dataset.returnTaskOpen));
   });
@@ -2380,28 +2516,61 @@ function getUniqueEventsFromGroups(groups = []) {
   return [...events.values()];
 }
 
+function setSummaryCardLabel(valueId, label) {
+  const value = $(valueId);
+  const labelNode = value?.closest(".history-summary-card")?.querySelector("span");
+  if (labelNode) labelNode.textContent = label;
+}
+
 function renderSummary(groups = getVisibleHistoryGroups()) {
   const visibleLines = getUniqueLinesFromGroups(groups);
   const visibleEvents = getUniqueEventsFromGroups(groups);
-  const shippedLines = visibleLines.filter((line) => line.line_status === "fulfilled");
-  const shippedGroups = groups.filter((group) =>
-    (group.lines || []).some((line) => line.line_status === "fulfilled")
-  );
-  const gross = shippedLines.reduce((sum, line) => sum + getLineGross(line), 0);
-  const payout = shippedLines.reduce((sum, line) => sum + getLinePayout(line), 0);
+  const visibleOrders = getUniqueOrdersFromLines(visibleLines);
+  const status = $("history-status")?.value || "all";
+  const gross = visibleLines.reduce((sum, line) => sum + getLineGross(line), 0);
+  const payout = visibleLines.reduce((sum, line) => sum + getLinePayout(line), 0);
+  const payoutSourceCounts = visibleLines.reduce((counts, line) => {
+    const source = getLinePayoutSource(line);
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, {});
+  const estimatedPayoutLines = (payoutSourceCounts.deduction_estimate || 0) + (payoutSourceCounts.gross_estimate || 0);
   const closeoutEvents = visibleEvents.filter((event) => event.action === "fulfilled_no_inventory");
-  const closeouts = closeoutEvents.length || visibleLines.filter(isAdminCloseoutLine).length;
+  const closeouts = visibleLines.filter(isAdminCloseoutLine).length;
+  const closeoutProofDetail = closeoutEvents.length
+    ? `${closeoutEvents.length.toLocaleString()} proof event${closeoutEvents.length === 1 ? "" : "s"}`
+    : closeouts
+    ? "No saved proof event"
+    : "";
   const cancelled = visibleLines.filter((line) => line.line_status === "cancelled").length;
   const returnCount = new Set(getReturnCasesForLineIds(visibleLines.map((line) => line.id)).map((entry) => entry.id)).size;
   const reverted = visibleEvents
     .filter((event) => event.category === "revert")
     .reduce((sum, event) => sum + Number(event.payload?.reverted_lines || event.order_line_ids?.length || 1), 0);
 
-  $("summary-shipped-orders").textContent = String(shippedGroups.length);
-  $("summary-shipped-lines").textContent = String(shippedLines.length);
+  const primaryLabels = {
+    all: ["Closed Orders", "Closed Lines"],
+    fulfilled: ["Orders Shipped", "Lines Shipped"],
+    cancelled: ["Canceled Orders", "Canceled Lines"],
+    admin_closeout: ["No-Inventory Orders", "No-Inventory Lines"],
+    returns: ["Return Orders", "Return Lines"],
+  }[status] || ["Visible Orders", "Visible Lines"];
+
+  setSummaryCardLabel("summary-shipped-orders", primaryLabels[0]);
+  setSummaryCardLabel("summary-shipped-lines", primaryLabels[1]);
+  $("summary-shipped-orders").textContent = String(visibleOrders.length || groups.length);
+  $("summary-shipped-lines").textContent = String(visibleLines.length);
   $("summary-gross").textContent = formatMoney(gross);
   $("summary-payout").textContent = formatMoney(payout);
+  const payoutDetail = $("summary-payout-detail");
+  if (payoutDetail) {
+    payoutDetail.textContent = estimatedPayoutLines
+      ? `${estimatedPayoutLines.toLocaleString()} line${estimatedPayoutLines === 1 ? "" : "s"} estimated from gross`
+      : "";
+  }
   $("summary-admin-closeouts").textContent = String(closeouts);
+  const closeoutDetail = $("summary-admin-closeouts-detail");
+  if (closeoutDetail) closeoutDetail.textContent = closeoutProofDetail;
   $("summary-cancelled").textContent = String(cancelled);
   $("summary-returns").textContent = String(returnCount);
   $("summary-reversals").textContent = String(reverted);
@@ -2633,6 +2802,22 @@ function getUniqueOrdersFromLines(lines = []) {
     orders.set(key, order);
   });
   return [...orders.values()];
+}
+
+function buildBuyerInsightCurrentItems(lines = []) {
+  return (lines || []).map((line) => ({
+    title: line.item_title || "Untitled eBay item",
+    itemNumber: line.item_number || "",
+    orderNumber: line.order?.order_number || "",
+    quantity: Number(line.fulfilled_quantity || line.quantity || 0),
+    grossSales: getLineGross(line),
+    status: getLineStatusLabel(line),
+    shipByDate: line.order?.ship_by_date || null,
+  }));
+}
+
+function buyerInsightCurrentItemsAttribute(lines = []) {
+  return escapeHtml(JSON.stringify(buildBuyerInsightCurrentItems(lines)));
 }
 
 function getOrderNumbersFromOrders(orders = []) {
@@ -2894,6 +3079,11 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
               class="buyer-insight-link history-buyer-insight-link"
               data-buyer-insights="${escapeHtml(group.buyer)}"
               data-buyer-context="order-history"
+              data-current-order-total="${escapeHtml(group.gross)}"
+              data-current-order-count="${escapeHtml(groupOrders.length || 1)}"
+              data-current-line-count="${escapeHtml(group.lines.length)}"
+              data-current-order-numbers="${escapeHtml(groupOrders.map((order) => order.order_number).filter(Boolean).join(","))}"
+              data-current-items="${buyerInsightCurrentItemsAttribute(group.lines)}"
             >${escapeHtml(group.buyer)}</button>
           </h3>
           <div class="history-card-meta">
@@ -2934,7 +3124,10 @@ function renderHistoryList(groups = getVisibleHistoryGroups()) {
         ${group.lines.map((line) => `
           <div class="history-line-row">
             <div>
-              <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+              <div class="history-line-title-row">
+                <strong>${escapeHtml(line.item_title || "Untitled eBay item")}</strong>
+                <b>${escapeHtml(formatMoney(getLineGross(line)))}</b>
+              </div>
               <small>${escapeHtml(line.item_number || "No item #")} - Qty ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()} - ${escapeHtml(getDisplayHistoryNote(line.notes) || "No notes")}</small>
               <div class="history-worker-row">
                 <span>${escapeHtml(getLineStatusLabel(line))}</span>
@@ -3988,13 +4181,13 @@ function renderReturnLineList() {
               <option value="wrong_item">Wrong item</option>
               <option value="refund_only">Refund only / no item</option>
               <option value="missing">Missing from return package</option>
-              <option value="admin_review">Needs admin review</option>
+              <option value="admin_review">Dispute with eBay / admin review</option>
             </select>
           </label>
         </div>
         <label class="return-line-note">
           Item note
-          <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Optional note for this returned item" />
+          <input type="text" data-return-line-note="${escapeHtml(line.id)}" placeholder="Condition note for this returned item" />
         </label>
       </article>
     `;
@@ -4005,6 +4198,18 @@ function renderReturnLineList() {
       if (checkbox.checked) state.returnSelectedLineIds.add(checkbox.dataset.returnLineSelect);
       else state.returnSelectedLineIds.delete(checkbox.dataset.returnLineSelect);
       renderReturnLineList();
+    });
+  });
+  list.querySelectorAll("[data-return-condition]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const lineId = select.getAttribute("data-return-condition");
+      const disposition = getReturnLineField("data-return-disposition", lineId);
+      if (!disposition) return;
+      if (select.value === "wrong_item") {
+        disposition.value = "wrong_item";
+      } else if (["damaged", "missing_parts"].includes(select.value) && !["wrong_item", "missing"].includes(disposition.value)) {
+        disposition.value = "admin_review";
+      }
     });
   });
 }
@@ -4089,6 +4294,52 @@ function buildReturnTransferNote(info = {}) {
     info.orderDetailsUrl ? `Order details: ${info.orderDetailsUrl}` : "",
     info.pageUrl ? `Captured from: ${info.pageUrl}` : "",
   ].filter(Boolean).join("\n");
+}
+
+function returnTransferShowsClosed(info = {}) {
+  const detail = info.returnDetails || {};
+  const text = [
+    info.returnClosed,
+    info.returnStatus,
+    info.returnState,
+    info.returnAction,
+    info.primaryText,
+    info.closedText,
+    detail.returnClosed,
+    detail.returnStatus,
+    detail.returnState,
+    detail.returnAction,
+    detail.primaryText,
+    detail.closedText,
+  ].map((value) => String(value || "")).join(" ").toLowerCase();
+  return text.includes("closed");
+}
+
+async function closeReturnCaseFromTransfer(payload = {}) {
+  const info = getReturnTransferInfo(payload);
+  const rpcPayload = {
+    ...payload,
+    return: info,
+    metadata: {
+      ...(payload.metadata || {}),
+      returnId: info.returnId || payload.metadata?.returnId || "",
+      orderNumber: info.orderNumber || payload.metadata?.orderNumber || "",
+      buyerUsername: info.buyerUsername || payload.metadata?.buyerUsername || "",
+      returnClosed: true,
+      returnStatus: info.returnStatus || "CLOSED",
+      returnState: info.returnState || "CLOSED",
+      returnAction: info.returnAction || "CLOSED_ON_EBAY_PAGE",
+      closedAt: info.closedAt || info.returnDetails?.closedAt || "",
+      closedText: info.closedText || info.returnDetails?.closedText || "",
+      pageUrl: info.pageUrl || payload.metadata?.pageUrl || "",
+    },
+  };
+  const { data, error } = await supabase.rpc("close_ebay_return_case_from_page", {
+    _payload: rpcPayload,
+    _signed_by_email: state.user?.email || null,
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] || {} : data || {};
 }
 
 function buildUnmatchedReturnTransferNote(info = {}) {
@@ -4266,12 +4517,165 @@ function getReturnTaskDueInfo(task = {}) {
   const rawDue = task.due_at || metadata.returnDueAt || metadata.return_due_at || "";
   const parsedDue = rawDue ? new Date(rawDue) : parseReturnDateText(metadata.returnAction || metadata.return_action, metadata.returnInitiated || metadata.return_initiated);
   const hasDue = parsedDue && !Number.isNaN(parsedDue.getTime());
-  const actionText = metadata.returnAction || metadata.return_action || "";
+  const tracking = getReturnTaskTrackingNumber(task);
+  const stage = getReturnTaskLifecycleStage(task);
+  const actionText = stage === "delivered"
+    ? "Return delivered / ready for inspection"
+    : stage === "shipped"
+    ? tracking ? `Return shipped - ${tracking}` : "Return shipped back by buyer"
+    : stage === "ready_to_ship"
+    ? "Return ready for buyer shipment"
+    : metadata.returnAction || metadata.return_action || "";
   return {
     date: hasDue ? parsedDue : null,
     iso: hasDue ? parsedDue.toISOString() : "",
     label: hasDue ? formatDateOnly(parsedDue) : "No response deadline captured",
     sourceText: actionText || (task.due_at ? "OG task due date" : ""),
+  };
+}
+
+function getReturnTaskTrackingNumber(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const detail = metadata.returnDetails || {};
+  const returnCase = getReturnTaskCase(task);
+  return [
+    metadata.returnTrackingNumber,
+    metadata.return_tracking_number,
+    detail.trackingNumber,
+    detail.tracking_number,
+    metadata.trackingNumber,
+    returnCase.return_tracking_number,
+  ].map((value) => String(value || "").trim()).find(Boolean) || "";
+}
+
+function normalizeReturnApiToken(value = "") {
+  return String(value || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+const RETURN_TASK_DELIVERED_MARKERS = [
+  "ITEM_DELIVERED",
+  "RETURN_DELIVERED",
+  "DELIVERED",
+  "RECEIVED_BY_SELLER",
+  "SELLER_MARK_AS_RECEIVED",
+];
+
+const RETURN_TASK_SHIPPED_MARKERS = [
+  "BUYER_SHIPPED",
+  "RETURN_SHIPPED",
+  "ITEM_SHIPPED",
+  "SHIPPED",
+  "IN_TRANSIT",
+  "ON_ITS_WAY",
+  "ON ITS WAY",
+  "ITEM_ON_THE_WAY",
+  "ITEM DELIVERED",
+];
+
+const RETURN_TASK_READY_MARKERS = [
+  "READY_FOR_SHIPPING",
+  "ITEM_READY_TO_SHIP",
+  "RETURN_READY_TO_SHIP",
+  "READY_TO_SHIP",
+];
+
+const RETURN_TASK_DECISION_MARKERS = [
+  "SELLER_APPROVE_REQUEST",
+  "SELLER_DECLINE_REQUEST",
+  "SELLER_OFFER_PARTIAL_REFUND",
+  "SELLER_OFFER_REPLACEMENT",
+  "SELLER_ACCEPT",
+  "SELLER_DECIDE",
+  "SELLER_RESPOND",
+  "SELLER_UPLOAD",
+];
+
+const RETURN_TASK_INTAKE_DUE_MARKERS = [
+  "SELLER_MARK_AS_RECEIVED",
+  "SELLER_RECEIVE_ITEM",
+  "SELLER_CONFIRM_RECEIPT",
+];
+
+function getReturnTaskLifecycleText(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  return [
+    metadata.returnStatus,
+    metadata.return_status,
+    metadata.returnState,
+    metadata.return_state,
+    metadata.buyerActionDue,
+    metadata.buyer_action_due,
+    metadata.returnAction,
+    metadata.return_action,
+    getReturnTaskTrackingNumber(task),
+  ].map((value) => normalizeReturnApiToken(value)).filter(Boolean).join(" ");
+}
+
+function getReturnTaskLifecycleStage(task = {}) {
+  const metadata = getReturnTaskPayload(task);
+  const explicit = normalizeReturnApiToken(metadata.returnLifecycleStage || metadata.return_lifecycle_stage);
+  if (explicit) return explicit.toLowerCase();
+
+  const text = getReturnTaskLifecycleText(task);
+  if (text.includes("CANCEL")) return "cancelled";
+  if (text.includes("CLOSED")) return "closed";
+  if (RETURN_TASK_DELIVERED_MARKERS.some((marker) => text.includes(marker))) return "delivered";
+  if (getReturnTaskTrackingNumber(task) || RETURN_TASK_SHIPPED_MARKERS.some((marker) => text.includes(marker))) return "shipped";
+  if (RETURN_TASK_READY_MARKERS.some((marker) => text.includes(marker))) return "ready_to_ship";
+
+  const sellerDue = normalizeReturnApiToken(metadata.sellerActionDue || metadata.seller_action_due || metadata.returnAction || metadata.return_action);
+  if (!sellerDue.includes("SELLER_")) return "requested";
+  if (RETURN_TASK_INTAKE_DUE_MARKERS.some((marker) => sellerDue.includes(marker))) return "delivered";
+  if (RETURN_TASK_DECISION_MARKERS.some((marker) => sellerDue.includes(marker))) return "decision";
+  return "requested";
+}
+
+function returnTaskNeedsSellerDecision(task = {}) {
+  return getReturnTaskLifecycleStage(task) === "decision";
+}
+
+function returnTaskShipmentStarted(task = {}) {
+  return ["delivered", "shipped"].includes(getReturnTaskLifecycleStage(task));
+}
+
+function returnTaskReadyForShipment(task = {}) {
+  return getReturnTaskLifecycleStage(task) === "ready_to_ship";
+}
+
+function getReturnTaskDisplayInfo(task = {}) {
+  const stage = getReturnTaskLifecycleStage(task);
+  if (stage === "decision") {
+    return {
+      taskType: "return_review",
+      title: "Decide eBay return request",
+      question: "Open the eBay return and decide how to proceed before intake. Approve, decline, refund, message, or dispute on eBay as needed; keep OG open until the next action is clear.",
+    };
+  }
+  if (stage === "delivered") {
+    return {
+      taskType: "return_intake",
+      title: "Inspect returned eBay item",
+      question: "eBay shows the return was delivered or is ready for seller receipt. Inspect the item, attach evidence photos, add condition notes, choose a disposition/location, then refund or dispute on eBay as appropriate.",
+    };
+  }
+  if (stage === "shipped") {
+    return {
+      taskType: "return_intake",
+      title: "Receive returned eBay item",
+      question: "eBay shows the buyer has shipped the item back. Keep this open until arrival, then mark it received in eBay, inspect it, attach evidence photos, add condition notes, choose a disposition/location, or route it to dispute/admin review.",
+    };
+  }
+  if (stage === "ready_to_ship") {
+    return {
+      taskType: "return_intake",
+      title: "Monitor eBay return shipment",
+      question: "eBay shows the return is approved or ready for buyer shipment. Keep OG open, monitor eBay for tracking/arrival, then inspect and assign location when the item comes back.",
+    };
+  }
+  return {
+    taskType: task.task_type,
+    title: task.title || "Return task",
+    question: task.question || "No question recorded.",
   };
 }
 
@@ -4935,6 +5339,68 @@ function applyHistoryLabelLaunchSelection() {
   openHistoryLabelReceiverForOrders(orderNumbers);
 }
 
+function clearOneTimeReturnTransferParams(paramNames = []) {
+  if (!paramNames.length || !window.history?.replaceState) return;
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    paramNames.forEach((paramName) => {
+      if (!url.searchParams.has(paramName)) return;
+      url.searchParams.delete(paramName);
+      changed = true;
+    });
+    if (changed) {
+      window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  } catch (_) {}
+}
+
+function rememberReturnExternalNavigation(link) {
+  if (!link) return;
+  const marker = {
+    taskId: link.dataset.returnExternalLink || "",
+    returnId: link.dataset.returnExternalReturnId || "",
+    orderNumber: link.dataset.returnExternalOrderNumber || "",
+    buyer: link.dataset.returnExternalBuyer || "",
+    itemNumber: link.dataset.returnExternalItemNumber || "",
+    searchValue: $("return-task-search")?.value || "",
+    createdAt: Date.now(),
+  };
+  try {
+    sessionStorage.setItem(RETURN_EXTERNAL_NAV_RESTORE_KEY, JSON.stringify(marker));
+  } catch (_) {}
+  clearOneTimeReturnTransferParams(["returnTaskId"]);
+}
+
+function maybeRestoreReturnQueueAfterExternalNavigation() {
+  let marker = null;
+  try {
+    marker = JSON.parse(sessionStorage.getItem(RETURN_EXTERNAL_NAV_RESTORE_KEY) || "null");
+  } catch (_) {
+    marker = null;
+  }
+  if (!marker) return;
+
+  const tooOld = Date.now() - Number(marker.createdAt || 0) > 10 * 60 * 1000;
+  try {
+    sessionStorage.removeItem(RETURN_EXTERNAL_NAV_RESTORE_KEY);
+  } catch (_) {}
+  if (tooOld || !$("return-task-search")) return;
+
+  const currentSearch = String($("return-task-search").value || "").trim().toLowerCase();
+  const transientTerms = [
+    marker.searchValue,
+    marker.returnId,
+    marker.orderNumber,
+    marker.itemNumber,
+    marker.buyer,
+  ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+  if (currentSearch && transientTerms.includes(currentSearch)) {
+    $("return-task-search").value = "";
+    renderReturnQueue();
+  }
+}
+
 function applyHistoryBuyerLaunchSearch() {
   const params = new URLSearchParams(window.location.search);
   const buyer = String(params.get("buyer") || "").trim();
@@ -5581,6 +6047,7 @@ async function recordEbayReturnMessageLog(payload = {}) {
 
 async function handleHistoryReturnMessageTransfer(payload = {}) {
   const transferId = payload?.transferId || "";
+  if (transferId) clearOneTimeReturnTransferParams(["returnMessageTransferId"]);
   if (transferId && state.handledReturnMessageTransferIds.has(transferId)) {
     postHistoryReturnMessageTransferStatus({
       transferId,
@@ -5747,7 +6214,8 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
   const unmatched = Number(summary.unmatchedCreated ?? summary.unmatchedCount ?? 0);
   const failed = Number(summary.failedCount || 0);
   const duplicate = Number(summary.duplicateResolvedCount || 0);
-  const processed = Number(summary.processedCount || matched + unmatched + duplicate);
+  const heldOpen = Number(summary.staleCasesHeldOpen || 0);
+  const processed = Number(summary.processedCount || matched + unmatched + duplicate + heldOpen);
   const missing = Math.max(0, requested - processed - failed);
   const failedReturns = Array.isArray(summary.failedReturns) ? summary.failedReturns : [];
   const unmatchedReturns = Array.isArray(summary.unmatchedReturns) ? summary.unmatchedReturns : [];
@@ -5770,6 +6238,7 @@ function renderReturnImportSummary(summary = state.lastReturnImportSummary) {
       <span><small>Missing OG match</small><b>${unmatched.toLocaleString()}</b></span>
       <span><small>Rejected / failed</small><b>${failed.toLocaleString()}</b></span>
       <span><small>Already resolved</small><b>${duplicate.toLocaleString()}</b></span>
+      ${heldOpen ? `<span><small>Needs local action</small><b>${heldOpen.toLocaleString()}</b></span>` : ""}
       <span><small>Not accounted for</small><b>${missing.toLocaleString()}</b></span>
       ${messagesImported ? `<span><small>Messages imported</small><b>${messagesImported.toLocaleString()}</b></span>` : ""}
       ${filesSeen ? `<span><small>eBay files/photos</small><b>${filesSeen.toLocaleString()}</b></span>` : ""}
@@ -6109,6 +6578,7 @@ async function postEbayReturnSyncPayload(payload) {
 
 function buildReturnApiSyncSummary(response = {}) {
   const results = Array.isArray(response.results) ? response.results : [];
+  const skippedAlreadyProcessed = results.filter((entry) => entry?.taskSkipped).length;
   const failedReturns = results
     .filter((entry) => entry?.error)
     .map((entry) => ({
@@ -6133,20 +6603,24 @@ function buildReturnApiSyncSummary(response = {}) {
     importedCreatedCount: Number(response.matched || 0),
     unmatchedCreated: Number(response.unmatched || 0),
     failedCount: Number(response.errors || 0),
-    duplicateResolvedCount: 0,
+    duplicateResolvedCount: skippedAlreadyProcessed,
     messagesImported: Number(response.messagesImported || 0),
     filesSeen: Number(response.filesSeen || 0),
     staleCasesClosed: Number(response.staleCasesClosed || 0),
     staleTasksResolved: Number(response.staleTasksResolved || 0),
+    staleCasesHeldOpen: Number(response.staleCasesHeldOpen || 0),
+    staleCasesRemaining: Number(response.staleCasesRemaining || 0),
     importedReturns: results.filter((entry) => entry?.matched === true),
     unmatchedReturns,
     failedReturns,
     message: response.error
       ? response.error
       : response.cleanupClosed
-        ? (response.dryRun
-          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would be hidden from the open queue.`
-          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} and resolved ${Number(response.staleTasksResolved || 0).toLocaleString()} task${Number(response.staleTasksResolved || 0) === 1 ? "" : "s"}.`)
+        ? (response.cleanupOnly
+          ? (response.dryRun
+          ? `Cleaner dry check complete. ${Number(response.staleCasesClosed || 0).toLocaleString()} return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"} would close, ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} would stay open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.`
+          : `Cleaner complete. Closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open for local action, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for another pass.`)
+          : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, closed ${Number(response.staleCasesClosed || 0).toLocaleString()} stale return${Number(response.staleCasesClosed || 0) === 1 ? "" : "s"}, kept ${Number(response.staleCasesHeldOpen || 0).toLocaleString()} open, and ${Number(response.staleCasesRemaining || 0).toLocaleString()} remain for cleaner passes.`)
       : response.dryRun
         ? `Dry check complete. ${Number(response.matched || 0).toLocaleString()} return${Number(response.matched || 0) === 1 ? "" : "s"} match OG orders, ${Number(response.unmatched || 0).toLocaleString()} need review.`
         : `eBay return sync complete. Created ${Number(response.tasksCreated || 0).toLocaleString()} task${Number(response.tasksCreated || 0) === 1 ? "" : "s"}, refreshed ${Number(response.tasksUpdated || 0).toLocaleString()}, imported ${Number(response.messagesImported || 0).toLocaleString()} message${Number(response.messagesImported || 0) === 1 ? "" : "s"}.`,
@@ -6170,6 +6644,8 @@ async function runEbayReturnApiSync(dryRun = true) {
       dryRun,
       limit: 200,
       daysBack: 90,
+      cleanupClosed: !dryRun,
+      cleanupLimit: 10,
     });
     const summary = buildReturnApiSyncSummary(response);
     setLastReturnImportSummary(summary);
@@ -6195,7 +6671,7 @@ async function runEbayReturnApiCleanup() {
     alert("Only admins can clean eBay returns from the API.");
     return;
   }
-  const confirmed = window.confirm("Clean the return queue so only returns still open on eBay remain pending? This closes local return cases and resolves tasks that no longer appear in eBay's open-return list.");
+  const confirmed = window.confirm("Check eBay for returns that are no longer open, store the eBay closure details, and close local cases only when no local action is still open?");
   if (!confirmed) return;
 
   setReturnApiSyncButtonsDisabled(true);
@@ -6206,6 +6682,8 @@ async function runEbayReturnApiCleanup() {
       limit: 500,
       daysBack: 540,
       cleanupClosed: true,
+      cleanupOnly: true,
+      cleanupLimit: 75,
     });
     const summary = buildReturnApiSyncSummary(response);
     setLastReturnImportSummary(summary);
@@ -6213,7 +6691,7 @@ async function runEbayReturnApiCleanup() {
     await loadReturnQueue();
     setReturnTaskSaveStatus(
       response.ok
-        ? "Closed eBay returns cleaned from the pending queue."
+        ? "eBay closure details synced; local-action cases stayed open."
         : "Cleaner finished with issues. Review the audit panel.",
       response.ok ? "success" : "error"
     );
@@ -6241,6 +6719,42 @@ function drainQueuedHistoryReturnTransfers() {
 async function openReturnIntakeForTransfer(payload = {}) {
   const transferId = payload?.transferId || "";
   const info = getReturnTransferInfo(payload);
+  if (returnTransferShowsClosed(info)) {
+    const closed = await closeReturnCaseFromTransfer(payload);
+    if ($("return-task-status-filter")) $("return-task-status-filter").value = "all";
+    if ($("return-task-assignee-filter")) $("return-task-assignee-filter").value = "";
+    if ($("return-task-search")) $("return-task-search").value = info.returnId || info.orderNumber || info.buyerUsername || "";
+    await loadReturnQueue().catch((queueError) => {
+      console.warn("Could not refresh return queue after closing eBay return:", queueError);
+    });
+    renderReturnQueue();
+    setLastReturnImportSummary({
+      transferId,
+      ok: true,
+      requestedCount: 1,
+      processedCount: 1,
+      importedCount: 0,
+      importedCreatedCount: 0,
+      unmatchedCount: 0,
+      unmatchedCreated: 0,
+      failedCount: 0,
+      duplicateResolvedCount: Number(closed.closed_task_count || 0),
+      importedReturns: [],
+      unmatchedReturns: [],
+      failedReturns: [],
+      message: `Closed eBay return ${info.returnId || info.orderNumber || ""} in OG from the live eBay detail page.`,
+    });
+    postHistoryReturnTransferStatus({
+      transferId,
+      ok: true,
+      opened: false,
+      closed: true,
+      returnCaseId: closed.return_case_id || null,
+      resolvedTaskCount: Number(closed.closed_task_count || 0),
+      message: `Closed eBay return ${info.returnId || info.orderNumber || ""} in OG.`,
+    });
+    return;
+  }
   const lines = await findReturnTransferLines(payload);
   if (!lines.length) {
     const opened = await ensureUnmatchedReturnTaskForTransfer(payload);
@@ -6393,6 +6907,21 @@ async function importReturnBatchTransfer(payload = {}) {
     const itemPayload = buildReturnBatchItemPayload(payload, returnInfo, index);
     const info = getReturnTransferInfo(itemPayload);
     try {
+      if (returnTransferShowsClosed(info)) {
+        const closed = await closeReturnCaseFromTransfer(itemPayload);
+        importedReturns.push({
+          returnId: info.returnId || "",
+          itemNumber: info.itemNumber || "",
+          buyerUsername: info.buyerUsername || "",
+          returnCaseId: closed.return_case_id || null,
+          taskId: null,
+          duplicateResolved: true,
+          closedFromEbayPage: true,
+          resolvedTaskCount: Number(closed.closed_task_count || 0),
+          orderNumbers: [info.orderNumber].filter(Boolean),
+        });
+        continue;
+      }
       const lines = await findReturnTransferLines(itemPayload);
       if (!lines.length) {
         const opened = await ensureUnmatchedReturnTaskForTransfer(itemPayload, { refreshQueue: false });
@@ -6501,6 +7030,7 @@ async function importReturnBatchTransfer(payload = {}) {
 
 async function handleHistoryReturnTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (transferId) clearOneTimeReturnTransferParams(["returnTransferId"]);
   if (transferId && state.handledReturnTransferIds.has(transferId)) {
     postHistoryReturnTransferStatus({
       transferId,
@@ -6906,13 +7436,38 @@ function setupListeners() {
   ["history-from", "history-to"].forEach((id) => {
     $(id)?.addEventListener("change", loadOrderHistory);
   });
-  ["history-worker", "history-status", "history-label-filter", "history-sort", "history-search"].forEach((id) => {
+  ["history-worker", "history-status", "history-label-filter", "history-sort"].forEach((id) => {
     $(id)?.addEventListener("input", applyFilters);
     $(id)?.addEventListener("change", applyFilters);
+  });
+  $("history-search")?.addEventListener("input", () => {
+    if ($("history-buyer-all-dates")?.checked) {
+      window.clearTimeout(historyBuyerAllDatesSearchTimer);
+      historyBuyerAllDatesSearchTimer = window.setTimeout(loadOrderHistory, 450);
+      return;
+    }
+    applyFilters();
+  });
+  $("history-search")?.addEventListener("change", () => {
+    if ($("history-buyer-all-dates")?.checked) {
+      loadOrderHistory();
+      return;
+    }
+    applyFilters();
+  });
+  $("history-buyer-all-dates")?.addEventListener("change", () => {
+    if (String($("history-search")?.value || "").trim()) {
+      loadOrderHistory();
+      return;
+    }
+    applyFilters();
   });
   ["return-task-status-filter", "return-task-assignee-filter", "return-task-search"].forEach((id) => {
     $(id)?.addEventListener("input", renderReturnQueue);
     $(id)?.addEventListener("change", renderReturnQueue);
+  });
+  window.addEventListener("pageshow", () => {
+    if (isReturnsWorkbenchPage()) maybeRestoreReturnQueueAfterExternalNavigation();
   });
 
   $("close-revert-modal")?.addEventListener("click", closeRevertModal);

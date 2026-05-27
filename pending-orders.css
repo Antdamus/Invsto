@@ -2894,6 +2894,7 @@ body.pending-order-detail-open .mobile-detail-close {
   min-width: 0;
 }
 
+.buyer-line-created,
 .buyer-line-due {
   display: inline-flex;
   align-items: center;
@@ -2910,6 +2911,12 @@ body.pending-order-detail-open .mobile-detail-close {
   font-weight: 950;
   line-height: 1.1;
   overflow-wrap: anywhere;
+}
+
+.buyer-line-created {
+  border-color: rgba(227, 189, 119, 0.22);
+  background: rgba(227, 189, 119, 0.08);
+  color: var(--gold);
 }
 
 .buyer-line-due svg {

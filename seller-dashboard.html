@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OG Jewelry - Seller Dashboard</title>
+  <link href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="seller-dashboard.css" />
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="seller-mobile-header">
+    <button class="seller-menu-button" id="seller-menu-toggle" type="button" aria-label="Open menu">
+      <i data-lucide="menu"></i>
+    </button>
+    <span>Seller</span>
+  </div>
+
+  <div class="seller-mobile-menu" id="seller-mobile-menu">
+    <nav>
+      <a href="seller-dashboard.html" class="active">Schedule</a>
+      <a href="timeclock.html">Time Clock</a>
+      <a href="live-sales.html">Live Sales</a>
+      <a href="#" id="seller-logout-mobile">Logout</a>
+    </nav>
+  </div>
+
+  <div class="seller-page">
+    <aside class="seller-sidebar">
+      <div class="seller-logo">OG</div>
+      <nav class="seller-nav">
+        <a class="active" href="seller-dashboard.html">
+          <i data-lucide="calendar-days"></i>
+          <span>Schedule</span>
+        </a>
+        <a href="timeclock.html">
+          <i data-lucide="clock-3"></i>
+          <span>Time Clock</span>
+        </a>
+        <a href="live-sales.html">
+          <i data-lucide="radio"></i>
+          <span>Live Sales</span>
+        </a>
+        <a href="#" id="seller-logout">
+          <i data-lucide="log-out"></i>
+          <span>Logout</span>
+        </a>
+      </nav>
+    </aside>
+
+    <main class="seller-main">
+      <header class="seller-header">
+        <div>
+          <span class="seller-kicker">Seller Dashboard</span>
+          <h1 id="seller-greeting">Schedule</h1>
+        </div>
+        <div class="seller-header-actions">
+          <a class="seller-action" href="timeclock.html">
+            <i data-lucide="clock"></i>
+            <span>Clock In</span>
+          </a>
+          <a class="seller-action seller-action-primary" href="live-sales.html">
+            <i data-lucide="radio-tower"></i>
+            <span>Open Live</span>
+          </a>
+        </div>
+      </header>
+
+      <section class="seller-metrics" aria-label="Seller summary">
+        <div class="seller-metric">
+          <span>Next Shift</span>
+          <strong id="metric-next-shift">-</strong>
+        </div>
+        <div class="seller-metric">
+          <span>Booked This Month</span>
+          <strong id="metric-booked-hours">0h</strong>
+        </div>
+        <div class="seller-metric">
+          <span>Estimated Commission</span>
+          <strong id="metric-commission">$0.00</strong>
+        </div>
+        <div class="seller-metric">
+          <span>Pending Approvals</span>
+          <strong id="metric-pending">0</strong>
+        </div>
+      </section>
+
+      <section class="seller-layout">
+        <div class="seller-calendar-panel">
+          <div class="seller-toolbar">
+            <div>
+              <span class="seller-kicker">Current Month</span>
+              <h2 id="seller-month-label">-</h2>
+            </div>
+            <div class="seller-toolbar-actions">
+              <button id="seller-refresh" class="seller-icon-button" type="button" aria-label="Refresh schedule">
+                <i data-lucide="refresh-cw"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="seller-weekdays" aria-hidden="true">
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+          <div id="seller-calendar" class="seller-calendar" aria-label="Seller sale calendar"></div>
+        </div>
+
+        <aside class="seller-booking-panel">
+          <div class="seller-panel-head">
+            <div>
+              <span class="seller-kicker">Selected Day</span>
+              <h2 id="selected-day-title">Today</h2>
+            </div>
+            <button id="seller-clear-edit" class="seller-text-button hidden" type="button">New</button>
+          </div>
+
+          <div id="selected-day-roster" class="seller-roster"></div>
+
+          <form id="seller-booking-form" class="seller-form">
+            <input id="booking-shift-id" type="hidden" />
+
+            <label>
+              Date
+              <input id="booking-date" type="date" required />
+            </label>
+
+            <div class="seller-segment" role="group" aria-label="Sale channel">
+              <button type="button" class="active" data-channel="ebay">eBay</button>
+              <button type="button" data-channel="whatnot">Whatnot</button>
+            </div>
+
+            <label>
+              Store
+              <select id="booking-store" required></select>
+            </label>
+
+            <div class="seller-time-grid">
+              <label>
+                Start
+                <input id="booking-start" type="time" step="1800" required />
+              </label>
+              <label>
+                End
+                <input id="booking-end" type="time" step="1800" required />
+              </label>
+            </div>
+
+            <label>
+              Note
+              <textarea id="booking-note" rows="2" placeholder="Optional"></textarea>
+            </label>
+
+            <div id="booking-availability" class="seller-availability">Choose a time.</div>
+
+            <div class="seller-form-actions">
+              <button id="booking-submit" class="seller-submit" type="submit">Book Shift</button>
+              <button id="booking-cancel-shift" class="seller-danger hidden" type="button">Cancel Shift</button>
+            </div>
+            <div id="seller-form-status" class="seller-status" role="status" aria-live="polite"></div>
+          </form>
+        </aside>
+      </section>
+
+      <section id="seller-management-panel" class="seller-management-panel hidden">
+        <div class="seller-panel-head">
+          <div>
+            <span class="seller-kicker">Management</span>
+            <h2>Seller Controls</h2>
+          </div>
+        </div>
+
+        <div class="seller-management-grid">
+          <div>
+            <h3>Pending Requests</h3>
+            <div id="seller-requests-list" class="seller-list"></div>
+          </div>
+
+          <form id="seller-block-form" class="seller-form">
+            <h3>Block Sale Time</h3>
+            <label>
+              Channel
+              <select id="block-channel">
+                <option value="all">All</option>
+                <option value="ebay">eBay</option>
+                <option value="whatnot">Whatnot</option>
+              </select>
+            </label>
+            <label>
+              Date
+              <input id="block-date" type="date" required />
+            </label>
+            <div class="seller-time-grid">
+              <label>
+                Start
+                <input id="block-start" type="time" step="1800" required />
+              </label>
+              <label>
+                End
+                <input id="block-end" type="time" step="1800" required />
+              </label>
+            </div>
+            <label>
+              Reason
+              <textarea id="block-reason" rows="2" placeholder="Optional"></textarea>
+            </label>
+            <button class="seller-submit" type="submit">Block Time</button>
+            <div id="seller-management-status" class="seller-status" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+      </section>
+
+      <section class="seller-bottom-grid">
+        <div class="seller-list-panel">
+          <div class="seller-panel-head">
+            <div>
+              <span class="seller-kicker">My Blocks</span>
+              <h2>Upcoming Shifts</h2>
+            </div>
+          </div>
+          <div id="my-shifts-list" class="seller-list"></div>
+        </div>
+
+        <div class="seller-list-panel">
+          <div class="seller-panel-head">
+            <div>
+              <span class="seller-kicker">Commission</span>
+              <h2>Friday Payout</h2>
+            </div>
+          </div>
+          <div id="commission-list" class="seller-list"></div>
+        </div>
+
+        <div class="seller-list-panel">
+          <div class="seller-panel-head">
+            <div>
+              <span class="seller-kicker">Inbox</span>
+              <h2>Notifications</h2>
+            </div>
+          </div>
+          <div id="seller-notifications" class="seller-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="initSupabase.js"></script>
+  <script src="seller-dashboard.js"></script>
+</body>
+</html>

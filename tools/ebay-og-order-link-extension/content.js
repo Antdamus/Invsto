@@ -1012,11 +1012,24 @@
     return unique([...String(html || "").matchAll(/"returnFileId"\s*:\s*"([^"]+)"/gi)].map((match) => decodeJsonishText(match[1])));
   }
 
+  function parseEbayClosedReturnDate(text = "") {
+    const match = String(text || "").match(/\bclosed\s+on\s+([A-Za-z]{3,9})\s+(\d{1,2})(?:,\s*(\d{4}))?/i);
+    if (!match) return "";
+    const year = Number(match[3] || new Date().getFullYear());
+    const parsed = new Date(`${match[1]} ${match[2]}, ${year} 12:00:00`);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  }
+
   function extractReturnDetailsFromHtml(html = "", detailsUrl = "") {
     const parser = new DOMParser();
     const doc = parser.parseFromString(String(html || ""), "text/html");
     const primaryText = cleanElementText(doc.querySelector("#primaryText, .primaryText"))
       || readFirstRegexMatch(html, /"mainContent"\s*:\s*\{[\s\S]{0,900}?"text"\s*:\s*"((?:\\.|[^"\\])*)"/);
+    const pageText = cleanElementText(doc.body);
+    const closedText = readFirstRegexMatch(pageText, /(This return (?:is|was) closed(?: on [^.]+)?\.)/i)
+      || readFirstRegexMatch(html, /"text"\s*:\s*"((?:This return (?:is|was) closed|This return was closed on)(?:\\.|[^"\\])*)"/i);
+    const returnClosed = /this return (?:is|was) closed|return was closed/i.test(`${primaryText} ${closedText} ${pageText}`);
+    const closedAt = returnClosed ? parseEbayClosedReturnDate(`${closedText} ${pageText}`) : "";
     const orderDetailsUrl = findOrderDetailsUrlInText(html, detailsUrl)
       || normalizeEbayNavigationUrl(doc.querySelector('a[href*="/mesh/ord/details"]')?.getAttribute("href") || "", detailsUrl);
     const returnId = readDetailPageValue(doc, "Return ID")
@@ -1059,6 +1072,12 @@
       detailsUrl,
       capturedAt: new Date().toISOString(),
       primaryText,
+      returnClosed,
+      returnStatus: returnClosed ? "CLOSED" : "",
+      returnState: returnClosed ? "CLOSED" : "",
+      returnAction: returnClosed ? "CLOSED_ON_EBAY_PAGE" : "",
+      closedText,
+      closedAt,
       returnId,
       orderNumber,
       orderDetailsUrl,
@@ -3144,6 +3163,12 @@
         requestAmount: returnInfo.requestAmount || returnInfo.returnDetails?.requestAmount || "",
         onHoldAmount: returnInfo.onHoldAmount || returnInfo.returnDetails?.onHoldAmount || "",
         buyerComment: returnInfo.buyerComment || returnInfo.returnDetails?.buyerComment || "",
+        returnClosed: Boolean(returnInfo.returnClosed || returnInfo.returnDetails?.returnClosed),
+        returnStatus: returnInfo.returnStatus || returnInfo.returnDetails?.returnStatus || "",
+        returnState: returnInfo.returnState || returnInfo.returnDetails?.returnState || "",
+        returnAction: returnInfo.returnAction || returnInfo.returnDetails?.returnAction || "",
+        closedText: returnInfo.closedText || returnInfo.returnDetails?.closedText || "",
+        closedAt: returnInfo.closedAt || returnInfo.returnDetails?.closedAt || "",
         returnFileIds: returnInfo.returnFileIds || returnInfo.returnDetails?.returnFileIds || [],
         pageUrl: window.location.href,
         pageTitle: document.title || "",
@@ -3786,6 +3811,12 @@
         requestAmount: returnInfo.requestAmount || detail.requestAmount || "",
         onHoldAmount: returnInfo.onHoldAmount || detail.onHoldAmount || "",
         datePurchased: returnInfo.datePurchased || detail.datePurchased || "",
+        returnClosed: Boolean(returnInfo.returnClosed || detail.returnClosed),
+        returnStatus: returnInfo.returnStatus || detail.returnStatus || "",
+        returnState: returnInfo.returnState || detail.returnState || "",
+        returnAction: returnInfo.returnAction || detail.returnAction || "",
+        closedText: returnInfo.closedText || detail.closedText || "",
+        closedAt: returnInfo.closedAt || detail.closedAt || "",
         itemTitle: returnInfo.itemTitle || detail.itemTitle || "",
         itemUrl: returnInfo.itemUrl || detail.itemUrl || "",
         itemImageUrl: returnInfo.itemImageUrl || detail.itemImageUrl || "",
@@ -5389,6 +5420,56 @@
     return button;
   }
 
+  function isEbayReturnDetailPage() {
+    return /\/(?:rt\/ReturnDetails|rtn\/Return\/ReturnsDetail)/i.test(window.location.pathname)
+      || /returnId=\d+/i.test(window.location.search)
+      || /Return item/i.test(document.title || "");
+  }
+
+  function getCurrentReturnDetailInfo() {
+    if (!isEbayReturnDetailPage()) return null;
+    const detail = extractReturnDetailsFromHtml(document.documentElement.outerHTML, window.location.href);
+    if (!detail.returnId && !detail.orderNumber) return null;
+    return {
+      ...detail,
+      returnDetails: detail,
+      detailsUrl: window.location.href,
+      pageUrl: window.location.href,
+      pageTitle: document.title || "",
+    };
+  }
+
+  function injectReturnDetailPageButton() {
+    const returnInfo = getCurrentReturnDetailInfo();
+    let button = document.getElementById("og-ebay-return-detail-send");
+    if (!returnInfo) {
+      button?.remove();
+      return;
+    }
+    const orderLink = [...document.querySelectorAll("a")]
+      .find((anchor) => cleanText(anchor.textContent || "").includes(returnInfo.orderNumber || "__none__"));
+    const parent = orderLink?.parentElement || document.querySelector("main") || document.body;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = SEND_RETURN_BUTTON_CLASS;
+      button.id = "og-ebay-return-detail-send";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        sendReturnToOg(getCurrentReturnDetailInfo() || returnInfo, button);
+      });
+    }
+    button.dataset.ogReturnId = returnInfo.returnId || "";
+    button.textContent = returnInfo.returnClosed ? "Close in OG" : "Open Return in OG";
+    button.title = returnInfo.returnClosed
+      ? `Close eBay return ${returnInfo.returnId || returnInfo.orderNumber || ""} in OG`
+      : `Open eBay return ${returnInfo.returnId || returnInfo.orderNumber || ""} in OG Returns`;
+    if (!parent.contains(button)) {
+      parent.appendChild(button);
+    }
+  }
+
   function ensureReturnBatchExportButton(panel, returns = [], options = {}) {
     if (!panel) return null;
     let button = panel.querySelector(`#${SEND_RETURN_BATCH_ID}`);
@@ -5584,6 +5665,7 @@
     injectBulkLabelSendButton();
     injectAwaitingReportButton();
     injectReturnPageButtons();
+    injectReturnDetailPageButton();
     injectReturnMessageLoggerButton();
     injectCancelConfirmationProofButton();
     maybeLogSentReturnMessageConfirmation();

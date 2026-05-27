@@ -1182,6 +1182,7 @@
 
         <select id="userRole" class="role-native">
           <option value="employee" selected>employee</option>
+          <option value="seller">seller</option>
           <option value="manager">manager</option>
           <option value="admin">admin</option>
         </select>
@@ -1191,6 +1192,12 @@
             <div class="role-name">Employee</div>
             <div class="role-desc">Clock in/out, view own history.</div>
             <div class="role-tag">Default</div>
+          </button>
+
+          <button type="button" class="role-card" data-role="seller" aria-pressed="false">
+            <div class="role-name">Seller</div>
+            <div class="role-desc">Book sale shifts and run live sales.</div>
+            <div class="role-tag">Commission</div>
           </button>
 
           <button type="button" class="role-card" data-role="manager" aria-pressed="false">

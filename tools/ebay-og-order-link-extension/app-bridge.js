@@ -21,7 +21,7 @@
       type,
       payload,
     };
-    const maxAttempts = ["OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG", "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", "OG_EBAY_CANCEL_PROOF_TRANSFER"].includes(type) ? 60 : 10;
+    const maxAttempts = ["OG_EBAY_LABEL_TRANSFER", "OG_EBAY_AWAITING_REPORT_TRANSFER", "OG_EBAY_RETURN_TRANSFER", "OG_EBAY_RETURN_MESSAGE_LOG", "OG_EBAY_VIDEO_RECEIPT_PHOTO_TRANSFER", "OG_EBAY_CANCEL_PROOF_TRANSFER"].includes(type) ? 60 : 10;
     window.postMessage(message, window.location.origin);
     let attempts = 0;
     const timer = window.setInterval(() => {
@@ -36,6 +36,22 @@
       type,
       payload,
     }).catch(() => null);
+  }
+
+  function clearOneTimeTransferParams(paramNames = []) {
+    if (!paramNames.length || !window.history?.replaceState) return;
+    try {
+      const url = new URL(window.location.href);
+      let changed = false;
+      paramNames.forEach((paramName) => {
+        if (!url.searchParams.has(paramName)) return;
+        url.searchParams.delete(paramName);
+        changed = true;
+      });
+      if (changed) {
+        window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
+      }
+    } catch (_) {}
   }
 
   function requestReceiverState(payload) {
@@ -125,14 +141,20 @@
         type: "OG_EBAY_GET_PENDING_RETURN",
         transferId: returnTransferId,
       }).catch(() => null);
-      if (response?.payload) postToOgApp(response.payload, "OG_EBAY_RETURN_TRANSFER");
+      if (response?.payload) {
+        clearOneTimeTransferParams(["returnTransferId"]);
+        postToOgApp(response.payload, "OG_EBAY_RETURN_TRANSFER");
+      }
     }
     if (returnMessageTransferId) {
       const response = await chrome.runtime.sendMessage({
         type: "OG_EBAY_GET_PENDING_RETURN_MESSAGE",
         transferId: returnMessageTransferId,
       }).catch(() => null);
-      if (response?.payload) postToOgApp(response.payload, "OG_EBAY_RETURN_MESSAGE_LOG");
+      if (response?.payload) {
+        clearOneTimeTransferParams(["returnMessageTransferId"]);
+        postToOgApp(response.payload, "OG_EBAY_RETURN_MESSAGE_LOG");
+      }
     }
     if (videoReceiptPhotoTransferId) {
       const response = await chrome.runtime.sendMessage({
