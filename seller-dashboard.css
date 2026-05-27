@@ -348,6 +348,11 @@ textarea {
   padding: 12px;
 }
 
+.seller-list-row.is-deduction {
+  border-color: rgba(168, 65, 47, 0.28);
+  background: #fff7f4;
+}
+
 .seller-roster-row strong,
 .seller-list-row strong {
   display: block;
@@ -358,6 +363,13 @@ textarea {
 .seller-list-row span,
 .seller-list-row small {
   color: var(--seller-muted);
+}
+
+.seller-proof-link {
+  display: inline-flex;
+  margin-top: 6px;
+  color: #0f5d3f;
+  font-weight: 900;
 }
 
 .seller-row-actions {
@@ -489,7 +501,7 @@ textarea {
 
 .seller-management-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 18px;
   align-items: start;
 }

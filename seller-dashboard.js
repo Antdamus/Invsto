@@ -66,6 +66,18 @@ function dateFromKey(value) {
   return new Date(year, month - 1, day);
 }
 
+function addDays(date, days) {
+  const next = startOfToday(date);
+  next.setDate(next.getDate() + Number(days || 0));
+  return next;
+}
+
+function nextFriday(date) {
+  const start = startOfToday(date);
+  const daysUntilFriday = (5 - start.getDay() + 7) % 7;
+  return addDays(start, daysUntilFriday);
+}
+
 function formatMonth(date) {
   return date.toLocaleDateString([], { month: "long", year: "numeric" });
 }
@@ -95,6 +107,11 @@ function formatTimeRange(row) {
 function formatCurrency(value) {
   const amount = Number(value || 0);
   return amount.toLocaleString(undefined, { style: "currency", currency: "USD" });
+}
+
+function formatLedgerKind(value) {
+  const kind = String(value || "sale").replace(/_/g, " ");
+  return kind.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function minutesBetween(start, end) {
@@ -272,7 +289,7 @@ async function loadRequests() {
 async function loadCommission() {
   const ledgerResult = await window.supabase
     .from("seller_commission_ledger")
-    .select("id, channel, source_type, source_label, net_store_proceeds, commission_amount, status, created_at")
+    .select("id, channel, source_type, source_label, net_store_proceeds, commission_amount, status, return_case_id, return_proof_url, created_at")
     .order("created_at", { ascending: false })
     .limit(30);
 
@@ -460,19 +477,29 @@ function renderCommission() {
     return;
   }
 
-  const ledgerHtml = ledger.map((row) => `
-    <div class="seller-list-row">
-      <strong>${escapeHtml(row.source_label || row.source_type || "Sale")} - ${escapeHtml(row.channel || "")}</strong>
+  const ledgerHtml = ledger.map((row) => {
+    const isDeduction = Number(row.commission_amount || 0) < 0 || ["return", "cancellation"].includes(String(row.source_type || ""));
+    const proofLink = row.return_proof_url
+      ? `<a class="seller-proof-link" href="${escapeHtml(row.return_proof_url)}" target="_blank" rel="noopener">Return proof</a>`
+      : "";
+    return `
+    <div class="seller-list-row ${isDeduction ? "is-deduction" : ""}">
+      <strong>${escapeHtml(row.source_label || formatLedgerKind(row.source_type))} - ${escapeHtml(row.channel || "")}</strong>
       <span>Net ${escapeHtml(formatCurrency(row.net_store_proceeds))} / Commission ${escapeHtml(formatCurrency(row.commission_amount))}</span>
+      ${proofLink}
       <div><span class="seller-pill">${escapeHtml(row.status || "pending")}</span></div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 
   const payoutHtml = payouts.map((row) => `
     <div class="seller-list-row">
       <strong>${escapeHtml(row.payout_date || "Friday payout")}</strong>
       <span>${escapeHtml(formatCurrency(row.net_commission))} after ${escapeHtml(formatCurrency(row.deductions))} deductions</span>
       <div><span class="seller-pill">${escapeHtml(row.status || "draft")}</span></div>
+      ${canManageSellers() && ["draft", "approved"].includes(String(row.status || ""))
+        ? `<div class="seller-row-actions"><button type="button" data-action="mark-payout-paid" data-payout-id="${escapeHtml(row.id)}">Mark Paid</button></div>`
+        : ""}
     </div>
   `).join("");
 
@@ -513,6 +540,13 @@ function renderManagement() {
     blockDate.max = dateKey(endOfMonth(state.currentMonth));
     if (!blockDate.value) blockDate.value = dateKey(state.selectedDate);
   }
+
+  const payoutEnd = $("payout-end");
+  const payoutStart = $("payout-start");
+  const payoutDate = $("payout-date");
+  if (payoutEnd && !payoutEnd.value) payoutEnd.value = dateKey(new Date());
+  if (payoutStart && !payoutStart.value) payoutStart.value = dateKey(addDays(dateFromKey(payoutEnd?.value || dateKey(new Date())), -6));
+  if (payoutDate && !payoutDate.value) payoutDate.value = dateKey(nextFriday(dateFromKey(payoutEnd?.value || dateKey(new Date()))));
 
   const list = $("seller-requests-list");
   if (!list) return;
@@ -872,6 +906,73 @@ async function submitBlock(event) {
   }
 }
 
+async function submitPayout(event) {
+  event.preventDefault();
+  if (!canManageSellers() || state.busy) return;
+
+  const statusEl = $("seller-payout-status");
+  const periodStart = $("payout-start")?.value;
+  const periodEnd = $("payout-end")?.value;
+  const payoutDate = $("payout-date")?.value;
+
+  if (!periodStart || !periodEnd || !payoutDate) {
+    if (statusEl) {
+      statusEl.textContent = "Choose the payout dates.";
+      statusEl.classList.add("is-error");
+    }
+    return;
+  }
+
+  state.busy = true;
+  if (statusEl) {
+    statusEl.textContent = "Preparing payouts...";
+    statusEl.classList.remove("is-error");
+  }
+
+  try {
+    const { data, error } = await window.supabase.rpc("create_seller_commission_payouts", {
+      _period_start: periodStart,
+      _period_end: periodEnd,
+      _payout_date: payoutDate,
+    });
+    if (error) throw error;
+    const count = Array.isArray(data) ? data.length : 0;
+    if (statusEl) statusEl.textContent = count ? `Prepared ${count} payout${count === 1 ? "" : "s"}.` : "No unpaid commission entries for that period.";
+    await refreshAll();
+  } catch (error) {
+    console.error("Seller payout preparation failed:", error);
+    if (statusEl) {
+      statusEl.textContent = error.message || "Could not prepare payouts.";
+      statusEl.classList.add("is-error");
+    }
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function markPayoutPaid(payoutId) {
+  if (!canManageSellers() || !payoutId || state.busy) return;
+  if (!window.confirm("Mark this seller commission payout as paid?")) return;
+
+  state.busy = true;
+  setStatus("Marking payout paid...");
+
+  try {
+    const { error } = await window.supabase.rpc("mark_seller_commission_payout_paid", {
+      _payout_id: payoutId,
+      _notes: null,
+    });
+    if (error) throw error;
+    setStatus("Payout marked paid.");
+    await refreshAll();
+  } catch (error) {
+    console.error("Seller payout paid failed:", error);
+    setStatus(error.message || "Could not mark payout paid.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
 function handleActionClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -888,6 +989,8 @@ function handleActionClick(event) {
     reviewSellerRequest(button.dataset.requestId, "approve");
   } else if (action === "deny-request") {
     reviewSellerRequest(button.dataset.requestId, "deny");
+  } else if (action === "mark-payout-paid") {
+    markPayoutPaid(button.dataset.payoutId);
   }
 }
 
@@ -922,15 +1025,22 @@ function setupListeners() {
     $(id)?.addEventListener("input", updateAvailabilityPreview);
   });
 
+  $("payout-end")?.addEventListener("change", () => {
+    const end = dateFromKey($("payout-end")?.value || dateKey(new Date()));
+    if ($("payout-start")) $("payout-start").value = dateKey(addDays(end, -6));
+    if ($("payout-date")) $("payout-date").value = dateKey(nextFriday(end));
+  });
+
   $("seller-booking-form")?.addEventListener("submit", submitBooking);
   $("seller-block-form")?.addEventListener("submit", submitBlock);
+  $("seller-payout-form")?.addEventListener("submit", submitPayout);
   $("booking-cancel-shift")?.addEventListener("click", () => {
     const shiftId = $("booking-shift-id")?.value;
     cancelShift(shiftId);
   });
   $("seller-clear-edit")?.addEventListener("click", clearEditMode);
 
-  ["selected-day-roster", "my-shifts-list", "seller-notifications", "seller-requests-list"].forEach((id) => {
+  ["selected-day-roster", "my-shifts-list", "seller-notifications", "seller-requests-list", "commission-list"].forEach((id) => {
     $(id)?.addEventListener("click", handleActionClick);
   });
 }

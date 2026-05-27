@@ -214,6 +214,24 @@
             <button class="seller-submit" type="submit">Block Time</button>
             <div id="seller-management-status" class="seller-status" role="status" aria-live="polite"></div>
           </form>
+
+          <form id="seller-payout-form" class="seller-form">
+            <h3>Commission Payouts</h3>
+            <label>
+              Period Start
+              <input id="payout-start" type="date" required />
+            </label>
+            <label>
+              Period End
+              <input id="payout-end" type="date" required />
+            </label>
+            <label>
+              Payout Date
+              <input id="payout-date" type="date" required />
+            </label>
+            <button class="seller-submit" type="submit">Prepare Payouts</button>
+            <div id="seller-payout-status" class="seller-status" role="status" aria-live="polite"></div>
+          </form>
         </div>
       </section>
 
