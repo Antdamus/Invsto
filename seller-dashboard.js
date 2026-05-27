@@ -10,6 +10,9 @@ const state = {
   ledger: [],
   payouts: [],
   liveSessions: [],
+  unassignedSales: [],
+  smsHealth: null,
+  sellers: [],
   currentMonth: startOfMonth(new Date()),
   selectedDate: startOfToday(new Date()),
   selectedChannel: "ebay",
@@ -117,6 +120,10 @@ function formatLedgerKind(value) {
 
 function getStoreName(storeId) {
   return state.stores.find((store) => String(store.id) === String(storeId))?.name || "";
+}
+
+function getSellerLabel(seller = {}) {
+  return seller.seller_name || seller.display_name || seller.email || seller.seller_email || "Unnamed seller";
 }
 
 function getSessionSellerLabel(session = {}) {
@@ -343,12 +350,103 @@ async function loadLiveSessions() {
   state.liveSessions = Array.isArray(data) ? data : [];
 }
 
+async function loadSellerDirectory() {
+  if (!canManageSellers()) {
+    state.sellers = [];
+    return;
+  }
+
+  let data = [];
+  let error = null;
+  const rpcResult = await window.supabase.rpc("get_live_sale_seller_directory");
+  if (rpcResult.error) {
+    const fallback = await window.supabase
+      .from("employees")
+      .select("id, display_name, email, role, active")
+      .eq("active", true)
+      .in("role", ["seller", "employee", "manager", "admin"])
+      .order("display_name", { ascending: true });
+    data = fallback.data || [];
+    error = fallback.error;
+  } else {
+    data = rpcResult.data || [];
+  }
+
+  if (error) {
+    console.warn("Seller directory unavailable:", error);
+    data = [];
+  }
+
+  state.sellers = [...data, state.employee].filter(Boolean)
+    .reduce((map, seller) => {
+      if (!seller.id) return map;
+      map.set(String(seller.id), {
+        id: seller.id,
+        display_name: seller.display_name || seller.email || "Unnamed seller",
+        email: seller.email || "",
+        role: seller.role || "",
+        active: seller.active !== false,
+      });
+      return map;
+    }, new Map());
+  state.sellers = [...state.sellers.values()]
+    .filter((seller) => seller.active !== false)
+    .sort((a, b) => getSellerLabel(a).localeCompare(getSellerLabel(b)));
+}
+
+async function loadUnassignedSales() {
+  if (!canManageSellers()) {
+    state.unassignedSales = [];
+    return;
+  }
+
+  const { data, error } = await window.supabase.rpc("get_unassigned_seller_sales", {
+    _limit: 50,
+  });
+
+  if (error) {
+    console.warn("Unassigned seller sales unavailable:", error);
+    state.unassignedSales = [];
+    return;
+  }
+
+  state.unassignedSales = Array.isArray(data) ? data : [];
+}
+
+async function loadSellerSmsHealth() {
+  if (!canManageSellers()) {
+    state.smsHealth = null;
+    return;
+  }
+
+  const { data, error } = await window.supabase.rpc("get_seller_sms_health", {
+    _hours_back: 24,
+  });
+
+  if (error) {
+    console.warn("Seller SMS health unavailable:", error);
+    state.smsHealth = null;
+    return;
+  }
+
+  state.smsHealth = data || null;
+}
+
 async function refreshAll() {
   if (state.busy) return;
   state.busy = true;
   setStatus("");
   try {
-    await Promise.all([loadSchedule(), loadNotifications(), loadCommission(), loadRequests(), loadLiveSessions()]);
+    await Promise.all([
+      loadSchedule(),
+      loadNotifications(),
+      loadCommission(),
+      loadRequests(),
+      loadLiveSessions(),
+      loadSellerDirectory(),
+      loadUnassignedSales(),
+      loadSellerSmsHealth(),
+    ]);
     renderAll();
   } catch (error) {
     console.error("Seller dashboard refresh failed:", error);
@@ -582,6 +680,99 @@ function renderLiveSessions() {
   `).join("");
 }
 
+function renderSellerSelectOptions(row = {}) {
+  const candidates = Array.isArray(row.candidate_sellers) ? row.candidate_sellers : [];
+  const seen = new Set();
+  const options = [];
+
+  candidates.forEach((candidate) => {
+    const id = candidate.seller_employee_id || candidate.id;
+    if (!id || seen.has(String(id))) return;
+    seen.add(String(id));
+    options.push({
+      id,
+      label: `${getSellerLabel(candidate)} (suggested)`,
+    });
+  });
+
+  state.sellers.forEach((seller) => {
+    if (!seller.id || seen.has(String(seller.id))) return;
+    seen.add(String(seller.id));
+    options.push({
+      id: seller.id,
+      label: getSellerLabel(seller),
+    });
+  });
+
+  return [
+    `<option value="">Select seller</option>`,
+    ...options.map((option, index) => (
+      `<option value="${escapeHtml(option.id)}" ${index === 0 ? "selected" : ""}>${escapeHtml(option.label)}</option>`
+    )),
+  ].join("");
+}
+
+function formatInferenceSource(value) {
+  const source = String(value || "unassigned").replace(/_/g, " ");
+  return source.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function renderUnassignedSales() {
+  const list = $("seller-unassigned-sales");
+  if (!list) return;
+
+  if (!state.unassignedSales.length) {
+    list.innerHTML = `<div class="seller-empty">No unassigned seller sales.</div>`;
+    return;
+  }
+
+  list.innerHTML = state.unassignedSales.map((row) => `
+    <div class="seller-list-row" data-unassigned-row>
+      <strong>${escapeHtml(row.item_title || "Untitled sale item")}</strong>
+      <span>${escapeHtml(row.order_number || row.channel || "sale")} - ${escapeHtml(formatDateTime(row.sold_at))}</span>
+      <small>${escapeHtml(formatInferenceSource(row.inference_source))} / ${Number(row.candidate_count || 0)} candidate(s) / Net ${escapeHtml(formatCurrency(row.net_store_proceeds))}</small>
+      ${row.live_session_title ? `<small>Show: ${escapeHtml(row.live_session_title)}</small>` : ""}
+      <div class="seller-assignment-row">
+        <select data-unassigned-seller-select>
+          ${renderSellerSelectOptions(row)}
+        </select>
+        <button type="button"
+          data-action="assign-unassigned-seller"
+          data-sale-item-id="${escapeHtml(row.sale_item_id)}"
+          data-order-line-id="${escapeHtml(row.order_line_id || "")}">
+          Assign
+        </button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderSellerSmsHealth() {
+  const list = $("seller-sms-health");
+  if (!list) return;
+
+  const health = state.smsHealth;
+  if (!health) {
+    list.innerHTML = `<div class="seller-empty">SMS health unavailable.</div>`;
+    return;
+  }
+
+  const statusCounts = Object.entries(health.status_counts || {})
+    .map(([status, count]) => `${status}: ${count}`)
+    .join(" / ") || "No seller SMS in the last 24h";
+  const hasIssue = Number(health.failed || 0) > 0 || Number(health.pending_over_10_min || 0) > 0;
+
+  list.innerHTML = `
+    <div class="seller-list-row ${hasIssue ? "is-deduction" : ""}">
+      <strong>${hasIssue ? "Needs attention" : "Healthy"}</strong>
+      <span>${escapeHtml(statusCounts)}</span>
+      <small>Pending over 10 min: ${Number(health.pending_over_10_min || 0)} / Failed: ${Number(health.failed || 0)}</small>
+      ${health.latest_created_at ? `<small>Latest: ${escapeHtml(formatDateTime(health.latest_created_at))}</small>` : ""}
+      ${health.latest_error ? `<small>${escapeHtml(health.latest_error)}</small>` : ""}
+    </div>
+  `;
+}
+
 function renderManagement() {
   const panel = $("seller-management-panel");
   if (!panel) return;
@@ -602,6 +793,9 @@ function renderManagement() {
   if (payoutEnd && !payoutEnd.value) payoutEnd.value = dateKey(new Date());
   if (payoutStart && !payoutStart.value) payoutStart.value = dateKey(addDays(dateFromKey(payoutEnd?.value || dateKey(new Date())), -6));
   if (payoutDate && !payoutDate.value) payoutDate.value = dateKey(nextFriday(dateFromKey(payoutEnd?.value || dateKey(new Date()))));
+
+  renderUnassignedSales();
+  renderSellerSmsHealth();
 
   const list = $("seller-requests-list");
   if (!list) return;
@@ -1029,6 +1223,52 @@ async function markPayoutPaid(payoutId) {
   }
 }
 
+async function assignUnassignedSeller(button) {
+  if (!canManageSellers() || state.busy) return;
+
+  const row = button.closest("[data-unassigned-row]");
+  const select = row?.querySelector("[data-unassigned-seller-select]");
+  const sellerId = select?.value || "";
+  const saleItemId = button.dataset.saleItemId || "";
+  const orderLineId = button.dataset.orderLineId || "";
+
+  if (!sellerId || !saleItemId) {
+    setStatus("Select a seller for that sale first.", "error");
+    select?.focus();
+    return;
+  }
+
+  state.busy = true;
+  setStatus("Assigning seller to sale...");
+
+  try {
+    const rpcName = orderLineId ? "assign_seller_to_ebay_order_line" : "assign_seller_to_sale_item";
+    const payload = orderLineId
+      ? {
+        _order_line_id: orderLineId,
+        _seller_employee_id: sellerId,
+        _seller_sale_shift_id: null,
+        _notes: "Seller assigned from unassigned seller review queue.",
+      }
+      : {
+        _sale_item_id: saleItemId,
+        _seller_employee_id: sellerId,
+        _seller_sale_shift_id: null,
+        _notes: "Seller assigned from unassigned seller review queue.",
+      };
+    const { error } = await window.supabase.rpc(rpcName, payload);
+    if (error) throw error;
+    setStatus("Seller assigned and commission ledger synced.");
+    state.busy = false;
+    await refreshAll();
+  } catch (error) {
+    console.error("Unassigned seller assignment failed:", error);
+    setStatus(error.message || "Could not assign seller to that sale.", "error");
+  } finally {
+    state.busy = false;
+  }
+}
+
 function handleActionClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -1047,6 +1287,8 @@ function handleActionClick(event) {
     reviewSellerRequest(button.dataset.requestId, "deny");
   } else if (action === "mark-payout-paid") {
     markPayoutPaid(button.dataset.payoutId);
+  } else if (action === "assign-unassigned-seller") {
+    assignUnassignedSeller(button);
   }
 }
 
@@ -1096,7 +1338,7 @@ function setupListeners() {
   });
   $("seller-clear-edit")?.addEventListener("click", clearEditMode);
 
-  ["selected-day-roster", "my-shifts-list", "seller-notifications", "seller-requests-list", "commission-list"].forEach((id) => {
+  ["selected-day-roster", "my-shifts-list", "seller-notifications", "seller-requests-list", "commission-list", "seller-unassigned-sales"].forEach((id) => {
     $(id)?.addEventListener("click", handleActionClick);
   });
 }

@@ -378,6 +378,31 @@ textarea {
   margin-top: 10px;
 }
 
+.seller-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.seller-assignment-row select {
+  min-width: 0;
+  border: 1px solid var(--seller-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.seller-assignment-row button {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--seller-green);
+  background: var(--seller-green-soft);
+  color: var(--seller-green);
+  font-weight: 900;
+}
+
 .seller-row-actions button {
   min-height: 34px;
   padding: 0 10px;
