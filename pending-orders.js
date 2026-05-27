@@ -47,6 +47,12 @@ const state = {
   handledEbayReportTransferIds: new Set(),
   handledVideoReceiptPhotoTransferIds: new Set(),
   handledEbayCancelProofTransferIds: new Set(),
+  queuedEbayLabelTransfers: [],
+  queuedEbayReportTransfers: [],
+  queuedVideoReceiptPhotoTransfers: [],
+  queuedEbayCancelProofTransfers: [],
+  ebayTransferReceiverReady: false,
+  ebayTransferReceiverSetup: false,
   ebayLabelReturnContext: null,
   ebayLabelBusy: false,
   ebayReportBusy: false,
@@ -6618,6 +6624,30 @@ function postEbayPendingQueueChanged(payload = {}) {
   }, window.location.origin);
 }
 
+function queueEbayTransfer(queueName, payload) {
+  const queue = state[queueName];
+  if (!Array.isArray(queue)) return;
+  const transferId = payload?.transferId || "";
+  if (transferId && queue.some((entry) => entry?.transferId === transferId)) return;
+  queue.push(payload);
+}
+
+function drainQueuedEbayTransfers(queueName, handler) {
+  const queue = state[queueName];
+  if (!Array.isArray(queue) || !queue.length) return;
+  const queued = [...queue];
+  state[queueName] = [];
+  queued.forEach((payload) => handler(payload));
+}
+
+function markEbayTransferReceiverReady() {
+  state.ebayTransferReceiverReady = true;
+  drainQueuedEbayTransfers("queuedEbayLabelTransfers", handleEbayLabelTransfer);
+  drainQueuedEbayTransfers("queuedEbayReportTransfers", handleEbayAwaitingReportTransfer);
+  drainQueuedEbayTransfers("queuedVideoReceiptPhotoTransfers", handleVideoReceiptPhotoTransfer);
+  drainQueuedEbayTransfers("queuedEbayCancelProofTransfers", handleEbayCancelProofTransfer);
+}
+
 function postEbayLabelExitReturnToQueue(reason = "pending-label-session-exit") {
   const context = state.ebayLabelReturnContext;
   if (!context) return false;
@@ -6885,6 +6915,10 @@ async function attachEbayLabelToOrder(transferPayload) {
 
 async function handleEbayLabelTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayLabelTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayLabelTransferIds.has(transferId)) return;
   if (state.ebayLabelBusy) return;
   if (transferId) state.handledEbayLabelTransferIds.add(transferId);
@@ -6944,6 +6978,10 @@ async function importAwaitingReportTransfer(payload) {
 
 async function handleEbayAwaitingReportTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayReportTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayReportTransferIds.has(transferId)) return;
   if (state.ebayReportBusy) return;
   if (transferId) state.handledEbayReportTransferIds.add(transferId);
@@ -7203,6 +7241,10 @@ async function attachVideoReceiptPhotoToPendingLine(payload = {}) {
 
 async function handleVideoReceiptPhotoTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedVideoReceiptPhotoTransfers", payload);
+    return;
+  }
   if (transferId && state.handledVideoReceiptPhotoTransferIds.has(transferId)) return;
   if (transferId) state.handledVideoReceiptPhotoTransferIds.add(transferId);
   setVideoReceiptPhotoTransferStatus("Saving video receipt photo to OG...");
@@ -7333,6 +7375,10 @@ async function attachEbayCancelProofToWorkerModal(payload = {}) {
 
 async function handleEbayCancelProofTransfer(payload) {
   const transferId = payload?.transferId || "";
+  if (!state.ebayTransferReceiverReady) {
+    queueEbayTransfer("queuedEbayCancelProofTransfers", payload);
+    return;
+  }
   if (transferId && state.handledEbayCancelProofTransferIds.has(transferId)) return;
   if (transferId) state.handledEbayCancelProofTransferIds.add(transferId);
   setEbayCancelProofTransferStatus("Attaching eBay cancellation proof...");
@@ -7369,6 +7415,7 @@ function getPendingLabelReceiverState() {
     selectedOrderNumber,
     hasOpenSession: Boolean(selectedOrderNumber),
     noInventoryModalOpen: isWorkerNoInventoryModalOpen(),
+    receiverReady: state.ebayTransferReceiverReady,
     canAutoRoute: !selectedOrderNumber,
   };
 }
@@ -7463,6 +7510,8 @@ function buildEbayPendingPriorityPayload() {
 }
 
 function setupEbayLabelReceiver() {
+  if (state.ebayTransferReceiverSetup) return;
+  state.ebayTransferReceiverSetup = true;
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) return;
     if (event.data?.type === "OG_EBAY_LABEL_RECEIVER_STATE_REQUEST") {
@@ -7825,10 +7874,10 @@ function setupListeners() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupEbayLabelReceiver();
   await waitForSupabaseReady();
   const ok = await loadCurrentWorker();
   if (!ok) return;
-  setupEbayLabelReceiver();
   setupDashboardShell();
   setupImportVisibility();
   setupListeners();
@@ -7840,5 +7889,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadOrders();
   const openedTask = await openRequestedOrderTask();
   if (!openedTask) applyEbayLaunchOrderSelection();
+  markEbayTransferReceiverReady();
   if (window.lucide) window.lucide.createIcons();
 });
