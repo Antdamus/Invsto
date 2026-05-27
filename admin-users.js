@@ -501,6 +501,7 @@ if (!taxStatusLoaded) {
                 <span>Role</span>
                 <select class="user-role" id="udRole">
                   <option value="employee">employee</option>
+                  <option value="seller">seller</option>
                   <option value="manager">manager</option>
                   <option value="admin">admin</option>
                 </select>

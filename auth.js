@@ -1,5 +1,5 @@
 // auth.js
-// Login + automatic role routing using the employees table (admin -> dashboard, employee -> worker dashboard)
+// Login + automatic role routing using the employees table.
 
 function waitForSupabaseReady() {
   return new Promise((resolve) => {
@@ -77,7 +77,9 @@ async function routeUser(session) {
 
   if (role === "admin") {
     window.location.href = "dashboard.html";
-  } else if (role === "employee") {
+  } else if (role === "seller") {
+    window.location.href = "seller-dashboard.html";
+  } else if (role === "employee" || role === "manager") {
     window.location.href = "worker-dashboard.html";
   } else {
     // Unknown role -> safest behavior
@@ -179,7 +181,9 @@ if (feedback) {
 
     setTimeout(() => {
       if (role === "admin") window.location.href = "dashboard.html";
-      else window.location.href = "worker-dashboard.html";
+      else if (role === "seller") window.location.href = "seller-dashboard.html";
+      else if (role === "employee" || role === "manager") window.location.href = "worker-dashboard.html";
+      else window.location.href = "index.html";
     }, 500);
 
   } catch (err) {

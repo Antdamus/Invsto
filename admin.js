@@ -1534,7 +1534,7 @@ function setUserError(msg){
 }
 
 function setInviteRole(roleValue = 'employee') {
-  const role = ['employee', 'manager', 'admin'].includes(String(roleValue).toLowerCase())
+  const role = ['employee', 'seller', 'manager', 'admin'].includes(String(roleValue).toLowerCase())
     ? String(roleValue).toLowerCase()
     : 'employee';
   const select = qs('userRole');
@@ -1662,7 +1662,7 @@ async function loadUsers(){
 
     return {
       ...r,
-      role: ['employee','manager','admin'].includes(role) ? role : 'employee',
+      role: ['employee','seller','manager','admin'].includes(role) ? role : 'employee',
       worker_type: ['employee','contractor'].includes(worker_type) ? worker_type : 'employee',
       active: !!r.active,
       email: r.email || '',
@@ -1689,7 +1689,7 @@ async function inviteUser(){
 
     if (!email) throw new Error('Email is required.');
     if (!display_name) throw new Error('Display name is required.');
-    if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+    if (!['employee','seller','manager','admin'].includes(role)) throw new Error('Invalid role.');
     if (!['employee','contractor'].includes(worker_type)) throw new Error('Invalid worker type.');
     if (hrRaw !== '' && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) {
       throw new Error('Hourly rate must be a non-negative number.');
@@ -1744,7 +1744,7 @@ async function saveUserRow(tr, options = {}){
 
   if (!employee_id) throw new Error('Missing employee id.');
   if (!display_name) throw new Error('Display name is required.');
-  if (!['employee','manager','admin'].includes(role)) throw new Error('Invalid role.');
+  if (!['employee','seller','manager','admin'].includes(role)) throw new Error('Invalid role.');
   if (!['employee','contractor'].includes(worker_type)) throw new Error('Invalid worker type.');
   if (hrRaw !== '' && (!Number.isFinite(hourly_rate) || hourly_rate < 0)) {
     throw new Error('Hourly rate must be a non-negative number.');
