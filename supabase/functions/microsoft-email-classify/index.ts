@@ -18,6 +18,7 @@ const ADMIN_CATEGORY_TOTAL_SCAN_LIMIT = 1000;
 const ADMIN_VIEW_EMAIL_RECEIVED_ORDER_COLUMN = "email_messages(received_at)";
 const OPENAI_TIMEOUT_MS = 30000;
 const MESSAGE_DETAIL_BODY_CHAR_LIMIT = 14000;
+const MESSAGE_DETAIL_THREAD_LIMIT = 50;
 const MAX_DRAFT_BODY_CHARS = 5000;
 const MAX_DRAFT_SUBJECT_CHARS = 180;
 const REPAIR_BAD_CURRENT_DRAFTS_CONFIRMATION = "REPAIR_BAD_CURRENT_DRAFTS";
@@ -656,6 +657,175 @@ function capMessageDetailBody(value: unknown, maxLength = MESSAGE_DETAIL_BODY_CH
 
 function uniqueStrings(values: unknown[], maxItems = 20) {
   return [...new Set(values.map((value) => cleanWhitespace(value)).filter(Boolean))].slice(0, maxItems);
+}
+
+function normalizedEmail(value: unknown) {
+  return shortText(value, 180).toLowerCase() || null;
+}
+
+function emailDomain(value: unknown) {
+  const email = normalizedEmail(value);
+  const at = email?.lastIndexOf("@") ?? -1;
+  return at >= 0 ? email?.slice(at + 1) || null : null;
+}
+
+function personPayload(name: unknown, email: unknown) {
+  return {
+    name: shortText(name, 120) || null,
+    email: normalizedEmail(email),
+  };
+}
+
+function emptyRecipientGroups() {
+  return {
+    to: [] as Array<{ name: string | null; email: string | null }>,
+    cc: [] as Array<{ name: string | null; email: string | null }>,
+    bcc: [] as Array<{ name: string | null; email: string | null }>,
+  };
+}
+
+function groupedRecipients(rows: Record<string, any>[]) {
+  const recipients = emptyRecipientGroups();
+  for (const row of rows) {
+    const type = String(row.recipient_type || "").toLowerCase();
+    if (type !== "to" && type !== "cc" && type !== "bcc") continue;
+    recipients[type].push(personPayload(row.display_name, row.email_normalized || row.email));
+  }
+  return recipients;
+}
+
+function recipientsByMessageId(rows: Record<string, any>[]) {
+  const byMessageId = new Map<string, Record<string, any>[]>();
+  for (const row of rows) {
+    const messageId = String(row.message_id || "");
+    if (!messageId) continue;
+    const existing = byMessageId.get(messageId) || [];
+    existing.push(row);
+    byMessageId.set(messageId, existing);
+  }
+  return byMessageId;
+}
+
+function bodyHtmlAvailable(body: Record<string, any> | null | undefined) {
+  return typeof body?.body_html === "string" && body.body_html.trim().length > 0;
+}
+
+function messageBodyState(message: Record<string, any>, body: Record<string, any> | null | undefined) {
+  const rawBodyText = body?.body_text || "";
+  const rawNormalizedText = body?.normalized_text || "";
+  const previewText = message.body_preview || "";
+  const sourceText = rawNormalizedText || rawBodyText || previewText || "";
+  const source = rawNormalizedText ? "normalized_text" : rawBodyText ? "body_text" : previewText ? "body_preview" : "none";
+  const display = capMessageDetailBody(sourceText);
+  const bodyText = rawBodyText ? capMessageDetailBody(rawBodyText) : null;
+  const normalizedText = rawNormalizedText ? capMessageDetailBody(rawNormalizedText) : null;
+
+  return {
+    source,
+    display,
+    body_text: bodyText,
+    normalized_text: normalizedText,
+    body_html_available: bodyHtmlAvailable(body),
+    body_content_type: shortText(message.body_content_type, 80) || null,
+    normalization_version: shortText(body?.normalization_version, 120) || null,
+    redaction_status: shortText(body?.redaction_status, 120) || null,
+  };
+}
+
+function detailWarning(code: string, message: string, severity: "info" | "warning" = "warning") {
+  return { code, message, severity };
+}
+
+function messageSortTime(message: Record<string, any>) {
+  const raw = message.sent_at || message.received_at || message.created_date_time || message.last_modified_date_time || "";
+  const time = Date.parse(String(raw));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sortThreadMessages(messages: Record<string, any>[]) {
+  return [...messages].sort((a, b) => {
+    const timeDiff = messageSortTime(a) - messageSortTime(b);
+    if (timeDiff !== 0) return timeDiff;
+    return String(a.conversation_index || "").localeCompare(String(b.conversation_index || ""));
+  });
+}
+
+function inferThreadRole(message: Record<string, any>, mailbox: Record<string, any> | null, text: string | null) {
+  const fromEmail = normalizedEmail(message.from_email);
+  const senderEmail = normalizedEmail(message.sender_email);
+  const mailboxEmail = normalizedEmail(mailbox?.mailbox_email);
+  const candidates = [fromEmail, senderEmail].filter(Boolean) as string[];
+  const domains = candidates.map(emailDomain).filter(Boolean) as string[];
+  const searchable = `${message.subject || ""} ${text || ""}`.toLowerCase();
+
+  if (mailboxEmail && candidates.includes(mailboxEmail)) return "operator";
+  if (candidates.some((email) => /@members\.ebay\./i.test(email))) return "buyer";
+  if (domains.some((domain) => domain === "reply.ebay.com") && /\b(?:buyer|member|message from)\b/i.test(searchable)) return "buyer";
+  if (domains.some((domain) => domain === "ebay.com" || domain.endsWith(".ebay.com") || domain.includes(".ebay."))) return "platform";
+  return "unknown";
+}
+
+function threadMessagePayload(
+  message: Record<string, any>,
+  body: Record<string, any> | null | undefined,
+  recipientRows: Record<string, any>[],
+) {
+  const bodyState = messageBodyState(message, body);
+  return {
+    message_id: message.id,
+    provider_message_id: shortText(message.provider_message_id, 300) || null,
+    internet_message_id: shortText(message.internet_message_id, 300) || null,
+    conversation_id: shortText(message.conversation_id, 300) || null,
+    conversation_index: shortText(message.conversation_index, 500) || null,
+    subject: shortText(message.subject, 300) || null,
+    from_name: shortText(message.from_name, 120) || null,
+    from_email: normalizedEmail(message.from_email),
+    sender_name: shortText(message.sender_name, 120) || null,
+    sender_email: normalizedEmail(message.sender_email),
+    received_at: message.received_at || null,
+    sent_at: message.sent_at || null,
+    body_preview: shortText(message.body_preview, 800) || null,
+    body_text: bodyState.body_text?.text || null,
+    normalized_text: bodyState.normalized_text?.text || null,
+    display_text: bodyState.display.text || null,
+    body_source: bodyState.source,
+    body_html_available: bodyState.body_html_available,
+    body_truncated: bodyState.display.body_truncated,
+    body_chars_original: bodyState.display.body_chars_original,
+    body_chars_returned: bodyState.display.body_chars_returned,
+    recipients: groupedRecipients(recipientRows),
+  };
+}
+
+function threadBlockPayload(
+  message: Record<string, any>,
+  body: Record<string, any> | null | undefined,
+  recipientRows: Record<string, any>[],
+  mailbox: Record<string, any> | null,
+  selectedMessageId: string,
+  hasConversationId: boolean,
+) {
+  const bodyState = messageBodyState(message, body);
+  const warnings = [];
+  if (bodyState.source === "none") warnings.push("missing_body_text");
+  if (bodyState.body_html_available) warnings.push("html_body_not_rendered");
+  const text = bodyState.display.text || null;
+  const isFallback = !hasConversationId && String(message.id) === selectedMessageId;
+  return {
+    block_id: `${message.id}:${isFallback ? "body_fallback" : "stored_message"}`,
+    source_message_id: message.id,
+    kind: isFallback ? "body_fallback" : "stored_message",
+    role: inferThreadRole(message, mailbox, text),
+    sender_name: shortText(message.from_name || message.sender_name, 120) || null,
+    sender_email: normalizedEmail(message.from_email || message.sender_email),
+    received_at: message.received_at || null,
+    sent_at: message.sent_at || null,
+    subject: shortText(message.subject, 300) || null,
+    text,
+    confidence: isFallback ? "fallback" : "stored_message",
+    warnings,
+    recipients: groupedRecipients(recipientRows),
+  };
 }
 
 function promptVersion() {
@@ -3419,20 +3589,15 @@ async function adminClassificationView(supabase: ServiceClient, input: Input) {
 async function adminMessageDetail(supabase: ServiceClient, input: Input) {
   if (!input.messageId) throw new ClassifierError("message_id_required", { status: 400, phase: "input" });
 
+  const messageSelect = "id, mailbox_id, provider, provider_message_id, provider_immutable_id, internet_message_id, conversation_id, conversation_index, subject, from_name, from_email, sender_name, sender_email, reply_to_emails, received_at, sent_at, created_date_time, last_modified_date_time, web_link, importance, inference_classification, is_read, is_draft, body_preview, body_content_type, has_attachments, sync_status";
   const [
     messageResult,
-    bodyResult,
     classificationResult,
   ] = await Promise.all([
     supabase
       .from("email_messages")
-      .select("id, subject, from_name, from_email, sender_name, sender_email, received_at, sent_at, body_preview, body_content_type, has_attachments, sync_status")
+      .select(messageSelect)
       .eq("id", input.messageId)
-      .maybeSingle(),
-    supabase
-      .from("email_message_bodies")
-      .select("body_text, normalized_text, normalization_version, redaction_status")
-      .eq("message_id", input.messageId)
       .maybeSingle(),
     supabase
       .from("email_message_classifications")
@@ -3448,42 +3613,204 @@ async function adminMessageDetail(supabase: ServiceClient, input: Input) {
   if (messageResult.data.sync_status !== "active") {
     throw new ClassifierError("message_not_active", { status: 400, phase: "message_detail_lookup", messageId: input.messageId });
   }
-  if (bodyResult.error) throw new ClassifierError("body_lookup_failed", { phase: "message_detail_body", messageId: input.messageId });
   if (classificationResult.error) {
     throw new ClassifierError("classification_lookup_failed", { phase: "message_detail_classification", messageId: input.messageId });
   }
 
   const message = messageResult.data as Record<string, any>;
-  const body = bodyResult.data as Record<string, any> | null;
-  const sourceText = body?.normalized_text || body?.body_text || message.body_preview || "";
-  const bodySource = body?.normalized_text ? "normalized_text" : body?.body_text ? "body_text" : message.body_preview ? "body_preview" : "none";
-  const cappedBody = capMessageDetailBody(sourceText);
   const classification = Array.isArray(classificationResult.data) ? classificationResult.data[0] : null;
-  const classificationStaleness = classification
-    ? await classificationStalenessForRow(supabase, classification as Record<string, any>)
-    : null;
+  const conversationId = shortText(message.conversation_id, 300) || null;
+
+  const [
+    mailboxResult,
+    threadResult,
+  ] = await Promise.all([
+    supabase
+      .from("email_mailboxes")
+      .select("id, mailbox_email, display_name, provider")
+      .eq("id", message.mailbox_id)
+      .maybeSingle(),
+    conversationId
+      ? supabase
+        .from("email_messages")
+        .select(messageSelect)
+        .eq("mailbox_id", message.mailbox_id)
+        .eq("conversation_id", conversationId)
+        .eq("sync_status", "active")
+        .order("received_at", { ascending: true, nullsFirst: false })
+        .limit(MESSAGE_DETAIL_THREAD_LIMIT + 1)
+      : Promise.resolve({ data: [message], error: null }),
+  ]);
+
+  if (mailboxResult.error) throw new ClassifierError("mailbox_lookup_failed", { phase: "message_detail_mailbox", messageId: input.messageId });
+  if (threadResult.error) throw new ClassifierError("thread_lookup_failed", { phase: "message_detail_thread", messageId: input.messageId });
+
+  const rawThreadMessages = ((threadResult.data || []) as Record<string, any>[]);
+  const threadTruncated = rawThreadMessages.length > MESSAGE_DETAIL_THREAD_LIMIT;
+  let threadMessages = rawThreadMessages.slice(0, MESSAGE_DETAIL_THREAD_LIMIT);
+  if (!threadMessages.some((row) => String(row.id) === String(message.id))) {
+    threadMessages = threadMessages.length >= MESSAGE_DETAIL_THREAD_LIMIT
+      ? [...threadMessages.slice(0, MESSAGE_DETAIL_THREAD_LIMIT - 1), message]
+      : [...threadMessages, message];
+  }
+  threadMessages = sortThreadMessages(threadMessages.length ? threadMessages : [message]);
+  const threadMessageIds = uniqueStrings(threadMessages.map((row) => row.id), MESSAGE_DETAIL_THREAD_LIMIT);
+
+  const [
+    bodyRowsResult,
+    recipientRowsResult,
+    classificationStaleness,
+  ] = await Promise.all([
+    supabase
+      .from("email_message_bodies")
+      .select("message_id, body_text, body_html, normalized_text, normalization_version, redaction_status, metadata")
+      .in("message_id", threadMessageIds),
+    supabase
+      .from("email_message_recipients")
+      .select("message_id, recipient_type, display_name, email, email_normalized, position")
+      .in("message_id", threadMessageIds)
+      .order("position", { ascending: true }),
+    classification
+      ? classificationStalenessForRow(supabase, classification as Record<string, any>)
+      : Promise.resolve(null),
+  ]);
+
+  if (bodyRowsResult.error) throw new ClassifierError("body_lookup_failed", { phase: "message_detail_body", messageId: input.messageId });
+  if (recipientRowsResult.error) throw new ClassifierError("recipient_lookup_failed", { phase: "message_detail_recipients", messageId: input.messageId });
+
+  const bodyByMessageId = new Map<string, Record<string, any>>();
+  for (const bodyRow of bodyRowsResult.data || []) bodyByMessageId.set(String(bodyRow.message_id), bodyRow as Record<string, any>);
+  const recipientRowsByMessageId = recipientsByMessageId((recipientRowsResult.data || []) as Record<string, any>[]);
+  const selectedBody = bodyByMessageId.get(String(message.id)) || null;
+  const selectedBodyState = messageBodyState(message, selectedBody);
+  const selectedRecipientRows = recipientRowsByMessageId.get(String(message.id)) || [];
+  const siblingCount = rawThreadMessages.filter((row) => String(row.id) !== String(message.id)).length;
+  const warnings = [];
+
+  if (!conversationId) {
+    warnings.push(detailWarning("no_conversation_id", "Selected message has no stored Outlook conversation id, so the thread falls back to the selected message only.", "info"));
+  } else if (siblingCount === 0) {
+    warnings.push(detailWarning("no_thread_siblings", "No other stored messages were found for this Outlook conversation.", "info"));
+  }
+  if (selectedBodyState.source === "none") {
+    warnings.push(detailWarning("missing_body_text", "No stored body text or preview was available for the selected message."));
+  } else if (!selectedBodyState.body_text && !selectedBodyState.normalized_text) {
+    warnings.push(detailWarning("missing_body_text", "Stored body text is missing for the selected message; using body preview fallback."));
+  }
+  if (selectedBodyState.body_html_available) {
+    warnings.push(detailWarning("html_body_not_rendered", "A stored HTML body exists, but raw HTML is not returned by this endpoint.", "info"));
+  }
+  if (threadTruncated) {
+    warnings.push(detailWarning("thread_truncated", `Stored conversation messages were capped at ${MESSAGE_DETAIL_THREAD_LIMIT}.`, "warning"));
+  }
+
+  const threadMessagesPayload = threadMessages.map((threadMessage) =>
+    threadMessagePayload(
+      threadMessage,
+      bodyByMessageId.get(String(threadMessage.id)) || null,
+      recipientRowsByMessageId.get(String(threadMessage.id)) || [],
+    )
+  );
+  const threadBlocks = threadMessages.map((threadMessage) =>
+    threadBlockPayload(
+      threadMessage,
+      bodyByMessageId.get(String(threadMessage.id)) || null,
+      recipientRowsByMessageId.get(String(threadMessage.id)) || [],
+      mailboxResult.data as Record<string, any> | null,
+      String(message.id),
+      Boolean(conversationId),
+    )
+  );
 
   return {
     ok: true,
     mode: "message_detail",
     message_id: message.id,
+    provider_message_id: shortText(message.provider_message_id, 300) || null,
+    provider_immutable_id: shortText(message.provider_immutable_id, 300) || null,
+    internet_message_id: shortText(message.internet_message_id, 300) || null,
+    conversation_id: conversationId,
+    conversation_index: shortText(message.conversation_index, 500) || null,
+    web_link: shortText(message.web_link, 1200) || null,
     subject: shortText(message.subject, 300) || null,
     from_name: shortText(message.from_name, 120) || null,
-    from_email: shortText(message.from_email, 180).toLowerCase() || null,
+    from_email: normalizedEmail(message.from_email),
     sender_name: shortText(message.sender_name, 120) || null,
-    sender_email: shortText(message.sender_email, 180).toLowerCase() || null,
+    sender_email: normalizedEmail(message.sender_email),
+    from: personPayload(message.from_name, message.from_email),
+    sender: personPayload(message.sender_name, message.sender_email),
+    reply_to_emails: uniqueStrings(message.reply_to_emails || [], 20).map(normalizedEmail).filter(Boolean),
     received_at: message.received_at || null,
     sent_at: message.sent_at || null,
     body_preview: shortText(message.body_preview, 800) || null,
     body_content_type: shortText(message.body_content_type, 80) || null,
-    body_source: bodySource,
-    normalized_text: cappedBody.text,
-    body_truncated: cappedBody.body_truncated,
-    body_chars_original: cappedBody.body_chars_original,
-    body_chars_returned: cappedBody.body_chars_returned,
-    normalization_version: shortText(body?.normalization_version, 120) || null,
-    redaction_status: shortText(body?.redaction_status, 120) || null,
+    body_source: selectedBodyState.source,
+    body_source_metadata: {
+      source: selectedBodyState.source,
+      body_content_type: selectedBodyState.body_content_type,
+      body_html_available: selectedBodyState.body_html_available,
+      normalization_version: selectedBodyState.normalization_version,
+      redaction_status: selectedBodyState.redaction_status,
+    },
+    body_text: selectedBodyState.body_text?.text || null,
+    normalized_text: selectedBodyState.display.text,
+    stored_normalized_text: selectedBodyState.normalized_text?.text || null,
+    body_html_available: selectedBodyState.body_html_available,
+    body_truncated: selectedBodyState.display.body_truncated,
+    body_chars_original: selectedBodyState.display.body_chars_original,
+    body_chars_returned: selectedBodyState.display.body_chars_returned,
+    body_text_truncated: selectedBodyState.body_text?.body_truncated === true,
+    normalized_text_truncated: selectedBodyState.normalized_text?.body_truncated === true,
+    normalization_version: selectedBodyState.normalization_version,
+    redaction_status: selectedBodyState.redaction_status,
     has_attachments: message.has_attachments === true,
+    recipients: groupedRecipients(selectedRecipientRows),
+    message_metadata: {
+      message_id: message.id,
+      mailbox_id: message.mailbox_id,
+      provider: message.provider || null,
+      provider_message_id: shortText(message.provider_message_id, 300) || null,
+      provider_immutable_id: shortText(message.provider_immutable_id, 300) || null,
+      internet_message_id: shortText(message.internet_message_id, 300) || null,
+      conversation_id: conversationId,
+      conversation_index: shortText(message.conversation_index, 500) || null,
+      subject: shortText(message.subject, 300) || null,
+      from: personPayload(message.from_name, message.from_email),
+      sender: personPayload(message.sender_name, message.sender_email),
+      reply_to_emails: uniqueStrings(message.reply_to_emails || [], 20).map(normalizedEmail).filter(Boolean),
+      received_at: message.received_at || null,
+      sent_at: message.sent_at || null,
+      created_date_time: message.created_date_time || null,
+      last_modified_date_time: message.last_modified_date_time || null,
+      body_preview: shortText(message.body_preview, 800) || null,
+      web_link: shortText(message.web_link, 1200) || null,
+      importance: message.importance || null,
+      inference_classification: message.inference_classification || null,
+      is_read: message.is_read === null || message.is_read === undefined ? null : message.is_read === true,
+      is_draft: message.is_draft === null || message.is_draft === undefined ? null : message.is_draft === true,
+      has_attachments: message.has_attachments === true,
+      body_source: selectedBodyState.source,
+      body_source_metadata: {
+        source: selectedBodyState.source,
+        body_content_type: selectedBodyState.body_content_type,
+        body_html_available: selectedBodyState.body_html_available,
+        normalization_version: selectedBodyState.normalization_version,
+        redaction_status: selectedBodyState.redaction_status,
+      },
+    },
+    conversation: {
+      conversation_id: conversationId,
+      conversation_index: shortText(message.conversation_index, 500) || null,
+      stored_message_count: threadMessagesPayload.length,
+      stored_sibling_count: siblingCount,
+      limit: MESSAGE_DETAIL_THREAD_LIMIT,
+      truncated: threadTruncated,
+      messages: threadMessagesPayload,
+    },
+    conversation_messages: threadMessagesPayload,
+    same_conversation_messages: threadMessagesPayload,
+    thread_blocks: threadBlocks,
+    warnings,
     classification: classification ? {
       id: classification.id,
       category: classification.category,
