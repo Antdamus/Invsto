@@ -2811,6 +2811,25 @@ function renderOrderTaskAssigneeSelect() {
     : "";
 }
 
+function setOrderTaskFieldVisible(inputId, visible) {
+  const input = $(inputId);
+  input?.closest(".modal-field")?.classList.toggle("hidden", !visible);
+}
+
+function configureOrderTaskStatusOptionsForProgress(progressMode = false) {
+  const select = $("order-task-status");
+  if (!select) return;
+  ["resolved", "cancelled"].forEach((value) => {
+    const option = [...select.options].find((entry) => entry.value === value);
+    if (!option) return;
+    option.hidden = progressMode;
+    option.disabled = progressMode;
+  });
+  if (progressMode && ["resolved", "cancelled"].includes(select.value)) {
+    select.value = "deferred";
+  }
+}
+
 async function loadOrderTaskAssignees() {
   if (state.orderTaskAssignees.length) {
     renderOrderTaskAssigneeSelect();
@@ -3549,7 +3568,7 @@ async function openOrderTaskModal(options = {}) {
   const taskId = options.taskId || "";
   const task = taskId ? state.selectedOrderTasks.find((entry) => entry.id === taskId) : null;
   state.activeOrderTaskId = task?.id || "";
-  state.orderTaskMode = task ? "reply" : "create";
+  state.orderTaskMode = task ? options.progress ? "progress" : "reply" : "create";
   resetOrderTaskPhotos();
   setOrderTaskError("");
   setOrderTaskPhotoStatus("");
@@ -3570,7 +3589,11 @@ async function openOrderTaskModal(options = {}) {
     : "Write exactly what needs review, a decision, or special coordination.";
   $("order-task-priority").value = task?.priority || "normal";
   $("order-task-status").value = task ? options.progress ? "deferred" : "" : "";
+  configureOrderTaskStatusOptionsForProgress(Boolean(options.progress));
   $("order-task-due-at").value = toDateTimeLocalValue(task?.due_at || (!task ? line.order?.ship_by_date : ""));
+  setOrderTaskFieldVisible("order-task-assignee", !options.progress);
+  setOrderTaskFieldVisible("order-task-priority", !options.progress);
+  setOrderTaskFieldVisible("order-task-due-at", true);
   $("order-task-context").innerHTML = `
     <strong>${escapeHtml(line.order?.order_number || "eBay order")} - ${escapeHtml(line.order?.buyer_username || "unknown buyer")}</strong>
     <span>${escapeHtml(line.item_title || "Untitled item")}</span>
@@ -3606,11 +3629,12 @@ async function submitOrderTask() {
   try {
     const lineIds = getOrderTaskLineIdsForSelectedOrder();
     const photos = await persistOrderTaskPhotos(lineIds);
-    const assigneeUserId = $("order-task-assignee")?.value || null;
-    const priority = $("order-task-priority")?.value || "normal";
+    const isProgressUpdate = state.orderTaskMode === "progress";
+    const assigneeUserId = isProgressUpdate ? null : $("order-task-assignee")?.value || null;
+    const priority = isProgressUpdate ? null : $("order-task-priority")?.value || "normal";
     const signedByEmail = state.user?.email || state.employee?.display_name || "";
 
-    if (state.orderTaskMode === "reply" && state.activeOrderTaskId) {
+    if ((state.orderTaskMode === "reply" || state.orderTaskMode === "progress") && state.activeOrderTaskId) {
       const { error } = await supabase.rpc("respond_ebay_order_coordination_task", {
         _task_id: state.activeOrderTaskId,
         _note: note,
