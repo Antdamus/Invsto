@@ -339,6 +339,20 @@ function configureModalAdminFields({
   $("team-task-status-field")?.classList.toggle("hidden", !status);
 }
 
+function configureStatusOptionsForProgress(selectId, progressMode = false) {
+  const select = $(selectId);
+  if (!select) return;
+  ["resolved", "cancelled"].forEach((value) => {
+    const option = [...select.options].find((entry) => entry.value === value);
+    if (!option) return;
+    option.hidden = progressMode;
+    option.disabled = progressMode;
+  });
+  if (progressMode && ["resolved", "cancelled"].includes(select.value)) {
+    select.value = "deferred";
+  }
+}
+
 function getTaskAssigneeLabel(task = {}) {
   if (task.assigned_to_email) return task.assigned_to_email;
   const assignee = state.assignees.find((employee) => employee.user_id === task.assigned_to_user_id);
@@ -605,7 +619,7 @@ function normalizeTeamTask(task = {}) {
   return {
     ...task,
     source: "team",
-    sourceLabel: "Independent",
+    sourceLabel: "",
     actionHref: `team-tasks.html?taskId=${encodeURIComponent(task.id || "")}`,
   };
 }
@@ -1448,7 +1462,7 @@ function renderTasks() {
           <span class="team-task-chip">${escapeHtml(isCanceledTaskScope() ? "Canceled" : getTaskStatusLabel(task.status))}</span>
         </div>
         <div class="team-task-meta">
-          <span class="team-task-source">${escapeHtml(task.sourceLabel || "Task")}</span>
+          ${task.source !== "team" && task.sourceLabel ? `<span class="team-task-source">${escapeHtml(task.sourceLabel)}</span>` : ""}
           <span>${escapeHtml(task.task_type || "general")}</span>
           <span>${escapeHtml(task.priority || "normal")}</span>
           <span>Assigned: ${escapeHtml(getTaskAssigneeLabel(task))}</span>
@@ -1468,9 +1482,6 @@ function renderTasks() {
     `;
   }).join("");
 
-  list.querySelectorAll("[data-team-task-reply]").forEach((button) => {
-    button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskReply }));
-  });
   list.querySelectorAll("[data-team-task-progress]").forEach((button) => {
     button.addEventListener("click", () => openTaskModal({ taskId: button.dataset.teamTaskProgress, progress: true }));
   });
@@ -1598,7 +1609,6 @@ function renderTaskActions(task = {}, resolved = false) {
     <div class="team-task-actions">
       ${resolved ? "" : `<button type="button" class="secondary-btn" data-team-task-progress="${escapeHtml(task.id)}">Progress / Delay</button>`}
       ${!resolved && !isAdminUser() && task.assigned_to_user_id === state.user?.id ? `<button type="button" class="secondary-btn" data-team-task-reassign-request="${escapeHtml(task.id)}">Request Reassign</button>` : ""}
-      <button type="button" class="secondary-btn" data-team-task-reply="${escapeHtml(task.id)}">${escapeHtml(isAdminUser() ? "Reply / Reassign" : "Reply")}</button>
       ${resolved ? "" : `<button type="button" class="primary-btn" data-team-task-resolve="${escapeHtml(task.id)}">Mark Completed</button>`}
     </div>
     ${renderAdminAssignmentActions(task)}
@@ -2416,6 +2426,7 @@ function configureOrderWorkflowModal(task, options = {}) {
   $("team-task-priority").value = task?.priority || "normal";
   $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
   $("team-task-status-input").value = "";
+  configureStatusOptionsForProgress("team-task-status-input", false);
   renderAssigneeSelect();
   $("team-task-assignee").value = isShippingReadyPackaging
     ? (state.user?.id || task?.assigned_to_user_id || "")
@@ -2516,6 +2527,7 @@ function openAdminAssignmentModal({ taskSource = "", taskId = "", action = "" } 
   $("team-task-priority").value = task?.priority || "normal";
   $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
   $("team-task-status-input").value = "";
+  configureStatusOptionsForProgress("team-task-status-input", false);
   renderAssigneeSelect();
   $("team-task-assignee").value = isReassign ? "" : (task?.assigned_to_user_id || "");
   configureModalAdminFields({
@@ -2616,7 +2628,15 @@ async function handleAdminHistoryAction({ taskSource = "", taskId = "", action =
 async function openTaskModal(options = {}) {
   const taskId = options.taskId || "";
   const task = taskId ? state.tasks.find((entry) => entry.source === "team" && entry.id === taskId) : null;
-  state.mode = task ? "reply" : "create";
+  state.mode = task
+    ? options.reassignRequest
+      ? "reassign_request"
+      : options.resolve
+        ? "resolve"
+        : options.progress
+          ? "progress"
+          : "reply"
+    : "create";
   state.activeTaskId = task?.id || "";
   resetPhotos();
   setModalError("");
@@ -2658,14 +2678,15 @@ async function openTaskModal(options = {}) {
   $("team-task-priority").value = task?.priority || "normal";
   $("team-task-due-at").value = toDateTimeLocalValue(task?.due_at || "");
   $("team-task-status-input").value = options.resolve ? "resolved" : options.reassignRequest ? "waiting_on_admin" : options.progress ? "deferred" : "";
+  configureStatusOptionsForProgress("team-task-status-input", Boolean(options.progress));
   renderAssigneeSelect();
   $("team-task-assignee").value = task?.assigned_to_user_id || "";
   configureModalAdminFields({
-    assignee: !task || isAdminUser(),
-    category: !task || isAdminUser(),
-    priority: !task || isAdminUser(),
-    due: !task || isAdminUser(),
-    status: Boolean(task) && isAdminUser(),
+    assignee: !task || (isAdminUser() && !options.progress && !options.resolve),
+    category: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest),
+    priority: !task || (isAdminUser() && !options.progress && !options.resolve && !options.reassignRequest),
+    due: !task || options.progress || (isAdminUser() && !options.resolve && !options.reassignRequest),
+    status: Boolean(task) && (options.progress || isAdminUser()) && !options.resolve && !options.reassignRequest,
   });
 
   openModal();
@@ -2946,7 +2967,7 @@ async function submitTask() {
   const title = String($("team-task-title-input")?.value || "").trim();
   const note = String($("team-task-note")?.value || "").trim();
   if (state.mode === "create" && !title) return setModalError("Write a task title first.");
-  if (!note && state.mode === "reply") return setModalError("Write a note before saving the update.");
+  if (!note && ["reply", "progress", "resolve", "reassign_request"].includes(state.mode)) return setModalError("Write a note before saving the update.");
 
   const submit = $("submit-team-task");
   submit?.toggleAttribute("disabled", true);
@@ -2973,6 +2994,19 @@ async function submitTask() {
       });
       if (error) throw error;
       setStatus("Team task updated.", "success");
+    } else if (["progress", "resolve", "reassign_request"].includes(state.mode) && state.activeTaskId) {
+      const { error } = await supabase.rpc("respond_team_task", {
+        _task_id: state.activeTaskId,
+        _note: note,
+        _assigned_to_user_id: null,
+        _status: $("team-task-status-input")?.value || null,
+        _priority: null,
+        _photo_attachments: photos,
+        _signed_by_email: signedByEmail,
+        _due_at: state.mode === "progress" ? localDateTimeToIso($("team-task-due-at")?.value || "") : null,
+      });
+      if (error) throw error;
+      setStatus(state.mode === "progress" ? "Task progress saved." : state.mode === "resolve" ? "Team task completed." : "Reassignment request sent.", "success");
     } else {
       const { error } = await supabase.rpc("create_team_task", {
         _title: title,
