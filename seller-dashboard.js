@@ -9,6 +9,7 @@ const state = {
   requests: [],
   ledger: [],
   payouts: [],
+  liveSessions: [],
   currentMonth: startOfMonth(new Date()),
   selectedDate: startOfToday(new Date()),
   selectedChannel: "ebay",
@@ -112,6 +113,17 @@ function formatCurrency(value) {
 function formatLedgerKind(value) {
   const kind = String(value || "sale").replace(/_/g, " ");
   return kind.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getStoreName(storeId) {
+  return state.stores.find((store) => String(store.id) === String(storeId))?.name || "";
+}
+
+function getSessionSellerLabel(session = {}) {
+  const primary = session.seller_snapshot?.primary || {};
+  const primaryLabel = primary.display_name || primary.email || "Main seller";
+  const coSellerCount = Array.isArray(session.co_seller_employee_ids) ? session.co_seller_employee_ids.length : 0;
+  return `${primaryLabel}${coSellerCount ? ` + ${coSellerCount} more` : ""}`;
 }
 
 function minutesBetween(start, end) {
@@ -314,12 +326,29 @@ async function loadCommission() {
   }
 }
 
+async function loadLiveSessions() {
+  const { data, error } = await window.supabase
+    .from("live_sale_sessions")
+    .select("id, session_code, title, store_id, status, started_at, primary_seller_employee_id, co_seller_employee_ids, seller_snapshot")
+    .eq("status", "active")
+    .order("started_at", { ascending: false })
+    .limit(6);
+
+  if (error) {
+    console.warn("Live sale sessions unavailable:", error);
+    state.liveSessions = [];
+    return;
+  }
+
+  state.liveSessions = Array.isArray(data) ? data : [];
+}
+
 async function refreshAll() {
   if (state.busy) return;
   state.busy = true;
   setStatus("");
   try {
-    await Promise.all([loadSchedule(), loadNotifications(), loadCommission(), loadRequests()]);
+    await Promise.all([loadSchedule(), loadNotifications(), loadCommission(), loadRequests(), loadLiveSessions()]);
     renderAll();
   } catch (error) {
     console.error("Seller dashboard refresh failed:", error);
@@ -527,6 +556,32 @@ function renderNotifications() {
   `).join("");
 }
 
+function renderLiveSessions() {
+  const list = $("seller-live-sessions");
+  if (!list) return;
+
+  if (!state.liveSessions.length) {
+    list.innerHTML = `
+      <div class="seller-empty">
+        No active eBay live sale shows.
+        <div class="seller-row-actions"><a class="seller-text-button" href="live-sales.html">Start Show</a></div>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = state.liveSessions.map((session) => `
+    <div class="seller-list-row">
+      <strong>${escapeHtml(session.title || "Live Sale")}</strong>
+      <span>${escapeHtml(getSessionSellerLabel(session))}</span>
+      <small>${escapeHtml(session.session_code || "")}${session.store_id ? ` - ${escapeHtml(getStoreName(session.store_id) || "Store")}` : ""} - ${escapeHtml(formatDateTime(session.started_at))}</small>
+      <div class="seller-row-actions">
+        <a class="seller-text-button" href="live-sales.html">Open Show</a>
+      </div>
+    </div>
+  `).join("");
+}
+
 function renderManagement() {
   const panel = $("seller-management-panel");
   if (!panel) return;
@@ -612,6 +667,7 @@ function renderAll() {
   renderSelectedDay();
   renderMyShifts();
   renderCommission();
+  renderLiveSessions();
   renderNotifications();
   renderManagement();
   renderMetrics();

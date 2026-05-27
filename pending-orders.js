@@ -4,6 +4,7 @@ const state = {
   orders: [],
   filteredOrders: [],
   stores: [],
+  sellers: [],
   checkoutStoreId: "",
   selectedLine: null,
   selectedItem: null,
@@ -404,6 +405,53 @@ async function loadCurrentWorker() {
 
   state.employee = employee;
   return true;
+}
+
+function getSellerLabel(seller = {}) {
+  return seller.display_name || seller.email || "Unnamed seller";
+}
+
+async function loadPackingSellerDirectory() {
+  let data = [];
+  let error = null;
+
+  const rpcResult = await supabase.rpc("get_live_sale_seller_directory");
+  if (rpcResult.error) {
+    const fallback = await supabase
+      .from("employees")
+      .select("id, display_name, email, role, active")
+      .eq("active", true)
+      .in("role", ["seller", "employee", "manager", "admin"])
+      .order("display_name", { ascending: true });
+    data = fallback.data || [];
+    error = fallback.error;
+  } else {
+    data = rpcResult.data || [];
+  }
+
+  if (error) {
+    console.warn("Could not load packing seller directory:", error);
+    data = [];
+  }
+
+  const byId = new Map();
+  [...data, state.employee].filter(Boolean).forEach((seller) => {
+    if (!seller.id) return;
+    byId.set(String(seller.id), {
+      id: seller.id,
+      display_name: seller.display_name || seller.email || "Unnamed seller",
+      email: seller.email || "",
+      role: seller.role || "",
+      active: seller.active !== false,
+    });
+  });
+
+  state.sellers = [...byId.values()]
+    .filter((seller) => seller.active !== false)
+    .sort((a, b) => getSellerLabel(a).localeCompare(getSellerLabel(b)));
+
+  renderFulfillmentSellerSelect();
+  return state.sellers;
 }
 
 function canImportOrders() {
@@ -1474,6 +1522,8 @@ function buildOrderLineQueueQuery(status, admin) {
       internal_item_id,
       fulfilled_quantity,
       fulfilled_at,
+      assigned_seller_employee_id,
+      assigned_seller_snapshot,
       notes,
       raw_payload,
       ebay_orders!inner(
@@ -2347,6 +2397,82 @@ function resetFulfillmentInputs() {
   setStatus("");
 }
 
+function renderFulfillmentSellerSelect(line = state.selectedLine) {
+  const select = $("fulfill-seller");
+  const hint = $("fulfill-seller-hint");
+  if (!select) return;
+
+  const current = line?.assigned_seller_employee_id || select.value || "";
+  const options = [
+    `<option value="">Auto from shift/show</option>`,
+    ...state.sellers.map((seller) => {
+      const label = getSellerLabel(seller);
+      const role = seller.role ? ` - ${seller.role}` : "";
+      return `<option value="${escapeHtml(seller.id)}">${escapeHtml(label + role)}</option>`;
+    }),
+  ];
+
+  select.innerHTML = options.join("");
+  select.value = state.sellers.some((seller) => String(seller.id) === String(current)) ? current : "";
+
+  if (hint) {
+    const snapshot = line?.assigned_seller_snapshot || {};
+    const assignedLabel = select.value
+      ? getSellerLabel(state.sellers.find((seller) => String(seller.id) === String(select.value)) || snapshot)
+      : "";
+    hint.textContent = assignedLabel
+      ? `Assigned to ${assignedLabel}.`
+      : "Auto works when only one seller is booked for that show time; choose manually when two sellers overlap.";
+  }
+}
+
+function getSelectedPackingSellerId() {
+  return $("fulfill-seller")?.value || "";
+}
+
+async function assignSellerToOrderLines(lineIds = [], sellerId = getSelectedPackingSellerId()) {
+  const cleanLineIds = [...new Set(lineIds.filter(Boolean))];
+  if (!sellerId || !cleanLineIds.length) return;
+
+  for (const lineId of cleanLineIds) {
+    const { error } = await supabase.rpc("assign_seller_to_ebay_order_line", {
+      _order_line_id: lineId,
+      _seller_employee_id: sellerId,
+      _seller_sale_shift_id: null,
+      _notes: "Seller selected from pending order packing screen.",
+    });
+    if (error) throw error;
+  }
+
+  state.orders.forEach((line) => {
+    if (!cleanLineIds.includes(line.id)) return;
+    const seller = state.sellers.find((entry) => String(entry.id) === String(sellerId));
+    line.assigned_seller_employee_id = sellerId;
+    line.assigned_seller_snapshot = seller ? {
+      id: seller.id,
+      display_name: seller.display_name,
+      email: seller.email,
+      role: seller.role,
+    } : line.assigned_seller_snapshot;
+  });
+}
+
+async function persistSelectedLineSeller() {
+  const line = state.selectedLine;
+  const sellerId = getSelectedPackingSellerId();
+  if (!line?.id || !sellerId || state.busy) return;
+  if (String(line.assigned_seller_employee_id || "") === String(sellerId)) return;
+
+  try {
+    await assignSellerToOrderLines([line.id], sellerId);
+    renderFulfillmentSellerSelect(line);
+    setStatus("Seller assignment saved for this eBay line.", "success");
+  } catch (error) {
+    console.error("Seller assignment failed:", error);
+    setStatus(error.message || "Could not assign seller to this eBay line.", "error");
+  }
+}
+
 function renderSelectedOrder() {
   const line = state.selectedLine;
   if (!line) return;
@@ -2362,6 +2488,7 @@ function renderSelectedOrder() {
   $("detail-shipping").textContent = formatMoney(line.shipping_and_handling || order.shipping_and_handling);
   $("detail-total").textContent = formatMoney(line.total_price || order.total_price || line.sold_for);
   $("detail-payout").textContent = line.net_payout || order.net_payout ? formatMoney(line.net_payout || order.net_payout) : "Not imported";
+  renderFulfillmentSellerSelect(line);
   renderSelectedVideoReceipt(line);
   renderEbayLabelPanel();
 }
@@ -6379,6 +6506,11 @@ async function fulfillSelectedOrder({ skipReview = false } = {}) {
       .filter(Boolean))];
     const completedLineCount = liveItems.length && !staged.length ? 1 : staged.length;
     const changedItemIds = [];
+    const selectedSellerId = getSelectedPackingSellerId();
+    if (selectedSellerId && !(liveItems.length && !staged.length)) {
+      await assignSellerToOrderLines(completedLineIds, selectedSellerId);
+    }
+
     if (liveItems.length && !staged.length) {
       if (!state.selectedLine) throw new Error("Select the eBay order line before confirming the live-sale bag.");
       const { error } = await supabase.rpc("fulfill_ebay_order_line_with_live_lot_for_store", {
@@ -7641,6 +7773,7 @@ function setupListeners() {
   $("cancel-pending-order")?.addEventListener("click", () => openWorkerCancelOrderModal({ openEbayCancel: true }));
   $("complete-no-inventory")?.addEventListener("click", openWorkerNoInventoryModal);
   $("fulfill-order")?.addEventListener("click", fulfillSelectedOrder);
+  $("fulfill-seller")?.addEventListener("change", persistSelectedLineSeller);
   $("clear-selection")?.addEventListener("click", clearSelection);
   $("preview-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
   $("preview-worker-ebay-label")?.addEventListener("click", previewSelectedEbayLabel);
@@ -7908,6 +8041,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadCheckoutStores();
   state.launchOrderTaskId = getRequestedOrderTaskId();
   loadOrderTaskAssignees().catch((error) => console.warn("Could not preload order task assignees:", error));
+  loadPackingSellerDirectory().catch((error) => console.warn("Could not preload seller directory:", error));
   clearOrderSearch({ apply: false });
   clearOrderCreatedDateFilter({ apply: false });
   await loadOrders();
