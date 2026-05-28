@@ -10,6 +10,7 @@ const state = {
   returnTasks: [],
   returnMessages: [],
   returnTaskLines: new Map(),
+  returnTaskOrderEvents: [],
   relatedOrderTaskEvents: [],
   returnAssignees: [],
   returnTaskLaunchApplied: false,
@@ -366,6 +367,8 @@ function getLabelMetadataSearchText(...metadataObjects) {
     "shipmentIds",
     "labelId",
     "labelIds",
+    "videoReceiptUrl",
+    "videoReceiptUrls",
     "lookupKeys",
     "labelRows",
   ];
@@ -447,6 +450,141 @@ function getLabelTrackingDisplay(metadata = {}) {
     ...(Array.isArray(metadata.shippingBarcodeNumbers) ? metadata.shippingBarcodeNumbers : []),
     ...(Array.isArray(metadata.labelRows) ? metadata.labelRows.flatMap((row) => row?.trackingNumbers || row?.shippingBarcodeNumbers || []) : []),
   ]).join(", ");
+}
+
+function getMetadataVideoReceiptUrls(metadata = {}) {
+  if (!metadata || typeof metadata !== "object") return [];
+  const detail = metadata.returnDetails && typeof metadata.returnDetails === "object" ? metadata.returnDetails : {};
+  return [
+    metadata.videoReceiptUrl,
+    metadata.videoReceiptURL,
+    ...(Array.isArray(metadata.videoReceiptUrls) ? metadata.videoReceiptUrls : []),
+    detail.videoReceiptUrl,
+    detail.videoReceiptURL,
+    ...(Array.isArray(detail.videoReceiptUrls) ? detail.videoReceiptUrls : []),
+  ].filter(Boolean).map((url) => String(url || "").trim()).filter(Boolean);
+}
+
+function normalizeVideoReceiptUrlForLine(url = "", line = {}) {
+  const cleanUrl = String(url || "").trim().replace(/&amp;/g, "&");
+  if (!cleanUrl) return "";
+  let parsed;
+  try {
+    parsed = new URL(cleanUrl);
+  } catch (_) {
+    return "";
+  }
+  if (!/(^|\.)ebay\.com$/i.test(parsed.hostname) || !/\/ebaylive\/events\//i.test(parsed.pathname)) return "";
+
+  const itemNumber = String(line.item_number || line.itemNumber || "").trim();
+  if (!itemNumber) return parsed.toString();
+
+  const selectedItemId = String(parsed.searchParams.get("selectedItemId") || "").trim();
+  const itemIds = String(parsed.searchParams.get("itemIds") || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (selectedItemId === itemNumber) return parsed.toString();
+  if (itemIds.includes(itemNumber)) {
+    parsed.searchParams.set("selectedItemId", itemNumber);
+    if (!parsed.searchParams.get("playback")) parsed.searchParams.set("playback", "true");
+    return parsed.toString();
+  }
+  return "";
+}
+
+function getReturnLineVideoReceiptUrl(line = {}) {
+  const order = getOrderFromLine(line);
+  return [
+    ...getMetadataVideoReceiptUrls(line.label_metadata),
+    ...getMetadataVideoReceiptUrls(order.label_metadata),
+    line.videoReceiptUrl,
+  ].map((url) => normalizeVideoReceiptUrlForLine(url, line)).find(Boolean) || "";
+}
+
+function buildEbayOrderDetailsUrl(orderNumber = "") {
+  const cleanNumber = String(orderNumber || "").trim();
+  if (!cleanNumber) return "";
+  const url = new URL("https://www.ebay.com/mesh/ord/details");
+  url.searchParams.set("orderid", cleanNumber);
+  return url.toString();
+}
+
+function getReturnLineVideoReceiptLink(line = {}) {
+  const order = getOrderFromLine(line);
+  const directUrl = getReturnLineVideoReceiptUrl(line);
+  return {
+    url: directUrl,
+    orderNumber: order.order_number || "",
+    orderDetailsUrl: buildEbayOrderDetailsUrl(order.order_number),
+    itemNumber: line.item_number || "",
+    transactionId: line.transaction_id || "",
+    itemTitle: line.item_title || "",
+    itemUrl: line.item_number ? `https://www.ebay.com/itm/${encodeURIComponent(line.item_number)}` : "",
+    direct: Boolean(directUrl),
+    title: directUrl
+      ? "Open the captured eBay Live video receipt"
+      : "Resolve and open the eBay Live video receipt",
+  };
+}
+
+function requestExtensionVideoReceiptOpen(payload = {}) {
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(result || null);
+    };
+    const timer = window.setTimeout(() => finish({ ok: false, error: "The eBay extension did not answer." }), 4000);
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.type !== "OG_EBAY_VIDEO_RECEIPT_OPEN_RESPONSE") return;
+      if (event.data?.requestId !== requestId) return;
+      finish(event.data.payload || null);
+    };
+    window.addEventListener("message", onMessage);
+    window.postMessage({
+      type: "OG_EBAY_VIDEO_RECEIPT_OPEN_REQUEST",
+      requestId,
+      payload,
+    }, window.location.origin);
+  });
+}
+
+function setReturnVideoReceiptOpenStatus(message = "", type = "info") {
+  if (isModalOpen("return-intake-modal")) {
+    setReturnIntakeStatus(message, type);
+  } else {
+    setReturnTaskSaveStatus(message, type);
+  }
+}
+
+async function openReturnVideoReceiptLink(event, receiptLink = {}) {
+  if (receiptLink.direct || !receiptLink.orderNumber) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setReturnVideoReceiptOpenStatus("Opening eBay video receipt...", "info");
+  const result = await requestExtensionVideoReceiptOpen({
+    orderNumber: receiptLink.orderNumber,
+    orderDetailsUrl: receiptLink.orderDetailsUrl,
+    itemNumber: receiptLink.itemNumber,
+    transactionId: receiptLink.transactionId,
+    itemTitle: receiptLink.itemTitle,
+    itemUrl: receiptLink.itemUrl,
+  });
+  if (!result?.ok) {
+    setReturnVideoReceiptOpenStatus(
+      result?.error || "Could not open the eBay video receipt. Make sure the OG eBay extension is enabled and you are signed in to eBay.",
+      "error"
+    );
+  } else {
+    setReturnVideoReceiptOpenStatus("eBay video receipt opened.", "success");
+  }
 }
 
 function formatFileSize(bytes) {
@@ -1622,6 +1760,7 @@ async function loadReturnAssignees() {
 async function loadReturnTaskLines(tasks = []) {
   const ids = [...new Set(tasks.flatMap(getReturnTaskLineIds))];
   state.returnTaskLines = new Map();
+  state.returnTaskOrderEvents = [];
   if (!ids.length) return;
   const { data, error } = await supabase
     .from("ebay_order_lines")
@@ -1635,6 +1774,13 @@ async function loadReturnTaskLines(tasks = []) {
   (data || []).map(normalizeLine).forEach((line) => {
     state.returnTaskLines.set(line.id, line);
   });
+
+  try {
+    state.returnTaskOrderEvents = await loadOrderTaskEventsForLines(ids);
+  } catch (taskEventError) {
+    console.warn("Failed to load return video receipt task events:", taskEventError);
+    state.returnTaskOrderEvents = [];
+  }
 }
 
 async function loadReturnQueue() {
@@ -2242,6 +2388,7 @@ function renderReturnQueue() {
               </span>
             </div>
             <small>${escapeHtml(getReturnTaskLineSummary(task))}</small>
+            ${renderReturnTaskVideoReceiptPanel(task)}
             ${renderReturnComplaintDetails(task)}
             ${renderReturnMessageLog(task)}
           </div>
@@ -2288,6 +2435,10 @@ function renderReturnQueue() {
   }).join("");
 
   bindReturnQueueActions();
+  bindReturnVideoReceiptLinks(list);
+  hydrateHistoryVideoReceiptThumbnails().catch((error) => {
+    console.warn("Could not load return queue video receipt screenshots:", error);
+  });
 }
 
 function toDateTimeLocalValue(value) {
@@ -3038,6 +3189,111 @@ function renderHistoryLineVideoReceiptPhotos(line = {}, events = []) {
       </div>
     </div>
   `;
+}
+
+function getReturnVideoReceiptEventsForLine(line = {}) {
+  const lineId = line?.id || "";
+  if (!lineId) return [];
+  const byId = new Map();
+  [...state.returnTaskOrderEvents, ...state.relatedOrderTaskEvents].forEach((event) => {
+    const eventLineIds = getEventLineIds(event);
+    if (!eventLineIds.includes(lineId)) return;
+    const key = event.id || `${event.task_id || "task"}:${event.created_at || ""}`;
+    if (!byId.has(key)) byId.set(key, event);
+  });
+  return [...byId.values()];
+}
+
+function renderReturnLineVideoReceiptPanel(line = {}, options = {}) {
+  const receiptLink = getReturnLineVideoReceiptLink(line);
+  const photos = getHistoryLineVideoReceiptPhotos(line, getReturnVideoReceiptEventsForLine(line));
+  const hasLink = Boolean(receiptLink.url || receiptLink.orderNumber);
+  const compact = options.compact === true;
+  const showEmpty = options.showEmpty !== false;
+  if (!hasLink && !photos.length && !showEmpty) return "";
+
+  const title = compact
+    ? `${line.item_number || "Returned item"} video receipt`
+    : "Video receipt for inspection";
+  return `
+    <div class="return-video-receipt-panel ${compact ? "is-compact" : ""}">
+      <div class="return-video-receipt-head">
+        <div>
+          <span class="eyebrow">Video Receipt</span>
+          <strong>${escapeHtml(title)}</strong>
+          ${!compact ? `<small>${escapeHtml(line.item_title || line.item_number || "Returned item")}</small>` : ""}
+        </div>
+        ${hasLink ? `
+          <a
+            class="secondary-btn return-video-receipt-link"
+            href="${escapeHtml(receiptLink.url || "#")}"
+            target="_blank"
+            rel="noopener"
+            title="${escapeHtml(receiptLink.title)}"
+            data-return-video-receipt-link="1"
+            data-direct="${receiptLink.direct ? "1" : "0"}"
+            data-order-number="${escapeHtml(receiptLink.orderNumber)}"
+            data-order-details-url="${escapeHtml(receiptLink.orderDetailsUrl)}"
+            data-item-number="${escapeHtml(receiptLink.itemNumber)}"
+            data-transaction-id="${escapeHtml(receiptLink.transactionId)}"
+            data-item-title="${escapeHtml(receiptLink.itemTitle)}"
+            data-item-url="${escapeHtml(receiptLink.itemUrl)}"
+          >Open</a>
+        ` : ""}
+      </div>
+      ${photos.length ? `
+        <div class="history-video-receipt-grid">
+          ${photos.map((photo, index) => {
+            const label = photo.label || `Video receipt ${index + 1}`;
+            const meta = getEvidencePhotoViewerMeta(photo);
+            return `
+              <button
+                type="button"
+                class="history-video-receipt-thumb"
+                data-history-video-receipt-photo="1"
+                data-bucket="${escapeHtml(photo.bucket)}"
+                data-path="${escapeHtml(photo.path)}"
+                data-label="${escapeHtml(label)}"
+                data-meta="${escapeHtml(meta)}"
+              >
+                <span class="history-video-receipt-image" data-history-video-receipt-image>Loading...</span>
+                <span>${escapeHtml(label)}</span>
+                <small>${escapeHtml(getEvidencePhotoAuditText(photo))}</small>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      ` : showEmpty ? `<div class="return-video-receipt-empty">No saved video receipt screenshot yet.</div>` : ""}
+    </div>
+  `;
+}
+
+function renderReturnTaskVideoReceiptPanel(task = {}) {
+  const panels = getReturnTaskLines(task)
+    .map((line) => renderReturnLineVideoReceiptPanel(line, { compact: true, showEmpty: false }))
+    .filter(Boolean);
+  if (!panels.length) return "";
+  return `<div class="return-task-video-receipts">${panels.join("")}</div>`;
+}
+
+function bindReturnVideoReceiptLinks(root = document) {
+  root.querySelectorAll("[data-return-video-receipt-link]").forEach((link) => {
+    if (link.dataset.bound === "true") return;
+    link.dataset.bound = "true";
+    link.addEventListener("click", (event) => {
+      const receiptLink = {
+        url: link.getAttribute("href") || "",
+        orderNumber: link.dataset.orderNumber || "",
+        orderDetailsUrl: link.dataset.orderDetailsUrl || "",
+        itemNumber: link.dataset.itemNumber || "",
+        transactionId: link.dataset.transactionId || "",
+        itemTitle: link.dataset.itemTitle || "",
+        itemUrl: link.dataset.itemUrl || "",
+        direct: link.dataset.direct === "1",
+      };
+      openReturnVideoReceiptLink(event, receiptLink);
+    });
+  });
 }
 
 function renderHistoryList(groups = getVisibleHistoryGroups()) {
@@ -4156,6 +4412,7 @@ function renderReturnLineList() {
             <small>${escapeHtml(orderNumber)} - Qty shipped ${Number(line.fulfilled_quantity || line.quantity || 1).toLocaleString()}${priorReturns.length ? ` - ${priorReturns.length} prior return record${priorReturns.length === 1 ? "" : "s"}` : ""}</small>
           </span>
         </label>
+        ${renderReturnLineVideoReceiptPanel(line)}
         <div class="return-line-fields">
           <label>
             Qty received
@@ -4211,6 +4468,10 @@ function renderReturnLineList() {
         disposition.value = "admin_review";
       }
     });
+  });
+  bindReturnVideoReceiptLinks(list);
+  hydrateHistoryVideoReceiptThumbnails().catch((error) => {
+    console.warn("Could not load return intake video receipt screenshots:", error);
   });
 }
 
