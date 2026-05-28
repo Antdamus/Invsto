@@ -897,33 +897,47 @@
   <!-- Right Drawer -->
   <aside id="drawer" class="drawer hidden" aria-labelledby="drawerTitle" aria-modal="true" role="dialog">
     <header class="drawer-header">
-      <div>
-        <h2 id="drawerTitle">—</h2>
-        <div id="drawerSubtitle" class="drawer-subtitle">—</div>
+      <div class="drawer-person">
+        <span id="drawerAvatar" class="drawer-avatar" aria-hidden="true">--</span>
+        <div>
+          <h2 id="drawerTitle">—</h2>
+          <div id="drawerSubtitle" class="drawer-subtitle">—</div>
+        </div>
       </div>
       <button id="drawerCloseBtn" class="btn ghost" type="button" aria-label="Close">✕</button>
     </header>
 
     <section class="drawer-summary" aria-label="Worker monthly summary">
       <div class="ds-card">
-        <div class="ds-label">Shifts</div>
+        <div id="dsShiftsLabel" class="ds-label">Closed shifts</div>
         <div id="dsShifts" class="ds-value">—</div>
       </div>
       <div class="ds-card">
-        <div class="ds-label">Total Hours</div>
+        <div id="dsHoursLabel" class="ds-label">Closed hours</div>
         <div id="dsHours" class="ds-value">—</div>
       </div>
       <div class="ds-card">
-        <div class="ds-label">Avg / Shift</div>
+        <div id="dsAvgLabel" class="ds-label">Needs review</div>
         <div id="dsAvg" class="ds-value">—</div>
+      </div>
+      <div class="ds-card">
+        <div id="dsOpenLabel" class="ds-label">Open now</div>
+        <div id="dsOpen" class="ds-value">—</div>
       </div>
     </section>
 
     <section class="drawer-controls" aria-label="Approvals & filters">
+      <div class="drawer-audit-copy">
+        <div class="drawer-audit-title">Shift audit</div>
+        <div id="drawerAuditMeta" class="drawer-audit-meta">Review closed shifts before payroll.</div>
+      </div>
       <label class="switch">
         <input id="toggleAnoms" type="checkbox" />
-        <span>Only anomalies</span>
+        <span>Needs review only</span>
       </label>
+      <div class="drawer-control-actions">
+        <button id="manualShiftBtn" class="btn drawer-admin-btn" type="button">Add manual shift</button>
+      </div>
     </section>
 
     <section class="drawer-list" id="drawerList" aria-label="Shift list"></section>
@@ -976,6 +990,62 @@
     <footer class="modal-footer">
       <button id="editCancelBtn" class="btn ghost" type="button">Cancel</button>
       <button id="editSaveBtn" class="btn" type="button">Save</button>
+    </footer>
+  </div>
+
+  <!-- Shift Admin Modal -->
+  <div id="shiftAdminModalBackdrop" class="modal-backdrop hidden" aria-hidden="true"></div>
+  <div id="shiftAdminModal" class="modal hidden shift-admin-modal" role="dialog" aria-modal="true" aria-labelledby="shiftAdminTitle">
+    <header class="modal-header">
+      <div>
+        <h3 id="shiftAdminTitle">Shift action</h3>
+        <div id="shiftAdminSubtitle" class="shift-admin-subtitle">Every change requires an audit reason.</div>
+      </div>
+      <button id="shiftAdminCloseBtn" class="btn ghost" type="button" aria-label="Close">x</button>
+    </header>
+
+    <section class="modal-body">
+      <div class="shift-admin-context">
+        <span>Worker</span>
+        <strong id="shiftAdminWorker">-</strong>
+      </div>
+
+      <div id="shiftAdminWarning" class="shift-admin-warning hidden" role="note"></div>
+
+      <div id="shiftAdminClockInRow" class="form-row">
+        <label>
+          <span>Clock-in</span>
+          <input id="shiftAdminIn" type="datetime-local" />
+        </label>
+        <label>
+          <span>Clock-out</span>
+          <input id="shiftAdminOut" type="datetime-local" />
+        </label>
+      </div>
+
+      <label id="shiftAdminOutOnlyRow" class="hidden">
+        <span>Clock-out</span>
+        <input id="shiftAdminOutOnly" type="datetime-local" />
+      </label>
+
+      <label id="shiftAdminStoreRow">
+        <span>Store</span>
+        <select id="shiftAdminStore"></select>
+      </label>
+
+      <div id="shiftAdminDuration" class="hint">Duration: -</div>
+
+      <label class="reason">
+        <span>Audit reason (required)</span>
+        <textarea id="shiftAdminReason" rows="4" placeholder="Example: Worker forgot to clock out; verified with manager."></textarea>
+      </label>
+
+      <div id="shiftAdminError" class="error hidden" role="alert"></div>
+    </section>
+
+    <footer class="modal-footer">
+      <button id="shiftAdminCancelBtn" class="btn ghost" type="button">Cancel</button>
+      <button id="shiftAdminSaveBtn" class="btn" type="button">Save</button>
     </footer>
   </div>
 

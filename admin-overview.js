@@ -523,5 +523,5 @@ async function bootOverview() {
   await loadSummary();
 }
 
-  return { bootOverview, loadSummary };
+  return { bootOverview, loadSummary, loadLiveNow };
 }

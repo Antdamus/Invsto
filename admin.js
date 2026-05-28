@@ -531,7 +531,7 @@ async function ensureStoresCache(force = false){
 async function loadStoresCache(){
   const { data, error } = await supabaseClient
     .from('store_locations')
-    .select('id, name, lat, lng, radius_m, active, timezone, schedule_enforce')
+    .select('id, name, lat, lng, radius_m, active, timezone, schedule_enforce, paid_break_cap_min, schedule_grace_in_m, schedule_grace_out_m')
     .order('active', { ascending: false })
     .order('name', { ascending: true });
 
@@ -595,7 +595,7 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
 
   // 1) Fetch ALL shifts (closed + OPEN)
   const { data: entries, error } = await supabaseClient.from('time_entries')
-    .select('id, clock_in, clock_out, store_id, photo_in_path, photo_out_path')
+    .select('id, clock_in, clock_out, store_id, device_info, note, created_at, schedule_note, photo_in_path, photo_out_path')
     .eq('employee_id', employeeId)
     .gte('clock_in', start.toISOString())
     .lt('clock_in', end.toISOString())
@@ -605,13 +605,56 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
   const rows = entries || [];
   const ids = rows.map(r => r.id);
 
+  let deletedAuditRows = [];
+  try{
+    const { data: deletions, error: deletionErr } = await supabaseClient
+      .from('time_entry_admin_audits')
+      .select('id, time_entry_id, employee_id, action, edited_at, reason, old_value')
+      .eq('employee_id', employeeId)
+      .eq('action', 'manual_delete')
+      .order('edited_at', { ascending: false });
+
+    if (deletionErr) console.warn('Deleted shift audits unavailable', deletionErr);
+    else deletedAuditRows = deletions || [];
+  }catch(err){
+    console.warn('Deleted shift audits unavailable', err);
+  }
+
   // 2) Anomalies + approvals
   let anomalyById = new Map();
   if (ids.length){
     const { data: anoms } = await supabaseClient.from('v_shift_anomalies')
-      .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at')
+      .select('time_entry_id, anomalies, has_anomaly, approval_status, approval_note, approved_at, expected_start_ts, expected_end_ts')
       .in('time_entry_id', ids);
     anomalyById = new Map((anoms||[]).map(a => [a.time_entry_id, a]));
+  }
+
+  // 2b) Approval records, including manager identity when available.
+  let approvalById = new Map();
+  if (ids.length){
+    const { data: approvals, error: approvalErr } = await supabaseClient
+      .from('shift_approvals')
+      .select('time_entry_id, status, note, approved_by, approved_at')
+      .in('time_entry_id', ids);
+
+    if (approvalErr) throw approvalErr;
+
+    const approverIds = Array.from(new Set((approvals || []).map(a => a.approved_by).filter(Boolean)));
+    let approverNames = new Map();
+
+    if (approverIds.length){
+      const { data: approvers } = await supabaseClient
+        .from('employees')
+        .select('user_id, display_name')
+        .in('user_id', approverIds);
+
+      approverNames = new Map((approvers || []).map(a => [a.user_id, a.display_name]));
+    }
+
+    approvalById = new Map((approvals || []).map(a => [
+      a.time_entry_id,
+      { ...a, approved_by_name: approverNames.get(a.approved_by) || null }
+    ]));
   }
 
   // 3) Breaks (with photo paths)
@@ -650,20 +693,29 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
     if (r.photo_out_path) outUrl = await signPath(r.photo_out_path);
 
     const a = anomalyById.get(r.id) || {};
+    const ap = approvalById.get(r.id) || {};
     const rec = {
       id: r.id,
       clock_in: r.clock_in,
       clock_out: r.clock_out,
       duration_ms: durMs,
       store_id: r.store_id || null,
+      device_info: r.device_info || null,
+      note: r.note || null,
+      created_at: r.created_at || null,
+      schedule_note: r.schedule_note || null,
       photo_in_url: inUrl,
       photo_out_url: outUrl,
       // anomalies + approvals
       anomalies: Array.isArray(a.anomalies) ? a.anomalies : [],
       has_anomaly: !!a.has_anomaly,
-      approval_status: a.approval_status || null,
-      approval_note: a.approval_note || null,
-      approved_at: a.approved_at || null,
+      approval_status: ap.status || a.approval_status || null,
+      approval_note: ap.note ?? a.approval_note ?? null,
+      approved_at: ap.approved_at || a.approved_at || null,
+      approved_by: ap.approved_by || null,
+      approved_by_name: ap.approved_by_name || null,
+      expected_start_ts: a.expected_start_ts || null,
+      expected_end_ts: a.expected_end_ts || null,
       // breaks (with signed URLs)
       breaks: bks,                 // [{ id, started_at, ended_at, photo_start_url, photo_end_url, ... }]
       break_count: bks.length,
@@ -672,6 +724,69 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
     };
     map.set(r.id, rec); out.push(rec);
   }
+
+  for (const audit of deletedAuditRows){
+    const oldEntry = audit?.old_value?.time_entry || {};
+    if (!oldEntry?.clock_in) continue;
+
+    const inMs = new Date(oldEntry.clock_in).getTime();
+    if (!Number.isFinite(inMs) || inMs < start.getTime() || inMs >= end.getTime()) continue;
+
+    const outMs = oldEntry.clock_out ? new Date(oldEntry.clock_out).getTime() : inMs;
+    let inUrl = null, outUrl = null;
+    if (oldEntry.photo_in_path) inUrl = await signPath(oldEntry.photo_in_path);
+    if (oldEntry.photo_out_path) outUrl = await signPath(oldEntry.photo_out_path);
+
+    const deletedBreaks = [];
+    for (const b of (Array.isArray(audit.old_value?.breaks) ? audit.old_value.breaks : [])){
+      deletedBreaks.push({
+        ...b,
+        photo_start_url: b.photo_start_path ? await signPath(b.photo_start_path) : null,
+        photo_end_url: b.photo_end_path ? await signPath(b.photo_end_path) : null
+      });
+    }
+    const deletedBreakMs = deletedBreaks.reduce((sum, b) => {
+      const done = b.ended_at ? (new Date(b.ended_at) - new Date(b.started_at)) : 0;
+      return sum + Math.max(0, done);
+    }, 0);
+
+    const deletedRec = {
+      id: oldEntry.id || audit.time_entry_id,
+      clock_in: oldEntry.clock_in,
+      clock_out: oldEntry.clock_out,
+      duration_ms: Math.max(0, outMs - inMs),
+      store_id: oldEntry.store_id || null,
+      device_info: oldEntry.device_info || null,
+      note: oldEntry.note || null,
+      created_at: oldEntry.created_at || null,
+      schedule_note: oldEntry.schedule_note || null,
+      photo_in_url: inUrl,
+      photo_out_url: outUrl,
+      anomalies: [],
+      has_anomaly: false,
+      approval_status: 'deleted',
+      approval_note: audit.reason || null,
+      approved_at: audit.edited_at || null,
+      approved_by: null,
+      approved_by_name: null,
+      expected_start_ts: oldEntry.expected_start_ts || null,
+      expected_end_ts: oldEntry.expected_end_ts || null,
+      breaks: deletedBreaks,
+      break_count: deletedBreaks.length,
+      break_ms: deletedBreakMs,
+      is_open: false,
+      is_deleted: true,
+      deleted_at: audit.edited_at || null,
+      delete_reason: audit.reason || ''
+    };
+
+    if (!map.has(deletedRec.id)){
+      map.set(deletedRec.id, deletedRec);
+      out.push(deletedRec);
+    }
+  }
+
+  out.sort((a, b) => new Date(a.clock_in).getTime() - new Date(b.clock_in).getTime());
   currentShiftsById = map;
   lastDrawerShifts = out;
   return out;
@@ -681,16 +796,74 @@ async function fetchWorkerShifts(employeeId, monthStartStr){
 
 function openDrawer(){ qs('drawer').classList.add('open'); qs('drawer').classList.remove('hidden'); qs('drawerBackdrop').classList.add('show'); qs('drawerBackdrop').classList.remove('hidden'); }
 function closeDrawer(){ qs('drawer').classList.remove('open'); qs('drawerBackdrop').classList.remove('show'); setTimeout(()=>{ qs('drawer').classList.add('hidden'); qs('drawerBackdrop').classList.add('hidden'); },250); }
-function renderDrawerHeader(name,monthStartStr){ qs('drawerTitle').textContent=name||'—'; qs('drawerSubtitle').textContent=monthLabel(monthStartStr); }
-function renderDrawerSummary(shifts){ const n=shifts.length, tot=shifts.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000, avg=n?tot/n:0; qs('dsShifts').textContent=String(n); qs('dsHours').textContent=fmtHours(tot); qs('dsAvg').textContent=fmtHours(avg); }
+
+function initialsFromName(name = ""){
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || 'W') + (parts[1]?.[0] || '')).toUpperCase();
+}
+function setDrawerMetric(valueId, labelId, label, value){
+  const labelEl = qs(labelId);
+  const valueEl = qs(valueId);
+  if (labelEl) labelEl.textContent = label;
+  if (valueEl) valueEl.textContent = value;
+}
+function shiftApprovalState(s = {}){
+  if (s.is_deleted) return 'deleted';
+  if (s.is_open) return 'open';
+  return String(s.approval_status || 'pending').toLowerCase();
+}
+function shiftNeedsReview(s = {}){
+  return !s.is_open && shiftApprovalState(s) === 'pending';
+}
+function renderDrawerHeader(name,monthStartStr){
+  const title = name || '-';
+  qs('drawerTitle').textContent = title;
+  qs('drawerSubtitle').textContent = `${monthLabel(monthStartStr)} / shift audit`;
+  const avatar = qs('drawerAvatar');
+  if (avatar) avatar.textContent = initialsFromName(title);
+}
+function resetDrawerMetrics(value = '...'){
+  setDrawerMetric('dsShifts', 'dsShiftsLabel', 'Closed shifts', value);
+  setDrawerMetric('dsHours', 'dsHoursLabel', 'Closed hours', value);
+  setDrawerMetric('dsAvg', 'dsAvgLabel', 'Needs review', value);
+  setDrawerMetric('dsOpen', 'dsOpenLabel', 'Open now', value);
+  const meta = qs('drawerAuditMeta');
+  if (meta) meta.textContent = 'Review closed shifts before payroll.';
+}
+function renderDrawerSummary(shifts){
+  const rows = Array.isArray(shifts) ? shifts : [];
+  const closed = rows.filter(s => !s.is_open && !s._placeholder && !s.is_deleted);
+  const open = rows.filter(s => s.is_open);
+  const deleted = rows.filter(s => s.is_deleted);
+  const review = closed.filter(shiftNeedsReview);
+  const waived = closed.filter(s => shiftApprovalState(s) === 'waived');
+  const closedHours = closed.reduce((a,s)=>a+(s.duration_ms||0),0)/3600000;
+  const openMs = open.reduce((a,s)=>a+(s.duration_ms||0),0);
+
+  setDrawerMetric('dsShifts', 'dsShiftsLabel', 'Closed shifts', String(closed.length));
+  setDrawerMetric('dsHours', 'dsHoursLabel', 'Closed hours', fmtHours(closedHours));
+  setDrawerMetric('dsAvg', 'dsAvgLabel', 'Needs review', String(review.length));
+  setDrawerMetric('dsOpen', 'dsOpenLabel', 'Open now', open.length ? `${open.length} / ${fmtDurationHM(openMs)}` : '0');
+
+  const meta = qs('drawerAuditMeta');
+  if (meta) {
+    meta.textContent = [
+      `${closed.length} closed`,
+      `${review.length} pending`,
+      `${waived.length} waived`,
+      `${open.length} open`,
+      `${deleted.length} deleted audit`
+    ].join(' / ');
+  }
+}
 
 function renderDrawerList(shifts){
   const host = qs('drawerList');
   host.innerHTML = '';
 
-  const src = drawerOnlyAnoms ? shifts.filter(s => s.has_anomaly) : shifts;
+  const src = drawerOnlyAnoms ? shifts.filter(shiftNeedsReview) : shifts;
   if (!src.length){
-    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No anomalies in this month.' : 'No shifts in this month.'}</div>`;
+    host.innerHTML = `<div class="drawer-empty">${drawerOnlyAnoms ? 'No shifts need review.' : 'No shifts in this month.'}</div>`;
     return;
   }
 
@@ -700,10 +873,13 @@ function renderDrawerList(shifts){
   };
 
   const statusBadgeHTML = (s) => {
-    if (s.is_open) return `<span class="badge warn">OPEN</span>`;
-    const st = (s.approval_status || 'pending').toLowerCase();
+    const st = shiftApprovalState(s);
+    if (st === 'open') return `<span class="badge warn">OPEN</span>`;
+    if (st === 'deleted') return `<span class="badge locked">DELETED</span>`;
     if (st === 'approved') return `<span class="badge open">APPROVED</span>`;
-    if (st === 'waived')   return `<span class="badge warn">WAIVED</span>`;
+    if (st === 'waived') return `<span class="badge warn">WAIVED</span>`;
+    if (st === 'scheduled') return `<span class="badge">SCHEDULED</span>`;
+    if (st === 'missed') return `<span class="badge locked">MISSED</span>`;
     return `<span class="badge">PENDING</span>`;
   };
 
@@ -735,32 +911,109 @@ function renderDrawerList(shifts){
     return d.toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' });
   };
 
-  for (const s of src){
-    const inStr  = fmtLocal(s.clock_in);
-    const outStr = s.is_open ? 'OPEN' : fmtLocal(s.clock_out);
+  const timeOnly = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '-';
+
+  const expectedWindowText = (s) => {
+    if (!s.expected_start_ts || !s.expected_end_ts) return '-';
+    return `${timeOnly(s.expected_start_ts)} - ${timeOnly(s.expected_end_ts)}`;
+  };
+
+  const adminNoteHTML = (s) => {
+    const bits = [];
+    if (s.is_deleted) bits.push(`Deleted by admin: ${(s.delete_reason || 'reason recorded in audit').trim()}`);
+    if (String(s.device_info || '') === 'admin_manual_entry') bits.push('Manual entry');
+    if ((s.note || '').trim()) bits.push(s.note.trim());
+    if ((s.schedule_note || '').trim()) bits.push(s.schedule_note.trim());
+    if (!bits.length) return '';
+    return `
+      <div class="shift-admin-note">
+        <div class="shift-admin-note-label">Audit note</div>
+        <div class="shift-admin-note-text">${escapeHtml(bits.join(' / '))}</div>
+      </div>
+    `;
+  };
+
+  const groupPriority = (s) => {
+    const state = shiftApprovalState(s);
+    if (shiftNeedsReview(s) || state === 'missed') return 0;
+    if (state === 'open') return 1;
+    if (state === 'waived') return 2;
+    if (state === 'scheduled') return 3;
+    if (state === 'deleted') return 5;
+    return 4;
+  };
+
+  const groupTitle = (s) => {
+    const state = shiftApprovalState(s);
+    if (shiftNeedsReview(s) || state === 'missed') return 'Needs review';
+    if (state === 'open') return 'Open now';
+    if (state === 'waived') return 'Waived exceptions';
+    if (state === 'scheduled') return 'Scheduled';
+    if (state === 'deleted') return 'Deleted audit';
+    return 'Reviewed';
+  };
+
+  const ordered = src.slice().sort((a, b) => {
+    const p = groupPriority(a) - groupPriority(b);
+    if (p) return p;
+    return new Date(a.clock_in).getTime() - new Date(b.clock_in).getTime();
+  });
+
+  let activeGroup = '';
+
+  for (const s of ordered){
+    const sectionTitle = groupTitle(s);
+    if (sectionTitle !== activeGroup) {
+      activeGroup = sectionTitle;
+      const group = document.createElement('div');
+      group.className = 'shift-group-heading';
+      group.textContent = sectionTitle;
+      host.appendChild(group);
+    }
+
+    const inStr  = timeOnly(s.clock_in);
+    const outStr = s.is_open ? 'OPEN' : timeOnly(s.clock_out);
     const durStr = fmtDurationHM(s.duration_ms);
 
-    const breaksText = s.break_count ? `${s.break_count} break(s) • ${fmtDurationHM(s.break_ms)}` : 'No breaks';
+    const auditBreaksText = s.break_count ? `${s.break_count} break(s) / ${fmtDurationHM(s.break_ms)}` : 'No breaks';
     const storeLabel = storeName(s.store_id);
     const dirHref = s.store_id ? (storeDirectionsHref(s.store_id) || '#') : '#';
+    const store = s.store_id && typeof storesById?.get === 'function' ? storesById.get(s.store_id) : null;
+    const breakCapText = store?.paid_break_cap_min != null ? `${store.paid_break_cap_min}m cap` : '-';
+    const reviewText = (() => {
+      const state = shiftApprovalState(s);
+      if (state === 'open') return 'Open shift';
+      if (state === 'deleted') return `Deleted${s.deleted_at ? ` / ${fmtLocal(s.deleted_at)}` : ''}`;
+      if (state === 'approved') return `Approved${s.approved_by_name ? ` by ${s.approved_by_name}` : ''}${s.approved_at ? ` / ${fmtLocal(s.approved_at)}` : ''}`;
+      if (state === 'waived') return `Waived${s.approved_by_name ? ` by ${s.approved_by_name}` : ''}${s.approved_at ? ` / ${fmtLocal(s.approved_at)}` : ''}`;
+      if (state === 'scheduled') return 'Scheduled';
+      if (state === 'missed') return 'No clock-in found';
+      return 'Pending manager review';
+    })();
 
-    // Actions: hide approve/waive for OPEN shifts
-// Actions: hide approve/waive for OPEN shifts
-const showApprovalBtns = !s.is_open;
+    const st = shiftApprovalState(s);
+    const approvalBtns = (!s.is_open && !s.is_deleted) ? `
+      ${st === 'pending' ? `
+        <button class="btn small primary-action" type="button" data-approve-id="${s.id}">Approve</button>
+        <button class="btn small ghost" type="button" data-waive-id="${s.id}">Waive with note</button>
+      ` : ``}
 
-// Only allow Approve/Waive when still pending
-const st = String(s.approval_status || 'pending').toLowerCase();
+      ${(st === 'approved' || st === 'waived') ? `
+        <button class="btn small ghost" type="button" data-unapprove-id="${s.id}">Return to review</button>
+      ` : ``}
+    ` : ``;
 
-const approvalBtns = showApprovalBtns ? `
-  ${st === 'pending' ? `
-    <button class="btn small" type="button" data-approve-id="${s.id}">Approve</button>
-    <button class="btn small ghost" type="button" data-waive-id="${s.id}">Waive</button>
-  ` : ``}
+    const editBtn = s.is_deleted
+      ? ``
+      : s.is_open
+      ? `<button class="btn small ghost" type="button" disabled title="Open shifts can be adjusted after clock-out">Adjust time</button>`
+      : `<button class="btn small ghost" type="button" data-edit-id="${s.id}">Adjust time</button>`;
 
-  ${(st === 'approved' || st === 'waived') ? `
-    <button class="btn small ghost" type="button" data-unapprove-id="${s.id}">Remove</button>
-  ` : ``}
-` : '';
+    const closeBtn = (s.is_open && !s.is_deleted)
+      ? `<button class="btn small primary-action" type="button" data-close-id="${s.id}">Close shift</button>`
+      : ``;
+
+    const deleteBtn = s.is_deleted ? `` : `<button class="btn small ghost danger-action" type="button" data-delete-id="${s.id}">Delete</button>`;
 
 
     // Shift-level photo strip (clock in/out)
@@ -807,6 +1060,11 @@ const approvalBtns = showApprovalBtns ? `
 
     const card = document.createElement('div');
     card.className = 'shift';
+    card.dataset.shiftId = s.id || '';
+    card.dataset.employeeId = s._employee_id || '';
+    card.dataset.monthStart = s._month_start || '';
+    card.dataset.displayName = s._display_name || '';
+    card.dataset.placeholder = s._placeholder ? '1' : '0';
     card.innerHTML = `
       <div class="shift-top">
         <div class="shift-title">
@@ -816,13 +1074,13 @@ const approvalBtns = showApprovalBtns ? `
 
         <div class="shift-status">
           ${statusBadgeHTML(s)}
-          ${(() => {
-            const st = String(s.approval_status || 'pending').toLowerCase();
-            const unresolved = s.has_anomaly && (st === 'pending');
-            return unresolved
+          ${s.is_open
+            ? `<span class="badge">In progress</span>`
+            : s.is_deleted
+              ? `<span class="badge locked">Audit only</span>`
+            : shiftNeedsReview(s)
               ? `<span class="badge warn">Needs review</span>`
-              : `<span class="badge">OK</span>`;
-          })()}
+              : `<span class="badge">Audit ready</span>`}
 
         </div>
       </div>
@@ -835,12 +1093,27 @@ const approvalBtns = showApprovalBtns ? `
 
         <div class="shift-meta-line">
           <span class="shift-meta-label">Breaks</span>
-          <span class="shift-meta-value">${breaksText}</span>
+          <span class="shift-meta-value">${auditBreaksText}</span>
         </div>
 
         <div class="shift-meta-line shift-meta-store">
           <span class="shift-meta-label">Store</span>
           <span class="shift-meta-value">${escapeHtml(storeLabel)}</span>
+        </div>
+
+        <div class="shift-meta-line">
+          <span class="shift-meta-label">Expected</span>
+          <span class="shift-meta-value">${expectedWindowText(s)}</span>
+        </div>
+
+        <div class="shift-meta-line">
+          <span class="shift-meta-label">Break policy</span>
+          <span class="shift-meta-value">${breakCapText}</span>
+        </div>
+
+        <div class="shift-meta-line shift-meta-review">
+          <span class="shift-meta-label">Review</span>
+          <span class="shift-meta-value">${escapeHtml(reviewText)}</span>
         </div>
       </div>
 
@@ -856,12 +1129,15 @@ const approvalBtns = showApprovalBtns ? `
 
       ${waiveNoteBlock}
 
+      ${adminNoteHTML(s)}
+
       ${shiftPhotos ? `<div class="shift-photos">${shiftPhotos}</div>` : ``}
 
       <div class="shift-actions">
-        <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit</button>
-        <button class="btn small ghost" type="button" data-edit-id="${s.id}">Edit</button>
+        <button class="btn small ghost" type="button" data-audit-id="${s.id}">Audit trail</button>
+        ${closeBtn || editBtn}
         ${approvalBtns}
+        ${deleteBtn}
       </div>
 
       <div class="audit hidden" id="audit-${s.id}"></div>
@@ -891,28 +1167,87 @@ async function toggleAudit(shiftId){
   try{ const audits = auditCache.get(shiftId) || await fetchAuditsForShift(shiftId); auditCache.set(shiftId,audits); renderAuditList(c,audits,shiftId); }
   catch(err){ console.error(err); c.innerHTML=`<div class="drawer-empty">Error loading audit trail.</div>`; }
 }
+function renderReviewAuditRecord(shiftId){
+  const s = currentShiftsById.get(shiftId);
+  if (!s) return '';
+
+  const state = shiftApprovalState(s);
+  const statusLabel = state === 'pending'
+    ? 'Pending manager review'
+    : state === 'open'
+      ? 'Open shift'
+      : state.toUpperCase();
+  const reviewedBy = s.approved_by_name || 'Not recorded';
+  const reviewedAt = s.approved_at ? fmtLocal(s.approved_at) : '-';
+  const note = s.approval_note ? `<div class="audit-note">${escapeHtml(s.approval_note)}</div>` : '';
+
+  return `
+    <div class="audit-review-record">
+      <div class="audit-review-top">
+        <span class="badge ${state === 'approved' ? 'open' : state === 'waived' ? 'warn' : ''}">${escapeHtml(statusLabel)}</span>
+        <span class="audit-review-time">${escapeHtml(reviewedAt)}</span>
+      </div>
+      <div class="audit-review-grid">
+        <div>
+          <span>Reviewed by</span>
+          <strong>${escapeHtml(reviewedBy)}</strong>
+        </div>
+        <div>
+          <span>Clock window</span>
+          <strong>${timeRangeForAudit(s)}</strong>
+        </div>
+      </div>
+      ${note}
+    </div>
+  `;
+}
+
+function timeRangeForAudit(s){
+  const start = s?.clock_in ? fmtLocal(s.clock_in) : '-';
+  const end = s?.clock_out ? fmtLocal(s.clock_out) : 'OPEN';
+  return `${escapeHtml(start)} / ${escapeHtml(end)}`;
+}
+
 function renderAuditList(container, audits, shiftId){
-  if (!audits.length){ container.innerHTML=`<div class="drawer-empty">No adjustments yet.</div>`; return; }
-  const parts=audits.map(a=>{
-    const who=a.editor_name||'(unknown)', when=fmtLocal(a.edited_at), why=a.reason||'';
-    const fields=Array.isArray(a.fields_changed)?a.fields_changed:[]; const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out, newIn=a.new_value?.clock_in, newOut=a.new_value?.clock_out;
-    const diffs=[]; if(fields.includes('clock_in')) diffs.push(`<div>clock_in: <code>${fmtLocal(oldIn)}</code> → <code>${fmtLocal(newIn)}</code></div>`); if(fields.includes('clock_out')) diffs.push(`<div>clock_out: <code>${fmtLocal(oldOut)}</code> → <code>${fmtLocal(newOut)}</code></div>`);
+  const reviewRecord = renderReviewAuditRecord(shiftId);
+  const rows = Array.isArray(audits) ? audits : [];
+
+  const adjustmentHtml = rows.length ? rows.map(a=>{
+    const who=escapeHtml(a.editor_name||'(unknown)');
+    const when=escapeHtml(fmtLocal(a.edited_at));
+    const why=escapeHtml(a.reason||'');
+    const fields=Array.isArray(a.fields_changed)?a.fields_changed:[];
+    const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out, newIn=a.new_value?.clock_in, newOut=a.new_value?.clock_out;
+    const diffs=[];
+    if(fields.includes('clock_in')) diffs.push(`<div>Clock-in: <code>${escapeHtml(fmtLocal(oldIn))}</code> / <code>${escapeHtml(fmtLocal(newIn))}</code></div>`);
+    if(fields.includes('clock_out')) diffs.push(`<div>Clock-out: <code>${escapeHtml(fmtLocal(oldOut))}</code> / <code>${escapeHtml(fmtLocal(newOut))}</code></div>`);
+    const canRevert = !!(oldIn && oldOut && (fields.includes('clock_in') || fields.includes('clock_out')));
+    const actionLabel = fields.find(f => String(f || '').startsWith('manual_')) || 'time_edit';
     return `
-      <div class="ai" data-adjustment-id="${a.id}">
+      <div class="ai" data-adjustment-id="${escapeHtml(a.id)}">
         <div class="row ai-hd">
           <div class="who">${who}</div>
-          <div class="when">• ${when}</div>
-          <div class="acts" style="margin-left:auto;">
-            <button class="btn small" data-revert="${a.id}" title="Revert to OLD values">Revert</button>
-          </div>
+          <div class="audit-action-label">${escapeHtml(actionLabel.replaceAll('_', ' '))}</div>
+          <div class="when">${when}</div>
+          ${canRevert ? `<div class="acts"><button class="btn small" data-revert="${escapeHtml(a.id)}" title="Revert to previous values">Revert</button></div>` : ``}
         </div>
         <div class="why">${why}</div>
         ${diffs.length?`<div class="chg">${diffs.join('')}</div>`:''}
       </div>`;
-  });
-  container.innerHTML = `<div class="ai-list">${parts.join('')}</div>`;
+  }).join('') : `<div class="drawer-empty audit-empty">No time edits recorded for this shift.</div>`;
+
+  container.innerHTML = `
+    <div class="audit-panel">
+      <div class="audit-panel-title">Review record</div>
+      ${reviewRecord}
+      <div class="audit-panel-title">Time adjustment trail</div>
+      <div class="ai-list">${adjustmentHtml}</div>
+    </div>
+  `;
+
   container.querySelectorAll('button[data-revert]').forEach(btn=>btn.addEventListener('click',()=>onRevertClick(shiftId, btn.getAttribute('data-revert'))));
 }
+
 async function onRevertClick(shiftId, adjustmentId){
   const audits=auditCache.get(shiftId)||[]; const a=audits.find(x=>x.id===adjustmentId); if(!a) return;
   const oldIn=a.old_value?.clock_in, oldOut=a.old_value?.clock_out; if(!oldIn||!oldOut){ showToast('Cannot revert: missing old values','err'); return; }
@@ -923,7 +1258,7 @@ async function onRevertClick(shiftId, adjustmentId){
     showToast('Shift reverted','ok'); auditCache.delete(shiftId);
     const { employeeId, monthStart } = drawerContext;
     const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts);
-    await toggleAudit(shiftId); await loadSummary();
+    await toggleAudit(shiftId); await refreshOverviewSummary();
   }catch(err){ console.error(err); showToast(err?.message||'Failed to revert','err'); }
 }
 let editingShiftId=null, saving=false;
@@ -997,7 +1332,7 @@ async function saveWaiveNote(){
       const shifts = await fetchWorkerShifts(employeeId, monthStart);
       renderDrawerSummary(shifts);
       renderDrawerList(shifts);
-      await loadSummary();
+      await refreshOverviewSummary();
     }
   }catch(err){
     console.error(err);
@@ -1018,7 +1353,7 @@ async function saveEdit(){
   if(saving||!editingShiftId) return;
   const iv=qs('editIn').value, ov=qs('editOut').value, reason=(qs('editReason').value||'').trim();
   if(!iv||!ov) return setEditError('Both times are required.');
-  const s=new Date(iv), e=new Date(ov); if(isNaN(s)||isNaN(e)) return setEditError('Invalid date/time values.'); if(e<s) return setEditError('Clock-out must be after clock-in.'); if(reason.length<3) return setEditError('Reason is required (min 3 characters).');
+  const s=new Date(iv), e=new Date(ov); if(isNaN(s)||isNaN(e)) return setEditError('Invalid date/time values.'); if(e<=s) return setEditError('Clock-out must be after clock-in.'); if(reason.length<3) return setEditError('Reason is required (min 3 characters).');
   setEditError(''); saving=true; qs('editSaveBtn').disabled=true; qs('editSaveBtn').textContent='Saving…';
   try{
     const inISO=localInputToOffsetISO(iv), outISO=localInputToOffsetISO(ov);
@@ -1027,7 +1362,7 @@ async function saveEdit(){
     showToast('Shift updated','ok'); closeEditModal();
     auditCache.delete(editingShiftId);
     const { employeeId, monthStart } = drawerContext;
-    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); await loadSummary();
+    const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); await refreshOverviewSummary();
   }catch(err){ console.error(err); setEditError(err?.message||'Failed to save changes'); }
   finally{ saving=false; qs('editSaveBtn').disabled=false; qs('editSaveBtn').textContent='Save'; }
 }
@@ -1040,19 +1375,300 @@ function wireEditModal(){
   qs('editSaveBtn').addEventListener('click', saveEdit);
   document.addEventListener('keydown',(e)=>{ const open=!qs('editModal').classList.contains('hidden'); if(!open) return; if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){ e.preventDefault(); const b=qs('editSaveBtn'); if(b&&!b.disabled) b.click(); }});
 }
-async function onRowClick(e){
-  const tr=e.target.closest('tr.summary-row'); if(!tr) return;
-  const employeeId=tr.dataset.employeeId, monthStart=tr.dataset.monthStart, displayName=tr.dataset.displayName||'—';
-  drawerContext={ employeeId, monthStart, displayName };
-  renderDrawerHeader(displayName, monthStart);
-  qs('dsShifts').textContent=qs('dsHours').textContent=qs('dsAvg').textContent='…';
-  qs('drawerList').innerHTML=`<div class="drawer-empty">Loading shifts…</div>`; openDrawer();
-  try{ const shifts=await fetchWorkerShifts(employeeId, monthStart); renderDrawerSummary(shifts); renderDrawerList(shifts); }
-  catch(err){ console.error(err); qs('drawerList').innerHTML=`<div class="drawer-empty">Error loading shifts.</div>`; }
+
+let shiftAdminMode = null;
+let shiftAdminShiftId = null;
+let shiftAdminSaving = false;
+
+function shiftAdminEl(id){
+  return document.getElementById(id);
 }
 
+function setShiftAdminError(msg){
+  const el = shiftAdminEl('shiftAdminError');
+  if (!el) return;
+  el.textContent = msg || '';
+  show(el, !!msg);
+}
 
+function setShiftAdminVisible(id, visible){
+  const el = shiftAdminEl(id);
+  if (el) show(el, visible);
+}
 
+function dateToLocalInput(d){
+  return toDatetimeLocalValue(d instanceof Date ? d.toISOString() : d);
+}
+
+function defaultManualShiftWindow(){
+  const now = new Date();
+  const monthStart = drawerContext?.monthStart
+    ? new Date(`${drawerContext.monthStart}T00:00:00`)
+    : getMonthStart(now);
+
+  const start = new Date(now);
+  if (start.getFullYear() !== monthStart.getFullYear() || start.getMonth() !== monthStart.getMonth()){
+    start.setFullYear(monthStart.getFullYear(), monthStart.getMonth(), 1);
+    start.setHours(9, 0, 0, 0);
+  } else {
+    start.setSeconds(0, 0);
+  }
+
+  const end = new Date(start);
+  end.setHours(end.getHours() + 4);
+  return { start, end };
+}
+
+function updateShiftAdminDuration(){
+  const el = shiftAdminEl('shiftAdminDuration');
+  if (!el) return;
+
+  if (shiftAdminMode === 'delete'){
+    el.textContent = 'A permanent audit snapshot will be saved before this row is deleted.';
+    return;
+  }
+
+  let startVal = shiftAdminEl('shiftAdminIn')?.value || '';
+  let endVal = shiftAdminEl('shiftAdminOut')?.value || '';
+
+  if (shiftAdminMode === 'close'){
+    const shift = currentShiftsById.get(shiftAdminShiftId);
+    startVal = shift?.clock_in || '';
+    endVal = shiftAdminEl('shiftAdminOutOnly')?.value || '';
+  }
+
+  const start = startVal ? new Date(startVal) : null;
+  const end = endVal ? new Date(endVal) : null;
+  const diff = start && end ? (end.getTime() - start.getTime()) : NaN;
+  el.textContent = Number.isFinite(diff) && diff > 0 ? `Duration: ${fmtDurationHM(diff)}` : 'Duration: -';
+}
+
+async function openShiftAdminModal(mode, shift = null){
+  if (!drawerContext?.employeeId){
+    showToast('Open a worker first, then add a manual shift.', 'err');
+    return;
+  }
+
+  await ensureStoresCache().catch(console.warn);
+
+  shiftAdminMode = mode;
+  shiftAdminShiftId = shift?.id || null;
+  shiftAdminSaving = false;
+  setShiftAdminError('');
+
+  const workerName = drawerContext.displayName || qs('drawerTitle')?.textContent || 'Worker';
+  const monthText = drawerContext.monthStart ? monthLabel(drawerContext.monthStart) : '';
+  const workerEl = shiftAdminEl('shiftAdminWorker');
+  if (workerEl) workerEl.textContent = monthText ? `${workerName} / ${monthText}` : workerName;
+
+  const title = shiftAdminEl('shiftAdminTitle');
+  const subtitle = shiftAdminEl('shiftAdminSubtitle');
+  const warning = shiftAdminEl('shiftAdminWarning');
+  const saveBtn = shiftAdminEl('shiftAdminSaveBtn');
+  const reason = shiftAdminEl('shiftAdminReason');
+  const store = shiftAdminEl('shiftAdminStore');
+
+  if (reason) reason.value = '';
+  if (store) store.innerHTML = storeOptionsHTML(shift?.store_id || null);
+
+  setShiftAdminVisible('shiftAdminClockInRow', mode === 'manual');
+  setShiftAdminVisible('shiftAdminOutOnlyRow', mode === 'close');
+  setShiftAdminVisible('shiftAdminStoreRow', mode === 'manual');
+  setShiftAdminVisible('shiftAdminWarning', mode === 'delete');
+
+  if (mode === 'manual'){
+    const defaults = defaultManualShiftWindow();
+    shiftAdminEl('shiftAdminIn').value = dateToLocalInput(defaults.start);
+    shiftAdminEl('shiftAdminOut').value = dateToLocalInput(defaults.end);
+    if (title) title.textContent = 'Add manual shift';
+    if (subtitle) subtitle.textContent = 'Creates a closed time entry and records who made it, when, and why.';
+    if (saveBtn) saveBtn.textContent = 'Create shift';
+  }
+
+  if (mode === 'close'){
+    const out = new Date();
+    out.setSeconds(0, 0);
+    shiftAdminEl('shiftAdminOutOnly').value = dateToLocalInput(out);
+    if (title) title.textContent = 'Close open shift';
+    if (subtitle) subtitle.textContent = 'Sets the clock-out time, clears prior review, and writes an audit entry.';
+    if (saveBtn) saveBtn.textContent = 'Close shift';
+  }
+
+  if (mode === 'delete'){
+    const range = shift ? `${fmtLocal(shift.clock_in)} to ${shift.clock_out ? fmtLocal(shift.clock_out) : 'OPEN'}` : 'this shift';
+    if (title) title.textContent = 'Delete shift';
+    if (subtitle) subtitle.textContent = 'Use only when the time entry should not exist.';
+    if (warning) warning.textContent = `This removes ${range}. The old shift, breaks, review status, and adjustment trail are kept in the audit log.`;
+    if (saveBtn) saveBtn.textContent = 'Delete shift';
+  }
+
+  updateShiftAdminDuration();
+
+  shiftAdminEl('shiftAdminModal')?.classList.add('open');
+  shiftAdminEl('shiftAdminModal')?.classList.remove('hidden');
+  shiftAdminEl('shiftAdminModalBackdrop')?.classList.add('show');
+  shiftAdminEl('shiftAdminModalBackdrop')?.classList.remove('hidden');
+
+  const focusTarget = mode === 'manual'
+    ? shiftAdminEl('shiftAdminIn')
+    : mode === 'close'
+      ? shiftAdminEl('shiftAdminOutOnly')
+      : reason;
+  setTimeout(()=>focusTarget?.focus(), 0);
+}
+
+function closeShiftAdminModal(){
+  shiftAdminMode = null;
+  shiftAdminShiftId = null;
+  shiftAdminSaving = false;
+  shiftAdminEl('shiftAdminModal')?.classList.remove('open');
+  shiftAdminEl('shiftAdminModalBackdrop')?.classList.remove('show');
+  setTimeout(()=>{
+    shiftAdminEl('shiftAdminModal')?.classList.add('hidden');
+    shiftAdminEl('shiftAdminModalBackdrop')?.classList.add('hidden');
+  }, 180);
+}
+
+async function refreshOverviewLiveNow(){
+  const api = overviewApi || window.overviewApi;
+  if (typeof api?.loadLiveNow === 'function') await api.loadLiveNow();
+}
+
+async function refreshOverviewSurfaces(){
+  await refreshOverviewSummary();
+  await refreshOverviewLiveNow();
+}
+
+async function refreshDrawerAfterAdminShiftAction(reopenAuditId = null){
+  if (drawerContext?.employeeId && drawerContext?.monthStart){
+    const shifts = await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+    renderDrawerSummary(shifts);
+    renderDrawerList(shifts);
+  }
+
+  if (reopenAuditId && currentShiftsById.has(reopenAuditId)){
+    auditCache.delete(reopenAuditId);
+    await toggleAudit(reopenAuditId);
+  }
+
+  await refreshOverviewSurfaces();
+}
+
+async function saveShiftAdminAction(){
+  if (shiftAdminSaving || !shiftAdminMode) return;
+
+  const reason = (shiftAdminEl('shiftAdminReason')?.value || '').trim();
+  if (reason.length < 3){
+    setShiftAdminError('Audit reason is required (minimum 3 characters).');
+    return;
+  }
+
+  const saveBtn = shiftAdminEl('shiftAdminSaveBtn');
+  shiftAdminSaving = true;
+  if (saveBtn){
+    saveBtn.disabled = true;
+    saveBtn.textContent = shiftAdminMode === 'delete' ? 'Deleting...' : 'Saving...';
+  }
+
+  try{
+    let changedShiftId = shiftAdminShiftId;
+
+    if (shiftAdminMode === 'manual'){
+      const inValue = shiftAdminEl('shiftAdminIn')?.value || '';
+      const outValue = shiftAdminEl('shiftAdminOut')?.value || '';
+      const inDate = new Date(inValue);
+      const outDate = new Date(outValue);
+      if (!inValue || !outValue || Number.isNaN(inDate.getTime()) || Number.isNaN(outDate.getTime())){
+        throw new Error('Clock-in and clock-out are required.');
+      }
+      if (outDate <= inDate) throw new Error('Clock-out must be after clock-in.');
+
+      const { data, error } = await supabaseClient.rpc('admin_create_manual_shift', {
+        _employee_id: drawerContext.employeeId,
+        _clock_in: localInputToOffsetISO(inValue),
+        _clock_out: localInputToOffsetISO(outValue),
+        _store_id: shiftAdminEl('shiftAdminStore')?.value || null,
+        _reason: reason
+      });
+      if (error) throw error;
+      changedShiftId = data?.id || null;
+      showToast('Manual shift created', 'ok');
+    }
+
+    if (shiftAdminMode === 'close'){
+      const shift = currentShiftsById.get(shiftAdminShiftId);
+      const outValue = shiftAdminEl('shiftAdminOutOnly')?.value || '';
+      const outDate = new Date(outValue);
+      if (!shift) throw new Error('Shift not found.');
+      if (!outValue || Number.isNaN(outDate.getTime())) throw new Error('Clock-out is required.');
+      if (outDate <= new Date(shift.clock_in)) throw new Error('Clock-out must be after clock-in.');
+
+      const { data, error } = await supabaseClient.rpc('admin_close_open_shift', {
+        _time_entry_id: shiftAdminShiftId,
+        _clock_out: localInputToOffsetISO(outValue),
+        _reason: reason
+      });
+      if (error) throw error;
+      changedShiftId = data?.id || shiftAdminShiftId;
+      auditCache.delete(changedShiftId);
+      showToast('Shift closed', 'ok');
+    }
+
+    if (shiftAdminMode === 'delete'){
+      if (!shiftAdminShiftId) throw new Error('Shift not found.');
+      const { error } = await supabaseClient.rpc('admin_delete_shift_entry', {
+        _time_entry_id: shiftAdminShiftId,
+        _reason: reason
+      });
+      if (error) throw error;
+      auditCache.delete(shiftAdminShiftId);
+      currentShiftsById.delete(shiftAdminShiftId);
+      changedShiftId = null;
+      showToast('Shift deleted with audit snapshot', 'ok');
+    }
+
+    const shouldOpenAudit = shiftAdminMode !== 'delete';
+    closeShiftAdminModal();
+    await refreshDrawerAfterAdminShiftAction(shouldOpenAudit ? changedShiftId : null);
+  }catch(err){
+    console.error(err);
+    setShiftAdminError(err?.message || 'Failed to save shift action.');
+  }finally{
+    shiftAdminSaving = false;
+    if (saveBtn){
+      saveBtn.disabled = false;
+      saveBtn.textContent = shiftAdminMode === 'delete'
+        ? 'Delete shift'
+        : shiftAdminMode === 'manual'
+          ? 'Create shift'
+          : 'Close shift';
+    }
+  }
+}
+
+function wireShiftAdminModal(){
+  shiftAdminEl('shiftAdminCloseBtn')?.addEventListener('click', closeShiftAdminModal);
+  shiftAdminEl('shiftAdminCancelBtn')?.addEventListener('click', closeShiftAdminModal);
+  shiftAdminEl('shiftAdminModalBackdrop')?.addEventListener('click', closeShiftAdminModal);
+  shiftAdminEl('shiftAdminSaveBtn')?.addEventListener('click', saveShiftAdminAction);
+  shiftAdminEl('shiftAdminIn')?.addEventListener('input', updateShiftAdminDuration);
+  shiftAdminEl('shiftAdminOut')?.addEventListener('input', updateShiftAdminDuration);
+  shiftAdminEl('shiftAdminOutOnly')?.addEventListener('input', updateShiftAdminDuration);
+  document.addEventListener('keydown',(e)=>{
+    const open = !shiftAdminEl('shiftAdminModal')?.classList.contains('hidden');
+    if (!open) return;
+    if (e.key === 'Escape'){
+      e.preventDefault();
+      closeShiftAdminModal();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter'){
+      e.preventDefault();
+      const b = shiftAdminEl('shiftAdminSaveBtn');
+      if (b && !b.disabled) b.click();
+    }
+  });
+}
 async function fetchLiveNow(){
   // 1) open shifts
   const { data: entries, error } = await supabaseClient
@@ -1193,6 +1809,16 @@ async function refreshDrawerAfterApprovalChange(changedShiftId) {
   }
 }
 
+async function refreshOverviewSummary(){
+  if (typeof overviewApi?.loadSummary === 'function') {
+    await overviewApi.loadSummary();
+    return;
+  }
+  if (typeof window.overviewApi?.loadSummary === 'function') {
+    await window.overviewApi.loadSummary();
+  }
+}
+
 async function setShiftApprovalStatus(timeEntryId, status, note = null) {
   // status: 'approved' | 'waived' | 'pending'
   if (!timeEntryId) throw new Error("Missing time entry id.");
@@ -1234,8 +1860,7 @@ if (st === 'waived') {
     showToast('Approved ✅', 'ok');
 
     await refreshDrawerAfterApprovalChange(shiftId);
-    if (typeof overviewApi?.loadSummary === 'function') await overviewApi.loadSummary();
-    else await loadSummary?.();
+    await refreshOverviewSummary();
   } catch (err) {
     console.error(err);
     showToast(err?.message || 'Failed to approve shift', 'err');
@@ -1266,8 +1891,7 @@ async function onUnapproveClick(shiftId) {
     showToast('Removed (back to pending)', 'ok');
 
     await refreshDrawerAfterApprovalChange(shiftId);
-    if (typeof overviewApi?.loadSummary === 'function') await overviewApi.loadSummary();
-    else await loadSummary?.();
+    await refreshOverviewSummary();
 } catch (err) {
   console.error(err);
   const msg = err?.message || "Failed to remove approval";
@@ -1283,6 +1907,7 @@ async function onUnapproveClick(shiftId) {
 
 function wireDrawer(){
   ensurePhotoViewer();
+  wireShiftAdminModal();
 
   // Close actions
   const closeBtn = qs('drawerCloseBtn');
@@ -1308,13 +1933,22 @@ function wireDrawer(){
   const backdrop = qs('drawerBackdrop');
   if (backdrop) backdrop.addEventListener('click', closeDrawer);
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeDrawer();
-  });
+  const manualBtn = qs('manualShiftBtn');
+  if (manualBtn) {
+    manualBtn.addEventListener('click', async () => {
+      await openShiftAdminModal('manual');
+    });
+  }
 
-  // Click a summary row to open drawer
-  const tbody = qs('summaryTbody');
-  if (tbody) tbody.addEventListener('click', onRowClick);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const modalOpen =
+        !qs('editModal')?.classList.contains('hidden') ||
+        !qs('waiveModal')?.classList.contains('hidden') ||
+        !shiftAdminEl('shiftAdminModal')?.classList.contains('hidden');
+      if (!modalOpen) closeDrawer();
+    }
+  });
 
   // Delegated actions inside the drawer list
   const list = qs('drawerList');
@@ -1333,10 +1967,11 @@ if (shiftCard?.dataset?.employeeId && shiftCard?.dataset?.monthStart) {
   if (drawerContext.employeeId !== empId || drawerContext.monthStart !== monthStart) {
     drawerContext.employeeId = empId;
     drawerContext.monthStart = monthStart;
+    drawerContext.displayName = shiftCard.dataset.displayName || drawerContext.displayName;
 
     // Rebuild currentShiftsById for THIS employee/month so Edit works
     // (This is required because currentShiftsById is global.)
-    fetchWorkerShifts(empId, monthStart).catch(console.warn);
+    await fetchWorkerShifts(empId, monthStart).catch(console.warn);
   }
 
   // Prevent actions on placeholders
@@ -1378,6 +2013,30 @@ if (!shift && drawerContext?.employeeId && drawerContext?.monthStart) {
 if (shift) openEditModal(shift);
 return;
 
+      }
+
+      const closeShiftBtn = t.closest('button[data-close-id]');
+      if (closeShiftBtn) {
+        const id = closeShiftBtn.getAttribute('data-close-id');
+        let shift = currentShiftsById.get(id);
+        if (!shift && drawerContext?.employeeId && drawerContext?.monthStart) {
+          await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+          shift = currentShiftsById.get(id);
+        }
+        if (shift) await openShiftAdminModal('close', shift);
+        return;
+      }
+
+      const deleteShiftBtn = t.closest('button[data-delete-id]');
+      if (deleteShiftBtn) {
+        const id = deleteShiftBtn.getAttribute('data-delete-id');
+        let shift = currentShiftsById.get(id);
+        if (!shift && drawerContext?.employeeId && drawerContext?.monthStart) {
+          await fetchWorkerShifts(drawerContext.employeeId, drawerContext.monthStart);
+          shift = currentShiftsById.get(id);
+        }
+        if (shift) await openShiftAdminModal('delete', shift);
+        return;
       }
 
       // Audit toggle
@@ -1485,8 +2144,7 @@ let rtChannel = null;
 const onRealtimeChange = debounce(async () => {
   try {
     // Refresh Overview
-    if (window.overviewApi?.loadSummary) await window.overviewApi.loadSummary();
-    else await loadSummary();
+    await refreshOverviewSummary();
 
 
     // If drawer is open for a worker/month, refresh it too
@@ -1915,9 +2573,12 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
 
   // ✅ Summary KPIs (ONLY hours inside this clicked day)
   const totalHours = rendered.reduce((sum, s) => sum + ((s._day_ms || 0) / 3600000), 0);
-  qs('dsShifts').textContent = String(rendered.length);
-  qs('dsHours').textContent  = totalHours.toFixed(2);
-  qs('dsAvg').textContent    = (rendered.length ? (totalHours / rendered.length) : 0).toFixed(2);
+  setDrawerMetric('dsShifts', 'dsShiftsLabel', 'Visible shifts', String(rendered.length));
+  setDrawerMetric('dsHours', 'dsHoursLabel', 'Day hours', totalHours.toFixed(2));
+  setDrawerMetric('dsAvg', 'dsAvgLabel', 'Avg / shift', (rendered.length ? (totalHours / rendered.length) : 0).toFixed(2));
+  setDrawerMetric('dsOpen', 'dsOpenLabel', 'Missing', String(rendered.filter(s => s._placeholder && shiftApprovalState(s) === 'missed').length));
+  const meta = qs('drawerAuditMeta');
+  if (meta) meta.textContent = `${rendered.length} visible / ${workISO}`;
 
   // Render using your existing drawer host
   qs('drawerList').innerHTML = '';
@@ -1938,7 +2599,7 @@ async function openGlobalDayDrawer(workISO, scheduledRowsForDay){
 
   for (let i = 0; i < cards.length; i++){
     const card = cards[i];
-    const item = rendered[i];
+    const item = rendered.find(r => String(r.id || '') === String(card.dataset.shiftId || ''));
     if (!item) continue;
 
     card.dataset.employeeId = item._employee_id || '';
@@ -2185,6 +2846,7 @@ function setupOverview() {
       // Reuse the exact drawer open flow you already have
       drawerContext = { employeeId, monthStart, displayName };
       renderDrawerHeader(displayName, monthStart);
+      resetDrawerMetrics();
 
       qs("dsShifts").textContent = qs("dsHours").textContent = qs("dsAvg").textContent = "…";
       qs("drawerList").innerHTML = `<div class="drawer-empty">Loading shifts…</div>`;
@@ -2198,9 +2860,10 @@ function setupOverview() {
         .catch((err) => {
           console.error(err);
           qs("drawerList").innerHTML = `<div class="drawer-empty">Error loading shifts.</div>`;
-        });
+      });
     },
   });
+  window.overviewApi = overviewApi;
 }
 
 //* ============== Boot ============== */
